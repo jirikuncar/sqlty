@@ -14,10 +14,7 @@ class Query(SQLRegistry):
     SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id
     """
         ],
-    ) -> SQL[tuple[int, str]]:
-        # from multi_query:19
-        ...
-
+    ) -> SQL[tuple[int, str]]: ...
     @overload
     @classmethod
     def sql(
@@ -27,10 +24,7 @@ class Query(SQLRegistry):
     SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id
     """
         ],
-    ) -> SQL[tuple[int, str, str]]:
-        # from multi_query:25
-        ...
-
+    ) -> SQL[tuple[int, str, str]]: ...
     @overload
     @classmethod
     def sql(
@@ -40,16 +34,9 @@ class Query(SQLRegistry):
     SELECT COUNT(*)::INTEGER FROM users
     """
         ],
-    ) -> SQL[tuple[int]]:
-        # from multi_query:31
-        ...
-
+    ) -> SQL[tuple[int]]: ...
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
 sql = Query.sql

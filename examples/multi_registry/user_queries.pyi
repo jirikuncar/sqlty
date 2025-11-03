@@ -14,10 +14,7 @@ class UserQueries(SQLRegistry):
     SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id
 """
         ],
-    ) -> SQL[tuple[int, str, str]]:
-        # from user_queries:17
-        ...
-
+    ) -> SQL[tuple[int, str, str]]: ...
     @overload
     @classmethod
     def sql(
@@ -27,10 +24,7 @@ class UserQueries(SQLRegistry):
     SELECT id::INTEGER, name::TEXT FROM users ORDER BY name
 """
         ],
-    ) -> SQL[tuple[int, str]]:
-        # from user_queries:21
-        ...
-
+    ) -> SQL[tuple[int, str]]: ...
     @overload
     @classmethod
     def sql(
@@ -40,16 +34,9 @@ class UserQueries(SQLRegistry):
         SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id ORDER BY name
     """
         ],
-    ) -> SQL[tuple[int, str, str]]:
-        # from app:10
-        ...
-
+    ) -> SQL[tuple[int, str, str]]: ...
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
 user_sql = UserQueries.sql

@@ -162,8 +162,8 @@ q2: SQL[tuple[int]] = sql("SELECT 1")
 
     # Only one Literal annotation for SELECT 1
     assert content.count('Literal["SELECT 1"]') == 1
-    # Should include at least one source location comment
-    assert "# from " in content
+    # No source location comments are generated; ensure overload exists
+    assert "def sql(" in content
 
 
 def test_custom_output_path(tmp_path: Path) -> None:
