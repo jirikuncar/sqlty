@@ -16,7 +16,6 @@ Main orchestrator that delegates to specialized modules for:
 
 import ast
 import logging
-import re
 import sys
 from pathlib import Path
 
