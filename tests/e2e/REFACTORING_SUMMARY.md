@@ -59,10 +59,7 @@ subprocess.run([sys.executable, "-m", "sqlty", ...])
 1. **tests/e2e/README.md** - Comprehensive guide to e2e testing approach
 2. **tests/README.md** - Overview of test structure and migration guide
 3. **tests/e2e/test_example_template.py** - Template for new tests
-4. **tests/integration/DEPRECATED.md** - Deprecation notice for old tests
-5. **tests/generator/NOTICE.md** - Notice about internal imports
-6. **tests/sql_analyzer/NOTICE.md** - Notice about internal imports
-7. **Updated DEVELOPMENT.md** - Added e2e testing information
+4. **Updated DEVELOPMENT.md** - Added e2e testing information
 
 ### Dependencies
 
@@ -134,14 +131,20 @@ pytest tests/e2e/ --inline-snapshot=update
 4. **Type-safe** - Mypy validation ensures correctness
 5. **Easy updates** - Snapshot testing simplifies maintenance
 
-## Future Work
+## Migration Path
 
-The old tests in `tests/generator/`, `tests/sql_analyzer/`, and `tests/integration/` 
-can remain for internal unit testing, but:
+### Legacy Tests Removed
 
-1. New features should add e2e tests in `tests/e2e/`
-2. Old integration tests should not be extended
-3. Eventually, redundant tests could be removed
+The following legacy tests that duplicated e2e functionality have been removed:
+- `tests/integration/test_workflow.py` - All functionality now covered by e2e tests
+- `tests/generator/test_generator.py` - Core generation features now in e2e tests
+- `tests/generator/test_cli.py` - CLI functionality now in `test_cli_modes.py`
+
+### Remaining Tests
+
+Old tests in `tests/generator/` and `tests/sql_analyzer/` remain for testing
+internal implementation details. These should not be extended for end-to-end
+functionality. New features should add e2e tests following the documented patterns.
 
 ## Conclusion
 

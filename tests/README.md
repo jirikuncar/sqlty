@@ -15,15 +15,15 @@ End-to-end tests that follow best practices:
 
 See [tests/e2e/README.md](e2e/README.md) for detailed information.
 
-### `tests/integration/` ⚠️ **DEPRECATED**
-Integration tests that import from internal modules (`sqlty._generator`).
-These tests violate the acceptance criteria and should not be extended.
-See [tests/integration/DEPRECATED.md](integration/DEPRECATED.md).
-
 ### `tests/generator/` ⚠️ **INTERNAL ONLY**  
-Unit tests for the generator implementation.
-These import from `sqlty._generator` and test internal details.
+Unit tests for internal generator implementation details.
+These import from `sqlty._generator` and test internal logic.
 Useful for development but not for end-to-end validation.
+
+Legacy tests that duplicated e2e functionality have been removed:
+- `test_generator.py` - Core generation (now in e2e tests)
+- `test_cli.py` - CLI functionality (now in test_cli_modes.py)
+
 See [tests/generator/NOTICE.md](generator/NOTICE.md).
 
 ### `tests/sql_analyzer/` ⚠️ **INTERNAL ONLY**
