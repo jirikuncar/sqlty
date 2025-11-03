@@ -14,6 +14,10 @@ sql = SchemaQueries.sql
 user_query = sql("SELECT id, name FROM users")
 # Type: SQL[tuple[int, str]]
 
+# Query with UUID type from schema
+user_with_uuid = sql("SELECT id, user_id, name FROM users")
+# Type: SQL[tuple[int, uuid.UUID, str]]
+
 
 def main() -> None:
     from psycopg import Connection
