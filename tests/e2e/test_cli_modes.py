@@ -34,8 +34,8 @@ def test_cli_version_command(
     """
     result = cli(["--version"], {"cwd": str(tmp_path)})
 
-    # Accepts success (version shown) or error (flag not recognized)
-    assert result.returncode in (0, 2)  # 2 = unrecognized arguments
+    # Should only accept success (version shown)
+    assert result.returncode == 0
 
 
 def test_full_mode_generation(
@@ -46,14 +46,24 @@ def test_full_mode_generation(
     """Test full mode that analyzes all files."""
     setup_queries_file(tmp_path)
 
-    (tmp_path / "file1.py").write_text('''from queries import sql
+    (tmp_path / "file1.py").write_text('''from typing import TYPE_CHECKING
 
-q1 = sql("SELECT id::INTEGER FROM users")
+from queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+q1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 ''')
 
-    (tmp_path / "file2.py").write_text('''from queries import sql
+    (tmp_path / "file2.py").write_text('''from typing import TYPE_CHECKING
 
-q2 = sql("SELECT name::TEXT FROM users")
+from queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+q2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users")
 ''')
 
     # Run in full mode
@@ -66,8 +76,42 @@ q2 = sql("SELECT name::TEXT FROM users")
     assert stub_file.exists()
 
     stub_content = stub_file.read_text()
-    assert "SELECT id::INTEGER FROM users" in stub_content
-    assert "SELECT name::TEXT FROM users" in stub_content
+    assert stub_content == snapshot("""\
+from typing import Literal, overload
+
+from sqlty import SQL, SQLRegistry
+
+class Query(SQLRegistry):
+    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT id::INTEGER FROM users"],
+    ) -> SQL[tuple[int]]:
+        # from file1:7
+        ...
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT name::TEXT FROM users"],
+    ) -> SQL[tuple[str]]:
+        # from file2:7
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](
+        cls,
+        query: T,
+    ) -> T: ...
+
+# Type alias for the sql function
+sql = Query.sql
+""")
 
 
 def test_incremental_mode_generation(

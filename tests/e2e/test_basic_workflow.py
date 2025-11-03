@@ -19,23 +19,12 @@ from inline_snapshot import snapshot
 def test_basic_query_generation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str | None], Path],
+    mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test basic query generation and mypy validation."""
     # Step 1: Create source file with repository and queries
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''"""Query registry."""
-
-from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    """Application query registry."""
-
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path, "Query", "Application query registry.")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using SQL queries."""
@@ -116,12 +105,7 @@ sql = Query.sql
 """)
 
     # Step 4: Run mypy to validate type annotations
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
 
     # Mypy should pass or have expected errors (we'll snapshot those too)
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
@@ -130,19 +114,12 @@ sql = Query.sql
 def test_typed_query_annotation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str | None], Path],
+    mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test that explicitly typed queries work with mypy."""
     # Create source files
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -197,11 +174,7 @@ sql = Query.sql
 """)
 
     # Validate with mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
@@ -209,19 +182,11 @@ sql = Query.sql
 def test_incremental_stub_update(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that adding new queries updates the stub file."""
     # Create initial source files
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -313,18 +278,10 @@ sql = Query.sql
 def test_multiline_query_formatting(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that multiline queries are properly formatted in stubs."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
