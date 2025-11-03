@@ -37,6 +37,10 @@ class StubASTUnparser:
                 # Format import statement
                 names = ", ".join(alias.name for alias in node.names)
                 lines.append(f"from {node.module} import {names}")
+            elif isinstance(node, ast.Import):
+                # Format regular import statement
+                names = ", ".join(alias.name for alias in node.names)
+                lines.append(f"import {names}")
             elif isinstance(node, ast.ClassDef):
                 # Format class definition
                 lines.extend(self.unparse_class_def(node, calls, relative_to))

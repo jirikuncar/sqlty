@@ -14,23 +14,23 @@ class StubASTBuilder:
 
     def _extract_required_imports(self, calls: list[CallInfo]) -> list[ast.stmt]:
         """Extract required imports based on return types in calls.
-        
+
         Args:
             calls: List of CallInfo with SQL queries and types
-            
+
         Returns:
             List of import statements needed for the return types
         """
         imports: list[ast.stmt] = []
         needs_uuid = False
-        
+
         # Check if any return type contains uuid.UUID
         for call in calls:
             return_type_str = call.get("return_type") or ""
             if "uuid.UUID" in return_type_str:
                 needs_uuid = True
                 break
-        
+
         # Add uuid import if needed
         if needs_uuid:
             imports.append(
@@ -38,7 +38,7 @@ class StubASTBuilder:
                     names=[ast.alias(name="uuid", asname=None)],
                 )
             )
-        
+
         return imports
 
     def build_stub_module(
@@ -78,7 +78,7 @@ class StubASTBuilder:
                 level=0,
             )
         )
-        
+
         # Add conditional imports based on return types
         conditional_imports = self._extract_required_imports(calls)
         module_body.extend(conditional_imports)
