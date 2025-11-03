@@ -35,16 +35,21 @@ sql = Query.sql
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using SQL queries."""
 
+from typing import TYPE_CHECKING
+
 from queries import sql
 
+if TYPE_CHECKING:
+    from sqlty import SQL
+
 # Simple query with type cast
-query1 = sql("SELECT id::INTEGER FROM users")
+query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 
 # Multi-column query
-query2 = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
+query2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
 
 # Count query
-query3 = sql("SELECT COUNT(*)::INTEGER FROM users")
+query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 ''')
 
     # Step 2: Run pyi generator
@@ -78,7 +83,7 @@ class Query(SQLRegistry):
         cls,
         query: Literal["SELECT id::INTEGER FROM users"],
     ) -> SQL[tuple[int]]:
-        # from app:6
+        # from app:10
         ...
 
     @overload
@@ -87,7 +92,7 @@ class Query(SQLRegistry):
         cls,
         query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
     ) -> SQL[tuple[int, str]]:
-        # from app:9
+        # from app:13
         ...
 
     @overload
@@ -96,7 +101,7 @@ class Query(SQLRegistry):
         cls,
         query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
     ) -> SQL[tuple[int]]:
-        # from app:12
+        # from app:16
         ...
 
     @overload
@@ -217,10 +222,15 @@ sql = Query.sql
 ''')
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
 
 # Initial query
-query1 = sql("SELECT id::INTEGER FROM users")
+query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 ''')
 
     # Generate initial stub
@@ -238,13 +248,18 @@ query1 = sql("SELECT id::INTEGER FROM users")
     assert "SELECT id::INTEGER FROM users" in initial_stub
 
     # Step 5 (optional): Add a new query
-    app_file.write_text('''from queries import sql
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
 
 # Initial query
-query1 = sql("SELECT id::INTEGER FROM users")
+query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 
 # New query added
-query2 = sql("SELECT name::TEXT FROM users WHERE id = :id")
+query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
 ''')
 
     # Step 6: Run generator again
@@ -277,7 +292,7 @@ class Query(SQLRegistry):
         cls,
         query: Literal["SELECT id::INTEGER FROM users"],
     ) -> SQL[tuple[int]]:
-        # from app:4
+        # from app:8
         ...
 
     @overload
@@ -286,7 +301,7 @@ class Query(SQLRegistry):
         cls,
         query: Literal["SELECT name::TEXT FROM users WHERE id = :id"],
     ) -> SQL[tuple[str]]:
-        # from app:7
+        # from app:11
         ...
 
     @overload
@@ -315,10 +330,15 @@ sql = Query.sql
 ''')
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
 
 # Multiline query
-query = sql("""
+query: SQL[tuple[int, str, str]] = sql("""
     SELECT
         id::INTEGER,
         name::TEXT,
@@ -369,7 +389,7 @@ class Query(SQLRegistry):
 \"\"\"
         ],
     ) -> SQL[tuple[int, str, str]]:
-        # from app:4
+        # from app:8
         ...
 
     @overload
