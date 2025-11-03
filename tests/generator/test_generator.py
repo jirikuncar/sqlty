@@ -381,7 +381,7 @@ query = sql("SELECT user_id::UUID FROM users")
     schema_file = tmp_path / "schema.sql"
     schema_file.write_text("CREATE TABLE users (user_id UUID);")
 
-    generator = TypeStubGenerator(schema_path=schema_file)
+    generator = TypeStubGenerator()
     calls = generator.analyze_file(source_file)
     stub = generator.generate_stub_content(calls, class_name="Query")
 
