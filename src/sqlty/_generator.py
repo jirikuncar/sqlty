@@ -105,12 +105,12 @@ class TypeStubGenerator:
         """Get the appropriate SQLAnalyzer for a registry.
 
         Priority:
-        1. Registry-specific schema from schema_mappings
+        1. Registry-specific schema from schema_mappings (supports fully qualified names)
         2. Global CLI schema from schema_mappings[None]
         3. __schema_path__ from registry class
 
         Args:
-            registry_name: Name of the registry module
+            registry_name: Name of the registry module (e.g., 'user_queries')
             module_path: Path to the module file
 
         Returns:
@@ -125,15 +125,30 @@ class TypeStubGenerator:
         schema_source = "default"
 
         # Priority 1: Registry-specific schema from mappings
-        if registry_name and registry_name in self.schema_mappings:
-            schema_to_use = self.schema_mappings[registry_name]
-            schema_source = f"mapping for '{registry_name}'"
+        # Support both simple names (e.g., 'Query') and fully qualified names (e.g., 'user_queries.Query')
+        if registry_name:
+            # Try exact match first
+            if registry_name in self.schema_mappings:
+                schema_to_use = self.schema_mappings[registry_name]
+                schema_source = f"mapping for '{registry_name}'"
+            else:
+                # Try fully qualified name matching: module.ClassName
+                # Get the actual class name from the module
+                class_name = self._registry_detector.get_registry_class_name(module_path)
+                if class_name:
+                    # Check for module.ClassName match
+                    fqn = f"{registry_name}.{class_name}"
+                    if fqn in self.schema_mappings:
+                        schema_to_use = self.schema_mappings[fqn]
+                        schema_source = f"mapping for '{fqn}'"
+
         # Priority 2: Default CLI schema provided via schema_mappings[None]
-        elif None in self.schema_mappings:
+        if schema_to_use is None and None in self.schema_mappings:
             schema_to_use = self.schema_mappings[None]
             schema_source = "CLI --schema"
+
         # Priority 3: __schema_path__ from registry class (only if no CLI schema)
-        else:
+        if schema_to_use is None:
             detected_schema = self._registry_detector.get_schema_path_from_registry(module_path)
             if detected_schema:
                 schema_to_use = detected_schema
@@ -512,7 +527,8 @@ def main(argv: list[str] | None = None) -> None:
         type=str,
         help=(
             "Schema specification. Either a single path applying to all registries, "
-            "or a registry-specific mapping in the form registry_name:path/to/schema.sql. "
+            "or a registry-specific mapping in the form registry_name:path/to/schema.sql "
+            "or module.ClassName:path/to/schema.sql for fully qualified names. "
             "Can be provided multiple times for multiple mappings."
         ),
     )
@@ -546,7 +562,14 @@ def main(argv: list[str] | None = None) -> None:
                 if not registry_name or not schema_path_str:
                     logging.getLogger(__name__).error("Invalid --schema mapping: %s", entry)
                     logging.getLogger(__name__).error(
-                        "Expected format: registry_name:path/to/schema.sql"
+                        "Expected format: module.ClassName:path/to/schema.sql"
+                    )
+                    sys.exit(1)
+                # Enforce fully qualified registry names (module.ClassName)
+                if "." not in registry_name:
+                    logging.getLogger(__name__).error(
+                        "Invalid --schema mapping: '%s' is not fully qualified. Use module.ClassName:path",
+                        entry,
                     )
                     sys.exit(1)
                 schema_mappings[registry_name] = Path(schema_path_str)

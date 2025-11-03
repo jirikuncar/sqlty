@@ -44,8 +44,7 @@ class RegistryDetector:
                                 ):
                                     # Resolve path relative to module
                                     schema_path = module_path.parent / stmt.value.value
-                                    if schema_path.exists():
-                                        return schema_path
+                                    return schema_path
         except Exception:
             pass
         return None
