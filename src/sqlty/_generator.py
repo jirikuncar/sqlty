@@ -26,7 +26,7 @@ from ._ast_builder import StubASTBuilder
 from ._ast_unparser import StubASTUnparser
 from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
-from ._stub_merger import StubMerger
+from ._stub_merger import StubMerger, compute_additional_imports
 
 
 class TypeStubGenerator:
@@ -55,28 +55,6 @@ class TypeStubGenerator:
         self._ast_unparser = StubASTUnparser()
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector()
-
-    def _compute_additional_imports(self, calls: list[CallInfo]) -> list[str]:
-        """Compute extra top-level imports needed based on return types.
-
-        Currently supports importing modules when their qualified names appear in
-        return types, e.g. uuid.UUID, datetime.datetime, decimal.Decimal.
-
-        Returns a list of module names to import (e.g., ["uuid", "datetime"]).
-        """
-        patterns = {
-            r"\buuid\.UUID\b": "uuid",
-            r"\bdatetime\.datetime\b": "datetime",
-            r"\bdecimal\.Decimal\b": "decimal",
-        }
-        needed: set[str] = set()
-        for call in calls:
-            rt = call.get("return_type") or ""
-            for pat, mod in patterns.items():
-                if re.search(pat, rt):
-                    needed.add(mod)
-        # Keep a stable order for determinism
-        return sorted(needed)
 
     def _format_stub_text(self, text: str, filename: str) -> str:
         """Format generated stub content by piping it through an external command.
@@ -551,7 +529,7 @@ class TypeStubGenerator:
                             output.write("from typing import overload, Literal\n")
                             output.write(f"from sqlty import SQL, {base_class}\n")
                             # Conditional imports based on return types across all registry calls
-                            for mod in self._compute_additional_imports(registry_calls):
+                            for mod in compute_additional_imports(registry_calls):
                                 output.write(f"import {mod}\n")
                             output.write("\n\n")
                             for cls_name in class_names:
@@ -683,7 +661,7 @@ class TypeStubGenerator:
                         output.write("from typing import overload, Literal\n")
                         output.write(f"from sqlty import SQL, {base_class}\n")
                         # Conditional imports based on return types across all registry calls
-                        for mod in self._compute_additional_imports(registry_calls):
+                        for mod in compute_additional_imports(registry_calls):
                             output.write(f"import {mod}\n")
                         output.write("\n\n")
 
