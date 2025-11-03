@@ -425,7 +425,7 @@ class TypeStubGenerator:
             if len(registry_classes) > 1:
                 # Generate minimal stubs for all registry classes
                 class_stubs = []
-                export_names_used = set()
+                export_alias_names_used: set[str] = set()
                 type_aliases = []
 
                 for reg_class in registry_classes:
@@ -444,9 +444,9 @@ class TypeStubGenerator:
                     export_name = self._registry_detector.get_registry_export_name(
                         source_path, reg_class
                     )
-                    if export_name not in export_names_used:
+                    if export_name not in export_alias_names_used:
                         type_aliases.append(f"{export_name} = {reg_class}.{self.function_name}")
-                        export_names_used.add(export_name)
+                        export_alias_names_used.add(export_name)
 
                 minimal_stub = (
                     "from typing import overload, Literal\n"
@@ -514,94 +514,222 @@ class TypeStubGenerator:
                             calls_by_class[registry_class] = []
                         calls_by_class[registry_class].append(call)
 
-                    # Generate combined stub content with all classes
-                    # For now, generate content for each class and combine them
-                    from io import StringIO
+                    # Handle incremental/full mode for multiple classes
+                    if incremental or (is_full_mode and stub_path.exists()):
+                        # Merge mode: update each class block while preserving unrelated content (imports, comments, aliases)
+                        # If the stub doesn't exist yet, fall back to fresh generation for a proper base
+                        if not stub_path.exists():
+                            from io import StringIO
 
-                    output = StringIO()
-                    output.write("from typing import overload, Literal\n")
-                    output.write(f"from sqlty import SQL, {base_class}\n\n\n")
+                            output = StringIO()
+                            output.write("from typing import overload, Literal\n")
+                            output.write(f"from sqlty import SQL, {base_class}\n\n\n")
+                            for cls_name in class_names:
+                                cls_calls = calls_by_class.get(cls_name, [])
+                                if cls_calls:
+                                    class_block = self._stub_merger.generate_class_block(
+                                        cls_calls,
+                                        cls_name,
+                                        base_class,
+                                        relative_to=stub_path.parent,
+                                    )
+                                    output.write(class_block)
+                                    output.write("\n\n\n")
+                                else:
+                                    # Minimal class block when no calls exist
+                                    output.write(f"class {cls_name}({base_class}):\n")
+                                    output.write(
+                                        '    """Application-specific SQL query registry with type-safe overloads."""\n'
+                                    )
+                                    output.write("    \n")
+                                    output.write("    @overload\n")
+                                    output.write("    @classmethod\n")
+                                    output.write(
+                                        f"    def {self.function_name}[T](cls, query: T) -> T: ...\n"
+                                    )
+                                    output.write("    \n\n")
 
-                    for cls_name in class_names:
-                        cls_calls = calls_by_class.get(cls_name, [])
-                        export_name = self._registry_detector.get_registry_export_name(
-                            registry_file, cls_name
-                        )
+                            # Deduped type aliases
+                            output.write("# Type aliases for the sql functions\n")
+                            export_alias_names_used_init: set[str] = set()
+                            for cls_name in class_names:
+                                export_name = self._registry_detector.get_registry_export_name(
+                                    registry_file, cls_name
+                                )
+                                if export_name not in export_alias_names_used_init:
+                                    output.write(
+                                        f"{export_name} = {cls_name}.{self.function_name}\n"
+                                    )
+                                    export_alias_names_used_init.add(export_name)
+                            stub_content = output.getvalue()
+                        else:
+                            # Read existing content and modify in place per class
+                            stub_content = stub_path.read_text()
 
-                        if cls_calls:
-                            # Generate content for this class with calls
-                            cls_stub = self.generate_stub_content(
-                                cls_calls,
-                                cls_name,
-                                base_class,
-                                export_name,
-                                relative_to=stub_path.parent,
+                            for cls_name in class_names:
+                                cls_calls = calls_by_class.get(cls_name, [])
+
+                                if is_full_mode:
+                                    # Replace only this class block with regenerated one (even if empty -> minimal fallback)
+                                    class_block = self._stub_merger.generate_class_block(
+                                        cls_calls,
+                                        cls_name,
+                                        base_class,
+                                        relative_to=stub_path.parent,
+                                    )
+                                    span = self._stub_merger.find_class_span(stub_content, cls_name)
+                                    if not span:
+                                        # No existing class: append at end preserving file content
+                                        if not stub_content.endswith("\n"):
+                                            stub_content += "\n"
+                                        stub_content = (
+                                            stub_content.rstrip() + "\n\n" + class_block + "\n"
+                                        )
+                                    else:
+                                        start, end = span
+                                        lines = stub_content.splitlines()
+                                        new_lines = (
+                                            lines[: start - 1]
+                                            + class_block.splitlines()
+                                            + lines[end:]
+                                        )
+                                        stub_content = "\n".join(new_lines) + (
+                                            "\n" if stub_content.endswith("\n") else ""
+                                        )
+                                else:
+                                    # Incremental: insert only missing overloads for this class
+                                    existing_literals = self._stub_merger.parse_stub_class_literals(
+                                        stub_content, cls_name
+                                    )
+                                    missing_calls = [
+                                        c
+                                        for c in cls_calls
+                                        if c["literal"] not in existing_literals
+                                    ]
+                                    if not missing_calls:
+                                        continue
+                                    insertion_line = self._stub_merger.find_class_insertion_line(
+                                        stub_content, cls_name
+                                    )
+                                    if insertion_line is None:
+                                        # Fallback: append full class block and keep file intact
+                                        class_block = self._stub_merger.generate_class_block(
+                                            cls_calls,
+                                            cls_name,
+                                            base_class,
+                                            relative_to=stub_path.parent,
+                                        )
+                                        if not stub_content.endswith("\n"):
+                                            stub_content += "\n"
+                                        stub_content = (
+                                            stub_content.rstrip() + "\n\n" + class_block + "\n"
+                                        )
+                                    else:
+                                        insertion_text = "".join(
+                                            self._stub_merger.generate_overload_method_block(
+                                                c, relative_to=stub_path.parent
+                                            )
+                                            + "\n"
+                                            for c in missing_calls
+                                        )
+                                        lines = stub_content.splitlines()
+                                        zero_idx = max(0, insertion_line - 1)
+                                        new_lines = (
+                                            lines[:zero_idx]
+                                            + insertion_text.splitlines()
+                                            + lines[zero_idx:]
+                                        )
+                                        stub_content = "\n".join(new_lines) + (
+                                            "\n" if stub_content.endswith("\n") else ""
+                                        )
+                    else:
+                        # Fresh generation: generate content for each class and combine them
+                        from io import StringIO
+
+                        output = StringIO()
+                        output.write("from typing import overload, Literal\n")
+                        output.write(f"from sqlty import SQL, {base_class}\n\n\n")
+
+                        for cls_name in class_names:
+                            cls_calls = calls_by_class.get(cls_name, [])
+                            export_name = self._registry_detector.get_registry_export_name(
+                                registry_file, cls_name
                             )
-                            # Extract just the class definition (skip imports and aliases)
-                            lines = cls_stub.split("\n")
-                            # Find where class definition starts
-                            class_start = next(
-                                i for i, line in enumerate(lines) if line.startswith("class ")
-                            )
-                            # Find where comments about type alias start
-                            comment_idx = next(
-                                (
-                                    i
-                                    for i, line in enumerate(lines[class_start:])
-                                    if line.startswith("# Type alias")
-                                ),
-                                None,
-                            )
-                            if comment_idx is not None:
-                                # Extract up to the comment line (exclusive)
-                                class_lines = lines[class_start : class_start + comment_idx]
-                            else:
-                                # No comment found, take until export alias or end
-                                export_idx = next(
+
+                            if cls_calls:
+                                # Generate content for this class with calls
+                                cls_stub = self.generate_stub_content(
+                                    cls_calls,
+                                    cls_name,
+                                    base_class,
+                                    export_name,
+                                    relative_to=stub_path.parent,
+                                )
+                                # Extract just the class definition (skip imports and aliases)
+                                lines = cls_stub.split("\n")
+                                # Find where class definition starts
+                                class_start = next(
+                                    i for i, line in enumerate(lines) if line.startswith("class ")
+                                )
+                                # Find where comments about type alias start
+                                comment_idx = next(
                                     (
                                         i
                                         for i, line in enumerate(lines[class_start:])
-                                        if "=" in line and cls_name in line
+                                        if line.startswith("# Type alias")
                                     ),
                                     None,
                                 )
-                                if export_idx is not None:
-                                    class_lines = lines[class_start : class_start + export_idx]
+                                if comment_idx is not None:
+                                    # Extract up to the comment line (exclusive)
+                                    class_lines = lines[class_start : class_start + comment_idx]
                                 else:
-                                    class_lines = lines[class_start:]
+                                    # No comment found, take until export alias or end
+                                    export_idx = next(
+                                        (
+                                            i
+                                            for i, line in enumerate(lines[class_start:])
+                                            if "=" in line and cls_name in line
+                                        ),
+                                        None,
+                                    )
+                                    if export_idx is not None:
+                                        class_lines = lines[class_start : class_start + export_idx]
+                                    else:
+                                        class_lines = lines[class_start:]
 
-                            # Remove trailing empty lines
-                            while class_lines and not class_lines[-1].strip():
-                                class_lines.pop()
+                                # Remove trailing empty lines
+                                while class_lines and not class_lines[-1].strip():
+                                    class_lines.pop()
 
-                            output.write("\n".join(class_lines))
-                            output.write("\n\n\n")
-                        else:
-                            # Generate minimal stub for this class with no calls
-                            output.write(f"class {cls_name}({base_class}):\n")
-                            output.write(
-                                '    """Application-specific SQL query registry with type-safe overloads."""\n'
+                                output.write("\n".join(class_lines))
+                                output.write("\n\n\n")
+                            else:
+                                # Generate minimal stub for this class with no calls
+                                output.write(f"class {cls_name}({base_class}):\n")
+                                output.write(
+                                    '    """Application-specific SQL query registry with type-safe overloads."""\n'
+                                )
+                                output.write("    \n")
+                                output.write("    @overload\n")
+                                output.write("    @classmethod\n")
+                                output.write(
+                                    f"    def {self.function_name}[T](cls, query: T) -> T: ...\n"
+                                )
+                                output.write("    \n\n")
+
+                        # Add type aliases
+                        output.write("# Type aliases for the sql functions\n")
+                        export_alias_names_used_fresh: set[str] = set()
+                        for cls_name in class_names:
+                            export_name = self._registry_detector.get_registry_export_name(
+                                registry_file, cls_name
                             )
-                            output.write("    \n")
-                            output.write("    @overload\n")
-                            output.write("    @classmethod\n")
-                            output.write(
-                                f"    def {self.function_name}[T](cls, query: T) -> T: ...\n"
-                            )
-                            output.write("    \n\n")
+                            if export_name not in export_alias_names_used_fresh:
+                                output.write(f"{export_name} = {cls_name}.{self.function_name}\n")
+                                export_alias_names_used_fresh.add(export_name)
 
-                    # Add type aliases
-                    output.write("# Type aliases for the sql functions\n")
-                    export_names_used = set()
-                    for cls_name in class_names:
-                        export_name = self._registry_detector.get_registry_export_name(
-                            registry_file, cls_name
-                        )
-                        if export_name not in export_names_used:
-                            output.write(f"{export_name} = {cls_name}.{self.function_name}\n")
-                            export_names_used.add(export_name)
-
-                    stub_content = output.getvalue()
+                        stub_content = output.getvalue()
 
                     # Write formatted output to file
                     stub_path.parent.mkdir(parents=True, exist_ok=True)
@@ -610,7 +738,12 @@ class TypeStubGenerator:
                         f.write(formatted)
 
                     generated_paths.append(stub_path)
-                    logging.getLogger(__name__).info("Generated stub file (full): %s", stub_path)
+                    mode_label = (
+                        "incremental" if incremental else ("full" if is_full_mode else "fresh")
+                    )
+                    logging.getLogger(__name__).info(
+                        "Generated stub file (%s): %s", mode_label, stub_path
+                    )
                     logging.getLogger(__name__).info(
                         "Found %s call(s) to %s", len(registry_calls), self.function_name
                     )
