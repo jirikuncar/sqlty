@@ -166,8 +166,10 @@ SQLType uses PostgreSQL-style type casts to infer Python types:
 | `::FLOAT` | `float` |
 | `::DOUBLE` | `float` |
 | `::DECIMAL` | `Decimal` |
-| `::DATE` | `date` |
-| `::TIMESTAMP` | `datetime` |
+| `::DATE` | `datetime.date` |
+| `::TIMESTAMP` | `datetime.datetime` |
+| `::TIMESTAMPTZ` | `datetime.datetime` |
+| `::INTERVAL` | `datetime.timedelta` |
 | `::BYTEA` | `bytes` |
 
 Example:
@@ -178,14 +180,16 @@ result = sql("""
         id::INTEGER,
         name::TEXT,
         is_active::BOOLEAN,
-        created_at::TIMESTAMP
+        created_at::TIMESTAMP,
+        birth_date::DATE,
+        duration::INTERVAL
     FROM users
 """)
-# Type: SQL[tuple[int, str, bool, datetime]]
+# Type: SQL[tuple[int, str, bool, datetime.datetime, datetime.date, datetime.timedelta]]
 
 # Execute with type safety
 rows = execute(conn, result, {})
-# Type: Iterator[tuple[int, str, bool, datetime]]
+# Type: Iterator[tuple[int, str, bool, datetime.datetime, datetime.date, datetime.timedelta]]
 ```
 
 ### Generating Stub Files
@@ -503,9 +507,10 @@ SQL_TYPE_MAP = {
     "REAL": "float",
     "DECIMAL": "Decimal",
     "NUMERIC": "Decimal",
-    "DATE": "date",
-    "TIMESTAMP": "datetime",
-    "TIMESTAMPTZ": "datetime",
+    "DATE": "datetime.date",
+    "TIMESTAMP": "datetime.datetime",
+    "TIMESTAMPTZ": "datetime.datetime",
+    "INTERVAL": "datetime.timedelta",
     "BYTEA": "bytes",
     "BLOB": "bytes",
     "UUID": "uuid.UUID",
