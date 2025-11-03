@@ -515,7 +515,9 @@ class TypeStubGenerator:
                     # If there's only one registry class in the module, assign unclassified calls to it
                     if len(class_names) == 1 and None in calls_by_class:
                         only_cls = class_names[0]
-                        calls_by_class.setdefault(only_cls, []).extend(calls_by_class.pop(None))
+                        calls_by_class[only_cls] = calls_by_class.get(
+                            only_cls, []
+                        ) + calls_by_class.pop(None)
 
                     # Handle incremental/full mode for multiple classes
                     if incremental or (is_full_mode and stub_path.exists()):
