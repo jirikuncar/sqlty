@@ -12,7 +12,8 @@ class CallInfo(TypedDict):
     return_type: str | None
     lineno: int
     file: str
-    registry_source: str | None  # Track which registry this call belongs to
+    registry_source: str | None  # Track which module/registry this call belongs to
+    registry_class: str | None  # Track which specific registry class (e.g., "RegistryA")
 
 
 class LiteralCallCollector(ast.NodeVisitor):
@@ -28,6 +29,9 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.module_imports: dict[
             str, str
         ] = {}  # Track module imports (e.g., import queries -> {"queries": "queries"})
+        self.class_imports: dict[
+            str, str
+        ] = {}  # Track class imports with aliases (e.g., {"A": "QueryA"})
 
     def visit_Import(self, node: ast.Import) -> None:
         """Track module imports (e.g., import queries)."""
@@ -41,9 +45,13 @@ class LiteralCallCollector(ast.NodeVisitor):
         """Track where functions are imported from."""
         if node.module:
             for alias in node.names:
-                name = alias.asname if alias.asname else alias.name
+                imported_name = alias.name
+                local_name = alias.asname if alias.asname else alias.name
                 # Track all imports, not just the target function
-                self.import_sources[name] = node.module
+                self.import_sources[local_name] = node.module
+                # Also track the original class name if it's different from the local name
+                if alias.asname:
+                    self.class_imports[local_name] = imported_name
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -64,6 +72,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         """Visit function calls to find target function with literal arguments."""
         # Check for direct call: sql(...) or user_sql(...) etc.
         registry_source: str | None = None
+        registry_class: str | None = None
         is_target_call = False
 
         if isinstance(node.func, ast.Name):
@@ -76,12 +85,28 @@ class LiteralCallCollector(ast.NodeVisitor):
                     registry_source = self.import_sources[func_name]
                 # If not imported, still mark as valid (no registry_source)
 
-        # Check for qualified call: module.sql(...)
+        # Check for qualified call: module.sql(...) or RegistryClass.sql(...)
         if isinstance(node.func, ast.Attribute) and node.func.attr == self.function_name:
             if isinstance(node.func.value, ast.Name):
-                module_name = node.func.value.id
-                if module_name in self.module_imports:
-                    registry_source = self.module_imports[module_name]
+                module_or_class_name = node.func.value.id
+                # Priority 1: Check if it's a module import (e.g., queries.sql)
+                if module_or_class_name in self.module_imports:
+                    registry_source = self.module_imports[module_or_class_name]
+                    is_target_call = True
+                # Priority 2: Check if it's a class imported from somewhere (e.g., QueryRegistry.sql or A.sql where A is an alias)
+                elif module_or_class_name in self.import_sources:
+                    registry_source = self.import_sources[module_or_class_name]
+                    # Check if this is an aliased import and get the original class name
+                    if module_or_class_name in self.class_imports:
+                        registry_class = self.class_imports[module_or_class_name]
+                    else:
+                        # Not aliased, use the name as-is
+                        registry_class = module_or_class_name
+                    is_target_call = True
+                else:
+                    # This might be a direct registry class reference in the same file (e.g., RegistryA.sql())
+                    # We'll mark it as a target call and capture the class name
+                    registry_class = module_or_class_name
                     is_target_call = True
 
         # Add any direct or qualified call to the target function with a literal argument
@@ -99,6 +124,7 @@ class LiteralCallCollector(ast.NodeVisitor):
                     "lineno": node.lineno,
                     "file": "",
                     "registry_source": registry_source,
+                    "registry_class": registry_class,
                 }
                 self.calls.append(call_info)
             elif node.args:

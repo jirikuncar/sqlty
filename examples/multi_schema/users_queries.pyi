@@ -10,7 +10,7 @@ class UsersQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal["SELECT id, name FROM users"],
-    ) -> SQL[tuple[str, str]]:
+    ) -> SQL[tuple[int, str]]:
         # from users_queries:10
         ...
 
