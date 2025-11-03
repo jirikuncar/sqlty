@@ -1,0 +1,3 @@
+[tool.sqlty]
+dialect = "sqlite"
+schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }

@@ -1,0 +1,9 @@
+- id: sqlty
+  name: sqlty stub generation
+  description: Generate type stubs for SQL queries
+  entry: sqlty
+  language: python
+  types: [python]
+  pass_filenames: false
+  require_serial: true
+  args: [".", "--mode=full"]

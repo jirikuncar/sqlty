@@ -1,0 +1,55 @@
+from typing import Literal, overload
+
+from sqlty import SQL, SQLRegistry
+
+class UserQueries(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal[
+            """
+    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id
+"""
+        ],
+    ) -> SQL[tuple[int, str, str]]:
+        # from user_queries:17
+        ...
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal[
+            """
+    SELECT id::INTEGER, name::TEXT FROM users ORDER BY name
+"""
+        ],
+    ) -> SQL[tuple[int, str]]:
+        # from user_queries:21
+        ...
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal[
+            """
+        SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id ORDER BY name
+    """
+        ],
+    ) -> SQL[tuple[int, str, str]]:
+        # from app:10
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](
+        cls,
+        query: T,
+    ) -> T: ...
+
+# Type alias for the sql function
+user_sql = UserQueries.sql

@@ -1,0 +1,89 @@
+# Discover all example directories automatically
+EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d)
+
+.PHONY: help
+help:
+	@echo "Available targets:"
+	@echo ""
+	@echo "Development:"
+	@echo "  install           - Install/sync dependencies with uv"
+	@echo "  pre-commit-install- Install pre-commit hooks"
+	@echo "  pre-commit        - Run pre-commit on all files"
+	@echo "  lint              - Run ruff linter with auto-fix"
+	@echo "  format            - Run ruff formatter"
+	@echo "  typecheck         - Run mypy and ty type checks on src and examples"
+	@echo "  test              - Run pytest test suite"
+	@echo "  test-coverage     - Run pytest with coverage report"
+	@echo ""
+	@echo "Examples:"
+	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
+	@echo "  generate-examples - Generate stubs for all examples"
+	@echo "  verify-examples   - Generate stubs and verify with mypy and ty"
+	@echo ""
+	@echo "Example directories found: $(EXAMPLE_DIRS)"
+
+.PHONY: install
+install:
+	uv sync --all-groups
+
+.PHONY: pre-commit-install
+pre-commit-install:
+	uv run pre-commit install
+
+.PHONY: pre-commit
+pre-commit:
+	uv run pre-commit run --all-files
+
+.PHONY: lint
+lint:
+	uv run ruff check --fix .
+
+.PHONY: format
+format:
+	uv run ruff format .
+
+.PHONY: typecheck
+typecheck:
+	@echo "🔍 Running mypy on src/sqlty..."
+	uv run mypy src/sqlty
+	@echo "🔍 Running mypy on examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  → $$dir"; \
+		uv run mypy $$dir; \
+	done
+	@echo "✅ mypy checks passed"
+	@echo ""
+	@echo "🔍 Running ty on src/sqlty..."
+	uv run ty check src/sqlty
+
+.PHONY: test
+test:
+	uv run pytest
+
+.PHONY: test-coverage
+test-coverage:
+	uv run pytest tests/ -v --cov=sqlty --cov-report=term-missing
+
+.PHONY: clean-examples
+clean-examples:
+	@echo "🧹 Removing generated .pyi files in examples/"
+	@find examples -name "*.pyi" -type f -delete || true
+	@echo "✅ Cleaned"
+
+.PHONY: generate-examples
+generate-examples: clean-examples
+	@echo "🔧 Generating stubs for all examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  → $$dir"; \
+		uv run sqlty $$dir/ --mode=full; \
+	done
+	@echo "✅ All stubs generated"
+
+.PHONY: verify-examples
+verify-examples: generate-examples
+	@echo "🔍 Verifying examples with mypy..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  → $$dir"; \
+		uv run mypy $$dir/; \
+	done
+	@echo "✅ mypy verification passed"
