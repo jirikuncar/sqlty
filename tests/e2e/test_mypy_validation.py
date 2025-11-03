@@ -60,7 +60,7 @@ for user_id, user_name in []:  # Using empty list for type checking only
     )
 
     # Snapshot mypy output
-    assert mypy_result.returncode == snapshot(0)
+    assert mypy_result.returncode == 0
     # Success should produce no output or just success message
     assert mypy_result.stdout == snapshot("Success: no issues found in 1 source file\n")
 

@@ -24,10 +24,10 @@ def test_cli_help_command(tmp_path: Path) -> None:
 
 
 def test_cli_version_command(tmp_path: Path) -> None:
-    """Test version display.
+    """Test that --version flag is handled correctly.
     
-    Note: The --version flag may not be implemented yet.
-    Accepts either success (0) if implemented or error (2) if not recognized.
+    The tool should either display version information (if implemented)
+    or report that the argument is not recognized.
     """
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", "--version"],
@@ -36,7 +36,7 @@ def test_cli_version_command(tmp_path: Path) -> None:
         cwd=str(tmp_path),
     )
 
-    # Either succeeds if --version exists, or errors if not implemented
+    # Accepts success (version shown) or error (flag not recognized)
     assert result.returncode in (0, 2)  # 2 = unrecognized arguments
 
 

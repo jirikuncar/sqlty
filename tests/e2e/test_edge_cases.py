@@ -21,10 +21,10 @@ def test_empty_project(tmp_path: Path) -> None:
 
 
 def test_no_queries_found(tmp_path: Path) -> None:
-    """Test project with registry but no queries.
+    """Test how the tool handles a project with registry but no queries.
     
-    Should succeed (0) as the tool handles this gracefully,
-    creating a minimal stub or skipping stub generation.
+    The tool should complete successfully, either creating a minimal
+    stub file with just the generic overload or skipping stub generation.
     """
     queries_file = tmp_path / "queries.py"
     queries_file.write_text('''from sqlty import SQLRegistry

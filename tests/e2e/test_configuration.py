@@ -11,13 +11,11 @@ from inline_snapshot import snapshot
 
 
 def test_config_via_pyproject_toml(tmp_path: Path) -> None:
-    """Test configuration via pyproject.toml.
+    """Test that the tool accepts pyproject.toml configuration.
     
-    Note: pyproject.toml configuration may not be fully implemented.
-    This test validates that the tool either:
-    - Succeeds using the configuration (0)
-    - Gracefully ignores unknown config (0 or 1)
-    - Reports config errors appropriately (1 or 2)
+    This test validates that the tool can read and process a pyproject.toml
+    file with sqlty configuration. The tool should either use the configuration
+    if the feature is implemented, or gracefully ignore it if not yet supported.
     """
     # Create pyproject.toml with sqlty configuration
     pyproject_file = tmp_path / "pyproject.toml"
