@@ -50,3 +50,89 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
         )
 
     return _run_cli
+
+
+@pytest.fixture
+def setup_queries_file() -> Callable[[Path, str, str | None], Path]:
+    """Fixture to create a queries.py file with SQLRegistry.
+
+    Returns a callable that creates a queries.py file with the given
+    registry class name and optional docstring.
+
+    Args:
+        tmp_path: The temporary directory path
+        class_name: Name of the SQLRegistry class (default: "Query")
+        docstring: Optional docstring for the class
+
+    Returns:
+        Path to the created queries.py file
+
+    Example:
+        queries_file = setup_queries_file(tmp_path, "Query")
+        queries_file = setup_queries_file(tmp_path, "UserQuery", "User-related queries.")
+    """
+
+    def _create_queries_file(
+        tmp_path: Path, class_name: str = "Query", docstring: str | None = None
+    ) -> Path:
+        """Create a queries.py file with SQLRegistry."""
+        queries_file = tmp_path / "queries.py"
+        
+        docstring_line = f'    """{docstring}"""\n\n' if docstring else ""
+        
+        content = f'''from sqlty import SQLRegistry
+
+
+class {class_name}(SQLRegistry):
+{docstring_line}    pass
+
+
+sql = {class_name}.sql
+'''
+        queries_file.write_text(content)
+        return queries_file
+
+    return _create_queries_file
+
+
+@pytest.fixture
+def setup_registry_file() -> Callable[[Path, str, str, str | None], Path]:
+    """Fixture to create a custom registry file.
+
+    Returns a callable that creates a registry file with a custom name,
+    class name, and optional docstring.
+
+    Args:
+        tmp_path: The temporary directory path
+        filename: Name of the file (e.g., "user_queries.py")
+        class_name: Name of the SQLRegistry class
+        docstring: Optional docstring for the class
+
+    Returns:
+        Path to the created registry file
+
+    Example:
+        user_file = setup_registry_file(tmp_path, "user_queries.py", "UserQuery", "User queries.")
+    """
+
+    def _create_registry_file(
+        tmp_path: Path, filename: str, class_name: str, docstring: str | None = None
+    ) -> Path:
+        """Create a custom registry file."""
+        registry_file = tmp_path / filename
+        
+        docstring_line = f'    """{docstring}"""\n\n' if docstring else ""
+        
+        content = f'''from sqlty import SQLRegistry
+
+
+class {class_name}(SQLRegistry):
+{docstring_line}    pass
+
+
+sql = {class_name}.sql
+'''
+        registry_file.write_text(content)
+        return registry_file
+
+    return _create_registry_file
