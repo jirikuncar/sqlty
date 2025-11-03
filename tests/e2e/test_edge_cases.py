@@ -21,7 +21,11 @@ def test_empty_project(tmp_path: Path) -> None:
 
 
 def test_no_queries_found(tmp_path: Path) -> None:
-    """Test project with registry but no queries."""
+    """Test project with registry but no queries.
+    
+    Should succeed (0) as the tool handles this gracefully,
+    creating a minimal stub or skipping stub generation.
+    """
     queries_file = tmp_path / "queries.py"
     queries_file.write_text('''from sqlty import SQLRegistry
 
@@ -48,7 +52,7 @@ def hello() -> str:
         text=True,
     )
 
-    # Should succeed but might not create stub or create minimal stub
+    # Should succeed - the tool handles this gracefully
     assert result.returncode == 0
 
     # If stub is created, it should have the generic overload at minimum

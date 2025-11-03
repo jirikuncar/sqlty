@@ -148,5 +148,18 @@ template showing:
 
 Copy and modify the template when adding new test cases.
 
+### Tips for Writing Tests
+
+1. **Use descriptive test names** that explain what is being tested
+2. **Add docstrings** explaining the test purpose and any special considerations
+3. **Use tmp_path** for all file operations to ensure isolation
+4. **Assert success before checking content** to catch failures early
+5. **Use snapshot()** for first run, then update with `--inline-snapshot=update`
+6. **Include mypy validation** for type-safety tests
+7. **Test both success and failure scenarios** to ensure robustness
+8. **Keep tests focused** on one aspect at a time for clarity
+9. **Document assumptions** about feature implementation status
+10. **Use clear variable names** like `queries_file`, `app_file`, `stub_file`
+
 For questions or clarification, see the original issue: 
 "Refactor tests to use inline-snapshot and mypy check"

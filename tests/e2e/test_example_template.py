@@ -227,12 +227,4 @@ query2 = sql("SELECT name::TEXT FROM users")
     assert "SELECT name::TEXT FROM users" in updated_stub
 
 
-# Tips for writing tests:
-# 1. Use descriptive test names that explain what is being tested
-# 2. Add docstrings explaining the test purpose
-# 3. Use tmp_path for all file operations
-# 4. Assert success before checking content
-# 5. Use snapshot() for first run, then update with --inline-snapshot=update
-# 6. Include mypy validation for type-safety tests
-# 7. Test both success and failure scenarios
-# 8. Keep tests focused on one aspect at a time
+# Note: See tests/e2e/README.md for tips on writing new tests
