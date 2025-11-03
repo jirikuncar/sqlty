@@ -124,7 +124,9 @@ def test_non_select_query() -> None:
         ("DATE", "datetime.date"),
         ("TIMESTAMP", "datetime.datetime"),
         ("TIMESTAMPTZ", "datetime.datetime"),
+        ("DATETIME", "datetime.datetime"),
         ("TIME", "datetime.time"),
+        ("TIMETZ", "datetime.time"),
         ("INTERVAL", "datetime.timedelta"),
         ("UUID", "uuid.UUID"),
     ],
@@ -230,6 +232,30 @@ def test_interval_type_inference() -> None:
     assert columns[0].name == "duration"
     assert columns[0].python_type == "datetime.timedelta"
     assert columns[0].sql_type == "INTERVAL"
+
+
+def test_datetime_type_inference() -> None:
+    """Test DATETIME type mapping from SQL to Python."""
+    analyzer = SQLAnalyzer()
+    columns = analyzer.analyze_select("SELECT created_at::DATETIME FROM events")
+
+    assert columns is not None
+    assert len(columns) == 1
+    assert columns[0].name == "created_at"
+    assert columns[0].python_type == "datetime.datetime"
+    assert columns[0].sql_type == "DATETIME"
+
+
+def test_timetz_type_inference() -> None:
+    """Test TIMETZ type mapping from SQL to Python."""
+    analyzer = SQLAnalyzer()
+    columns = analyzer.analyze_select("SELECT scheduled_time::TIMETZ FROM events")
+
+    assert columns is not None
+    assert len(columns) == 1
+    assert columns[0].name == "scheduled_time"
+    assert columns[0].python_type == "datetime.time"
+    assert columns[0].sql_type == "TIMETZ"
 
 
 def test_datetime_types_with_other_types() -> None:
