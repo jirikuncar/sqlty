@@ -44,6 +44,7 @@ class SQLAnalyzer:
         "ARRAY": "list",
         "JSON": "dict",
         "JSONB": "dict",
+        "UUID": "uuid.UUID",
     }
 
     def __init__(self, dialect: str = "postgres", schema_path: Path | None = None) -> None:

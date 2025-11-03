@@ -508,6 +508,7 @@ SQL_TYPE_MAP = {
     "TIMESTAMPTZ": "datetime",
     "BYTEA": "bytes",
     "BLOB": "bytes",
+    "UUID": "uuid.UUID",
 }
 ```
 
