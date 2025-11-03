@@ -7,6 +7,7 @@ modes.
 
 import ast
 import logging
+import re
 from pathlib import Path
 
 from ._collector import CallInfo
@@ -27,6 +28,24 @@ class StubMerger:
             function_name: Name of the SQL function to generate overloads for
         """
         self.function_name = function_name
+
+    def _compute_additional_imports(self, calls: list[CallInfo]) -> list[str]:
+        """Compute extra imports needed from return types.
+
+        Returns module names like ["uuid", "datetime", "decimal"].
+        """
+        patterns = {
+            r"\buuid\.UUID\b": "uuid",
+            r"\bdatetime\.datetime\b": "datetime",
+            r"\bdecimal\.Decimal\b": "decimal",
+        }
+        needed: set[str] = set()
+        for call in calls:
+            rt = call.get("return_type") or ""
+            for pat, mod in patterns.items():
+                if re.search(pat, rt):
+                    needed.add(mod)
+        return sorted(needed)
 
     def parse_existing_stub(self, stub_path: Path) -> set[str]:
         """Parse an existing stub file to extract all query literals (any class).
@@ -136,18 +155,6 @@ class StubMerger:
         literal: str = call["literal"]
         return_type: str = call.get("return_type") or "Any"
 
-        # Generate source location comment using module name derived from file path
-        src_comment = ""
-        lineno = call.get("lineno")
-        file_path = call.get("file")
-
-        if lineno and file_path:
-            # Always derive module name from file path for source location
-            from pathlib import Path as _P
-
-            module_name = _P(file_path).stem
-            src_comment = f"        # from {module_name}:{lineno}"
-
         if "\n" in literal:
             literal_repr = '"""' + literal + '"""'
         else:
@@ -160,8 +167,6 @@ class StubMerger:
         lines.append("        cls,")
         lines.append(f"        query: Literal[{literal_repr}],")
         lines.append(f"    ) -> {return_type}:")
-        if src_comment:
-            lines.append(src_comment)
         lines.append("        ...")
         lines.append("    ")
         return "\n".join(lines)
@@ -214,15 +219,16 @@ class StubMerger:
             header = [
                 "from typing import overload, Literal",
                 f"from sqlty import SQL, {base_class}",
-                "",
-                "",
             ]
+            # Add conditional imports derived from new_calls
+            for mod in self._compute_additional_imports(new_calls):
+                header.append(f"import {mod}")
+            header.extend(["", ""])  # spacing
             class_block = self.generate_class_block(
                 new_calls, class_name, base_class, relative_to=output_path.parent
             )
             alias = [
                 "",
-                "# Type alias for the sql function",
                 f"{export_name} = {class_name}.{self.function_name}",
                 "",
             ]
@@ -258,7 +264,6 @@ class StubMerger:
             )
             alias = [
                 "",
-                "# Type alias for the sql function",
                 f"{export_name} = {class_name}.{self.function_name}",
                 "",
             ]

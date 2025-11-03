@@ -21,10 +21,8 @@ query2 = sql("SELECT name::TEXT FROM products")
 
     content = stub_file.read_text()
 
-    # Comments should use module name "my_queries", not file path
-    assert "# from my_queries:4" in content
-    assert "# from my_queries:5" in content
-
+    # No source comments are generated anymore; ensure stub contains overloads
+    assert "def sql(" in content
     # Should NOT contain file system paths
     assert tmp_path.name not in content.replace("my_queries", "")  # Ensure no path remnants
 
@@ -46,7 +44,7 @@ query = sql("SELECT 42::INTEGER")
     # Find the overload method
     lines = content.split("\n")
 
-    # Check structure: @overload -> @classmethod -> def -> ) -> return_type: -> comment -> ...
+    # Check structure: @overload -> @classmethod -> def -> ) -> return_type: -> ...
     found_overload = False
     for i, line in enumerate(lines):
         if "@overload" in line and "def sql(" in lines[i + 2]:
@@ -69,8 +67,8 @@ query = sql("SELECT 42::INTEGER")
                         next_line_idx += 1
                     if next_line_idx < len(lines):
                         next_line = lines[next_line_idx].strip()
-                        # Should be either comment or ...
-                        assert next_line.startswith("# from") or next_line == "..."
+                        # Should be the body ellipsis
+                        assert next_line == "..."
                         found_return_line = True
                         found_overload = True
                         break
@@ -99,8 +97,8 @@ query = user_sql("SELECT user_id::INTEGER FROM sessions")
 
     content = stub_file.read_text()
 
-    # Should use module name "user_queries"
-    assert "# from user_queries:9" in content
+    # Basic structure should be present
+    assert "class UserQueries(SQLRegistry):" in content
 
 
 def test_comment_format_multiline_query(tmp_path: Path) -> None:
@@ -123,8 +121,8 @@ query = sql('''
 
     content = stub_file.read_text()
 
-    # Comment should point to line where sql() call starts
-    assert "# from complex_queries:4" in content
+    # No source comments are generated anymore; just validate stub content exists
+    assert "def sql(" in content
 
 
 def test_no_comment_when_registry_source_missing(tmp_path: Path) -> None:

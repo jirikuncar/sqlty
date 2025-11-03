@@ -16,7 +16,6 @@ class StubASTUnparser:
 
     Maintains:
     - Double quotes for Literal strings
-    - Source location comments
     - Proper blank lines and indentation
     """
 
@@ -27,7 +26,6 @@ class StubASTUnparser:
 
         Uses AST structure but formats output to match our conventions:
         - Double quotes for Literal strings
-        - Source location comments
         - Proper blank lines
         """
         lines: list[str] = []
@@ -45,19 +43,18 @@ class StubASTUnparser:
                 # Format class definition
                 lines.extend(self.unparse_class_def(node, calls, relative_to))
             elif isinstance(node, ast.Assign):
-                # Format type alias
+                # Format alias assignment without custom comments
                 if (
                     len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name)
                     and isinstance(node.value, ast.Attribute)
+                    and isinstance(node.value.value, ast.Name)
                 ):
                     alias_name = node.targets[0].id
-                    if isinstance(node.value.value, ast.Name):
-                        class_name = node.value.value.id
-                        attr_name = node.value.attr
-                        lines.append("")
-                        lines.append("# Type alias for the sql function")
-                        lines.append(f"{alias_name} = {class_name}.{attr_name}")
+                    class_name = node.value.value.id
+                    attr_name = node.value.attr
+                    lines.append("")
+                    lines.append(f"{alias_name} = {class_name}.{attr_name}")
 
         lines.append("")
         return "\n".join(lines)
@@ -98,7 +95,7 @@ class StubASTUnparser:
         # Method definitions
         for node in class_node.body[body_start:]:
             if isinstance(node, ast.FunctionDef):
-                lines.extend(self.unparse_method(node, literal_to_call, relative_to))
+                lines.extend(self.unparse_method(node))
 
         lines.append("")
         return lines
@@ -106,8 +103,6 @@ class StubASTUnparser:
     def unparse_method(
         self,
         method_node: ast.FunctionDef,
-        literal_to_call: dict[str, CallInfo],
-        relative_to: Path | None = None,
     ) -> list[str]:
         """Unparse a method definition with decorators and proper formatting."""
         lines: list[str] = []
@@ -146,18 +141,6 @@ class StubASTUnparser:
             else:
                 lines.append(f"        {arg_str},")
         lines.append(f"    ){returns_str}:")
-
-        # Add source location comment if this is a Literal overload
-        literal_value = self.extract_literal_from_method(method_node)
-        if literal_value and literal_value in literal_to_call:
-            call = literal_to_call[literal_value]
-            lineno = call.get("lineno")
-            file_path = call.get("file")
-            if lineno and file_path:
-                from pathlib import Path as _P
-
-                module_name = _P(file_path).stem
-                lines.append(f"        # from {module_name}:{lineno}")
 
         # Body
         lines.append("        ...")

@@ -11,25 +11,15 @@ class SchemaQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal["SELECT id, name FROM users"],
-    ) -> SQL[tuple[int, str]]:
-        # from query:14
-        ...
-
+    ) -> SQL[tuple[int, str]]: ...
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT id, user_id, name FROM users"],
-    ) -> SQL[tuple[int, uuid.UUID, str]]:
-        # from query:18
-        ...
-
+    ) -> SQL[tuple[int, uuid.UUID, str]]: ...
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
 sql = SchemaQueries.sql
