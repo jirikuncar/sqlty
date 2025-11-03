@@ -149,9 +149,9 @@ def test_detect_registry_class(tmp_path: Path, source: str, expected_class: str)
     module_file.write_text(source)
 
     generator = TypeStubGenerator()
-    result = generator._get_registry_class_name(module_file)
+    result = generator._get_registry_class_names(module_file)
 
-    assert result == expected_class
+    assert result == [expected_class] if expected_class else []
 
 
 def test_detect_registry_parse_error(tmp_path: Path) -> None:
@@ -160,9 +160,46 @@ def test_detect_registry_parse_error(tmp_path: Path) -> None:
     module_file.write_text("this is not valid python !!!")
 
     generator = TypeStubGenerator()
-    result = generator._get_registry_class_name(module_file)
+    result = generator._get_registry_class_names(module_file)
 
-    assert result is None
+    assert result == []
+
+
+def test_detect_multiple_registry_classes(tmp_path: Path) -> None:
+    """Test detection of all SQLRegistry subclasses in a module."""
+    module_file = tmp_path / "multi_queries.py"
+    module_file.write_text(
+        """
+from sqlty import SQLRegistry
+
+class UserQueries(SQLRegistry):
+    pass
+
+class PostQueries(SQLRegistry):
+    pass
+
+class CommentQueries(SQLRegistry):
+    pass
+
+class NotARegistry:
+    pass
+"""
+    )
+
+    generator = TypeStubGenerator()
+
+    # Test get_registry_class_names returns all registries
+    registries = generator._registry_detector.get_registry_class_names(module_file)
+    assert len(registries) == 3
+    assert "UserQueries" in registries
+    assert "PostQueries" in registries
+    assert "CommentQueries" in registries
+    assert "NotARegistry" not in registries
+
+    # Test delegation method returns all registries
+    first_registries = generator._get_registry_class_names(module_file)
+    assert len(first_registries) == 3
+    assert first_registries[0] == "UserQueries"
 
 
 # Registry Export Name Tests

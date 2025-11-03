@@ -383,7 +383,7 @@ x = sql("SELECT id, name FROM users")
             "--schema",
             str(global_schema),
             "--schema",
-            f"users_queries:{specific_schema}",
+            f"users_queries.UsersQueries:{specific_schema}",
         ],
         capture_output=True,
         text=True,

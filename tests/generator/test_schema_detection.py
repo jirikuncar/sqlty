@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from sqlty._generator import TypeStubGenerator
 
 if TYPE_CHECKING:
@@ -81,7 +83,7 @@ user_query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
 
 def test_schema_path_detection_with_missing_file(tmp_path: Path) -> None:
-    """Test that missing schema file is handled gracefully."""
+    """Test that missing schema file raises RuntimeError."""
     # Create a registry with __schema_path__ pointing to non-existent file
     query_file = tmp_path / "queries.py"
     query_file.write_text(
@@ -93,21 +95,15 @@ class UserQueries(SQLRegistry):
 
 sql = UserQueries.sql
 
-# Query without casts or schema - should return None type
+# Query without casts or schema - should raise error
 user_query = sql("SELECT id, name FROM users")
 """
     )
 
-    # Generate stub - should not crash
+    # Generate stub - should raise RuntimeError for missing schema
     generator = TypeStubGenerator(sql_dialect="postgres")
-    stub_path = generator.generate_stub_file(query_file, mode="full")
-
-    # Read generated stub
-    stub_content = stub_path.read_text()
-
-    # Should still generate stub, but without type information
-    assert "UserQueries" in stub_content
-    assert "sql" in stub_content
+    with pytest.raises(RuntimeError, match="Schema file not found"):
+        generator.generate_stub_file(query_file, mode="full")
 
 
 def test_schema_path_detection_with_invalid_schema(tmp_path: Path) -> None:
