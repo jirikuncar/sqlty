@@ -38,3 +38,11 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
+      - id: sqlty-examples
+        name: sqlty stub generation for examples
+        entry: uv run sqlty examples --mode=incremental
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [python]
+        files: ^examples/

@@ -111,6 +111,27 @@ repos:
         # args: [".", "--mode=full", "--schema=schema.sql"]
 ```
 
+For more targeted stub generation (e.g., only for specific directories), you can use a local hook:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: sqlty-incremental
+        name: sqlty stub generation
+        entry: sqlty . --mode=incremental
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [python]
+        files: ^src/  # Only run on files in src/
+```
+
+This approach allows you to:
+- Use `--mode=incremental` for faster updates
+- Target specific directories with the `files` pattern
+- Customize behavior per directory or project area
+
 ## Documentation
 
 📚 **[Complete Documentation](https://github.com/jirikuncar/sqlty/blob/main/docs/README.md)**
