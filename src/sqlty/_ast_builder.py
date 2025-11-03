@@ -12,6 +12,44 @@ class StubASTBuilder:
     def __init__(self, function_name: str = "sql") -> None:
         self.function_name = function_name
 
+    def _extract_required_imports(self, calls: list[CallInfo]) -> list[ast.stmt]:
+        """Extract required imports based on return types in calls.
+
+        Args:
+            calls: List of CallInfo with SQL queries and types
+
+        Returns:
+            List of import statements needed for the return types
+        """
+        import re
+
+        # Mapping from type pattern to import statement generator
+        # Using word boundaries to avoid false positives
+        type_import_map = {
+            r"\buuid\.UUID\b": lambda: ast.Import(names=[ast.alias(name="uuid", asname=None)]),
+            r"\bdatetime\.datetime\b": lambda: ast.Import(
+                names=[ast.alias(name="datetime", asname=None)]
+            ),
+            r"\bdecimal\.Decimal\b": lambda: ast.Import(
+                names=[ast.alias(name="decimal", asname=None)]
+            ),
+        }
+
+        needed_imports: set[str] = set()
+
+        # Check if any return type contains types that need imports
+        for call in calls:
+            return_type_str = call.get("return_type") or ""
+            for pattern in type_import_map:
+                if re.search(pattern, return_type_str):
+                    needed_imports.add(pattern)
+
+        imports: list[ast.stmt] = []
+        for pattern in needed_imports:
+            imports.append(type_import_map[pattern]())
+
+        return imports
+
     def build_stub_module(
         self,
         calls: list[CallInfo],
@@ -49,6 +87,10 @@ class StubASTBuilder:
                 level=0,
             )
         )
+
+        # Add conditional imports based on return types
+        conditional_imports = self._extract_required_imports(calls)
+        module_body.extend(conditional_imports)
 
         # Generate class definition
         class_node = self.build_class_ast(calls, class_name, base_class, relative_to)

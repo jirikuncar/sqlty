@@ -1,3 +1,4 @@
+import uuid
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
@@ -12,6 +13,15 @@ class SchemaQueries(SQLRegistry):
         query: Literal["SELECT id, name FROM users"],
     ) -> SQL[tuple[int, str]]:
         # from query:14
+        ...
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT id, user_id, name FROM users"],
+    ) -> SQL[tuple[int, uuid.UUID, str]]:
+        # from query:18
         ...
 
     @overload

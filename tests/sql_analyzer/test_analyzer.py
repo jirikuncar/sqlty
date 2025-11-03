@@ -123,6 +123,7 @@ def test_non_select_query() -> None:
         ("BOOLEAN", "bool"),
         ("DATE", "str"),
         ("TIMESTAMP", "str"),
+        ("UUID", "uuid.UUID"),
     ],
 )
 def test_sql_to_python_type_mapping(sql_type: str, expected_python_type: str) -> None:
@@ -154,3 +155,27 @@ def test_dialect_mysql() -> None:
     assert columns is not None
     # MySQL SIGNED maps to INT
     assert columns[0].python_type == "int"
+
+
+def test_uuid_type_inference() -> None:
+    """Test UUID type mapping from SQL to Python."""
+    analyzer = SQLAnalyzer()
+    columns = analyzer.analyze_select("SELECT user_id::UUID FROM users")
+
+    assert columns is not None
+    assert len(columns) == 1
+    assert columns[0].name == "user_id"
+    assert columns[0].python_type == "uuid.UUID"
+    assert columns[0].sql_type == "UUID"
+
+
+def test_uuid_with_other_types() -> None:
+    """Test UUID in query with multiple types."""
+    analyzer = SQLAnalyzer()
+    columns = analyzer.analyze_select("SELECT id::INTEGER, user_id::UUID, name::TEXT FROM users")
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "uuid.UUID"
+    assert columns[2].python_type == "str"

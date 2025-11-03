@@ -1,6 +1,7 @@
 -- Example schema for SQLTy
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
+    user_id UUID NOT NULL,
     name TEXT NOT NULL
 );
 

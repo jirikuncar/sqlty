@@ -359,3 +359,56 @@ query = sql("SELECT * FROM users")
 
     # Should still generate stub even without type info (with Any or generic fallback)
     assert "from typing import" in stub
+
+
+def test_uuid_import_added_when_needed(tmp_path: Path) -> None:
+    """Test that uuid import is added when UUID type is used."""
+    source = """
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
+    pass
+
+sql = Query.sql
+
+query = sql("SELECT user_id::UUID FROM users")
+# Type: SQL[tuple[uuid.UUID]]
+"""
+    source_file = tmp_path / "test.py"
+    source_file.write_text(source)
+
+    # Create a schema with UUID type
+    schema_file = tmp_path / "schema.sql"
+    schema_file.write_text("CREATE TABLE users (user_id UUID);")
+
+    generator = TypeStubGenerator()
+    calls = generator.analyze_file(source_file)
+    stub = generator.generate_stub_content(calls, class_name="Query")
+
+    # Should include uuid import when UUID type is detected
+    assert "import uuid" in stub
+    assert "uuid.UUID" in stub
+
+
+def test_no_uuid_import_when_not_needed(tmp_path: Path) -> None:
+    """Test that uuid import is not added when UUID type is not used."""
+    source = """
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
+    pass
+
+sql = Query.sql
+
+query = sql("SELECT id::INTEGER, name::TEXT FROM users")
+# Type: SQL[tuple[int, str]]
+"""
+    source_file = tmp_path / "test.py"
+    source_file.write_text(source)
+
+    generator = TypeStubGenerator()
+    calls = generator.analyze_file(source_file)
+    stub = generator.generate_stub_content(calls, class_name="Query")
+
+    # Should NOT include uuid import when UUID type is not used
+    assert "import uuid" not in stub
