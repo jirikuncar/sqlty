@@ -40,7 +40,7 @@ class SQLAnalyzer:
         "DATE": "datetime.date",
         "TIMESTAMP": "datetime.datetime",
         "TIMESTAMPTZ": "datetime.datetime",
-        "TIME": "str",
+        "TIME": "datetime.time",
         "INTERVAL": "datetime.timedelta",
         "ARRAY": "list",
         "JSON": "dict",

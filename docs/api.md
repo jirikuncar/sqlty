@@ -365,7 +365,7 @@ The generator maps SQL type casts to Python types:
 | `DECIMAL`, `NUMERIC` | `Decimal` | `from decimal import Decimal` |
 | `DATE` | `datetime.date` | `import datetime` |
 | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` | `import datetime` |
-| `TIME`, `TIMETZ` | `time` | `from datetime import time` |
+| `TIME`, `TIMETZ` | `datetime.time` | `import datetime` |
 | `INTERVAL` | `datetime.timedelta` | `import datetime` |
 | `BYTEA`, `BLOB`, `BINARY` | `bytes` | Built-in |
 | `JSON`, `JSONB` | `Any` | `from typing import Any` |
@@ -388,7 +388,7 @@ FROM products
 SELECT
     created_date::DATE,              -- datetime.date
     created_at::TIMESTAMP,           -- datetime.datetime
-    scheduled_time::TIME,            -- time
+    scheduled_time::TIME,            -- datetime.time
     duration::INTERVAL               -- datetime.timedelta
 FROM events
 ```

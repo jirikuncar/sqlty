@@ -124,6 +124,7 @@ def test_non_select_query() -> None:
         ("DATE", "datetime.date"),
         ("TIMESTAMP", "datetime.datetime"),
         ("TIMESTAMPTZ", "datetime.datetime"),
+        ("TIME", "datetime.time"),
         ("INTERVAL", "datetime.timedelta"),
         ("UUID", "uuid.UUID"),
     ],
@@ -241,18 +242,32 @@ def test_datetime_types_with_other_types() -> None:
             name::TEXT,
             birth_date::DATE,
             created_at::TIMESTAMP,
+            scheduled_time::TIME,
             duration::INTERVAL
         FROM users
         """
     )
 
     assert columns is not None
-    assert len(columns) == 5
+    assert len(columns) == 6
     assert columns[0].python_type == "int"
     assert columns[1].python_type == "str"
     assert columns[2].python_type == "datetime.date"
     assert columns[3].python_type == "datetime.datetime"
-    assert columns[4].python_type == "datetime.timedelta"
+    assert columns[4].python_type == "datetime.time"
+    assert columns[5].python_type == "datetime.timedelta"
+
+
+def test_time_type_inference() -> None:
+    """Test TIME type mapping from SQL to Python."""
+    analyzer = SQLAnalyzer()
+    columns = analyzer.analyze_select("SELECT scheduled_time::TIME FROM events")
+
+    assert columns is not None
+    assert len(columns) == 1
+    assert columns[0].name == "scheduled_time"
+    assert columns[0].python_type == "datetime.time"
+    assert columns[0].sql_type == "TIME"
 
 
 def test_generate_return_type_with_datetime() -> None:

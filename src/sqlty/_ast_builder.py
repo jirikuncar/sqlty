@@ -27,7 +27,7 @@ class StubASTBuilder:
         # Using word boundaries to avoid false positives
         type_import_map = {
             r"\buuid\.UUID\b": lambda: ast.Import(names=[ast.alias(name="uuid", asname=None)]),
-            r"\bdatetime\.(datetime|date|timedelta)\b": lambda: ast.Import(
+            r"\bdatetime\.(datetime|date|time|timedelta)\b": lambda: ast.Import(
                 names=[ast.alias(name="datetime", asname=None)]
             ),
             r"\bdecimal\.Decimal\b": lambda: ast.Import(
