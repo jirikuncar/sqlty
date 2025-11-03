@@ -40,7 +40,7 @@ repos:
         types: [file, python]
       - id: sqlty-examples
         name: sqlty stub generation for examples
-        entry: uv run sqlty examples --mode=incremental
+        entry: uv run sqlty examples --mode=full --format-command "uv run ruff format --stdin-filename {filename}"
         language: system
         pass_filenames: false
         require_serial: true

@@ -34,8 +34,9 @@ The repository uses several pre-commit hooks:
 - **uv-lock**: Keeps the lockfile up to date
 - **mypy**: Type checking for the src directory
 - **sqlty-examples**: Automatic stub generation for example files
-  - Runs incrementally when any Python file in `examples/` changes
-  - Uses `--mode=incremental` to add new overloads without regenerating existing ones
+  - Runs when any Python file in `examples/` changes
+  - Uses `--mode=full` to regenerate all stubs from scratch
+  - Formats generated stubs with ruff formatter
   - Ensures example stubs stay synchronized with code changes
 
 To manually run all pre-commit hooks:

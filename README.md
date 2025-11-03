@@ -117,9 +117,9 @@ For more targeted stub generation (e.g., only for specific directories), you can
 repos:
   - repo: local
     hooks:
-      - id: sqlty-incremental
+      - id: sqlty-src
         name: sqlty stub generation
-        entry: sqlty . --mode=incremental
+        entry: sqlty . --mode=full --format-command "ruff format --stdin-filename {filename}"
         language: system
         pass_filenames: false
         require_serial: true
@@ -128,7 +128,8 @@ repos:
 ```
 
 This approach allows you to:
-- Use `--mode=incremental` for faster updates
+- Use `--mode=full` for complete regeneration ensuring consistency
+- Use `--format-command` to format generated stubs with your preferred formatter
 - Target specific directories with the `files` pattern
 - Customize behavior per directory or project area
 

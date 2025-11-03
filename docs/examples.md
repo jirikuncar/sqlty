@@ -418,8 +418,9 @@ The repository is configured with a pre-commit hook that automatically generates
 
 **How it works:**
 - When you modify any Python file in the `examples/` directory
-- The pre-commit hook runs `sqlty examples --mode=incremental`
-- New query stubs are added without regenerating existing ones
+- The pre-commit hook runs `sqlty examples --mode=full --format-command "uv run ruff format --stdin-filename {filename}"`
+- All query stubs are regenerated from scratch
+- Generated stubs are formatted with ruff
 - The updated `.pyi` files are automatically included in your commit
 
 **To enable this in your own projects:**
@@ -431,7 +432,7 @@ repos:
     hooks:
       - id: sqlty-examples
         name: sqlty stub generation for examples
-        entry: uv run sqlty examples --mode=incremental
+        entry: uv run sqlty examples --mode=full --format-command "uv run ruff format --stdin-filename {filename}"
         language: system
         pass_filenames: false
         require_serial: true
