@@ -1,0 +1,338 @@
+"""End-to-end tests for driver integration patterns.
+
+Tests that the generated stubs work correctly with driver code patterns,
+particularly the psycopg driver integration.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+from inline_snapshot import snapshot
+
+
+def test_psycopg_driver_pattern(tmp_path: Path) -> None:
+    """Test stub generation for code using psycopg driver pattern."""
+    queries_file = tmp_path / "queries.py"
+    queries_file.write_text('''from sqlty import SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Query registry for database operations."""
+
+    pass
+
+
+sql = Query.sql
+''')
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from queries import sql
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from sqlty import SQL
+
+# Query definitions that would be used with psycopg
+get_user: SQL[tuple[int, str]] = sql(
+    "SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"
+)
+
+get_posts: SQL[tuple[int, str, str]] = sql(
+    "SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id"
+)
+
+count_users: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
+
+
+# Type annotations that would be used with execute()
+def example_usage() -> None:
+    # These type annotations should work with the generated stubs
+    users: Iterator[tuple[int, str]]
+    posts: Iterator[tuple[int, str, str]]
+    counts: Iterator[tuple[int]]
+''')
+
+    # Generate stub
+    result = subprocess.run(
+        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+    # Verify stub
+    stub_file = tmp_path / "queries.pyi"
+    assert stub_file.exists()
+
+    stub_content = stub_file.read_text()
+
+    # Verify all queries are present
+    assert "SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id" in stub_content
+    assert (
+        "SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id"
+        in stub_content
+    )
+    assert "SELECT COUNT(*)::INTEGER FROM users" in stub_content
+
+    # Snapshot the result
+    assert stub_content == snapshot("""\
+from typing import Literal, overload
+
+from sqlty import SQL, SQLRegistry
+
+class Query(SQLRegistry):
+    \"\"\"Query registry for database operations with type-safe overloads.\"\"\"
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
+    ) -> SQL[tuple[int, str]]:
+        # from app:10
+        ...
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal[
+            "SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id"
+        ],
+    ) -> SQL[tuple[int, str, str]]:
+        # from app:14
+        ...
+
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
+    ) -> SQL[tuple[int]]:
+        # from app:18
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](
+        cls,
+        query: T,
+    ) -> T: ...
+
+# Type alias for the sql function
+sql = Query.sql
+""")
+
+    # Validate with mypy
+    mypy_result = subprocess.run(
+        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
+
+
+def test_query_with_iterator_return_type(tmp_path: Path) -> None:
+    """Test that SQL[tuple[...]] works with Iterator[tuple[...]] in type checking."""
+    queries_file = tmp_path / "queries.py"
+    queries_file.write_text('''from sqlty import SQLRegistry
+
+
+class Query(SQLRegistry):
+    pass
+
+
+sql = Query.sql
+''')
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from queries import sql
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from sqlty import SQL
+
+
+def fetch_users() -> None:
+    """Demonstrate iterator pattern with SQL queries."""
+    query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
+
+    # In real code, execute() would return Iterator[tuple[int, str]]
+    # For type checking, we simulate this
+    result: Iterator[tuple[int, str]] = iter([])  # Placeholder
+
+    for user_id, name in result:
+        print(f"User {user_id}: {name}")
+''')
+
+    # Generate stub
+    result = subprocess.run(
+        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+    # Validate with mypy
+    mypy_result = subprocess.run(
+        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
+
+
+def test_parameterized_query_type_safety(tmp_path: Path) -> None:
+    """Test that parameterized queries maintain type safety."""
+    queries_file = tmp_path / "queries.py"
+    queries_file.write_text('''from sqlty import SQLRegistry
+
+
+class Query(SQLRegistry):
+    pass
+
+
+sql = Query.sql
+''')
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+# Query with multiple parameters
+query: SQL[tuple[int, str, str]] = sql(
+    """
+    SELECT id::INTEGER, name::TEXT, email::TEXT
+    FROM users
+    WHERE id = :user_id AND active = :is_active
+    """
+)
+
+# Parameters dictionary would be:
+# params = {"user_id": 123, "is_active": True}
+
+# Return type is still inferred from SELECT clause
+result_tuple: tuple[int, str, str]
+''')
+
+    # Generate stub
+    result = subprocess.run(
+        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+    stub_file = tmp_path / "queries.pyi"
+    stub_content = stub_file.read_text()
+
+    # Verify parameters are preserved in literal
+    assert ":user_id" in stub_content
+    assert ":is_active" in stub_content
+
+    # Verify return type
+    assert "SQL[tuple[int, str, str]]" in stub_content
+
+    # Validate with mypy
+    mypy_result = subprocess.run(
+        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
+
+
+def test_multiple_registries_in_driver_code(tmp_path: Path) -> None:
+    """Test multiple registries as used in multi-schema applications."""
+    # Create user registry
+    user_queries_file = tmp_path / "user_queries.py"
+    user_queries_file.write_text('''from sqlty import SQLRegistry
+
+
+class UserQuery(SQLRegistry):
+    """User database queries."""
+
+    pass
+
+
+sql = UserQuery.sql
+''')
+
+    # Create order registry
+    order_queries_file = tmp_path / "order_queries.py"
+    order_queries_file.write_text('''from sqlty import SQLRegistry
+
+
+class OrderQuery(SQLRegistry):
+    """Order database queries."""
+
+    pass
+
+
+sql = OrderQuery.sql
+''')
+
+    # Create app using both
+    app_file = tmp_path / "app.py"
+    app_file.write_text('''from typing import TYPE_CHECKING
+
+from user_queries import sql as user_sql
+from order_queries import sql as order_sql
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from sqlty import SQL
+
+
+def get_user_data() -> None:
+    """Fetch user data."""
+    query: SQL[tuple[int, str]] = user_sql(
+        "SELECT id::INTEGER, username::TEXT FROM users WHERE id = :id"
+    )
+    # result: Iterator[tuple[int, str]] = execute(conn, query, {"id": 1})
+
+
+def get_order_data() -> None:
+    """Fetch order data."""
+    query: SQL[tuple[int, int, str]] = order_sql(
+        "SELECT id::INTEGER, user_id::INTEGER, status::TEXT FROM orders WHERE user_id = :user_id"
+    )
+    # result: Iterator[tuple[int, int, str]] = execute(conn, query, {"user_id": 1})
+''')
+
+    # Generate stubs
+    result = subprocess.run(
+        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+    # Verify both stubs exist
+    assert (tmp_path / "user_queries.pyi").exists()
+    assert (tmp_path / "order_queries.pyi").exists()
+
+    # Validate with mypy
+    mypy_result = subprocess.run(
+        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"

@@ -55,6 +55,35 @@ Tests CLI commands and modes:
 - Dialect and schema options
 - Error handling
 
+### `test_driver_integration.py`
+Tests integration with database drivers:
+- psycopg driver pattern with type annotations
+- Iterator return types
+- Parameterized query type safety
+- Multiple registries in driver code
+
+### `test_configuration.py`
+Tests configuration via pyproject.toml:
+- Basic configuration settings
+- Schema path configuration
+- CLI arguments override config
+- Multiple registry configuration
+- Exclude patterns
+
+### `test_edge_cases.py`
+Tests edge cases and error scenarios:
+- Empty projects
+- No queries found
+- Syntax errors in source
+- Non-literal query strings
+- Duplicate queries
+- Very long queries
+- Unicode in queries
+- SQL comments
+- Nested function calls
+- Class method queries
+- Queries in conditionals
+
 ## Key Principles
 
 ### No Internal Imports
