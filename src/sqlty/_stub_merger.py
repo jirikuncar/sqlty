@@ -20,7 +20,7 @@ def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
     """
     patterns = {
         r"\buuid\.UUID\b": "uuid",
-        r"\bdatetime\.datetime\b": "datetime",
+        r"\bdatetime\.(datetime|date|time|timedelta)\b": "datetime",
         r"\bdecimal\.Decimal\b": "decimal",
     }
     needed: set[str] = set()
