@@ -9,12 +9,17 @@ Test the complete workflow:
 
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from inline_snapshot import snapshot
 
 
-def test_basic_query_generation(tmp_path: Path) -> None:
+def test_basic_query_generation(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+) -> None:
     """Test basic query generation and mypy validation."""
     # Step 1: Create source file with repository and queries
     queries_file = tmp_path / "queries.py"
@@ -53,12 +58,7 @@ query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 ''')
 
     # Step 2: Run pyi generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
@@ -127,7 +127,10 @@ sql = Query.sql
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
 
 
-def test_typed_query_annotation(tmp_path: Path) -> None:
+def test_typed_query_annotation(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+) -> None:
     """Test that explicitly typed queries work with mypy."""
     # Create source files
     queries_file = tmp_path / "queries.py"
@@ -154,11 +157,7 @@ q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
@@ -207,7 +206,10 @@ sql = Query.sql
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_incremental_stub_update(tmp_path: Path) -> None:
+def test_incremental_stub_update(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+) -> None:
     """Test that adding new queries updates the stub file."""
     # Create initial source files
     queries_file = tmp_path / "queries.py"
@@ -234,11 +236,7 @@ query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 ''')
 
     # Generate initial stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
@@ -263,11 +261,7 @@ query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
 ''')
 
     # Step 6: Run generator again
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
@@ -316,7 +310,10 @@ sql = Query.sql
 """)
 
 
-def test_multiline_query_formatting(tmp_path: Path) -> None:
+def test_multiline_query_formatting(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+) -> None:
     """Test that multiline queries are properly formatted in stubs."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text('''from sqlty import SQLRegistry
@@ -349,11 +346,7 @@ query: SQL[tuple[int, str, str]] = sql("""
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
