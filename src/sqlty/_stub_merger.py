@@ -13,6 +13,25 @@ from pathlib import Path
 from ._collector import CallInfo
 
 
+def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
+    """Compute extra imports needed from return types.
+
+    Returns module names like ["uuid", "datetime", "decimal"].
+    """
+    patterns = {
+        r"\buuid\.UUID\b": "uuid",
+        r"\bdatetime\.datetime\b": "datetime",
+        r"\bdecimal\.Decimal\b": "decimal",
+    }
+    needed: set[str] = set()
+    for call in calls:
+        rt = call.get("return_type") or ""
+        for pat, mod in patterns.items():
+            if re.search(pat, rt):
+                needed.add(mod)
+    return sorted(needed)
+
+
 class StubMerger:
     """Merge new query overloads into existing stub files.
 
@@ -28,24 +47,6 @@ class StubMerger:
             function_name: Name of the SQL function to generate overloads for
         """
         self.function_name = function_name
-
-    def _compute_additional_imports(self, calls: list[CallInfo]) -> list[str]:
-        """Compute extra imports needed from return types.
-
-        Returns module names like ["uuid", "datetime", "decimal"].
-        """
-        patterns = {
-            r"\buuid\.UUID\b": "uuid",
-            r"\bdatetime\.datetime\b": "datetime",
-            r"\bdecimal\.Decimal\b": "decimal",
-        }
-        needed: set[str] = set()
-        for call in calls:
-            rt = call.get("return_type") or ""
-            for pat, mod in patterns.items():
-                if re.search(pat, rt):
-                    needed.add(mod)
-        return sorted(needed)
 
     def parse_existing_stub(self, stub_path: Path) -> set[str]:
         """Parse an existing stub file to extract all query literals (any class).
@@ -221,7 +222,7 @@ class StubMerger:
                 f"from sqlty import SQL, {base_class}",
             ]
             # Add conditional imports derived from new_calls
-            for mod in self._compute_additional_imports(new_calls):
+            for mod in compute_additional_imports(new_calls):
                 header.append(f"import {mod}")
             header.extend(["", ""])  # spacing
             class_block = self.generate_class_block(
