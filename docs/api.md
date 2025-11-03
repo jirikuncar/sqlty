@@ -368,7 +368,7 @@ The generator maps SQL type casts to Python types:
 | `TIME`, `TIMETZ` | `time` | `from datetime import time` |
 | `BYTEA`, `BLOB`, `BINARY` | `bytes` | Built-in |
 | `JSON`, `JSONB` | `Any` | `from typing import Any` |
-| `UUID` | `uuid.UUID` | `from uuid import UUID` |
+| `UUID` | `uuid.UUID` | `import uuid` |
 
 ### Using Type Casts
 
