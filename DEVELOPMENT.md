@@ -152,6 +152,26 @@ make run-example
 - Ensure all tests pass
 - Maintain or improve code coverage
 
+**For new functionality, prefer adding end-to-end tests in `tests/e2e/` that:**
+- Use subprocess to run the sqlty CLI (no internal imports)
+- Use inline-snapshot for result verification
+- Include mypy validation of generated stubs
+- Test the complete workflow from source to type checking
+
+See [tests/README.md](tests/README.md) and [tests/e2e/README.md](tests/e2e/README.md) for details.
+
+Run end-to-end tests:
+
+```bash
+pytest tests/e2e/ -v
+```
+
+Update snapshots when output changes intentionally:
+
+```bash
+pytest tests/e2e/ --inline-snapshot=update
+```
+
 ### Pull Request Guidelines
 
 - Write clear PR descriptions

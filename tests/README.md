@@ -136,5 +136,17 @@ When adding new features:
 3. Update snapshots with `--inline-snapshot=update` after verifying changes
 4. Ensure mypy validation passes in e2e tests
 
+### Example Template
+
+See [tests/e2e/test_example_template.py](e2e/test_example_template.py) for a complete
+template showing:
+- Basic test pattern with snapshots
+- Tests without mypy validation
+- Error case testing
+- CLI option testing
+- Incremental behavior testing
+
+Copy and modify the template when adding new test cases.
+
 For questions or clarification, see the original issue: 
 "Refactor tests to use inline-snapshot and mypy check"
