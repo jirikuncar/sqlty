@@ -21,23 +21,32 @@ class StubASTBuilder:
         Returns:
             List of import statements needed for the return types
         """
-        imports: list[ast.stmt] = []
-        needs_uuid = False
+        import re
 
-        # Check if any return type contains uuid.UUID
+        # Mapping from type pattern to import statement generator
+        # Using word boundaries to avoid false positives
+        type_import_map = {
+            r"\buuid\.UUID\b": lambda: ast.Import(names=[ast.alias(name="uuid", asname=None)]),
+            r"\bdatetime\.datetime\b": lambda: ast.Import(
+                names=[ast.alias(name="datetime", asname=None)]
+            ),
+            r"\bdecimal\.Decimal\b": lambda: ast.Import(
+                names=[ast.alias(name="decimal", asname=None)]
+            ),
+        }
+
+        needed_imports: set[str] = set()
+
+        # Check if any return type contains types that need imports
         for call in calls:
             return_type_str = call.get("return_type") or ""
-            if "uuid.UUID" in return_type_str:
-                needs_uuid = True
-                break
+            for pattern in type_import_map:
+                if re.search(pattern, return_type_str):
+                    needed_imports.add(pattern)
 
-        # Add uuid import if needed
-        if needs_uuid:
-            imports.append(
-                ast.Import(
-                    names=[ast.alias(name="uuid", asname=None)],
-                )
-            )
+        imports: list[ast.stmt] = []
+        for pattern in needed_imports:
+            imports.append(type_import_map[pattern]())
 
         return imports
 
