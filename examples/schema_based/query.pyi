@@ -1,6 +1,5 @@
-from typing import Literal, overload
-
 import uuid
+from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 

@@ -172,9 +172,7 @@ def test_uuid_type_inference() -> None:
 def test_uuid_with_other_types() -> None:
     """Test UUID in query with multiple types."""
     analyzer = SQLAnalyzer()
-    columns = analyzer.analyze_select(
-        "SELECT id::INTEGER, user_id::UUID, name::TEXT FROM users"
-    )
+    columns = analyzer.analyze_select("SELECT id::INTEGER, user_id::UUID, name::TEXT FROM users")
 
     assert columns is not None
     assert len(columns) == 3
