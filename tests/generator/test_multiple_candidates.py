@@ -77,10 +77,8 @@ user_query = AnotherQuery.sql("SELECT id::INTEGER, email::TEXT FROM customers")
         content2 = stub2.read_text()
 
         # The stubs should contain the literal queries from their respective directories
-        assert (
-            "name" in content1.lower()
-        ), "First stub should reference user query with name field"
-        assert (
-            "email" in content2.lower()
-        ), "Second stub should reference customer query with email field"
+        assert "name" in content1.lower(), "First stub should reference user query with name field"
+        assert "email" in content2.lower(), (
+            "Second stub should reference customer query with email field"
+        )
         assert content1 != content2, "Stubs should have different content"
