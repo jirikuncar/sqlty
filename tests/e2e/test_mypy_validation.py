@@ -4,26 +4,15 @@ These tests ensure that the generated stubs work correctly with mypy
 and that type annotations are properly inferred and validated.
 """
 
-import subprocess
-import sys
 from pathlib import Path
 
 from inline_snapshot import snapshot
 
 
-def test_mypy_validates_query_types(tmp_path: Path) -> None:
+def test_mypy_validates_query_types(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test that mypy validates query return types correctly."""
     # Create source files
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -44,20 +33,12 @@ for user_id, user_name in []:  # Using empty list for type checking only
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
     # Run mypy - it should pass
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     # Snapshot mypy output
     assert mypy_result.returncode == 0
@@ -65,18 +46,9 @@ for user_id, user_name in []:  # Using empty list for type checking only
     assert mypy_result.stdout == snapshot("Success: no issues found in 1 source file\n")
 
 
-def test_mypy_catches_type_mismatch(tmp_path: Path) -> None:
+def test_mypy_catches_type_mismatch(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test that mypy catches type mismatches in query usage."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -94,20 +66,12 @@ wrong: SQL[tuple[str, int]] = q  # This should fail mypy
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
     # Run mypy - it should fail due to type mismatch
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     # Should have non-zero exit code (type error found)
     assert mypy_result.returncode != 0
@@ -115,72 +79,51 @@ wrong: SQL[tuple[str, int]] = q  # This should fail mypy
     assert "incompatible" in mypy_result.stdout.lower() or "error" in mypy_result.stdout.lower()
 
 
-def test_mypy_infers_tuple_unpacking(tmp_path: Path) -> None:
-    """Test that mypy correctly infers types from tuple unpacking."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+def test_mypy_infers_tuple_unpacking(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
+    """Test that mypy correctly infers types from tuple unpacking with execute function."""
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text('''from typing import TYPE_CHECKING
 
-# Query returns tuple[int, str, str]
-query = sql("SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+from queries import sql
 
-# Mypy should infer types from unpacking
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from psycopg import Connection
+    from sqlty import SQL
+    from sqlty.drivers.psycopg import execute
+
+# Query with type annotation
+query: SQL[tuple[int, str, str]] = sql("SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+
+# Function that processes user data
 def process_user(user_id: int, name: str, email: str) -> None:
     print(f"{user_id}: {name} <{email}>")
 
 
-# This should type-check - but we need actual execution or iterator
-# For type checking purposes, we'll use TYPE_CHECKING
-from typing import TYPE_CHECKING
-
+# Use execute function for proper type inference
 if TYPE_CHECKING:
-    # Simulate the query result type
-    result: list[tuple[int, str, str]] = []
-    for user_id, name, email in result:
+    conn: Connection
+    results: Iterator[tuple[int, str, str]] = execute(conn, query, {})
+    for user_id, name, email in results:
         process_user(user_id, name, email)
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
     # Run mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_mypy_with_multiple_queries(tmp_path: Path) -> None:
+def test_mypy_with_multiple_queries(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test mypy validation with multiple queries of different types."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -206,11 +149,7 @@ def check_types() -> None:
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
@@ -223,27 +162,14 @@ def check_types() -> None:
     assert "SQL[tuple[int, str, str]]" in stub_content
 
     # Run mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_mypy_with_query_parameters(tmp_path: Path) -> None:
+def test_mypy_with_query_parameters(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test mypy validation for queries with parameters."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
-
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -264,11 +190,7 @@ result_type: SQL[tuple[int, str]] = query
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
@@ -280,28 +202,16 @@ result_type: SQL[tuple[int, str]] = query
     assert "SQL[tuple[int, str]]" in stub_content
 
     # Run mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_mypy_with_complex_types(tmp_path: Path) -> None:
+def test_mypy_with_complex_types(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test mypy validation with complex SQL types like arrays or JSON."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    setup_queries_file(tmp_path)
 
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
-''')
-
+    app_file = tmp_path / "app.py"
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
 
@@ -318,19 +228,11 @@ query: SQL[tuple[int, str, str]] = sql(
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--mode=full"])
 
     assert result.returncode == 0
 
     # Run mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
