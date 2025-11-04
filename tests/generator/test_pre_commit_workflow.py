@@ -8,8 +8,6 @@ import os
 import time
 from pathlib import Path
 
-import pytest
-
 from sqlty._generator import TypeStubGenerator
 
 
@@ -69,7 +67,9 @@ query1 = sql("SELECT id::INTEGER FROM users")
     second_mtime = os.path.getmtime(stub_path)
     second_content = stub_path.read_text()
 
-    assert second_mtime == initial_mtime, "File timestamp should not change when content is identical"
+    assert second_mtime == initial_mtime, (
+        "File timestamp should not change when content is identical"
+    )
     assert second_content == initial_content, "File content should remain identical"
 
     # Wait a bit to ensure timestamp would be different if file is rewritten
