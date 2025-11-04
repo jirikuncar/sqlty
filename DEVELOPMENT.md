@@ -25,6 +25,26 @@ uv run pre-commit install
 
 This ensures code is formatted and checked before each commit.
 
+#### Pre-commit Hooks Configured
+
+The repository uses several pre-commit hooks:
+
+- **Standard checks**: AST validation, YAML/TOML/JSON syntax, merge conflicts, trailing whitespace, etc.
+- **Ruff**: Code formatting and linting with automatic fixes
+- **uv-lock**: Keeps the lockfile up to date
+- **mypy**: Type checking for the src directory
+- **sqlty-examples**: Automatic stub generation for example files
+  - Runs when any Python file in `examples/` changes
+  - Uses `--mode=full` to regenerate all stubs from scratch
+  - Formats generated stubs with ruff formatter
+  - Ensures example stubs stay synchronized with code changes
+
+To manually run all pre-commit hooks:
+
+```bash
+uv run pre-commit run --all-files
+```
+
 ## Development Workflow
 
 ### Type Checking
@@ -221,7 +241,7 @@ Based on user value and implementation effort:
   - [x] Implemented --mode flag with incremental, full, and prune options
   - [x] Removed legacy --mode=incremental and --mode=full flags (breaking change)
   - [x] Updated API: generate_stub_file now uses mode parameter instead of boolean flags
-  - [ ] Configure it to run on changed files in examples
+  - [x] Configure it to run on changed files in examples
   - [ ] Prune implementation (remove overloads for queries that no longer exist)
   - [ ] Support multiple modes in a single run: incremental,prune,create would run incremental generation, prune stale overloads, and create new ones if missing. Create alone should not override existing stubs but only create missing ones. Prune would only remove stale overloads if they are no longer in use - you can run prune only with whole directory otherwise it might lead to removing used stubs.
 - [ ] Make sure everything works with both `ty` and `mypy`.

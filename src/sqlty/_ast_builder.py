@@ -15,16 +15,11 @@ class StubASTBuilder:
     def _extract_required_imports(self, calls: list[CallInfo]) -> list[ast.stmt]:
         """Extract required imports based on return types in calls.
 
-        Args:
-            calls: List of CallInfo with SQL queries and types
-
-        Returns:
-            List of import statements needed for the return types
+        Returns a list of ast.Import statements for modules that appear in
+        return type strings (e.g., uuid.UUID, datetime.datetime, decimal.Decimal).
         """
         import re
 
-        # Mapping from type pattern to import statement generator
-        # Using word boundaries to avoid false positives
         type_import_map = {
             r"\buuid\.UUID\b": lambda: ast.Import(names=[ast.alias(name="uuid", asname=None)]),
             r"\bdatetime\.(datetime|date|time|timedelta)\b": lambda: ast.Import(
@@ -35,19 +30,16 @@ class StubASTBuilder:
             ),
         }
 
-        needed_imports: set[str] = set()
-
-        # Check if any return type contains types that need imports
+        needed_patterns: set[str] = set()
         for call in calls:
             return_type_str = call.get("return_type") or ""
             for pattern in type_import_map:
                 if re.search(pattern, return_type_str):
-                    needed_imports.add(pattern)
+                    needed_patterns.add(pattern)
 
         imports: list[ast.stmt] = []
-        for pattern in needed_imports:
+        for pattern in needed_patterns:
             imports.append(type_import_map[pattern]())
-
         return imports
 
     def build_stub_module(
@@ -58,7 +50,8 @@ class StubASTBuilder:
         export_name: str = "sql",
         relative_to: Path | None = None,
     ) -> ast.Module:
-        """Build the module AST for a stub file.
+        """
+        Build the module AST for a stub file.
 
         Args:
             calls: List of CallInfo with SQL queries and types
@@ -72,14 +65,20 @@ class StubASTBuilder:
         """
         module_body: list[ast.stmt] = []
 
-        # Import statements
+        # Import statements in PEP 8 order:
+        # 1. Standard library imports (conditional: uuid, datetime, decimal)
+        module_body.extend(self._extract_required_imports(calls))
+
+        # 2. Standard library imports (typing)
         module_body.append(
             ast.ImportFrom(
                 module="typing",
-                names=[ast.alias(name="overload"), ast.alias(name="Literal")],
+                names=[ast.alias(name="Literal"), ast.alias(name="overload")],
                 level=0,
             )
         )
+
+        # 3. Local imports (sqlty)
         module_body.append(
             ast.ImportFrom(
                 module="sqlty",
@@ -87,10 +86,6 @@ class StubASTBuilder:
                 level=0,
             )
         )
-
-        # Add conditional imports based on return types
-        conditional_imports = self._extract_required_imports(calls)
-        module_body.extend(conditional_imports)
 
         # Generate class definition
         class_node = self.build_class_ast(calls, class_name, base_class, relative_to)
@@ -111,7 +106,6 @@ class StubASTBuilder:
         # Create the module and fix locations
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
-
         return module
 
     def build_class_ast(
@@ -132,6 +126,9 @@ class StubASTBuilder:
             if call["literal"] not in seen_literals:
                 seen_literals.add(call["literal"])
                 unique_calls.append(call)
+
+        # Sort calls by literal string for deterministic output across machines
+        unique_calls.sort(key=lambda c: c["literal"])
 
         class_body: list[ast.stmt] = []
 
@@ -183,7 +180,6 @@ class StubASTBuilder:
             ast.Name(id="classmethod", ctx=ast.Load()),
         ]
 
-        # Build the query parameter with Literal type annotation
         # query: Literal["..."]
         literal_annotation = ast.Subscript(
             value=ast.Name(id="Literal", ctx=ast.Load()),
@@ -194,11 +190,9 @@ class StubASTBuilder:
         query_arg = ast.arg(arg="query", annotation=literal_annotation)
         cls_arg = ast.arg(arg="cls", annotation=None)
 
-        # Build return type annotation from return_type_str
-        # Parse the return_type_str to create proper AST
+        # Return type annotation
         return_annotation = ast.parse(return_type_str, mode="eval").body
 
-        # Build the function
         func_def = ast.FunctionDef(
             name=self.function_name,
             args=ast.arguments(
@@ -208,7 +202,7 @@ class StubASTBuilder:
                 kw_defaults=[],
                 defaults=[],
             ),
-            body=[ast.Expr(value=ast.Constant(value=...))],  # Body is just "..."
+            body=[ast.Expr(value=ast.Constant(value=...))],
             decorator_list=decorators,
             returns=return_annotation,
         )

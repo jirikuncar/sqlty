@@ -25,7 +25,7 @@ from ._ast_builder import StubASTBuilder
 from ._ast_unparser import StubASTUnparser
 from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
-from ._stub_merger import StubMerger
+from ._stub_merger import StubMerger, compute_additional_imports
 
 
 class TypeStubGenerator:
@@ -98,6 +98,27 @@ class TypeStubGenerator:
         except Exception as e:
             logging.getLogger(__name__).warning("Could not run formatter '%s': %s", cmd, e)
             return text
+
+    def _write_stub_if_changed(self, stub_path: Path, content: str) -> bool:
+        """Write stub file only if content has changed.
+
+        Returns True if file was written (changed), False if unchanged.
+        This prevents unnecessary file modifications that would trigger pre-commit hooks.
+        """
+        # Check if file exists and read current content
+        if stub_path.exists():
+            try:
+                existing_content = stub_path.read_text(encoding="utf-8")
+                if existing_content == content:
+                    # Content is identical, skip writing
+                    return False
+            except Exception:
+                # If we can't read the file, proceed with writing
+                pass
+
+        # Write the file
+        stub_path.write_text(content, encoding="utf-8")
+        return True
 
     def _get_analyzer_for_registry(
         self,
@@ -424,9 +445,9 @@ class TypeStubGenerator:
 
             if len(registry_classes) > 1:
                 # Generate minimal stubs for all registry classes
-                class_stubs = []
+                class_stubs: list[str] = []
                 export_alias_names_used: set[str] = set()
-                type_aliases = []
+                type_aliases: list[str] = []
 
                 for reg_class in registry_classes:
                     class_stub = (
@@ -449,63 +470,103 @@ class TypeStubGenerator:
                         export_alias_names_used.add(export_name)
 
                 minimal_stub = (
-                    "from typing import overload, Literal\n"
+                    "from typing import Literal, overload\n\n"
                     f"from sqlty import SQL, {base_class}\n\n\n" + "\n\n".join(class_stubs) + "\n"
                 )
 
                 if type_aliases:
-                    minimal_stub += (
-                        "# Type aliases for the sql functions\n" + "\n".join(type_aliases) + "\n"
-                    )
+                    minimal_stub += "\n" + "\n".join(type_aliases) + "\n"
             else:
                 # Single registry class or no registry detected
                 actual_class = registry_classes[0] if registry_classes else class_name
                 minimal_stub = (
-                    "from typing import overload, Literal\n"
+                    "from typing import Literal, overload\n\n"
                     f"from sqlty import SQL, {base_class}\n\n\n"
                     f"class {actual_class}({base_class}):\n"
                     '    """Application-specific SQL query registry with type-safe overloads."""\n    '
                     f"    @overload\n    @classmethod\n    def {self.function_name}[T](cls, query: T) -> T: ...\n\n"
-                    f"# Type alias for the sql function\n{self.function_name} = {actual_class}.{self.function_name}\n"
+                    f"{self.function_name} = {actual_class}.{self.function_name}\n"
                 )
 
             # Format via pipe if configured, then write
             formatted = self._format_stub_text(minimal_stub, str(stub_path))
-            with open(stub_path, "w") as f:
-                f.write(formatted)
+            self._write_stub_if_changed(stub_path, formatted)
             return stub_path
 
-        # Group calls by registry_source
-        calls_by_registry: dict[str | None, list[CallInfo]] = {}
-        for call in calls:
-            registry = call["registry_source"]
-            if registry not in calls_by_registry:
-                calls_by_registry[registry] = []
-            calls_by_registry[registry].append(call)
+        # Group calls by the actual registry file location (not just module name)
+        # This handles cases where multiple directories have files with the same name
+        calls_by_registry_file: dict[Path, list[CallInfo]] = {}
 
-        # Generate stub files for each registry
+        for call in calls:
+            registry_source = call["registry_source"]
+            if not registry_source:
+                # Skip calls that don't belong to a SQLRegistry
+                logging.getLogger(__name__).info(
+                    "Skipping call without registry_source: %s:%s",
+                    call.get("file", "unknown file"),
+                    call.get("lineno", "?"),
+                )
+                continue
+
+            # Find the actual file that defines this registry
+            registry_file: Path | None = None
+            if source_path.is_file():
+                registry_file = source_path.parent / f"{registry_source}.py"
+            else:
+                # Search for files matching the registry_source name
+                # Check which one actually has a registry class defined
+                candidates = list(source_path.rglob(f"{registry_source}.py"))
+
+                # For each candidate, check if it defines a SQLRegistry subclass
+                # and if THIS CALL references it (not other calls)
+                call_file = call.get("file")
+                if call_file:
+                    call_path = Path(call_file)
+
+                    for candidate in candidates:
+                        if self._registry_detector.get_registry_class_names(candidate):
+                            # If the call is from the registry file itself
+                            if call_path == candidate:
+                                registry_file = candidate
+                                break
+                            # Or if they're in the same directory (likely related)
+                            if call_path.parent == candidate.parent:
+                                registry_file = candidate
+                                break
+
+                # If we didn't find a match through directory relationship,
+                # use the first candidate with a registry class
+                if registry_file is None:
+                    for candidate in candidates:
+                        if self._registry_detector.get_registry_class_names(candidate):
+                            registry_file = candidate
+                            break
+
+                # Final fallback
+                if registry_file is None and candidates:
+                    registry_file = candidates[0]
+                elif registry_file is None:
+                    registry_file = source_path / f"{registry_source}.py"
+
+            if registry_file not in calls_by_registry_file:
+                calls_by_registry_file[registry_file] = []
+            calls_by_registry_file[registry_file].append(call)
+
+        # Generate stub files for each registry file
         generated_paths: list[Path] = []
-        for registry_source, registry_calls in calls_by_registry.items():
-            if registry_source and not output_path:
-                # Auto-detected registry: determine output path based on registry source
-                if source_path.is_file():
-                    stub_path = source_path.parent / f"{registry_source}.pyi"
-                else:
-                    stub_path = source_path / f"{registry_source}.pyi"
+        for registry_file, registry_calls in calls_by_registry_file.items():
+            if not output_path:
+                stub_path = registry_file.with_suffix(".pyi")
+                registry_source = registry_file.stem
                 logging.getLogger(__name__).info(
                     "Detected SQLRegistry subclass in '%s', writing to %s",
                     registry_source,
                     stub_path,
                 )
-                # Get the actual class names from the registry module
-                if source_path.is_file():
-                    registry_file = source_path.parent / f"{registry_source}.py"
-                else:
-                    registry_file = source_path / f"{registry_source}.py"
                 class_names = self._registry_detector.get_registry_class_names(registry_file)
 
-                # Check if there are multiple classes in this registry
-                if len(class_names) > 1:
+                # Unified path: handle one or multiple classes the same way
+                if class_names:
                     # Group calls by registry_class
                     calls_by_class: dict[str | None, list[CallInfo]] = {}
                     for call in registry_calls:
@@ -513,6 +574,13 @@ class TypeStubGenerator:
                         if registry_class not in calls_by_class:
                             calls_by_class[registry_class] = []
                         calls_by_class[registry_class].append(call)
+
+                    # If there's only one registry class in the module, assign unclassified calls to it
+                    if len(class_names) == 1 and None in calls_by_class:
+                        only_cls = class_names[0]
+                        calls_by_class[only_cls] = calls_by_class.get(
+                            only_cls, []
+                        ) + calls_by_class.pop(None)
 
                     # Handle incremental/full mode for multiple classes
                     if incremental or (is_full_mode and stub_path.exists()):
@@ -522,8 +590,12 @@ class TypeStubGenerator:
                             from io import StringIO
 
                             output = StringIO()
-                            output.write("from typing import overload, Literal\n")
-                            output.write(f"from sqlty import SQL, {base_class}\n\n\n")
+                            # Conditional imports based on return types (stdlib: uuid, datetime, decimal)
+                            for mod in compute_additional_imports(registry_calls):
+                                output.write(f"import {mod}\n")
+                            # typing is considered stdlib by ruff's isort, no blank line before it
+                            output.write("from typing import Literal, overload\n\n")
+                            output.write(f"from sqlty import SQL, {base_class}\n\n")
                             for cls_name in class_names:
                                 cls_calls = calls_by_class.get(cls_name, [])
                                 if cls_calls:
@@ -550,17 +622,20 @@ class TypeStubGenerator:
                                     output.write("    \n\n")
 
                             # Deduped type aliases
-                            output.write("# Type aliases for the sql functions\n")
                             export_alias_names_used_init: set[str] = set()
+                            alias_lines: list[str] = []
                             for cls_name in class_names:
                                 export_name = self._registry_detector.get_registry_export_name(
                                     registry_file, cls_name
                                 )
                                 if export_name not in export_alias_names_used_init:
-                                    output.write(
+                                    alias_lines.append(
                                         f"{export_name} = {cls_name}.{self.function_name}\n"
                                     )
                                     export_alias_names_used_init.add(export_name)
+                            if alias_lines:
+                                for line in alias_lines:
+                                    output.write(line)
                             stub_content = output.getvalue()
                         else:
                             # Read existing content and modify in place per class
@@ -647,62 +722,21 @@ class TypeStubGenerator:
                         from io import StringIO
 
                         output = StringIO()
-                        output.write("from typing import overload, Literal\n")
-                        output.write(f"from sqlty import SQL, {base_class}\n\n\n")
+                        # Conditional imports based on return types (stdlib: uuid, datetime, decimal)
+                        for mod in compute_additional_imports(registry_calls):
+                            output.write(f"import {mod}\n")
+                        # typing is considered stdlib by ruff's isort, no blank line before it
+                        output.write("from typing import Literal, overload\n\n")
+                        output.write(f"from sqlty import SQL, {base_class}\n\n")
 
                         for cls_name in class_names:
                             cls_calls = calls_by_class.get(cls_name, [])
-                            export_name = self._registry_detector.get_registry_export_name(
-                                registry_file, cls_name
-                            )
-
                             if cls_calls:
-                                # Generate content for this class with calls
-                                cls_stub = self.generate_stub_content(
-                                    cls_calls,
-                                    cls_name,
-                                    base_class,
-                                    export_name,
-                                    relative_to=stub_path.parent,
+                                # Generate only the class block using AST-based builder
+                                class_block = self._stub_merger.generate_class_block(
+                                    cls_calls, cls_name, base_class, relative_to=stub_path.parent
                                 )
-                                # Extract just the class definition (skip imports and aliases)
-                                lines = cls_stub.split("\n")
-                                # Find where class definition starts
-                                class_start = next(
-                                    i for i, line in enumerate(lines) if line.startswith("class ")
-                                )
-                                # Find where comments about type alias start
-                                comment_idx = next(
-                                    (
-                                        i
-                                        for i, line in enumerate(lines[class_start:])
-                                        if line.startswith("# Type alias")
-                                    ),
-                                    None,
-                                )
-                                if comment_idx is not None:
-                                    # Extract up to the comment line (exclusive)
-                                    class_lines = lines[class_start : class_start + comment_idx]
-                                else:
-                                    # No comment found, take until export alias or end
-                                    export_idx = next(
-                                        (
-                                            i
-                                            for i, line in enumerate(lines[class_start:])
-                                            if "=" in line and cls_name in line
-                                        ),
-                                        None,
-                                    )
-                                    if export_idx is not None:
-                                        class_lines = lines[class_start : class_start + export_idx]
-                                    else:
-                                        class_lines = lines[class_start:]
-
-                                # Remove trailing empty lines
-                                while class_lines and not class_lines[-1].strip():
-                                    class_lines.pop()
-
-                                output.write("\n".join(class_lines))
+                                output.write(class_block)
                                 output.write("\n\n\n")
                             else:
                                 # Generate minimal stub for this class with no calls
@@ -719,23 +753,27 @@ class TypeStubGenerator:
                                 output.write("    \n\n")
 
                         # Add type aliases
-                        output.write("# Type aliases for the sql functions\n")
                         export_alias_names_used_fresh: set[str] = set()
+                        alias_lines_fresh: list[str] = []
                         for cls_name in class_names:
                             export_name = self._registry_detector.get_registry_export_name(
                                 registry_file, cls_name
                             )
                             if export_name not in export_alias_names_used_fresh:
-                                output.write(f"{export_name} = {cls_name}.{self.function_name}\n")
+                                alias_lines_fresh.append(
+                                    f"{export_name} = {cls_name}.{self.function_name}\n"
+                                )
                                 export_alias_names_used_fresh.add(export_name)
+                        if alias_lines_fresh:
+                            for line in alias_lines_fresh:
+                                output.write(line)
 
                         stub_content = output.getvalue()
 
                     # Write formatted output to file
                     stub_path.parent.mkdir(parents=True, exist_ok=True)
                     formatted = self._format_stub_text(stub_content, str(stub_path))
-                    with open(stub_path, "w") as f:
-                        f.write(formatted)
+                    self._write_stub_if_changed(stub_path, formatted)
 
                     generated_paths.append(stub_path)
                     mode_label = (
@@ -747,13 +785,14 @@ class TypeStubGenerator:
                     logging.getLogger(__name__).info(
                         "Found %s call(s) to %s", len(registry_calls), self.function_name
                     )
+                    # Mirror CLI output expectations
+                    print(f"Generated stub file ({mode_label}): {stub_path}")
+                    print(f"Found {len(registry_calls)} call(s) to {self.function_name}")
                     continue  # Skip the rest of the loop for this registry
                 else:
-                    # Single class: use original logic
-                    actual_class_name = class_names[0] if class_names else class_name
-                    export_name = self._registry_detector.get_registry_export_name(
-                        registry_file, actual_class_name
-                    )
+                    # No registry classes found in target module; use generic single-class generation
+                    actual_class_name = class_name
+                    export_name = self.function_name
 
                     # Generate the stub content with merging logic
                     if incremental or (is_full_mode and stub_path.exists()):
@@ -815,8 +854,7 @@ class TypeStubGenerator:
             # Write formatted output to file
             stub_path.parent.mkdir(parents=True, exist_ok=True)
             formatted = self._format_stub_text(stub_content, str(stub_path))
-            with open(stub_path, "w") as f:
-                f.write(formatted)
+            self._write_stub_if_changed(stub_path, formatted)
 
             mode_desc = "full" if is_full_mode else ("incremental" if incremental else "fresh")
             print(f"Generated stub file ({mode_desc}): {stub_path}")

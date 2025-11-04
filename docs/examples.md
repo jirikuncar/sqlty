@@ -412,6 +412,36 @@ uv run sqlty examples/query/ --mode=full
 uv run mypy examples/query/
 ```
 
+### Automatic Stub Generation for Examples
+
+The repository is configured with a pre-commit hook that automatically generates stubs for example files when they change. This ensures that the examples always have up-to-date type information.
+
+**How it works:**
+- When you modify any Python file in the `examples/` directory
+- The pre-commit hook runs `sqlty examples --mode=full --format-command "uv run ruff format --stdin-filename {filename}"`
+- All query stubs are regenerated from scratch
+- Generated stubs are formatted with ruff
+- The updated `.pyi` files are automatically included in your commit
+
+**To enable this in your own projects:**
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: sqlty-examples
+        name: sqlty stub generation for examples
+        entry: uv run sqlty examples --mode=full --format-command "uv run ruff format --stdin-filename {filename}"
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [python]
+        files: ^examples/
+```
+
+This configuration can be adapted to any directory structure - just change `examples` to your target directory and adjust the `files` pattern accordingly.
+
 ## Next Steps
 
 - Read the [User Guide](index.md) for comprehensive documentation
