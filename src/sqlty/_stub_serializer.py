@@ -103,9 +103,7 @@ class IRToASTSerializer:
                 level=0,
             )
         else:
-            return ast.Import(
-                names=[ast.alias(name=import_stmt.module, asname=None)]
-            )
+            return ast.Import(names=[ast.alias(name=import_stmt.module, asname=None)])
 
     def _serialize_registry_class(self, registry: RegistryClass) -> ast.ClassDef:
         """Serialize a RegistryClass to AST ClassDef.
@@ -118,9 +116,7 @@ class IRToASTSerializer:
         """
         class_body: list[ast.stmt] = []
 
-        class_body.append(
-            ast.Expr(value=ast.Constant(value=registry.docstring))
-        )
+        class_body.append(ast.Expr(value=ast.Constant(value=registry.docstring)))
 
         for overload in registry.get_sorted_overloads():
             method_node = self._serialize_overload(overload)
@@ -268,7 +264,7 @@ class IRToTextSerializer:
         result: list[str] = []
         prev_line_type = None
 
-        for i, line in enumerate(lines):
+        for line in lines:
             line_type = self._classify_line(line)
 
             if prev_line_type is not None and line_type != prev_line_type:

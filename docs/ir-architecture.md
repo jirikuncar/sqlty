@@ -79,14 +79,14 @@ The `StubMerger` class now uses the IR system internally:
 def merge_stub_incremental(self, output_path, new_calls, ...):
     # Parse new calls to IR
     new_stub = self._call_parser.parse_calls(new_calls, ...)
-    
+
     # Parse existing stub to IR (if exists)
     existing_stub = self._pyi_parser.parse_file(output_path)
-    
+
     # Merge using IR operations
     for registry_name, new_registry in new_stub.registries.items():
         existing_stub.merge_registry(new_registry, mode=mode)
-    
+
     # Serialize back to text
     return self._serializer.serialize_to_text(existing_stub)
 ```
@@ -101,7 +101,7 @@ The `generate_stub_content()` method now uses IR-based generation:
 def generate_stub_content(self, calls, ...):
     parser = CallInfoToIRParser(self.function_name)
     serializer = IRToTextSerializer(self.function_name)
-    
+
     stub_ir = parser.parse_calls(calls, ...)
     return serializer.serialize_to_text(stub_ir)
 ```

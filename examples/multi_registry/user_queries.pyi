@@ -10,29 +10,20 @@ class UserQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal[
-            """
-        SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id ORDER BY name
-    """
+            "\n        SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id ORDER BY name\n    "
         ],
     ) -> SQL[tuple[int, str, str]]: ...
     @overload
     @classmethod
     def sql(
-        cls,
-        query: Literal[
-            """
-    SELECT id::INTEGER, name::TEXT FROM users ORDER BY name
-"""
-        ],
+        cls, query: Literal["\n    SELECT id::INTEGER, name::TEXT FROM users ORDER BY name\n"]
     ) -> SQL[tuple[int, str]]: ...
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal[
-            """
-    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id
-"""
+            "\n    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id\n"
         ],
     ) -> SQL[tuple[int, str, str]]: ...
     @overload

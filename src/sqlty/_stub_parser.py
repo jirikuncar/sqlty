@@ -43,9 +43,7 @@ class PyiToIRParser:
             tree = ast.parse(source, filename=str(file_path))
             return self.parse_ast(tree, file_path)
         except Exception as e:
-            logging.getLogger(__name__).warning(
-                "Failed to parse stub file %s: %s", file_path, e
-            )
+            logging.getLogger(__name__).warning("Failed to parse stub file %s: %s", file_path, e)
             return stub
 
     def parse_ast(self, tree: ast.Module, file_path: Path | None = None) -> StubFile:
@@ -143,8 +141,7 @@ class PyiToIRParser:
             OverloadSignature or None if not a valid overload
         """
         has_overload = any(
-            isinstance(dec, ast.Name) and dec.id == "overload"
-            for dec in node.decorator_list
+            isinstance(dec, ast.Name) and dec.id == "overload" for dec in node.decorator_list
         )
 
         if not has_overload:
@@ -202,10 +199,7 @@ class PyiToIRParser:
         export_name = node.targets[0].id
 
         if isinstance(node.value, ast.Attribute):
-            if (
-                isinstance(node.value.value, ast.Name)
-                and node.value.attr == self.function_name
-            ):
+            if isinstance(node.value.value, ast.Name) and node.value.attr == self.function_name:
                 class_name = node.value.value.id
                 registry = stub.get_registry(class_name)
                 if registry:

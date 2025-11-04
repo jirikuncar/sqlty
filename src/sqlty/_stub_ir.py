@@ -200,7 +200,9 @@ class StubFile:
         """
         required: set[ImportStatement] = set()
 
-        required.add(ImportStatement(module="typing", names=["Literal", "overload"], from_import=True))
+        required.add(
+            ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
+        )
 
         base_classes = {r.base_class for r in self.registries.values()}
         sqlty_imports = ["SQL"] + sorted(base_classes)

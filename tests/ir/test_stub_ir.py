@@ -53,16 +53,24 @@ def test_stub_file_merge_incremental():
     stub = StubFile()
 
     registry1 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]"))
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
+    )
 
     stub.merge_registry(registry1, mode="incremental")
     assert len(stub.registries["Query"].overloads) == 2
 
     # Add more overloads
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]"))
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))  # Duplicate
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
+    )
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )  # Duplicate
 
     stub.merge_registry(registry2, mode="incremental")
     assert len(stub.registries["Query"].overloads) == 3  # Only SELECT 3 added
@@ -73,15 +81,21 @@ def test_stub_file_merge_full():
     stub = StubFile()
 
     registry1 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]"))
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
+    )
 
     stub.merge_registry(registry1, mode="full")
     assert len(stub.registries["Query"].overloads) == 2
 
     # Replace with new registry
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]"))
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
+    )
 
     stub.merge_registry(registry2, mode="full")
     assert len(stub.registries["Query"].overloads) == 1  # Only SELECT 3
@@ -94,17 +108,27 @@ def test_stub_file_merge_prune():
     stub = StubFile()
 
     registry1 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]"))
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]"))
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
+    )
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
+    )
 
     stub.merge_registry(registry1, mode="full")
     assert len(stub.registries["Query"].overloads) == 3
 
     # Prune to keep only SELECT 1 and SELECT 3 (removes SELECT 2)
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]"))
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
+    )
 
     stub.merge_registry(registry2, mode="prune")
     assert len(stub.registries["Query"].overloads) == 2
@@ -119,18 +143,30 @@ def test_stub_file_merge_prune_never_adds():
 
     # Start with 2 overloads
     registry1 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry1.add_overload(OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]"))
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
+    )
 
     stub.merge_registry(registry1, mode="full")
     assert len(stub.registries["Query"].overloads) == 2
 
     # Try to prune with a superset (includes SELECT 3 and SELECT 4 which are new)
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]"))
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]"))  # NEW
-    registry2.add_overload(OverloadSignature(query_literal="SELECT 4", return_type="SQL[tuple[int]]"))  # NEW
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
+    )
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
+    )  # NEW
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 4", return_type="SQL[tuple[int]]")
+    )  # NEW
 
     stub.merge_registry(registry2, mode="prune")
 
@@ -164,7 +200,9 @@ def test_call_info_to_ir_parser():
     ]
 
     parser = CallInfoToIRParser()
-    stub = parser.parse_calls(calls, class_name="Query", base_class="SQLRegistry", export_name="sql")
+    stub = parser.parse_calls(
+        calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+    )
 
     assert "Query" in stub.registries
     assert len(stub.registries["Query"].overloads) == 2
@@ -211,7 +249,9 @@ def test_ir_to_ast_serializer():
     stub = StubFile()
 
     registry = RegistryClass(name="Query", base_class="SQLRegistry", export_name="sql")
-    registry.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
+    registry.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
 
     stub.add_registry(registry)
 
@@ -233,8 +273,12 @@ def test_ir_to_text_serializer():
     stub = StubFile()
 
     registry = RegistryClass(name="Query", base_class="SQLRegistry", export_name="sql")
-    registry.add_overload(OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]"))
-    registry.add_overload(OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[str]]"))
+    registry.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+    registry.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[str]]")
+    )
 
     stub.add_registry(registry)
 

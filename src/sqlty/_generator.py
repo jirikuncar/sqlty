@@ -24,7 +24,7 @@ from sqlty._sql_analyzer import SQLAnalyzer
 
 from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
-from ._stub_merger import StubMerger, compute_additional_imports
+from ._stub_merger import StubMerger
 
 
 class TypeStubGenerator:
@@ -383,10 +383,10 @@ class TypeStubGenerator:
         # Parse calls to IR
         from ._stub_parser import CallInfoToIRParser
         from ._stub_serializer import IRToTextSerializer
-        
+
         parser = CallInfoToIRParser(self.function_name)
         serializer = IRToTextSerializer(self.function_name)
-        
+
         stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
         return serializer.serialize_to_text(stub_ir, relative_to=relative_to)
 
@@ -591,7 +591,7 @@ class TypeStubGenerator:
                         export_name = self._registry_detector.get_registry_export_name(
                             registry_file, cls_name
                         )
-                        
+
                         # Use IR-based merge for incremental, full, or prune modes
                         stub_content = self._stub_merger.merge_stub_incremental(
                             stub_path,

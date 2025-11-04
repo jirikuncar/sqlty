@@ -3,7 +3,6 @@
 Compatibility layer using IR-based implementation internally.
 """
 
-import logging
 import re
 from pathlib import Path
 
@@ -64,9 +63,7 @@ class StubMerger:
         Returns:
             Generated stub content
         """
-        new_stub = self._call_parser.parse_calls(
-            new_calls, class_name, base_class, export_name
-        )
+        new_stub = self._call_parser.parse_calls(new_calls, class_name, base_class, export_name)
 
         if not output_path.exists():
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
@@ -75,7 +72,7 @@ class StubMerger:
 
         mode = "prune" if prune else ("full" if full_mode else "incremental")
 
-        for registry_name, new_registry in new_stub.registries.items():
+        for new_registry in new_stub.registries.values():
             existing_stub.merge_registry(new_registry, mode=mode)
 
         return self._serializer.serialize_to_text(existing_stub, relative_to=output_path.parent)
