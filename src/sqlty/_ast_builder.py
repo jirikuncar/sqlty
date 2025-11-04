@@ -157,6 +157,7 @@ class StubASTBuilder:
             keywords=[],
             body=class_body,
             decorator_list=[],
+            type_params=[],  # Added for Python 3.12+ compatibility
         )
 
         return class_def
@@ -205,6 +206,7 @@ class StubASTBuilder:
             body=[ast.Expr(value=ast.Constant(value=...))],
             decorator_list=decorators,
             returns=return_annotation,
+            type_params=[],  # Added for Python 3.12+ compatibility
         )
 
         return func_def

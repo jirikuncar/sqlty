@@ -71,6 +71,7 @@ fallback-version = "0.0.0"
 
 [dependency-groups]
 dev = [
+    "inline-snapshot>=0.15.0",
     "mypy>=1.18.2",
     "pre-commit>=4.0.1",
     "pytest>=8.4.2",
