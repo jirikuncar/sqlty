@@ -31,9 +31,10 @@ class StubASTUnparser:
         lines: list[str] = []
 
         def import_group(n: ast.AST) -> str | None:
-            """Return import group matching ruff's isort behavior.
+            """Return import group matching Ruff's isort behavior.
 
-            Ruff treats typing as stdlib, so we group:
+            Note: Typing is always treated as stdlib (per Ruff's isort behavior), and this is the convention used throughout the codebase.
+            We group:
             - stdlib: import uuid/datetime/decimal AND from typing
             - local: from sqlty
             """
