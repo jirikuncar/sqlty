@@ -11,6 +11,16 @@ class Query(SQLRegistry):
         cls,
         query: Literal[
             """
+    SELECT COUNT(*)::INTEGER FROM users
+    """
+        ],
+    ) -> SQL[tuple[int]]: ...
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal[
+            """
     SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id
     """
         ],
@@ -25,16 +35,6 @@ class Query(SQLRegistry):
     """
         ],
     ) -> SQL[tuple[int, str, str]]: ...
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal[
-            """
-    SELECT COUNT(*)::INTEGER FROM users
-    """
-        ],
-    ) -> SQL[tuple[int]]: ...
     @overload
     @classmethod
     def sql[T](cls, query: T) -> T: ...

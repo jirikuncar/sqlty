@@ -30,15 +30,48 @@ class StubASTUnparser:
         """
         lines: list[str] = []
 
+        def import_group(n: ast.AST) -> str | None:
+            """Return import group matching Ruff's isort behavior.
+
+            Note: Typing is always treated as stdlib (per Ruff's isort behavior), and this is the convention used throughout the codebase.
+            We group:
+            - stdlib: import uuid/datetime/decimal AND from typing
+            - local: from sqlty
+            """
+            if isinstance(n, ast.Import):
+                std_names = {"uuid", "datetime", "decimal"}
+                if any(alias.name in std_names for alias in n.names):
+                    return "stdlib"
+                return "other"
+            if isinstance(n, ast.ImportFrom):
+                # typing is considered stdlib by ruff's isort
+                if n.module == "typing":
+                    return "stdlib"
+                if n.module == "sqlty":
+                    return "local"
+                return "other"
+            return None
+
+        prev_group: str | None = None
+
         for node in module.body:
+            group = import_group(node)
+            # Insert a blank line when transitioning from stdlib to local
+            if group is not None and prev_group is not None and group != prev_group:
+                # Add blank line between stdlib (including typing) and local (sqlty)
+                if prev_group == "stdlib" and group == "local":
+                    lines.append("")
+
             if isinstance(node, ast.ImportFrom):
                 # Format import statement
                 names = ", ".join(alias.name for alias in node.names)
                 lines.append(f"from {node.module} import {names}")
+                prev_group = group
             elif isinstance(node, ast.Import):
                 # Format regular import statement
                 names = ", ".join(alias.name for alias in node.names)
                 lines.append(f"import {names}")
+                prev_group = group
             elif isinstance(node, ast.ClassDef):
                 # Format class definition
                 lines.extend(self.unparse_class_def(node, calls, relative_to))

@@ -21,20 +21,20 @@ class PostQueries(SQLRegistry):
         cls,
         query: Literal[
             """
-    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id
+    SELECT id::INTEGER, title::TEXT FROM posts ORDER BY created_at DESC
 """
         ],
-    ) -> SQL[tuple[int, str, str]]: ...
+    ) -> SQL[tuple[int, str]]: ...
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal[
             """
-    SELECT id::INTEGER, title::TEXT FROM posts ORDER BY created_at DESC
+    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id
 """
         ],
-    ) -> SQL[tuple[int, str]]: ...
+    ) -> SQL[tuple[int, str, str]]: ...
     @overload
     @classmethod
     def sql[T](cls, query: T) -> T: ...

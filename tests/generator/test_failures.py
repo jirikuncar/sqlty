@@ -33,6 +33,7 @@ sql(x)
 
 
 def test_missing_registry(tmp_path):
+    """Test that no stub is generated when there's no SQLRegistry."""
     src = tmp_path / "plain.py"
     src.write_text("""
 def sql(query):
@@ -41,13 +42,8 @@ sql("SELECT 1")
 """)
     gen = TypeStubGenerator()
     stub_path = tmp_path / "plain.pyi"
-    gen.generate_stub_file(src, stub_path)
-    stub = stub_path.read_text()
-    # Should use default Query class
-    assert "class Query(" in stub
-    assert "def sql" in stub
-    # Should generate a Literal overload for the string
-    assert 'Literal["SELECT 1"]' in stub or "Literal['SELECT 1']" in stub
+    result = gen.generate_stub_file(src, stub_path)
+    assert not result.exists()
 
 
 def test_invalid_syntax(tmp_path):

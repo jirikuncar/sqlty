@@ -35,11 +35,13 @@ sql = Query.sql
 
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT 1")
-query2 = sql("SELECT 2")
+query1 = Query.sql("SELECT 1")
+query2 = Query.sql("SELECT 2")
 """)
 
     generator = TypeStubGenerator()
@@ -100,11 +102,14 @@ def validate_query(query: str) -> bool:
 
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT 1")
-query2 = sql("SELECT 2")
+
+query1 = Query.sql("SELECT 1")
+query2 = Query.sql("SELECT 2")
 """)
 
     generator = TypeStubGenerator()
@@ -163,11 +168,14 @@ sql = Query.sql
 
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT 1")
-query2 = sql("SELECT 2")
+
+query1 = Query.sql("SELECT 1")
+query2 = Query.sql("SELECT 2")
 """)
 
     generator = TypeStubGenerator()
@@ -223,11 +231,13 @@ sql = Query.sql
 
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT 1")
-query2 = sql("SELECT 2")
+query1 = Query.sql("SELECT 1")
+query2 = Query.sql("SELECT 2")
 """)
 
     generator = TypeStubGenerator()
@@ -285,11 +295,13 @@ sql = Query.sql
 
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT 1")
-query2 = sql("SELECT 2")
+query1 = Query.sql("SELECT 1")
+query2 = Query.sql("SELECT 2")
 """)
 
     generator = TypeStubGenerator()

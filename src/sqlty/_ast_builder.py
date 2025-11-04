@@ -65,14 +65,20 @@ class StubASTBuilder:
         """
         module_body: list[ast.stmt] = []
 
-        # Import statements
+        # Import statements in PEP 8 order:
+        # 1. Standard library imports (conditional: uuid, datetime, decimal)
+        module_body.extend(self._extract_required_imports(calls))
+
+        # 2. Standard library imports (typing)
         module_body.append(
             ast.ImportFrom(
                 module="typing",
-                names=[ast.alias(name="overload"), ast.alias(name="Literal")],
+                names=[ast.alias(name="Literal"), ast.alias(name="overload")],
                 level=0,
             )
         )
+
+        # 3. Local imports (sqlty)
         module_body.append(
             ast.ImportFrom(
                 module="sqlty",
@@ -80,9 +86,6 @@ class StubASTBuilder:
                 level=0,
             )
         )
-
-        # Conditional imports based on return types (e.g., uuid, datetime, decimal)
-        module_body.extend(self._extract_required_imports(calls))
 
         # Generate class definition
         class_node = self.build_class_ast(calls, class_name, base_class, relative_to)
@@ -123,6 +126,9 @@ class StubASTBuilder:
             if call["literal"] not in seen_literals:
                 seen_literals.add(call["literal"])
                 unique_calls.append(call)
+
+        # Sort calls by literal string for deterministic output across machines
+        unique_calls.sort(key=lambda c: c["literal"])
 
         class_body: list[ast.stmt] = []
 

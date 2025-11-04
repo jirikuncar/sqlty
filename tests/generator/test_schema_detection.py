@@ -298,13 +298,15 @@ def test_schema_path_detection_without_sqlregistry_base(tmp_path: Path) -> None:
     query_file = tmp_path / "queries.py"
     query_file.write_text(
         """
+from sqlty import SQLRegistry
+
 class NotARegistry:
     __schema_path__ = "schema.sql"
 
-def sql(query: str) -> str:
-    return query
+class Query(SQLRegistry):
+    pass
 
-user_query = sql("SELECT id, name FROM users")
+user_query = Query.sql("SELECT id, name FROM users")
 """
     )
 

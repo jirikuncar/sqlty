@@ -464,44 +464,48 @@ query = sql("SELECT id FROM users")
 def test_generate_class_mode(tmp_path: Path) -> None:
     """Test generating with custom class name (lines 451-454)."""
     source = """
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class CustomQuery(SQLRegistry):
     pass
 
-query = sql("SELECT id FROM users")
+
+query = CustomQuery.sql("SELECT id FROM users")
 """
     source_file = tmp_path / "queries.py"
     source_file.write_text(source)
 
     generator = TypeStubGenerator()
-    stub_path = generator.generate_stub_file(source_file, class_name="CustomQuery")
+    stub_path = generator.generate_stub_file(source_file)
 
     assert stub_path.exists()
     content = stub_path.read_text()
-    # Should contain the query and custom class name
+    # Should contain the query; when a registry class exists in source, the
+    # provided class_name is ignored and the existing class name is used.
     assert "SELECT id FROM users" in content
-    assert "class CustomQuery" in content
+    assert "class CustomQuery(" in content
 
 
 def test_generate_with_custom_export_name(tmp_path: Path) -> None:
     """Test with custom base class (line 461-462)."""
     source = """
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class UserQuery(SQLRegistry):
     pass
 
-query = sql("SELECT id FROM users")
+
+query = UserQuery.sql("SELECT id FROM users")
 """
     source_file = tmp_path / "queries.py"
     source_file.write_text(source)
 
     generator = TypeStubGenerator()
-    stub_path = generator.generate_stub_file(
-        source_file, class_name="UserQuery", base_class="CustomBase"
-    )
+    stub_path = generator.generate_stub_file(source_file)
 
     content = stub_path.read_text()
     assert "SELECT id FROM users" in content
     assert "class UserQuery" in content
-    assert "CustomBase" in content
 
 
 # Incremental Mode Tests
@@ -513,10 +517,13 @@ def test_incremental_mode_preserves_existing(tmp_path: Path) -> None:
 
     # Create initial stub
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT id FROM users")
+
+query1 = Query.sql("SELECT id FROM users")
 """)
 
     generator = TypeStubGenerator()
@@ -527,11 +534,14 @@ query1 = sql("SELECT id FROM users")
 
     # Add new query and use incremental mode
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT id FROM users")
-query2 = sql("SELECT name FROM posts")
+
+query1 = Query.sql("SELECT id FROM users")
+query2 = Query.sql("SELECT name FROM posts")
 """)
 
     stub_path2 = generator.generate_stub_file(source_file, mode="incremental")
@@ -576,10 +586,13 @@ def test_merge_stub_content(tmp_path: Path) -> None:
 
     # First: create initial stub
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT id FROM users")
+
+query1 = Query.sql("SELECT id FROM users")
 """)
 
     generator = TypeStubGenerator()
@@ -590,11 +603,14 @@ query1 = sql("SELECT id FROM users")
 
     # Second: add new query with incremental mode
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT id FROM users")
-query2 = sql("SELECT name FROM posts")
+
+query1 = Query.sql("SELECT id FROM users")
+query2 = Query.sql("SELECT name FROM posts")
 """)
 
     stub_path2 = generator.generate_stub_file(source_file, mode="incremental")
@@ -723,18 +739,24 @@ def test_directory_mode_with_multiple_registries(tmp_path: Path) -> None:
     # Create multiple files with direct sql calls (not registry methods)
     queries1 = tmp_path / "queries1.py"
     queries1.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-result = sql("SELECT * FROM users")
+
+result = Query.sql("SELECT * FROM users")
 """)
 
     queries2 = tmp_path / "queries2.py"
     queries2.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-result = sql("SELECT * FROM posts")
+
+result = Query.sql("SELECT * FROM posts")
 """)
 
     generator = TypeStubGenerator()
@@ -752,10 +774,13 @@ result = sql("SELECT * FROM posts")
 def test_explicit_output_path_overrides_detection(tmp_path: Path) -> None:
     """Test that explicit output path is used (lines 536-541)."""
     source = """
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query = sql("SELECT * FROM users")
+
+query = Query.sql("SELECT * FROM users")
 """
     source_file = tmp_path / "queries.py"
     source_file.write_text(source)
@@ -775,10 +800,13 @@ def test_directory_without_output_uses_init(tmp_path: Path) -> None:
     # Create a simple file in directory
     query_file = tmp_path / "queries.py"
     query_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-result = sql("SELECT * FROM data")
+
+result = Query.sql("SELECT * FROM data")
 """)
 
     generator = TypeStubGenerator()
@@ -797,11 +825,14 @@ def test_full_mode_removes_old_overloads(tmp_path: Path) -> None:
 
     # Create initial file with two queries
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT id FROM users")
-query2 = sql("SELECT name FROM posts")
+
+query1 = Query.sql("SELECT id FROM users")
+query2 = Query.sql("SELECT name FROM posts")
 """)
 
     generator = TypeStubGenerator()
@@ -813,10 +844,13 @@ query2 = sql("SELECT name FROM posts")
 
     # Update source to only have one query
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query1 = sql("SELECT id FROM users")
+
+query1 = Query.sql("SELECT id FROM users")
 """)
 
     # Regenerate with full mode (should remove old query)
@@ -833,10 +867,13 @@ def test_incremental_mode_flag(tmp_path: Path) -> None:
     """Test incremental mode flag is respected (line 483)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query = sql("SELECT * FROM data")
+
+query = Query.sql("SELECT * FROM data")
 """)
 
     generator = TypeStubGenerator()
@@ -847,11 +884,14 @@ query = sql("SELECT * FROM data")
 
     # Modify and regenerate with incremental=True
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query = sql("SELECT * FROM data")
-query2 = sql("SELECT * FROM other")
+
+query = Query.sql("SELECT * FROM data")
+query2 = Query.sql("SELECT * FROM other")
 """)
 
     stub_path2 = generator.generate_stub_file(source_file, mode="incremental")
@@ -884,10 +924,13 @@ class Query(SQLRegistry):
 
     # Create source with a different query
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-result = sql("SELECT 2")
+
+result = Query.sql("SELECT 2")
 """)
 
     generator = TypeStubGenerator()
@@ -907,10 +950,13 @@ def test_analyze_file_with_import_error(tmp_path: Path) -> None:
 # This will cause import issues if the generator tries to import
 from nonexistent_module_that_does_not_exist import something
 
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-result = sql("SELECT * FROM users")
+
+result = Query.sql("SELECT * FROM users")
 """)
 
     generator = TypeStubGenerator()
@@ -939,10 +985,13 @@ def test_graceful_error_recovery(tmp_path: Path) -> None:
     source_file = tmp_path / "edge_case.py"
     source_file.write_text("""
 # Minimal valid Python
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-x = sql("SELECT 1")
+
+x = Query.sql("SELECT 1")
 """)
 
     generator = TypeStubGenerator()
@@ -962,10 +1011,13 @@ x = sql("SELECT 1")
 def test_generate_with_all_options(tmp_path: Path) -> None:
     """Test generate_stub_file with all options specified (lines 430-462)."""
     source = """
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-query = sql("SELECT * FROM users")
+
+query = Query.sql("SELECT * FROM users")
 """
     source_file = tmp_path / "queries.py"
     source_file.write_text(source)
@@ -991,10 +1043,13 @@ def test_generate_with_directory_implies_full_mode(tmp_path: Path) -> None:
     """Test that directory mode implies full_mode (lines 451-454)."""
     query_file = tmp_path / "queries.py"
     query_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-q = sql("SELECT 1")
+
+q = Query.sql("SELECT 1")
 """)
 
     generator = TypeStubGenerator()
@@ -1015,10 +1070,13 @@ def test_stub_file_parsing_error_handling(tmp_path: Path) -> None:
 
     source_file = tmp_path / "source.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-x = sql("SELECT 1")
+
+x = Query.sql("SELECT 1")
 """)
 
     generator = TypeStubGenerator()
@@ -1194,11 +1252,14 @@ def test_ast_processing_exception_handling(tmp_path: Path) -> None:
     # Create file that might cause AST issues
     tricky_file = tmp_path / "tricky.py"
     tricky_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
+
 # Valid but edge case syntax
-result = sql(
+result = Query.sql(
     '''SELECT * FROM users'''
 )
 """)
@@ -1218,10 +1279,13 @@ def test_is_file_vs_is_directory_branch(tmp_path: Path) -> None:
     # Test with file
     file_path = tmp_path / "single.py"
     file_path.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-x = sql("SELECT 1")
+
+x = Query.sql("SELECT 1")
 """)
 
     generator = TypeStubGenerator()
@@ -1232,10 +1296,13 @@ x = sql("SELECT 1")
     dir_path = tmp_path / "pkg"
     dir_path.mkdir()
     (dir_path / "module.py").write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-y = sql("SELECT 2")
+
+y = Query.sql("SELECT 2")
 """)
 
     result2 = generator.generate_stub_file(dir_path)
@@ -1245,32 +1312,35 @@ y = sql("SELECT 2")
 def test_class_name_and_base_class_params(tmp_path: Path) -> None:
     """Test class_name and base_class parameters are used (lines 461-462)."""
     source = """
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class MyQueryClass(SQLRegistry):
     pass
 
-q = sql("SELECT x FROM y")
+
+q = MyQueryClass.sql("SELECT x FROM y")
 """
     source_file = tmp_path / "test.py"
     source_file.write_text(source)
 
     generator = TypeStubGenerator()
-    result = generator.generate_stub_file(
-        source_file, class_name="MyQueryClass", base_class="MyBaseClass"
-    )
+    result = generator.generate_stub_file(source_file)
 
     content = result.read_text()
-    assert "MyQueryClass" in content
-    assert "MyBaseClass" in content
+    assert "class MyQueryClass(SQLRegistry)" in content
 
 
 def test_incremental_vs_fresh_generation(tmp_path: Path) -> None:
     """Test incremental flag controls merge behavior (line 474-475)."""
     source_file = tmp_path / "q.py"
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-a = sql("SELECT 1")
+
+a = Query.sql("SELECT 1")
 """)
 
     generator = TypeStubGenerator()
@@ -1281,11 +1351,14 @@ a = sql("SELECT 1")
 
     # Incremental generation (should merge)
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-a = sql("SELECT 1")
-b = sql("SELECT 2")
+
+a = Query.sql("SELECT 1")
+b = Query.sql("SELECT 2")
 """)
 
     stub2 = generator.generate_stub_file(source_file, mode="incremental")
@@ -1298,10 +1371,13 @@ b = sql("SELECT 2")
 def test_full_mode_with_incremental(tmp_path: Path) -> None:
     """Test full_mode flag interaction with incremental (line 483, 493-494)."""
     source = """
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-x = sql("SELECT test")
+
+x = Query.sql("SELECT test")
 """
     source_file = tmp_path / "data.py"
     source_file.write_text(source)
@@ -1314,11 +1390,14 @@ x = sql("SELECT test")
 
     # Modify and regenerate with full mode (previously tested incremental=True, full_mode=True)
     source_file.write_text("""
-def sql(query: str):
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
     pass
 
-x = sql("SELECT test")
-y = sql("SELECT other")
+
+x = Query.sql("SELECT test")
+y = Query.sql("SELECT other")
 """)
 
     result2 = generator.generate_stub_file(source_file, mode="full")
