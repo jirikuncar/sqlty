@@ -69,7 +69,7 @@ class StubASTBuilder:
         # 1. Standard library imports (conditional: uuid, datetime, decimal)
         module_body.extend(self._extract_required_imports(calls))
 
-        # 2. Third-party imports (typing)
+        # 2. Standard library imports (typing)
         module_body.append(
             ast.ImportFrom(
                 module="typing",
