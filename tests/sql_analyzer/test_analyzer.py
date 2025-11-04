@@ -198,7 +198,7 @@ def test_date_type_inference() -> None:
     assert columns[0].sql_type == "DATE"
 
 
-def test_datetime_type_inference() -> None:
+def test_timestamp_type_inference() -> None:
     """Test TIMESTAMP type mapping from SQL to Python."""
     analyzer = SQLAnalyzer()
     columns = analyzer.analyze_select("SELECT created_at::TIMESTAMP FROM users")
