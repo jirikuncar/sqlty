@@ -1,5 +1,4 @@
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
 
 class OrdersQueries(SQLRegistry):
@@ -7,10 +6,7 @@ class OrdersQueries(SQLRegistry):
 
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id, total FROM orders"],
-    ) -> SQL[tuple[int, float]]: ...
+    def sql(cls, query: Literal["SELECT id, total FROM orders"]) -> SQL[tuple[int, float]]: ...
     @overload
     @classmethod
     def sql[T](cls, query: T) -> T: ...

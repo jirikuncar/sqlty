@@ -58,26 +58,21 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
     stub_content = stub_file.read_text()
     assert stub_content == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class Query(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
-    ) -> SQL[tuple[int, str]]:
+    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-
-
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = Query.sql
 ''')
 

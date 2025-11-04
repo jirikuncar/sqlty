@@ -22,11 +22,9 @@ from pathlib import Path
 
 from sqlty._sql_analyzer import SQLAnalyzer
 
-from ._ast_builder import StubASTBuilder
-from ._ast_unparser import StubASTUnparser
 from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
-from ._stub_merger import StubMerger, compute_additional_imports
+from ._stub_merger import StubMerger
 
 
 class TypeStubGenerator:
@@ -50,9 +48,6 @@ class TypeStubGenerator:
         self._analyzer_cache: dict[str, SQLAnalyzer] = {}
         self._format_command = format_command
 
-        # Initialize helper components
-        self._ast_builder = StubASTBuilder(function_name=self.function_name)
-        self._ast_unparser = StubASTUnparser()
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector()
 
@@ -383,15 +378,17 @@ class TypeStubGenerator:
         This generates a Query class that inherits from SQLRegistry with
         @overload @classmethod sql() methods for each unique query literal.
 
-        Uses AST construction and custom unparsing for robust code generation.
+        Uses the new IR-based approach for better structure and maintainability.
         """
-        # Build the module AST using the AST builder
-        module = self._ast_builder.build_stub_module(
-            calls, class_name, base_class, export_name, relative_to
-        )
+        # Parse calls to IR
+        from ._stub_parser import CallInfoToIRParser
+        from ._stub_serializer import IRToTextSerializer
 
-        # Unparse it using custom formatter
-        return self._ast_unparser.unparse_stub_module(module, calls, relative_to)
+        parser = CallInfoToIRParser(self.function_name)
+        serializer = IRToTextSerializer(self.function_name)
+
+        stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
+        return serializer.serialize_to_text(stub_ir, relative_to=relative_to)
 
     def generate_stub_file(
         self,
@@ -588,195 +585,48 @@ class TypeStubGenerator:
                         ) + calls_by_class.pop(None)
 
                     # Handle incremental/full mode for multiple classes
-                    if incremental or (is_full_mode and stub_path.exists()):
-                        # Merge mode: update each class block while preserving unrelated content (imports, comments, aliases)
-                        # If the stub doesn't exist yet, fall back to fresh generation for a proper base
-                        if not stub_path.exists():
-                            from io import StringIO
+                    # Handle all modes using IR-based merge
+                    # Parse all new registries first
+                    from ._stub_ir import StubFile
+                    from ._stub_parser import CallInfoToIRParser
+                    from ._stub_serializer import IRToTextSerializer
 
-                            output = StringIO()
-                            # Conditional imports based on return types (stdlib: uuid, datetime, decimal)
-                            for mod in compute_additional_imports(registry_calls):
-                                output.write(f"import {mod}\n")
-                            # typing is considered stdlib by ruff's isort, no blank line before it
-                            output.write("from typing import Literal, overload\n\n")
-                            output.write(f"from sqlty import SQL, {base_class}\n\n")
-                            for cls_name in class_names:
-                                cls_calls = calls_by_class.get(cls_name, [])
-                                if cls_calls:
-                                    class_block = self._stub_merger.generate_class_block(
-                                        cls_calls,
-                                        cls_name,
-                                        base_class,
-                                        relative_to=stub_path.parent,
-                                    )
-                                    output.write(class_block)
-                                    output.write("\n\n\n")
-                                else:
-                                    # Minimal class block when no calls exist
-                                    output.write(f"class {cls_name}({base_class}):\n")
-                                    output.write(
-                                        '    """Application-specific SQL query registry with type-safe overloads."""\n'
-                                    )
-                                    output.write("    \n")
-                                    output.write("    @overload\n")
-                                    output.write("    @classmethod\n")
-                                    output.write(
-                                        f"    def {self.function_name}[T](cls, query: T) -> T: ...\n"
-                                    )
-                                    output.write("    \n\n")
+                    call_parser = CallInfoToIRParser(self.function_name)
+                    serializer = IRToTextSerializer(self.function_name)
 
-                            # Deduped type aliases
-                            export_alias_names_used_init: set[str] = set()
-                            alias_lines: list[str] = []
-                            for cls_name in class_names:
-                                export_name = self._registry_detector.get_registry_export_name(
-                                    registry_file, cls_name
-                                )
-                                if export_name not in export_alias_names_used_init:
-                                    alias_lines.append(
-                                        f"{export_name} = {cls_name}.{self.function_name}\n"
-                                    )
-                                    export_alias_names_used_init.add(export_name)
-                            if alias_lines:
-                                for line in alias_lines:
-                                    output.write(line)
-                            stub_content = output.getvalue()
-                        else:
-                            # Read existing content and modify in place per class
-                            stub_content = stub_path.read_text()
+                    # Create stub with all new registries
+                    all_new_registries = StubFile(file_path=stub_path)
+                    for cls_name in class_names:
+                        cls_calls = calls_by_class.get(cls_name, [])
+                        export_name = self._registry_detector.get_registry_export_name(
+                            registry_file, cls_name
+                        )
+                        new_stub = call_parser.parse_calls(
+                            cls_calls, cls_name, base_class, export_name
+                        )
+                        for registry in new_stub.registries.values():
+                            all_new_registries.add_registry(registry)
 
-                            for cls_name in class_names:
-                                cls_calls = calls_by_class.get(cls_name, [])
+                    # Merge with existing stub if it exists
+                    if stub_path.exists():
+                        from ._stub_parser import PyiToIRParser
 
-                                if is_full_mode:
-                                    # Replace only this class block with regenerated one (even if empty -> minimal fallback)
-                                    class_block = self._stub_merger.generate_class_block(
-                                        cls_calls,
-                                        cls_name,
-                                        base_class,
-                                        relative_to=stub_path.parent,
-                                    )
-                                    span = self._stub_merger.find_class_span(stub_content, cls_name)
-                                    if not span:
-                                        # No existing class: append at end preserving file content
-                                        if not stub_content.endswith("\n"):
-                                            stub_content += "\n"
-                                        stub_content = (
-                                            stub_content.rstrip() + "\n\n" + class_block + "\n"
-                                        )
-                                    else:
-                                        start, end = span
-                                        lines = stub_content.splitlines()
-                                        new_lines = (
-                                            lines[: start - 1]
-                                            + class_block.splitlines()
-                                            + lines[end:]
-                                        )
-                                        stub_content = "\n".join(new_lines) + (
-                                            "\n" if stub_content.endswith("\n") else ""
-                                        )
-                                else:
-                                    # Incremental: insert only missing overloads for this class
-                                    existing_literals = self._stub_merger.parse_stub_class_literals(
-                                        stub_content, cls_name
-                                    )
-                                    missing_calls = [
-                                        c
-                                        for c in cls_calls
-                                        if c["literal"] not in existing_literals
-                                    ]
-                                    if not missing_calls:
-                                        continue
-                                    insertion_line = self._stub_merger.find_class_insertion_line(
-                                        stub_content, cls_name
-                                    )
-                                    if insertion_line is None:
-                                        # Fallback: append full class block and keep file intact
-                                        class_block = self._stub_merger.generate_class_block(
-                                            cls_calls,
-                                            cls_name,
-                                            base_class,
-                                            relative_to=stub_path.parent,
-                                        )
-                                        if not stub_content.endswith("\n"):
-                                            stub_content += "\n"
-                                        stub_content = (
-                                            stub_content.rstrip() + "\n\n" + class_block + "\n"
-                                        )
-                                    else:
-                                        insertion_text = "".join(
-                                            self._stub_merger.generate_overload_method_block(
-                                                c, relative_to=stub_path.parent
-                                            )
-                                            + "\n"
-                                            for c in missing_calls
-                                        )
-                                        lines = stub_content.splitlines()
-                                        zero_idx = max(0, insertion_line - 1)
-                                        new_lines = (
-                                            lines[:zero_idx]
-                                            + insertion_text.splitlines()
-                                            + lines[zero_idx:]
-                                        )
-                                        stub_content = "\n".join(new_lines) + (
-                                            "\n" if stub_content.endswith("\n") else ""
-                                        )
+                        pyi_parser = PyiToIRParser(self.function_name)
+                        existing_stub = pyi_parser.parse_file(stub_path)
+
+                        mode = (
+                            "prune" if prune_mode else ("full" if is_full_mode else "incremental")
+                        )
+                        for new_registry in all_new_registries.registries.values():
+                            existing_stub.merge_registry(new_registry, mode=mode)
+
+                        stub_content = serializer.serialize_to_text(
+                            existing_stub, relative_to=stub_path.parent
+                        )
                     else:
-                        # Fresh generation: generate content for each class and combine them
-                        from io import StringIO
-
-                        output = StringIO()
-                        # Conditional imports based on return types (stdlib: uuid, datetime, decimal)
-                        for mod in compute_additional_imports(registry_calls):
-                            output.write(f"import {mod}\n")
-                        # typing is considered stdlib by ruff's isort, no blank line before it
-                        output.write("from typing import Literal, overload\n\n")
-                        output.write(f"from sqlty import SQL, {base_class}\n\n")
-
-                        for cls_name in class_names:
-                            cls_calls = calls_by_class.get(cls_name, [])
-                            if cls_calls:
-                                # Generate only the class block using AST-based builder
-                                class_block = self._stub_merger.generate_class_block(
-                                    cls_calls, cls_name, base_class, relative_to=stub_path.parent
-                                )
-                                output.write(class_block)
-                                output.write("\n\n\n")
-                            else:
-                                # Generate minimal stub for this class with no calls
-                                output.write(f"class {cls_name}({base_class}):\n")
-                                output.write(
-                                    '    """Application-specific SQL query registry with type-safe overloads."""\n'
-                                )
-                                output.write("    \n")
-                                output.write("    @overload\n")
-                                output.write("    @classmethod\n")
-                                output.write(
-                                    f"    def {self.function_name}[T](cls, query: T) -> T: ...\n"
-                                )
-                                output.write("    \n\n")
-
-                        # Add type aliases
-                        export_alias_names_used_fresh: set[str] = set()
-                        alias_lines_fresh: list[str] = []
-                        for cls_name in class_names:
-                            export_name = self._registry_detector.get_registry_export_name(
-                                registry_file, cls_name
-                            )
-                            if export_name not in export_alias_names_used_fresh:
-                                alias_lines_fresh.append(
-                                    f"{export_name} = {cls_name}.{self.function_name}\n"
-                                )
-                                export_alias_names_used_fresh.add(export_name)
-                        if alias_lines_fresh:
-                            for line in alias_lines_fresh:
-                                output.write(line)
-
-                        stub_content = output.getvalue()
-
-                    # Write formatted output to file
-                    stub_path.parent.mkdir(parents=True, exist_ok=True)
+                        stub_content = serializer.serialize_to_text(
+                            all_new_registries, relative_to=stub_path.parent
+                        )
                     formatted = self._format_stub_text(stub_content, str(stub_path))
                     self._write_stub_if_changed(stub_path, formatted)
 
@@ -975,13 +825,6 @@ def main(argv: list[str] | None = None) -> None:
             output_path=args.output,
             mode=mode,
         )
-
-        # TODO: Implement prune logic when mode="prune"
-        # This will require extending StubMerger to track and remove unused overloads
-        if mode == "prune":
-            logging.getLogger(__name__).info(
-                "Prune mode enabled but not yet implemented; stubs generated in full mode"
-            )
     except Exception as e:
         logging.getLogger(__name__).error("%s", e)
         sys.exit(1)

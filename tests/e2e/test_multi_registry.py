@@ -49,26 +49,21 @@ posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM pos
     user_stub_content = user_stub.read_text()
     assert user_stub_content == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class UserQuery(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
-    ) -> SQL[tuple[int, str]]:
+    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-
-
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = UserQuery.sql
 ''')
 
@@ -76,26 +71,21 @@ sql = UserQuery.sql
     post_stub_content = post_stub.read_text()
     assert post_stub_content == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class PostQuery(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, title::TEXT FROM posts"],
-    ) -> SQL[tuple[int, str]]:
+    def sql(cls, query: Literal['SELECT id::INTEGER, title::TEXT FROM posts']) -> SQL[tuple[int, str]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-
-
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = PostQuery.sql
 ''')
 
@@ -201,25 +191,20 @@ query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users
     # Snapshot the result
     assert stub_content == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class UserQuery(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, username::TEXT FROM users"],
-    ) -> SQL[tuple[int, str]]:
+    def sql(cls, query: Literal['SELECT id::INTEGER, username::TEXT FROM users']) -> SQL[tuple[int, str]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-
-
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = UserQuery.sql
 ''')

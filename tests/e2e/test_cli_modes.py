@@ -187,6 +187,53 @@ query = sql("SELECT id, name FROM users")
     assert result.returncode in (0, 2)  # 2 if flag not recognized
 
 
+def test_prune_mode_removes_stale_overloads(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str | None], Path],
+) -> None:
+    """Test prune mode that removes overloads for queries no longer in source."""
+    setup_queries_file(tmp_path)
+
+    # Initial file with 3 queries
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT id::INTEGER FROM users")
+q2 = sql("SELECT name::TEXT FROM users")
+q3 = sql("SELECT email::TEXT FROM users")
+""")
+
+    # Generate initial stub
+    result = cli([str(tmp_path)])
+    assert result.returncode == 0
+
+    stub_file = tmp_path / "queries.pyi"
+    assert stub_file.exists()
+
+    initial_content = stub_file.read_text()
+    assert "SELECT id::INTEGER FROM users" in initial_content
+    assert "SELECT name::TEXT FROM users" in initial_content
+    assert "SELECT email::TEXT FROM users" in initial_content
+
+    # Remove one query from source
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT id::INTEGER FROM users")
+q3 = sql("SELECT email::TEXT FROM users")
+""")
+
+    # Run prune mode
+    result = cli([str(tmp_path), "--mode=prune"])
+    assert result.returncode == 0
+
+    # Check that the removed query's overload is gone
+    pruned_content = stub_file.read_text()
+    assert "SELECT id::INTEGER FROM users" in pruned_content
+    assert "SELECT email::TEXT FROM users" in pruned_content
+    assert "SELECT name::TEXT FROM users" not in pruned_content
+
+
 def test_cli_error_handling_invalid_path(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],

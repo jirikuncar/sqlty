@@ -1,5 +1,4 @@
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
 
 class PostQueries(SQLRegistry):
@@ -10,9 +9,7 @@ class PostQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal[
-            """
-        SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id ORDER BY created_at DESC
-    """
+            "\n        SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id ORDER BY created_at DESC\n    "
         ],
     ) -> SQL[tuple[int, str]]: ...
     @overload
@@ -20,9 +17,7 @@ class PostQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal[
-            """
-    SELECT id::INTEGER, title::TEXT FROM posts ORDER BY created_at DESC
-"""
+            "\n    SELECT id::INTEGER, title::TEXT FROM posts ORDER BY created_at DESC\n"
         ],
     ) -> SQL[tuple[int, str]]: ...
     @overload
@@ -30,9 +25,7 @@ class PostQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal[
-            """
-    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id
-"""
+            "\n    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id\n"
         ],
     ) -> SQL[tuple[int, str, str]]: ...
     @overload

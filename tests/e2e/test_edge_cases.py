@@ -167,7 +167,7 @@ query3 = sql("SELECT id::INTEGER FROM users")
     stub_content = stub_file.read_text()
 
     # Should only have one overload for the duplicate query
-    assert stub_content.count('Literal["SELECT id::INTEGER FROM users"]') == 1
+    assert stub_content.count("SELECT id::INTEGER FROM users") == 1
 
 
 def test_very_long_query(tmp_path: Path) -> None:

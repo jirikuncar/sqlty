@@ -1,5 +1,4 @@
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
 
 class QueryA(SQLRegistry):
@@ -8,12 +7,7 @@ class QueryA(SQLRegistry):
     @overload
     @classmethod
     def sql(
-        cls,
-        query: Literal[
-            """
-    SELECT id, name, age FROM users WHERE id = :id
-    """
-        ],
+        cls, query: Literal["\n    SELECT id, name, age FROM users WHERE id = :id\n    "]
     ) -> SQL[tuple[int, str, int]]: ...
     @overload
     @classmethod
@@ -25,15 +19,11 @@ class QueryB(SQLRegistry):
     @overload
     @classmethod
     def sql(
-        cls,
-        query: Literal[
-            """
-    SELECT id, name, age FROM users WHERE id = :id
-    """
-        ],
+        cls, query: Literal["\n    SELECT id, name, age FROM users WHERE id = :id\n    "]
     ) -> SQL[tuple[int, str, float]]: ...
     @overload
     @classmethod
     def sql[T](cls, query: T) -> T: ...
 
 sql = QueryA.sql
+sql = QueryB.sql
