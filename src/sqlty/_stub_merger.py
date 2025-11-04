@@ -217,14 +217,22 @@ class StubMerger:
         """
         # If file doesn't exist, generate a fresh full stub
         if not output_path.exists():
-            header = [
-                "from typing import overload, Literal",
-                f"from sqlty import SQL, {base_class}",
-            ]
-            # Add conditional imports derived from new_calls
+            header: list[str] = []
+            # Add conditional imports derived from new_calls (stdlib first)
             for mod in compute_additional_imports(new_calls):
                 header.append(f"import {mod}")
-            header.extend(["", ""])  # spacing
+            if compute_additional_imports(new_calls):
+                header.append("")
+            # Third-party and local imports
+            header.extend(
+                [
+                    "from typing import Literal, overload",
+                    "",
+                    f"from sqlty import SQL, {base_class}",
+                    "",
+                    "",
+                ]
+            )
             class_block = self.generate_class_block(
                 new_calls, class_name, base_class, relative_to=output_path.parent
             )
