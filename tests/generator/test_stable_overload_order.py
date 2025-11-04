@@ -182,6 +182,12 @@ query_a = Query.sql("SELECT id::INTEGER FROM users")
     generator = TypeStubGenerator()
     stub_file = generator.generate_stub_file(source_file)
     initial_stub = stub_file.read_text()
+    initial_id_pos = initial_stub.find('"SELECT id::INTEGER FROM users"')
+    initial_name_pos = initial_stub.find('"SELECT name::TEXT FROM users"')
+
+    assert initial_id_pos != -1
+    assert initial_name_pos != -1
+    assert initial_id_pos < initial_name_pos, "Initial stub should have id query before name query."
 
     # Add a third query that should be inserted in the middle alphabetically
     source_file.write_text("""
