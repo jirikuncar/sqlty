@@ -42,14 +42,8 @@ class IRToASTSerializer:
             class_node = self._serialize_registry_class(registry)
             module_body.append(class_node)
 
-        # Count export names to detect duplicates
-        export_name_counts = Counter(
-            registry.export_name
-            for registry in stub.registries.values()
-            if registry.export_name
-        )
-
         # Only create aliases for unique export names
+        export_name_counts = self._count_export_names(stub)
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
             if registry.export_name and export_name_counts[registry.export_name] == 1:
@@ -59,6 +53,21 @@ class IRToASTSerializer:
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
         return module
+
+    def _count_export_names(self, stub: StubFile) -> Counter[str]:
+        """Count how many registries use each export name.
+
+        Args:
+            stub: StubFile to analyze
+
+        Returns:
+            Counter mapping export names to their usage count
+        """
+        return Counter(
+            registry.export_name
+            for registry in stub.registries.values()
+            if registry.export_name
+        )
 
     def _sort_imports(self, imports: set[ImportStatement]) -> list[ImportStatement]:
         """Sort imports in PEP 8 order.
