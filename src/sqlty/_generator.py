@@ -22,8 +22,6 @@ from pathlib import Path
 
 from sqlty._sql_analyzer import SQLAnalyzer
 
-from ._ast_builder import StubASTBuilder
-from ._ast_unparser import StubASTUnparser
 from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
 from ._stub_merger import StubMerger, compute_additional_imports
@@ -50,9 +48,6 @@ class TypeStubGenerator:
         self._analyzer_cache: dict[str, SQLAnalyzer] = {}
         self._format_command = format_command
 
-        # Initialize helper components
-        self._ast_builder = StubASTBuilder(function_name=self.function_name)
-        self._ast_unparser = StubASTUnparser()
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector()
 
@@ -977,13 +972,6 @@ def main(argv: list[str] | None = None) -> None:
             output_path=args.output,
             mode=mode,
         )
-
-        # TODO: Implement prune logic when mode="prune"
-        # This will require extending StubMerger to track and remove unused overloads
-        if mode == "prune":
-            logging.getLogger(__name__).info(
-                "Prune mode enabled but not yet implemented; stubs generated in full mode"
-            )
     except Exception as e:
         logging.getLogger(__name__).error("%s", e)
         sys.exit(1)
