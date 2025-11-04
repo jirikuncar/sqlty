@@ -188,8 +188,8 @@ def test_date_time_types(analyzer: SQLAnalyzer) -> None:
             scheduled_time::TIME
         FROM events
     """)
-    # Date/time types without explicit cast functions return str
-    assert result == "tuple[str, str, str, str]"
+    # Date/time types are now mapped to datetime module types
+    assert result == "tuple[datetime.date, datetime.datetime, datetime.datetime, datetime.time]"
 
 
 def test_numeric_types(analyzer: SQLAnalyzer) -> None:

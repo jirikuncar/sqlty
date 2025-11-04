@@ -10,16 +10,9 @@ class UsersQueries(SQLRegistry):
     def sql(
         cls,
         query: Literal["SELECT id, name FROM users"],
-    ) -> SQL[tuple[str, str]]:
-        # from users_queries:10
-        ...
-
+    ) -> SQL[tuple[int, str]]: ...
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
 sql = UsersQueries.sql

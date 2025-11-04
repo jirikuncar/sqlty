@@ -363,9 +363,10 @@ The generator maps SQL type casts to Python types:
 | `BOOLEAN`, `BOOL` | `bool` | Built-in |
 | `FLOAT`, `DOUBLE`, `REAL` | `float` | Built-in |
 | `DECIMAL`, `NUMERIC` | `Decimal` | `from decimal import Decimal` |
-| `DATE` | `date` | `from datetime import date` |
-| `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime` | `from datetime import datetime` |
-| `TIME`, `TIMETZ` | `time` | `from datetime import time` |
+| `DATE` | `datetime.date` | `import datetime` |
+| `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` | `import datetime` |
+| `TIME`, `TIMETZ` | `datetime.time` | `import datetime` |
+| `INTERVAL` | `datetime.timedelta` | `import datetime` |
 | `BYTEA`, `BLOB`, `BINARY` | `bytes` | Built-in |
 | `JSON`, `JSONB` | `Any` | `from typing import Any` |
 | `UUID` | `uuid.UUID` | `import uuid` |
@@ -385,9 +386,10 @@ FROM products
 **Date/time types:**
 ```sql
 SELECT
-    created_date::DATE,              -- date
-    created_at::TIMESTAMP,           -- datetime
-    scheduled_time::TIME            -- time
+    created_date::DATE,              -- datetime.date
+    created_at::TIMESTAMP,           -- datetime.datetime
+    scheduled_time::TIME,            -- datetime.time
+    duration::INTERVAL               -- datetime.timedelta
 FROM events
 ```
 

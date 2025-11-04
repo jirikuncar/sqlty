@@ -223,6 +223,7 @@ Based on user value and implementation effort:
   - [x] Updated API: generate_stub_file now uses mode parameter instead of boolean flags
   - [x] Configure it to run on changed files in examples
   - [ ] Prune implementation (remove overloads for queries that no longer exist)
+  - [ ] Support multiple modes in a single run: incremental,prune,create would run incremental generation, prune stale overloads, and create new ones if missing. Create alone should not override existing stubs but only create missing ones. Prune would only remove stale overloads if they are no longer in use - you can run prune only with whole directory otherwise it might lead to removing used stubs.
 - [ ] Make sure everything works with both `ty` and `mypy`.
 - [ ] Make sub-commands or parameters to check pyi files for missing or outdated stubs.
 - [ ] Add bootstrap sub-command to generate registry skeleton, detect schema if available in repo, and suggests configuration for pyproject.toml and pre-commit if present.
@@ -233,6 +234,7 @@ Based on user value and implementation effort:
 
 - [ ] Support more psycopg query types (e.g. Composed, Nested, ...)
 - [ ] Migration tool for existing codebases
+- [ ] Support queries defined in files (hashes).
 
 ## Getting Help
 

@@ -3,6 +3,8 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from sqlty._sql_analyzer import SQLAnalyzer
 
 
@@ -197,12 +199,10 @@ def test_schema_loading_with_comments() -> None:
 
 
 def test_schema_loading_invalid_path() -> None:
-    """Test that invalid schema path doesn't crash."""
-    # Should not raise an exception
-    analyzer = SQLAnalyzer(schema_path=Path("/nonexistent/schema.sql"))
-
-    # Schema should be empty
-    assert analyzer.schema == {}
+    """Test that invalid schema path raises RuntimeError."""
+    # Should raise RuntimeError when schema file doesn't exist
+    with pytest.raises(RuntimeError, match="Schema file not found"):
+        SQLAnalyzer(schema_path=Path("/nonexistent/schema.sql"))
 
 
 def test_schema_with_qualified_table_name() -> None:

@@ -119,7 +119,7 @@ class TestASTUnparserEdgeCases:
             type_params=[type_param],
         )
 
-        lines = unparser.unparse_method(method_node, {}, None)
+        lines = unparser.unparse_method(method_node)
 
         # Should include type parameter
         assert any("[T]" in line for line in lines)
@@ -145,7 +145,7 @@ class TestASTUnparserEdgeCases:
             returns=None,
         )
 
-        lines = unparser.unparse_method(method_node, {}, None)
+        lines = unparser.unparse_method(method_node)
 
         # Should handle unannotated args
         assert any("value," in line for line in lines)
@@ -301,7 +301,6 @@ class MyClass:
         assert '"""SELECT *' in result
         assert "FROM users" in result
         assert "WHERE id = 1" in result
-        assert "# from queries:10" in result
 
     def test_generate_overload_method_block_no_location(self) -> None:
         """Test generating method block without source location."""

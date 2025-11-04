@@ -37,10 +37,13 @@ class SQLAnalyzer:
         "STRING": "str",
         "BOOLEAN": "bool",
         "BOOL": "bool",
-        "DATE": "str",  # Could be date, but str is simpler
-        "TIMESTAMP": "str",
-        "TIMESTAMPTZ": "str",
-        "TIME": "str",
+        "DATE": "datetime.date",
+        "TIMESTAMP": "datetime.datetime",
+        "TIMESTAMPTZ": "datetime.datetime",
+        "DATETIME": "datetime.datetime",
+        "TIME": "datetime.time",
+        "TIMETZ": "datetime.time",
+        "INTERVAL": "datetime.timedelta",
         "ARRAY": "list",
         "JSON": "dict",
         "JSONB": "dict",
@@ -61,41 +64,47 @@ class SQLAnalyzer:
 
         Parses CREATE TABLE statements to build a schema dictionary mapping:
         table_name -> {column_name -> sql_type}
+
+        Raises:
+            RuntimeError: If the schema file cannot be read or does not exist.
         """
+        if not schema_path.exists():
+            raise RuntimeError(f"Schema file not found: {schema_path}")
+
         try:
             schema_sql = schema_path.read_text()
-            # Parse all statements in the schema file
-            for statement in schema_sql.split(";"):
-                statement = statement.strip()
-                if not statement:
-                    continue
+        except Exception as e:
+            raise RuntimeError(f"Failed to read schema file {schema_path}: {e}") from e
 
-                try:
-                    ast = parse_one(statement, dialect=self.dialect)
+        # Parse all statements in the schema file
+        for statement in schema_sql.split(";"):
+            statement = statement.strip()
+            if not statement:
+                continue
 
-                    # Look for CREATE TABLE statements
-                    if isinstance(ast, exp.Create) and ast.find(exp.Table):
-                        table_expr = ast.find(exp.Table)
-                        if table_expr:
-                            table_name = table_expr.name.lower()
+            try:
+                ast = parse_one(statement, dialect=self.dialect)
 
-                            # Extract column definitions
-                            schema_def = ast.find(exp.Schema)
-                            if schema_def:
-                                self.schema[table_name] = {}
-                                for col_def in schema_def.expressions:
-                                    if isinstance(col_def, exp.ColumnDef):
-                                        col_name = col_def.name.lower()
-                                        # Get the column type
-                                        if col_def.kind:
-                                            col_type = str(col_def.kind).upper()
-                                            self.schema[table_name][col_name] = col_type
-                except Exception:
-                    # Skip statements that can't be parsed
-                    continue
-        except Exception:
-            # If schema loading fails, continue without schema
-            pass
+                # Look for CREATE TABLE statements
+                if isinstance(ast, exp.Create) and ast.find(exp.Table):
+                    table_expr = ast.find(exp.Table)
+                    if table_expr:
+                        table_name = table_expr.name.lower()
+
+                        # Extract column definitions
+                        schema_def = ast.find(exp.Schema)
+                        if schema_def:
+                            self.schema[table_name] = {}
+                            for col_def in schema_def.expressions:
+                                if isinstance(col_def, exp.ColumnDef):
+                                    col_name = col_def.name.lower()
+                                    # Get the column type
+                                    if col_def.kind:
+                                        col_type = str(col_def.kind).upper()
+                                        self.schema[table_name][col_name] = col_type
+            except Exception:
+                # Skip statements that can't be parsed
+                continue
 
     def _get_column_type_from_schema(self, table_name: str, column_name: str) -> str | None:
         """
