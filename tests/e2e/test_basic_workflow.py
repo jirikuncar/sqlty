@@ -49,42 +49,31 @@ query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 
     assert stub_content == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class Query(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
-    ) -> SQL[tuple[int]]:
-        ...
-    \n\
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER FROM users"],
-    ) -> SQL[tuple[int]]:
-        ...
-    \n\
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
-    ) -> SQL[tuple[int, str]]:
-        ...
-    \n\
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
 
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
+        ...
 
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
+        ...
 
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]:
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = Query.sql
 ''')
 
@@ -172,34 +161,26 @@ query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
 
     assert updated_stub == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class Query(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER FROM users"],
-    ) -> SQL[tuple[int]]:
+    def sql(cls, query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT name::TEXT FROM users WHERE id = :id"],
-    ) -> SQL[tuple[str]]:
+    def sql(cls, query: Literal['SELECT name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[str]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-
-
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = Query.sql
 ''')
 
@@ -242,32 +223,20 @@ query: SQL[tuple[int, str, str]] = sql("""
 
     assert stub_content == snapshot('''\
 from typing import Literal, overload
-
 from sqlty import SQL, SQLRegistry
+
 
 class Query(SQLRegistry):
     """Application-specific SQL query registry with type-safe overloads."""
-    \n\
+
     @overload
     @classmethod
-    def sql(
-        cls,
-        query: Literal["""
-    SELECT
-        id::INTEGER,
-        name::TEXT,
-        email::TEXT
-    FROM users
-    WHERE active = true
-"""],
-    ) -> SQL[tuple[int, str, str]]:
+    def sql(cls, query: Literal['\\n    SELECT\\n        id::INTEGER,\\n        name::TEXT,\\n        email::TEXT\\n    FROM users\\n    WHERE active = true\\n']) -> SQL[tuple[int, str, str]]:
         ...
-    \n\
+
     @overload
     @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-
-
+    def sql[T](cls, query: T) -> T:
+        ...
 sql = Query.sql
 ''')

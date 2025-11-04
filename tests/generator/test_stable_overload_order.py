@@ -148,14 +148,14 @@ mango = Query.sql("mango query")
     stub_content = stub_file.read_text()
 
     # Find positions of each query in the stub
-    apple_pos = stub_content.find('"apple query"')
-    mango_pos = stub_content.find('"mango query"')
-    zebra_pos = stub_content.find('"zebra query"')
+    apple_pos = stub_content.find("apple query")
+    mango_pos = stub_content.find("mango query")
+    zebra_pos = stub_content.find("zebra query")
 
     # Verify all queries are present
-    assert apple_pos != -1, "apple query not found in stub"
-    assert mango_pos != -1, "mango query not found in stub"
-    assert zebra_pos != -1, "zebra query not found in stub"
+    assert apple_pos != -1, "apple query not found in stub " + stub_content
+    assert mango_pos != -1, "mango query not found in stub " + stub_content
+    assert zebra_pos != -1, "zebra query not found in stub " + stub_content
 
     # Verify they appear in alphabetical order
     assert apple_pos < mango_pos < zebra_pos, (
@@ -182,8 +182,8 @@ query_a = Query.sql("SELECT id::INTEGER FROM users")
     generator = TypeStubGenerator()
     stub_file = generator.generate_stub_file(source_file)
     initial_stub = stub_file.read_text()
-    initial_id_pos = initial_stub.find('"SELECT id::INTEGER FROM users"')
-    initial_name_pos = initial_stub.find('"SELECT name::TEXT FROM users"')
+    initial_id_pos = initial_stub.find("SELECT id::INTEGER FROM users")
+    initial_name_pos = initial_stub.find("SELECT name::TEXT FROM users")
 
     assert initial_id_pos != -1
     assert initial_name_pos != -1
@@ -206,9 +206,9 @@ query_c = Query.sql("SELECT email::TEXT FROM users")
     final_stub = stub_file.read_text()
 
     # Find positions
-    id_pos = final_stub.find('"SELECT id::INTEGER FROM users"')
-    name_pos = final_stub.find('"SELECT name::TEXT FROM users"')
-    email_pos = final_stub.find('"SELECT email::TEXT FROM users"')
+    id_pos = final_stub.find("SELECT id::INTEGER FROM users")
+    name_pos = final_stub.find("SELECT name::TEXT FROM users")
+    email_pos = final_stub.find("SELECT email::TEXT FROM users")
 
     # All should be present
     assert id_pos != -1
