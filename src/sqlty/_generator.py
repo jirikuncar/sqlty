@@ -586,22 +586,38 @@ class TypeStubGenerator:
 
                     # Handle incremental/full mode for multiple classes
                     # Handle all modes using IR-based merge
+                    # Parse all new registries first
+                    from ._stub_parser import CallInfoToIRParser
+                    from ._stub_serializer import IRToTextSerializer
+                    from ._stub_ir import StubFile
+
+                    call_parser = CallInfoToIRParser(self.function_name)
+                    serializer = IRToTextSerializer(self.function_name)
+                    
+                    # Create stub with all new registries
+                    all_new_registries = StubFile(file_path=stub_path)
                     for cls_name in class_names:
                         cls_calls = calls_by_class.get(cls_name, [])
                         export_name = self._registry_detector.get_registry_export_name(
                             registry_file, cls_name
                         )
-
-                        # Use IR-based merge for incremental, full, or prune modes
-                        stub_content = self._stub_merger.merge_stub_incremental(
-                            stub_path,
-                            cls_calls,
-                            class_name=cls_name,
-                            base_class=base_class,
-                            full_mode=is_full_mode and not prune_mode,
-                            export_name=export_name,
-                            prune=prune_mode,
-                        )
+                        new_stub = call_parser.parse_calls(cls_calls, cls_name, base_class, export_name)
+                        for registry in new_stub.registries.values():
+                            all_new_registries.add_registry(registry)
+                    
+                    # Merge with existing stub if it exists
+                    if stub_path.exists():
+                        from ._stub_parser import PyiToIRParser
+                        pyi_parser = PyiToIRParser(self.function_name)
+                        existing_stub = pyi_parser.parse_file(stub_path)
+                        
+                        mode = "prune" if prune_mode else ("full" if is_full_mode else "incremental")
+                        for new_registry in all_new_registries.registries.values():
+                            existing_stub.merge_registry(new_registry, mode=mode)
+                        
+                        stub_content = serializer.serialize_to_text(existing_stub, relative_to=stub_path.parent)
+                    else:
+                        stub_content = serializer.serialize_to_text(all_new_registries, relative_to=stub_path.parent)
                     formatted = self._format_stub_text(stub_content, str(stub_path))
                     self._write_stub_if_changed(stub_path, formatted)
 
