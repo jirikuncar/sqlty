@@ -5,6 +5,7 @@ back to AST nodes and formatted Python code.
 """
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, StubFile
@@ -42,17 +43,16 @@ class IRToASTSerializer:
             module_body.append(class_node)
 
         # Count export names to detect duplicates
-        export_name_counts: dict[str, int] = {}
-        for registry in stub.registries.values():
-            if registry.export_name:
-                export_name_counts[registry.export_name] = (
-                    export_name_counts.get(registry.export_name, 0) + 1
-                )
+        export_name_counts = Counter(
+            registry.export_name
+            for registry in stub.registries.values()
+            if registry.export_name
+        )
 
         # Only create aliases for unique export names
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
-            if registry.export_name and export_name_counts.get(registry.export_name, 0) == 1:
+            if registry.export_name and export_name_counts[registry.export_name] == 1:
                 alias_node = self._serialize_export_alias(registry)
                 module_body.append(alias_node)
 
