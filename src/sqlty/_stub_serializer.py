@@ -12,70 +12,70 @@ from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, StubFil
 
 class IRToASTSerializer:
     """Serializes intermediate representation to AST."""
-    
+
     def __init__(self, function_name: str = "sql") -> None:
         """Initialize the serializer.
-        
+
         Args:
             function_name: Name of the SQL function (e.g., "sql")
         """
         self.function_name = function_name
-    
+
     def serialize_to_module(self, stub: StubFile) -> ast.Module:
         """Serialize a StubFile to an AST Module.
-        
+
         Args:
             stub: StubFile IR to serialize
-            
+
         Returns:
             AST Module node
         """
         module_body: list[ast.stmt] = []
-        
+
         # Add imports in sorted order
         imports = self._sort_imports(stub.compute_required_imports())
         for import_stmt in imports:
             module_body.append(self._serialize_import(import_stmt))
-        
+
         # Add registry classes in sorted order by name
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
             class_node = self._serialize_registry_class(registry)
             module_body.append(class_node)
-        
+
         # Add export aliases
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
             if registry.export_name:
                 alias_node = self._serialize_export_alias(registry)
                 module_body.append(alias_node)
-        
+
         # Create and fix the module
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
         return module
-    
+
     def _sort_imports(self, imports: set[ImportStatement]) -> list[ImportStatement]:
         """Sort imports in PEP 8 order.
-        
+
         Order:
         1. Standard library imports (non-from)
         2. Standard library from imports (typing)
         3. Third-party/local imports (sqlty)
-        
+
         Args:
             imports: Set of import statements
-            
+
         Returns:
             Sorted list of imports
         """
         stdlib_modules = {"uuid", "datetime", "decimal"}
         typing_modules = {"typing"}
-        
+
         stdlib_imports = []
         typing_imports = []
         other_imports = []
-        
+
         for imp in imports:
             if imp.module in stdlib_modules and not imp.from_import:
                 stdlib_imports.append(imp)
@@ -83,20 +83,20 @@ class IRToASTSerializer:
                 typing_imports.append(imp)
             else:
                 other_imports.append(imp)
-        
+
         # Sort each group by module name
         stdlib_imports.sort(key=lambda x: x.module)
         typing_imports.sort(key=lambda x: x.module)
         other_imports.sort(key=lambda x: x.module)
-        
+
         return stdlib_imports + typing_imports + other_imports
-    
+
     def _serialize_import(self, import_stmt: ImportStatement) -> ast.stmt:
         """Serialize an ImportStatement to AST.
-        
+
         Args:
             import_stmt: ImportStatement to serialize
-            
+
         Returns:
             AST Import or ImportFrom node
         """
@@ -110,32 +110,32 @@ class IRToASTSerializer:
             return ast.Import(
                 names=[ast.alias(name=import_stmt.module, asname=None)]
             )
-    
+
     def _serialize_registry_class(self, registry: RegistryClass) -> ast.ClassDef:
         """Serialize a RegistryClass to AST ClassDef.
-        
+
         Args:
             registry: RegistryClass to serialize
-            
+
         Returns:
             AST ClassDef node
         """
         class_body: list[ast.stmt] = []
-        
+
         # Add docstring
         class_body.append(
             ast.Expr(value=ast.Constant(value=registry.docstring))
         )
-        
+
         # Add overload methods in sorted order
         for overload in registry.get_sorted_overloads():
             method_node = self._serialize_overload(overload)
             class_body.append(method_node)
-        
+
         # Add generic fallback
         fallback = self._serialize_fallback()
         class_body.append(fallback)
-        
+
         # Create class definition
         return ast.ClassDef(
             name=registry.name,
@@ -145,13 +145,13 @@ class IRToASTSerializer:
             decorator_list=[],
             type_params=[],
         )
-    
+
     def _serialize_overload(self, overload: OverloadSignature) -> ast.FunctionDef:
         """Serialize an OverloadSignature to AST FunctionDef.
-        
+
         Args:
             overload: OverloadSignature to serialize
-            
+
         Returns:
             AST FunctionDef node
         """
@@ -160,20 +160,20 @@ class IRToASTSerializer:
             ast.Name(id="overload", ctx=ast.Load()),
             ast.Name(id="classmethod", ctx=ast.Load()),
         ]
-        
+
         # query: Literal["..."]
         literal_annotation = ast.Subscript(
             value=ast.Name(id="Literal", ctx=ast.Load()),
             slice=ast.Constant(value=overload.query_literal),
             ctx=ast.Load(),
         )
-        
+
         query_arg = ast.arg(arg="query", annotation=literal_annotation)
         cls_arg = ast.arg(arg="cls", annotation=None)
-        
+
         # Return type annotation
         return_annotation = ast.parse(overload.return_type, mode="eval").body
-        
+
         return ast.FunctionDef(
             name=self.function_name,
             args=ast.arguments(
@@ -188,10 +188,10 @@ class IRToASTSerializer:
             returns=return_annotation,
             type_params=[],
         )
-    
+
     def _serialize_fallback(self) -> ast.FunctionDef:
         """Serialize the generic fallback overload.
-        
+
         Returns:
             AST FunctionDef node for the fallback
         """
@@ -199,14 +199,14 @@ class IRToASTSerializer:
             ast.Name(id="overload", ctx=ast.Load()),
             ast.Name(id="classmethod", ctx=ast.Load()),
         ]
-        
+
         # Type parameter [T]
         type_param = ast.TypeVar(name="T")
-        
+
         # Arguments: cls, query: T
         cls_arg = ast.arg(arg="cls", annotation=None)
         query_arg = ast.arg(arg="query", annotation=ast.Name(id="T", ctx=ast.Load()))
-        
+
         return ast.FunctionDef(
             name=self.function_name,
             args=ast.arguments(
@@ -221,13 +221,13 @@ class IRToASTSerializer:
             returns=ast.Name(id="T", ctx=ast.Load()),
             type_params=[type_param],
         )
-    
+
     def _serialize_export_alias(self, registry: RegistryClass) -> ast.Assign:
         """Serialize export alias (e.g., sql = Query.sql).
-        
+
         Args:
             registry: RegistryClass to create alias for
-            
+
         Returns:
             AST Assign node
         """
@@ -243,53 +243,53 @@ class IRToASTSerializer:
 
 class IRToTextSerializer:
     """Serializes intermediate representation to formatted Python code."""
-    
+
     def __init__(self, function_name: str = "sql") -> None:
         """Initialize the serializer.
-        
+
         Args:
             function_name: Name of the SQL function (e.g., "sql")
         """
         self.function_name = function_name
         self.ast_serializer = IRToASTSerializer(function_name)
-    
+
     def serialize_to_text(self, stub: StubFile, relative_to: Path | None = None) -> str:
         """Serialize a StubFile to formatted Python text.
-        
+
         Args:
             stub: StubFile IR to serialize
             relative_to: Optional path for relative source comments
-            
+
         Returns:
             Formatted Python code as string
         """
         # Convert to AST
         module = self.ast_serializer.serialize_to_module(stub)
-        
+
         # Unparse to text
         code = ast.unparse(module)
-        
+
         # Add blank lines between sections for better formatting
         lines = code.split("\n")
         formatted_lines = self._add_blank_lines(lines)
-        
+
         return "\n".join(formatted_lines) + "\n"
-    
+
     def _add_blank_lines(self, lines: list[str]) -> list[str]:
         """Add blank lines between sections for PEP 8 compliance.
-        
+
         Args:
             lines: List of code lines
-            
+
         Returns:
             List of code lines with appropriate blank lines
         """
         result: list[str] = []
         prev_line_type = None
-        
+
         for i, line in enumerate(lines):
             line_type = self._classify_line(line)
-            
+
             # Add blank lines between different sections
             if prev_line_type is not None and line_type != prev_line_type:
                 if prev_line_type == "import" and line_type == "import":
@@ -305,18 +305,18 @@ class IRToTextSerializer:
                 elif prev_line_type == "class" and line_type == "alias":
                     # Between class and alias
                     result.append("")
-            
+
             result.append(line)
             prev_line_type = line_type
-        
+
         return result
-    
+
     def _classify_line(self, line: str) -> str:
         """Classify a line of code.
-        
+
         Args:
             line: Line of code
-            
+
         Returns:
             Classification: "import", "class", "alias", or "other"
         """

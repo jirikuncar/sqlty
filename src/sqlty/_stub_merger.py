@@ -44,7 +44,7 @@ class StubMerger:
     - Incremental mode: Add only new overloads
     - Full mode: Regenerate class while preserving imports/aliases
     - Prune mode: Remove overloads not present in source
-    
+
     This class now uses the IR-based implementation internally for better
     structure and maintainability.
     """
@@ -84,7 +84,7 @@ class StubMerger:
 
     def collect_literal_strings(self, tree: ast.AST) -> set[str]:
         """Collect all string values used inside Literal[...] type annotations.
-        
+
         Legacy method for backward compatibility.
         """
         literals: set[str] = set()
@@ -240,14 +240,14 @@ class StubMerger:
         new_stub = self._call_parser.parse_calls(
             new_calls, class_name, base_class, export_name
         )
-        
+
         # If file doesn't exist, generate fresh stub
         if not output_path.exists():
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
-        
+
         # Parse existing stub to IR
         existing_stub = self._pyi_parser.parse_file(output_path)
-        
+
         # Determine merge mode
         if prune:
             mode = "prune"
@@ -255,10 +255,10 @@ class StubMerger:
             mode = "full"
         else:
             mode = "incremental"
-        
+
         # Merge each registry from new stub into existing stub
         for registry_name, new_registry in new_stub.registries.items():
             existing_stub.merge_registry(new_registry, mode=mode)
-        
+
         # Serialize back to text
         return self._serializer.serialize_to_text(existing_stub, relative_to=output_path.parent)
