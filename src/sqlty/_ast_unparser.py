@@ -30,15 +30,41 @@ class StubASTUnparser:
         """
         lines: list[str] = []
 
+        def import_group(n: ast.AST) -> str | None:
+            """Return a simple import group name for blank-line separation."""
+            if isinstance(n, ast.Import):
+                std_names = {"uuid", "datetime", "decimal"}
+                if any(alias.name in std_names for alias in n.names):
+                    return "stdlib"
+                return "other"
+            if isinstance(n, ast.ImportFrom):
+                if n.module == "typing":
+                    return "typing"
+                if n.module == "sqlty":
+                    return "local"
+                return "other"
+            return None
+
+        prev_group: str | None = None
+
         for node in module.body:
+            group = import_group(node)
+            # Insert a blank line between import groups (PEP 8): stdlib, third-party, local
+            if group is not None and prev_group is not None and group != prev_group:
+                # We only add spacing when transitioning between known groups
+                if (prev_group, group) in (("stdlib", "typing"), ("typing", "local")):
+                    lines.append("")
+
             if isinstance(node, ast.ImportFrom):
                 # Format import statement
                 names = ", ".join(alias.name for alias in node.names)
                 lines.append(f"from {node.module} import {names}")
+                prev_group = group
             elif isinstance(node, ast.Import):
                 # Format regular import statement
                 names = ", ".join(alias.name for alias in node.names)
                 lines.append(f"import {names}")
+                prev_group = group
             elif isinstance(node, ast.ClassDef):
                 # Format class definition
                 lines.extend(self.unparse_class_def(node, calls, relative_to))
