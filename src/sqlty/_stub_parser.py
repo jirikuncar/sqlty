@@ -60,7 +60,6 @@ class PyiToIRParser:
         """
         stub = StubFile(file_path=file_path)
 
-        # Parse imports
         for node in tree.body:
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -81,15 +80,12 @@ class PyiToIRParser:
                     )
                 )
 
-        # Parse class definitions
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 registry = self._parse_registry_class(node)
                 if registry:
                     stub.add_registry(registry)
 
-        # Parse module-level aliases to detect export names
-        # e.g., "sql = Query.sql" or "user_sql = UserQueries.sql"
         for node in tree.body:
             if isinstance(node, ast.Assign):
                 self._parse_export_alias(node, stub)
@@ -112,7 +108,6 @@ class PyiToIRParser:
             if isinstance(base, ast.Name):
                 base_class = base.id
 
-        # Extract docstring
         docstring = "Application-specific SQL query registry with type-safe overloads."
         if (
             node.body
@@ -128,7 +123,6 @@ class PyiToIRParser:
             docstring=docstring,
         )
 
-        # Parse overload methods
         for item in node.body:
             if isinstance(item, ast.FunctionDef) and item.name == self.function_name:
                 overload = self._parse_overload_method(item)
@@ -146,7 +140,6 @@ class PyiToIRParser:
         Returns:
             OverloadSignature or None if not a valid overload
         """
-        # Check for @overload decorator
         has_overload = any(
             isinstance(dec, ast.Name) and dec.id == "overload"
             for dec in node.decorator_list
@@ -155,12 +148,10 @@ class PyiToIRParser:
         if not has_overload:
             return None
 
-        # Extract query literal from Literal[...] annotation
         query_literal = self._extract_literal_from_annotation(node)
         if not query_literal:
             return None
 
-        # Extract return type
         return_type = "Any"
         if node.returns:
             return_type = ast.unparse(node.returns)
@@ -179,16 +170,13 @@ class PyiToIRParser:
         Returns:
             The literal string or None if not found
         """
-        # Look for the 'query' parameter
         for arg in node.args.args:
             if arg.arg == "query" and arg.annotation:
-                # Check if it's Literal[...]
                 if isinstance(arg.annotation, ast.Subscript):
                     if (
                         isinstance(arg.annotation.value, ast.Name)
                         and arg.annotation.value.id == "Literal"
                     ):
-                        # Extract the string constant
                         slice_node = arg.annotation.slice
                         if isinstance(slice_node, ast.Constant) and isinstance(
                             slice_node.value, str
@@ -205,13 +193,11 @@ class PyiToIRParser:
             node: AST Assign node
             stub: StubFile to update
         """
-        # Pattern: export_name = ClassName.sql
         if not node.targets or not isinstance(node.targets[0], ast.Name):
             return
 
         export_name = node.targets[0].id
 
-        # Check if value is ClassName.sql
         if isinstance(node.value, ast.Attribute):
             if (
                 isinstance(node.value.value, ast.Name)
@@ -262,11 +248,9 @@ class CallInfoToIRParser:
                 calls_by_class[registry_class] = []
             calls_by_class[registry_class].append(call)
 
-        # If there's only one class and it's None, use the default class name
         if len(calls_by_class) == 1 and None in calls_by_class:
             calls_by_class[class_name] = calls_by_class.pop(None)
 
-        # Create registries from calls
         for cls_name, cls_calls in calls_by_class.items():
             if cls_name is None:
                 cls_name = class_name
@@ -283,7 +267,6 @@ class CallInfoToIRParser:
 
             stub.add_registry(registry)
 
-        # Compute and add required imports
         required_imports = stub.compute_required_imports()
         for import_stmt in required_imports:
             stub.add_import(import_stmt)

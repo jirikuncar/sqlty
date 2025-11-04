@@ -161,10 +161,8 @@ class StubFile:
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
         if mode == "full":
-            # Replace entire registry
             self.registries[registry.name] = registry
         elif mode == "incremental":
-            # Add new overloads to existing registry
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 for overload in registry.overloads:
@@ -172,11 +170,9 @@ class StubFile:
             else:
                 self.registries[registry.name] = registry
         elif mode == "prune":
-            # Remove overloads that no longer exist in the source (prune only removes, never adds)
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 new_literals = {o.query_literal for o in registry.overloads}
-                # Remove overloads not in new set
                 to_remove = [
                     o.query_literal
                     for o in existing.overloads
@@ -197,15 +193,12 @@ class StubFile:
         """
         required: set[ImportStatement] = set()
 
-        # Always need typing imports
         required.add(ImportStatement(module="typing", names=["Literal", "overload"], from_import=True))
 
-        # Always need sqlty imports
         base_classes = {r.base_class for r in self.registries.values()}
         sqlty_imports = ["SQL"] + sorted(base_classes)
         required.add(ImportStatement(module="sqlty", names=sqlty_imports, from_import=True))
 
-        # Check return types for additional imports
         import re
 
         type_patterns = {

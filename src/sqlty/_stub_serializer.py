@@ -32,25 +32,21 @@ class IRToASTSerializer:
         """
         module_body: list[ast.stmt] = []
 
-        # Add imports in sorted order
         imports = self._sort_imports(stub.compute_required_imports())
         for import_stmt in imports:
             module_body.append(self._serialize_import(import_stmt))
 
-        # Add registry classes in sorted order by name
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
             class_node = self._serialize_registry_class(registry)
             module_body.append(class_node)
 
-        # Add export aliases
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
             if registry.export_name:
                 alias_node = self._serialize_export_alias(registry)
                 module_body.append(alias_node)
 
-        # Create and fix the module
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
         return module
@@ -122,21 +118,17 @@ class IRToASTSerializer:
         """
         class_body: list[ast.stmt] = []
 
-        # Add docstring
         class_body.append(
             ast.Expr(value=ast.Constant(value=registry.docstring))
         )
 
-        # Add overload methods in sorted order
         for overload in registry.get_sorted_overloads():
             method_node = self._serialize_overload(overload)
             class_body.append(method_node)
 
-        # Add generic fallback
         fallback = self._serialize_fallback()
         class_body.append(fallback)
 
-        # Create class definition
         return ast.ClassDef(
             name=registry.name,
             bases=[ast.Name(id=registry.base_class, ctx=ast.Load())],
@@ -155,13 +147,11 @@ class IRToASTSerializer:
         Returns:
             AST FunctionDef node
         """
-        # Build decorators
         decorators: list[ast.expr] = [
             ast.Name(id="overload", ctx=ast.Load()),
             ast.Name(id="classmethod", ctx=ast.Load()),
         ]
 
-        # query: Literal["..."]
         literal_annotation = ast.Subscript(
             value=ast.Name(id="Literal", ctx=ast.Load()),
             slice=ast.Constant(value=overload.query_literal),
@@ -171,7 +161,6 @@ class IRToASTSerializer:
         query_arg = ast.arg(arg="query", annotation=literal_annotation)
         cls_arg = ast.arg(arg="cls", annotation=None)
 
-        # Return type annotation
         return_annotation = ast.parse(overload.return_type, mode="eval").body
 
         return ast.FunctionDef(
@@ -200,10 +189,8 @@ class IRToASTSerializer:
             ast.Name(id="classmethod", ctx=ast.Load()),
         ]
 
-        # Type parameter [T]
         type_param = ast.TypeVar(name="T")
 
-        # Arguments: cls, query: T
         cls_arg = ast.arg(arg="cls", annotation=None)
         query_arg = ast.arg(arg="query", annotation=ast.Name(id="T", ctx=ast.Load()))
 
@@ -263,16 +250,10 @@ class IRToTextSerializer:
         Returns:
             Formatted Python code as string
         """
-        # Convert to AST
         module = self.ast_serializer.serialize_to_module(stub)
-
-        # Unparse to text
         code = ast.unparse(module)
-
-        # Add blank lines between sections for better formatting
         lines = code.split("\n")
         formatted_lines = self._add_blank_lines(lines)
-
         return "\n".join(formatted_lines) + "\n"
 
     def _add_blank_lines(self, lines: list[str]) -> list[str]:
@@ -290,7 +271,6 @@ class IRToTextSerializer:
         for i, line in enumerate(lines):
             line_type = self._classify_line(line)
 
-            # Add blank lines between different sections
             if prev_line_type is not None and line_type != prev_line_type:
                 if prev_line_type == "import" and line_type == "import":
                     # Different import groups
