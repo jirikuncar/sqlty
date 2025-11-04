@@ -64,9 +64,7 @@ class IRToASTSerializer:
             Counter mapping export names to their usage count
         """
         return Counter(
-            registry.export_name
-            for registry in stub.registries.values()
-            if registry.export_name
+            registry.export_name for registry in stub.registries.values() if registry.export_name
         )
 
     def _sort_imports(self, imports: set[ImportStatement]) -> list[ImportStatement]:
