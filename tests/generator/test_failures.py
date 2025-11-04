@@ -43,11 +43,9 @@ sql("SELECT 1")
     gen = TypeStubGenerator()
     stub_path = tmp_path / "plain.pyi"
     result = gen.generate_stub_file(src, stub_path)
-    stub = stub_path.read_text()
-    # Should not generate any Literal overloads (no SQLRegistry-based stubs)
-    assert "Literal[" not in stub
-    # Fallback overload should always be present
-    assert "def sql" in stub
+    assert not result.exists()
+
+
 def test_invalid_syntax(tmp_path):
     src = tmp_path / "bad.py"
     src.write_text("def sql(:\n")
