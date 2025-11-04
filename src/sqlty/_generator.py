@@ -501,6 +501,11 @@ class TypeStubGenerator:
             registry_source = call["registry_source"]
             if not registry_source:
                 # Skip calls that don't belong to a SQLRegistry
+                logging.getLogger(__name__).info(
+                    "Skipping call without registry_source: %s:%s",
+                    call.get("file", "unknown file"),
+                    call.get("lineno", "?"),
+                )
                 continue
 
             # Find the actual file that defines this registry
@@ -515,19 +520,22 @@ class TypeStubGenerator:
                 # For each candidate, check if it defines a SQLRegistry subclass
                 for candidate in candidates:
                     if self._registry_detector.get_registry_class_names(candidate):
-                        # Check if any calls reference this specific file
-                        # by seeing if the call was made from this file or imports from it
-                        call_file = call.get("file")
-                        if call_file:
-                            call_path = Path(call_file)
-                            # If the call is from the registry file itself
-                            if call_path == candidate:
-                                registry_file = candidate
-                                break
-                            # Or if they're in the same directory (likely related)
-                            if call_path.parent == candidate.parent:
-                                registry_file = candidate
-                                break
+                        # Check if any calls with this registry_source reference this specific file
+                        for other_call in calls:
+                            if other_call.get("registry_source") == registry_source:
+                                call_file = other_call.get("file")
+                                if call_file:
+                                    call_path = Path(call_file)
+                                    # If the call is from the registry file itself
+                                    if call_path == candidate:
+                                        registry_file = candidate
+                                        break
+                                    # Or if they're in the same directory (likely related)
+                                    if call_path.parent == candidate.parent:
+                                        registry_file = candidate
+                                        break
+                        if registry_file is not None:
+                            break
 
                 # If we didn't find a match through directory relationship,
                 # use the first candidate with a registry class
