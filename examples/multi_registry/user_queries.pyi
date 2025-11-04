@@ -11,8 +11,8 @@ class UserQueries(SQLRegistry):
         cls,
         query: Literal[
             """
-    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id
-"""
+        SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id ORDER BY name
+    """
         ],
     ) -> SQL[tuple[int, str, str]]: ...
     @overload
@@ -31,8 +31,8 @@ class UserQueries(SQLRegistry):
         cls,
         query: Literal[
             """
-        SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id ORDER BY name
-    """
+    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id
+"""
         ],
     ) -> SQL[tuple[int, str, str]]: ...
     @overload

@@ -187,6 +187,10 @@ class StubMerger:
             if call["literal"] not in seen_literals:
                 seen_literals.add(call["literal"])
                 unique_calls.append(call)
+
+        # Sort calls by literal string for deterministic output across machines
+        unique_calls.sort(key=lambda c: c["literal"])
+
         parts: list[str] = []
         parts.append(f"class {class_name}({base_class}):")
         parts.append('    """Application-specific SQL query registry with type-safe overloads."""')

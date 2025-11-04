@@ -127,6 +127,9 @@ class StubASTBuilder:
                 seen_literals.add(call["literal"])
                 unique_calls.append(call)
 
+        # Sort calls by literal string for deterministic output across machines
+        unique_calls.sort(key=lambda c: c["literal"])
+
         class_body: list[ast.stmt] = []
 
         # Add docstring
