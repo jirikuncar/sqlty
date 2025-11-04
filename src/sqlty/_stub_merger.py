@@ -3,6 +3,8 @@
 This module handles merging new SQL query overloads into existing stub files,
 supporting both incremental (add only new queries) and full (regenerate class)
 modes.
+
+This is a compatibility layer that uses the new IR-based implementation internally.
 """
 
 import ast
@@ -11,6 +13,9 @@ import re
 from pathlib import Path
 
 from ._collector import CallInfo
+from ._stub_ir import StubFile
+from ._stub_parser import CallInfoToIRParser, PyiToIRParser
+from ._stub_serializer import IRToTextSerializer
 
 
 def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
@@ -38,6 +43,10 @@ class StubMerger:
     Supports:
     - Incremental mode: Add only new overloads
     - Full mode: Regenerate class while preserving imports/aliases
+    - Prune mode: Remove overloads not present in source
+    
+    This class now uses the IR-based implementation internally for better
+    structure and maintainability.
     """
 
     def __init__(self, function_name: str = "sql"):
@@ -47,6 +56,9 @@ class StubMerger:
             function_name: Name of the SQL function to generate overloads for
         """
         self.function_name = function_name
+        self._pyi_parser = PyiToIRParser(function_name)
+        self._call_parser = CallInfoToIRParser(function_name)
+        self._serializer = IRToTextSerializer(function_name)
 
     def parse_existing_stub(self, stub_path: Path) -> set[str]:
         """Parse an existing stub file to extract all query literals (any class).
@@ -57,10 +69,13 @@ class StubMerger:
         if not stub_path.exists():
             return set()
         try:
-            with open(stub_path) as f:
-                stub_content = f.read()
-            tree = ast.parse(stub_content)
-            return self.collect_literal_strings(tree)
+            stub_ir = self._pyi_parser.parse_file(stub_path)
+            # Collect all literals from all registries
+            literals: set[str] = set()
+            for registry in stub_ir.registries.values():
+                for overload in registry.overloads:
+                    literals.add(overload.query_literal)
+            return literals
         except Exception as e:
             logging.getLogger(__name__).warning(
                 "Failed to parse existing stub %s: %s", stub_path, e
@@ -68,7 +83,10 @@ class StubMerger:
             return set()
 
     def collect_literal_strings(self, tree: ast.AST) -> set[str]:
-        """Collect all string values used inside Literal[...] type annotations."""
+        """Collect all string values used inside Literal[...] type annotations.
+        
+        Legacy method for backward compatibility.
+        """
         literals: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Subscript):
@@ -87,14 +105,13 @@ class StubMerger:
         """Parse stub source and return literals only from the given class body."""
         try:
             tree = ast.parse(stub_source)
+            stub_ir = self._pyi_parser.parse_ast(tree)
+            registry = stub_ir.get_registry(class_name)
+            if registry:
+                return {o.query_literal for o in registry.overloads}
+            return set()
         except Exception:
             return set()
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef) and node.name == class_name:
-                # Build a temporary module from the class body to reuse collector
-                fake_module = ast.Module(body=node.body, type_ignores=[])
-                return self.collect_literal_strings(fake_module)
-        return set()
 
     def find_class_span(self, stub_source: str, class_name: str) -> tuple[int, int] | None:
         """Find 1-based (start_line, end_line) span of class in source using AST."""
@@ -213,80 +230,35 @@ class StubMerger:
         export_name: str = "sql",
         prune: bool = False,
     ) -> str:
-        """Merge new calls with existing stub file using AST to update only the class.
+        """Merge new calls with existing stub file using IR-based approach.
 
         - Incremental: add only missing overloads into the class body.
         - Full mode: regenerate the class block; keep imports and aliases intact.
         - Prune: when combined with full_mode, removes overloads not in new_calls.
         """
-        # If file doesn't exist, generate a fresh full stub
-        if not output_path.exists():
-            header: list[str] = []
-            # Add conditional imports derived from new_calls (stdlib first)
-            for mod in compute_additional_imports(new_calls):
-                header.append(f"import {mod}")
-            # Add blank line between typing and sqlty imports
-            # Third-party and local imports
-            header.extend(
-                [
-                    "from typing import Literal, overload",
-                    "",
-                    f"from sqlty import SQL, {base_class}",
-                    "",
-                    "",
-                ]
-            )
-            class_block = self.generate_class_block(
-                new_calls, class_name, base_class, relative_to=output_path.parent
-            )
-            alias = [
-                "",
-                f"{export_name} = {class_name}.{self.function_name}",
-                "",
-            ]
-            return "\n".join(header + [class_block] + alias)
-
-        # Read existing content
-        stub_source = output_path.read_text()
-
-        if full_mode:
-            # Replace only the class block
-            span = self.find_class_span(stub_source, class_name)
-            class_block = self.generate_class_block(
-                new_calls, class_name, base_class, relative_to=output_path.parent
-            )
-            if not span:
-                # No class found; append at end preserving file
-                return stub_source.rstrip() + "\n\n" + class_block + "\n"
-            start, end = span
-            lines = stub_source.splitlines()
-            new_lines = lines[: start - 1] + class_block.splitlines() + lines[end:]
-            return "\n".join(new_lines) + ("\n" if stub_source.endswith("\n") else "")
-
-        # Incremental: add only missing overloads
-        existing_literals = self.parse_stub_class_literals(stub_source, class_name)
-        missing_calls = [c for c in new_calls if c["literal"] not in existing_literals]
-        if not missing_calls:
-            return stub_source
-        insertion_line = self.find_class_insertion_line(stub_source, class_name)
-        if insertion_line is None:
-            # Fallback: append full class block and alias at end
-            class_block = self.generate_class_block(
-                new_calls, class_name, base_class, relative_to=output_path.parent
-            )
-            alias = [
-                "",
-                f"{export_name} = {class_name}.{self.function_name}",
-                "",
-            ]
-            return stub_source.rstrip() + "\n\n" + class_block + "\n".join(alias)
-        # Build insertion text
-        insertion_text = "".join(
-            self.generate_overload_method_block(c, relative_to=output_path.parent) + "\n"
-            for c in missing_calls
+        # Parse new calls to IR
+        new_stub = self._call_parser.parse_calls(
+            new_calls, class_name, base_class, export_name
         )
-        lines = stub_source.splitlines()
-        # insertion_line is 1-based; insert before this line
-        zero_idx = max(0, insertion_line - 1)
-        new_lines = lines[:zero_idx] + insertion_text.splitlines() + lines[zero_idx:]
-        return "\n".join(new_lines) + ("\n" if stub_source.endswith("\n") else "")
+        
+        # If file doesn't exist, generate fresh stub
+        if not output_path.exists():
+            return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
+        
+        # Parse existing stub to IR
+        existing_stub = self._pyi_parser.parse_file(output_path)
+        
+        # Determine merge mode
+        if prune:
+            mode = "prune"
+        elif full_mode:
+            mode = "full"
+        else:
+            mode = "incremental"
+        
+        # Merge each registry from new stub into existing stub
+        for registry_name, new_registry in new_stub.registries.items():
+            existing_stub.merge_registry(new_registry, mode=mode)
+        
+        # Serialize back to text
+        return self._serializer.serialize_to_text(existing_stub, relative_to=output_path.parent)
