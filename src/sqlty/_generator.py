@@ -268,15 +268,16 @@ class TypeStubGenerator:
 
         # Resolve imported sources
         for _, module_name in collector.import_sources.items():
-            registry_module = self._registry_detector.resolve_import_to_registry_module(
+            resolved_module = self._registry_detector.resolve_import_to_registry_module(
                 module_name, filepath
             )
-            if registry_module:
-                registry_sources.add(registry_module)
-                # Update calls that use this import with the registry source
+            if resolved_module:
+                registry_sources.add(resolved_module)
+
+                # Update calls that use this import with the resolved registry source
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
-                        call["registry_source"] = registry_module
+                        call["registry_source"] = resolved_module
 
         # For calls without a registry_source, check if they're in the current file's registry
         current_module = filepath.stem

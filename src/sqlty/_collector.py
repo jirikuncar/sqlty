@@ -77,13 +77,22 @@ class LiteralCallCollector(ast.NodeVisitor):
 
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
-            # Always treat direct calls to the target function as valid, even if not imported
+            # Check if it's a call to the target function or an alias/import of it
             if func_name == self.function_name or func_name.endswith(f"_{self.function_name}"):
                 is_target_call = True
                 # Check if it was imported from somewhere
                 if func_name in self.import_sources:
                     registry_source = self.import_sources[func_name]
                 # If not imported, still mark as valid (no registry_source)
+            elif func_name in self.import_sources:
+                # This is an imported/aliased name (e.g., sql1 from "import sql as sql1")
+                # Check if it's an alias of sql by looking at class_imports
+                if (
+                    func_name in self.class_imports
+                    and self.class_imports[func_name] == self.function_name
+                ):
+                    is_target_call = True
+                    registry_source = self.import_sources[func_name]
 
         # Check for qualified call: module.sql(...) or RegistryClass.sql(...)
         if isinstance(node.func, ast.Attribute) and node.func.attr == self.function_name:

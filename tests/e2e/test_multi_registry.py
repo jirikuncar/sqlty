@@ -18,7 +18,7 @@ def test_multi_registry_different_files(tmp_path: Path, cli, mypy, setup_registr
 
     # Create app using both registries
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from user_queries import sql as user_sql
 from post_queries import sql as post_sql
@@ -31,7 +31,7 @@ users: SQL[tuple[int, str]] = user_sql("SELECT id::INTEGER, name::TEXT FROM user
 
 # Post queries
 posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM posts")
-''')
+""")
 
     # Generate stubs
     result = cli([str(tmp_path), "--mode=full"])
@@ -47,63 +47,57 @@ posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM pos
 
     # Snapshot user stub
     user_stub_content = user_stub.read_text()
-    assert user_stub_content == snapshot("""\
+    assert user_stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class UserQuery(SQLRegistry):
-    \"\"\"User-related queries with type-safe overloads.\"\"\"
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
     ) -> SQL[tuple[int, str]]:
-        # from app:11
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = UserQuery.sql
-""")
+''')
 
     # Snapshot post stub
     post_stub_content = post_stub.read_text()
-    assert post_stub_content == snapshot("""\
+    assert post_stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class PostQuery(SQLRegistry):
-    \"\"\"Post-related queries with type-safe overloads.\"\"\"
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT id::INTEGER, title::TEXT FROM posts"],
     ) -> SQL[tuple[int, str]]:
-        # from app:14
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = PostQuery.sql
-""")
+''')
 
     # Validate with mypy
     mypy_result = mypy([str(app_file), "--strict"])
@@ -111,7 +105,9 @@ sql = PostQuery.sql
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_multi_registry_same_query_different_registries(tmp_path: Path, cli, setup_registry_file) -> None:
+def test_multi_registry_same_query_different_registries(
+    tmp_path: Path, cli, setup_registry_file
+) -> None:
     """Test that same query in different registries creates separate overloads."""
     # Create first registry
     setup_registry_file(tmp_path, "registry1.py", "Registry1")
@@ -121,7 +117,7 @@ def test_multi_registry_same_query_different_registries(tmp_path: Path, cli, set
 
     # Create app using the same query with both registries
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from registry1 import sql as sql1
 from registry2 import sql as sql2
@@ -132,7 +128,7 @@ if TYPE_CHECKING:
 # Same query used by both registries
 query1: SQL[tuple[int]] = sql1("SELECT 1::INTEGER")
 query2: SQL[tuple[int]] = sql2("SELECT 1::INTEGER")
-''')
+""")
 
     # Generate stubs
     result = cli([str(tmp_path), "--mode=full"])
@@ -167,7 +163,7 @@ def test_nested_package_structure(tmp_path: Path, cli) -> None:
 
     # Create registry in nested package
     users_file = queries_dir / "users.py"
-    users_file.write_text('''from sqlty import SQLRegistry
+    users_file.write_text("""from sqlty import SQLRegistry
 
 
 class UserQuery(SQLRegistry):
@@ -175,11 +171,11 @@ class UserQuery(SQLRegistry):
 
 
 sql = UserQuery.sql
-''')
+""")
 
     # Create app that uses the nested registry
     app_file = package_dir / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from myapp.queries.users import sql
 
@@ -187,7 +183,7 @@ if TYPE_CHECKING:
     from sqlty import SQL
 
 query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users")
-''')
+""")
 
     # Generate stubs
     result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})

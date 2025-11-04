@@ -27,7 +27,7 @@ sql = Query.sql
 ''')
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -53,7 +53,7 @@ def example_usage() -> None:
     users: Iterator[tuple[int, str]]
     posts: Iterator[tuple[int, str, str]]
     counts: Iterator[tuple[int]]
-''')
+""")
 
     # Generate stub
     result = subprocess.run(
@@ -79,53 +79,46 @@ def example_usage() -> None:
     assert "SELECT COUNT(*)::INTEGER FROM users" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class Query(SQLRegistry):
-    \"\"\"Query registry for database operations with type-safe overloads.\"\"\"
-
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
-    ) -> SQL[tuple[int, str]]:
-        # from app:10
-        ...
-
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal[
-            "SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id"
-        ],
-    ) -> SQL[tuple[int, str, str]]:
-        # from app:14
-        ...
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
     ) -> SQL[tuple[int]]:
-        # from app:18
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
+    def sql(
         cls,
-        query: T,
-    ) -> T: ...
+        query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
+    ) -> SQL[tuple[int, str]]:
+        ...
+    \n\
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id"],
+    ) -> SQL[tuple[int, str, str]]:
+        ...
+    \n\
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = Query.sql
-""")
+''')
 
     # Validate with mypy
     mypy_result = subprocess.run(
@@ -140,7 +133,7 @@ sql = Query.sql
 def test_query_with_iterator_return_type(tmp_path: Path) -> None:
     """Test that SQL[tuple[...]] works with Iterator[tuple[...]] in type checking."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -148,7 +141,7 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -194,7 +187,7 @@ def fetch_users() -> None:
 def test_parameterized_query_type_safety(tmp_path: Path) -> None:
     """Test that parameterized queries maintain type safety."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -202,7 +195,7 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING

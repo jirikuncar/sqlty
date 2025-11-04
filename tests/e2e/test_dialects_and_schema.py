@@ -13,7 +13,7 @@ from inline_snapshot import snapshot
 def test_postgres_dialect(tmp_path: Path) -> None:
     """Test PostgreSQL-specific type inference."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -21,16 +21,16 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # PostgreSQL-specific types
 query1 = sql("SELECT id::INTEGER, name::TEXT, created::TIMESTAMP FROM users")
 query2 = sql("SELECT data::JSONB FROM settings")
 query3 = sql("SELECT tags::TEXT[] FROM posts")
-''')
+""")
 
     # Generate stub with PostgreSQL dialect
     result = subprocess.run(
@@ -62,7 +62,7 @@ query3 = sql("SELECT tags::TEXT[] FROM posts")
 def test_mysql_dialect(tmp_path: Path) -> None:
     """Test MySQL-specific type inference."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -70,14 +70,14 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # MySQL-specific casts
 query = sql("SELECT CAST(id AS SIGNED), CAST(name AS CHAR), CAST(price AS DECIMAL) FROM products")
-''')
+""")
 
     # Generate stub with MySQL dialect
     result = subprocess.run(
@@ -108,7 +108,7 @@ def test_schema_based_type_inference(tmp_path: Path) -> None:
     """Test type inference using a schema file."""
     # Create schema file
     schema_file = tmp_path / "schema.sql"
-    schema_file.write_text('''CREATE TABLE users (
+    schema_file.write_text("""CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT NOT NULL,
@@ -121,10 +121,10 @@ CREATE TABLE posts (
     title TEXT NOT NULL,
     content TEXT
 );
-''')
+""")
 
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -132,15 +132,15 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Queries without explicit casts - should use schema for inference
 query1 = sql("SELECT id, name, email FROM users")
 query2 = sql("SELECT id, title FROM posts")
-''')
+""")
 
     # Generate stub with schema file
     result = subprocess.run(
@@ -171,7 +171,7 @@ query2 = sql("SELECT id, title FROM posts")
 def test_without_type_casts_fallback(tmp_path: Path) -> None:
     """Test that queries without casts fall back to generic string types."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -179,14 +179,14 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Query without any type information
 query = sql("SELECT id, name FROM users")
-''')
+""")
 
     # Generate stub without schema
     result = subprocess.run(
@@ -209,7 +209,7 @@ query = sql("SELECT id, name FROM users")
 def test_mixed_typed_and_untyped_queries(tmp_path: Path) -> None:
     """Test mix of queries with and without type casts."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -217,17 +217,17 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Query with explicit casts
 typed_query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
 # Query without casts
 untyped_query = sql("SELECT id, name FROM posts")
-''')
+""")
 
     # Generate stub
     result = subprocess.run(
@@ -246,48 +246,44 @@ untyped_query = sql("SELECT id, name FROM posts")
     assert "SELECT id, name FROM posts" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class Query(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
-
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
-    ) -> SQL[tuple[int, str]]:
-        # from app:4
-        ...
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT id, name FROM posts"],
     ) -> SQL[tuple[str, str]]:
-        # from app:7
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
+    def sql(
         cls,
-        query: T,
-    ) -> T: ...
+        query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
+    ) -> SQL[tuple[int, str]]:
+        ...
+    \n\
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = Query.sql
-""")
+''')
 
 
 def test_uuid_type_inference(tmp_path: Path) -> None:
     """Test UUID type inference."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -295,14 +291,14 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Query with UUID type
 query = sql("SELECT id::UUID, name::TEXT FROM users")
-''')
+""")
 
     # Generate stub
     result = subprocess.run(

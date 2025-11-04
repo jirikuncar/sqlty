@@ -39,7 +39,7 @@ Tests mypy integration:
 ### `test_dialects_and_schema.py`
 Tests SQL dialect support and schema-based inference:
 - PostgreSQL dialect
-- MySQL dialect  
+- MySQL dialect
 - Schema-based type inference
 - Fallback to generic types
 - Mixed typed/untyped queries
@@ -164,10 +164,10 @@ def test_new_feature(tmp_path: Path) -> None:
     # 1. Create source files
     queries_file = tmp_path / "queries.py"
     queries_file.write_text('''...''')
-    
+
     app_file = tmp_path / "app.py"
     app_file.write_text('''...''')
-    
+
     # 2. Run generator
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -175,13 +175,13 @@ def test_new_feature(tmp_path: Path) -> None:
         text=True,
     )
     assert result.returncode == 0
-    
+
     # 3. Verify and snapshot
     stub_file = tmp_path / "queries.pyi"
     assert stub_file.exists()
     stub_content = stub_file.read_text()
     assert stub_content == snapshot("""...""")
-    
+
     # 4. Run mypy
     mypy_result = subprocess.run(
         [sys.executable, "-m", "mypy", str(app_file), "--strict"],

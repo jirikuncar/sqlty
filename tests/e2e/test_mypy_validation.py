@@ -6,15 +6,13 @@ and that type annotations are properly inferred and validated.
 
 from pathlib import Path
 
-from inline_snapshot import snapshot
-
 
 def test_mypy_validates_query_types(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test that mypy validates query return types correctly."""
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -27,12 +25,14 @@ user_id: int
 user_name: str
 for user_id, user_name in []:
     print(f"User {user_id}: {user_name}")
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
 
-    mypy_result = mypy([str(app_file), "--strict"])
+    mypy_result = mypy(
+        [str(app_file), "--strict"],
+    )
     assert mypy_result.returncode == 0
 
 
@@ -41,7 +41,7 @@ def test_mypy_catches_type_mismatch(tmp_path: Path, cli, mypy, setup_queries_fil
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 q: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 wrong: SQL[tuple[str, int]] = q
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
@@ -65,7 +65,7 @@ def test_mypy_infers_tuple_unpacking(tmp_path: Path, cli, mypy, setup_queries_fi
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -85,7 +85,7 @@ if TYPE_CHECKING:
     results: Iterator[tuple[int, str, str]] = execute(conn, query, {})
     for user_id, name, email in results:
         process_user(user_id, name, email)
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
@@ -99,7 +99,7 @@ def test_mypy_with_multiple_queries(tmp_path: Path, cli, mypy, setup_queries_fil
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -119,7 +119,7 @@ def check_types() -> None:
     i: SQL[tuple[int]] = int_query
     s: SQL[tuple[str]] = str_query
     m: SQL[tuple[int, str, str]] = multi_query
-''')
+""")
 
     # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
@@ -145,7 +145,7 @@ def test_mypy_with_query_parameters(tmp_path: Path, cli, mypy, setup_queries_fil
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -156,7 +156,7 @@ query: SQL[tuple[int, str]] = sql(
     "SELECT id::INTEGER, name::TEXT FROM users WHERE id = :user_id"
 )
 result_type: SQL[tuple[int, str]] = query
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
@@ -176,7 +176,7 @@ def test_mypy_with_complex_types(tmp_path: Path, cli, mypy, setup_queries_file) 
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -186,7 +186,7 @@ if TYPE_CHECKING:
 query: SQL[tuple[int, str, str]] = sql(
     "SELECT id::INTEGER, data::TEXT, tags::TEXT FROM items"
 )
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0

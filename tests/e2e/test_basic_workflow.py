@@ -47,51 +47,46 @@ query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 
     stub_content = stub_file.read_text()
 
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class Query(SQLRegistry):
-    \"\"\"Application query registry with type-safe overloads.\"\"\"
-
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER FROM users"],
-    ) -> SQL[tuple[int]]:
-        # from app:10
-        ...
-
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
-    ) -> SQL[tuple[int, str]]:
-        # from app:13
-        ...
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
     ) -> SQL[tuple[int]]:
-        # from app:16
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
+    def sql(
         cls,
-        query: T,
-    ) -> T: ...
+        query: Literal["SELECT id::INTEGER FROM users"],
+    ) -> SQL[tuple[int]]:
+        ...
+    \n\
+    @overload
+    @classmethod
+    def sql(
+        cls,
+        query: Literal["SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id"],
+    ) -> SQL[tuple[int, str]]:
+        ...
+    \n\
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = Query.sql
-""")
+''')
 
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
@@ -107,7 +102,7 @@ def test_typed_query_annotation(
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -115,7 +110,7 @@ if TYPE_CHECKING:
     from sqlty import SQL
 
 q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
@@ -140,7 +135,7 @@ def test_incremental_stub_update(
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -148,7 +143,7 @@ if TYPE_CHECKING:
     from sqlty import SQL
 
 query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
@@ -157,7 +152,7 @@ query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
     initial_stub = stub_file.read_text()
     assert "SELECT id::INTEGER FROM users" in initial_stub
 
-    app_file.write_text('''from typing import TYPE_CHECKING
+    app_file.write_text("""from typing import TYPE_CHECKING
 
 from queries import sql
 
@@ -166,7 +161,7 @@ if TYPE_CHECKING:
 
 query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
-''')
+""")
 
     result = cli([str(tmp_path), "--mode=full"])
     assert result.returncode == 0
@@ -175,42 +170,38 @@ query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
     assert "SELECT id::INTEGER FROM users" in updated_stub
     assert "SELECT name::TEXT FROM users WHERE id = :id" in updated_stub
 
-    assert updated_stub == snapshot("""\
+    assert updated_stub == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class Query(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT id::INTEGER FROM users"],
     ) -> SQL[tuple[int]]:
-        # from app:8
         ...
-
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT name::TEXT FROM users WHERE id = :id"],
     ) -> SQL[tuple[str]]:
-        # from app:11
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = Query.sql
-""")
+''')
 
 
 def test_multiline_query_formatting(
@@ -249,39 +240,34 @@ query: SQL[tuple[int, str, str]] = sql("""
     assert "SELECT" in stub_content
     assert "FROM users" in stub_content
 
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class Query(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
-        query: Literal[
-            \"\"\"
+        query: Literal["""
     SELECT
         id::INTEGER,
         name::TEXT,
         email::TEXT
     FROM users
     WHERE active = true
-\"\"\"
-        ],
+"""],
     ) -> SQL[tuple[int, str, str]]:
-        # from app:8
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = Query.sql
-""")
+''')

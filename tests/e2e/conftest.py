@@ -77,10 +77,10 @@ def setup_queries_file() -> Callable[[Path, str, str | None], Path]:
     ) -> Path:
         """Create a queries.py file with SQLRegistry."""
         queries_file = tmp_path / "queries.py"
-        
+
         docstring_line = f'    """{docstring}"""\n\n' if docstring else ""
-        
-        content = f'''from sqlty import SQLRegistry
+
+        content = f"""from sqlty import SQLRegistry
 
 
 class {class_name}(SQLRegistry):
@@ -88,7 +88,7 @@ class {class_name}(SQLRegistry):
 
 
 sql = {class_name}.sql
-'''
+"""
         queries_file.write_text(content)
         return queries_file
 
@@ -120,10 +120,10 @@ def setup_registry_file() -> Callable[[Path, str, str, str | None], Path]:
     ) -> Path:
         """Create a custom registry file."""
         registry_file = tmp_path / filename
-        
+
         docstring_line = f'    """{docstring}"""\n\n' if docstring else ""
-        
-        content = f'''from sqlty import SQLRegistry
+
+        content = f"""from sqlty import SQLRegistry
 
 
 class {class_name}(SQLRegistry):
@@ -131,7 +131,7 @@ class {class_name}(SQLRegistry):
 
 
 sql = {class_name}.sql
-'''
+"""
         registry_file.write_text(content)
         return registry_file
 
@@ -165,6 +165,7 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
 
         # Set default kwargs for mypy execution
         default_kwargs = {
+            # "cwd": str(tmpdir),
             "capture_output": True,
             "text": True,
         }

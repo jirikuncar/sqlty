@@ -15,7 +15,7 @@ End-to-end tests that follow best practices:
 
 See [tests/e2e/README.md](e2e/README.md) for detailed information.
 
-### `tests/generator/` ⚠️ **INTERNAL ONLY**  
+### `tests/generator/` ⚠️ **INTERNAL ONLY**
 Unit tests for internal generator implementation details.
 These import from `sqlty._generator` and test internal logic.
 Useful for development but not for end-to-end validation.
@@ -114,7 +114,7 @@ def test_something(tmp_path):
         text=True,
     )
     assert result.returncode == 0
-    
+
     stub_file = tmp_path / "queries.pyi"
     assert stub_file.exists()
     assert stub_file.read_text() == snapshot("""...""")
@@ -161,5 +161,5 @@ Copy and modify the template when adding new test cases.
 9. **Document assumptions** about feature implementation status
 10. **Use clear variable names** like `queries_file`, `app_file`, `stub_file`
 
-For questions or clarification, see the original issue: 
+For questions or clarification, see the original issue:
 "Refactor tests to use inline-snapshot and mypy check"

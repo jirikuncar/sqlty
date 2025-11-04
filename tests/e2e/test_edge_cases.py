@@ -22,12 +22,12 @@ def test_empty_project(tmp_path: Path) -> None:
 
 def test_no_queries_found(tmp_path: Path) -> None:
     """Test how the tool handles a project with registry but no queries.
-    
+
     The tool should complete successfully, either creating a minimal
     stub file with just the generic overload or skipping stub generation.
     """
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -35,16 +35,16 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     # App file without any sql() calls
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 
 def hello() -> str:
     return "Hello, World!"
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -65,7 +65,7 @@ def hello() -> str:
 def test_syntax_error_in_source(tmp_path: Path) -> None:
     """Test handling of syntax errors in source files."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -73,15 +73,15 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     # File with syntax error
     bad_file = tmp_path / "bad.py"
-    bad_file.write_text('''from queries import sql
+    bad_file.write_text("""from queries import sql
 
 def broken(
     # Missing closing parenthesis and body
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path)],
@@ -96,7 +96,7 @@ def broken(
 def test_non_literal_query_string(tmp_path: Path) -> None:
     """Test that non-literal query strings are skipped with warning."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -104,10 +104,10 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Non-literal query - should be warned about
 dynamic_query = "SELECT * FROM users"
@@ -115,7 +115,7 @@ query = sql(dynamic_query)
 
 # This should work
 static_query = sql("SELECT id::INTEGER FROM users")
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -136,7 +136,7 @@ static_query = sql("SELECT id::INTEGER FROM users")
 def test_duplicate_queries_same_file(tmp_path: Path) -> None:
     """Test handling of duplicate queries in the same file."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -144,16 +144,16 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Same query used multiple times
 query1 = sql("SELECT id::INTEGER FROM users")
 query2 = sql("SELECT id::INTEGER FROM users")
 query3 = sql("SELECT id::INTEGER FROM users")
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -173,7 +173,7 @@ query3 = sql("SELECT id::INTEGER FROM users")
 def test_very_long_query(tmp_path: Path) -> None:
     """Test handling of very long SQL queries."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -181,15 +181,15 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     # Create a very long query
     columns = ", ".join([f"col{i}::TEXT" for i in range(50)])
     app_file = tmp_path / "app.py"
-    app_file.write_text(f'''from queries import sql
+    app_file.write_text(f"""from queries import sql
 
 query = sql("SELECT {columns} FROM big_table")
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -204,7 +204,7 @@ query = sql("SELECT {columns} FROM big_table")
 def test_unicode_in_query(tmp_path: Path) -> None:
     """Test handling of Unicode characters in queries."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -212,15 +212,15 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Query with Unicode
 query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE name = :name")
 # params = {"name": "José García"} -- would contain unicode
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -234,7 +234,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE name = :name")
 def test_comments_in_queries(tmp_path: Path) -> None:
     """Test SQL queries with SQL comments."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -242,7 +242,7 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from queries import sql
@@ -273,7 +273,7 @@ query = sql("""
 def test_query_with_semicolon(tmp_path: Path) -> None:
     """Test query ending with semicolon."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -281,14 +281,14 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 # Query with trailing semicolon
 query = sql("SELECT id::INTEGER FROM users;")
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
@@ -308,7 +308,7 @@ query = sql("SELECT id::INTEGER FROM users;")
 def test_nested_function_calls(tmp_path: Path) -> None:
     """Test sql() calls inside function definitions."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -316,7 +316,7 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from queries import sql
@@ -351,7 +351,7 @@ def get_posts_query():
 def test_class_method_queries(tmp_path: Path) -> None:
     """Test sql() calls inside class methods."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -359,7 +359,7 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from queries import sql
@@ -396,7 +396,7 @@ class UserRepository:
 def test_query_in_conditional(tmp_path: Path) -> None:
     """Test sql() calls inside conditional blocks."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import SQLRegistry
 
 
 class Query(SQLRegistry):
@@ -404,10 +404,10 @@ class Query(SQLRegistry):
 
 
 sql = Query.sql
-''')
+""")
 
     app_file = tmp_path / "app.py"
-    app_file.write_text('''from queries import sql
+    app_file.write_text("""from queries import sql
 
 DEBUG = True
 
@@ -417,7 +417,7 @@ if DEBUG:
 
 # Always used query
 user_query = sql("SELECT id::INTEGER FROM users")
-''')
+""")
 
     result = subprocess.run(
         [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
