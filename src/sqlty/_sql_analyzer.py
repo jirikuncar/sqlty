@@ -124,12 +124,56 @@ class SQLAnalyzer:
         """
         Analyze a SELECT query and extract column information.
 
-        Returns None if the query is not a SELECT or cannot be parsed.
+        Also supports UPDATE/DELETE/INSERT/MERGE with RETURNING clause.
+
+        Returns None if the query is not a SELECT or does not have a RETURNING clause.
         """
         try:
             ast = parse_one(sql, dialect=self.dialect)
         except Exception:
             return None
+
+        # Check for RETURNING clause in UPDATE/DELETE/INSERT/MERGE statements
+        returning_expr = ast.find(exp.Returning)
+        if returning_expr:
+            # Process RETURNING clause similar to SELECT
+            columns: list[ColumnInfo] = []
+            for projection in returning_expr.expressions:
+                col_name = projection.alias_or_name
+                python_type: str | None = None
+                sql_type: str | None = None
+
+                # Try to extract type information
+                if isinstance(projection, exp.Cast):
+                    # Explicit cast: RETURNING id::INTEGER
+                    sql_type = str(projection.to)
+                    python_type = self._sql_to_python_type(sql_type)
+                elif isinstance(projection, exp.Column):
+                    # Simple column: RETURNING id
+                    # Try to infer type from schema if available
+                    if self.schema:
+                        # Find the table this statement operates on
+                        table_expr = ast.find(exp.Table)
+                        if table_expr:
+                            table_name = table_expr.name
+                            sql_type = self._get_column_type_from_schema(table_name, col_name)
+                            if sql_type:
+                                python_type = self._sql_to_python_type(sql_type)
+                elif isinstance(projection, exp.Count):
+                    # COUNT(*) always returns integer
+                    python_type = "int"
+                    sql_type = "INTEGER"
+                elif isinstance(projection, exp.Sum):
+                    # SUM typically returns numeric
+                    python_type = "float"
+                    sql_type = "NUMERIC"
+                elif isinstance(projection, exp.Func):
+                    # Other functions - try to infer from function name
+                    python_type = self._infer_from_function(projection)
+
+                columns.append(ColumnInfo(col_name, python_type, sql_type))
+
+            return columns
 
         # Find the SELECT expression
         select_expr = ast.find(exp.Select)
