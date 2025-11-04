@@ -413,3 +413,110 @@ sql = Query.sql
     for imp in stub.imports:
         assert imp.ast_node is not None
         assert isinstance(imp.ast_node, (ast.Import, ast.ImportFrom))
+
+
+def test_duplicate_alias_omission():
+    """Test that duplicate export aliases are omitted from serialized output."""
+    stub = StubFile()
+
+    # Create two registries with the same export name
+    registry1 = RegistryClass(name="QueryA", base_class="SQLRegistry", export_name="sql")
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+
+    registry2 = RegistryClass(name="QueryB", base_class="SQLRegistry", export_name="sql")
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[str]]")
+    )
+
+    stub.add_registry(registry1)
+    stub.add_registry(registry2)
+
+    # Serialize to text
+    serializer = IRToTextSerializer()
+    text = serializer.serialize_to_text(stub)
+
+    # Both classes should be present
+    assert "class QueryA(SQLRegistry):" in text
+    assert "class QueryB(SQLRegistry):" in text
+
+    # No duplicate aliases should be present
+    # Count how many times "sql = " appears (should be 0 because export name is duplicated)
+    alias_count = text.count("sql = ")
+    assert alias_count == 0, f"Expected 0 aliases but found {alias_count}"
+
+
+def test_unique_alias_inclusion():
+    """Test that unique export aliases are included in serialized output."""
+    stub = StubFile()
+
+    # Create registries with unique export names
+    registry1 = RegistryClass(name="UserQuery", base_class="SQLRegistry", export_name="user_sql")
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT * FROM users", return_type="SQL[tuple[int, str]]")
+    )
+
+    registry2 = RegistryClass(name="PostQuery", base_class="SQLRegistry", export_name="post_sql")
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT * FROM posts", return_type="SQL[tuple[int, str]]")
+    )
+
+    stub.add_registry(registry1)
+    stub.add_registry(registry2)
+
+    # Serialize to text
+    serializer = IRToTextSerializer()
+    text = serializer.serialize_to_text(stub)
+
+    # Both classes should be present
+    assert "class UserQuery(SQLRegistry):" in text
+    assert "class PostQuery(SQLRegistry):" in text
+
+    # Both unique aliases should be present
+    assert "user_sql = UserQuery.sql" in text
+    assert "post_sql = PostQuery.sql" in text
+
+
+def test_mixed_alias_scenario():
+    """Test scenario with both unique and duplicate export names."""
+    stub = StubFile()
+
+    # Two registries with the same export name
+    registry1 = RegistryClass(name="QueryA", base_class="SQLRegistry", export_name="sql")
+    registry1.add_overload(
+        OverloadSignature(query_literal="SELECT 1", return_type="SQL[tuple[int]]")
+    )
+
+    registry2 = RegistryClass(name="QueryB", base_class="SQLRegistry", export_name="sql")
+    registry2.add_overload(
+        OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[str]]")
+    )
+
+    # One registry with a unique export name
+    registry3 = RegistryClass(
+        name="SpecialQuery", base_class="SQLRegistry", export_name="special_sql"
+    )
+    registry3.add_overload(
+        OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[float]]")
+    )
+
+    stub.add_registry(registry1)
+    stub.add_registry(registry2)
+    stub.add_registry(registry3)
+
+    # Serialize to text
+    serializer = IRToTextSerializer()
+    text = serializer.serialize_to_text(stub)
+
+    # All classes should be present
+    assert "class QueryA(SQLRegistry):" in text
+    assert "class QueryB(SQLRegistry):" in text
+    assert "class SpecialQuery(SQLRegistry):" in text
+
+    # Duplicate aliases should NOT be present
+    assert "sql = QueryA.sql" not in text
+    assert "sql = QueryB.sql" not in text
+
+    # Unique alias should be present
+    assert "special_sql = SpecialQuery.sql" in text

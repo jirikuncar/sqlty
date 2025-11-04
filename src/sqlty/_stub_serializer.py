@@ -41,9 +41,18 @@ class IRToASTSerializer:
             class_node = self._serialize_registry_class(registry)
             module_body.append(class_node)
 
+        # Count export names to detect duplicates
+        export_name_counts: dict[str, int] = {}
+        for registry in stub.registries.values():
+            if registry.export_name:
+                export_name_counts[registry.export_name] = (
+                    export_name_counts.get(registry.export_name, 0) + 1
+                )
+
+        # Only create aliases for unique export names
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
-            if registry.export_name:
+            if registry.export_name and export_name_counts.get(registry.export_name, 0) == 1:
                 alias_node = self._serialize_export_alias(registry)
                 module_body.append(alias_node)
 
