@@ -198,11 +198,18 @@ class SQLAnalyzer:
 
     def analyze_select(self, sql: str) -> list[ColumnInfo] | None:
         """
-        Analyze a SELECT query and extract column information.
+        Analyze a SQL query and extract column information from result set.
 
-        Also supports UPDATE/DELETE/INSERT/MERGE with RETURNING clause.
+        Supports:
+        - SELECT queries
+        - UPDATE/DELETE/INSERT/MERGE with RETURNING clause
 
-        Returns None if the query is not a SELECT or does not have a RETURNING clause.
+        Args:
+            sql: SQL query string to analyze
+
+        Returns:
+            List of ColumnInfo objects if the query returns results, None otherwise.
+            Returns None for DML statements (UPDATE/DELETE/INSERT/MERGE) without RETURNING.
         """
         try:
             ast = parse_one(sql, dialect=self.dialect)
