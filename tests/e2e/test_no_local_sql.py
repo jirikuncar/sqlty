@@ -141,7 +141,7 @@ from query import A, B
 if TYPE_CHECKING:
     from sqlty import SQL
 
-# Use classes directly
+# Use classes directly with local aliases
 qa = A.sql
 qb = B.sql
 
@@ -160,6 +160,6 @@ b: SQL[tuple[str]] = qb("SELECT 'b'::TEXT")
     stub_content = stub_file.read_text()
     assert "class A(SQLRegistry)" in stub_content, "Class A should be in stub"
     assert "class B(SQLRegistry)" in stub_content, "Class B should be in stub"
-    # These queries are in app.py but should still be in query.pyi
+    # These queries are in app.py but should be in query.pyi since they reference query module classes
     assert "SELECT 2::INTEGER" in stub_content, "Query for A should be in stub"
     assert "SELECT 'b'::TEXT" in stub_content, "Query for B should be in stub"
