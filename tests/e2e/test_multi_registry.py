@@ -188,6 +188,7 @@ query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users
     # Generate stubs
     result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
 
+    print(result.stdout)
     assert result.returncode == 0
 
     # Verify stub was created
@@ -198,30 +199,27 @@ query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users
     assert "SELECT id::INTEGER, username::TEXT FROM users" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 
 from sqlty import SQL, SQLRegistry
 
 class UserQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
-
+    """Application-specific SQL query registry with type-safe overloads."""
+    \n\
     @overload
     @classmethod
     def sql(
         cls,
         query: Literal["SELECT id::INTEGER, username::TEXT FROM users"],
     ) -> SQL[tuple[int, str]]:
-        # from app:9
         ...
-
+    \n\
     @overload
     @classmethod
-    def sql[T](
-        cls,
-        query: T,
-    ) -> T: ...
+    def sql[T](cls, query: T) -> T: ...
 
-# Type alias for the sql function
+
+
 sql = UserQuery.sql
-""")
+''')

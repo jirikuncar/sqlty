@@ -14,6 +14,10 @@ def test_mypy_validates_query_types(tmp_path: Path, cli, mypy, setup_queries_fil
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
 
+from psycopg import Connection
+from psycopg.abc import Params
+from sqlty.drivers.psycopg import execute
+
 from queries import sql
 
 if TYPE_CHECKING:
@@ -21,9 +25,12 @@ if TYPE_CHECKING:
 
 q: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
+conn = Connection.connect("dbname=test user=postgres password=secret host=localhost port=5432")
+
 user_id: int
 user_name: str
-for user_id, user_name in []:
+
+for user_id, user_name in execute(conn, q, {}):
     print(f"User {user_id}: {user_name}")
 """)
 
@@ -33,7 +40,7 @@ for user_id, user_name in []:
     mypy_result = mypy(
         [str(app_file), "--strict"],
     )
-    assert mypy_result.returncode == 0
+    assert mypy_result.returncode == 0, mypy_result.stdout
 
 
 def test_mypy_catches_type_mismatch(tmp_path: Path, cli, mypy, setup_queries_file) -> None:

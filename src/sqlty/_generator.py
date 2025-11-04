@@ -16,6 +16,7 @@ Main orchestrator that delegates to specialized modules for:
 
 import ast
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -508,6 +509,9 @@ class TypeStubGenerator:
                     call.get("lineno", "?"),
                 )
                 continue
+
+            # Convert module name to path
+            registry_source = registry_source.replace(".", os.path.sep)
 
             # Find the actual file that defines this registry
             registry_file: Path | None = None
