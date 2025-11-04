@@ -66,7 +66,10 @@ def test_update_returning_all_columns(analyzer: SQLAnalyzer) -> None:
     columns = analyzer.analyze_select("UPDATE users SET name = 'John' RETURNING *")
 
     assert columns is not None
-    # RETURNING * returns a single str column
+    # RETURNING * is treated as a single projection expression by sqlglot.
+    # Without schema information, it defaults to a single column with unknown type (str).
+    # In practice, this would return all columns from the table, but type inference
+    # requires explicit casts or schema information.
     assert len(columns) == 1
 
 
@@ -277,6 +280,8 @@ def test_delete_returning_all(analyzer: SQLAnalyzer) -> None:
     columns = analyzer.analyze_select("DELETE FROM users WHERE active = false RETURNING *")
 
     assert columns is not None
+    # RETURNING * is treated as a single projection expression by sqlglot.
+    # See test_update_returning_all_columns for detailed explanation.
     assert len(columns) == 1
 
 
