@@ -3,7 +3,7 @@ name = "sqlty"
 dynamic = ["version"]
 description = "Type-safe SQL queries for Python with automatic stub generation"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = {file = "LICENSE"}
 authors = [
     {name = "Jiri Kuncar", email = "jiri.kuncar@gmail.com"},
