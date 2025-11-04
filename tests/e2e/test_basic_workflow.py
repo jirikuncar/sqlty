@@ -8,7 +8,6 @@ Test the complete workflow:
 """
 
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any

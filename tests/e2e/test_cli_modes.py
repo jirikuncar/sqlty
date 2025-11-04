@@ -4,7 +4,6 @@ Tests different sqlty CLI commands and modes.
 """
 
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,7 @@ def test_cli_version_command(
 ) -> None:
     """Test that --version flag is handled correctly.
     
-    The tool should either display version information (if implemented)
-    or report that the argument is not recognized.
+    The tool displays version information when --version is passed.
     """
     result = cli(["--version"], {"cwd": str(tmp_path)})
 

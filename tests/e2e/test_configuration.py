@@ -7,8 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from inline_snapshot import snapshot
-
 
 def test_config_via_pyproject_toml(tmp_path: Path) -> None:
     """Test that the tool accepts pyproject.toml configuration.
