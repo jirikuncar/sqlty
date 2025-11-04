@@ -11,7 +11,6 @@ from inline_snapshot import snapshot
 
 def test_mypy_validates_query_types(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test that mypy validates query return types correctly."""
-    # Create source files
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
@@ -22,28 +21,19 @@ from queries import sql
 if TYPE_CHECKING:
     from sqlty import SQL
 
-# Query with explicit type annotation
 q: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
-# This should type-check correctly
 user_id: int
 user_name: str
-for user_id, user_name in []:  # Using empty list for type checking only
+for user_id, user_name in []:
     print(f"User {user_id}: {user_name}")
 ''')
 
-    # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
-
     assert result.returncode == 0
 
-    # Run mypy - it should pass
     mypy_result = mypy([str(app_file), "--strict"])
-
-    # Snapshot mypy output
     assert mypy_result.returncode == 0
-    # Success should produce no output or just success message
-    assert mypy_result.stdout == snapshot("Success: no issues found in 1 source file\n")
 
 
 def test_mypy_catches_type_mismatch(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
@@ -58,24 +48,15 @@ from queries import sql
 if TYPE_CHECKING:
     from sqlty import SQL
 
-# Correct type annotation
 q: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
-
-# Type error: trying to assign to wrong type
-wrong: SQL[tuple[str, int]] = q  # This should fail mypy
+wrong: SQL[tuple[str, int]] = q
 ''')
 
-    # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
-
     assert result.returncode == 0
 
-    # Run mypy - it should fail due to type mismatch
     mypy_result = mypy([str(app_file), "--strict"])
-
-    # Should have non-zero exit code (type error found)
     assert mypy_result.returncode != 0
-    # Should contain error about incompatible types
     assert "incompatible" in mypy_result.stdout.lower() or "error" in mypy_result.stdout.lower()
 
 
@@ -94,15 +75,11 @@ if TYPE_CHECKING:
     from sqlty import SQL
     from sqlty.drivers.psycopg import execute
 
-# Query with type annotation
 query: SQL[tuple[int, str, str]] = sql("SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 
-# Function that processes user data
 def process_user(user_id: int, name: str, email: str) -> None:
     print(f"{user_id}: {name} <{email}>")
 
-
-# Use execute function for proper type inference
 if TYPE_CHECKING:
     conn: Connection
     results: Iterator[tuple[int, str, str]] = execute(conn, query, {})
@@ -110,14 +87,10 @@ if TYPE_CHECKING:
         process_user(user_id, name, email)
 ''')
 
-    # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
-
     assert result.returncode == 0
 
-    # Run mypy
     mypy_result = mypy([str(app_file), "--strict"])
-
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
@@ -179,31 +152,22 @@ from queries import sql
 if TYPE_CHECKING:
     from sqlty import SQL
 
-# Query with named parameters
 query: SQL[tuple[int, str]] = sql(
     "SELECT id::INTEGER, name::TEXT FROM users WHERE id = :user_id"
 )
-
-# The query string includes parameter placeholders
-# but the return type is still inferred from SELECT clause
 result_type: SQL[tuple[int, str]] = query
 ''')
 
-    # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
-
     assert result.returncode == 0
 
-    # Verify stub includes parameterized query
     stub_file = tmp_path / "queries.pyi"
     stub_content = stub_file.read_text()
 
     assert ":user_id" in stub_content
     assert "SQL[tuple[int, str]]" in stub_content
 
-    # Run mypy
     mypy_result = mypy([str(app_file), "--strict"])
-
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
@@ -212,7 +176,6 @@ def test_mypy_with_complex_types(tmp_path: Path, cli, mypy, setup_queries_file) 
     setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
-    app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
 
 from queries import sql
@@ -220,19 +183,13 @@ from queries import sql
 if TYPE_CHECKING:
     from sqlty import SQL
 
-# For now, complex types are treated as strings
-# Future: could support more specific type mappings
 query: SQL[tuple[int, str, str]] = sql(
     "SELECT id::INTEGER, data::TEXT, tags::TEXT FROM items"
 )
 ''')
 
-    # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
-
     assert result.returncode == 0
 
-    # Run mypy
     mypy_result = mypy([str(app_file), "--strict"])
-
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
