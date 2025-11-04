@@ -274,6 +274,11 @@ class TypeStubGenerator:
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
                         call["registry_source"] = resolved_module
+            else:
+                # If the module doesn't contain a SQLRegistry, clear registry_source for those calls
+                for call in collector.calls:
+                    if call["registry_source"] == module_name:
+                        call["registry_source"] = None
 
         # For calls without a registry_source, check if they're in the current file's registry
         current_module = filepath.stem
@@ -606,6 +611,18 @@ class TypeStubGenerator:
 
                 # Unified path: handle one or multiple classes the same way
                 if class_names:
+                    # Resolve registry_class names that might be export aliases
+                    for call in registry_calls:
+                        registry_class = call.get("registry_class")
+                        if registry_class and registry_class not in class_names:
+                            # This might be an export alias (e.g., 'qa' instead of 'A')
+                            # Try to resolve it to the actual class name
+                            resolved_class = self._registry_detector.get_class_name_from_export(
+                                registry_file, registry_class
+                            )
+                            if resolved_class and resolved_class in class_names:
+                                call["registry_class"] = resolved_class
+                    
                     # Group calls by registry_class
                     calls_by_class: dict[str | None, list[CallInfo]] = {}
                     for call in registry_calls:

@@ -128,6 +128,44 @@ class RegistryDetector:
         except Exception:
             return "sql"
 
+    def get_class_name_from_export(self, module_path: Path, export_name: str) -> str | None:
+        """Get the registry class name from an exported .sql method name.
+
+        Args:
+            module_path: Path to the Python module to check
+            export_name: Name of the exported function (e.g., 'user_sql' or 'qa')
+
+        Returns:
+            The class name (e.g., 'UserQueries' or 'A'), or None if not found
+        """
+        if not module_path.exists():
+            return None
+
+        try:
+            with open(module_path) as f:
+                source = f.read()
+            tree = ast.parse(source)
+
+            # Look for assignments like: user_sql = UserQueries.sql or qa = A.sql
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    # Check if the target matches the export_name
+                    if (
+                        node.targets
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id == export_name
+                    ):
+                        # Check if the value is ClassName.sql
+                        if isinstance(node.value, ast.Attribute):
+                            if (
+                                node.value.attr == "sql"
+                                and isinstance(node.value.value, ast.Name)
+                            ):
+                                return node.value.value.id
+            return None
+        except Exception:
+            return None
+
     def resolve_import_to_registry_module(
         self, import_source: str, source_file: Path
     ) -> str | None:
