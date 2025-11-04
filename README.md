@@ -87,7 +87,17 @@ result = execute(conn, query, {"id": 123})
 **Generate stubs:**
 
 ```bash
-sqlty . --mode=full
+# Single file (incremental updates)
+sqlty queries.py
+
+# Directory (incremental + prune stale queries + create missing stubs)
+sqlty .
+
+# Only create missing stubs (skip existing)
+sqlty . --mode=create
+
+# Custom mode combinations
+sqlty . --mode=incremental,prune
 ```
 
 **Type check:**
@@ -96,6 +106,32 @@ sqlty . --mode=full
 mypy .
 # Success: no issues found
 ```
+
+## Stub Generation Modes
+
+SQLTy supports flexible stub generation with comma-separated mode actions:
+
+- **`incremental`**: Add new query overloads to existing stubs
+- **`prune`**: Remove overloads for queries that no longer exist
+- **`create`**: Only create missing stub files (skip existing ones)
+
+**Default behavior:**
+- Single file: `incremental`
+- Directory: `incremental,prune,create`
+
+**Examples:**
+```bash
+# Update existing stubs and remove stale queries
+sqlty . --mode=incremental,prune
+
+# Create new stubs but skip existing ones
+sqlty . --mode=create
+
+# Full regeneration (replace all overloads)
+sqlty queries.py --mode=fresh
+```
+
+**Safety:** Prune mode prompts for confirmation when used on single files to prevent accidentally removing stubs for queries defined elsewhere.
 
 ### Pre-commit Hook
 
@@ -108,7 +144,8 @@ repos:
     hooks:
       - id: sqlty
         # Optional: customize with args
-        # args: [".", "--mode=full", "--schema=schema.sql"]
+        # Default mode for directories: incremental,prune,create
+        # args: [".", "--schema=schema.sql"]
 ```
 
 For more targeted stub generation (e.g., only for specific directories), you can use a local hook:
@@ -119,7 +156,7 @@ repos:
     hooks:
       - id: sqlty-src
         name: sqlty stub generation
-        entry: sqlty . --mode=full --format-command "ruff format --stdin-filename {filename}"
+        entry: sqlty . --format-command "ruff format --stdin-filename {filename}"
         language: system
         pass_filenames: false
         require_serial: true
@@ -128,7 +165,7 @@ repos:
 ```
 
 This approach allows you to:
-- Use `--mode=full` for complete regeneration ensuring consistency
+- Automatic mode selection based on directory vs file
 - Use `--format-command` to format generated stubs with your preferred formatter
 - Target specific directories with the `files` pattern
 - Customize behavior per directory or project area
