@@ -383,15 +383,17 @@ class TypeStubGenerator:
         This generates a Query class that inherits from SQLRegistry with
         @overload @classmethod sql() methods for each unique query literal.
 
-        Uses AST construction and custom unparsing for robust code generation.
+        Uses the new IR-based approach for better structure and maintainability.
         """
-        # Build the module AST using the AST builder
-        module = self._ast_builder.build_stub_module(
-            calls, class_name, base_class, export_name, relative_to
-        )
-
-        # Unparse it using custom formatter
-        return self._ast_unparser.unparse_stub_module(module, calls, relative_to)
+        # Parse calls to IR
+        from ._stub_parser import CallInfoToIRParser
+        from ._stub_serializer import IRToTextSerializer
+        
+        parser = CallInfoToIRParser(self.function_name)
+        serializer = IRToTextSerializer(self.function_name)
+        
+        stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
+        return serializer.serialize_to_text(stub_ir, relative_to=relative_to)
 
     def generate_stub_file(
         self,
