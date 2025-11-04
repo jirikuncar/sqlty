@@ -13,6 +13,7 @@ The IR provides a clean separation between:
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import ast
 
 
 @dataclass
@@ -24,12 +25,14 @@ class OverloadSignature:
         return_type: The return type annotation (e.g., "SQL[tuple[int, str]]")
         source_file: Optional source file where this query appears
         source_line: Optional line number in source file
+        ast_node: Optional reference to original AST FunctionDef node from stub
     """
 
     query_literal: str
     return_type: str
     source_file: str | None = None
     source_line: int | None = None
+    ast_node: ast.FunctionDef | None = None
 
     def __hash__(self) -> int:
         """Hash based on query literal for deduplication."""
@@ -52,6 +55,7 @@ class RegistryClass:
         overloads: Set of overload signatures for this registry
         export_name: Name used for the module-level alias (e.g., "sql", "user_sql")
         docstring: Optional class docstring
+        ast_node: Optional reference to original AST ClassDef node from stub
     """
 
     name: str
@@ -59,6 +63,7 @@ class RegistryClass:
     overloads: set[OverloadSignature] = field(default_factory=set)
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
+    ast_node: ast.ClassDef | None = None
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -103,11 +108,13 @@ class ImportStatement:
         module: Module name (e.g., "typing", "uuid")
         names: List of imported names (e.g., ["Literal", "overload"])
         from_import: True if "from X import Y", False if "import X"
+        ast_node: Optional reference to original AST Import/ImportFrom node from stub
     """
 
     module: str
     names: list[str] = field(default_factory=list)
     from_import: bool = True
+    ast_node: ast.Import | ast.ImportFrom | None = None
 
     def __hash__(self) -> int:
         """Hash for deduplication."""
@@ -132,11 +139,13 @@ class StubFile:
         imports: Set of import statements
         registries: Dictionary mapping class name to RegistryClass
         file_path: Optional path to the stub file
+        ast_module: Optional reference to original AST Module node from stub
     """
 
     imports: set[ImportStatement] = field(default_factory=set)
     registries: dict[str, RegistryClass] = field(default_factory=dict)
     file_path: Path | None = None
+    ast_module: ast.Module | None = None
 
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""

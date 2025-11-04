@@ -58,7 +58,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path)
+        stub = StubFile(file_path=file_path, ast_module=tree)
 
         for node in tree.body:
             if isinstance(node, ast.Import):
@@ -68,6 +68,7 @@ class PyiToIRParser:
                             module=alias.name,
                             names=[],
                             from_import=False,
+                            ast_node=node,
                         )
                     )
             elif isinstance(node, ast.ImportFrom) and node.module:
@@ -77,6 +78,7 @@ class PyiToIRParser:
                         module=node.module,
                         names=names,
                         from_import=True,
+                        ast_node=node,
                     )
                 )
 
@@ -101,7 +103,6 @@ class PyiToIRParser:
         Returns:
             RegistryClass or None if not a valid registry
         """
-        # Extract base class
         base_class = "SQLRegistry"
         if node.bases:
             base = node.bases[0]
@@ -121,6 +122,7 @@ class PyiToIRParser:
             name=node.name,
             base_class=base_class,
             docstring=docstring,
+            ast_node=node,
         )
 
         for item in node.body:
@@ -159,6 +161,7 @@ class PyiToIRParser:
         return OverloadSignature(
             query_literal=query_literal,
             return_type=return_type,
+            ast_node=node,
         )
 
     def _extract_literal_from_annotation(self, node: ast.FunctionDef) -> str | None:

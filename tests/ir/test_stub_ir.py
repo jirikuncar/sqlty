@@ -326,3 +326,52 @@ def test_compute_required_imports():
     from_imports = {imp.module for imp in required if imp.from_import}
     assert "typing" in from_imports
     assert "sqlty" in from_imports
+
+
+def test_ast_node_references_preserved():
+    """Test that AST node references are preserved during parsing."""
+    pyi_source = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    tree = ast.parse(pyi_source)
+    parser = PyiToIRParser()
+    stub = parser.parse_ast(tree)
+
+    # Verify StubFile has AST module reference
+    assert stub.ast_module is not None
+    assert isinstance(stub.ast_module, ast.Module)
+
+    # Verify RegistryClass has AST node reference
+    registry = stub.get_registry("Query")
+    assert registry is not None
+    assert registry.ast_node is not None
+    assert isinstance(registry.ast_node, ast.ClassDef)
+    assert registry.ast_node.name == "Query"
+
+    # Verify OverloadSignature has AST node reference
+    overloads = list(registry.overloads)
+    assert len(overloads) == 1
+    assert overloads[0].ast_node is not None
+    assert isinstance(overloads[0].ast_node, ast.FunctionDef)
+    assert overloads[0].ast_node.name == "sql"
+
+    # Verify ImportStatement has AST node reference
+    assert len(stub.imports) > 0
+    for imp in stub.imports:
+        assert imp.ast_node is not None
+        assert isinstance(imp.ast_node, (ast.Import, ast.ImportFrom))
