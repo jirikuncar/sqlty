@@ -208,3 +208,88 @@ class UserQuery(SQLRegistry):
         ...
 sql = UserQuery.sql
 ''')
+
+
+def test_multi_registry_same_file_no_duplicate_aliases(tmp_path: Path, cli) -> None:
+    """Test that multiple registries in the same file don't create duplicate aliases."""
+    # Create a single file with two registries
+    queries_file = tmp_path / "queries.py"
+    queries_file.write_text("""from sqlty import SQLRegistry
+
+
+class QueryA(SQLRegistry):
+    pass
+
+
+class QueryB(SQLRegistry):
+    pass
+""")
+
+    # Create app that uses both registries
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from typing import TYPE_CHECKING
+
+from queries import QueryA, QueryB
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+# Use QueryA
+query_a: SQL[tuple[int]] = QueryA.sql("SELECT 1::INTEGER")
+
+# Use QueryB
+query_b: SQL[tuple[str]] = QueryB.sql("SELECT 'hello'::TEXT")
+""")
+
+    # Generate stubs
+    result = cli([str(tmp_path), "--mode=full"])
+
+    assert result.returncode == 0
+
+    # Verify stub was created
+    stub_file = tmp_path / "queries.pyi"
+    assert stub_file.exists()
+
+    stub_content = stub_file.read_text()
+
+    # Both classes should be present
+    assert "class QueryA(SQLRegistry):" in stub_content
+    assert "class QueryB(SQLRegistry):" in stub_content
+
+    # No duplicate aliases should be present
+    # Since both registries default to "sql" export name, neither should have an alias
+    alias_count = stub_content.count("sql = ")
+    assert alias_count == 0, f"Expected 0 aliases but found {alias_count} in:\n{stub_content}"
+
+    # Snapshot the result to verify format
+    assert stub_content == snapshot('''\
+from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class QueryA(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T:
+        ...
+
+class QueryB(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]:
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T:
+        ...
+''')
