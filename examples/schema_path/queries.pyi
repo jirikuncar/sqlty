@@ -24,6 +24,3 @@ class QueryB(SQLRegistry):
     @overload
     @classmethod
     def sql[T](cls, query: T) -> T: ...
-
-sql = QueryA.sql
-sql = QueryB.sql
