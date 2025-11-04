@@ -80,15 +80,15 @@ class LiteralCallCollector(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Visit assignment nodes to capture type context and track .sql aliases."""
-        # Check if this is an assignment like: user_sql = UserQueries.sql
+        # Check if this is an assignment like: user_sql = UserQueries.sql or qa = A.sql
         if (
             isinstance(node.value, ast.Attribute)
             and node.value.attr == self.function_name
             and isinstance(node.value.value, ast.Name)
         ):
             class_name = node.value.value.id
-            # Check if it's a local registry class
-            if class_name in self.local_registry_classes:
+            # Check if it's a local registry class OR an imported class
+            if class_name in self.local_registry_classes or class_name in self.import_sources:
                 # Track the alias
                 for target in node.targets:
                     if isinstance(target, ast.Name):

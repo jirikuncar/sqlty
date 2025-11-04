@@ -279,6 +279,17 @@ class TypeStubGenerator:
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
                         call["registry_source"] = None
+        
+        # For calls with registry_class but no registry_source, check if the class is imported
+        for call in collector.calls:
+            if call["registry_source"] is None and call["registry_class"]:
+                # Check if registry_class is an imported name
+                registry_class = call["registry_class"]
+                if registry_class in collector.import_sources:
+                    import_module = collector.import_sources[registry_class]
+                    # Check if this module is in registry_sources (i.e., it has a SQLRegistry)
+                    if import_module in registry_sources:
+                        call["registry_source"] = import_module
 
         # For calls without a registry_source, check if they're in the current file's registry
         current_module = filepath.stem
