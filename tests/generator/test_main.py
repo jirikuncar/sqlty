@@ -11,10 +11,12 @@ def test_main_with_basic_args(tmp_path: Path) -> None:
     """Test main() with basic arguments (lines 764-830)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT 1")
 """)
 
     main([str(source_file)])
@@ -28,10 +30,12 @@ def test_main_with_output_path(tmp_path: Path) -> None:
     """Test main() with -o option (lines 783-785)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT 1")
 """)
 
     output_file = tmp_path / "custom.pyi"
@@ -45,10 +49,12 @@ def test_main_with_dialect_option(tmp_path: Path) -> None:
     """Test main() with --dialect option (lines 787-791)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT 1")
 """)
 
     main([str(source_file), "--dialect", "mysql"])
@@ -61,10 +67,12 @@ def test_main_with_incremental_flag(tmp_path: Path) -> None:
     """Test main() with --mode=incremental flag."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT 1")
 """)
 
     main([str(source_file), "--mode=incremental"])
@@ -77,10 +85,12 @@ def test_main_with_full_flag(tmp_path: Path) -> None:
     """Test main() with --mode=full flag."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT 1")
 """)
 
     main([str(source_file), "--mode=full"])
@@ -105,10 +115,12 @@ def test_main_with_directory(tmp_path: Path) -> None:
     pkg_dir.mkdir()
 
     (pkg_dir / "queries.py").write_text("""
-def sql(query: str):
-    return query
+    from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+    class Query(SQLRegistry):
+        pass
+
+    x = Query.sql("SELECT 1")
 """)
 
     main([str(pkg_dir)])
@@ -122,10 +134,12 @@ def test_main_all_options(tmp_path: Path) -> None:
     """Test main() with all options combined."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT id FROM users")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT id FROM users")
 """)
 
     output_file = tmp_path / "output.pyi"

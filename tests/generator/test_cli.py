@@ -22,10 +22,13 @@ def test_cli_basic_generation(tmp_path: Path) -> None:
     # Create a simple source file
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-result = sql("SELECT id FROM users")
+class Query(SQLRegistry):
+    pass
+
+
+result = Query.sql("SELECT id FROM users")
 """)
 
     # Run the generator CLI
@@ -48,10 +51,13 @@ def test_cli_with_output_path(tmp_path: Path) -> None:
     """Test CLI with explicit output path (lines 783-785)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+
+x = Query.sql("SELECT 1")
 """)
 
     output_file = tmp_path / "custom.pyi"
@@ -78,10 +84,13 @@ def test_cli_with_dialect(tmp_path: Path) -> None:
     """Test CLI with SQL dialect option (line 787-791)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+
+x = Query.sql("SELECT 1")
 """)
 
     result = subprocess.run(
@@ -105,10 +114,13 @@ def test_cli_with_incremental_flag(tmp_path: Path) -> None:
     """Test CLI with incremental mode (lines 803-806)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+
+x = Query.sql("SELECT 1")
 """)
 
     # First generation
@@ -120,11 +132,14 @@ x = sql("SELECT 1")
 
     # Modify source
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
-y = sql("SELECT 2")
+class Query(SQLRegistry):
+    pass
+
+
+x = Query.sql("SELECT 1")
+y = Query.sql("SELECT 2")
 """)
 
     # Incremental generation
@@ -148,10 +163,13 @@ def test_cli_with_full_mode(tmp_path: Path) -> None:
     """Test CLI with full mode flag."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+
+x = Query.sql("SELECT 1")
 """)
 
     result = subprocess.run(
@@ -192,10 +210,13 @@ def test_cli_with_directory_source(tmp_path: Path) -> None:
     pkg_dir.mkdir()
 
     (pkg_dir / "queries.py").write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+
+x = Query.sql("SELECT 1")
 """)
 
     result = subprocess.run(
@@ -213,10 +234,12 @@ def test_cli_all_options_combined(tmp_path: Path) -> None:
     """Test CLI with all options combined."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT id FROM users")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT id FROM users")
 """)
 
     output_file = tmp_path / "output.pyi"
@@ -249,10 +272,12 @@ def test_cli_output_messages(tmp_path: Path) -> None:
     """Test CLI output messages are printed (lines 826-830)."""
     source_file = tmp_path / "queries.py"
     source_file.write_text("""
-def sql(query: str):
-    return query
+from sqlty import SQLRegistry
 
-x = sql("SELECT 1")
+class Query(SQLRegistry):
+    pass
+
+x = Query.sql("SELECT 1")
 """)
 
     result = subprocess.run(

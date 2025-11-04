@@ -480,6 +480,7 @@ class TypeStubGenerator:
         for call in calls:
             registry_source = call["registry_source"]
             if not registry_source:
+                # Skip calls that don't belong to a SQLRegistry
                 continue
 
             # Find the actual file that defines this registry
