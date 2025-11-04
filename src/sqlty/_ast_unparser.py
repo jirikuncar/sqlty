@@ -31,15 +31,21 @@ class StubASTUnparser:
         lines: list[str] = []
 
         def import_group(n: ast.AST) -> str | None:
-            """Return a simple import group name for blank-line separation."""
+            """Return import group matching ruff's isort behavior.
+
+            Ruff treats typing as stdlib, so we group:
+            - stdlib: import uuid/datetime/decimal AND from typing
+            - local: from sqlty
+            """
             if isinstance(n, ast.Import):
                 std_names = {"uuid", "datetime", "decimal"}
                 if any(alias.name in std_names for alias in n.names):
                     return "stdlib"
                 return "other"
             if isinstance(n, ast.ImportFrom):
+                # typing is considered stdlib by ruff's isort
                 if n.module == "typing":
-                    return "typing"
+                    return "stdlib"
                 if n.module == "sqlty":
                     return "local"
                 return "other"
@@ -49,10 +55,10 @@ class StubASTUnparser:
 
         for node in module.body:
             group = import_group(node)
-            # Insert a blank line between import groups (PEP 8): stdlib, third-party, local
+            # Insert a blank line when transitioning from stdlib to local
             if group is not None and prev_group is not None and group != prev_group:
-                # We only add spacing when transitioning between known groups
-                if (prev_group, group) in (("stdlib", "typing"), ("typing", "local")):
+                # Add blank line between stdlib (including typing) and local (sqlty)
+                if prev_group == "stdlib" and group == "local":
                     lines.append("")
 
             if isinstance(node, ast.ImportFrom):
