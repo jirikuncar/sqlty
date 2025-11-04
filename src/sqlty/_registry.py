@@ -180,17 +180,17 @@ class RegistryDetector:
         """
         source_dir = source_file.parent
         module_path_parts = import_source.split(".")
-        
+
         # Try as a simple relative import first (e.g., "queries" from same directory)
         module_file = source_dir / f"{import_source}.py"
         if self.get_registry_class_names(module_file):
             return import_source
-        
+
         # Try as a package with __init__.py
         package_init = source_dir / import_source / "__init__.py"
         if self.get_registry_class_names(package_init):
             return import_source
-        
+
         # For dotted imports, try multiple resolution strategies
         if len(module_path_parts) > 1:
             # Strategy 1: Resolve from current directory
@@ -200,10 +200,10 @@ class RegistryDetector:
             for part in module_path_parts[:-1]:
                 module_file = module_file / part
             module_file = module_file / f"{module_path_parts[-1]}.py"
-            
+
             if self.get_registry_class_names(module_file):
                 return import_source
-            
+
             # Strategy 2: Resolve as absolute import from parent directories
             # Walk up the directory tree to find the package root
             # For myapp/app.py with import myapp.queries.users:
@@ -213,22 +213,22 @@ class RegistryDetector:
                 if current_dir.parent == current_dir:  # reached root
                     break
                 current_dir = current_dir.parent
-                
+
                 # Try to resolve from this directory
                 module_file = current_dir
                 for part in module_path_parts[:-1]:
                     module_file = module_file / part
                 module_file = module_file / f"{module_path_parts[-1]}.py"
-                
+
                 if self.get_registry_class_names(module_file):
                     return import_source
-                
+
                 # Also try as package
                 package_init = current_dir
                 for part in module_path_parts:
                     package_init = package_init / part
                 package_init = package_init / "__init__.py"
-                
+
                 if self.get_registry_class_names(package_init):
                     return import_source
 

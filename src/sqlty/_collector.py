@@ -18,7 +18,7 @@ class CallInfo(TypedDict):
 
 class LiteralCallCollector(ast.NodeVisitor):
     """Collects function calls with literal string arguments.
-    
+
     Only collects calls that are verified to come from SQLRegistry subclasses.
     """
 
@@ -93,7 +93,7 @@ class LiteralCallCollector(ast.NodeVisitor):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         self.registry_aliases[target.id] = class_name
-        
+
         old_assignment = self.current_assignment
         self.current_assignment = node
         self.generic_visit(node)
@@ -108,7 +108,7 @@ class LiteralCallCollector(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         """Visit function calls to find target function with literal arguments.
-        
+
         Only accepts calls that are verified to come from SQLRegistry subclasses.
         """
         # Check for direct call: sql(...) or user_sql(...) etc.
@@ -118,7 +118,7 @@ class LiteralCallCollector(ast.NodeVisitor):
 
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
-            
+
             # Check if this is an alias to a local registry's .sql method
             if func_name in self.registry_aliases:
                 is_target_call = True

@@ -246,7 +246,7 @@ class TypeStubGenerator:
         registry_sources: set[str],
     ) -> None:
         """Resolve registry_source for a call based on its registry_class.
-        
+
         Args:
             call: The call info to update
             collector: The collector with import information
@@ -301,7 +301,7 @@ class TypeStubGenerator:
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
                         call["registry_source"] = None
-        
+
         # For calls with registry_class but no registry_source, check if the class is imported
         for call in collector.calls:
             self._resolve_registry_source_for_class(call, collector, registry_sources)
@@ -648,7 +648,7 @@ class TypeStubGenerator:
                             )
                             if resolved_class and resolved_class in class_names:
                                 call["registry_class"] = resolved_class
-                    
+
                     # Group calls by registry_class
                     calls_by_class: dict[str | None, list[CallInfo]] = {}
                     for call in registry_calls:
