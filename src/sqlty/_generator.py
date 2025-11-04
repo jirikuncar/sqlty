@@ -99,6 +99,27 @@ class TypeStubGenerator:
             logging.getLogger(__name__).warning("Could not run formatter '%s': %s", cmd, e)
             return text
 
+    def _write_stub_if_changed(self, stub_path: Path, content: str) -> bool:
+        """Write stub file only if content has changed.
+
+        Returns True if file was written (changed), False if unchanged.
+        This prevents unnecessary file modifications that would trigger pre-commit hooks.
+        """
+        # Check if file exists and read current content
+        if stub_path.exists():
+            try:
+                existing_content = stub_path.read_text(encoding="utf-8")
+                if existing_content == content:
+                    # Content is identical, skip writing
+                    return False
+            except Exception:
+                # If we can't read the file, proceed with writing
+                pass
+
+        # Write the file
+        stub_path.write_text(content, encoding="utf-8")
+        return True
+
     def _get_analyzer_for_registry(
         self,
         registry_name: str | None,
@@ -469,8 +490,7 @@ class TypeStubGenerator:
 
             # Format via pipe if configured, then write
             formatted = self._format_stub_text(minimal_stub, str(stub_path))
-            with open(stub_path, "w") as f:
-                f.write(formatted)
+            self._write_stub_if_changed(stub_path, formatted)
             return stub_path
 
         # Group calls by the actual registry file location (not just module name)
@@ -748,8 +768,7 @@ class TypeStubGenerator:
                     # Write formatted output to file
                     stub_path.parent.mkdir(parents=True, exist_ok=True)
                     formatted = self._format_stub_text(stub_content, str(stub_path))
-                    with open(stub_path, "w") as f:
-                        f.write(formatted)
+                    self._write_stub_if_changed(stub_path, formatted)
 
                     generated_paths.append(stub_path)
                     mode_label = (
@@ -830,8 +849,7 @@ class TypeStubGenerator:
             # Write formatted output to file
             stub_path.parent.mkdir(parents=True, exist_ok=True)
             formatted = self._format_stub_text(stub_content, str(stub_path))
-            with open(stub_path, "w") as f:
-                f.write(formatted)
+            self._write_stub_if_changed(stub_path, formatted)
 
             mode_desc = "full" if is_full_mode else ("incremental" if incremental else "fresh")
             print(f"Generated stub file ({mode_desc}): {stub_path}")
