@@ -456,11 +456,11 @@ class TypeStubGenerator:
             logging.getLogger(__name__).info(
                 "No calls to %s found in %s", self.function_name, source_path
             )
-            # Always create a minimal stub file (unless create_only and file exists)
+            # Always create a minimal stub file (unless create_only and file exists and no other operations)
             stub_path = output_path or source_path.with_suffix(".pyi")
             
-            # Skip if create_only mode and file already exists
-            if create_only and stub_path.exists():
+            # Skip if create_only mode and file already exists and no other operations
+            if create_only and stub_path.exists() and not incremental and not prune_mode:
                 logging.getLogger(__name__).info(
                     "Stub file already exists, skipping (create mode): %s", stub_path
                 )
@@ -641,8 +641,8 @@ class TypeStubGenerator:
 
                     # Merge with existing stub if it exists
                     if stub_path.exists():
-                        # Skip if create_only mode
-                        if create_only:
+                        # Skip if create_only mode and no other operations requested
+                        if create_only and not incremental and not prune_mode:
                             logging.getLogger(__name__).info(
                                 "Stub file already exists, skipping (create mode): %s", stub_path
                             )
@@ -701,8 +701,8 @@ class TypeStubGenerator:
                     actual_class_name = class_name
                     export_name = self.function_name
 
-                    # Skip if create_only mode and file already exists
-                    if create_only and stub_path.exists():
+                    # Skip if create_only mode and file already exists and no other operations
+                    if create_only and stub_path.exists() and not incremental and not prune_mode:
                         logging.getLogger(__name__).info(
                             "Stub file already exists, skipping (create mode): %s", stub_path
                         )
@@ -746,8 +746,8 @@ class TypeStubGenerator:
                 actual_class_name = class_name
                 export_name = self.function_name
 
-            # Skip if create_only mode and file already exists
-            if create_only and stub_path.exists():
+            # Skip if create_only mode and file already exists and no other operations
+            if create_only and stub_path.exists() and not incremental and not prune_mode:
                 logging.getLogger(__name__).info(
                     "Stub file already exists, skipping (create mode): %s", stub_path
                 )
