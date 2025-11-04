@@ -425,6 +425,11 @@ class TypeStubGenerator:
         
         is_directory = source_path.is_dir()
         
+        # Helper: Check if we should skip because of create_only mode
+        def should_skip_create_only(stub_path: Path) -> bool:
+            """Check if we should skip processing due to create_only mode."""
+            return create_only and stub_path.exists() and not incremental and not prune_mode
+        
         # Safety check: prune should only run on directory mode
         if prune_mode and not is_directory:
             logging.getLogger(__name__).warning(
@@ -460,7 +465,7 @@ class TypeStubGenerator:
             stub_path = output_path or source_path.with_suffix(".pyi")
             
             # Skip if create_only mode and file already exists and no other operations
-            if create_only and stub_path.exists() and not incremental and not prune_mode:
+            if should_skip_create_only(stub_path):
                 logging.getLogger(__name__).info(
                     "Stub file already exists, skipping (create mode): %s", stub_path
                 )
@@ -642,7 +647,7 @@ class TypeStubGenerator:
                     # Merge with existing stub if it exists
                     if stub_path.exists():
                         # Skip if create_only mode and no other operations requested
-                        if create_only and not incremental and not prune_mode:
+                        if should_skip_create_only(stub_path):
                             logging.getLogger(__name__).info(
                                 "Stub file already exists, skipping (create mode): %s", stub_path
                             )
@@ -702,7 +707,7 @@ class TypeStubGenerator:
                     export_name = self.function_name
 
                     # Skip if create_only mode and file already exists and no other operations
-                    if create_only and stub_path.exists() and not incremental and not prune_mode:
+                    if should_skip_create_only(stub_path):
                         logging.getLogger(__name__).info(
                             "Stub file already exists, skipping (create mode): %s", stub_path
                         )
@@ -710,14 +715,14 @@ class TypeStubGenerator:
                         continue
 
                     # Generate the stub content with merging logic
+                    full_mode = False  # Use incremental/prune modes instead of full regeneration
                     if incremental and stub_path.exists():
-                        merge_mode = "prune" if prune_mode else "incremental"
                         stub_content = self._stub_merger.merge_stub_incremental(
                             stub_path,
                             registry_calls,
                             actual_class_name,
                             base_class,
-                            False,  # full_mode
+                            full_mode,
                             export_name,
                             prune=prune_mode,
                         )
@@ -747,7 +752,7 @@ class TypeStubGenerator:
                 export_name = self.function_name
 
             # Skip if create_only mode and file already exists and no other operations
-            if create_only and stub_path.exists() and not incremental and not prune_mode:
+            if should_skip_create_only(stub_path):
                 logging.getLogger(__name__).info(
                     "Stub file already exists, skipping (create mode): %s", stub_path
                 )
@@ -755,13 +760,14 @@ class TypeStubGenerator:
                 continue
 
             # Generate the stub content with merging logic
+            full_mode = False  # Use incremental/prune modes instead of full regeneration
             if incremental and stub_path.exists():
                 stub_content = self._stub_merger.merge_stub_incremental(
                     stub_path,
                     registry_calls,
                     actual_class_name,
                     base_class,
-                    False,  # full_mode
+                    full_mode,
                     export_name,
                     prune=prune_mode,
                 )
