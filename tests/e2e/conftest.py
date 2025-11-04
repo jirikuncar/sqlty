@@ -26,6 +26,10 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
         result = cli([str(tmp_path), "--mode=full"])
         assert result.returncode == 0
     """
+    import os
+    
+    # Get the source directory path (assuming tests are in tests/e2e/)
+    src_dir = Path(__file__).parent.parent.parent / "src"
 
     def _run_cli(
         args: list[str | Path], kwargs: dict[str, Any] | None = None
@@ -44,8 +48,21 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
         # Convert Path objects to strings
         str_args = [str(arg) for arg in args]
 
+        # Set PYTHONPATH to include src directory
+        env = kwargs.get("env", os.environ.copy())
+        pythonpath = env.get("PYTHONPATH", "")
+        if pythonpath:
+            env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
+        else:
+            env["PYTHONPATH"] = str(src_dir)
+        
+        # Remove env from kwargs if it was there, we'll add it back
+        if "env" in default_kwargs:
+            del default_kwargs["env"]
+
         return subprocess.run(
             [sys.executable, "-m", "sqlty"] + str_args,
+            env=env,
             **default_kwargs,
         )
 
@@ -155,6 +172,10 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
         result = mypy([str(app_file), "--strict"])
         assert result.returncode == 0
     """
+    import os
+    
+    # Get the source directory path (assuming tests are in tests/e2e/)
+    src_dir = Path(__file__).parent.parent.parent / "src"
 
     def _run_mypy(
         args: list[str | Path], kwargs: dict[str, Any] | None = None
@@ -174,8 +195,21 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
         # Convert Path objects to strings
         str_args = [str(arg) for arg in args]
 
+        # Set MYPYPATH to include src directory so mypy can find sqlty module
+        env = kwargs.get("env", os.environ.copy())
+        mypypath = env.get("MYPYPATH", "")
+        if mypypath:
+            env["MYPYPATH"] = f"{src_dir}:{mypypath}"
+        else:
+            env["MYPYPATH"] = str(src_dir)
+        
+        # Remove env from kwargs if it was there, we'll add it back
+        if "env" in default_kwargs:
+            del default_kwargs["env"]
+
         return subprocess.run(
             [sys.executable, "-m", "mypy"] + str_args,
+            env=env,
             **default_kwargs,
         )
 
