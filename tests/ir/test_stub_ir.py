@@ -1,15 +1,9 @@
 """Tests for the intermediate representation (IR) system."""
 
 import ast
-from pathlib import Path
 
 from sqlty._collector import CallInfo
-from sqlty._stub_ir import (
-    ImportStatement,
-    OverloadSignature,
-    RegistryClass,
-    StubFile,
-)
+from sqlty._stub_ir import OverloadSignature, RegistryClass, StubFile
 from sqlty._stub_parser import CallInfoToIRParser, PyiToIRParser
 from sqlty._stub_serializer import IRToASTSerializer, IRToTextSerializer
 

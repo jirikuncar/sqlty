@@ -10,10 +10,10 @@ The IR provides a clean separation between:
 3. Serialization: Converting IR back to AST/text
 """
 
+import ast
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-import ast
 
 
 @dataclass
@@ -189,8 +189,6 @@ class StubFile:
                 ]
                 for literal in to_remove:
                     existing.remove_overload(literal)
-            else:
-                self.registries[registry.name] = registry
         else:
             raise ValueError(f"Unknown merge mode: {mode}")
 
@@ -207,8 +205,6 @@ class StubFile:
         base_classes = {r.base_class for r in self.registries.values()}
         sqlty_imports = ["SQL"] + sorted(base_classes)
         required.add(ImportStatement(module="sqlty", names=sqlty_imports, from_import=True))
-
-        import re
 
         type_patterns = {
             r"\buuid\.UUID\b": ImportStatement(module="uuid", names=[], from_import=False),
