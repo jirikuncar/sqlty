@@ -850,7 +850,7 @@ def main(argv: list[str] | None = None) -> None:
             "  - prune: Remove overloads no longer in source\n"
             "  - create: Only create missing stubs (skip if exists)\n"
             "Examples: 'incremental', 'incremental,prune', 'incremental,prune,create'\n"
-            "Default: 'incremental' (single file), 'incremental,prune,create' (directory)"
+            "Default: 'incremental,create' (single file), 'incremental,prune,create' (directory)"
         ),
     )
     parser.add_argument(
@@ -870,8 +870,8 @@ def main(argv: list[str] | None = None) -> None:
             # Directory mode: incremental,prune,create
             mode = "incremental,prune,create"
         else:
-            # Single file mode: incremental
-            mode = "incremental"
+            # Single file mode: incremental,create
+            mode = "incremental,create"
 
     # Validate mode string
     valid_actions = {"incremental", "prune", "create", "full", "fresh"}

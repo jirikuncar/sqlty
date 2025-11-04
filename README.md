@@ -116,7 +116,7 @@ SQLTy supports flexible stub generation with comma-separated mode actions:
 - **`create`**: Only create missing stub files (skip existing ones)
 
 **Default behavior:**
-- Single file: `incremental`
+- Single file: `incremental,create`
 - Directory: `incremental,prune,create`
 
 **Examples:**
