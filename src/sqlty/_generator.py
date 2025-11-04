@@ -412,24 +412,24 @@ class TypeStubGenerator:
                 Examples: "incremental", "incremental,prune", "incremental,prune,create"
         """
         # Parse comma-separated modes into flags
-        modes = set(m.strip() for m in mode.split(","))
+        modes = {m.strip() for m in mode.split(",")}
         incremental = "incremental" in modes
         prune_mode = "prune" in modes
         create_only = "create" in modes
-        
+
         # Legacy mode support (for backward compatibility)
         if mode in ("full", "fresh"):
             incremental = False
             prune_mode = False
             create_only = False
-        
+
         is_directory = source_path.is_dir()
-        
+
         # Helper: Check if we should skip because of create_only mode
         def should_skip_create_only(stub_path: Path) -> bool:
             """Check if we should skip processing due to create_only mode."""
             return create_only and stub_path.exists() and not incremental and not prune_mode
-        
+
         # Safety check: prune should only run on directory mode
         if prune_mode and not is_directory:
             logging.getLogger(__name__).warning(
@@ -463,14 +463,14 @@ class TypeStubGenerator:
             )
             # Always create a minimal stub file (unless create_only and file exists and no other operations)
             stub_path = output_path or source_path.with_suffix(".pyi")
-            
+
             # Skip if create_only mode and file already exists and no other operations
             if should_skip_create_only(stub_path):
                 logging.getLogger(__name__).info(
                     "Stub file already exists, skipping (create mode): %s", stub_path
                 )
                 return stub_path
-            
+
             stub_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Check if source file has multiple registry classes
@@ -653,7 +653,7 @@ class TypeStubGenerator:
                             )
                             generated_paths.append(stub_path)
                             continue
-                        
+
                         from ._stub_parser import PyiToIRParser
 
                         pyi_parser = PyiToIRParser(self.function_name)
@@ -690,7 +690,7 @@ class TypeStubGenerator:
                     if create_only:
                         mode_parts.append("create")
                     mode_label = ",".join(mode_parts) if mode_parts else "fresh"
-                    
+
                     logging.getLogger(__name__).info(
                         "Generated stub file (%s): %s", mode_label, stub_path
                     )
@@ -866,16 +866,11 @@ def main(argv: list[str] | None = None) -> None:
         mode = args.mode
     else:
         # Default mode detection based on source type
-        if args.source.is_dir():
-            # Directory mode: incremental,prune,create
-            mode = "incremental,prune,create"
-        else:
-            # Single file mode: incremental,create
-            mode = "incremental,create"
+        mode = "incremental,prune,create" if args.source.is_dir() else "incremental,create"
 
     # Validate mode string
     valid_actions = {"incremental", "prune", "create", "full", "fresh"}
-    mode_actions = set(m.strip() for m in mode.split(","))
+    mode_actions = {m.strip() for m in mode.split(",")}
     invalid_actions = mode_actions - valid_actions
     if invalid_actions:
         logging.getLogger(__name__).error(
