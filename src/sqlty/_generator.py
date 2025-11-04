@@ -239,6 +239,28 @@ class TypeStubGenerator:
             output_path, new_calls, class_name, base_class, full_mode, export_name
         )
 
+    def _resolve_registry_source_for_class(
+        self,
+        call: CallInfo,
+        collector: LiteralCallCollector,
+        registry_sources: set[str],
+    ) -> None:
+        """Resolve registry_source for a call based on its registry_class.
+        
+        Args:
+            call: The call info to update
+            collector: The collector with import information
+            registry_sources: Set of known registry module names
+        """
+        if call["registry_source"] is None and call["registry_class"]:
+            # Check if registry_class is an imported name
+            registry_class = call["registry_class"]
+            if registry_class in collector.import_sources:
+                import_module = collector.import_sources[registry_class]
+                # Check if this module is in registry_sources (i.e., it has a SQLRegistry)
+                if import_module in registry_sources:
+                    call["registry_source"] = import_module
+
     def analyze_file(self, filepath: Path) -> list[CallInfo]:
         """Analyze a single Python file and collect function calls."""
         try:
@@ -282,14 +304,7 @@ class TypeStubGenerator:
         
         # For calls with registry_class but no registry_source, check if the class is imported
         for call in collector.calls:
-            if call["registry_source"] is None and call["registry_class"]:
-                # Check if registry_class is an imported name
-                registry_class = call["registry_class"]
-                if registry_class in collector.import_sources:
-                    import_module = collector.import_sources[registry_class]
-                    # Check if this module is in registry_sources (i.e., it has a SQLRegistry)
-                    if import_module in registry_sources:
-                        call["registry_source"] = import_module
+            self._resolve_registry_source_for_class(call, collector, registry_sources)
 
         # For calls without a registry_source, check if they're in the current file's registry
         current_module = filepath.stem

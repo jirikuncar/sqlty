@@ -87,8 +87,8 @@ class LiteralCallCollector(ast.NodeVisitor):
             and isinstance(node.value.value, ast.Name)
         ):
             class_name = node.value.value.id
-            # Check if it's a local registry class OR an imported class
-            if class_name in self.local_registry_classes or class_name in self.import_sources:
+            # Check if it's a local registry class OR an imported class (by class name)
+            if class_name in self.local_registry_classes or class_name in self.class_imports:
                 # Track the alias
                 for target in node.targets:
                     if isinstance(target, ast.Name):
