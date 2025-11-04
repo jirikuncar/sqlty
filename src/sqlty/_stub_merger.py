@@ -221,8 +221,7 @@ class StubMerger:
             # Add conditional imports derived from new_calls (stdlib first)
             for mod in compute_additional_imports(new_calls):
                 header.append(f"import {mod}")
-            if compute_additional_imports(new_calls):
-                header.append("")
+            # Note: No blank line here - typing is stdlib per ruff's isort
             # Third-party and local imports
             header.extend(
                 [

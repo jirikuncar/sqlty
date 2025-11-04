@@ -568,8 +568,7 @@ class TypeStubGenerator:
                             # Conditional imports based on return types (stdlib: uuid, datetime, decimal)
                             for mod in compute_additional_imports(registry_calls):
                                 output.write(f"import {mod}\n")
-                            if compute_additional_imports(registry_calls):
-                                output.write("\n")
+                            # typing is considered stdlib by ruff's isort, no blank line before it
                             output.write("from typing import Literal, overload\n\n")
                             output.write(f"from sqlty import SQL, {base_class}\n\n")
                             for cls_name in class_names:
@@ -701,8 +700,7 @@ class TypeStubGenerator:
                         # Conditional imports based on return types (stdlib: uuid, datetime, decimal)
                         for mod in compute_additional_imports(registry_calls):
                             output.write(f"import {mod}\n")
-                        if compute_additional_imports(registry_calls):
-                            output.write("\n")
+                        # typing is considered stdlib by ruff's isort, no blank line before it
                         output.write("from typing import Literal, overload\n\n")
                         output.write(f"from sqlty import SQL, {base_class}\n\n")
 
