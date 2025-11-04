@@ -27,7 +27,7 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
         assert result.returncode == 0
     """
     import os
-    
+
     # Get the source directory path (assuming tests are in tests/e2e/)
     src_dir = Path(__file__).parent.parent.parent / "src"
 
@@ -55,7 +55,7 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
             env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
         else:
             env["PYTHONPATH"] = str(src_dir)
-        
+
         # Remove env from kwargs if it was there, we'll add it back
         if "env" in default_kwargs:
             del default_kwargs["env"]
@@ -173,7 +173,7 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
         assert result.returncode == 0
     """
     import os
-    
+
     # Get the source directory path (assuming tests are in tests/e2e/)
     src_dir = Path(__file__).parent.parent.parent / "src"
 
@@ -202,7 +202,7 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
             env["MYPYPATH"] = f"{src_dir}:{mypypath}"
         else:
             env["MYPYPATH"] = str(src_dir)
-        
+
         # Remove env from kwargs if it was there, we'll add it back
         if "env" in default_kwargs:
             del default_kwargs["env"]
