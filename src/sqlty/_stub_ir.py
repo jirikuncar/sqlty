@@ -158,7 +158,7 @@ class StubFile:
             mode: Merge mode - "incremental", "full", or "prune"
                 - incremental: Add new overloads, keep existing ones
                 - full: Replace entire registry with new one
-                - prune: Remove overloads not in the new registry
+                - prune: Remove overloads not in the new registry (only removes, never adds)
         """
         if mode == "full":
             # Replace entire registry
@@ -172,7 +172,7 @@ class StubFile:
             else:
                 self.registries[registry.name] = registry
         elif mode == "prune":
-            # Keep only overloads that exist in the new registry
+            # Remove overloads that no longer exist in the source (prune only removes, never adds)
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 new_literals = {o.query_literal for o in registry.overloads}
@@ -184,9 +184,6 @@ class StubFile:
                 ]
                 for literal in to_remove:
                     existing.remove_overload(literal)
-                # Add any new overloads
-                for overload in registry.overloads:
-                    existing.add_overload(overload)
             else:
                 self.registries[registry.name] = registry
         else:

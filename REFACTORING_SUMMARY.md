@@ -28,7 +28,7 @@ Successfully refactored the SQLTy code generation system to use an intermediate 
 **Implementation**: `_stub_ir.py` - `StubFile.merge_registry()`
 - **Incremental mode**: Adds new overloads, preserves existing ones
 - **Full mode**: Replaces entire registry with new overloads
-- **Prune mode**: Removes stale overloads, keeps only those in new set
+- **Prune mode**: Removes stale overloads that no longer exist (only removes, never adds)
 - All operations work on structured IR, not text manipulation
 
 ### 4. ✅ Implement serializer that updates pyi AST with modified internal structure

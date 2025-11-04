@@ -162,16 +162,16 @@ existing_stub.merge_registry(new_registry, mode="full")
 
 ### Prune Mode
 
-Removes overloads not in the new set:
+Removes stale overloads (only removes, never adds):
 
 ```python
 existing_stub.merge_registry(new_registry, mode="prune")
 ```
 
-- Keeps only overloads present in new registry
-- Adds any new overloads
-- Removes stale overloads
-- Useful for cleanup after code changes
+- Removes overloads no longer present in new registry
+- Does NOT add new overloads that weren't already there
+- Preserves existing overloads that are still in new registry
+- Useful for cleanup after code changes (removing deleted queries)
 
 ## Migration from Old System
 
