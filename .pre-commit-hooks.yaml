@@ -6,4 +6,4 @@
   types: [python]
   pass_filenames: false
   require_serial: true
-  args: [".", "--mode=full"]
+  args: ["."]

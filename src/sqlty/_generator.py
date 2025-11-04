@@ -405,16 +405,48 @@ class TypeStubGenerator:
             output_path: Path for the generated stub file
             class_name: Name of the Query class (used as fallback)
             base_class: Name of the base class
-            mode: Generation mode - "fresh", "incremental", "full", or "prune"
-                - fresh: Create new stub (default)
+            mode: Generation mode - comma-separated list of actions:
                 - incremental: Add new overloads to existing stub
-                - full: Regenerate all overloads (default for directory)
                 - prune: Remove overloads no longer in source
+                - create: Only create missing stubs (skip if exists)
+                Examples: "incremental", "incremental,prune", "incremental,prune,create"
         """
-        # Compute internal flags from mode
-        incremental = mode == "incremental"
-        is_full_mode = mode in ("full", "prune")
-        prune_mode = mode == "prune"
+        # Parse comma-separated modes into flags
+        modes = {m.strip() for m in mode.split(",")}
+        incremental = "incremental" in modes
+        prune_mode = "prune" in modes
+        create_only = "create" in modes
+
+        # Legacy mode support (for backward compatibility)
+        if mode in ("full", "fresh"):
+            incremental = False
+            prune_mode = False
+            create_only = False
+
+        is_directory = source_path.is_dir()
+
+        # Helper: Check if we should skip because of create_only mode
+        def should_skip_create_only(stub_path: Path) -> bool:
+            """Check if we should skip processing due to create_only mode."""
+            return create_only and stub_path.exists() and not incremental and not prune_mode
+
+        # Safety check: prune should only run on directory mode
+        if prune_mode and not is_directory:
+            logging.getLogger(__name__).warning(
+                "WARNING: Prune mode is not recommended for single file mode."
+            )
+            logging.getLogger(__name__).warning(
+                "This may remove stubs for queries defined elsewhere in your project."
+            )
+            # Prompt user for confirmation
+            try:
+                response = input("Do you want to continue? (y/n): ").strip().lower()
+                if response != "y":
+                    logging.getLogger(__name__).info("Aborting prune operation.")
+                    sys.exit(0)
+            except (EOFError, KeyboardInterrupt):
+                logging.getLogger(__name__).info("\nAborting prune operation.")
+                sys.exit(0)
 
         # Check if source exists
         if not source_path.exists():
@@ -424,16 +456,21 @@ class TypeStubGenerator:
             calls = self.analyze_file(source_path)
         else:
             calls = self.analyze_directory(source_path)
-            # Directory mode implies full mode for cleanup
-            if mode == "fresh":
-                is_full_mode = True
 
         if not calls:
             logging.getLogger(__name__).info(
                 "No calls to %s found in %s", self.function_name, source_path
             )
-            # Always create a minimal stub file
+            # Always create a minimal stub file (unless create_only and file exists and no other operations)
             stub_path = output_path or source_path.with_suffix(".pyi")
+
+            # Skip if create_only mode and file already exists and no other operations
+            if should_skip_create_only(stub_path):
+                logging.getLogger(__name__).info(
+                    "Stub file already exists, skipping (create mode): %s", stub_path
+                )
+                return stub_path
+
             stub_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Check if source file has multiple registry classes
@@ -609,16 +646,30 @@ class TypeStubGenerator:
 
                     # Merge with existing stub if it exists
                     if stub_path.exists():
+                        # Skip if create_only mode and no other operations requested
+                        if should_skip_create_only(stub_path):
+                            logging.getLogger(__name__).info(
+                                "Stub file already exists, skipping (create mode): %s", stub_path
+                            )
+                            generated_paths.append(stub_path)
+                            continue
+
                         from ._stub_parser import PyiToIRParser
 
                         pyi_parser = PyiToIRParser(self.function_name)
                         existing_stub = pyi_parser.parse_file(stub_path)
 
-                        mode = (
-                            "prune" if prune_mode else ("full" if is_full_mode else "incremental")
-                        )
+                        # Apply modes in order: incremental first, then prune
                         for new_registry in all_new_registries.registries.values():
-                            existing_stub.merge_registry(new_registry, mode=mode)
+                            if incremental:
+                                # Add new overloads
+                                existing_stub.merge_registry(new_registry, mode="incremental")
+                            if prune_mode:
+                                # Remove stale overloads
+                                existing_stub.merge_registry(new_registry, mode="prune")
+                            if not incremental and not prune_mode:
+                                # Fresh mode: replace entirely
+                                existing_stub.merge_registry(new_registry, mode="full")
 
                         stub_content = serializer.serialize_to_text(
                             existing_stub, relative_to=stub_path.parent
@@ -631,9 +682,15 @@ class TypeStubGenerator:
                     self._write_stub_if_changed(stub_path, formatted)
 
                     generated_paths.append(stub_path)
-                    mode_label = (
-                        "incremental" if incremental else ("full" if is_full_mode else "fresh")
-                    )
+                    mode_parts = []
+                    if incremental:
+                        mode_parts.append("incremental")
+                    if prune_mode:
+                        mode_parts.append("prune")
+                    if create_only:
+                        mode_parts.append("create")
+                    mode_label = ",".join(mode_parts) if mode_parts else "fresh"
+
                     logging.getLogger(__name__).info(
                         "Generated stub file (%s): %s", mode_label, stub_path
                     )
@@ -649,14 +706,23 @@ class TypeStubGenerator:
                     actual_class_name = class_name
                     export_name = self.function_name
 
+                    # Skip if create_only mode and file already exists and no other operations
+                    if should_skip_create_only(stub_path):
+                        logging.getLogger(__name__).info(
+                            "Stub file already exists, skipping (create mode): %s", stub_path
+                        )
+                        generated_paths.append(stub_path)
+                        continue
+
                     # Generate the stub content with merging logic
-                    if incremental or (is_full_mode and stub_path.exists()):
+                    full_mode = False  # Use incremental/prune modes instead of full regeneration
+                    if incremental and stub_path.exists():
                         stub_content = self._stub_merger.merge_stub_incremental(
                             stub_path,
                             registry_calls,
                             actual_class_name,
                             base_class,
-                            is_full_mode,
+                            full_mode,
                             export_name,
                             prune=prune_mode,
                         )
@@ -685,14 +751,23 @@ class TypeStubGenerator:
                 actual_class_name = class_name
                 export_name = self.function_name
 
+            # Skip if create_only mode and file already exists and no other operations
+            if should_skip_create_only(stub_path):
+                logging.getLogger(__name__).info(
+                    "Stub file already exists, skipping (create mode): %s", stub_path
+                )
+                generated_paths.append(stub_path)
+                continue
+
             # Generate the stub content with merging logic
-            if incremental or (is_full_mode and stub_path.exists()):
+            full_mode = False  # Use incremental/prune modes instead of full regeneration
+            if incremental and stub_path.exists():
                 stub_content = self._stub_merger.merge_stub_incremental(
                     stub_path,
                     registry_calls,
                     actual_class_name,
                     base_class,
-                    is_full_mode,
+                    full_mode,
                     export_name,
                     prune=prune_mode,
                 )
@@ -711,7 +786,14 @@ class TypeStubGenerator:
             formatted = self._format_stub_text(stub_content, str(stub_path))
             self._write_stub_if_changed(stub_path, formatted)
 
-            mode_desc = "full" if is_full_mode else ("incremental" if incremental else "fresh")
+            mode_parts = []
+            if incremental:
+                mode_parts.append("incremental")
+            if prune_mode:
+                mode_parts.append("prune")
+            if create_only:
+                mode_parts.append("create")
+            mode_desc = ",".join(mode_parts) if mode_parts else "fresh"
             print(f"Generated stub file ({mode_desc}): {stub_path}")
             print(f"Found {len(registry_calls)} call(s) to {self.function_name}")
             generated_paths.append(stub_path)
@@ -762,8 +844,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["incremental", "full", "prune"],
-        help="Stub generation mode: incremental (add new overloads), full (regenerate all), prune (remove unused overloads)",
+        help=(
+            "Stub generation mode (comma-separated actions):\n"
+            "  - incremental: Add new overloads to existing stubs\n"
+            "  - prune: Remove overloads no longer in source\n"
+            "  - create: Only create missing stubs (skip if exists)\n"
+            "Examples: 'incremental', 'incremental,prune', 'incremental,prune,create'\n"
+            "Default: 'incremental,create' (single file), 'incremental,prune,create' (directory)"
+        ),
     )
     parser.add_argument(
         "--format-command",
@@ -773,8 +861,24 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
 
-    # Determine the mode string from flags
-    mode = args.mode or "fresh"
+    # Determine the mode with smart defaults
+    if args.mode:
+        mode = args.mode
+    else:
+        # Default mode detection based on source type
+        mode = "incremental,prune,create" if args.source.is_dir() else "incremental,create"
+
+    # Validate mode string
+    valid_actions = {"incremental", "prune", "create", "full", "fresh"}
+    mode_actions = {m.strip() for m in mode.split(",")}
+    invalid_actions = mode_actions - valid_actions
+    if invalid_actions:
+        logging.getLogger(__name__).error(
+            "Invalid mode action(s): %s. Valid actions: %s",
+            ", ".join(invalid_actions),
+            ", ".join(valid_actions),
+        )
+        sys.exit(1)
 
     # Parse unified --schema options into base schema and mappings
     schema_mappings: dict[str | None, Path] = {}
