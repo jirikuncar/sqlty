@@ -113,9 +113,7 @@ def test_sum_multiple_columns_from_schema(tmp_path: Path) -> None:
     """)
 
     analyzer = SQLAnalyzer(schema_path=schema_path)
-    result = analyzer.generate_return_type(
-        "SELECT SUM(quantity), SUM(price) FROM products"
-    )
+    result = analyzer.generate_return_type("SELECT SUM(quantity), SUM(price) FROM products")
 
     # First is int, second is float based on schema
     assert result == "tuple[int, float]"
@@ -176,4 +174,3 @@ def test_sum_unknown_table_with_schema_uses_fallback(tmp_path: Path) -> None:
     # Query from table not in schema should fall back to float (table not found in query)
     result = analyzer.generate_return_type("SELECT SUM(amount) FROM orders")
     assert result == "tuple[float]"
-

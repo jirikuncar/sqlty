@@ -143,6 +143,7 @@ class SQLAnalyzer:
             col_name = projection.alias_or_name
             python_type: str | None = None
             sql_type: str | None = None
+            table_name: str | None = None
 
             # Try to extract type information using match statement
             match projection:
