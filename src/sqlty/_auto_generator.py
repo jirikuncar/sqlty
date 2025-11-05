@@ -16,6 +16,10 @@ def auto_generate_stub(cls: type) -> None:
 
     This function is intended to be called from SQLRegistry.__init_subclass__
     when the SQLTY_AUTO_GENERATE environment variable is enabled.
+    
+    If a .pyi file already exists, it will be updated incrementally.
+    If no .pyi file exists, stub generation is deferred to the atexit handler
+    which will have collected all runtime sql() calls.
     """
     # Get the module where this class is defined
     module = inspect.getmodule(cls)
@@ -24,6 +28,17 @@ def auto_generate_stub(cls: type) -> None:
 
     source_file = Path(module.__file__)
     if not source_file.exists():
+        return
+    
+    # Check if stub file already exists
+    stub_file = source_file.with_suffix(".pyi")
+    if not stub_file.exists():
+        # No stub exists yet - defer to atexit handler which will have
+        # all runtime calls collected
+        logging.getLogger(__name__).debug(
+            "[sqlty] Deferring stub generation for %s to atexit (no existing stub)",
+            source_file.name
+        )
         return
 
     try:
