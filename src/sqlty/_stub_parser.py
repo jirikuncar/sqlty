@@ -39,21 +39,8 @@ class PyiToIRParser:
         if not self.atok:
             return (1, 0)
 
-        text = self.atok.text
-        line = 1
-        col = 0
-
-        for i, char in enumerate(text):
-            if i == offset:
-                return (line, col)
-            if char == "\n":
-                line += 1
-                col = 0
-            else:
-                col += 1
-
-        # If we reach the end, return the last position
-        return (line, col)
+        # Use asttokens' built-in method which is O(log n) with binary search
+        return self.atok.offset_to_line(offset)
 
     def parse_file(self, file_path: Path) -> StubFile:
         """Parse a .pyi file into IR.

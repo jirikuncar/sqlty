@@ -1030,3 +1030,40 @@ sql = Query.sql
 
         # The docstring should be preserved
         assert "Application-specific SQL query registry." in result
+
+
+def test_blank_line_removal_logic():
+    """Test that _find_removal_end_offset properly skips multiple consecutive blank lines."""
+    from sqlty._stub_serializer import IRToTextSerializer
+
+    serializer = IRToTextSerializer()
+
+    # Test case 1: Single blank line after content
+    source1 = "content\n\nmore content"
+    end_offset1 = 8  # After "content\n"
+    result1 = serializer._find_removal_end_offset(source1, end_offset1)
+    assert result1 == 9, f"Expected 9, got {result1} - should skip one blank line"
+
+    # Test case 2: Multiple consecutive blank lines
+    source2 = "content\n\n\n\nmore content"
+    end_offset2 = 8  # After "content\n"
+    result2 = serializer._find_removal_end_offset(source2, end_offset2)
+    assert result2 == 11, f"Expected 11, got {result2} - should skip three blank lines"
+
+    # Test case 3: No blank lines after content
+    source3 = "content\nmore content"
+    end_offset3 = 8  # After "content\n"
+    result3 = serializer._find_removal_end_offset(source3, end_offset3)
+    assert result3 == 8, f"Expected 8, got {result3} - should not skip when next line has content"
+
+    # Test case 4: At end of file with blank lines
+    source4 = "content\n\n\n"
+    end_offset4 = 8  # After "content\n"
+    result4 = serializer._find_removal_end_offset(source4, end_offset4)
+    assert result4 == 11, f"Expected 11, got {result4} - should skip all trailing blank lines"
+
+    # Test case 5: Already at end of file
+    source5 = "content"
+    end_offset5 = 7  # At end
+    result5 = serializer._find_removal_end_offset(source5, end_offset5)
+    assert result5 == 7, f"Expected 7, got {result5} - should not move past end of file"
