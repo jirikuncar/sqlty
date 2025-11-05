@@ -520,3 +520,479 @@ def test_mixed_alias_scenario():
 
     # Unique alias should be present
     assert "special_sql = SpecialQuery.sql" in text
+
+
+def test_source_span_tracking_in_pyi_parser():
+    """Test that source spans are tracked when parsing .pyi files."""
+    pyi_source = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    tree = ast.parse(pyi_source)
+    parser = PyiToIRParser()
+    stub = parser.parse_ast(tree)
+
+    # Verify overloads have source spans
+    registry = stub.get_registry("Query")
+    assert registry is not None
+
+    overloads = list(registry.overloads)
+    assert len(overloads) == 2
+
+    # Check that both overloads have source spans
+    for overload in overloads:
+        assert overload.source_span is not None
+        assert overload.source_span.start_offset >= 0
+        assert overload.source_span.end_offset > overload.source_span.start_offset
+        assert overload.source_span.start_line > 0
+        assert overload.source_span.end_line >= overload.source_span.start_line
+        assert overload.source_span.start_col >= 0
+        assert overload.source_span.end_col >= 0
+
+
+def test_source_span_tracking_from_call_info():
+    """Test that source spans are propagated from CallInfo to IR."""
+    calls: list[CallInfo] = [
+        {
+            "literal": "SELECT 1::INTEGER",
+            "return_type": "SQL[tuple[int]]",
+            "lineno": 10,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": 100,
+            "end_offset": 150,
+            "start_col": 5,
+            "end_line": 10,
+            "end_col": 55,
+        },
+        {
+            "literal": "SELECT 'hello'::TEXT",
+            "return_type": "SQL[tuple[str]]",
+            "lineno": 15,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": 200,
+            "end_offset": 250,
+            "start_col": 5,
+            "end_line": 15,
+            "end_col": 55,
+        },
+    ]
+
+    parser = CallInfoToIRParser()
+    stub = parser.parse_calls(
+        calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+    )
+
+    registry = stub.get_registry("Query")
+    assert registry is not None
+
+    overloads = list(registry.overloads)
+    assert len(overloads) == 2
+
+    # Check that source spans are preserved
+    for overload in overloads:
+        assert overload.source_span is not None
+        assert overload.source_span.start_offset in [100, 200]
+        assert overload.source_span.end_offset in [150, 250]
+
+
+def test_source_span_stability_across_edits():
+    """Test that source spans remain stable when unrelated parts are edited."""
+    original_pyi = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    # Parse original
+    tree = ast.parse(original_pyi)
+    parser = PyiToIRParser()
+    stub = parser.parse_ast(tree)
+
+    registry = stub.get_registry("Query")
+    assert registry is not None
+
+    original_overloads = {o.query_literal: o.source_span for o in registry.overloads}
+
+    # Simulate editing: add a new overload to the source
+    edited_pyi = original_pyi.replace(
+        '    def sql[T](cls, query: T) -> T: ...',
+        '''    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...''',
+    )
+
+    # Parse edited version
+    tree2 = ast.parse(edited_pyi)
+    parser2 = PyiToIRParser()
+    stub2 = parser2.parse_ast(tree2)
+
+    registry2 = stub2.get_registry("Query")
+    assert registry2 is not None
+
+    # Original overloads should have similar (but not necessarily identical) positions
+    # since we added text before the fallback
+    for overload in registry2.overloads:
+        if overload.query_literal in original_overloads:
+            original_span = original_overloads[overload.query_literal]
+            # Line numbers should be same for the first two overloads
+            # (they come before the insertion point)
+            if overload.query_literal in ["SELECT 1::INTEGER", "SELECT 2::INTEGER"]:
+                assert original_span is not None
+                assert overload.source_span is not None
+                assert overload.source_span.start_line == original_span.start_line
+
+
+def test_incremental_mode_preserves_existing_overloads():
+    """Test that incremental mode only adds new overloads without modifying existing ones."""
+    # Parse existing stub
+    existing_pyi = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    tree = ast.parse(existing_pyi)
+    parser = PyiToIRParser()
+    existing_stub = parser.parse_ast(tree)
+
+    # Verify initial state
+    registry = existing_stub.get_registry("Query")
+    assert registry is not None
+    assert len(registry.overloads) == 1
+    assert registry.has_overload("SELECT 1::INTEGER")
+
+    # Create new calls to add
+    new_calls: list[CallInfo] = [
+        {
+            "literal": "SELECT 2::INTEGER",
+            "return_type": "SQL[tuple[int]]",
+            "lineno": 20,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": None,
+            "end_offset": None,
+            "start_col": None,
+            "end_line": None,
+            "end_col": None,
+        },
+    ]
+
+    call_parser = CallInfoToIRParser()
+    new_stub = call_parser.parse_calls(
+        new_calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+    )
+
+    # Merge in incremental mode
+    for new_registry in new_stub.registries.values():
+        existing_stub.merge_registry(new_registry, mode="incremental")
+
+    # Verify that both old and new overloads exist
+    registry = existing_stub.get_registry("Query")
+    assert registry is not None
+    assert len(registry.overloads) == 2
+    assert registry.has_overload("SELECT 1::INTEGER")  # Preserved
+    assert registry.has_overload("SELECT 2::INTEGER")  # Added
+
+
+def test_prune_mode_preserves_existing_overloads():
+    """Test that prune mode only removes stale overloads without modifying kept ones."""
+    # Parse existing stub with 3 overloads
+    existing_pyi = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    tree = ast.parse(existing_pyi)
+    parser = PyiToIRParser()
+    existing_stub = parser.parse_ast(tree)
+
+    # Verify initial state
+    registry = existing_stub.get_registry("Query")
+    assert registry is not None
+    assert len(registry.overloads) == 3
+
+    # Create new calls representing current state (only SELECT 1 and SELECT 3)
+    new_calls: list[CallInfo] = [
+        {
+            "literal": "SELECT 1::INTEGER",
+            "return_type": "SQL[tuple[int]]",
+            "lineno": 10,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": None,
+            "end_offset": None,
+            "start_col": None,
+            "end_line": None,
+            "end_col": None,
+        },
+        {
+            "literal": "SELECT 3::INTEGER",
+            "return_type": "SQL[tuple[int]]",
+            "lineno": 20,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": None,
+            "end_offset": None,
+            "start_col": None,
+            "end_line": None,
+            "end_col": None,
+        },
+    ]
+
+    call_parser = CallInfoToIRParser()
+    new_stub = call_parser.parse_calls(
+        new_calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+    )
+
+    # Merge in prune mode
+    for new_registry in new_stub.registries.values():
+        existing_stub.merge_registry(new_registry, mode="prune")
+
+    # Verify that SELECT 2 was removed, but others were preserved
+    registry = existing_stub.get_registry("Query")
+    assert registry is not None
+    assert len(registry.overloads) == 2
+    assert registry.has_overload("SELECT 1::INTEGER")  # Preserved
+    assert not registry.has_overload("SELECT 2::INTEGER")  # Removed
+    assert registry.has_overload("SELECT 3::INTEGER")  # Preserved
+
+
+def test_source_span_tracking_in_pyi_parser():
+    """Test that source spans are tracked when parsing .pyi files."""
+    pyi_source = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    tree = ast.parse(pyi_source)
+    parser = PyiToIRParser()
+    stub = parser.parse_ast(tree)
+
+    # Verify overloads have source spans
+    registry = stub.get_registry("Query")
+    assert registry is not None
+
+    overloads = list(registry.overloads)
+    assert len(overloads) == 2
+
+    # Check that both overloads have source spans
+    for overload in overloads:
+        assert overload.source_span is not None
+        assert overload.source_span.start_offset >= 0
+        assert overload.source_span.end_offset > overload.source_span.start_offset
+        assert overload.source_span.start_line > 0
+        assert overload.source_span.end_line >= overload.source_span.start_line
+        assert overload.source_span.start_col >= 0
+        assert overload.source_span.end_col >= 0
+
+
+def test_source_span_tracking_from_call_info():
+    """Test that source spans are propagated from CallInfo to IR."""
+    calls: list[CallInfo] = [
+        {
+            "literal": "SELECT 1::INTEGER",
+            "return_type": "SQL[tuple[int]]",
+            "lineno": 10,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": 100,
+            "end_offset": 150,
+            "start_col": 5,
+            "end_line": 10,
+            "end_col": 55,
+        },
+        {
+            "literal": "SELECT 'hello'::TEXT",
+            "return_type": "SQL[tuple[str]]",
+            "lineno": 15,
+            "file": "test.py",
+            "registry_source": None,
+            "registry_class": None,
+            "start_offset": 200,
+            "end_offset": 250,
+            "start_col": 5,
+            "end_line": 15,
+            "end_col": 55,
+        },
+    ]
+
+    parser = CallInfoToIRParser()
+    stub = parser.parse_calls(
+        calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+    )
+
+    registry = stub.get_registry("Query")
+    assert registry is not None
+
+    overloads = list(registry.overloads)
+    assert len(overloads) == 2
+
+    # Check that source spans are preserved
+    for overload in overloads:
+        assert overload.source_span is not None
+        assert overload.source_span.start_offset in [100, 200]
+        assert overload.source_span.end_offset in [150, 250]
+
+
+def test_source_span_stability_across_edits():
+    """Test that source spans remain stable when unrelated parts are edited."""
+    original_pyi = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    # Parse original
+    tree = ast.parse(original_pyi)
+    parser = PyiToIRParser()
+    stub = parser.parse_ast(tree)
+
+    registry = stub.get_registry("Query")
+    assert registry is not None
+
+    original_overloads = {o.query_literal: o.source_span for o in registry.overloads}
+
+    # Simulate editing: add a new overload to the source
+    edited_pyi = original_pyi.replace(
+        '    def sql[T](cls, query: T) -> T: ...',
+        '''    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...''',
+    )
+
+    # Parse edited version
+    tree2 = ast.parse(edited_pyi)
+    parser2 = PyiToIRParser()
+    stub2 = parser2.parse_ast(tree2)
+
+    registry2 = stub2.get_registry("Query")
+    assert registry2 is not None
+
+    # Original overloads should have similar (but not necessarily identical) positions
+    # since we added text before the fallback
+    for overload in registry2.overloads:
+        if overload.query_literal in original_overloads:
+            original_span = original_overloads[overload.query_literal]
+            # Line numbers should be same for the first two overloads
+            # (they come before the insertion point)
+            if overload.query_literal in ["SELECT 1::INTEGER", "SELECT 2::INTEGER"]:
+                assert original_span is not None
+                assert overload.source_span is not None
+                assert overload.source_span.start_line == original_span.start_line
+
