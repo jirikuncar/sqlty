@@ -252,16 +252,60 @@ class IRToTextSerializer:
         self.function_name = function_name
         self.ast_serializer = IRToASTSerializer(function_name)
 
-    def serialize_to_text(self, stub: StubFile, relative_to: Path | None = None) -> str:
+    def serialize_to_text(
+        self, stub: StubFile, relative_to: Path | None = None, preserve_structure: bool = False
+    ) -> str:
         """Serialize a StubFile to formatted Python text.
 
         Args:
             stub: StubFile IR to serialize
             relative_to: Optional path for relative source comments
+            preserve_structure: If True and stub has original source, use surgical edits
+                               to preserve comments and formatting
 
         Returns:
             Formatted Python code as string
         """
+        # If we have the original file with source spans and preserve_structure is requested,
+        # use surgical editing to preserve comments
+        if preserve_structure and stub.file_path and stub.file_path.exists():
+            return self._serialize_with_preservation(stub)
+
+        # Otherwise, generate from scratch
+        module = self.ast_serializer.serialize_to_module(stub)
+        code = ast.unparse(module)
+        lines = code.split("\n")
+        formatted_lines = self._add_blank_lines(lines)
+        return "\n".join(formatted_lines) + "\n"
+
+    def _serialize_with_preservation(self, stub: StubFile) -> str:
+        """Serialize while preserving original structure and comments.
+
+        This method reads the original file and makes surgical edits based on
+        source spans to add/remove overloads while preserving everything else.
+
+        Args:
+            stub: StubFile with source spans and file path
+
+        Returns:
+            Modified source code with preserved structure
+        """
+        if not stub.file_path or not stub.file_path.exists():
+            # Fallback to normal serialization
+            return self.serialize_to_text(stub, preserve_structure=False)
+
+        # Read original source
+        original_source = stub.file_path.read_text(encoding="utf-8")
+
+        # For now, fallback to regular serialization
+        # TODO: Implement surgical editing using source spans
+        # This would involve:
+        # 1. Identifying overloads to add (not in original)
+        # 2. Identifying overloads to remove (in original but not in stub)
+        # 3. Using source spans to locate and edit specific lines
+        # 4. Preserving all comments and other code
+
+        # For MVP, just use the standard serialization
         module = self.ast_serializer.serialize_to_module(stub)
         code = ast.unparse(module)
         lines = code.split("\n")
