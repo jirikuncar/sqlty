@@ -164,7 +164,6 @@ class RuntimeCallRegistry:
         # Use file locking to prevent race conditions
         # Lock the stub file for writing
         lock_path = stub_path.with_suffix(".pyi.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
         
         try:
             with open(lock_path, "w") as lock_file:
@@ -213,7 +212,6 @@ class RuntimeCallRegistry:
                         )
                         
                         # Write the stub file
-                        stub_path.parent.mkdir(parents=True, exist_ok=True)
                         stub_path.write_text(stub_content, encoding="utf-8")
                         
                         logger.info(
