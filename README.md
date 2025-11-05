@@ -100,6 +100,19 @@ sqlty . --mode=create
 sqlty . --mode=incremental,prune
 ```
 
+**Check stubs are up-to-date:**
+
+```bash
+# Check without modifying files
+sqlty . --check
+
+# Check with detailed diff output
+sqlty . --check --verbose
+
+# Check with colored diff (requires rich library)
+sqlty . --check -vv
+```
+
 **Type check:**
 
 ```bash
@@ -133,10 +146,28 @@ sqlty queries.py --mode=fresh
 
 **Safety:** Prune mode prompts for confirmation when used on single files to prevent accidentally removing stubs for queries defined elsewhere.
 
+## Check Mode
+
+The `--check` flag verifies that stub files are up-to-date without modifying them. This is useful for CI/CD pipelines and pre-commit hooks to ensure type stubs match the current code.
+
+**Note:** `--check` and `--format-command` are mutually exclusive. Check mode compares the intermediate representations (IR) of registries - specifically the query literals and return types of each overload - rather than text output. This provides semantic comparison that ignores formatting, whitespace, and comment differences, ensuring only meaningful changes trigger failures.
+
+```bash
+# Basic check (exit code 0 if up-to-date, 1 if differences found)
+sqlty . --check
+
+# Show unified diff of changes
+sqlty . --check --verbose
+
+# Show colored diff with syntax highlighting (requires rich library)
+sqlty . --check -vv
+```
+
 ### Pre-commit Hook
 
-Automatically generate stubs on commit by adding to your `.pre-commit-config.yaml`:
+Automatically generate or check stubs on commit by adding to your `.pre-commit-config.yaml`:
 
+**Generate stubs automatically:**
 ```yaml
 repos:
   - repo: https://github.com/jirikuncar/sqlty
@@ -146,6 +177,17 @@ repos:
         # Optional: customize with args
         # Default mode for directories: incremental,prune,create
         # args: [".", "--schema=schema.sql"]
+```
+
+**Check stubs are up-to-date (recommended for CI):**
+```yaml
+repos:
+  - repo: https://github.com/jirikuncar/sqlty
+    rev: v0.1.0  # Use the latest version
+    hooks:
+      - id: sqlty-check
+        # Shows verbose diff output when stubs are outdated
+        # args: [".", "--check", "--verbose"]
 ```
 
 For more targeted stub generation (e.g., only for specific directories), you can use a local hook:

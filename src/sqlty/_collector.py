@@ -53,6 +53,34 @@ class LiteralCallCollector(ast.NodeVisitor):
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
         self.atok = atok  # ASTTokens for source range extraction
 
+    def _offset_to_line(self, offset: int) -> tuple[int, int]:
+        """Convert a character offset to (line, col) tuple.
+
+        Args:
+            offset: 0-based character offset in the source text
+
+        Returns:
+            Tuple of (line, col) where line is 1-indexed and col is 0-indexed
+        """
+        if not self.atok:
+            return (1, 0)
+
+        text = self.atok.text
+        line = 1
+        col = 0
+
+        for i, char in enumerate(text):
+            if i == offset:
+                return (line, col)
+            if char == "\n":
+                line += 1
+                col = 0
+            else:
+                col += 1
+
+        # If we reach the end, return the last position
+        return (line, col)
+
     def visit_Import(self, node: ast.Import) -> None:
         """Track module imports (e.g., import queries)."""
         for alias in node.names:
@@ -194,11 +222,11 @@ class LiteralCallCollector(ast.NodeVisitor):
                 if self.atok:
                     try:
                         start_offset, end_offset = self.atok.get_text_range(node)
+                        # Convert offsets to (line, col) tuples
                         # Note: We use node.lineno for start_line (already 1-indexed from AST)
-                        # offset_to_line returns (line, col) where line is 1-indexed, col is 0-indexed
                         # We only need start_col here, as node.lineno is already the start line
-                        _, start_col = self.atok.offset_to_line(start_offset)
-                        end_line, end_col = self.atok.offset_to_line(end_offset)
+                        _, start_col = self._offset_to_line(start_offset)
+                        end_line, end_col = self._offset_to_line(end_offset)
                     except Exception as e:
                         logging.getLogger(__name__).debug("Failed to extract source range: %s", e)
 

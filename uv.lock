@@ -448,6 +448,8 @@ wheels = [
 name = "sqlty"
 source = { editable = "." }
 dependencies = [
+    { name = "asttokens" },
+    { name = "rich" },
     { name = "sqlglot" },
 ]
 
@@ -473,7 +475,9 @@ psycopg = [
 
 [package.metadata]
 requires-dist = [
+    { name = "asttokens", specifier = ">=3.0.0" },
     { name = "psycopg", marker = "extra == 'psycopg'", specifier = ">=3.2.12" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "sqlglot", specifier = ">=27.29.0" },
 ]
 provides-extras = ["psycopg"]

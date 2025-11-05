@@ -427,6 +427,8 @@ class IRToTextSerializer:
         overload_texts = []
         for overload in sorted(overloads, key=lambda o: o.query_literal):
             overload_node = self.ast_serializer._serialize_overload(overload)
+            # Fix missing location information for ast.unparse()
+            ast.fix_missing_locations(overload_node)
             overload_code = ast.unparse(overload_node)
             overload_lines = overload_code.split("\n")
 

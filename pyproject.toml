@@ -32,6 +32,7 @@ classifiers = [
 dependencies = [
     "sqlglot>=27.29.0",
     "asttokens>=3.0.0",
+    "rich>=13.0.0",
 ]
 
 [project.urls]

@@ -247,3 +247,91 @@ class StubFile:
                         required.add(import_stmt)
 
         return required
+
+    def has_same_overloads(self, other: "StubFile") -> bool:
+        """Check if two StubFiles have the same overloads per registry.
+
+        Compares only the semantic content (overloads) per registry,
+        ignoring metadata like export names, base classes, etc.
+
+        Args:
+            other: Another StubFile to compare with
+
+        Returns:
+            True if both have the same registries with same overloads
+        """
+        # Check if registry sets differ
+        if set(self.registries.keys()) != set(other.registries.keys()):
+            return False
+
+        # Check each registry for differences in overloads only
+        for name in self.registries:
+            self_registry = self.registries[name]
+            other_registry = other.registries[name]
+
+            # Compare overload signatures (query literals and return types)
+            self_overloads = {(o.query_literal, o.return_type) for o in self_registry.overloads}
+            other_overloads = {(o.query_literal, o.return_type) for o in other_registry.overloads}
+
+            if self_overloads != other_overloads:
+                return False
+
+        return True
+
+    def compute_overload_diff(
+        self, other: "StubFile"
+    ) -> dict[str, dict[str, list[tuple[str, str]]]]:
+        """Compute differences in overloads between two StubFiles.
+
+        Args:
+            other: Another StubFile to compare with (expected/new state)
+
+        Returns:
+            Dictionary mapping registry names to their differences:
+            {
+                "RegistryName": {
+                    "missing": [(query, return_type), ...],  # In self but not in other
+                    "extra": [(query, return_type), ...],     # In other but not in self
+                }
+            }
+        """
+        diff_result: dict[str, dict[str, list[tuple[str, str]]]] = {}
+
+        # Get all registry names from both
+        all_registry_names = set(self.registries.keys()) | set(other.registries.keys())
+
+        for name in all_registry_names:
+            self_registry = self.registries.get(name)
+            other_registry = other.registries.get(name)
+
+            missing = []
+            extra = []
+
+            match self_registry, other_registry:
+                case (None, None):
+                    continue  # Should not happen
+                case (None, RegistryClass(overloads=other_overloads)):
+                    # Registry exists in other but not in self (new registry)
+                    extra = [(o.query_literal, o.return_type) for o in other_overloads]
+                case (RegistryClass(overloads=self_overloads), None):
+                    # Registry exists in self but not in other (removed registry)
+                    missing = [(o.query_literal, o.return_type) for o in self_overloads]
+                case (
+                    RegistryClass(overloads=self_overloads),
+                    RegistryClass(overloads=other_overloads),
+                ):
+                    # Both registries exist, compare overloads
+                    unique_self_overloads: set[tuple[str, str]] = {
+                        (o.query_literal, o.return_type) for o in self_overloads
+                    }
+                    unique_other_overloads: set[tuple[str, str]] = {
+                        (o.query_literal, o.return_type) for o in other_overloads
+                    }
+
+                    missing = sorted(unique_self_overloads - unique_other_overloads)
+                    extra = sorted(unique_other_overloads - unique_self_overloads)
+
+            if missing or extra:
+                diff_result[name] = {"missing": missing, "extra": extra}
+
+        return diff_result

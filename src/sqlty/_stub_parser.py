@@ -27,6 +27,34 @@ class PyiToIRParser:
         self.function_name = function_name
         self.atok: asttokens.ASTTokens | None = None
 
+    def _offset_to_line(self, offset: int) -> tuple[int, int]:
+        """Convert a character offset to (line, col) tuple.
+
+        Args:
+            offset: 0-based character offset in the source text
+
+        Returns:
+            Tuple of (line, col) where line is 1-indexed and col is 0-indexed
+        """
+        if not self.atok:
+            return (1, 0)
+
+        text = self.atok.text
+        line = 1
+        col = 0
+
+        for i, char in enumerate(text):
+            if i == offset:
+                return (line, col)
+            if char == "\n":
+                line += 1
+                col = 0
+            else:
+                col += 1
+
+        # If we reach the end, return the last position
+        return (line, col)
+
     def parse_file(self, file_path: Path) -> StubFile:
         """Parse a .pyi file into IR.
 
@@ -188,8 +216,8 @@ class PyiToIRParser:
             # Get text range for the node
             start_offset, end_offset = self.atok.get_text_range(node)
             # Get positions
-            start_line, start_col = self.atok.offset_to_line(start_offset)
-            end_line, end_col = self.atok.offset_to_line(end_offset)
+            start_line, start_col = self._offset_to_line(start_offset)
+            end_line, end_col = self._offset_to_line(end_offset)
 
             return SourceSpan(
                 start_offset=start_offset,
@@ -331,13 +359,21 @@ class CallInfoToIRParser:
             and call.get("end_line") is not None
             and call.get("end_col") is not None
         ):
+            # Extract with type assertions since we've checked for None
+            start_offset: int = call["start_offset"]  # type: ignore[assignment]
+            end_offset: int = call["end_offset"]  # type: ignore[assignment]
+            start_line: int = call["lineno"]
+            start_col: int = call["start_col"]  # type: ignore[assignment]
+            end_line: int = call["end_line"]  # type: ignore[assignment]
+            end_col: int = call["end_col"]  # type: ignore[assignment]
+
             source_span = SourceSpan(
-                start_offset=call["start_offset"],
-                end_offset=call["end_offset"],
-                start_line=call["lineno"],
-                start_col=call["start_col"],
-                end_line=call["end_line"],
-                end_col=call["end_col"],
+                start_offset=start_offset,
+                end_offset=end_offset,
+                start_line=start_line,
+                start_col=start_col,
+                end_line=end_line,
+                end_col=end_col,
             )
 
         return OverloadSignature(

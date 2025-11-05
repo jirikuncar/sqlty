@@ -19,7 +19,7 @@ This enables future features like:
 
 A new `SourceSpan` dataclass in `_stub_ir.py` stores:
 - `start_offset`: Starting byte offset in source file
-- `end_offset`: Ending byte offset in source file  
+- `end_offset`: Ending byte offset in source file
 - `start_line`: Starting line number (1-indexed)
 - `start_col`: Starting column number (0-indexed)
 - `end_line`: Ending line number (1-indexed)
@@ -66,7 +66,7 @@ Currently regenerates the entire stub file but:
 - Adds new overloads
 - Does NOT modify or remove existing overloads
 
-### Prune Mode  
+### Prune Mode
 Currently regenerates the entire stub file but:
 - Keeps overloads that still exist in source
 - Removes overloads that are no longer in source

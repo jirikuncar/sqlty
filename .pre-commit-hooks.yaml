@@ -7,3 +7,13 @@
   pass_filenames: false
   require_serial: true
   args: ["."]
+
+- id: sqlty-check
+  name: sqlty check
+  description: Check that type stubs for SQL queries are up-to-date
+  entry: sqlty
+  language: python
+  types: [python]
+  pass_filenames: false
+  require_serial: true
+  args: [".", "--check", "--verbose"]
