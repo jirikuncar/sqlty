@@ -106,6 +106,128 @@ class TypeStubGenerator:
             logging.getLogger(__name__).warning("Could not run formatter '%s': %s", cmd, e)
             return text
 
+    def _compare_stub_irs(
+        self, stub_path: Path, new_ir: "StubFile"
+    ) -> tuple[bool, str, str]:
+        """Compare intermediate representations of stub files.
+        
+        Args:
+            stub_path: Path to the existing stub file
+            new_ir: New IR to compare against
+            
+        Returns:
+            Tuple of (has_differences, existing_text, new_text)
+            - has_differences: True if IRs differ semantically
+            - existing_text: Text representation of existing stub (for diff display)
+            - new_text: Text representation of new stub (for diff display)
+        """
+        from ._stub_parser import PyiToIRParser
+        from ._stub_serializer import IRToTextSerializer
+        
+        # Parse existing stub to IR if it exists
+        if stub_path.exists():
+            parser = PyiToIRParser(self.function_name)
+            existing_ir = parser.parse_file(stub_path)
+        else:
+            # No existing file - create empty IR
+            from ._stub_ir import StubFile
+            existing_ir = StubFile(file_path=stub_path)
+        
+        # Compare registries
+        has_differences = False
+        
+        # Check if registry sets differ
+        existing_registry_names = set(existing_ir.registries.keys())
+        new_registry_names = set(new_ir.registries.keys())
+        
+        if existing_registry_names != new_registry_names:
+            has_differences = True
+        else:
+            # Check each registry for differences
+            for name in new_registry_names:
+                existing_registry = existing_ir.registries[name]
+                new_registry = new_ir.registries[name]
+                
+                # Compare overload signatures (query literals and return types)
+                existing_overloads = {
+                    (o.query_literal, o.return_type) for o in existing_registry.overloads
+                }
+                new_overloads = {
+                    (o.query_literal, o.return_type) for o in new_registry.overloads
+                }
+                
+                if existing_overloads != new_overloads:
+                    has_differences = True
+                    break
+                
+                # Also check export name and base class
+                if (
+                    existing_registry.export_name != new_registry.export_name
+                    or existing_registry.base_class != new_registry.base_class
+                ):
+                    has_differences = True
+                    break
+        
+        # Generate text representations for diff display
+        serializer = IRToTextSerializer(self.function_name)
+        existing_text = (
+            serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
+            if stub_path.exists()
+            else ""
+        )
+        new_text = serializer.serialize_to_text(new_ir, relative_to=stub_path.parent)
+        
+        return has_differences, existing_text, new_text
+
+    def _write_stub_ir_if_changed(
+        self, stub_path: Path, stub_ir: "StubFile"
+    ) -> bool:
+        """Write stub file from IR only if content has changed.
+        
+        In check mode, compares IRs instead of text to avoid false positives
+        from formatting differences.
+        
+        Args:
+            stub_path: Path where stub file should be written
+            stub_ir: Intermediate representation of the stub file
+            
+        Returns:
+            True if file was written (changed), False if unchanged.
+        """
+        if self._check_mode:
+            # In check mode, compare IRs
+            has_differences, existing_text, new_text = self._compare_stub_irs(stub_path, stub_ir)
+            
+            if not has_differences:
+                # IRs are identical, no differences
+                return False
+            
+            # IRs differ, record for reporting
+            self._files_with_differences.append((stub_path, existing_text, new_text))
+            return True
+        else:
+            # Normal mode: serialize and write
+            from ._stub_serializer import IRToTextSerializer
+            
+            serializer = IRToTextSerializer(self.function_name)
+            content = serializer.serialize_to_text(stub_ir, relative_to=stub_path.parent)
+            
+            # Format if needed (but not in check mode)
+            formatted = self._format_stub_text(content, str(stub_path))
+            
+            # Check if content changed
+            if stub_path.exists():
+                try:
+                    existing_content = stub_path.read_text(encoding="utf-8")
+                    if existing_content == formatted:
+                        return False
+                except Exception:
+                    pass
+            
+            # Write the file
+            stub_path.write_text(formatted, encoding="utf-8")
+            return True
+
     def _render_diff(self, filepath: Path, old_content: str, new_content: str) -> str:
         """Render a unified diff between old and new content.
 
@@ -501,15 +623,29 @@ class TypeStubGenerator:
 
         Uses the new IR-based approach for better structure and maintainability.
         """
-        # Parse calls to IR
-        from ._stub_parser import CallInfoToIRParser
+        stub_ir = self.generate_stub_ir(calls, class_name, base_class, export_name)
+        
         from ._stub_serializer import IRToTextSerializer
-
-        parser = CallInfoToIRParser(self.function_name)
         serializer = IRToTextSerializer(self.function_name)
-
-        stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
         return serializer.serialize_to_text(stub_ir, relative_to=relative_to)
+    
+    def generate_stub_ir(
+        self,
+        calls: list[CallInfo],
+        class_name: str = "Query",
+        base_class: str = "SQLRegistry",
+        export_name: str = "sql",
+    ) -> "StubFile":
+        """Generate stub IR from collected calls.
+        
+        Returns:
+            StubFile IR representing the stub structure
+        """
+        from ._stub_parser import CallInfoToIRParser
+        
+        parser = CallInfoToIRParser(self.function_name)
+        stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
+        return stub_ir
 
     def generate_stub_file(
         self,
@@ -600,54 +736,36 @@ class TypeStubGenerator:
             else:
                 registry_classes = []
 
+            # Create minimal stub IR for empty registries
+            from ._stub_ir import RegistryClass, StubFile
+            minimal_stub_ir = StubFile(file_path=stub_path)
+            
             if len(registry_classes) > 1:
                 # Generate minimal stubs for all registry classes
-                class_stubs: list[str] = []
-                export_alias_names_used: set[str] = set()
-                type_aliases: list[str] = []
-
                 for reg_class in registry_classes:
-                    class_stub = (
-                        f"class {reg_class}({base_class}):\n"
-                        '    """Application-specific SQL query registry with type-safe overloads."""\n'
-                        "    \n"
-                        "    @overload\n"
-                        "    @classmethod\n"
-                        f"    def {self.function_name}[T](cls, query: T) -> T: ...\n"
-                        "    \n"
-                    )
-                    class_stubs.append(class_stub)
-
-                    # Generate type alias for each registry's export name (but avoid duplicates)
                     export_name = self._registry_detector.get_registry_export_name(
                         source_path, reg_class
                     )
-                    if export_name not in export_alias_names_used:
-                        type_aliases.append(f"{export_name} = {reg_class}.{self.function_name}")
-                        export_alias_names_used.add(export_name)
-
-                minimal_stub = (
-                    "from typing import Literal, overload\n\n"
-                    f"from sqlty import SQL, {base_class}\n\n\n" + "\n\n".join(class_stubs) + "\n"
-                )
-
-                if type_aliases:
-                    minimal_stub += "\n" + "\n".join(type_aliases) + "\n"
+                    registry = RegistryClass(
+                        name=reg_class,
+                        base_class=base_class,
+                        export_name=export_name,
+                        overloads=set(),  # Empty set for minimal stub
+                    )
+                    minimal_stub_ir.add_registry(registry)
             else:
                 # Single registry class or no registry detected
                 actual_class = registry_classes[0] if registry_classes else class_name
-                minimal_stub = (
-                    "from typing import Literal, overload\n\n"
-                    f"from sqlty import SQL, {base_class}\n\n\n"
-                    f"class {actual_class}({base_class}):\n"
-                    '    """Application-specific SQL query registry with type-safe overloads."""\n    '
-                    f"    @overload\n    @classmethod\n    def {self.function_name}[T](cls, query: T) -> T: ...\n\n"
-                    f"{self.function_name} = {actual_class}.{self.function_name}\n"
+                registry = RegistryClass(
+                    name=actual_class,
+                    base_class=base_class,
+                    export_name=self.function_name,
+                    overloads=set(),  # Empty set for minimal stub
                 )
+                minimal_stub_ir.add_registry(registry)
 
-            # Format via pipe if configured, then write
-            formatted = self._format_stub_text(minimal_stub, str(stub_path))
-            self._write_stub_if_changed(stub_path, formatted)
+            # Use IR-based writing
+            self._write_stub_ir_if_changed(stub_path, minimal_stub_ir)
             return stub_path
 
         # Group calls by the actual registry file location (not just module name)
@@ -804,15 +922,13 @@ class TypeStubGenerator:
                                 # Fresh mode: replace entirely
                                 existing_stub.merge_registry(new_registry, mode="full")
 
-                        stub_content = serializer.serialize_to_text(
-                            existing_stub, relative_to=stub_path.parent
-                        )
+                        # Use IR-based writing for better check mode support
+                        final_stub_ir = existing_stub
                     else:
-                        stub_content = serializer.serialize_to_text(
-                            all_new_registries, relative_to=stub_path.parent
-                        )
-                    formatted = self._format_stub_text(stub_content, str(stub_path))
-                    self._write_stub_if_changed(stub_path, formatted)
+                        # Use IR-based writing for better check mode support
+                        final_stub_ir = all_new_registries
+                    
+                    self._write_stub_ir_if_changed(stub_path, final_stub_ir)
 
                     generated_paths.append(stub_path)
                     mode_parts = []

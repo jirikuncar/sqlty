@@ -150,7 +150,7 @@ sqlty queries.py --mode=fresh
 
 The `--check` flag verifies that stub files are up-to-date without modifying them. This is useful for CI/CD pipelines and pre-commit hooks to ensure type stubs match the current code.
 
-**Note:** `--check` and `--format-command` are mutually exclusive. Check mode compares the actual overload content, not formatted output, to avoid false positives from formatting differences.
+**Note:** `--check` and `--format-command` are mutually exclusive. Check mode compares the intermediate representations (IR) of registries - specifically the query literals and return types of each overload - rather than text output. This provides semantic comparison that ignores formatting, whitespace, and comment differences, ensuring only meaningful changes trigger failures.
 
 ```bash
 # Basic check (exit code 0 if up-to-date, 1 if differences found)
