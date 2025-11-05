@@ -50,7 +50,7 @@ user_query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM user
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
@@ -124,7 +124,7 @@ query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
@@ -218,7 +218,7 @@ posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM pos
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
@@ -340,7 +340,7 @@ query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
@@ -435,7 +435,7 @@ query: SQL[tuple[str]] = sql("SELECT 'hello'::TEXT")
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
@@ -533,7 +533,7 @@ api_query: SQL[tuple[str]] = api_sql("SELECT endpoint::TEXT FROM api_routes")
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
