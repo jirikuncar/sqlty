@@ -17,6 +17,27 @@ from pathlib import Path
 
 
 @dataclass
+class SourceSpan:
+    """Represents precise source location information.
+
+    Attributes:
+        start_offset: Starting byte offset in source file
+        end_offset: Ending byte offset in source file
+        start_line: Starting line number (1-indexed)
+        start_col: Starting column number (0-indexed)
+        end_line: Ending line number (1-indexed)
+        end_col: Ending column number (0-indexed)
+    """
+
+    start_offset: int
+    end_offset: int
+    start_line: int
+    start_col: int
+    end_line: int
+    end_col: int
+
+
+@dataclass
 class OverloadSignature:
     """Represents a single @overload method signature.
 
@@ -25,6 +46,7 @@ class OverloadSignature:
         return_type: The return type annotation (e.g., "SQL[tuple[int, str]]")
         source_file: Optional source file where this query appears
         source_line: Optional line number in source file
+        source_span: Optional precise source location information
         ast_node: Optional reference to original AST FunctionDef node from stub
     """
 
@@ -32,6 +54,7 @@ class OverloadSignature:
     return_type: str
     source_file: str | None = None
     source_line: int | None = None
+    source_span: SourceSpan | None = None
     ast_node: ast.FunctionDef | None = None
 
     def __hash__(self) -> int:
@@ -164,14 +187,11 @@ class StubFile:
 
         Args:
             registry: The registry to merge
-            mode: Merge mode - "incremental", "full", or "prune"
-                - incremental: Add new overloads, keep existing ones
-                - full: Replace entire registry with new one
+            mode: Merge mode - "incremental" or "prune"
+                - incremental: Add new overloads, keep existing ones (never removes)
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
-        if mode == "full":
-            self.registries[registry.name] = registry
-        elif mode == "incremental":
+        if mode == "incremental":
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 for overload in registry.overloads:
@@ -182,6 +202,7 @@ class StubFile:
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 new_literals = {o.query_literal for o in registry.overloads}
+                # Remove overloads not in new registry (never adds new ones)
                 to_remove = [
                     o.query_literal
                     for o in existing.overloads

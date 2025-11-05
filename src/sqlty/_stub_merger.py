@@ -68,11 +68,30 @@ class StubMerger:
         if not output_path.exists():
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
 
+        # Read original source and parse existing stub
+        original_source = output_path.read_text(encoding="utf-8")
         existing_stub = self._pyi_parser.parse_file(output_path)
 
-        mode = "prune" if prune else ("full" if full_mode else "incremental")
+        if full_mode:
+            # Full replace: ignore existing, serialize new stub without preservation
+            return self._serializer.serialize_to_text(
+                new_stub, relative_to=output_path.parent, preserve_structure=False
+            )
 
+        # Apply incremental and optionally prune to existing stub
         for new_registry in new_stub.registries.values():
-            existing_stub.merge_registry(new_registry, mode=mode)
+            # Add new overloads
+            existing_stub.merge_registry(new_registry, mode="incremental")
+            if prune:
+                # Remove stale overloads
+                existing_stub.merge_registry(new_registry, mode="prune")
 
-        return self._serializer.serialize_to_text(existing_stub, relative_to=output_path.parent)
+        # Use surgical editing to preserve comments and structure
+        # Reuse existing_stub which already has source spans from line 73
+        return self._serializer.serialize_to_text(
+            existing_stub,
+            relative_to=output_path.parent,
+            preserve_structure=True,
+            original_source=original_source,
+            original_stub=existing_stub,
+        )

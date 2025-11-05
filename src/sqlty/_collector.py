@@ -4,6 +4,8 @@ import ast
 import logging
 from typing import TypedDict
 
+import asttokens
+
 
 class CallInfo(TypedDict):
     """Information about a function call with literal argument."""
@@ -14,6 +16,11 @@ class CallInfo(TypedDict):
     file: str
     registry_source: str | None  # Track which module/registry this call belongs to
     registry_class: str | None  # Track which specific registry class (e.g., "RegistryA")
+    start_offset: int | None  # Starting byte offset in source file
+    end_offset: int | None  # Ending byte offset in source file
+    start_col: int | None  # Starting column number (0-indexed)
+    end_line: int | None  # Ending line number (1-indexed)
+    end_col: int | None  # Ending column number (0-indexed)
 
 
 class LiteralCallCollector(ast.NodeVisitor):
@@ -22,7 +29,7 @@ class LiteralCallCollector(ast.NodeVisitor):
     Only collects calls that are verified to come from SQLRegistry subclasses.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, atok: asttokens.ASTTokens | None = None) -> None:
         self.function_name = "sql"  # Always look for .sql() method calls
         self.calls: list[CallInfo] = []
         self.current_assignment: ast.AnnAssign | ast.Assign | None = None
@@ -44,6 +51,44 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.registry_aliases: dict[
             str, str
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
+        self.atok = atok  # ASTTokens for source range extraction
+
+    def _offset_to_line(self, offset: int) -> tuple[int, int]:
+        """Convert a character offset to (line, col) tuple.
+
+        Args:
+            offset: 0-based character offset in the source text
+
+        Returns:
+            Tuple of (line, col) where line is 1-indexed and col is 0-indexed
+        """
+        if not self.atok:
+            return (1, 0)
+
+        # Use asttokens' internal line offset tracking for O(log n) conversion
+        # This mimics asttokens' offset_to_line implementation
+        text = self.atok.text
+
+        # Build line offsets if not already cached
+        if not hasattr(self, "_line_offsets"):
+            self._line_offsets = [0]
+            for i, char in enumerate(text):
+                if char == "\n":
+                    self._line_offsets.append(i + 1)
+            # Add end of file as final offset
+            self._line_offsets.append(len(text))
+
+        # Clamp offset to valid range
+        offset = max(0, min(len(text), offset))
+
+        # Binary search to find line (O(log n))
+        import bisect
+
+        line_index = bisect.bisect_right(self._line_offsets, offset) - 1
+        line = line_index + 1  # 1-indexed
+        col = offset - self._line_offsets[line_index]  # 0-indexed
+
+        return (line, col)
 
     def visit_Import(self, node: ast.Import) -> None:
         """Track module imports (e.g., import queries)."""
@@ -175,13 +220,37 @@ class LiteralCallCollector(ast.NodeVisitor):
             ):
                 literal_value = node.args[0].value
                 return_type = self._infer_return_type(node)
+
+                # Extract source range information
+                start_offset = None
+                end_offset = None
+                start_col = None
+                end_line = None
+                end_col = None
+
+                if self.atok:
+                    try:
+                        start_offset, end_offset = self.atok.get_text_range(node)
+                        # Convert offsets to (line, col) tuples
+                        # Note: We use node.lineno for start_line (already 1-indexed from AST)
+                        # We only need start_col here, as node.lineno is already the start line
+                        _, start_col = self._offset_to_line(start_offset)
+                        end_line, end_col = self._offset_to_line(end_offset)
+                    except Exception as e:
+                        logging.getLogger(__name__).debug("Failed to extract source range: %s", e)
+
                 call_info: CallInfo = {
                     "literal": literal_value,
                     "return_type": return_type,
-                    "lineno": node.lineno,
+                    "lineno": node.lineno,  # This is start_line (1-indexed from AST)
                     "file": "",
                     "registry_source": registry_source,
                     "registry_class": registry_class,
+                    "start_offset": start_offset,
+                    "end_offset": end_offset,
+                    "start_col": start_col,
+                    "end_line": end_line,
+                    "end_col": end_col,
                 }
                 self.calls.append(call_info)
             elif node.args:

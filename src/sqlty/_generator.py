@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import asttokens
+
 from sqlty._formatter import formatter
 from sqlty._sql_analyzer import SQLAnalyzer
 
@@ -495,11 +497,13 @@ class TypeStubGenerator:
             with open(filepath) as f:
                 source = f.read()
             tree = ast.parse(source, filename=str(filepath))
+            # Create ASTTokens for source range tracking
+            atok = asttokens.ASTTokens(source, tree=tree)
         except Exception as e:
             logger.warning("Failed to parse %s: %s", filepath, e)
             return []
         # First pass: collect calls
-        collector = LiteralCallCollector()
+        collector = LiteralCallCollector(atok=atok)
         collector.visit(tree)
 
         logger.debug("Found %d calls in %s", len(collector.calls), filepath)
@@ -949,20 +953,21 @@ class TypeStubGenerator:
                         pyi_parser = PyiToIRParser(self.function_name)
                         existing_stub = pyi_parser.parse_file(stub_path)
 
-                        # Apply modes in order: incremental first, then prune
-                        for new_registry in all_new_registries.registries.values():
-                            if incremental:
-                                # Add new overloads
-                                existing_stub.merge_registry(new_registry, mode="incremental")
-                            if prune_mode:
-                                # Remove stale overloads
-                                existing_stub.merge_registry(new_registry, mode="prune")
-                            if not incremental and not prune_mode:
-                                # Fresh mode: replace entirely
-                                existing_stub.merge_registry(new_registry, mode="full")
+                        # Fresh mode: replace entirely without merging
+                        if not incremental and not prune_mode:
+                            final_stub_ir = all_new_registries
+                        else:
+                            # Apply modes in order: incremental first, then prune
+                            for new_registry in all_new_registries.registries.values():
+                                if incremental:
+                                    # Add new overloads
+                                    existing_stub.merge_registry(new_registry, mode="incremental")
+                                if prune_mode:
+                                    # Remove stale overloads
+                                    existing_stub.merge_registry(new_registry, mode="prune")
 
-                        # Use IR-based writing for better check mode support
-                        final_stub_ir = existing_stub
+                            # Use IR-based writing for better check mode support
+                            final_stub_ir = existing_stub
                     else:
                         # Use IR-based writing for better check mode support
                         final_stub_ir = all_new_registries
