@@ -392,7 +392,7 @@ order_result = order_sql("SELECT id, total FROM orders")
     orders_stub = tmp_path / "orders_queries.pyi"
     assert orders_stub.exists()
     orders_content = orders_stub.read_text()
-    
+
     # Should infer correct types from schema: id -> int, total -> float
     assert "tuple[int, float]" in orders_content
 
@@ -400,6 +400,6 @@ order_result = order_sql("SELECT id, total FROM orders")
     users_stub = tmp_path / "users_queries.pyi"
     assert users_stub.exists()
     users_content = users_stub.read_text()
-    
+
     # Should infer correct types from schema: id -> int, name -> str
     assert "tuple[int, str]" in users_content

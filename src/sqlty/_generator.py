@@ -177,12 +177,10 @@ class TypeStubGenerator:
                     class_name = registry_class
             else:
                 class_name = None
-            
+
             # Fallback to first registry class if resolution failed
             if not class_name:
-                class_names = self._registry_detector.get_registry_class_names(
-                    registry_module_path
-                )
+                class_names = self._registry_detector.get_registry_class_names(registry_module_path)
                 class_name = class_names[0] if class_names else None
 
             if class_name:
