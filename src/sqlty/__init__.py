@@ -51,5 +51,27 @@ class SQLRegistry:
         This base implementation returns the query as-is at runtime.
         Subclasses should define @overload methods in their stub files
         to provide specific type information for known queries.
+        
+        When SQLTY_AUTO_GENERATE is enabled, this method also registers
+        the call for automatic stub generation at script exit.
         """
+        # Register call for auto-generation if enabled
+        # Only register if query is a string (literal)
+        if isinstance(query, str):
+            from sqlty._runtime_registry import is_auto_generate_enabled, get_runtime_registry
+            
+            if is_auto_generate_enabled():
+                # Get the module name for this registry class
+                import inspect
+                module = inspect.getmodule(cls)
+                module_name = module.__name__ if module else None
+                
+                # Register the call
+                registry = get_runtime_registry()
+                registry.register_call(
+                    query=query,
+                    registry_class=cls.__name__,
+                    module_name=module_name,
+                )
+        
         return query
