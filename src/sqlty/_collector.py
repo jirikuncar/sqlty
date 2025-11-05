@@ -194,7 +194,9 @@ class LiteralCallCollector(ast.NodeVisitor):
                 if self.atok:
                     try:
                         start_offset, end_offset = self.atok.get_text_range(node)
-                        # Note: offset_to_line returns (line, col) where line is 1-indexed, col is 0-indexed
+                        # Note: We use node.lineno for start_line (already 1-indexed from AST)
+                        # offset_to_line returns (line, col) where line is 1-indexed, col is 0-indexed
+                        # We only need start_col here, as node.lineno is already the start line
                         _, start_col = self.atok.offset_to_line(start_offset)
                         end_line, end_col = self.atok.offset_to_line(end_offset)
                     except Exception as e:
