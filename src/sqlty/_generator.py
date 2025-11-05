@@ -143,7 +143,7 @@ class TypeStubGenerator:
         if existing_registry_names != new_registry_names:
             has_differences = True
         else:
-            # Check each registry for differences
+            # Check each registry for differences in overloads only
             for name in new_registry_names:
                 existing_registry = existing_ir.registries[name]
                 new_registry = new_ir.registries[name]
@@ -157,14 +157,6 @@ class TypeStubGenerator:
                 }
                 
                 if existing_overloads != new_overloads:
-                    has_differences = True
-                    break
-                
-                # Also check export name and base class
-                if (
-                    existing_registry.export_name != new_registry.export_name
-                    or existing_registry.base_class != new_registry.base_class
-                ):
                     has_differences = True
                     break
         
