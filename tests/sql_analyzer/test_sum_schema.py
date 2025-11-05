@@ -119,3 +119,61 @@ def test_sum_multiple_columns_from_schema(tmp_path: Path) -> None:
 
     # First is int, second is float based on schema
     assert result == "tuple[int, float]"
+
+
+def test_sum_unknown_column_with_schema_raises_error(tmp_path: Path) -> None:
+    """Test that SUM of unknown column with schema raises error."""
+    # Create a temporary schema file
+    schema_path = tmp_path / "schema.sql"
+    schema_path.write_text("""
+        CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+    """)
+
+    analyzer = SQLAnalyzer(schema_path=schema_path)
+
+    # Query column not in schema should raise error
+    with pytest.raises(RuntimeError, match="Column 'unknown_col' not found in table 'products'"):
+        analyzer.generate_return_type("SELECT SUM(unknown_col) FROM products")
+
+
+def test_sum_unknown_column_with_cast_works(tmp_path: Path) -> None:
+    """Test that SUM of unknown column with explicit cast works."""
+    # Create a temporary schema file
+    schema_path = tmp_path / "schema.sql"
+    schema_path.write_text("""
+        CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+    """)
+
+    analyzer = SQLAnalyzer(schema_path=schema_path)
+
+    # Query column not in schema WITH cast should work
+    result = analyzer.generate_return_type("SELECT SUM(unknown_col::INTEGER) FROM products")
+    assert result == "tuple[int]"
+
+
+def test_sum_unknown_table_with_schema_uses_fallback(tmp_path: Path) -> None:
+    """Test that SUM with unknown table falls back to float."""
+    # Create a temporary schema file
+    schema_path = tmp_path / "schema.sql"
+    schema_path.write_text("""
+        CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+    """)
+
+    analyzer = SQLAnalyzer(schema_path=schema_path)
+
+    # Query from table not in schema should fall back to float (table not found in query)
+    result = analyzer.generate_return_type("SELECT SUM(amount) FROM orders")
+    assert result == "tuple[float]"
+

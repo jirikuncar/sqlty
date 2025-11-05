@@ -190,10 +190,20 @@ class SQLAnalyzer:
                     self.schema and table_name
                 ):
                     # SUM of column with explicit table name and schema available
-                    sql_type = self._get_column_type_from_schema(table_name, column_name)
-                    if sql_type:
-                        python_type = self._sql_to_python_type(sql_type)
+                    # First check if table exists in schema
+                    if table_name.lower() in self.schema:
+                        sql_type = self._get_column_type_from_schema(table_name, column_name)
+                        if sql_type:
+                            python_type = self._sql_to_python_type(sql_type)
+                        else:
+                            # Table in schema but column not found
+                            raise RuntimeError(
+                                f"Column '{column_name}' not found in table '{table_name}' in schema. "
+                                f"If you want to query columns not in the schema, use an explicit cast: "
+                                f"SUM({column_name}::TYPE)"
+                            )
                     else:
+                        # Table not in schema, fall back to float
                         python_type = "float"
                         sql_type = "NUMERIC"
                 case exp.Sum(this=exp.Column(name=column_name)) if self.schema:
@@ -210,11 +220,22 @@ class SQLAnalyzer:
                                 break
 
                     if table_name is not None:
-                        sql_type = self._get_column_type_from_schema(table_name, column_name)
-                        if sql_type:
-                            python_type = self._sql_to_python_type(sql_type)
+                        # Check if table exists in schema
+                        if table_name.lower() in self.schema:
+                            sql_type = self._get_column_type_from_schema(table_name, column_name)
+                            if sql_type:
+                                python_type = self._sql_to_python_type(sql_type)
+                            else:
+                                # Table in schema but column not found
+                                raise RuntimeError(
+                                    f"Column '{column_name}' not found in table '{table_name}' in schema. "
+                                    f"If you want to query columns not in the schema, use an explicit cast: "
+                                    f"SUM({column_name}::TYPE)"
+                                )
+                        # else: table not in schema, fall through to default
 
                     if not python_type:
+                        # Table not found in query or not in schema, fall back to float
                         python_type = "float"
                         sql_type = "NUMERIC"
                 case exp.Sum():
