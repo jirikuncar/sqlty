@@ -35,6 +35,17 @@ for user_id, name in result:
     print(f"User {user_id}: {name}")
 ```
 
+## Why SQLTy?
+
+**For teams working with raw SQL in large codebases.** If you're using an ORM, stick with its type system.
+
+SQLTy provides:
+- **Zero runtime overhead** - Type checking happens at analysis time, not runtime
+- **Fast imports** - Stub-based typing avoids expensive runtime introspection
+- **Scale** - Designed for large codebases with thousands of queries
+
+See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/docs/motivation.md) for details.
+
 ## Features
 
 - 🔒 **Type Safety**: Full mypy integration with precise type inference
