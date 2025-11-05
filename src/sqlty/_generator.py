@@ -263,16 +263,23 @@ class TypeStubGenerator:
 
     def analyze_file(self, filepath: Path) -> list[CallInfo]:
         """Analyze a single Python file and collect function calls."""
+        logger = logging.getLogger(__name__)
+        logger.debug("Analyzing file: %s", filepath)
+        
         try:
             with open(filepath) as f:
                 source = f.read()
             tree = ast.parse(source, filename=str(filepath))
         except Exception as e:
-            logging.getLogger(__name__).warning("Failed to parse %s: %s", filepath, e)
+            logger.warning("Failed to parse %s: %s", filepath, e)
             return []
         # First pass: collect calls
         collector = LiteralCallCollector()
         collector.visit(tree)
+        
+        logger.debug("Found %d calls in %s", len(collector.calls), filepath)
+        logger.debug("Import sources: %s", collector.import_sources)
+        logger.debug("Import levels: %s", collector.import_levels)
 
         # Resolve each import source to find modules with SQLRegistry subclass
         # Also check if the current file itself has a SQLRegistry subclass
@@ -283,21 +290,31 @@ class TypeStubGenerator:
             # Use the module name (filename without .py)
             current_module = filepath.stem
             registry_sources.add(current_module)
+            logger.debug("Current file has registry: %s", current_module)
 
         # Resolve imported sources
         for local_name, module_name in collector.import_sources.items():
             import_level = collector.import_levels.get(local_name, 0)
+            logger.debug(
+                "Resolving import: local_name=%s, module_name=%s, level=%d",
+                local_name,
+                module_name,
+                import_level,
+            )
             resolved_module = self._registry_detector.resolve_import_to_registry_module(
                 module_name, filepath, import_level
             )
             if resolved_module:
                 registry_sources.add(resolved_module)
+                logger.debug("Resolved to registry source: %s", resolved_module)
 
                 # Update calls that use this import with the resolved registry source
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
                         call["registry_source"] = resolved_module
+                        logger.debug("Updated call registry_source to: %s", resolved_module)
             else:
+                logger.debug("Import does not resolve to a registry")
                 # If the module doesn't contain a SQLRegistry, clear registry_source for those calls
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
@@ -313,6 +330,10 @@ class TypeStubGenerator:
             for call in collector.calls:
                 if call["registry_source"] is None:
                     call["registry_source"] = current_module
+                    logger.debug("Set call registry_source to current module: %s", current_module)
+        
+        logger.debug("Final registry_sources: %s", registry_sources)
+        logger.debug("Final calls with registry_source: %s", [c.get("registry_source") for c in collector.calls])
 
         # Store the first registry source for single-file mode
         if registry_sources:
