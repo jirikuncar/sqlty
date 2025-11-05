@@ -8,7 +8,6 @@ import ast
 import logging
 from pathlib import Path
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -190,7 +189,7 @@ class RegistryDetector:
             import_level,
         )
         source_dir = source_file.parent
-        
+
         # Handle relative imports
         if import_level > 0:
             # Navigate up the directory tree
@@ -199,15 +198,17 @@ class RegistryDetector:
             # Level 3 (...) = grandparent directory (go up 2), etc.
             target_dir = source_dir
             levels_to_go_up = import_level - 1
-            
+
             for _ in range(levels_to_go_up):
                 target_dir = target_dir.parent
                 if target_dir == target_dir.parent:  # Reached root
                     logger.debug("Reached root directory, cannot resolve relative import")
                     return None
-            
-            logger.debug("Target directory for relative import (level %d): %s", import_level, target_dir)
-            
+
+            logger.debug(
+                "Target directory for relative import (level %d): %s", import_level, target_dir
+            )
+
             # If import_source is empty (e.g., "from .. import sql"), check target_dir
             if not import_source:
                 # Check for __init__.py in target directory
@@ -220,35 +221,35 @@ class RegistryDetector:
                     return resolved
                 logger.debug("No registry found in __init__.py")
                 return None
-            
+
             # Otherwise, resolve from target_dir
             module_path_parts = import_source.split(".")
-            
+
             # Try as a file
             module_file = target_dir
             for part in module_path_parts[:-1]:
                 module_file = module_file / part
             module_file = module_file / f"{module_path_parts[-1]}.py"
-            
+
             logger.debug("Trying module file: %s", module_file)
             if self.get_registry_class_names(module_file):
                 logger.debug("Found registry in module file, returning: %s", import_source)
                 return import_source
-            
+
             # Try as a package
             package_init = target_dir
             for part in module_path_parts:
                 package_init = package_init / part
             package_init = package_init / "__init__.py"
-            
+
             logger.debug("Trying package __init__: %s", package_init)
             if self.get_registry_class_names(package_init):
                 logger.debug("Found registry in package __init__, returning: %s", import_source)
                 return import_source
-            
+
             logger.debug("Could not resolve relative import")
             return None
-        
+
         # Handle absolute imports (original logic)
         module_path_parts = import_source.split(".")
 

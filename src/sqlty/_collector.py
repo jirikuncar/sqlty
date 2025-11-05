@@ -59,7 +59,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         # node.module can be None for imports like "from .. import sql"
         module_name = node.module if node.module else ""
         import_level = node.level if node.level else 0
-        
+
         for alias in node.names:
             imported_name = alias.name
             local_name = alias.asname if alias.asname else alias.name

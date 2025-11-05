@@ -450,18 +450,13 @@ query: SQL[tuple[str]] = sql("SELECT 'hello'::TEXT")
     assert "SELECT 'hello'::TEXT" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 from sqlty import SQL, SQLRegistry
 
 
 class DBQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
-
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
-        ...
+    """Application-specific SQL query registry with type-safe overloads."""
 
     @overload
     @classmethod
@@ -470,10 +465,15 @@ class DBQuery(SQLRegistry):
 
     @overload
     @classmethod
+    def sql(cls, query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
+        ...
+
+    @overload
+    @classmethod
     def sql[T](cls, query: T) -> T:
         ...
 sql = DBQuery.sql
-""")
+''')
 
     # Validate with mypy
     mypy_result = mypy([str(app_module), "--strict"], {"cwd": str(tmp_path)})
@@ -668,7 +668,7 @@ query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM sessions")
     assert stub_file.exists(), "Stub file was not generated"
 
     stub_content = stub_file.read_text()
-    
+
     # Both queries should be in the stub
     assert "SELECT id::INTEGER, username::TEXT FROM users WHERE active = true" in stub_content
     assert "SELECT COUNT(*)::INTEGER FROM sessions" in stub_content
@@ -701,8 +701,9 @@ sql = AppQuery.sql
 
     # Validate with mypy
     mypy_result_deep = mypy([str(deep_handler), "--strict"], {"cwd": str(tmp_path)})
-    assert mypy_result_deep.returncode == 0, f"Mypy failed on deep handler: {mypy_result_deep.stdout}"
+    assert mypy_result_deep.returncode == 0, (
+        f"Mypy failed on deep handler: {mypy_result_deep.stdout}"
+    )
 
     mypy_result_mid = mypy([str(mid_handler), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result_mid.returncode == 0, f"Mypy failed on mid handler: {mypy_result_mid.stdout}"
-

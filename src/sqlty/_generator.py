@@ -265,7 +265,7 @@ class TypeStubGenerator:
         """Analyze a single Python file and collect function calls."""
         logger = logging.getLogger(__name__)
         logger.debug("Analyzing file: %s", filepath)
-        
+
         try:
             with open(filepath) as f:
                 source = f.read()
@@ -276,7 +276,7 @@ class TypeStubGenerator:
         # First pass: collect calls
         collector = LiteralCallCollector()
         collector.visit(tree)
-        
+
         logger.debug("Found %d calls in %s", len(collector.calls), filepath)
         logger.debug("Import sources: %s", collector.import_sources)
         logger.debug("Import levels: %s", collector.import_levels)
@@ -331,9 +331,12 @@ class TypeStubGenerator:
                 if call["registry_source"] is None:
                     call["registry_source"] = current_module
                     logger.debug("Set call registry_source to current module: %s", current_module)
-        
+
         logger.debug("Final registry_sources: %s", registry_sources)
-        logger.debug("Final calls with registry_source: %s", [c.get("registry_source") for c in collector.calls])
+        logger.debug(
+            "Final calls with registry_source: %s",
+            [c.get("registry_source") for c in collector.calls],
+        )
 
         # Store the first registry source for single-file mode
         if registry_sources:
@@ -390,7 +393,8 @@ class TypeStubGenerator:
         import_sources: set[str] = set()
 
         for filepath in dirpath.rglob("*.py"):
-            if filepath.name.startswith("_"):
+            # Skip private modules but not __init__.py
+            if filepath.name.startswith("_") and filepath.name != "__init__.py":
                 continue
             try:
                 calls = self.analyze_file(filepath)
