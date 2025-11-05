@@ -128,6 +128,41 @@ class RegistryDetector:
         except Exception:
             return "sql"
 
+    def get_class_name_from_export(self, module_path: Path, export_name: str) -> str | None:
+        """Get the registry class name from an exported .sql method name.
+
+        Args:
+            module_path: Path to the Python module to check
+            export_name: Name of the exported function (e.g., 'user_sql' or 'qa')
+
+        Returns:
+            The class name (e.g., 'UserQueries' or 'A'), or None if not found
+        """
+        if not module_path.exists():
+            return None
+
+        try:
+            with open(module_path) as f:
+                source = f.read()
+            tree = ast.parse(source)
+
+            # Look for assignments like: user_sql = UserQueries.sql or qa = A.sql
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    # Check if the target matches the export_name
+                    if (
+                        node.targets
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id == export_name
+                    ):
+                        # Check if the value is ClassName.sql
+                        if isinstance(node.value, ast.Attribute):
+                            if node.value.attr == "sql" and isinstance(node.value.value, ast.Name):
+                                return node.value.value.id
+            return None
+        except Exception:
+            return None
+
     def resolve_import_to_registry_module(
         self, import_source: str, source_file: Path
     ) -> str | None:
@@ -140,17 +175,59 @@ class RegistryDetector:
         Returns:
             The module name that contains the SQLRegistry subclass, or None
         """
-        # Try to find the module file
         source_dir = source_file.parent
-        module_file = source_dir / f"{import_source}.py"
+        module_path_parts = import_source.split(".")
 
+        # Try as a simple relative import first (e.g., "queries" from same directory)
+        module_file = source_dir / f"{import_source}.py"
         if self.get_registry_class_names(module_file):
             return import_source
 
-        # Check if it's a package with __init__.py
+        # Try as a package with __init__.py
         package_init = source_dir / import_source / "__init__.py"
         if self.get_registry_class_names(package_init):
             return import_source
+
+        # For dotted imports, try multiple resolution strategies
+        if len(module_path_parts) > 1:
+            # Strategy 1: Resolve from current directory
+            # e.g., from app.py: import myapp.queries.users
+            # Try: <source_dir>/myapp/queries/users.py
+            module_file = source_dir
+            for part in module_path_parts[:-1]:
+                module_file = module_file / part
+            module_file = module_file / f"{module_path_parts[-1]}.py"
+
+            if self.get_registry_class_names(module_file):
+                return import_source
+
+            # Strategy 2: Resolve as absolute import from parent directories
+            # Walk up the directory tree to find the package root
+            # For myapp/app.py with import myapp.queries.users:
+            # Try: <parent_of_myapp>/myapp/queries/users.py
+            current_dir = source_dir
+            for _ in range(len(module_path_parts)):
+                if current_dir.parent == current_dir:  # reached root
+                    break
+                current_dir = current_dir.parent
+
+                # Try to resolve from this directory
+                module_file = current_dir
+                for part in module_path_parts[:-1]:
+                    module_file = module_file / part
+                module_file = module_file / f"{module_path_parts[-1]}.py"
+
+                if self.get_registry_class_names(module_file):
+                    return import_source
+
+                # Also try as package
+                package_init = current_dir
+                for part in module_path_parts:
+                    package_init = package_init / part
+                package_init = package_init / "__init__.py"
+
+                if self.get_registry_class_names(package_init):
+                    return import_source
 
         # If not found, return None
         return None
