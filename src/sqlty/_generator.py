@@ -15,6 +15,8 @@ Main orchestrator that delegates to specialized modules for:
 """
 
 import ast
+import difflib
+import io
 import logging
 import os
 import sys
@@ -107,8 +109,6 @@ class TypeStubGenerator:
         
         Uses rich library for colored output if verbose mode is enabled.
         """
-        import difflib
-        
         old_lines = old_content.splitlines(keepends=True)
         new_lines = new_content.splitlines(keepends=True)
         
@@ -128,7 +128,6 @@ class TypeStubGenerator:
             try:
                 from rich.console import Console
                 from rich.syntax import Syntax
-                import io
                 
                 # Join diff lines back into a string
                 diff_text = "\n".join(diff_lines)

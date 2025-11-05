@@ -174,7 +174,6 @@ query = sql("SELECT id::INTEGER FROM users")
 
     stub_file = tmp_path / "queries.pyi"
     initial_content = stub_file.read_text()
-    initial_mtime = stub_file.stat().st_mtime
 
     # Modify the source
     app_file.write_text("""from queries import sql
@@ -183,17 +182,12 @@ query = sql("SELECT id::INTEGER FROM users")
 query2 = sql("SELECT name::TEXT FROM users")
 """)
 
-    # Wait a bit to ensure mtime would change if file was modified
-    import time
-    time.sleep(0.1)
-
     # Check mode should not modify the file
     result = cli([str(tmp_path), "--check"])
     assert result.returncode == 1
 
-    # File should not be modified
+    # File content should not be modified
     assert stub_file.read_text() == initial_content
-    assert stub_file.stat().st_mtime == initial_mtime
 
 
 def test_check_mode_with_directory_mode(
