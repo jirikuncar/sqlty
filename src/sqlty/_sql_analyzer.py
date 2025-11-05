@@ -145,7 +145,12 @@ class SQLAnalyzer:
             sql_type: str | None = None
 
             # Try to extract type information
-            if isinstance(projection, exp.Cast):
+            # Check for aliased expressions first (e.g., (price * 1.1)::FLOAT AS new_price)
+            if isinstance(projection, exp.Alias) and isinstance(projection.this, exp.Cast):
+                # Aliased cast: SELECT/RETURNING (expr)::TYPE AS alias
+                sql_type = str(projection.this.to)
+                python_type = self._sql_to_python_type(sql_type)
+            elif isinstance(projection, exp.Cast):
                 # Explicit cast: SELECT/RETURNING id::INTEGER
                 sql_type = str(projection.to)
                 python_type = self._sql_to_python_type(sql_type)
