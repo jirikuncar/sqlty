@@ -20,9 +20,9 @@ Traditional approaches to SQL typing often involve runtime introspection or dyna
 
 SQLTy uses stub files (`.pyi`) for type information, which are read by type checkers like mypy but never imported at runtime. Your application imports remain fast regardless of how many queries you have.
 
-### Zero Runtime Overhead
+### Minimal Runtime Overhead
 
-Type checking happens during static analysis, not at runtime. SQLTy generates stub files that mypy uses for type checking, but your actual application code has no runtime dependencies on these stubs. There's no performance penalty for type safety.
+Type checking happens during static analysis, not at runtime. SQLTy generates stub files that mypy uses for type checking, but your actual application code has no runtime dependencies on these stubs. The runtime overhead is minimal—just a simple passthrough method and an optional environment variable check during class definition.
 
 ## How It Works
 
@@ -40,7 +40,7 @@ The type checking layer is completely separated from runtime execution.
 - You write raw SQL queries (not using an ORM)
 - You have a large codebase with many queries
 - You need static type checking for SQL results
-- You want fast import times and zero runtime overhead
+- You want fast import times and minimal runtime overhead
 - You can annotate your SQL with type casts
 
 ### When to Use Something Else
@@ -69,7 +69,7 @@ Manual annotations work for small codebases but become unmaintainable at scale. 
 - **Catch errors before runtime**: Type checker finds mismatches between expected and actual query results
 - **Refactoring confidence**: Change query structure and mypy tells you everywhere that needs updating
 - **IDE support**: Get autocomplete and inline documentation for query results
-- **No performance impact**: Type checking overhead is zero at runtime
+- **Minimal performance impact**: Type checking overhead is negligible at runtime
 - **Fast development cycles**: Quick imports mean fast test runs and CI builds
 
 SQLTy brings static typing to SQL without compromising on performance or development speed.

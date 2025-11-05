@@ -40,7 +40,7 @@ for user_id, name in result:
 **For teams working with raw SQL in large codebases.** If you're using an ORM, stick with its type system.
 
 SQLTy provides:
-- **Zero runtime overhead** - Type checking happens at analysis time, not runtime
+- **Minimal runtime overhead** - Type checking happens at analysis time, not runtime
 - **Fast imports** - Stub-based typing avoids expensive runtime introspection
 - **Scale** - Designed for large codebases with thousands of queries
 
