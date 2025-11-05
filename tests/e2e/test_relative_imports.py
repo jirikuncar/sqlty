@@ -597,3 +597,112 @@ sql = APIQuery.sql
     # Validate with mypy
     mypy_result = mypy([str(service_module), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
+
+
+def test_very_deep_nesting_with_level_3_plus_imports(tmp_path: Path, cli, mypy) -> None:
+    """Test that relative imports with 3+ levels (e.g., from .... import) work correctly."""
+    # Create a very deep package structure
+    # myapp/features/auth/handlers/user/
+    app_pkg = tmp_path / "myapp"
+    app_pkg.mkdir()
+    (app_pkg / "__init__.py").write_text("")
+
+    # Create registry at app level
+    app_registry = app_pkg / "queries.py"
+    app_registry.write_text("""from sqlty import SQLRegistry
+
+
+class AppQuery(SQLRegistry):
+    pass
+
+
+sql = AppQuery.sql
+""")
+
+    # Create deep nested structure
+    features_pkg = app_pkg / "features"
+    features_pkg.mkdir()
+    (features_pkg / "__init__.py").write_text("")
+
+    auth_pkg = features_pkg / "auth"
+    auth_pkg.mkdir()
+    (auth_pkg / "__init__.py").write_text("")
+
+    handlers_pkg = auth_pkg / "handlers"
+    handlers_pkg.mkdir()
+    (handlers_pkg / "__init__.py").write_text("")
+
+    # Create module at depth 4 that uses level 4 import (....queries)
+    deep_handler = handlers_pkg / "user_handler.py"
+    deep_handler.write_text("""from typing import TYPE_CHECKING
+
+from ....queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+# Use registry from 3 levels up via .... import
+query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users WHERE active = true")
+""")
+
+    # Also test level 3 import from one level less deep
+    mid_handler = auth_pkg / "auth_handler.py"
+    mid_handler.write_text("""from typing import TYPE_CHECKING
+
+from ...queries import sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+# Use registry from 2 levels up via ... import
+query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM sessions")
+""")
+
+    # Generate stubs
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
+
+    assert result.returncode == 0, f"Generator failed: {result.stderr}"
+
+    # Verify stub was created
+    stub_file = app_pkg / "queries.pyi"
+    assert stub_file.exists(), "Stub file was not generated"
+
+    stub_content = stub_file.read_text()
+    
+    # Both queries should be in the stub
+    assert "SELECT id::INTEGER, username::TEXT FROM users WHERE active = true" in stub_content
+    assert "SELECT COUNT(*)::INTEGER FROM sessions" in stub_content
+
+    # Snapshot the result
+    assert stub_content == snapshot("""\
+from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class AppQuery(SQLRegistry):
+    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM sessions']) -> SQL[tuple[int]]:
+        ...
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT id::INTEGER, username::TEXT FROM users WHERE active = true']) -> SQL[tuple[int, str]]:
+        ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T:
+        ...
+sql = AppQuery.sql
+""")
+
+    # Validate with mypy
+    mypy_result_deep = mypy([str(deep_handler), "--strict"], {"cwd": str(tmp_path)})
+    assert mypy_result_deep.returncode == 0, f"Mypy failed on deep handler: {mypy_result_deep.stdout}"
+
+    mypy_result_mid = mypy([str(mid_handler), "--strict"], {"cwd": str(tmp_path)})
+    assert mypy_result_mid.returncode == 0, f"Mypy failed on mid handler: {mypy_result_mid.stdout}"
+
