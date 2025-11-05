@@ -380,7 +380,9 @@ sql = AuthQuery.sql
 
     # Validate both files with mypy
     mypy_result_handler = mypy([str(auth_handler), "--strict"], {"cwd": str(tmp_path)})
-    assert mypy_result_handler.returncode == 0, f"Mypy failed on handler: {mypy_result_handler.stdout}"
+    assert mypy_result_handler.returncode == 0, (
+        f"Mypy failed on handler: {mypy_result_handler.stdout}"
+    )
 
     mypy_result_app = mypy([str(app_module), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result_app.returncode == 0, f"Mypy failed on app: {mypy_result_app.stdout}"
