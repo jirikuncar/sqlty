@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.14"
+# dependencies = []
+# ///
 """Comprehensive example demonstrating runtime auto-generation features.
 
 This example shows:
@@ -6,19 +9,7 @@ This example shows:
 2. Multiple registries in one file
 3. Incremental stub generation
 4. Thread-safe concurrent access
-
-Run with: SQLTY_AUTO_GENERATE=1 python examples/runtime_autogen_demo.py
 """
-
-import os
-import sys
-from pathlib import Path
-
-# Enable runtime auto-generation
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
-# Setup path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sqlty import SQLRegistry
 
@@ -96,6 +87,6 @@ print("✓ Dynamic queries registered")
 # Summary
 print("\n=== Summary ===")
 print("When this script exits, the following stub files will be created/updated:")
-print("  - runtime_autogen_demo.pyi (with all UserQueries, PostQueries, and CommentQueries)")
+print("  - demo.pyi (with all UserQueries, PostQueries, and CommentQueries)")
 print("\nAll queries will have proper type annotations based on SQL type casts.")
 print("\nYou can verify by checking the generated .pyi file after running this script.")
