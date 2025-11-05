@@ -165,8 +165,21 @@ class TypeStubGenerator:
             # If registry_class is provided, use it; otherwise get the first one
             class_name: str | None
             if registry_class:
-                class_name = registry_class
+                # If registry_class is "sql", it's likely from "import sql" - resolve to actual class
+                if registry_class == "sql":
+                    class_name = self._registry_detector.get_class_name_from_export(
+                        registry_module_path, "sql"
+                    )
+                    logging.getLogger(__name__).debug(
+                        f"Resolved registry_class='sql' to class_name='{class_name}' from {registry_module_path}"
+                    )
+                else:
+                    class_name = registry_class
             else:
+                class_name = None
+
+            # Fallback to first registry class if resolution failed
+            if not class_name:
                 class_names = self._registry_detector.get_registry_class_names(registry_module_path)
                 class_name = class_names[0] if class_names else None
 
@@ -183,9 +196,12 @@ class TypeStubGenerator:
 
         # Priority 3: __schema_path__ from registry class (only if no CLI schema)
         if schema_to_use is None:
-            # Pass the registry_class to get schema only from that specific class
+            # Determine which class name to use for schema lookup:
+            # - If registry_name exists, we've resolved class_name above (may differ from registry_class)
+            # - If registry_name is None, registry_class contains the direct class name
+            lookup_class_name = class_name if registry_name else registry_class
             detected_schema = self._registry_detector.get_schema_path_from_registry(
-                registry_module_path, class_name=registry_class
+                registry_module_path, class_name=lookup_class_name
             )
             if detected_schema:
                 schema_to_use = detected_schema

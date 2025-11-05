@@ -75,7 +75,7 @@ generate-examples: clean-examples
 	@echo "🔧 Generating stubs for all examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  → $$dir"; \
-		uv run sqlty $$dir/ --mode=full --format-command "uv run ruff format --stdin-filename {filename}"; \
+		uv run sqlty $$dir/ --format-command "uv run ruff format --stdin-filename {filename}"; \
 	done
 	@echo "✅ All stubs generated"
 
