@@ -25,7 +25,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
     # Run stubtest on the queries module
     stubtest_result = stubtest(
         ["queries", "--concise"],
-        {"env": {"PYTHONPATH": str(tmp_path)}},
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
     )
     assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
@@ -35,6 +35,13 @@ def test_stubtest_detects_stub_inconsistencies(
 ) -> None:
     """Test that stubtest detects inconsistencies between stub and implementation."""
     setup_queries_file(tmp_path)
+
+    # Create an app file with queries so stubs are generated
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+query = sql("SELECT id::INTEGER, name::TEXT FROM users")
+""")
 
     # Generate stub
     result = cli([str(tmp_path), "--mode=full"])
@@ -55,7 +62,7 @@ def test_stubtest_detects_stub_inconsistencies(
     # Run stubtest - it should detect the inconsistency
     stubtest_result = stubtest(
         ["queries", "--concise"],
-        {"env": {"PYTHONPATH": str(tmp_path)}},
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
     )
     # This should fail because we added a non-existent method
     assert stubtest_result.returncode != 0
@@ -92,7 +99,7 @@ detailed_query = sql("SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
     # Run stubtest
     stubtest_result = stubtest(
         ["queries", "--concise"],
-        {"env": {"PYTHONPATH": str(tmp_path)}},
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
     )
     assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
@@ -121,7 +128,7 @@ list_users = sql("SELECT id::INTEGER, name::TEXT FROM users")
     # Run stubtest
     stubtest_result = stubtest(
         ["user_queries", "--concise"],
-        {"env": {"PYTHONPATH": str(tmp_path)}},
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
     )
     assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
@@ -157,7 +164,7 @@ def main() -> None:  # Should be allowed by allowlist
     # Run stubtest - should pass because allowlist covers these cases
     stubtest_result = stubtest(
         ["queries", "--concise"],
-        {"env": {"PYTHONPATH": str(tmp_path)}},
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
     )
     assert (
         stubtest_result.returncode == 0

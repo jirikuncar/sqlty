@@ -232,7 +232,7 @@ def stubtest() -> (
         A CompletedProcess instance from subprocess.run
 
     Example:
-        result = stubtest(["queries", "--concise"])
+        result = stubtest(["queries", "--concise"], {"env": {"PYTHONPATH": str(tmp_path)}})
         assert result.returncode == 0
     """
     import os
@@ -253,6 +253,11 @@ def stubtest() -> (
             "capture_output": True,
             "text": True,
         }
+        
+        # Get env from kwargs before we update default_kwargs
+        env = kwargs.get("env", os.environ.copy())
+        
+        # Now update default_kwargs
         default_kwargs.update(kwargs)
 
         # Convert Path objects to strings
@@ -263,7 +268,7 @@ def stubtest() -> (
             str_args.extend(["--allowlist", str(allowlist), "--ignore-unused-allowlist"])
 
         # Set PYTHONPATH to include src directory so stubtest can find sqlty module
-        env = kwargs.get("env", os.environ.copy())
+        # Always prepend src_dir to whatever PYTHONPATH is provided
         pythonpath = env.get("PYTHONPATH", "")
         if pythonpath:
             env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
