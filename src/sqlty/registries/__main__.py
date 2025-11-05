@@ -26,12 +26,7 @@ def find_registries(root_path: Path) -> list[tuple[Path, str]]:
     registries: list[tuple[Path, str]] = []
 
     # Find all Python files
-    if root_path.is_file():
-        # If it's a single file, check it
-        python_files = [root_path]
-    else:
-        # If it's a directory, recursively find all .py files
-        python_files = sorted(root_path.rglob("*.py"))
+    python_files = [root_path] if root_path.is_file() else sorted(root_path.rglob("*.py"))
 
     for py_file in python_files:
         try:
