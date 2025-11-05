@@ -26,7 +26,7 @@ Type checking happens during static analysis, not at runtime. SQLTy generates st
 
 ## How It Works
 
-1. **Write SQL queries** with explicit type casts (`::INTEGER`, `::TEXT`, etc.)
+1. **Write SQL queries** with explicit type casts (`::INTEGER`, `::TEXT`, etc.) or provide path to SQL schema dump
 2. **Run `sqlty` command** to analyze your code and generate `.pyi` stub files
 3. **Type check with mypy** - stubs provide precise types for query results
 4. **Runtime execution** uses your queries as-is, no overhead from type checking
@@ -41,13 +41,13 @@ The type checking layer is completely separated from runtime execution.
 - You have a large codebase with many queries
 - You need static type checking for SQL results
 - You want fast import times and minimal runtime overhead
-- You can annotate your SQL with type casts
+- You can annotate your SQL with type casts or provide a schema dump
 
 ### When to Use Something Else
 
 - **Using an ORM**: Use its native type system (e.g., SQLAlchemy 2.0+ with mypy plugin)
 - **Small projects**: Manual type annotations may be simpler
-- **Cannot modify SQL**: SQLTy requires type casts in queries for inference
+- **Cannot modify SQL or provide schema**: SQLTy requires type casts in queries or a schema dump for inference
 - **Need runtime validation**: SQLTy focuses on static analysis, not runtime checks
 
 ## Comparison with Other Approaches
