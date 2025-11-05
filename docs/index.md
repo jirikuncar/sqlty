@@ -4,6 +4,7 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
 
 ## Table of Contents
 
+- [Motivation](motivation.md)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Basic Usage](#basic-usage)

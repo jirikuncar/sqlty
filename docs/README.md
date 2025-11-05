@@ -4,6 +4,7 @@ Welcome to the SQLType documentation!
 
 ## Quick Links
 
+- **[Motivation](motivation.md)** - Why use SQLTy and when it's the right choice
 - **[Main Documentation](index.md)** - Complete guide to SQLType
 - **[Installation Guide](installation.md)** - Setup and installation instructions
 - **[API Reference](api.md)** - Detailed API documentation
@@ -12,14 +13,20 @@ Welcome to the SQLType documentation!
 
 ### Getting Started
 
-1. **[Installation](installation.md)**
+1. **[Motivation](motivation.md)**
+   - When to use SQLTy
+   - Why SQLTy exists
+   - Trade-offs and comparisons
+   - Real-world benefits
+
+2. **[Installation](installation.md)**
    - Requirements
    - Installation methods (pip, uv, poetry, from source)
    - Optional dependencies
    - IDE integration
    - Verifying installation
 
-2. **[Quick Start](index.md#quick-start)**
+3. **[Quick Start](index.md#quick-start)**
    - Basic setup
    - Writing queries
    - Generating stubs
@@ -27,14 +34,14 @@ Welcome to the SQLType documentation!
 
 ### User Guide
 
-3. **[Basic Usage](index.md#basic-usage)**
+4. **[Basic Usage](index.md#basic-usage)**
    - Creating a SQL registry
    - Writing SQL queries
    - Type annotations in SQL
    - Generating stub files
    - Using the generated stubs
 
-4. **[Advanced Usage](index.md#advanced-usage)**
+5. **[Advanced Usage](index.md#advanced-usage)**
    - Multi-registry pattern
    - Custom SQL dialects
    - Incremental mode
@@ -43,7 +50,7 @@ Welcome to the SQLType documentation!
 
 ### Reference
 
-5. **[API Reference](api.md)**
+6. **[API Reference](api.md)**
    - SQLRegistry class
    - SQL type
    - Generator CLI
@@ -55,7 +62,7 @@ Welcome to the SQLType documentation!
 
 ### Understanding SQLType
 
-6. **[Internals](index.md#internals)**
+7. **[Internals](index.md#internals)**
    - Architecture overview
    - Type inference engine
    - AST analysis
@@ -63,7 +70,7 @@ Welcome to the SQLType documentation!
 
 ### Examples
 
-7. **[Examples](index.md#examples)**
+8. **[Examples](index.md#examples)**
    - Simple query registry
    - Multi-registry application
    - Real-world usage patterns
