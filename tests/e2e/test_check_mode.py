@@ -5,8 +5,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 
 def test_check_mode_with_up_to_date_stubs(
     tmp_path: Path,

@@ -56,7 +56,7 @@ class TypeStubGenerator:
 
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector()
-        
+
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, str, str]] = []
 
@@ -106,69 +106,71 @@ class TypeStubGenerator:
 
     def _render_diff(self, filepath: Path, old_content: str, new_content: str) -> str:
         """Render a unified diff between old and new content.
-        
+
         Uses rich library for colored output if verbose mode is enabled.
         """
         old_lines = old_content.splitlines(keepends=True)
         new_lines = new_content.splitlines(keepends=True)
-        
-        diff_lines = list(difflib.unified_diff(
-            old_lines,
-            new_lines,
-            fromfile=str(filepath) + " (existing)",
-            tofile=str(filepath) + " (expected)",
-            lineterm="",
-        ))
-        
+
+        diff_lines = list(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=str(filepath) + " (existing)",
+                tofile=str(filepath) + " (expected)",
+                lineterm="",
+            )
+        )
+
         if not diff_lines:
             return ""
-        
+
         # For verbose level 2+, use rich for syntax highlighting
         if self._verbose >= 2:
             try:
                 from rich.console import Console
                 from rich.syntax import Syntax
-                
+
                 # Join diff lines back into a string
                 diff_text = "\n".join(diff_lines)
-                
+
                 # Create a string buffer to capture rich output
                 buffer = io.StringIO()
                 console = Console(file=buffer, force_terminal=True, width=120)
-                
+
                 # Use Syntax for diff highlighting
                 syntax = Syntax(diff_text, "diff", theme="monokai", line_numbers=False)
                 console.print(syntax)
-                
+
                 return buffer.getvalue()
             except ImportError:
                 # Fall back to plain diff if rich is not available
                 pass
-        
+
         # Plain diff output
         return "\n".join(diff_lines)
-    
+
     def report_check_results(self) -> int:
         """Report check results and return exit code.
-        
+
         Returns 0 if no differences found, 1 if differences exist.
         """
         if not self._files_with_differences:
             print("✓ All stub files are up to date")
             return 0
-        
+
         print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
         for filepath, old_content, new_content in self._files_with_differences:
             print(f"\n  {filepath}")
-            
+
             if self._verbose >= 1:
                 diff = self._render_diff(filepath, old_content, new_content)
                 if diff:
                     print(diff)
-        
+
         if self._verbose == 0:
             print("\nRun with --verbose to see detailed differences.")
-        
+
         return 1
 
     def _write_stub_if_changed(self, stub_path: Path, content: str) -> bool:
@@ -176,7 +178,7 @@ class TypeStubGenerator:
 
         Returns True if file was written (changed), False if unchanged.
         This prevents unnecessary file modifications that would trigger pre-commit hooks.
-        
+
         In check mode, only checks for differences without writing.
         """
         # Read existing content if file exists
@@ -190,7 +192,7 @@ class TypeStubGenerator:
             except Exception:
                 # If we can't read the file, proceed with writing
                 existing_content = None
-        
+
         # In check mode, record differences but don't write
         if self._check_mode:
             if existing_content is None:
@@ -1074,7 +1076,7 @@ def main(argv: list[str] | None = None) -> None:
             output_path=args.output,
             mode=mode,
         )
-        
+
         # In check mode, report results and exit with appropriate code
         if args.check:
             exit_code = generator.report_check_results()
