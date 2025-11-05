@@ -194,7 +194,8 @@ class LiteralCallCollector(ast.NodeVisitor):
                 if self.atok:
                     try:
                         start_offset, end_offset = self.atok.get_text_range(node)
-                        start_line_temp, start_col = self.atok.offset_to_line(start_offset)
+                        # Note: offset_to_line returns (line, col) where line is 1-indexed, col is 0-indexed
+                        _, start_col = self.atok.offset_to_line(start_offset)
                         end_line, end_col = self.atok.offset_to_line(end_offset)
                     except Exception as e:
                         logging.getLogger(__name__).debug("Failed to extract source range: %s", e)
@@ -202,7 +203,7 @@ class LiteralCallCollector(ast.NodeVisitor):
                 call_info: CallInfo = {
                     "literal": literal_value,
                     "return_type": return_type,
-                    "lineno": node.lineno,
+                    "lineno": node.lineno,  # This is start_line (1-indexed from AST)
                     "file": "",
                     "registry_source": registry_source,
                     "registry_class": registry_class,

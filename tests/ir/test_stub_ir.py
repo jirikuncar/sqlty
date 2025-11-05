@@ -548,6 +548,10 @@ sql = Query.sql
 
     tree = ast.parse(pyi_source)
     parser = PyiToIRParser()
+    # Set up ASTTokens for source span extraction
+    import asttokens
+
+    parser.atok = asttokens.ASTTokens(pyi_source, tree=tree)
     stub = parser.parse_ast(tree)
 
     # Verify overloads have source spans
@@ -644,6 +648,10 @@ sql = Query.sql
     # Parse original
     tree = ast.parse(original_pyi)
     parser = PyiToIRParser()
+    # Set up ASTTokens for source span extraction
+    import asttokens
+
+    parser.atok = asttokens.ASTTokens(original_pyi, tree=tree)
     stub = parser.parse_ast(tree)
 
     registry = stub.get_registry("Query")
@@ -666,6 +674,7 @@ sql = Query.sql
     # Parse edited version
     tree2 = ast.parse(edited_pyi)
     parser2 = PyiToIRParser()
+    parser2.atok = asttokens.ASTTokens(edited_pyi, tree=tree2)
     stub2 = parser2.parse_ast(tree2)
 
     registry2 = stub2.get_registry("Query")
