@@ -116,10 +116,8 @@ class TypeStubGenerator:
 
         from ._stub_ir import StubFile
         from ._stub_parser import PyiToIRParser
-        from ._stub_serializer import IRToTextSerializer
 
         parser = PyiToIRParser(self.function_name)
-        serializer = IRToTextSerializer(self.function_name)
 
         print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
 
