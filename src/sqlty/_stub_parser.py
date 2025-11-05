@@ -9,8 +9,10 @@ import ast
 import logging
 from pathlib import Path
 
+import asttokens
+
 from ._collector import CallInfo
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, SourceSpan, StubFile
 
 
 class PyiToIRParser:
@@ -23,6 +25,7 @@ class PyiToIRParser:
             function_name: Name of the SQL function to parse (e.g., "sql")
         """
         self.function_name = function_name
+        self.atok: asttokens.ASTTokens | None = None
 
     def parse_file(self, file_path: Path) -> StubFile:
         """Parse a .pyi file into IR.
@@ -41,6 +44,8 @@ class PyiToIRParser:
         try:
             source = file_path.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(file_path))
+            # Create ASTTokens object to track source ranges
+            self.atok = asttokens.ASTTokens(source, tree=tree)
             return self.parse_ast(tree, file_path)
         except Exception as e:
             logging.getLogger(__name__).warning("Failed to parse stub file %s: %s", file_path, e)
@@ -155,11 +160,48 @@ class PyiToIRParser:
         if node.returns:
             return_type = ast.unparse(node.returns)
 
+        # Extract source span if asttokens is available
+        source_span = None
+        if self.atok:
+            source_span = self._extract_source_span(node)
+
         return OverloadSignature(
             query_literal=query_literal,
             return_type=return_type,
+            source_span=source_span,
             ast_node=node,
         )
+
+    def _extract_source_span(self, node: ast.AST) -> SourceSpan | None:
+        """Extract source span from an AST node using asttokens.
+
+        Args:
+            node: AST node
+
+        Returns:
+            SourceSpan or None if extraction fails
+        """
+        if not self.atok:
+            return None
+
+        try:
+            # Get text range for the node
+            start_offset, end_offset = self.atok.get_text_range(node)
+            # Get positions
+            start_line, start_col = self.atok.offset_to_line(start_offset)
+            end_line, end_col = self.atok.offset_to_line(end_offset)
+
+            return SourceSpan(
+                start_offset=start_offset,
+                end_offset=end_offset,
+                start_line=start_line,
+                start_col=start_col,
+                end_line=end_line,
+                end_col=end_col,
+            )
+        except Exception as e:
+            logging.getLogger(__name__).debug("Failed to extract source span: %s", e)
+            return None
 
     def _extract_literal_from_annotation(self, node: ast.FunctionDef) -> str | None:
         """Extract the query literal from a Literal[...] type annotation.
@@ -279,9 +321,29 @@ class CallInfoToIRParser:
         Returns:
             OverloadSignature
         """
+        # Extract source span if available
+        source_span = None
+        if (
+            call.get("start_offset") is not None
+            and call.get("end_offset") is not None
+            and call.get("lineno") is not None
+            and call.get("start_col") is not None
+            and call.get("end_line") is not None
+            and call.get("end_col") is not None
+        ):
+            source_span = SourceSpan(
+                start_offset=call["start_offset"],
+                end_offset=call["end_offset"],
+                start_line=call["lineno"],
+                start_col=call["start_col"],
+                end_line=call["end_line"],
+                end_col=call["end_col"],
+            )
+
         return OverloadSignature(
             query_literal=call["literal"],
             return_type=call.get("return_type") or "Any",
             source_file=call.get("file"),
             source_line=call.get("lineno"),
+            source_span=source_span,
         )

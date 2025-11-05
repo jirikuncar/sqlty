@@ -20,6 +20,8 @@ import os
 import sys
 from pathlib import Path
 
+import asttokens
+
 from sqlty._sql_analyzer import SQLAnalyzer
 
 from ._collector import CallInfo, LiteralCallCollector
@@ -286,11 +288,13 @@ class TypeStubGenerator:
             with open(filepath) as f:
                 source = f.read()
             tree = ast.parse(source, filename=str(filepath))
+            # Create ASTTokens for source range tracking
+            atok = asttokens.ASTTokens(source, tree=tree)
         except Exception as e:
             logger.warning("Failed to parse %s: %s", filepath, e)
             return []
         # First pass: collect calls
-        collector = LiteralCallCollector()
+        collector = LiteralCallCollector(atok=atok)
         collector.visit(tree)
 
         logger.debug("Found %d calls in %s", len(collector.calls), filepath)
