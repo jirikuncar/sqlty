@@ -7,7 +7,8 @@ This example demonstrates SQLTy's runtime auto-generation feature, which automat
 1. **Single Registry** - Basic query registration with auto-generated stubs
 2. **Multiple Registries** - Multiple SQLRegistry classes in a single file
 3. **Incremental Stub Generation** - Stubs are updated without losing existing content
-4. **Dynamic Query Generation** - Queries created programmatically
+
+**Note:** Only literal string queries are supported for type stub generation.
 
 ## Running the Example
 

@@ -8,7 +8,8 @@ This example shows:
 1. Single registry with multiple queries
 2. Multiple registries in one file
 3. Incremental stub generation
-4. Thread-safe concurrent access
+
+Note: Only literal string queries are supported for type stub generation.
 """
 
 from sqlty import SQLRegistry
@@ -65,23 +66,6 @@ comment_count = comment_sql("SELECT COUNT(*)::INTEGER FROM comments")
 
 print(f"✓ Post queries registered: 3")
 print(f"✓ Comment queries registered: 2")
-
-
-# Example 3: Dynamic Query Generation
-print("\n=== Example 3: Dynamic Query Generation ===")
-
-
-def get_user_fields(*fields: str) -> str:
-    """Generate a query dynamically."""
-    field_list = ", ".join(f"{field}::TEXT" for field in fields)
-    return user_sql(f"SELECT {field_list} FROM users")
-
-
-# Generate queries dynamically
-query1 = get_user_fields("id", "name")
-query2 = get_user_fields("id", "email", "created_at")
-
-print("✓ Dynamic queries registered")
 
 
 # Summary
