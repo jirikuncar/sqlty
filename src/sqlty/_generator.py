@@ -22,6 +22,7 @@ import os
 import sys
 from pathlib import Path
 
+from sqlty._formatter import formatter
 from sqlty._sql_analyzer import SQLAnalyzer
 
 from ._collector import CallInfo, LiteralCallCollector
@@ -60,52 +61,6 @@ class TypeStubGenerator:
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, str, str]] = []
 
-    def _format_stub_text(self, text: str, filename: str) -> str:
-        """Format generated stub content by piping it through an external command.
-
-        The configured format command must use the {filename} placeholder, which will be
-        replaced with the provided filename. The command is executed with the stub content
-        provided on stdin, and the formatted content is read from stdout.
-
-        If no formatter is configured or the formatter fails, the original text
-        is returned unchanged.
-        
-        In check mode, formatting is skipped to ensure comparison is based on content only.
-        """
-        if not self._format_command or self._check_mode:
-            return text
-
-        cmd = self._format_command.format(filename=filename)
-        try:
-            import subprocess as sp
-
-            result = sp.run(
-                cmd,
-                shell=True,
-                input=text.encode("utf-8"),
-                capture_output=True,
-                timeout=30,
-            )
-            if result.returncode != 0:
-                # Include both stdout and stderr to aid debugging
-                logging.getLogger(__name__).warning(
-                    "format_command failed (exit %s) for '%s'\n%s%s",
-                    result.returncode,
-                    cmd,
-                    result.stdout.decode("utf-8", errors="ignore"),
-                    result.stderr.decode("utf-8", errors="ignore"),
-                )
-                return text
-            return result.stdout.decode("utf-8", errors="ignore")
-        except FileNotFoundError:
-            logging.getLogger(__name__).warning(
-                "Formatter executable not found when running: %s", cmd
-            )
-            return text
-        except Exception as e:
-            logging.getLogger(__name__).warning("Could not run formatter '%s': %s", cmd, e)
-            return text
-
     def check(
         self,
         source_path: Path,
@@ -113,31 +68,31 @@ class TypeStubGenerator:
         mode: str = "incremental,prune,create",
     ) -> int:
         """Check if stub files are up-to-date without modifying them.
-        
+
         This method generates the expected stub IRs and compares them with
         existing stub files, reporting differences in a compact format.
-        
+
         Args:
             source_path: Path to source file or directory to analyze
             output_path: Optional output path for stub file
             mode: Stub generation mode
-            
+
         Returns:
             0 if all stubs are up-to-date, 1 if differences found
         """
-        from ._stub_parser import PyiToIRParser
         from ._stub_ir import StubFile
-        
+        from ._stub_parser import PyiToIRParser
+
         # Store stub paths and their IRs
         stub_checks: list[tuple[Path, StubFile, StubFile]] = []  # (path, existing_ir, expected_ir)
-        
+
         # Temporarily enable check mode for generation
         original_check_mode = self._check_mode
         self._check_mode = True
-        
+
         # Clear any previous differences
         self._files_with_differences.clear()
-        
+
         try:
             # Generate stubs (in check mode, this collects IRs without writing)
             self.generate_stub_file(
@@ -145,70 +100,71 @@ class TypeStubGenerator:
                 output_path=output_path,
                 mode=mode,
             )
-            
+
             # Parse collected differences and convert to IR-based comparisons
             parser = PyiToIRParser(self.function_name)
-            
+
             for stub_path, _, _ in self._files_with_differences:
                 # Parse existing stub to IR
                 if stub_path.exists():
                     existing_ir = parser.parse_file(stub_path)
                 else:
                     existing_ir = StubFile(file_path=stub_path)
-                
+
                 # The expected IR was stored during generation
                 # We need to regenerate it by finding the corresponding new IR
                 # For now, we'll use the text diff we collected
                 # This is a temporary solution until we refactor _write_stub_ir_if_changed
                 pass
-            
+
         finally:
             self._check_mode = original_check_mode
-        
+
         # Report results
         return self._report_ir_check_results()
-    
+
     def _report_ir_check_results(self) -> int:
         """Report check results using IR-level diff.
-        
+
         Returns 0 if no differences found, 1 if differences exist.
         """
         if not self._files_with_differences:
             print("✓ All stub files are up to date")
             return 0
-        
-        from ._stub_parser import PyiToIRParser
+
         from ._stub_ir import StubFile
+        from ._stub_parser import PyiToIRParser
         from ._stub_serializer import IRToTextSerializer
-        
+
         parser = PyiToIRParser(self.function_name)
         serializer = IRToTextSerializer(self.function_name)
-        
+
         print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
-        
+
         for stub_path, existing_text, expected_text in self._files_with_differences:
             print(f"\n  {stub_path}")
-            
+
             # Parse existing and expected stubs to IR
             if existing_text:
                 # Parse from text (we already have it serialized)
                 import ast
+
                 existing_tree = ast.parse(existing_text)
                 existing_ir = parser.parse_ast(existing_tree, stub_path)
             else:
                 existing_ir = StubFile(file_path=stub_path)
-            
+
             expected_tree = ast.parse(expected_text)
             expected_ir = parser.parse_ast(expected_tree, stub_path)
-            
+
             # Compute IR-level diff
             diff = existing_ir.compute_overload_diff(expected_ir)
-            
+
             # Display compact diff
             for registry_name, changes in diff.items():
                 if changes["missing"] or changes["extra"]:
                     print(f"    Registry '{registry_name}':")
-                    
+
                     if changes["missing"]:
                         print(f"      - {len(changes['missing'])} overload(s) removed:")
                         for query, return_type in changes["missing"][:3]:  # Show first 3
@@ -216,7 +172,7 @@ class TypeStubGenerator:
                             print(f"        • {query_preview} → {return_type}")
                         if len(changes["missing"]) > 3:
                             print(f"        ... and {len(changes['missing']) - 3} more")
-                    
+
                     if changes["extra"]:
                         print(f"      + {len(changes['extra'])} overload(s) added:")
                         for query, return_type in changes["extra"][:3]:  # Show first 3
@@ -224,7 +180,7 @@ class TypeStubGenerator:
                             print(f"        • {query_preview} → {return_type}")
                         if len(changes["extra"]) > 3:
                             print(f"        ... and {len(changes['extra']) - 3} more")
-            
+
             # Show traditional diff in verbose mode
             if self._verbose >= 1:
                 print("\n    Detailed diff:")
@@ -233,32 +189,30 @@ class TypeStubGenerator:
                     # Indent the diff
                     for line in diff_output.split("\n"):
                         print(f"    {line}")
-        
+
         if self._verbose == 0:
             print("\nRun with --verbose to see detailed text diffs.")
-        
+
         return 1
 
-    def _write_stub_ir_if_changed(
-        self, stub_path: Path, stub_ir: "StubFile"
-    ) -> bool:
+    def _write_stub_ir_if_changed(self, stub_path: Path, stub_ir: "StubFile") -> bool:
         """Write stub file from IR only if content has changed.
-        
+
         In check mode, compares IRs instead of text to avoid false positives
         from formatting differences.
-        
+
         Args:
             stub_path: Path where stub file should be written
             stub_ir: Intermediate representation of the stub file
-            
+
         Returns:
             True if file was written (changed), False if unchanged.
         """
         if self._check_mode:
             # In check mode, compare IRs
-            from ._stub_parser import PyiToIRParser
             from ._stub_ir import StubFile
-            
+            from ._stub_parser import PyiToIRParser
+
             # Parse existing stub to IR if it exists
             if stub_path.exists():
                 parser = PyiToIRParser(self.function_name)
@@ -266,36 +220,41 @@ class TypeStubGenerator:
             else:
                 # No existing file - create empty IR
                 existing_ir = StubFile(file_path=stub_path)
-            
+
             # Compare using the StubFile method
             if existing_ir.has_same_overloads(stub_ir):
                 # No differences
                 return False
-            
+
             # Differences found - serialize for diff display
             from ._stub_serializer import IRToTextSerializer
+
             serializer = IRToTextSerializer(self.function_name)
-            
+
             existing_text = (
                 serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
                 if stub_path.exists()
                 else ""
             )
             new_text = serializer.serialize_to_text(stub_ir, relative_to=stub_path.parent)
-            
+
             # IRs differ, record for reporting
             self._files_with_differences.append((stub_path, existing_text, new_text))
             return True
         else:
             # Normal mode: serialize and write
             from ._stub_serializer import IRToTextSerializer
-            
+
             serializer = IRToTextSerializer(self.function_name)
             content = serializer.serialize_to_text(stub_ir, relative_to=stub_path.parent)
-            
+
             # Format if needed (but not in check mode)
-            formatted = self._format_stub_text(content, str(stub_path))
-            
+            formatted = (
+                formatter(self._format_command, content, str(stub_path))
+                if self._format_command
+                else content
+            )
+
             # Check if content changed
             if stub_path.exists():
                 try:
@@ -304,7 +263,7 @@ class TypeStubGenerator:
                         return False
                 except Exception:
                     pass
-            
+
             # Write the file
             stub_path.write_text(formatted, encoding="utf-8")
             return True
@@ -682,11 +641,12 @@ class TypeStubGenerator:
         Uses the new IR-based approach for better structure and maintainability.
         """
         stub_ir = self.generate_stub_ir(calls, class_name, base_class, export_name)
-        
+
         from ._stub_serializer import IRToTextSerializer
+
         serializer = IRToTextSerializer(self.function_name)
         return serializer.serialize_to_text(stub_ir, relative_to=relative_to)
-    
+
     def generate_stub_ir(
         self,
         calls: list[CallInfo],
@@ -695,12 +655,12 @@ class TypeStubGenerator:
         export_name: str = "sql",
     ) -> "StubFile":
         """Generate stub IR from collected calls.
-        
+
         Returns:
             StubFile IR representing the stub structure
         """
         from ._stub_parser import CallInfoToIRParser
-        
+
         parser = CallInfoToIRParser(self.function_name)
         stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
         return stub_ir
@@ -796,8 +756,9 @@ class TypeStubGenerator:
 
             # Create minimal stub IR for empty registries
             from ._stub_ir import RegistryClass, StubFile
+
             minimal_stub_ir = StubFile(file_path=stub_path)
-            
+
             if len(registry_classes) > 1:
                 # Generate minimal stubs for all registry classes
                 for reg_class in registry_classes:
@@ -985,7 +946,7 @@ class TypeStubGenerator:
                     else:
                         # Use IR-based writing for better check mode support
                         final_stub_ir = all_new_registries
-                    
+
                     self._write_stub_ir_if_changed(stub_path, final_stub_ir)
 
                     generated_paths.append(stub_path)
@@ -1091,7 +1052,11 @@ class TypeStubGenerator:
 
             # Write formatted output to file
             stub_path.parent.mkdir(parents=True, exist_ok=True)
-            formatted = self._format_stub_text(stub_content, str(stub_path))
+            formatted = (
+                formatter(self._format_command, stub_content, str(stub_path))
+                if self._format_command
+                else stub_content
+            )
             self._write_stub_if_changed(stub_path, formatted)
 
             mode_parts = []
