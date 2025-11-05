@@ -198,7 +198,7 @@ class SQLAnalyzer:
                         sql_type = "NUMERIC"
                 case exp.Sum(this=exp.Column(name=column_name)) if self.schema:
                     # SUM of column without table name - try to find table from query
-                    table_name = ""
+                    table_name = None
                     table_expr = ast.find(exp.Table)
                     if table_expr:
                         table_name = table_expr.name
@@ -209,7 +209,7 @@ class SQLAnalyzer:
                                 table_name = table.name
                                 break
 
-                    if table_name:
+                    if table_name is not None:
                         sql_type = self._get_column_type_from_schema(table_name, column_name)
                         if sql_type:
                             python_type = self._sql_to_python_type(sql_type)
