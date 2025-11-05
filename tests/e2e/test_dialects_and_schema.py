@@ -317,3 +317,89 @@ query = sql("SELECT id::UUID, name::TEXT FROM users")
 
     # Snapshot to verify UUID handling
     assert "SELECT id::UUID, name::TEXT FROM users" in stub_content
+
+
+def test_multi_schema_with_schema_path_attribute(tmp_path: Path) -> None:
+    """Test type inference with multiple registries using __schema_path__ attribute."""
+    # Create separate schema files for different domains
+    orders_schema = tmp_path / "orders.sql"
+    orders_schema.write_text("""CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    total FLOAT NOT NULL
+);
+""")
+
+    users_schema = tmp_path / "users.sql"
+    users_schema.write_text("""CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+""")
+
+    # Create separate registry files with __schema_path__
+    orders_queries = tmp_path / "orders_queries.py"
+    orders_queries.write_text("""from sqlty import SQLRegistry
+
+
+class OrdersQueries(SQLRegistry):
+    __schema_path__ = "orders.sql"
+
+
+sql = OrdersQueries.sql
+
+order_query = sql("SELECT id, total FROM orders")
+""")
+
+    users_queries = tmp_path / "users_queries.py"
+    users_queries.write_text("""from sqlty import SQLRegistry
+
+
+class UsersQueries(SQLRegistry):
+    __schema_path__ = "users.sql"
+
+
+sql = UsersQueries.sql
+
+user_query = sql("SELECT id, name FROM users")
+""")
+
+    # Create main file that imports from both registries
+    main_file = tmp_path / "main.py"
+    main_file.write_text("""from orders_queries import sql as order_sql
+from users_queries import sql as user_sql
+
+# Example usage
+user_result = user_sql("SELECT id, name FROM users")
+order_result = order_sql("SELECT id, total FROM orders")
+""")
+
+    # Generate stubs
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "sqlty",
+            str(tmp_path),
+            "--mode=full",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+    # Check orders_queries.pyi
+    orders_stub = tmp_path / "orders_queries.pyi"
+    assert orders_stub.exists()
+    orders_content = orders_stub.read_text()
+    
+    # Should infer correct types from schema: id -> int, total -> float
+    assert "tuple[int, float]" in orders_content
+
+    # Check users_queries.pyi
+    users_stub = tmp_path / "users_queries.pyi"
+    assert users_stub.exists()
+    users_content = users_stub.read_text()
+    
+    # Should infer correct types from schema: id -> int, name -> str
+    assert "tuple[int, str]" in users_content
