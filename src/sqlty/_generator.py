@@ -173,16 +173,16 @@ class TypeStubGenerator:
                     logging.getLogger(__name__).debug(
                         f"Resolved registry_class='sql' to class_name='{class_name}' from {registry_module_path}"
                     )
-                    if not class_name:
-                        # Fallback to first registry class
-                        class_names = self._registry_detector.get_registry_class_names(
-                            registry_module_path
-                        )
-                        class_name = class_names[0] if class_names else None
                 else:
                     class_name = registry_class
             else:
-                class_names = self._registry_detector.get_registry_class_names(registry_module_path)
+                class_name = None
+            
+            # Fallback to first registry class if resolution failed
+            if not class_name:
+                class_names = self._registry_detector.get_registry_class_names(
+                    registry_module_path
+                )
                 class_name = class_names[0] if class_names else None
 
             if class_name:
@@ -198,9 +198,9 @@ class TypeStubGenerator:
 
         # Priority 3: __schema_path__ from registry class (only if no CLI schema)
         if schema_to_use is None:
-            # Determine which class name to use for schema lookup
-            # If we resolved a class_name earlier (when registry_name is set), use it
-            # Otherwise, use registry_class directly (e.g., when analyzing the registry file itself)
+            # Determine which class name to use for schema lookup:
+            # - If registry_name exists, we've resolved class_name above (may differ from registry_class)
+            # - If registry_name is None, registry_class contains the direct class name
             lookup_class_name = class_name if registry_name else registry_class
             detected_schema = self._registry_detector.get_schema_path_from_registry(
                 registry_module_path, class_name=lookup_class_name
