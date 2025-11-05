@@ -5,7 +5,10 @@ and resolving their associated schema files.
 """
 
 import ast
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class RegistryDetector:
@@ -164,28 +167,104 @@ class RegistryDetector:
             return None
 
     def resolve_import_to_registry_module(
-        self, import_source: str, source_file: Path
+        self, import_source: str, source_file: Path, import_level: int = 0
     ) -> str | None:
         """Resolve an import to find which module contains the SQLRegistry subclass.
 
         Args:
             import_source: The module name from the import statement
             source_file: The file that contains the import
+            import_level: The relative import level (0 for absolute, 1+ for relative)
+                         Level 1 = . (current package)
+                         Level 2 = .. (parent package)
+                         Level 3 = ... (grandparent package), etc.
 
         Returns:
             The module name that contains the SQLRegistry subclass, or None
         """
+        logger.debug(
+            "Resolving import: source='%s', file='%s', level=%d",
+            import_source,
+            source_file,
+            import_level,
+        )
         source_dir = source_file.parent
+
+        # Handle relative imports
+        if import_level > 0:
+            # Navigate up the directory tree
+            # Level 1 (.) = current directory (source_dir)
+            # Level 2 (..) = parent directory (go up 1)
+            # Level 3 (...) = grandparent directory (go up 2), etc.
+            target_dir = source_dir
+            levels_to_go_up = import_level - 1
+
+            for _ in range(levels_to_go_up):
+                target_dir = target_dir.parent
+                if target_dir == target_dir.parent:  # Reached root
+                    logger.debug("Reached root directory, cannot resolve relative import")
+                    return None
+
+            logger.debug(
+                "Target directory for relative import (level %d): %s", import_level, target_dir
+            )
+
+            # If import_source is empty (e.g., "from .. import sql"), check target_dir
+            if not import_source:
+                # Check for __init__.py in target directory
+                init_file = target_dir / "__init__.py"
+                logger.debug("Checking __init__.py: %s", init_file)
+                if self.get_registry_class_names(init_file):
+                    # Return the module name based on the directory path
+                    resolved = target_dir.name
+                    logger.debug("Found registry in __init__.py, returning: %s", resolved)
+                    return resolved
+                logger.debug("No registry found in __init__.py")
+                return None
+
+            # Otherwise, resolve from target_dir
+            module_path_parts = import_source.split(".")
+
+            # Try as a file
+            module_file = target_dir
+            for part in module_path_parts[:-1]:
+                module_file = module_file / part
+            module_file = module_file / f"{module_path_parts[-1]}.py"
+
+            logger.debug("Trying module file: %s", module_file)
+            if self.get_registry_class_names(module_file):
+                logger.debug("Found registry in module file, returning: %s", import_source)
+                return import_source
+
+            # Try as a package
+            package_init = target_dir
+            for part in module_path_parts:
+                package_init = package_init / part
+            package_init = package_init / "__init__.py"
+
+            logger.debug("Trying package __init__: %s", package_init)
+            if self.get_registry_class_names(package_init):
+                logger.debug("Found registry in package __init__, returning: %s", import_source)
+                return import_source
+
+            logger.debug("Could not resolve relative import")
+            return None
+
+        # Handle absolute imports (original logic)
         module_path_parts = import_source.split(".")
 
         # Try as a simple relative import first (e.g., "queries" from same directory)
         module_file = source_dir / f"{import_source}.py"
+        logger.debug("Trying simple module: %s", module_file)
         if self.get_registry_class_names(module_file):
+            logger.debug("Found registry, returning: %s", import_source)
             return import_source
 
         # Try as a package with __init__.py
         package_init = source_dir / import_source / "__init__.py"
+        logger.debug("Trying package: %s", package_init)
         if self.get_registry_class_names(package_init):
+            logger.debug("Found registry in package, returning: %s", import_source)
             return import_source
 
         # For dotted imports, try multiple resolution strategies
