@@ -896,10 +896,10 @@ class TypeStubGenerator:
                     # Parse all new registries first
                     from ._stub_ir import StubFile
                     from ._stub_parser import CallInfoToIRParser
-                    from ._stub_serializer import IRToTextSerializer
 
                     call_parser = CallInfoToIRParser(self.function_name)
-                    serializer = IRToTextSerializer(self.function_name)
+                    # TODO why is it not used?
+                    # serializer = IRToTextSerializer(self.function_name)
 
                     # Create stub with all new registries
                     all_new_registries = StubFile(file_path=stub_path)

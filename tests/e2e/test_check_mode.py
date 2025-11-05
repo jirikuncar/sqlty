@@ -265,7 +265,7 @@ query = sql("SELECT id::INTEGER FROM users")
 
     # Try to use both --check and --format-command together
     result = cli([str(tmp_path), "--check", "--format-command", "cat"])
-    
+
     # Should fail with error message
     assert result.returncode == 1
     output = result.stdout + result.stderr
