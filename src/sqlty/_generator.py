@@ -198,9 +198,12 @@ class TypeStubGenerator:
 
         # Priority 3: __schema_path__ from registry class (only if no CLI schema)
         if schema_to_use is None:
-            # Pass the resolved class_name to get schema only from that specific class
+            # Determine which class name to use for schema lookup
+            # If we resolved a class_name earlier (when registry_name is set), use it
+            # Otherwise, use registry_class directly (e.g., when analyzing the registry file itself)
+            lookup_class_name = class_name if registry_name else registry_class
             detected_schema = self._registry_detector.get_schema_path_from_registry(
-                registry_module_path, class_name=class_name if registry_name else registry_class
+                registry_module_path, class_name=lookup_class_name
             )
             if detected_schema:
                 schema_to_use = detected_schema
