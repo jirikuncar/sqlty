@@ -420,3 +420,302 @@ def test_insert_without_returning_returns_none(analyzer: SQLAnalyzer) -> None:
     columns = analyzer.analyze_select("INSERT INTO users (name) VALUES ('John')")
 
     assert columns is None
+
+
+# Edge cases and corner cases
+
+
+def test_update_from_returning_different_tables(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE...FROM where RETURNING references columns from both tables."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE users
+        SET status = orders.status
+        FROM orders
+        WHERE users.id = orders.user_id
+        RETURNING users.id::INTEGER, orders.order_id::INTEGER, users.status::TEXT
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].name == "id"
+    assert columns[0].python_type == "int"
+    assert columns[1].name == "order_id"
+    assert columns[1].python_type == "int"
+    assert columns[2].name == "status"
+    assert columns[2].python_type == "str"
+
+
+def test_delete_using_returning_different_tables(analyzer: SQLAnalyzer) -> None:
+    """Test DELETE...USING where RETURNING references columns from both tables."""
+    columns = analyzer.analyze_select(
+        """
+        DELETE FROM orders
+        USING users, products
+        WHERE orders.user_id = users.id
+        AND orders.product_id = products.id
+        AND users.active = false
+        RETURNING orders.id::INTEGER, users.email::TEXT, products.name::TEXT
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "str"
+    assert columns[2].python_type == "str"
+
+
+def test_update_with_subquery_in_set_returning(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE with subquery in SET clause and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE users
+        SET total_orders = (SELECT COUNT(*) FROM orders WHERE orders.user_id = users.id)
+        WHERE active = true
+        RETURNING id::INTEGER, total_orders::INTEGER
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 2
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "int"
+
+
+def test_update_from_join_returning(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE with JOIN in FROM clause and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE users
+        SET tier = 'premium'
+        FROM (
+            SELECT user_id, SUM(total) as total_spent
+            FROM orders
+            GROUP BY user_id
+            HAVING SUM(total) > 1000
+        ) AS high_spenders
+        WHERE users.id = high_spenders.user_id
+        RETURNING users.id::INTEGER, users.tier::TEXT, high_spenders.total_spent::FLOAT
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "str"
+    assert columns[2].python_type == "float"
+
+
+def test_delete_with_cte_returning(analyzer: SQLAnalyzer) -> None:
+    """Test DELETE with CTE (WITH clause) and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        WITH inactive_users AS (
+            SELECT id FROM users WHERE last_login < NOW() - INTERVAL '1 year'
+        )
+        DELETE FROM orders
+        WHERE user_id IN (SELECT id FROM inactive_users)
+        RETURNING id::INTEGER, user_id::INTEGER, created_at::TIMESTAMP
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "int"
+    assert columns[2].python_type == "datetime.datetime"
+
+
+def test_update_returning_with_expression(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE RETURNING with expressions and calculations."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE products
+        SET price = price * 1.1, updated_at = NOW()
+        RETURNING id::INTEGER, (price * 1.1)::FLOAT AS new_price, UPPER(name)::TEXT AS upper_name
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "float"
+    assert columns[2].python_type == "str"
+
+
+def test_insert_select_returning(analyzer: SQLAnalyzer) -> None:
+    """Test INSERT...SELECT with RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        INSERT INTO audit_log (user_id, action, timestamp)
+        SELECT id, 'login', NOW()
+        FROM users
+        WHERE active = true
+        RETURNING id::INTEGER, user_id::INTEGER, action::TEXT, timestamp::TIMESTAMP
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 4
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "int"
+    assert columns[2].python_type == "str"
+    assert columns[3].python_type == "datetime.datetime"
+
+
+def test_update_from_multiple_joins_returning(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE with multiple JOINs in FROM and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE order_items
+        SET discount = discounts.percentage
+        FROM orders
+        INNER JOIN users ON orders.user_id = users.id
+        INNER JOIN discounts ON users.tier = discounts.tier
+        WHERE order_items.order_id = orders.id
+        RETURNING order_items.id::INTEGER, order_items.discount::FLOAT, users.tier::TEXT
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "float"
+    assert columns[2].python_type == "str"
+
+
+def test_delete_from_nested_select_returning(analyzer: SQLAnalyzer) -> None:
+    """Test DELETE with nested SELECT in WHERE and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        DELETE FROM users
+        WHERE id IN (
+            SELECT user_id FROM orders
+            WHERE status = 'cancelled'
+            AND created_at < (
+                SELECT MIN(created_at) FROM orders WHERE status = 'completed'
+            )
+        )
+        RETURNING id::INTEGER, email::TEXT, created_at::TIMESTAMP
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "str"
+    assert columns[2].python_type == "datetime.datetime"
+
+
+def test_update_returning_with_case_expression(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE RETURNING with CASE expression."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE users
+        SET tier = CASE
+            WHEN total_spent > 10000 THEN 'platinum'
+            WHEN total_spent > 5000 THEN 'gold'
+            WHEN total_spent > 1000 THEN 'silver'
+            ELSE 'bronze'
+        END
+        RETURNING id::INTEGER, tier::TEXT, total_spent::FLOAT
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "str"
+    assert columns[2].python_type == "float"
+
+
+def test_merge_with_complex_conditions_returning(analyzer: SQLAnalyzer) -> None:
+    """Test MERGE with complex WHEN conditions and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        MERGE INTO inventory
+        USING (
+            SELECT product_id, SUM(quantity) as qty
+            FROM order_items
+            GROUP BY product_id
+        ) AS orders
+        ON inventory.product_id = orders.product_id
+        WHEN MATCHED AND orders.qty > 0 THEN
+            UPDATE SET quantity = inventory.quantity - orders.qty
+        WHEN NOT MATCHED THEN
+            INSERT (product_id, quantity) VALUES (orders.product_id, 0)
+        RETURNING inventory.product_id::INTEGER, inventory.quantity::INTEGER, orders.qty::INTEGER
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "int"
+    assert columns[2].python_type == "int"
+
+
+def test_update_from_lateral_join_returning(analyzer: SQLAnalyzer) -> None:
+    """Test UPDATE with LATERAL join in FROM and RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        UPDATE users
+        SET last_order_date = latest.order_date
+        FROM LATERAL (
+            SELECT MAX(created_at) as order_date
+            FROM orders
+            WHERE orders.user_id = users.id
+        ) AS latest
+        WHERE users.active = true
+        RETURNING users.id::INTEGER, users.last_order_date::DATE
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 2
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "datetime.date"
+
+
+def test_delete_returning_with_window_function_expression(analyzer: SQLAnalyzer) -> None:
+    """Test DELETE RETURNING with window function in expression."""
+    columns = analyzer.analyze_select(
+        """
+        DELETE FROM duplicates
+        WHERE id NOT IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY created_at DESC) as rn
+                FROM duplicates
+            ) t WHERE rn = 1
+        )
+        RETURNING id::INTEGER, email::TEXT, created_at::TIMESTAMP
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 3
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "str"
+    assert columns[2].python_type == "datetime.datetime"
+
+
+def test_insert_on_conflict_returning(analyzer: SQLAnalyzer) -> None:
+    """Test INSERT...ON CONFLICT with RETURNING."""
+    columns = analyzer.analyze_select(
+        """
+        INSERT INTO users (email, name, login_count)
+        VALUES ('user@example.com', 'User', 1)
+        ON CONFLICT (email) DO UPDATE
+        SET login_count = users.login_count + 1, last_login = NOW()
+        RETURNING id::INTEGER, email::TEXT, login_count::INTEGER, last_login::TIMESTAMP
+        """
+    )
+
+    assert columns is not None
+    assert len(columns) == 4
+    assert columns[0].python_type == "int"
+    assert columns[1].python_type == "str"
+    assert columns[2].python_type == "int"
+    assert columns[3].python_type == "datetime.datetime"
