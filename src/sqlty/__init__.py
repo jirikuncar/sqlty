@@ -55,14 +55,23 @@ class SQLRegistry:
         When SQLTY_AUTO_GENERATE is enabled, this method also registers
         the call for automatic stub generation at script exit.
         """
-        # Register call for auto-generation if enabled
-        # Only register if query is a string (literal)
+        # Fast path: check if this is even a string and if auto-gen is enabled
+        # Only do expensive operations if both conditions are true
         if isinstance(query, str):
-            from sqlty._runtime_registry import is_auto_generate_enabled, get_runtime_registry
+            import os
             
-            if is_auto_generate_enabled():
-                # Get the module name for this registry class
+            # Cache the auto-generate check at the module level for performance
+            # Only check once per process
+            if not hasattr(cls, '_sqlty_autogen_checked'):
+                cls._sqlty_autogen_checked = True
+                cls._sqlty_autogen_enabled = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in ("1", "true", "yes")
+            
+            if cls._sqlty_autogen_enabled:
+                # Import only when needed
+                from sqlty._runtime_registry import get_runtime_registry
                 import inspect
+                
+                # Get the module name for this registry class
                 module = inspect.getmodule(cls)
                 module_name = module.__name__ if module else None
                 
