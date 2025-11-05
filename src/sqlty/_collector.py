@@ -68,25 +68,26 @@ class LiteralCallCollector(ast.NodeVisitor):
         # Use asttokens' internal line offset tracking for O(log n) conversion
         # This mimics asttokens' offset_to_line implementation
         text = self.atok.text
-        
+
         # Build line offsets if not already cached
-        if not hasattr(self, '_line_offsets'):
+        if not hasattr(self, "_line_offsets"):
             self._line_offsets = [0]
             for i, char in enumerate(text):
-                if char == '\n':
+                if char == "\n":
                     self._line_offsets.append(i + 1)
             # Add end of file as final offset
             self._line_offsets.append(len(text))
-        
+
         # Clamp offset to valid range
         offset = max(0, min(len(text), offset))
-        
+
         # Binary search to find line (O(log n))
         import bisect
+
         line_index = bisect.bisect_right(self._line_offsets, offset) - 1
         line = line_index + 1  # 1-indexed
         col = offset - self._line_offsets[line_index]  # 0-indexed
-        
+
         return (line, col)
 
     def visit_Import(self, node: ast.Import) -> None:
