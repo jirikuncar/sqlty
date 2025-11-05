@@ -953,20 +953,21 @@ class TypeStubGenerator:
                         pyi_parser = PyiToIRParser(self.function_name)
                         existing_stub = pyi_parser.parse_file(stub_path)
 
-                        # Apply modes in order: incremental first, then prune
-                        for new_registry in all_new_registries.registries.values():
-                            if incremental:
-                                # Add new overloads
-                                existing_stub.merge_registry(new_registry, mode="incremental")
-                            if prune_mode:
-                                # Remove stale overloads
-                                existing_stub.merge_registry(new_registry, mode="prune")
-                            if not incremental and not prune_mode:
-                                # Fresh mode: replace entirely
-                                existing_stub.merge_registry(new_registry, mode="full")
+                        # Fresh mode: replace entirely without merging
+                        if not incremental and not prune_mode:
+                            final_stub_ir = all_new_registries
+                        else:
+                            # Apply modes in order: incremental first, then prune
+                            for new_registry in all_new_registries.registries.values():
+                                if incremental:
+                                    # Add new overloads
+                                    existing_stub.merge_registry(new_registry, mode="incremental")
+                                if prune_mode:
+                                    # Remove stale overloads
+                                    existing_stub.merge_registry(new_registry, mode="prune")
 
-                        # Use IR-based writing for better check mode support
-                        final_stub_ir = existing_stub
+                            # Use IR-based writing for better check mode support
+                            final_stub_ir = existing_stub
                     else:
                         # Use IR-based writing for better check mode support
                         final_stub_ir = all_new_registries

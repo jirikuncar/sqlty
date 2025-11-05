@@ -187,15 +187,11 @@ class StubFile:
 
         Args:
             registry: The registry to merge
-            mode: Merge mode - "incremental", "full", "prune", or "sync"
+            mode: Merge mode - "incremental" or "prune"
                 - incremental: Add new overloads, keep existing ones (never removes)
-                - full: Replace entire registry with new one (loses source spans)
                 - prune: Remove overloads not in the new registry (only removes, never adds)
-                - sync: Synchronize to match new registry (removes old, adds new, preserves source spans on kept items)
         """
-        if mode == "full":
-            self.registries[registry.name] = registry
-        elif mode == "incremental":
+        if mode == "incremental":
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 for overload in registry.overloads:
@@ -214,23 +210,6 @@ class StubFile:
                 ]
                 for literal in to_remove:
                     existing.remove_overload(literal)
-        elif mode == "sync":
-            if registry.name in self.registries:
-                existing = self.registries[registry.name]
-                new_literals = {o.query_literal for o in registry.overloads}
-                # Remove overloads not in new registry
-                to_remove = [
-                    o.query_literal
-                    for o in existing.overloads
-                    if o.query_literal not in new_literals
-                ]
-                for literal in to_remove:
-                    existing.remove_overload(literal)
-                # Add new overloads from new registry (preserves source spans on kept items)
-                for overload in registry.overloads:
-                    existing.add_overload(overload)
-            else:
-                self.registries[registry.name] = registry
         else:
             raise ValueError(f"Unknown merge mode: {mode}")
 

@@ -76,8 +76,8 @@ def test_stub_file_merge_incremental():
     assert len(stub.registries["Query"].overloads) == 3  # Only SELECT 3 added
 
 
-def test_stub_file_merge_full():
-    """Test full merge mode."""
+def test_stub_file_replace_via_add_registry():
+    """Test replacing entire registry via add_registry (no merge mode)."""
     stub = StubFile()
 
     registry1 = RegistryClass(name="Query", base_class="SQLRegistry")
@@ -88,7 +88,7 @@ def test_stub_file_merge_full():
         OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
     )
 
-    stub.merge_registry(registry1, mode="full")
+    stub.add_registry(registry1)
     assert len(stub.registries["Query"].overloads) == 2
 
     # Replace with new registry
@@ -97,7 +97,7 @@ def test_stub_file_merge_full():
         OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
     )
 
-    stub.merge_registry(registry2, mode="full")
+    stub.add_registry(registry2)
     assert len(stub.registries["Query"].overloads) == 1  # Only SELECT 3
     assert stub.registries["Query"].has_overload("SELECT 3")
     assert not stub.registries["Query"].has_overload("SELECT 1")
@@ -118,7 +118,7 @@ def test_stub_file_merge_prune():
         OverloadSignature(query_literal="SELECT 3", return_type="SQL[tuple[int]]")
     )
 
-    stub.merge_registry(registry1, mode="full")
+    stub.add_registry(registry1)
     assert len(stub.registries["Query"].overloads) == 3
 
     # Prune to keep only SELECT 1 and SELECT 3 (removes SELECT 2)
@@ -150,7 +150,7 @@ def test_stub_file_merge_prune_never_adds():
         OverloadSignature(query_literal="SELECT 2", return_type="SQL[tuple[int]]")
     )
 
-    stub.merge_registry(registry1, mode="full")
+    stub.add_registry(registry1)
     assert len(stub.registries["Query"].overloads) == 2
 
     # Try to prune with a superset (includes SELECT 3 and SELECT 4 which are new)
@@ -923,9 +923,12 @@ sql = Query.sql
             new_calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
         )
 
-        # Merge with sync mode (removes old, adds new, preserves source spans on kept items)
+        # Synchronize by applying incremental then prune
         for new_registry in new_stub.registries.values():
-            existing_stub.merge_registry(new_registry, mode="sync")
+            # Add new overloads
+            existing_stub.merge_registry(new_registry, mode="incremental")
+            # Remove stale ones
+            existing_stub.merge_registry(new_registry, mode="prune")
 
         # Re-parse to get original stub with source spans for comparison
         original_stub = parser.parse_file(stub_path)
