@@ -36,6 +36,9 @@ class SQLRegistry:
         import os
 
         auto_generate = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in ("1", "true", "yes")
+        
+        # Cache auto-generate setting on the class itself
+        cls._sqlty_autogen_enabled = auto_generate
 
         if auto_generate:
             # Delegate to helper to avoid bloating the base class and to prevent
@@ -58,28 +61,32 @@ class SQLRegistry:
         # Fast path: check if this is even a string and if auto-gen is enabled
         # Only do expensive operations if both conditions are true
         if isinstance(query, str):
-            import os
-            
-            # Cache the auto-generate check at the module level for performance
-            # Only check once per process
-            if not hasattr(cls, '_sqlty_autogen_checked'):
-                cls._sqlty_autogen_checked = True
-                cls._sqlty_autogen_enabled = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in ("1", "true", "yes")
-            
-            if cls._sqlty_autogen_enabled:
+            # Check if auto-generation is enabled (set in __init_subclass__)
+            if getattr(cls, '_sqlty_autogen_enabled', False):
                 # Import only when needed
                 from sqlty._runtime_registry import get_runtime_registry
                 import inspect
                 
-                # Get the module name for this registry class
+                # Get the module for this registry class
                 module = inspect.getmodule(cls)
                 module_name = module.__name__ if module else None
+                
+                # Get the source file where the registry class is defined
+                try:
+                    registry_file = inspect.getfile(cls)
+                except (TypeError, OSError):
+                    registry_file = None
+                
+                # Build fully qualified class name
+                fully_qualified_name = f"{module_name}.{cls.__name__}" if module_name else cls.__name__
                 
                 # Register the call
                 registry = get_runtime_registry()
                 registry.register_call(
                     query=query,
                     registry_class=cls.__name__,
+                    fully_qualified_name=fully_qualified_name,
+                    registry_file=registry_file,
                     module_name=module_name,
                 )
         

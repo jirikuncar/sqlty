@@ -37,6 +37,8 @@ class RuntimeCallRegistry:
         self, 
         query: str, 
         registry_class: str | None = None,
+        fully_qualified_name: str | None = None,
+        registry_file: str | None = None,
         module_name: str | None = None,
     ) -> None:
         """Register a sql() call from runtime.
@@ -44,6 +46,8 @@ class RuntimeCallRegistry:
         Args:
             query: The SQL query string
             registry_class: Name of the registry class that owns this call
+            fully_qualified_name: Fully qualified name of the registry class (module.ClassName)
+            registry_file: Path to the file where the registry class is defined
             module_name: Name of the module where the call was made
         """
         # Get the caller's frame to determine source location
@@ -90,6 +94,8 @@ class RuntimeCallRegistry:
                 "file": str(source_path),
                 "registry_class": registry_class,
                 "registry_source": module_name,
+                "fully_qualified_name": fully_qualified_name,
+                "registry_file": registry_file,
                 "return_type": None,  # Will be inferred during generation
             }
             
