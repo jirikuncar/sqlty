@@ -17,7 +17,10 @@ class CallInfo(TypedDict):
 
 
 class LiteralCallCollector(ast.NodeVisitor):
-    """Collects function calls with literal string arguments."""
+    """Collects function calls with literal string arguments.
+
+    Only collects calls that are verified to come from SQLRegistry subclasses.
+    """
 
     def __init__(self) -> None:
         self.function_name = "sql"  # Always look for .sql() method calls
@@ -32,6 +35,12 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.class_imports: dict[
             str, str
         ] = {}  # Track class imports with aliases (e.g., {"A": "QueryA"})
+        self.local_registry_classes: set[str] = (
+            set()
+        )  # Track SQLRegistry subclasses defined in current file
+        self.registry_aliases: dict[
+            str, str
+        ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
 
     def visit_Import(self, node: ast.Import) -> None:
         """Track module imports (e.g., import queries)."""
@@ -52,10 +61,41 @@ class LiteralCallCollector(ast.NodeVisitor):
                 # Also track the original class name if it's different from the local name
                 if alias.asname:
                     self.class_imports[local_name] = imported_name
+                else:
+                    # Even without alias, track the original name
+                    self.class_imports[local_name] = imported_name
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Track SQLRegistry subclasses defined in the current file."""
+        # Check if this class inherits from SQLRegistry
+        for base in node.bases:
+            if (
+                isinstance(base, ast.Name)
+                and base.id == "SQLRegistry"
+                or isinstance(base, ast.Attribute)
+                and base.attr == "SQLRegistry"
+            ):
+                self.local_registry_classes.add(node.name)
+                break
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        """Visit assignment nodes to capture type context."""
+        """Visit assignment nodes to capture type context and track .sql aliases."""
+        # Check if this is an assignment like: user_sql = UserQueries.sql or qa = A.sql
+        if (
+            isinstance(node.value, ast.Attribute)
+            and node.value.attr == self.function_name
+            and isinstance(node.value.value, ast.Name)
+        ):
+            class_name = node.value.value.id
+            # Check if it's a local registry class OR an imported class (by class name)
+            if class_name in self.local_registry_classes or class_name in self.class_imports:
+                # Track the alias
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self.registry_aliases[target.id] = class_name
+
         old_assignment = self.current_assignment
         self.current_assignment = node
         self.generic_visit(node)
@@ -69,7 +109,10 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.current_assignment = old_assignment
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Visit function calls to find target function with literal arguments."""
+        """Visit function calls to find target function with literal arguments.
+
+        Only accepts calls that are verified to come from SQLRegistry subclasses.
+        """
         # Check for direct call: sql(...) or user_sql(...) etc.
         registry_source: str | None = None
         registry_class: str | None = None
@@ -77,25 +120,22 @@ class LiteralCallCollector(ast.NodeVisitor):
 
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
-            # Check if it's a call to the target function or an alias/import of it
-            if func_name == self.function_name or func_name.endswith(f"_{self.function_name}"):
+
+            # Check if this is an alias to a local registry's .sql method
+            if func_name in self.registry_aliases:
                 is_target_call = True
-                # Check if it was imported from somewhere
-                if func_name in self.import_sources:
-                    registry_source = self.import_sources[func_name]
-                # If not imported, still mark as valid (no registry_source)
+                registry_class = self.registry_aliases[func_name]
+                # registry_source will be set later by the generator based on the current file
+            # Check if it's imported from another module
             elif func_name in self.import_sources:
-                # This is an imported/aliased name (e.g., sql1 from "import sql as sql1")
-                # Check if it's an alias of sql by looking at class_imports
-                if (
-                    func_name in self.class_imports
-                    and self.class_imports[func_name] == self.function_name
-                ):
-                    is_target_call = True
-                    registry_source = self.import_sources[func_name]
+                is_target_call = True
+                registry_source = self.import_sources[func_name]
+                # Also check if we know the original class name
+                if func_name in self.class_imports:
+                    registry_class = self.class_imports[func_name]
 
         # Check for qualified call: module.sql(...) or RegistryClass.sql(...)
-        if isinstance(node.func, ast.Attribute) and node.func.attr == self.function_name:
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == self.function_name:
             if isinstance(node.func.value, ast.Name):
                 module_or_class_name = node.func.value.id
                 # Priority 1: Check if it's a module import (e.g., queries.sql)
@@ -112,11 +152,11 @@ class LiteralCallCollector(ast.NodeVisitor):
                         # Not aliased, use the name as-is
                         registry_class = module_or_class_name
                     is_target_call = True
-                else:
-                    # This might be a direct registry class reference in the same file (e.g., RegistryA.sql())
-                    # We'll mark it as a target call and capture the class name
+                # Priority 3: Check if it's a local SQLRegistry class (e.g., RegistryA.sql())
+                elif module_or_class_name in self.local_registry_classes:
                     registry_class = module_or_class_name
                     is_target_call = True
+                    # registry_source will be set later by the generator based on the current file
 
         # Add any direct or qualified call to the target function with a literal argument
         if is_target_call:

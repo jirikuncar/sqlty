@@ -239,6 +239,28 @@ class TypeStubGenerator:
             output_path, new_calls, class_name, base_class, full_mode, export_name
         )
 
+    def _resolve_registry_source_for_class(
+        self,
+        call: CallInfo,
+        collector: LiteralCallCollector,
+        registry_sources: set[str],
+    ) -> None:
+        """Resolve registry_source for a call based on its registry_class.
+
+        Args:
+            call: The call info to update
+            collector: The collector with import information
+            registry_sources: Set of known registry module names
+        """
+        if call["registry_source"] is None and call["registry_class"]:
+            # Check if registry_class is an imported name
+            registry_class = call["registry_class"]
+            if registry_class in collector.import_sources:
+                import_module = collector.import_sources[registry_class]
+                # Check if this module is in registry_sources (i.e., it has a SQLRegistry)
+                if import_module in registry_sources:
+                    call["registry_source"] = import_module
+
     def analyze_file(self, filepath: Path) -> list[CallInfo]:
         """Analyze a single Python file and collect function calls."""
         try:
@@ -274,6 +296,15 @@ class TypeStubGenerator:
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
                         call["registry_source"] = resolved_module
+            else:
+                # If the module doesn't contain a SQLRegistry, clear registry_source for those calls
+                for call in collector.calls:
+                    if call["registry_source"] == module_name:
+                        call["registry_source"] = None
+
+        # For calls with registry_class but no registry_source, check if the class is imported
+        for call in collector.calls:
+            self._resolve_registry_source_for_class(call, collector, registry_sources)
 
         # For calls without a registry_source, check if they're in the current file's registry
         current_module = filepath.stem
@@ -606,6 +637,18 @@ class TypeStubGenerator:
 
                 # Unified path: handle one or multiple classes the same way
                 if class_names:
+                    # Resolve registry_class names that might be export aliases
+                    for call in registry_calls:
+                        registry_class = call.get("registry_class")
+                        if registry_class and registry_class not in class_names:
+                            # This might be an export alias (e.g., 'qa' instead of 'A')
+                            # Try to resolve it to the actual class name
+                            resolved_class = self._registry_detector.get_class_name_from_export(
+                                registry_file, registry_class
+                            )
+                            if resolved_class and resolved_class in class_names:
+                                call["registry_class"] = resolved_class
+
                     # Group calls by registry_class
                     calls_by_class: dict[str | None, list[CallInfo]] = {}
                     for call in registry_calls:
