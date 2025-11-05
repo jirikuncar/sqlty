@@ -35,6 +35,8 @@ class TypeStubGenerator:
         sql_dialect: str = "postgres",
         schema_mappings: dict[str | None, Path] | None = None,
         format_command: str | None = None,
+        check_mode: bool = False,
+        verbose: int = 0,
     ) -> None:
         self.function_name = "sql"  # Always use 'sql' as the method name
         self.sql_dialect = sql_dialect
@@ -47,9 +49,14 @@ class TypeStubGenerator:
         # Cache analyzers per registry for performance
         self._analyzer_cache: dict[str, SQLAnalyzer] = {}
         self._format_command = format_command
+        self._check_mode = check_mode
+        self._verbose = verbose
 
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector()
+        
+        # Track files that have differences (for check mode)
+        self._files_with_differences: list[tuple[Path, str, str]] = []
 
     def _format_stub_text(self, text: str, filename: str) -> str:
         """Format generated stub content by piping it through an external command.
@@ -95,13 +102,86 @@ class TypeStubGenerator:
             logging.getLogger(__name__).warning("Could not run formatter '%s': %s", cmd, e)
             return text
 
+    def _render_diff(self, filepath: Path, old_content: str, new_content: str) -> str:
+        """Render a unified diff between old and new content.
+        
+        Uses rich library for colored output if verbose mode is enabled.
+        """
+        import difflib
+        
+        old_lines = old_content.splitlines(keepends=True)
+        new_lines = new_content.splitlines(keepends=True)
+        
+        diff_lines = list(difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=str(filepath) + " (existing)",
+            tofile=str(filepath) + " (expected)",
+            lineterm="",
+        ))
+        
+        if not diff_lines:
+            return ""
+        
+        # For verbose level 2+, use rich for syntax highlighting
+        if self._verbose >= 2:
+            try:
+                from rich.console import Console
+                from rich.syntax import Syntax
+                import io
+                
+                # Join diff lines back into a string
+                diff_text = "\n".join(diff_lines)
+                
+                # Create a string buffer to capture rich output
+                buffer = io.StringIO()
+                console = Console(file=buffer, force_terminal=True, width=120)
+                
+                # Use Syntax for diff highlighting
+                syntax = Syntax(diff_text, "diff", theme="monokai", line_numbers=False)
+                console.print(syntax)
+                
+                return buffer.getvalue()
+            except ImportError:
+                # Fall back to plain diff if rich is not available
+                pass
+        
+        # Plain diff output
+        return "\n".join(diff_lines)
+    
+    def report_check_results(self) -> int:
+        """Report check results and return exit code.
+        
+        Returns 0 if no differences found, 1 if differences exist.
+        """
+        if not self._files_with_differences:
+            print("✓ All stub files are up to date")
+            return 0
+        
+        print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
+        for filepath, old_content, new_content in self._files_with_differences:
+            print(f"\n  {filepath}")
+            
+            if self._verbose >= 1:
+                diff = self._render_diff(filepath, old_content, new_content)
+                if diff:
+                    print(diff)
+        
+        if self._verbose == 0:
+            print("\nRun with --verbose to see detailed differences.")
+        
+        return 1
+
     def _write_stub_if_changed(self, stub_path: Path, content: str) -> bool:
         """Write stub file only if content has changed.
 
         Returns True if file was written (changed), False if unchanged.
         This prevents unnecessary file modifications that would trigger pre-commit hooks.
+        
+        In check mode, only checks for differences without writing.
         """
-        # Check if file exists and read current content
+        # Read existing content if file exists
+        existing_content = None
         if stub_path.exists():
             try:
                 existing_content = stub_path.read_text(encoding="utf-8")
@@ -110,7 +190,14 @@ class TypeStubGenerator:
                     return False
             except Exception:
                 # If we can't read the file, proceed with writing
-                pass
+                existing_content = None
+        
+        # In check mode, record differences but don't write
+        if self._check_mode:
+            if existing_content is None:
+                existing_content = ""
+            self._files_with_differences.append((stub_path, existing_content, content))
+            return True
 
         # Write the file
         stub_path.write_text(content, encoding="utf-8")
@@ -740,9 +827,10 @@ class TypeStubGenerator:
                     logging.getLogger(__name__).info(
                         "Found %s call(s) to %s", len(registry_calls), self.function_name
                     )
-                    # Mirror CLI output expectations
-                    print(f"Generated stub file ({mode_label}): {stub_path}")
-                    print(f"Found {len(registry_calls)} call(s) to {self.function_name}")
+                    # Mirror CLI output expectations (skip in check mode)
+                    if not self._check_mode:
+                        print(f"Generated stub file ({mode_label}): {stub_path}")
+                        print(f"Found {len(registry_calls)} call(s) to {self.function_name}")
                     continue  # Skip the rest of the loop for this registry
                 else:
                     # No registry classes found in target module; use generic single-class generation
@@ -837,8 +925,9 @@ class TypeStubGenerator:
             if create_only:
                 mode_parts.append("create")
             mode_desc = ",".join(mode_parts) if mode_parts else "fresh"
-            print(f"Generated stub file ({mode_desc}): {stub_path}")
-            print(f"Found {len(registry_calls)} call(s) to {self.function_name}")
+            if not self._check_mode:
+                print(f"Generated stub file ({mode_desc}): {stub_path}")
+                print(f"Found {len(registry_calls)} call(s) to {self.function_name}")
             generated_paths.append(stub_path)
 
         # Return the first generated path (or the primary one)
@@ -900,6 +989,18 @@ def main(argv: list[str] | None = None) -> None:
         "--format-command",
         type=str,
         help="Shell command to format generated stubs. Use {filename} as placeholder for the output file path.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check if stub files are up-to-date without modifying them. Exits with code 1 if differences found.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level. Use -v for basic diff output, -vv for colored diff with rich library.",
     )
 
     args = parser.parse_args(argv)
@@ -964,6 +1065,8 @@ def main(argv: list[str] | None = None) -> None:
         sql_dialect=args.dialect,
         schema_mappings=schema_mappings,
         format_command=args.format_command,
+        check_mode=args.check,
+        verbose=args.verbose,
     )
 
     try:
@@ -972,6 +1075,11 @@ def main(argv: list[str] | None = None) -> None:
             output_path=args.output,
             mode=mode,
         )
+        
+        # In check mode, report results and exit with appropriate code
+        if args.check:
+            exit_code = generator.report_check_results()
+            sys.exit(exit_code)
     except Exception as e:
         logging.getLogger(__name__).error("%s", e)
         sys.exit(1)
