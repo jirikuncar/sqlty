@@ -34,8 +34,8 @@ def find_registries(root_path: Path) -> list[tuple[Path, str]]:
             class_names = detector.get_registry_class_names(py_file)
             for class_name in class_names:
                 registries.append((py_file, class_name))
-        except Exception:
-            # Skip files that can't be parsed
+        except (SyntaxError, UnicodeDecodeError, OSError):
+            # Skip files that can't be parsed or read
             continue
 
     return registries

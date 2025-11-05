@@ -4,8 +4,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 
 def test_registries_find_single_file(tmp_path: Path) -> None:
     """Test finding registries in a single file."""
@@ -149,7 +147,7 @@ def test_registries_nested_directories(tmp_path: Path) -> None:
     # Create nested structure
     subdir = tmp_path / "subdir"
     subdir.mkdir()
-    
+
     file1 = tmp_path / "top.py"
     file1.write_text("""from sqlty import SQLRegistry
 
