@@ -248,16 +248,15 @@ def stubtest() -> (
         if kwargs is None:
             kwargs = {}
 
+        # Extract env from kwargs early, before updating default_kwargs
+        # If not provided, use a copy of the current environment
+        env = kwargs.pop("env", os.environ.copy())
+
         # Set default kwargs for stubtest execution
         default_kwargs = {
             "capture_output": True,
             "text": True,
         }
-        
-        # Get env from kwargs before we update default_kwargs
-        env = kwargs.get("env", os.environ.copy())
-        
-        # Now update default_kwargs
         default_kwargs.update(kwargs)
 
         # Convert Path objects to strings
@@ -274,10 +273,6 @@ def stubtest() -> (
             env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
         else:
             env["PYTHONPATH"] = str(src_dir)
-
-        # Remove env from kwargs if it was there, we'll add it back
-        if "env" in default_kwargs:
-            del default_kwargs["env"]
 
         return subprocess.run(
             [sys.executable, "-m", "mypy.stubtest"] + str_args,
