@@ -118,11 +118,11 @@ class TypeStubGenerator:
         Returns:
             Tuple of (has_differences, existing_text, new_text)
             - has_differences: True if IRs differ semantically
-            - existing_text: Text representation of existing stub (for diff display)
-            - new_text: Text representation of new stub (for diff display)
+            - existing_text: Text representation of existing stub (for diff display, empty if no diff)
+            - new_text: Text representation of new stub (for diff display, empty if no diff)
         """
         from ._stub_parser import PyiToIRParser
-        from ._stub_serializer import IRToTextSerializer
+        from ._stub_ir import StubFile
         
         # Parse existing stub to IR if it exists
         if stub_path.exists():
@@ -130,38 +130,17 @@ class TypeStubGenerator:
             existing_ir = parser.parse_file(stub_path)
         else:
             # No existing file - create empty IR
-            from ._stub_ir import StubFile
             existing_ir = StubFile(file_path=stub_path)
         
-        # Compare registries
-        has_differences = False
+        # Compare using the StubFile method
+        if existing_ir.has_same_overloads(new_ir):
+            # No differences - return empty strings to avoid serialization
+            return False, "", ""
         
-        # Check if registry sets differ
-        existing_registry_names = set(existing_ir.registries.keys())
-        new_registry_names = set(new_ir.registries.keys())
-        
-        if existing_registry_names != new_registry_names:
-            has_differences = True
-        else:
-            # Check each registry for differences in overloads only
-            for name in new_registry_names:
-                existing_registry = existing_ir.registries[name]
-                new_registry = new_ir.registries[name]
-                
-                # Compare overload signatures (query literals and return types)
-                existing_overloads = {
-                    (o.query_literal, o.return_type) for o in existing_registry.overloads
-                }
-                new_overloads = {
-                    (o.query_literal, o.return_type) for o in new_registry.overloads
-                }
-                
-                if existing_overloads != new_overloads:
-                    has_differences = True
-                    break
-        
-        # Generate text representations for diff display
+        # Differences found - serialize for diff display
+        from ._stub_serializer import IRToTextSerializer
         serializer = IRToTextSerializer(self.function_name)
+        
         existing_text = (
             serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
             if stub_path.exists()
@@ -169,7 +148,7 @@ class TypeStubGenerator:
         )
         new_text = serializer.serialize_to_text(new_ir, relative_to=stub_path.parent)
         
-        return has_differences, existing_text, new_text
+        return True, existing_text, new_text
 
     def _write_stub_ir_if_changed(
         self, stub_path: Path, stub_ir: "StubFile"

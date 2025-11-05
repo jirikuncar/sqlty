@@ -224,3 +224,37 @@ class StubFile:
                         required.add(import_stmt)
 
         return required
+    
+    def has_same_overloads(self, other: "StubFile") -> bool:
+        """Check if two StubFiles have the same overloads per registry.
+        
+        Compares only the semantic content (overloads) per registry,
+        ignoring metadata like export names, base classes, etc.
+        
+        Args:
+            other: Another StubFile to compare with
+            
+        Returns:
+            True if both have the same registries with same overloads
+        """
+        # Check if registry sets differ
+        if set(self.registries.keys()) != set(other.registries.keys()):
+            return False
+        
+        # Check each registry for differences in overloads only
+        for name in self.registries.keys():
+            self_registry = self.registries[name]
+            other_registry = other.registries[name]
+            
+            # Compare overload signatures (query literals and return types)
+            self_overloads = {
+                (o.query_literal, o.return_type) for o in self_registry.overloads
+            }
+            other_overloads = {
+                (o.query_literal, o.return_type) for o in other_registry.overloads
+            }
+            
+            if self_overloads != other_overloads:
+                return False
+        
+        return True
