@@ -2,6 +2,8 @@
 
 import ast
 
+import asttokens
+
 from sqlty._collector import CallInfo
 from sqlty._stub_ir import OverloadSignature, RegistryClass, StubFile
 from sqlty._stub_parser import CallInfoToIRParser, PyiToIRParser
@@ -549,8 +551,6 @@ sql = Query.sql
     tree = ast.parse(pyi_source)
     parser = PyiToIRParser()
     # Set up ASTTokens for source span extraction
-    import asttokens
-
     parser.atok = asttokens.ASTTokens(pyi_source, tree=tree)
     stub = parser.parse_ast(tree)
 
@@ -649,8 +649,6 @@ sql = Query.sql
     tree = ast.parse(original_pyi)
     parser = PyiToIRParser()
     # Set up ASTTokens for source span extraction
-    import asttokens
-
     parser.atok = asttokens.ASTTokens(original_pyi, tree=tree)
     stub = parser.parse_ast(tree)
 

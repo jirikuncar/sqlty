@@ -87,11 +87,11 @@ class StubMerger:
                 existing_stub.merge_registry(new_registry, mode="prune")
 
         # Use surgical editing to preserve comments and structure
-        original_stub = self._pyi_parser.parse_file(output_path)
+        # Reuse existing_stub which already has source spans from line 73
         return self._serializer.serialize_to_text(
             existing_stub,
             relative_to=output_path.parent,
             preserve_structure=True,
             original_source=original_source,
-            original_stub=original_stub,
+            original_stub=existing_stub,
         )

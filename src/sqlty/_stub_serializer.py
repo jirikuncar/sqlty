@@ -406,13 +406,10 @@ class IRToTextSerializer:
         # Look ahead from end_offset to skip any blank lines
         i = end_offset
         while i < len(source):
+            # Skip over any consecutive newlines (blank lines)
             if source[i] == "\n":
                 i += 1
-                # Check if the next line is blank
-                if i < len(source) and source[i] == "\n":
-                    i += 1
-                else:
-                    break
+                continue
             else:
                 break
         return i
