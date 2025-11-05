@@ -316,17 +316,14 @@ class IRToTextSerializer:
                 if not new_registry.has_overload(orig_overload.query_literal):
                     if orig_overload.source_span:
                         # Remove by replacing with empty string
-                        # Include any trailing blank lines by extending end_offset
+                        # Include any preceding comments and trailing blank lines
+                        start_offset = self._find_removal_start_offset(
+                            original_source, orig_overload.source_span.start_offset
+                        )
                         end_offset = self._find_removal_end_offset(
                             original_source, orig_overload.source_span.end_offset
                         )
-                        replacements.append(
-                            (
-                                orig_overload.source_span.start_offset,
-                                end_offset,
-                                "",
-                            )
-                        )
+                        replacements.append((start_offset, end_offset, ""))
 
             # 2. Identify overloads to add (in new stub but not in original)
             overloads_to_add = []
@@ -353,6 +350,48 @@ class IRToTextSerializer:
         else:
             # No changes needed
             return original_source
+
+    def _find_removal_start_offset(self, source: str, start_offset: int) -> int:
+        """Find the actual start offset for removal, including preceding comments.
+
+        Args:
+            source: Original source text
+            start_offset: Initial start offset from source span
+
+        Returns:
+            Adjusted start offset that includes preceding comment lines
+        """
+        # Find the start of the line containing start_offset
+        line_start = start_offset
+        while line_start > 0 and source[line_start - 1] != "\n":
+            line_start -= 1
+
+        # Look backwards from the line to include any preceding comment lines
+        result_offset = line_start
+        i = line_start - 1
+        while i >= 0:
+            # Skip back over the newline
+            if source[i] == "\n":
+                i -= 1
+                if i < 0:
+                    break
+                # Find the start of this line
+                prev_line_start = i
+                while prev_line_start > 0 and source[prev_line_start - 1] != "\n":
+                    prev_line_start -= 1
+                # Check if this line is a comment (after stripping leading whitespace)
+                line_content = source[prev_line_start : i + 1].lstrip()
+                if line_content.startswith("#"):
+                    # This is a comment line - include it
+                    result_offset = prev_line_start
+                    i = prev_line_start - 1
+                else:
+                    # Not a comment - stop here
+                    break
+            else:
+                break
+
+        return result_offset
 
     def _find_removal_end_offset(self, source: str, end_offset: int) -> int:
         """Find the actual end offset for removal, including trailing blank lines.

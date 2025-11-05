@@ -2,8 +2,6 @@
 
 import ast
 
-import pytest
-
 from sqlty._collector import CallInfo
 from sqlty._stub_ir import OverloadSignature, RegistryClass, StubFile
 from sqlty._stub_parser import CallInfoToIRParser, PyiToIRParser
@@ -846,9 +844,6 @@ sql = Query.sql
     assert registry.has_overload("SELECT 3::INTEGER")  # Preserved
 
 
-@pytest.mark.skip(
-    reason="Surgical editing for new overloads is not yet implemented - see _generate_overload_insertions"
-)
 def test_surgical_editing_preserves_comments():
     """Test that surgical editing preserves comments when adding/removing overloads."""
     import tempfile
@@ -928,9 +923,9 @@ sql = Query.sql
             new_calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
         )
 
-        # Merge with prune mode
+        # Merge with sync mode (removes old, adds new, preserves source spans on kept items)
         for new_registry in new_stub.registries.values():
-            existing_stub.merge_registry(new_registry, mode="prune")
+            existing_stub.merge_registry(new_registry, mode="sync")
 
         # Re-parse to get original stub with source spans for comparison
         original_stub = parser.parse_file(stub_path)
