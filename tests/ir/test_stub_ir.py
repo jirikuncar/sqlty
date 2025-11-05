@@ -927,9 +927,17 @@ sql = Query.sql
         for new_registry in new_stub.registries.values():
             existing_stub.merge_registry(new_registry, mode="prune")
 
+        # Re-parse to get original stub with source spans for comparison
+        original_stub = parser.parse_file(stub_path)
+
         # Serialize with structure preservation
         serializer = IRToTextSerializer()
-        result = serializer.serialize_to_text(existing_stub, preserve_structure=True)
+        result = serializer.serialize_to_text(
+            existing_stub,
+            preserve_structure=True,
+            original_source=stub_content,
+            original_stub=original_stub,
+        )
 
         # Verify the results
         assert "SELECT 1::INTEGER" in result
@@ -1003,9 +1011,17 @@ sql = Query.sql
         for new_registry in new_stub.registries.values():
             existing_stub.merge_registry(new_registry, mode="incremental")
 
+        # Re-parse to get original stub with source spans for comparison
+        original_stub = parser.parse_file(stub_path)
+
         # Serialize with structure preservation
         serializer = IRToTextSerializer()
-        result = serializer.serialize_to_text(existing_stub, preserve_structure=True)
+        result = serializer.serialize_to_text(
+            existing_stub,
+            preserve_structure=True,
+            original_source=stub_content,
+            original_stub=original_stub,
+        )
 
         # Verify both overloads are present
         assert "SELECT 1::INTEGER" in result

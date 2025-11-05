@@ -253,23 +253,30 @@ class IRToTextSerializer:
         self.ast_serializer = IRToASTSerializer(function_name)
 
     def serialize_to_text(
-        self, stub: StubFile, relative_to: Path | None = None, preserve_structure: bool = False
+        self,
+        stub: StubFile,
+        relative_to: Path | None = None,
+        preserve_structure: bool = False,
+        original_source: str | None = None,
+        original_stub: StubFile | None = None,
     ) -> str:
         """Serialize a StubFile to formatted Python text.
 
         Args:
             stub: StubFile IR to serialize
             relative_to: Optional path for relative source comments
-            preserve_structure: If True and stub has original source, use surgical edits
-                               to preserve comments and formatting
+            preserve_structure: If True and original_source/original_stub are provided,
+                               use surgical edits to preserve comments and formatting
+            original_source: Optional original source text for surgical editing
+            original_stub: Optional original parsed stub for surgical editing
 
         Returns:
             Formatted Python code as string
         """
-        # If we have the original file with source spans and preserve_structure is requested,
+        # If we have original source/stub and preserve_structure is requested,
         # use surgical editing to preserve comments
-        if preserve_structure and stub.file_path and stub.file_path.exists():
-            return self._serialize_with_preservation(stub)
+        if preserve_structure and original_source is not None and original_stub is not None:
+            return self._serialize_with_preservation(stub, original_source, original_stub)
 
         # Otherwise, generate from scratch
         module = self.ast_serializer.serialize_to_module(stub)
@@ -278,31 +285,22 @@ class IRToTextSerializer:
         formatted_lines = self._add_blank_lines(lines)
         return "\n".join(formatted_lines) + "\n"
 
-    def _serialize_with_preservation(self, stub: StubFile) -> str:
+    def _serialize_with_preservation(
+        self, stub: StubFile, original_source: str, original_stub: StubFile
+    ) -> str:
         """Serialize while preserving original structure and comments.
 
-        This method reads the original file and makes surgical edits based on
-        source spans using asttokens.util.replace to preserve everything else.
+        This method makes surgical edits based on source spans using
+        asttokens.util.replace to preserve everything else.
 
         Args:
-            stub: StubFile with source spans and file path
+            stub: StubFile with new content to serialize
+            original_source: Original source text
+            original_stub: Original parsed stub with source spans
 
         Returns:
             Modified source code with preserved structure
         """
-        if not stub.file_path or not stub.file_path.exists():
-            # Fallback to normal serialization
-            return self.serialize_to_text(stub, preserve_structure=False)
-
-        # Read original source
-        original_source = stub.file_path.read_text(encoding="utf-8")
-
-        # Parse the original file to get existing overloads with source spans
-        from ._stub_parser import PyiToIRParser
-
-        parser = PyiToIRParser(self.function_name)
-        original_stub = parser.parse_file(stub.file_path)
-
         # Collect all replacements as (start_offset, end_offset, new_text) tuples
         replacements: list[tuple[int, int, str]] = []
 

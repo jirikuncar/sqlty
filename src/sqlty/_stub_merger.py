@@ -68,6 +68,8 @@ class StubMerger:
         if not output_path.exists():
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
 
+        # Read original source and parse existing stub
+        original_source = output_path.read_text(encoding="utf-8")
         existing_stub = self._pyi_parser.parse_file(output_path)
 
         mode = "prune" if prune else ("full" if full_mode else "incremental")
@@ -77,6 +79,17 @@ class StubMerger:
 
         # Use surgical editing to preserve comments and structure when in incremental or prune mode
         preserve_structure = not full_mode
-        return self._serializer.serialize_to_text(
-            existing_stub, relative_to=output_path.parent, preserve_structure=preserve_structure
-        )
+        if preserve_structure:
+            # Re-parse the original file to get the original stub with source spans
+            original_stub = self._pyi_parser.parse_file(output_path)
+            return self._serializer.serialize_to_text(
+                existing_stub,
+                relative_to=output_path.parent,
+                preserve_structure=True,
+                original_source=original_source,
+                original_stub=original_stub,
+            )
+        else:
+            return self._serializer.serialize_to_text(
+                existing_stub, relative_to=output_path.parent, preserve_structure=False
+            )
