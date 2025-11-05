@@ -282,7 +282,7 @@ class IRToTextSerializer:
         """Serialize while preserving original structure and comments.
 
         This method reads the original file and makes surgical edits based on
-        source spans to add/remove overloads while preserving everything else.
+        source spans using asttokens.util.replace to preserve everything else.
 
         Args:
             stub: StubFile with source spans and file path
@@ -296,7 +296,6 @@ class IRToTextSerializer:
 
         # Read original source
         original_source = stub.file_path.read_text(encoding="utf-8")
-        original_lines = original_source.split("\n")
 
         # Parse the original file to get existing overloads with source spans
         from ._stub_parser import PyiToIRParser
@@ -304,7 +303,10 @@ class IRToTextSerializer:
         parser = PyiToIRParser(self.function_name)
         original_stub = parser.parse_file(stub.file_path)
 
-        # For each registry in the stub, perform surgical edits
+        # Collect all replacements as (start_offset, end_offset, new_text) tuples
+        replacements: list[tuple[int, int, str]] = []
+
+        # For each registry in the stub, identify changes
         for registry_name, new_registry in stub.registries.items():
             original_registry = original_stub.registries.get(registry_name)
             if not original_registry:
@@ -312,11 +314,21 @@ class IRToTextSerializer:
                 return self._fallback_to_full_generation(stub)
 
             # 1. Identify overloads to remove (in original but not in new stub)
-            overloads_to_remove = []
             for orig_overload in original_registry.overloads:
                 if not new_registry.has_overload(orig_overload.query_literal):
                     if orig_overload.source_span:
-                        overloads_to_remove.append(orig_overload)
+                        # Remove by replacing with empty string
+                        # Include any trailing blank lines by extending end_offset
+                        end_offset = self._find_removal_end_offset(
+                            original_source, orig_overload.source_span.end_offset
+                        )
+                        replacements.append(
+                            (
+                                orig_overload.source_span.start_offset,
+                                end_offset,
+                                "",
+                            )
+                        )
 
             # 2. Identify overloads to add (in new stub but not in original)
             overloads_to_add = []
@@ -324,19 +336,49 @@ class IRToTextSerializer:
                 if not original_registry.has_overload(new_overload.query_literal):
                     overloads_to_add.append(new_overload)
 
-            # 3. Remove stale overloads (working backwards to preserve line numbers)
-            # Sort by start line descending so we remove from bottom to top
-            overloads_to_remove.sort(key=lambda o: o.source_span.start_line, reverse=True)
-            for overload in overloads_to_remove:
-                original_lines = self._remove_overload_from_lines(original_lines, overload)
-
-            # 4. Add new overloads
+            # 3. Add new overloads at the appropriate location
             if overloads_to_add:
-                original_lines = self._add_overloads_to_lines(
-                    original_lines, overloads_to_add, new_registry, original_registry
+                insertion_offset, new_text = self._generate_overload_insertions(
+                    overloads_to_add, new_registry, original_registry
                 )
+                if insertion_offset is not None:
+                    replacements.append((insertion_offset, insertion_offset, new_text))
 
-        return "\n".join(original_lines) + "\n"
+        # Apply all replacements using asttokens.util.replace
+        if replacements:
+            import asttokens.util
+
+            # Sort replacements by start offset (required by asttokens.util.replace)
+            replacements.sort(key=lambda r: r[0])
+            result = asttokens.util.replace(original_source, replacements)
+            return result
+        else:
+            # No changes needed
+            return original_source
+
+    def _find_removal_end_offset(self, source: str, end_offset: int) -> int:
+        """Find the actual end offset for removal, including trailing blank lines.
+
+        Args:
+            source: Original source text
+            end_offset: Initial end offset from source span
+
+        Returns:
+            Adjusted end offset that includes trailing blank lines
+        """
+        # Look ahead from end_offset to skip any blank lines
+        i = end_offset
+        while i < len(source):
+            if source[i] == "\n":
+                i += 1
+                # Check if the next line is blank
+                if i < len(source) and source[i] == "\n":
+                    i += 1
+                else:
+                    break
+            else:
+                break
+        return i
 
     def _fallback_to_full_generation(self, stub: StubFile) -> str:
         """Fallback to full stub generation when surgical editing isn't possible."""
@@ -346,95 +388,45 @@ class IRToTextSerializer:
         formatted_lines = self._add_blank_lines(lines)
         return "\n".join(formatted_lines) + "\n"
 
-    def _remove_overload_from_lines(
-        self, lines: list[str], overload: OverloadSignature
-    ) -> list[str]:
-        """Remove an overload method from the source lines.
-
-        Args:
-            lines: Source code lines
-            overload: Overload to remove (must have source_span)
-
-        Returns:
-            Modified lines with the overload removed
-        """
-        if not overload.source_span:
-            return lines
-
-        # Remove lines from start_line to end_line (1-indexed, inclusive)
-        # Convert to 0-indexed for list operations
-        start_idx = overload.source_span.start_line - 1
-        end_idx = overload.source_span.end_line  # end_line is inclusive, so don't subtract 1
-
-        # Remove the overload lines
-        new_lines = lines[:start_idx] + lines[end_idx:]
-
-        return new_lines
-
-    def _add_overloads_to_lines(
+    def _generate_overload_insertions(
         self,
-        lines: list[str],
         overloads: list[OverloadSignature],
         new_registry: RegistryClass,
         original_registry: RegistryClass,
-    ) -> list[str]:
-        """Add new overloads to the source lines.
+    ) -> tuple[int | None, str]:
+        """Generate text for new overloads and find insertion offset.
 
         Args:
-            lines: Source code lines
             overloads: Overloads to add
             new_registry: New registry with overloads
             original_registry: Original registry from parsed file
 
         Returns:
-            Modified lines with new overloads added
+            Tuple of (insertion_offset, new_text) or (None, "") if no insertion point found
         """
         # Find the insertion point - after the last existing overload but before the fallback
-        # The fallback is typically "def sql[T](cls, query: T) -> T: ..."
-        insertion_line_idx = None  # 0-indexed
+        insertion_offset = None
 
         # Find the last concrete overload (has source_span and query_literal)
-        last_overload_line = None
+        last_overload = None
         for orig_overload in sorted(
-            original_registry.overloads, key=lambda o: o.source_span.start_line if o.source_span else 0
+            original_registry.overloads,
+            key=lambda o: o.source_span.start_offset if o.source_span else 0,
         ):
             if orig_overload.source_span and orig_overload.query_literal:
-                # This is a concrete overload, track its end line
-                last_overload_line = orig_overload.source_span.end_line
+                # This is a concrete overload
+                last_overload = orig_overload
 
-        if last_overload_line is not None:
-            # Insert right after the last overload (convert 1-indexed to 0-indexed)
-            insertion_line_idx = last_overload_line
+        if last_overload and last_overload.source_span:
+            # Insert right after the last overload
+            insertion_offset = last_overload.source_span.end_offset
         else:
-            # No concrete overloads found - try to find the class definition
-            for i, line in enumerate(lines):
-                if f"class {new_registry.name}" in line:
-                    # Look for the first method definition after the class
-                    for j in range(i + 1, len(lines)):
-                        stripped = lines[j].strip()
-                        if stripped.startswith("@overload") or stripped.startswith("def "):
-                            insertion_line_idx = j
-                            break
-                    break
+            # No concrete overloads found - can't determine insertion point safely
+            # Fall back to full regeneration by returning None
+            return None, ""
 
-        if insertion_line_idx is None:
-            # Still couldn't find - insert after docstring if exists
-            for i, line in enumerate(lines):
-                if f"class {new_registry.name}" in line:
-                    # Skip to after docstring
-                    for j in range(i + 1, len(lines)):
-                        if '"""' in lines[j]:
-                            insertion_line_idx = j + 1
-                            break
-                    if insertion_line_idx is None:
-                        insertion_line_idx = i + 1
-                    break
-
-        if insertion_line_idx is None:
-            # Last resort - append to end
-            insertion_line_idx = len(lines)
-
-        # Generate the overload methods
+        # Generate the overload methods text
+        overload_texts = []
         for overload in sorted(overloads, key=lambda o: o.query_literal):
             overload_node = self.ast_serializer._serialize_overload(overload)
             overload_code = ast.unparse(overload_node)
@@ -442,12 +434,12 @@ class IRToTextSerializer:
 
             # Add proper indentation (4 spaces for class methods)
             indented_lines = ["    " + line if line.strip() else "" for line in overload_lines]
+            overload_texts.append("\n".join(indented_lines))
 
-            # Insert with blank line before
-            lines = lines[:insertion_line_idx] + [""] + indented_lines + lines[insertion_line_idx:]
-            insertion_line_idx += len(indented_lines) + 1
+        # Combine all overloads with blank lines between them
+        new_text = "\n\n" + "\n\n".join(overload_texts)
 
-        return lines
+        return insertion_offset, new_text
 
     def _add_blank_lines(self, lines: list[str]) -> list[str]:
         """Add blank lines between sections for PEP 8 compliance.
