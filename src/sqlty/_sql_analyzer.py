@@ -195,8 +195,38 @@ class SQLAnalyzer:
                         # SUM has an explicit cast: SUM(column::TYPE)
                         sql_type = str(projection.this.to)
                         python_type = self._sql_to_python_type(sql_type)
+                    elif hasattr(projection, 'this') and isinstance(projection.this, exp.Column) and self.schema:
+                        # SUM of a column with schema available - try to infer from schema
+                        column = projection.this
+                        column_name = column.name
+                        table_name = column.table
+                        
+                        # If table not specified on column, try to find it from the query
+                        if not table_name:
+                            # Try to find table from the main query
+                            table_expr = ast.find(exp.Table)
+                            if table_expr:
+                                table_name = table_expr.name
+                            # For SELECT with FROM clause
+                            elif select_expr:
+                                from_expr = select_expr.find(exp.From)
+                                if from_expr:
+                                    for table in from_expr.find_all(exp.Table):
+                                        table_name = table.name
+                                        break
+                        
+                        # Look up the column type from schema
+                        if table_name:
+                            sql_type = self._get_column_type_from_schema(table_name, column_name)
+                            if sql_type:
+                                python_type = self._sql_to_python_type(sql_type)
+                        
+                        # If still no type found, default to float
+                        if not python_type:
+                            python_type = "float"
+                            sql_type = "NUMERIC"
                     else:
-                        # Default to float for SUM without explicit cast
+                        # Default to float for SUM without explicit cast or schema
                         python_type = "float"
                         sql_type = "NUMERIC"
                 case exp.Func():
