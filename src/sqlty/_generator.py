@@ -69,8 +69,10 @@ class TypeStubGenerator:
 
         If no formatter is configured or the formatter fails, the original text
         is returned unchanged.
+        
+        In check mode, formatting is skipped to ensure comparison is based on content only.
         """
-        if not self._format_command:
+        if not self._format_command or self._check_mode:
             return text
 
         cmd = self._format_command.format(filename=filename)
@@ -1005,6 +1007,14 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     args = parser.parse_args(argv)
+
+    # Validate mutually exclusive options
+    if args.check and args.format_command:
+        logging.getLogger(__name__).error(
+            "Error: --check and --format-command are mutually exclusive. "
+            "Check mode compares overload content, not formatted output."
+        )
+        sys.exit(1)
 
     # Determine the mode with smart defaults
     if args.mode:

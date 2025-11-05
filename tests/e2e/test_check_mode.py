@@ -247,3 +247,26 @@ query2 = sql("SELECT name::TEXT FROM users")
     # Check with outdated stubs should return 1
     result = cli([str(tmp_path), "--check"])
     assert result.returncode == 1
+
+
+def test_check_and_format_command_are_mutually_exclusive(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str | None], Path],
+) -> None:
+    """Test that --check and --format-command cannot be used together."""
+    setup_queries_file(tmp_path)
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+query = sql("SELECT id::INTEGER FROM users")
+""")
+
+    # Try to use both --check and --format-command together
+    result = cli([str(tmp_path), "--check", "--format-command", "cat"])
+    
+    # Should fail with error message
+    assert result.returncode == 1
+    output = result.stdout + result.stderr
+    assert "mutually exclusive" in output.lower()
