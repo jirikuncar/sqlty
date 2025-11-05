@@ -157,10 +157,7 @@ class RegistryDetector:
                     ):
                         # Check if the value is ClassName.sql
                         if isinstance(node.value, ast.Attribute):
-                            if (
-                                node.value.attr == "sql"
-                                and isinstance(node.value.value, ast.Name)
-                            ):
+                            if node.value.attr == "sql" and isinstance(node.value.value, ast.Name):
                                 return node.value.value.id
             return None
         except Exception:

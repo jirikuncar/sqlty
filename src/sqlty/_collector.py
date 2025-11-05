@@ -35,9 +35,9 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.class_imports: dict[
             str, str
         ] = {}  # Track class imports with aliases (e.g., {"A": "QueryA"})
-        self.local_registry_classes: set[
-            str
-        ] = set()  # Track SQLRegistry subclasses defined in current file
+        self.local_registry_classes: set[str] = (
+            set()
+        )  # Track SQLRegistry subclasses defined in current file
         self.registry_aliases: dict[
             str, str
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
@@ -70,10 +70,12 @@ class LiteralCallCollector(ast.NodeVisitor):
         """Track SQLRegistry subclasses defined in the current file."""
         # Check if this class inherits from SQLRegistry
         for base in node.bases:
-            if isinstance(base, ast.Name) and base.id == "SQLRegistry":
-                self.local_registry_classes.add(node.name)
-                break
-            elif isinstance(base, ast.Attribute) and base.attr == "SQLRegistry":
+            if (
+                isinstance(base, ast.Name)
+                and base.id == "SQLRegistry"
+                or isinstance(base, ast.Attribute)
+                and base.attr == "SQLRegistry"
+            ):
                 self.local_registry_classes.add(node.name)
                 break
         self.generic_visit(node)
