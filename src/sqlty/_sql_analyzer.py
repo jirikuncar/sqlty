@@ -146,92 +146,82 @@ class SQLAnalyzer:
 
             # Try to extract type information using match statement
             match projection:
-                case exp.Alias(this=exp.Cast() as cast_expr):
+                case exp.Alias(this=exp.Cast(to=cast_to)):
                     # Aliased cast: SELECT/RETURNING (expr)::TYPE AS alias
-                    sql_type = str(cast_expr.to)
+                    sql_type = str(cast_to)
                     python_type = self._sql_to_python_type(sql_type)
-                case exp.Cast():
+                case exp.Cast(to=cast_to):
                     # Explicit cast: SELECT/RETURNING id::INTEGER
-                    sql_type = str(projection.to)
+                    sql_type = str(cast_to)
                     python_type = self._sql_to_python_type(sql_type)
-                case exp.Column():
-                    # Simple column: SELECT/RETURNING id
-                    # Try to infer type from schema if available
-                    if self.schema:
-                        # First, try to get table from the column itself
-                        table_name = projection.table
-                        if table_name:
-                            sql_type = self._get_column_type_from_schema(table_name, col_name)
-                            if sql_type:
-                                python_type = self._sql_to_python_type(sql_type)
-                        else:
-                            # If no table specified on column, try to find it in the AST
-                            # For RETURNING, find the first table in the statement
-                            table_expr = ast.find(exp.Table)
-                            if table_expr:
-                                table_name = table_expr.name
+                case exp.Column(table=table_name) if self.schema and table_name:
+                    # Column with explicit table name and schema available
+                    sql_type = self._get_column_type_from_schema(table_name, col_name)
+                    if sql_type:
+                        python_type = self._sql_to_python_type(sql_type)
+                case exp.Column() if self.schema:
+                    # Column without table name - try to find table from AST
+                    # For RETURNING, find the first table in the statement
+                    table_expr = ast.find(exp.Table)
+                    if table_expr:
+                        table_name = table_expr.name
+                        sql_type = self._get_column_type_from_schema(table_name, col_name)
+                        if sql_type:
+                            python_type = self._sql_to_python_type(sql_type)
+                    # For SELECT, check FROM clause
+                    elif select_expr:
+                        from_expr = select_expr.find(exp.From)
+                        if from_expr:
+                            for table in from_expr.find_all(exp.Table):
+                                table_name = table.name
                                 sql_type = self._get_column_type_from_schema(table_name, col_name)
                                 if sql_type:
                                     python_type = self._sql_to_python_type(sql_type)
-                            # For SELECT, check FROM clause
-                            elif select_expr:
-                                from_expr = select_expr.find(exp.From)
-                                if from_expr:
-                                    for table in from_expr.find_all(exp.Table):
-                                        table_name = table.name
-                                        sql_type = self._get_column_type_from_schema(
-                                            table_name, col_name
-                                        )
-                                        if sql_type:
-                                            python_type = self._sql_to_python_type(sql_type)
-                                            break
+                                    break
                 case exp.Count():
                     # COUNT(*) always returns integer
                     python_type = "int"
                     sql_type = "INTEGER"
-                case exp.Sum():
-                    # SUM - try to infer type from what's being summed
-                    if hasattr(projection, 'this') and isinstance(projection.this, exp.Cast):
-                        # SUM has an explicit cast: SUM(column::TYPE)
-                        sql_type = str(projection.this.to)
+                case exp.Sum(this=exp.Cast(to=cast_to)):
+                    # SUM has an explicit cast: SUM(column::TYPE)
+                    sql_type = str(cast_to)
+                    python_type = self._sql_to_python_type(sql_type)
+                case exp.Sum(this=exp.Column(name=column_name, table=table_name)) if self.schema and table_name:
+                    # SUM of column with explicit table name and schema available
+                    sql_type = self._get_column_type_from_schema(table_name, column_name)
+                    if sql_type:
                         python_type = self._sql_to_python_type(sql_type)
-                    elif hasattr(projection, 'this') and isinstance(projection.this, exp.Column) and self.schema:
-                        # SUM of a column with schema available - try to infer from schema
-                        column = projection.this
-                        column_name = column.name
-                        table_name = column.table
-                        
-                        # If table not specified on column, try to find it from the query
-                        if not table_name:
-                            # Try to find table from the main query
-                            table_expr = ast.find(exp.Table)
-                            if table_expr:
-                                table_name = table_expr.name
-                            # For SELECT with FROM clause
-                            elif select_expr:
-                                from_expr = select_expr.find(exp.From)
-                                if from_expr:
-                                    for table in from_expr.find_all(exp.Table):
-                                        table_name = table.name
-                                        break
-                        
-                        # Look up the column type from schema
-                        if table_name:
-                            sql_type = self._get_column_type_from_schema(table_name, column_name)
-                            if sql_type:
-                                python_type = self._sql_to_python_type(sql_type)
-                        
-                        # If still no type found, default to float
-                        if not python_type:
-                            python_type = "float"
-                            sql_type = "NUMERIC"
                     else:
-                        # Default to float for SUM without explicit cast or schema
                         python_type = "float"
                         sql_type = "NUMERIC"
-                case exp.Func():
+                case exp.Sum(this=exp.Column(name=column_name)) if self.schema:
+                    # SUM of column without table name - try to find table from query
+                    table_name = None
+                    table_expr = ast.find(exp.Table)
+                    if table_expr:
+                        table_name = table_expr.name
+                    elif select_expr:
+                        from_expr = select_expr.find(exp.From)
+                        if from_expr:
+                            for table in from_expr.find_all(exp.Table):
+                                table_name = table.name
+                                break
+                    
+                    if table_name:
+                        sql_type = self._get_column_type_from_schema(table_name, column_name)
+                        if sql_type:
+                            python_type = self._sql_to_python_type(sql_type)
+                    
+                    if not python_type:
+                        python_type = "float"
+                        sql_type = "NUMERIC"
+                case exp.Sum():
+                    # Default to float for SUM without explicit cast or schema
+                    python_type = "float"
+                    sql_type = "NUMERIC"
+                case exp.Func() as func:
                     # Other functions - try to infer from function name
-                    python_type = self._infer_from_function(projection)
+                    python_type = self._infer_from_function(func)
 
             columns.append(ColumnInfo(col_name, python_type, sql_type))
 
