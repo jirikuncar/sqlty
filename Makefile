@@ -18,7 +18,7 @@ help:
 	@echo "Examples:"
 	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
 	@echo "  generate-examples - Generate stubs for all examples"
-	@echo "  verify-examples   - Generate stubs and verify with mypy and ty"
+	@echo "  verify-examples   - Generate stubs and verify with mypy, ty, and stubtest"
 	@echo ""
 	@echo "Example directories found: $(EXAMPLE_DIRS)"
 
@@ -87,3 +87,21 @@ verify-examples: generate-examples
 		uv run mypy $$dir/; \
 	done
 	@echo "✅ mypy verification passed"
+	@echo ""
+	@echo "🔍 Verifying examples with stubtest..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		module=$$(basename $$dir); \
+		for pyfile in $$dir/*.py; do \
+			[ -f $$pyfile ] || continue; \
+			stub=$${pyfile%.py}.pyi; \
+			[ -f $$stub ] || continue; \
+			modname=$$(basename $${pyfile%.py}); \
+			echo "  → $$module/$$modname"; \
+			PYTHONPATH=$$dir:src uv run python -m mypy.stubtest $$modname \
+				--allowlist .stubtest-allowlist \
+				--ignore-unused-allowlist \
+				--concise \
+				--mypy-config-file pyproject.toml; \
+		done; \
+	done
+	@echo "✅ stubtest verification passed"
