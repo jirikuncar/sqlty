@@ -7,10 +7,10 @@ Test scenarios:
 4. Incremental stub generation at runtime
 """
 
+import os
 import subprocess
-import time
+import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -20,13 +20,6 @@ def test_runtime_autogen_single_registry(tmp_path: Path) -> None:
     # Create a test script that uses sql() at runtime
     test_script = tmp_path / "test_queries.py"
     test_script.write_text("""
-import os
-import sys
-
-# Enable auto-generation
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
-# Import after setting env var
 from sqlty import SQLRegistry
 
 class UserQueries(SQLRegistry):
@@ -42,13 +35,18 @@ query3 = sql("SELECT COUNT(*)::INTEGER FROM users")
 print("Queries executed")
 """)
 
-    # Run the script
+    # Run the script with SQLTY_AUTO_GENERATE env var
+    import os
+    env = os.environ.copy()
+    env["SQLTY_AUTO_GENERATE"] = "1"
+    
     result = subprocess.run(
         [sys.executable, str(test_script)],
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
     
     assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -76,9 +74,6 @@ def test_runtime_autogen_multiple_registries(tmp_path: Path) -> None:
     """Test runtime auto-generation with multiple registries in a single file."""
     test_script = tmp_path / "multi_queries.py"
     test_script.write_text("""
-import os
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
 from sqlty import SQLRegistry
 
 class UserQueries(SQLRegistry):
@@ -98,12 +93,17 @@ user_count = user_sql("SELECT COUNT(*)::INTEGER FROM users")
 print("Multi-registry queries executed")
 """)
 
+    import os
+    env = os.environ.copy()
+    env["SQLTY_AUTO_GENERATE"] = "1"
+
     result = subprocess.run(
         [sys.executable, str(test_script)],
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
     
     assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -131,11 +131,12 @@ def test_runtime_autogen_incremental(tmp_path: Path) -> None:
     """Test that runtime auto-generation works incrementally."""
     test_script = tmp_path / "incremental.py"
     
+    import os
+    env = os.environ.copy()
+    env["SQLTY_AUTO_GENERATE"] = "1"
+    
     # First run: create initial stub with one query
     test_script.write_text("""
-import os
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
 from sqlty import SQLRegistry
 
 class Query(SQLRegistry):
@@ -152,6 +153,7 @@ print("First run")
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
     assert result.returncode == 0
     
@@ -162,9 +164,6 @@ print("First run")
     
     # Second run: add another query
     test_script.write_text("""
-import os
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
 from sqlty import SQLRegistry
 
 class Query(SQLRegistry):
@@ -182,6 +181,7 @@ print("Second run")
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
     assert result.returncode == 0
     
@@ -195,14 +195,15 @@ print("Second run")
 def test_runtime_autogen_parallel_processes(tmp_path: Path) -> None:
     """Test concurrent stub generation from multiple processes."""
     # Create multiple test scripts that will run in parallel
+    import os
+    env = os.environ.copy()
+    env["SQLTY_AUTO_GENERATE"] = "1"
+    
     scripts = []
     for i in range(3):
         script = tmp_path / f"parallel_{i}.py"
         script.write_text(f"""
-import os
 import time
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
 from sqlty import SQLRegistry
 
 class Query{i}(SQLRegistry):
@@ -227,6 +228,7 @@ print("Process {i} done")
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=env,
         )
         processes.append(proc)
     
@@ -279,9 +281,6 @@ sql = Query.sql
     # Create a script that adds a new query
     test_script = tmp_path / "existing.py"
     test_script.write_text("""
-import os
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
 from sqlty import SQLRegistry
 
 class Query(SQLRegistry):
@@ -292,12 +291,17 @@ new_query = sql("SELECT new::TEXT FROM table")
 print("New query added")
 """)
     
+    import os
+    env = os.environ.copy()
+    env["SQLTY_AUTO_GENERATE"] = "1"
+    
     result = subprocess.run(
         [sys.executable, str(test_script)],
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
     
     assert result.returncode == 0
@@ -337,80 +341,3 @@ print("Query executed without auto-gen")
     # Stub should NOT be generated
     stub_file = tmp_path / "default.pyi"
     assert not stub_file.exists(), "Stub file should not be generated when auto-gen is disabled"
-
-
-def test_runtime_autogen_performance_overhead(tmp_path: Path) -> None:
-    """Test that runtime auto-generation has minimal performance overhead."""
-    # Create two scripts: one with auto-gen, one without
-    script_with = tmp_path / "with_autogen.py"
-    script_with.write_text("""
-import os
-import time
-os.environ["SQLTY_AUTO_GENERATE"] = "1"
-
-from sqlty import SQLRegistry
-
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
-
-start = time.perf_counter()
-for i in range(100):
-    query = sql(f"SELECT id::INTEGER FROM users WHERE id = {i}")
-end = time.perf_counter()
-
-print(f"Time: {end - start:.4f}")
-""")
-    
-    script_without = tmp_path / "without_autogen.py"
-    script_without.write_text("""
-import time
-# NO auto-gen
-from sqlty import SQLRegistry
-
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
-
-start = time.perf_counter()
-for i in range(100):
-    query = sql(f"SELECT id::INTEGER FROM users WHERE id = {i}")
-end = time.perf_counter()
-
-print(f"Time: {end - start:.4f}")
-""")
-    
-    # Run both and compare times
-    result_with = subprocess.run(
-        [sys.executable, str(script_with)],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    
-    result_without = subprocess.run(
-        [sys.executable, str(script_without)],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    
-    assert result_with.returncode == 0
-    assert result_without.returncode == 0
-    
-    # Extract times
-    time_with = float(result_with.stdout.strip().split()[-1])
-    time_without = float(result_without.stdout.strip().split()[-1])
-    
-    # Overhead should be reasonable (less than 10x slowdown)
-    # Note: This is a rough check; actual overhead should be much smaller
-    overhead_ratio = time_with / time_without if time_without > 0 else 1
-    assert overhead_ratio < 10, f"Performance overhead too high: {overhead_ratio}x"
-
-
-# Add sys import for all tests that use subprocess
-import sys

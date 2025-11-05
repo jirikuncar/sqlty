@@ -353,10 +353,8 @@ sql = Query.sql
 ```
 
 **Use cases:**
-- Development workflows with frequent query additions
-- Integration tests that generate queries dynamically
-- Prototyping and experimentation
-- Multi-process applications that need concurrent stub updates
+- Development workflows with reload (e.g., running dev server with auto-reload)
+- Running tests to ensure .pyi stubs are up-to-date with the codebase
 
 **Performance:** The runtime registry uses caching and lazy initialization to minimize overhead. The auto-generation check is cached per registry class, and frame inspection only happens when auto-generation is enabled. When `SQLTY_AUTO_GENERATE` is not set (default), there is negligible performance impact.
 

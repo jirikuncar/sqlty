@@ -133,28 +133,6 @@ sqlty queries.py --mode=fresh
 
 **Safety:** Prune mode prompts for confirmation when used on single files to prevent accidentally removing stubs for queries defined elsewhere.
 
-### Runtime Auto-Generation
-
-For development workflows, you can enable automatic stub generation at runtime by setting the `SQLTY_AUTO_GENERATE` environment variable:
-
-```bash
-export SQLTY_AUTO_GENERATE=1
-python your_script.py
-```
-
-When enabled:
-- Stubs are automatically generated when a `SQLRegistry` subclass is defined
-- Additional `sql()` calls made at runtime are tracked and added to stubs at script exit
-- Uses incremental mode to preserve existing stubs
-- File locking ensures safe concurrent access in multi-threaded or multi-process environments
-
-**Use cases:**
-- Development workflows where you're frequently adding new queries
-- Integration tests that make SQL calls dynamically
-- Scripts that generate queries programmatically
-
-**Performance:** The runtime registry uses caching and lazy initialization to minimize overhead. When disabled (default), there is no performance impact.
-
 ### Pre-commit Hook
 
 Automatically generate stubs on commit by adding to your `.pre-commit-config.yaml`:
