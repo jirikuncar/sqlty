@@ -75,4 +75,8 @@ class StubMerger:
         for new_registry in new_stub.registries.values():
             existing_stub.merge_registry(new_registry, mode=mode)
 
-        return self._serializer.serialize_to_text(existing_stub, relative_to=output_path.parent)
+        # Use surgical editing to preserve comments and structure when in incremental or prune mode
+        preserve_structure = not full_mode
+        return self._serializer.serialize_to_text(
+            existing_stub, relative_to=output_path.parent, preserve_structure=preserve_structure
+        )

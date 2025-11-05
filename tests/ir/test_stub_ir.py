@@ -844,3 +844,174 @@ sql = Query.sql
     assert registry.has_overload("SELECT 3::INTEGER")  # Preserved
 
 
+def test_surgical_editing_preserves_comments():
+    """Test that surgical editing preserves comments when adding/removing overloads."""
+    import tempfile
+    from pathlib import Path
+
+    # Create a temporary stub file with comments
+    stub_content = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry with type-safe overloads."""
+
+    # This is a comment about query 1
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    # This is a comment about query 2
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        stub_path = Path(tmpdir) / "queries.pyi"
+        stub_path.write_text(stub_content)
+
+        # Parse the existing stub
+        from sqlty._stub_parser import PyiToIRParser, CallInfoToIRParser
+        from sqlty._stub_serializer import IRToTextSerializer
+
+        parser = PyiToIRParser()
+        existing_stub = parser.parse_file(stub_path)
+
+        # Create new calls that:
+        # 1. Keep SELECT 1
+        # 2. Remove SELECT 2
+        # 3. Add SELECT 3
+        new_calls: list[CallInfo] = [
+            {
+                "literal": "SELECT 1::INTEGER",
+                "return_type": "SQL[tuple[int]]",
+                "lineno": 10,
+                "file": "test.py",
+                "registry_source": None,
+                "registry_class": None,
+                "start_offset": None,
+                "end_offset": None,
+                "start_col": None,
+                "end_line": None,
+                "end_col": None,
+            },
+            {
+                "literal": "SELECT 3::INTEGER",
+                "return_type": "SQL[tuple[int]]",
+                "lineno": 20,
+                "file": "test.py",
+                "registry_source": None,
+                "registry_class": None,
+                "start_offset": None,
+                "end_offset": None,
+                "start_col": None,
+                "end_line": None,
+                "end_col": None,
+            },
+        ]
+
+        call_parser = CallInfoToIRParser()
+        new_stub = call_parser.parse_calls(
+            new_calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+        )
+
+        # Merge with prune mode
+        for new_registry in new_stub.registries.values():
+            existing_stub.merge_registry(new_registry, mode="prune")
+
+        # Serialize with structure preservation
+        serializer = IRToTextSerializer()
+        result = serializer.serialize_to_text(existing_stub, preserve_structure=True)
+
+        # Verify the results
+        assert "SELECT 1::INTEGER" in result
+        assert "SELECT 3::INTEGER" in result
+        assert "SELECT 2::INTEGER" not in result
+
+        # Most importantly - verify the comment about query 1 is preserved!
+        assert "# This is a comment about query 1" in result
+
+        # The comment about query 2 should be gone (with the overload)
+        # This is expected behavior when removing overloads with their decorators
+
+
+def test_surgical_editing_incremental_mode_preserves_structure():
+    """Test that incremental mode preserves existing overloads and structure."""
+    import tempfile
+    from pathlib import Path
+
+    # Create a temporary stub file
+    stub_content = '''from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+class Query(SQLRegistry):
+    """Application-specific SQL query registry."""
+
+    @overload
+    @classmethod
+    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+'''
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        stub_path = Path(tmpdir) / "queries.pyi"
+        stub_path.write_text(stub_content)
+
+        from sqlty._stub_parser import PyiToIRParser, CallInfoToIRParser
+        from sqlty._stub_serializer import IRToTextSerializer
+
+        parser = PyiToIRParser()
+        existing_stub = parser.parse_file(stub_path)
+
+        # Add a new overload
+        new_calls: list[CallInfo] = [
+            {
+                "literal": "SELECT 2::INTEGER",
+                "return_type": "SQL[tuple[int]]",
+                "lineno": 20,
+                "file": "test.py",
+                "registry_source": None,
+                "registry_class": None,
+                "start_offset": None,
+                "end_offset": None,
+                "start_col": None,
+                "end_line": None,
+                "end_col": None,
+            },
+        ]
+
+        call_parser = CallInfoToIRParser()
+        new_stub = call_parser.parse_calls(
+            new_calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
+        )
+
+        # Merge in incremental mode
+        for new_registry in new_stub.registries.values():
+            existing_stub.merge_registry(new_registry, mode="incremental")
+
+        # Serialize with structure preservation
+        serializer = IRToTextSerializer()
+        result = serializer.serialize_to_text(existing_stub, preserve_structure=True)
+
+        # Verify both overloads are present
+        assert "SELECT 1::INTEGER" in result
+        assert "SELECT 2::INTEGER" in result
+
+        # The docstring should be preserved
+        assert "Application-specific SQL query registry." in result
+
+

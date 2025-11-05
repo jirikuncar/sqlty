@@ -296,21 +296,158 @@ class IRToTextSerializer:
 
         # Read original source
         original_source = stub.file_path.read_text(encoding="utf-8")
+        original_lines = original_source.split("\n")
 
-        # For now, fallback to regular serialization
-        # TODO: Implement surgical editing using source spans
-        # This would involve:
-        # 1. Identifying overloads to add (not in original)
-        # 2. Identifying overloads to remove (in original but not in stub)
-        # 3. Using source spans to locate and edit specific lines
-        # 4. Preserving all comments and other code
+        # Parse the original file to get existing overloads with source spans
+        from ._stub_parser import PyiToIRParser
 
-        # For MVP, just use the standard serialization
+        parser = PyiToIRParser(self.function_name)
+        original_stub = parser.parse_file(stub.file_path)
+
+        # For each registry in the stub, perform surgical edits
+        for registry_name, new_registry in stub.registries.items():
+            original_registry = original_stub.registries.get(registry_name)
+            if not original_registry:
+                # Registry doesn't exist in original - fallback to full regeneration
+                return self._fallback_to_full_generation(stub)
+
+            # 1. Identify overloads to remove (in original but not in new stub)
+            overloads_to_remove = []
+            for orig_overload in original_registry.overloads:
+                if not new_registry.has_overload(orig_overload.query_literal):
+                    if orig_overload.source_span:
+                        overloads_to_remove.append(orig_overload)
+
+            # 2. Identify overloads to add (in new stub but not in original)
+            overloads_to_add = []
+            for new_overload in new_registry.overloads:
+                if not original_registry.has_overload(new_overload.query_literal):
+                    overloads_to_add.append(new_overload)
+
+            # 3. Remove stale overloads (working backwards to preserve line numbers)
+            # Sort by start line descending so we remove from bottom to top
+            overloads_to_remove.sort(key=lambda o: o.source_span.start_line, reverse=True)
+            for overload in overloads_to_remove:
+                original_lines = self._remove_overload_from_lines(original_lines, overload)
+
+            # 4. Add new overloads
+            if overloads_to_add:
+                original_lines = self._add_overloads_to_lines(
+                    original_lines, overloads_to_add, new_registry, original_registry
+                )
+
+        return "\n".join(original_lines) + "\n"
+
+    def _fallback_to_full_generation(self, stub: StubFile) -> str:
+        """Fallback to full stub generation when surgical editing isn't possible."""
         module = self.ast_serializer.serialize_to_module(stub)
         code = ast.unparse(module)
         lines = code.split("\n")
         formatted_lines = self._add_blank_lines(lines)
         return "\n".join(formatted_lines) + "\n"
+
+    def _remove_overload_from_lines(
+        self, lines: list[str], overload: OverloadSignature
+    ) -> list[str]:
+        """Remove an overload method from the source lines.
+
+        Args:
+            lines: Source code lines
+            overload: Overload to remove (must have source_span)
+
+        Returns:
+            Modified lines with the overload removed
+        """
+        if not overload.source_span:
+            return lines
+
+        # Remove lines from start_line to end_line (1-indexed, inclusive)
+        # Convert to 0-indexed for list operations
+        start_idx = overload.source_span.start_line - 1
+        end_idx = overload.source_span.end_line  # end_line is inclusive, so don't subtract 1
+
+        # Remove the overload lines
+        new_lines = lines[:start_idx] + lines[end_idx:]
+
+        return new_lines
+
+    def _add_overloads_to_lines(
+        self,
+        lines: list[str],
+        overloads: list[OverloadSignature],
+        new_registry: RegistryClass,
+        original_registry: RegistryClass,
+    ) -> list[str]:
+        """Add new overloads to the source lines.
+
+        Args:
+            lines: Source code lines
+            overloads: Overloads to add
+            new_registry: New registry with overloads
+            original_registry: Original registry from parsed file
+
+        Returns:
+            Modified lines with new overloads added
+        """
+        # Find the insertion point - after the last existing overload but before the fallback
+        # The fallback is typically "def sql[T](cls, query: T) -> T: ..."
+        insertion_line_idx = None  # 0-indexed
+
+        # Find the last concrete overload (has source_span and query_literal)
+        last_overload_line = None
+        for orig_overload in sorted(
+            original_registry.overloads, key=lambda o: o.source_span.start_line if o.source_span else 0
+        ):
+            if orig_overload.source_span and orig_overload.query_literal:
+                # This is a concrete overload, track its end line
+                last_overload_line = orig_overload.source_span.end_line
+
+        if last_overload_line is not None:
+            # Insert right after the last overload (convert 1-indexed to 0-indexed)
+            insertion_line_idx = last_overload_line
+        else:
+            # No concrete overloads found - try to find the class definition
+            for i, line in enumerate(lines):
+                if f"class {new_registry.name}" in line:
+                    # Look for the first method definition after the class
+                    for j in range(i + 1, len(lines)):
+                        stripped = lines[j].strip()
+                        if stripped.startswith("@overload") or stripped.startswith("def "):
+                            insertion_line_idx = j
+                            break
+                    break
+
+        if insertion_line_idx is None:
+            # Still couldn't find - insert after docstring if exists
+            for i, line in enumerate(lines):
+                if f"class {new_registry.name}" in line:
+                    # Skip to after docstring
+                    for j in range(i + 1, len(lines)):
+                        if '"""' in lines[j]:
+                            insertion_line_idx = j + 1
+                            break
+                    if insertion_line_idx is None:
+                        insertion_line_idx = i + 1
+                    break
+
+        if insertion_line_idx is None:
+            # Last resort - append to end
+            insertion_line_idx = len(lines)
+
+        # Generate the overload methods
+        for overload in sorted(overloads, key=lambda o: o.query_literal):
+            overload_node = self.ast_serializer._serialize_overload(overload)
+            overload_code = ast.unparse(overload_node)
+            overload_lines = overload_code.split("\n")
+
+            # Add proper indentation (4 spaces for class methods)
+            indented_lines = ["    " + line if line.strip() else "" for line in overload_lines]
+
+            # Insert with blank line before
+            lines = lines[:insertion_line_idx] + [""] + indented_lines + lines[insertion_line_idx:]
+            insertion_line_idx += len(indented_lines) + 1
+
+        return lines
 
     def _add_blank_lines(self, lines: list[str]) -> list[str]:
         """Add blank lines between sections for PEP 8 compliance.
