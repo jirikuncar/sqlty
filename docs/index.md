@@ -294,6 +294,72 @@ sqlty . --mode=full
 
 The generator automatically detects multiple registries and creates separate stub files for each.
 
+### Runtime Auto-Generation
+
+SQLTy can automatically generate and update stubs at runtime when you set the `SQLTY_AUTO_GENERATE` environment variable:
+
+```bash
+export SQLTY_AUTO_GENERATE=1
+python your_app.py
+```
+
+When enabled:
+
+1. **Class Definition**: Stubs are generated when a `SQLRegistry` subclass is defined
+2. **Runtime Calls**: Additional `sql()` calls made during execution are tracked
+3. **Exit Hook**: At script exit, all tracked calls are added to stubs using incremental mode
+4. **File Locking**: Safe concurrent access in multi-threaded or multi-process environments
+
+**Example workflow:**
+
+```python
+# development.py
+import os
+os.environ["SQLTY_AUTO_GENERATE"] = "1"
+
+from sqlty import SQLRegistry
+
+class Query(SQLRegistry):
+    pass
+
+sql = Query.sql
+
+# These calls are tracked and added to the stub at exit
+user = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
+posts = sql("SELECT COUNT(*)::INTEGER FROM posts")
+```
+
+Running this script will automatically create or update `development.pyi`:
+
+```python
+# development.pyi (generated automatically)
+from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+class Query(SQLRegistry):
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]: ...
+    
+    @overload
+    @classmethod
+    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM posts']) -> SQL[tuple[int]]: ...
+    
+    @overload
+    @classmethod
+    def sql[T](cls, query: T) -> T: ...
+
+sql = Query.sql
+```
+
+**Use cases:**
+- Development workflows with frequent query additions
+- Integration tests that generate queries dynamically
+- Prototyping and experimentation
+- Multi-process applications that need concurrent stub updates
+
+**Performance:** The runtime registry uses caching and lazy initialization to minimize overhead. The auto-generation check is cached per registry class, and frame inspection only happens when auto-generation is enabled. When `SQLTY_AUTO_GENERATE` is not set (default), there is negligible performance impact.
+
 ### Custom SQL Dialects
 
 SQLType supports multiple SQL dialects via sqlglot:
