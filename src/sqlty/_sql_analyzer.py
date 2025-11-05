@@ -190,9 +190,15 @@ class SQLAnalyzer:
                     python_type = "int"
                     sql_type = "INTEGER"
                 case exp.Sum():
-                    # SUM typically returns numeric
-                    python_type = "float"
-                    sql_type = "NUMERIC"
+                    # SUM - try to infer type from what's being summed
+                    if hasattr(projection, 'this') and isinstance(projection.this, exp.Cast):
+                        # SUM has an explicit cast: SUM(column::TYPE)
+                        sql_type = str(projection.this.to)
+                        python_type = self._sql_to_python_type(sql_type)
+                    else:
+                        # Default to float for SUM without explicit cast
+                        python_type = "float"
+                        sql_type = "NUMERIC"
                 case exp.Func():
                     # Other functions - try to infer from function name
                     python_type = self._infer_from_function(projection)
