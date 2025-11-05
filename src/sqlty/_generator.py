@@ -106,49 +106,138 @@ class TypeStubGenerator:
             logging.getLogger(__name__).warning("Could not run formatter '%s': %s", cmd, e)
             return text
 
-    def _compare_stub_irs(
-        self, stub_path: Path, new_ir: "StubFile"
-    ) -> tuple[bool, str, str]:
-        """Compare intermediate representations of stub files.
+    def check(
+        self,
+        source_path: Path,
+        output_path: Path | None = None,
+        mode: str = "incremental,prune,create",
+    ) -> int:
+        """Check if stub files are up-to-date without modifying them.
+        
+        This method generates the expected stub IRs and compares them with
+        existing stub files, reporting differences in a compact format.
         
         Args:
-            stub_path: Path to the existing stub file
-            new_ir: New IR to compare against
+            source_path: Path to source file or directory to analyze
+            output_path: Optional output path for stub file
+            mode: Stub generation mode
             
         Returns:
-            Tuple of (has_differences, existing_text, new_text)
-            - has_differences: True if IRs differ semantically
-            - existing_text: Text representation of existing stub (for diff display, empty if no diff)
-            - new_text: Text representation of new stub (for diff display, empty if no diff)
+            0 if all stubs are up-to-date, 1 if differences found
         """
         from ._stub_parser import PyiToIRParser
         from ._stub_ir import StubFile
         
-        # Parse existing stub to IR if it exists
-        if stub_path.exists():
+        # Store stub paths and their IRs
+        stub_checks: list[tuple[Path, StubFile, StubFile]] = []  # (path, existing_ir, expected_ir)
+        
+        # Temporarily enable check mode for generation
+        original_check_mode = self._check_mode
+        self._check_mode = True
+        
+        # Clear any previous differences
+        self._files_with_differences.clear()
+        
+        try:
+            # Generate stubs (in check mode, this collects IRs without writing)
+            self.generate_stub_file(
+                source_path=source_path,
+                output_path=output_path,
+                mode=mode,
+            )
+            
+            # Parse collected differences and convert to IR-based comparisons
             parser = PyiToIRParser(self.function_name)
-            existing_ir = parser.parse_file(stub_path)
-        else:
-            # No existing file - create empty IR
-            existing_ir = StubFile(file_path=stub_path)
+            
+            for stub_path, _, _ in self._files_with_differences:
+                # Parse existing stub to IR
+                if stub_path.exists():
+                    existing_ir = parser.parse_file(stub_path)
+                else:
+                    existing_ir = StubFile(file_path=stub_path)
+                
+                # The expected IR was stored during generation
+                # We need to regenerate it by finding the corresponding new IR
+                # For now, we'll use the text diff we collected
+                # This is a temporary solution until we refactor _write_stub_ir_if_changed
+                pass
+            
+        finally:
+            self._check_mode = original_check_mode
         
-        # Compare using the StubFile method
-        if existing_ir.has_same_overloads(new_ir):
-            # No differences - return empty strings to avoid serialization
-            return False, "", ""
+        # Report results
+        return self._report_ir_check_results()
+    
+    def _report_ir_check_results(self) -> int:
+        """Report check results using IR-level diff.
         
-        # Differences found - serialize for diff display
+        Returns 0 if no differences found, 1 if differences exist.
+        """
+        if not self._files_with_differences:
+            print("✓ All stub files are up to date")
+            return 0
+        
+        from ._stub_parser import PyiToIRParser
+        from ._stub_ir import StubFile
         from ._stub_serializer import IRToTextSerializer
+        
+        parser = PyiToIRParser(self.function_name)
         serializer = IRToTextSerializer(self.function_name)
         
-        existing_text = (
-            serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
-            if stub_path.exists()
-            else ""
-        )
-        new_text = serializer.serialize_to_text(new_ir, relative_to=stub_path.parent)
+        print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
         
-        return True, existing_text, new_text
+        for stub_path, existing_text, expected_text in self._files_with_differences:
+            print(f"\n  {stub_path}")
+            
+            # Parse existing and expected stubs to IR
+            if existing_text:
+                # Parse from text (we already have it serialized)
+                import ast
+                existing_tree = ast.parse(existing_text)
+                existing_ir = parser.parse_ast(existing_tree, stub_path)
+            else:
+                existing_ir = StubFile(file_path=stub_path)
+            
+            expected_tree = ast.parse(expected_text)
+            expected_ir = parser.parse_ast(expected_tree, stub_path)
+            
+            # Compute IR-level diff
+            diff = existing_ir.compute_overload_diff(expected_ir)
+            
+            # Display compact diff
+            for registry_name, changes in diff.items():
+                if changes["missing"] or changes["extra"]:
+                    print(f"    Registry '{registry_name}':")
+                    
+                    if changes["missing"]:
+                        print(f"      - {len(changes['missing'])} overload(s) removed:")
+                        for query, return_type in changes["missing"][:3]:  # Show first 3
+                            query_preview = query[:60] + "..." if len(query) > 60 else query
+                            print(f"        • {query_preview} → {return_type}")
+                        if len(changes["missing"]) > 3:
+                            print(f"        ... and {len(changes['missing']) - 3} more")
+                    
+                    if changes["extra"]:
+                        print(f"      + {len(changes['extra'])} overload(s) added:")
+                        for query, return_type in changes["extra"][:3]:  # Show first 3
+                            query_preview = query[:60] + "..." if len(query) > 60 else query
+                            print(f"        • {query_preview} → {return_type}")
+                        if len(changes["extra"]) > 3:
+                            print(f"        ... and {len(changes['extra']) - 3} more")
+            
+            # Show traditional diff in verbose mode
+            if self._verbose >= 1:
+                print("\n    Detailed diff:")
+                diff_output = self._render_diff(stub_path, existing_text, expected_text)
+                if diff_output:
+                    # Indent the diff
+                    for line in diff_output.split("\n"):
+                        print(f"    {line}")
+        
+        if self._verbose == 0:
+            print("\nRun with --verbose to see detailed text diffs.")
+        
+        return 1
 
     def _write_stub_ir_if_changed(
         self, stub_path: Path, stub_ir: "StubFile"
@@ -167,11 +256,32 @@ class TypeStubGenerator:
         """
         if self._check_mode:
             # In check mode, compare IRs
-            has_differences, existing_text, new_text = self._compare_stub_irs(stub_path, stub_ir)
+            from ._stub_parser import PyiToIRParser
+            from ._stub_ir import StubFile
             
-            if not has_differences:
-                # IRs are identical, no differences
+            # Parse existing stub to IR if it exists
+            if stub_path.exists():
+                parser = PyiToIRParser(self.function_name)
+                existing_ir = parser.parse_file(stub_path)
+            else:
+                # No existing file - create empty IR
+                existing_ir = StubFile(file_path=stub_path)
+            
+            # Compare using the StubFile method
+            if existing_ir.has_same_overloads(stub_ir):
+                # No differences
                 return False
+            
+            # Differences found - serialize for diff display
+            from ._stub_serializer import IRToTextSerializer
+            serializer = IRToTextSerializer(self.function_name)
+            
+            existing_text = (
+                serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
+                if stub_path.exists()
+                else ""
+            )
+            new_text = serializer.serialize_to_text(stub_ir, relative_to=stub_path.parent)
             
             # IRs differ, record for reporting
             self._files_with_differences.append((stub_path, existing_text, new_text))
@@ -244,29 +354,6 @@ class TypeStubGenerator:
 
         # Plain diff output
         return "\n".join(diff_lines)
-
-    def report_check_results(self) -> int:
-        """Report check results and return exit code.
-
-        Returns 0 if no differences found, 1 if differences exist.
-        """
-        if not self._files_with_differences:
-            print("✓ All stub files are up to date")
-            return 0
-
-        print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
-        for filepath, old_content, new_content in self._files_with_differences:
-            print(f"\n  {filepath}")
-
-            if self._verbose >= 1:
-                diff = self._render_diff(filepath, old_content, new_content)
-                if diff:
-                    print(diff)
-
-        if self._verbose == 0:
-            print("\nRun with --verbose to see detailed differences.")
-
-        return 1
 
     def _write_stub_if_changed(self, stub_path: Path, content: str) -> bool:
         """Write stub file only if content has changed.
@@ -1163,21 +1250,26 @@ def main(argv: list[str] | None = None) -> None:
         sql_dialect=args.dialect,
         schema_mappings=schema_mappings,
         format_command=args.format_command,
-        check_mode=args.check,
+        check_mode=False,  # Check mode is now handled by .check() method
         verbose=args.verbose,
     )
 
     try:
-        generator.generate_stub_file(
-            source_path=args.source,
-            output_path=args.output,
-            mode=mode,
-        )
-
-        # In check mode, report results and exit with appropriate code
         if args.check:
-            exit_code = generator.report_check_results()
+            # Use dedicated check method
+            exit_code = generator.check(
+                source_path=args.source,
+                output_path=args.output,
+                mode=mode,
+            )
             sys.exit(exit_code)
+        else:
+            # Normal generation mode
+            generator.generate_stub_file(
+                source_path=args.source,
+                output_path=args.output,
+                mode=mode,
+            )
     except Exception as e:
         logging.getLogger(__name__).error("%s", e)
         sys.exit(1)

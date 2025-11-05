@@ -258,3 +258,58 @@ class StubFile:
                 return False
         
         return True
+    
+    def compute_overload_diff(self, other: "StubFile") -> dict[str, dict[str, list[tuple[str, str]]]]:
+        """Compute differences in overloads between two StubFiles.
+        
+        Args:
+            other: Another StubFile to compare with (expected/new state)
+            
+        Returns:
+            Dictionary mapping registry names to their differences:
+            {
+                "RegistryName": {
+                    "missing": [(query, return_type), ...],  # In self but not in other
+                    "extra": [(query, return_type), ...],     # In other but not in self
+                }
+            }
+        """
+        diff_result: dict[str, dict[str, list[tuple[str, str]]]] = {}
+        
+        # Get all registry names from both
+        all_registry_names = set(self.registries.keys()) | set(other.registries.keys())
+        
+        for name in all_registry_names:
+            self_registry = self.registries.get(name)
+            other_registry = other.registries.get(name)
+            
+            if self_registry is None:
+                # Registry exists in other but not in self (new registry)
+                extra_overloads = [
+                    (o.query_literal, o.return_type) for o in other_registry.overloads
+                ]
+                if extra_overloads:
+                    diff_result[name] = {"missing": [], "extra": extra_overloads}
+            elif other_registry is None:
+                # Registry exists in self but not in other (removed registry)
+                missing_overloads = [
+                    (o.query_literal, o.return_type) for o in self_registry.overloads
+                ]
+                if missing_overloads:
+                    diff_result[name] = {"missing": missing_overloads, "extra": []}
+            else:
+                # Both registries exist, compare overloads
+                self_overloads = {
+                    (o.query_literal, o.return_type) for o in self_registry.overloads
+                }
+                other_overloads = {
+                    (o.query_literal, o.return_type) for o in other_registry.overloads
+                }
+                
+                missing = sorted(self_overloads - other_overloads)
+                extra = sorted(other_overloads - self_overloads)
+                
+                if missing or extra:
+                    diff_result[name] = {"missing": missing, "extra": extra}
+        
+        return diff_result
