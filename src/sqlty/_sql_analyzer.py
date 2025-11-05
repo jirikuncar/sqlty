@@ -120,39 +120,44 @@ class SQLAnalyzer:
 
         return None
 
-    def analyze_select(self, sql: str) -> list[ColumnInfo] | None:
+    def _process_projections(
+        self,
+        projections: list[exp.Expression],
+        ast: exp.Expression,
+        select_expr: exp.Select | None = None,
+    ) -> list[ColumnInfo]:
         """
-        Analyze a SELECT query and extract column information.
+        Process a list of projection expressions and extract column information.
 
-        Returns None if the query is not a SELECT or cannot be parsed.
+        Args:
+            projections: List of projection expressions to process
+            ast: The full AST for schema lookups
+            select_expr: Optional SELECT expression for FROM clause lookups
+
+        Returns:
+            List of ColumnInfo objects with extracted type information
         """
-        try:
-            ast = parse_one(sql, dialect=self.dialect)
-        except Exception:
-            return None
-
-        # Find the SELECT expression
-        select_expr = ast.find(exp.Select)
-        if not select_expr:
-            return None
-
         columns: list[ColumnInfo] = []
 
-        for projection in select_expr.expressions:
+        for projection in projections:
             col_name = projection.alias_or_name
             python_type: str | None = None
             sql_type: str | None = None
 
             # Try to extract type information
-            if isinstance(projection, exp.Cast):
-                # Explicit cast: SELECT id::INTEGER
+            # Check for aliased expressions first (e.g., (price * 1.1)::FLOAT AS new_price)
+            if isinstance(projection, exp.Alias) and isinstance(projection.this, exp.Cast):
+                # Aliased cast: SELECT/RETURNING (expr)::TYPE AS alias
+                sql_type = str(projection.this.to)
+                python_type = self._sql_to_python_type(sql_type)
+            elif isinstance(projection, exp.Cast):
+                # Explicit cast: SELECT/RETURNING id::INTEGER
                 sql_type = str(projection.to)
                 python_type = self._sql_to_python_type(sql_type)
             elif isinstance(projection, exp.Column):
-                # Simple column: SELECT id FROM users
+                # Simple column: SELECT/RETURNING id
                 # Try to infer type from schema if available
                 if self.schema:
-                    # Find the table this column comes from
                     # First, try to get table from the column itself
                     table_name = projection.table
                     if table_name:
@@ -160,16 +165,26 @@ class SQLAnalyzer:
                         if sql_type:
                             python_type = self._sql_to_python_type(sql_type)
                     else:
-                        # If no table specified, check all FROM tables
-                        from_expr = select_expr.find(exp.From)
-                        if from_expr:
-                            # Get the table from FROM clause
-                            for table in from_expr.find_all(exp.Table):
-                                table_name = table.name
-                                sql_type = self._get_column_type_from_schema(table_name, col_name)
-                                if sql_type:
-                                    python_type = self._sql_to_python_type(sql_type)
-                                    break
+                        # If no table specified on column, try to find it in the AST
+                        # For RETURNING, find the first table in the statement
+                        table_expr = ast.find(exp.Table)
+                        if table_expr:
+                            table_name = table_expr.name
+                            sql_type = self._get_column_type_from_schema(table_name, col_name)
+                            if sql_type:
+                                python_type = self._sql_to_python_type(sql_type)
+                        # For SELECT, check FROM clause
+                        elif select_expr:
+                            from_expr = select_expr.find(exp.From)
+                            if from_expr:
+                                for table in from_expr.find_all(exp.Table):
+                                    table_name = table.name
+                                    sql_type = self._get_column_type_from_schema(
+                                        table_name, col_name
+                                    )
+                                    if sql_type:
+                                        python_type = self._sql_to_python_type(sql_type)
+                                        break
             elif isinstance(projection, exp.Count):
                 # COUNT(*) always returns integer
                 python_type = "int"
@@ -185,6 +200,38 @@ class SQLAnalyzer:
             columns.append(ColumnInfo(col_name, python_type, sql_type))
 
         return columns
+
+    def analyze_select(self, sql: str) -> list[ColumnInfo] | None:
+        """
+        Analyze a SQL query and extract column information from result set.
+
+        Supports:
+        - SELECT queries
+        - UPDATE/DELETE/INSERT/MERGE with RETURNING clause
+
+        Args:
+            sql: SQL query string to analyze
+
+        Returns:
+            List of ColumnInfo objects if the query returns results, None otherwise.
+            Returns None for DML statements (UPDATE/DELETE/INSERT/MERGE) without RETURNING.
+        """
+        try:
+            ast = parse_one(sql, dialect=self.dialect)
+        except Exception:
+            return None
+
+        # Check for RETURNING clause in UPDATE/DELETE/INSERT/MERGE statements
+        returning_expr = ast.find(exp.Returning)
+        if returning_expr:
+            return self._process_projections(returning_expr.expressions, ast)
+
+        # Find the SELECT expression
+        select_expr = ast.find(exp.Select)
+        if not select_expr:
+            return None
+
+        return self._process_projections(select_expr.expressions, ast, select_expr)
 
     def _sql_to_python_type(self, sql_type: str) -> str:
         """Convert SQL type to Python type."""
