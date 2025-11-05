@@ -186,7 +186,9 @@ class SQLAnalyzer:
                     # SUM has an explicit cast: SUM(column::TYPE)
                     sql_type = str(cast_to)
                     python_type = self._sql_to_python_type(sql_type)
-                case exp.Sum(this=exp.Column(name=column_name, table=table_name)) if self.schema and table_name:
+                case exp.Sum(this=exp.Column(name=column_name, table=table_name)) if (
+                    self.schema and table_name
+                ):
                     # SUM of column with explicit table name and schema available
                     sql_type = self._get_column_type_from_schema(table_name, column_name)
                     if sql_type:
@@ -196,7 +198,7 @@ class SQLAnalyzer:
                         sql_type = "NUMERIC"
                 case exp.Sum(this=exp.Column(name=column_name)) if self.schema:
                     # SUM of column without table name - try to find table from query
-                    table_name = None
+                    table_name = ""
                     table_expr = ast.find(exp.Table)
                     if table_expr:
                         table_name = table_expr.name
@@ -206,12 +208,12 @@ class SQLAnalyzer:
                             for table in from_expr.find_all(exp.Table):
                                 table_name = table.name
                                 break
-                    
+
                     if table_name:
                         sql_type = self._get_column_type_from_schema(table_name, column_name)
                         if sql_type:
                             python_type = self._sql_to_python_type(sql_type)
-                    
+
                     if not python_type:
                         python_type = "float"
                         sql_type = "NUMERIC"
