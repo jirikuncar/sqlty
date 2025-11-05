@@ -21,6 +21,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlty._formatter import formatter
 from sqlty._sql_analyzer import SQLAnalyzer
@@ -28,6 +29,9 @@ from sqlty._sql_analyzer import SQLAnalyzer
 from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
 from ._stub_merger import StubMerger
+
+if TYPE_CHECKING:
+    from ._stub_ir import StubFile
 
 
 class TypeStubGenerator:
@@ -876,8 +880,6 @@ class TypeStubGenerator:
                     from ._stub_parser import CallInfoToIRParser
 
                     call_parser = CallInfoToIRParser(self.function_name)
-                    # TODO why is it not used?
-                    # serializer = IRToTextSerializer(self.function_name)
 
                     # Create stub with all new registries
                     all_new_registries = StubFile(file_path=stub_path)
