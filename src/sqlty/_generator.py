@@ -80,12 +80,6 @@ class TypeStubGenerator:
         Returns:
             0 if all stubs are up-to-date, 1 if differences found
         """
-        from ._stub_ir import StubFile
-        from ._stub_parser import PyiToIRParser
-
-        # Store stub paths and their IRs
-        stub_checks: list[tuple[Path, StubFile, StubFile]] = []  # (path, existing_ir, expected_ir)
-
         # Temporarily enable check mode for generation
         original_check_mode = self._check_mode
         self._check_mode = True
@@ -100,22 +94,6 @@ class TypeStubGenerator:
                 output_path=output_path,
                 mode=mode,
             )
-
-            # Parse collected differences and convert to IR-based comparisons
-            parser = PyiToIRParser(self.function_name)
-
-            for stub_path, _, _ in self._files_with_differences:
-                # Parse existing stub to IR
-                if stub_path.exists():
-                    existing_ir = parser.parse_file(stub_path)
-                else:
-                    existing_ir = StubFile(file_path=stub_path)
-
-                # The expected IR was stored during generation
-                # We need to regenerate it by finding the corresponding new IR
-                # For now, we'll use the text diff we collected
-                # This is a temporary solution until we refactor _write_stub_ir_if_changed
-                pass
 
         finally:
             self._check_mode = original_check_mode
