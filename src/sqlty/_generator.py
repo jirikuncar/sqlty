@@ -285,9 +285,10 @@ class TypeStubGenerator:
             registry_sources.add(current_module)
 
         # Resolve imported sources
-        for _, module_name in collector.import_sources.items():
+        for local_name, module_name in collector.import_sources.items():
+            import_level = collector.import_levels.get(local_name, 0)
             resolved_module = self._registry_detector.resolve_import_to_registry_module(
-                module_name, filepath
+                module_name, filepath, import_level
             )
             if resolved_module:
                 registry_sources.add(resolved_module)

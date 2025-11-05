@@ -164,18 +164,62 @@ class RegistryDetector:
             return None
 
     def resolve_import_to_registry_module(
-        self, import_source: str, source_file: Path
+        self, import_source: str, source_file: Path, import_level: int = 0
     ) -> str | None:
         """Resolve an import to find which module contains the SQLRegistry subclass.
 
         Args:
             import_source: The module name from the import statement
             source_file: The file that contains the import
+            import_level: The relative import level (0 for absolute, 1+ for relative)
 
         Returns:
             The module name that contains the SQLRegistry subclass, or None
         """
         source_dir = source_file.parent
+        
+        # Handle relative imports
+        if import_level > 0:
+            # Go up 'level' directories from source_file
+            target_dir = source_dir
+            for _ in range(import_level):
+                target_dir = target_dir.parent
+                if target_dir == target_dir.parent:  # Reached root
+                    return None
+            
+            # If import_source is empty (e.g., "from .. import sql"), check target_dir
+            if not import_source:
+                # Check for __init__.py in target directory
+                init_file = target_dir / "__init__.py"
+                if self.get_registry_class_names(init_file):
+                    # Return the module name based on the directory path
+                    return target_dir.name
+                return None
+            
+            # Otherwise, resolve from target_dir
+            module_path_parts = import_source.split(".")
+            
+            # Try as a file
+            module_file = target_dir
+            for part in module_path_parts[:-1]:
+                module_file = module_file / part
+            module_file = module_file / f"{module_path_parts[-1]}.py"
+            
+            if self.get_registry_class_names(module_file):
+                return import_source
+            
+            # Try as a package
+            package_init = target_dir
+            for part in module_path_parts:
+                package_init = package_init / part
+            package_init = package_init / "__init__.py"
+            
+            if self.get_registry_class_names(package_init):
+                return import_source
+            
+            return None
+        
+        # Handle absolute imports (original logic)
         module_path_parts = import_source.split(".")
 
         # Try as a simple relative import first (e.g., "queries" from same directory)

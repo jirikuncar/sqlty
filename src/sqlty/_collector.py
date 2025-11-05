@@ -29,6 +29,9 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.import_sources: dict[
             str, str
         ] = {}  # Map import name -> module (e.g., {"user_sql": "user_queries"})
+        self.import_levels: dict[
+            str, int
+        ] = {}  # Track relative import levels (e.g., {"sql": 2} for from .. import sql)
         self.module_imports: dict[
             str, str
         ] = {}  # Track module imports (e.g., import queries -> {"queries": "queries"})
@@ -52,18 +55,23 @@ class LiteralCallCollector(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Track where functions are imported from."""
-        if node.module:
-            for alias in node.names:
-                imported_name = alias.name
-                local_name = alias.asname if alias.asname else alias.name
-                # Track all imports, not just the target function
-                self.import_sources[local_name] = node.module
-                # Also track the original class name if it's different from the local name
-                if alias.asname:
-                    self.class_imports[local_name] = imported_name
-                else:
-                    # Even without alias, track the original name
-                    self.class_imports[local_name] = imported_name
+        # Handle relative imports: node.level > 0 means relative import
+        # node.module can be None for imports like "from .. import sql"
+        module_name = node.module if node.module else ""
+        import_level = node.level if node.level else 0
+        
+        for alias in node.names:
+            imported_name = alias.name
+            local_name = alias.asname if alias.asname else alias.name
+            # Track all imports, not just the target function
+            self.import_sources[local_name] = module_name
+            self.import_levels[local_name] = import_level
+            # Also track the original class name if it's different from the local name
+            if alias.asname:
+                self.class_imports[local_name] = imported_name
+            else:
+                # Even without alias, track the original name
+                self.class_imports[local_name] = imported_name
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
