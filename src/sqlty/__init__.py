@@ -3,7 +3,7 @@
 import importlib.metadata
 import os
 from collections.abc import Callable
-from typing import overload
+from typing import Any, overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
@@ -75,9 +75,16 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
 
         # Auto-generate stub if environment variable is set
         if _auto_generate:
+            import functools
+
             from sqlty._auto_generator import auto_generate_stub
 
-            auto_generate_stub(fn)  # type: ignore
+            @functools.wraps(fn)  # type: ignore
+            def wrapper(query: str) -> Any:
+                auto_generate_stub(fn, query)  # type: ignore
+                return fn(query)  # type: ignore
+
+            return wrapper  # type: ignore
 
         return fn
 
