@@ -33,20 +33,23 @@ def test_registries_find_in_directory(
     """Test finding registries in a directory."""
     # Create multiple files with registries
     file1 = tmp_path / "queries1.py"
-    file1.write_text("""from sqlty import SQLRegistry
+    file1.write_text("""from sqlty import sqlty
 
-class QueryA(SQLRegistry):
-    pass
+@sqlty
+def sql_a(query: str):
+    return query
 """)
 
     file2 = tmp_path / "queries2.py"
-    file2.write_text("""from sqlty import SQLRegistry
+    file2.write_text("""from sqlty import sqlty
 
-class QueryB(SQLRegistry):
-    pass
+@sqlty
+def sql_b(query: str):
+    return query
 
-class QueryC(SQLRegistry):
-    pass
+@sqlty
+def sql_c(query: str):
+    return query
 """)
 
     # Run the registries command
@@ -55,9 +58,9 @@ class QueryC(SQLRegistry):
     assert result.returncode == 0
     output_lines = result.stdout.strip().split("\n")
     assert len(output_lines) == 3
-    assert any("queries1.py:QueryA" in line for line in output_lines)
-    assert any("queries2.py:QueryB" in line for line in output_lines)
-    assert any("queries2.py:QueryC" in line for line in output_lines)
+    assert any("queries1.py:sql_a" in line for line in output_lines)
+    assert any("queries2.py:sql_b" in line for line in output_lines)
+    assert any("queries2.py:sql_c" in line for line in output_lines)
 
 
 def test_registries_indirect_import(
@@ -66,9 +69,9 @@ def test_registries_indirect_import(
 ) -> None:
     """Test finding registries with indirect imports (module.Class)."""
     test_file = tmp_path / "test.py"
-    test_file.write_text("""import sqlty
+    test_file.write_text("""from sqlty import sqlty
 
-@sqlty.sqlty
+@sqlty
 def sql(query: str):
     return query
 """)

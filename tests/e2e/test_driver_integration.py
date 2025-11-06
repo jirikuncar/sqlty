@@ -14,17 +14,13 @@ from inline_snapshot import snapshot
 def test_psycopg_driver_pattern(tmp_path: Path) -> None:
     """Test stub generation for code using psycopg driver pattern."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    """Query registry for database operations."""
-
-    pass
-
-
-sql = Query.sql
-''')
+@sqlty
+def sql(query: str):
+    return query
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING

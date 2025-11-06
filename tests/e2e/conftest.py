@@ -26,7 +26,7 @@ def _create_cli_runner(
     src_dir = Path(__file__).parent.parent.parent / "src"
 
     def _run_cli(
-        args: list[str | Path], **kwargs: dict[str, Any]
+        args: list[str | Path], kwargs: dict[str, Any] | None = None
     ) -> subprocess.CompletedProcess[str]:
         """Run CLI with given arguments."""
         # Set default kwargs for CLI execution
@@ -35,40 +35,9 @@ def _create_cli_runner(
             "text": True,
         }
 
-        # Only update with valid subprocess.run parameters
-        valid_keys = {
-            "capture_output",
-            "text",
-            "input",
-            "stdin",
-            "stdout",
-            "stderr",
-            "shell",
-            "cwd",
-            "timeout",
-            "check",
-            "encoding",
-            "errors",
-            "universal_newlines",
-            "bufsize",
-            "executable",
-            "preexec_fn",
-            "close_fds",
-            "pass_fds",
-            "restore_signals",
-            "start_new_session",
-            "process_group",
-            "group",
-            "user",
-            "umask",
-            "pipesize",
-            "env",
-            "extra_groups",
-        }
-
-        for key, value in (kwargs or {}).items():
-            if key in valid_keys:
-                run_kwargs[key] = value
+        # Merge provided kwargs
+        if kwargs:
+            run_kwargs.update(kwargs)
 
         # Convert Path objects to strings
         str_args = [str(arg) for arg in args]

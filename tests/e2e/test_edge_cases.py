@@ -27,14 +27,12 @@ def test_no_queries_found(tmp_path: Path) -> None:
     stub file with just the generic overload or skipping stub generation.
     """
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     # App file without any sql() calls
@@ -65,14 +63,12 @@ def hello() -> str:
 def test_syntax_error_in_source(tmp_path: Path) -> None:
     """Test handling of syntax errors in source files."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     # File with syntax error
@@ -96,14 +92,12 @@ def broken(
 def test_non_literal_query_string(tmp_path: Path) -> None:
     """Test that non-literal query strings are skipped with warning."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -136,14 +130,12 @@ static_query = sql("SELECT id::INTEGER FROM users")
 def test_duplicate_queries_same_file(tmp_path: Path) -> None:
     """Test handling of duplicate queries in the same file."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -173,14 +165,12 @@ query3 = sql("SELECT id::INTEGER FROM users")
 def test_very_long_query(tmp_path: Path) -> None:
     """Test handling of very long SQL queries."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     # Create a very long query
@@ -204,14 +194,12 @@ query = sql("SELECT {columns} FROM big_table")
 def test_unicode_in_query(tmp_path: Path) -> None:
     """Test handling of Unicode characters in queries."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -234,14 +222,12 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE name = :name")
 def test_comments_in_queries(tmp_path: Path) -> None:
     """Test SQL queries with SQL comments."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -273,14 +259,12 @@ query = sql("""
 def test_query_with_semicolon(tmp_path: Path) -> None:
     """Test query ending with semicolon."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -308,14 +292,12 @@ query = sql("SELECT id::INTEGER FROM users;")
 def test_nested_function_calls(tmp_path: Path) -> None:
     """Test sql() calls inside function definitions."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -351,14 +333,12 @@ def get_posts_query():
 def test_class_method_queries(tmp_path: Path) -> None:
     """Test sql() calls inside class methods."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -396,14 +376,12 @@ class UserRepository:
 def test_query_in_conditional(tmp_path: Path) -> None:
     """Test sql() calls inside conditional blocks."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
