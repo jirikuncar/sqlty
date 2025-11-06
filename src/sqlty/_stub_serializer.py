@@ -7,6 +7,7 @@ back to AST nodes and formatted Python code.
 import ast
 from collections import Counter
 from pathlib import Path
+from typing import Literal
 
 from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
 
@@ -138,7 +139,7 @@ class IRToASTSerializer:
 
         return ast.ClassDef(
             name=registry.name,
-            bases=[ast.Name(id=registry.base_class, ctx=ast.Load())],
+            bases=[ast.Name(id="SQLRegistry", ctx=ast.Load())],
             keywords=[],
             body=class_body,
             decorator_list=[],
@@ -569,12 +570,12 @@ class IRToTextSerializer:
                 elif prev_line_type == "import" and line_type != "import":
                     # Between imports and code
                     result.append("")
-                elif prev_line_type == "class" and line_type == "class":
-                    # Between classes
+                elif prev_line_type == "function" and line_type == "function":
+                    # Between functions
                     result.append("")
                     result.append("")
-                elif prev_line_type == "class" and line_type == "alias":
-                    # Between class and alias
+                elif prev_line_type == "function" and line_type == "alias":
+                    # Between function and alias
                     result.append("")
 
             result.append(line)
@@ -582,20 +583,20 @@ class IRToTextSerializer:
 
         return result
 
-    def _classify_line(self, line: str) -> str:
+    def _classify_line(self, line: str) -> Literal["import", "function", "alias", "other"]:
         """Classify a line of code.
 
         Args:
             line: Line of code
 
         Returns:
-            Classification: "import", "class", "alias", or "other"
+            Classification: "import", "function", "alias", or "other"
         """
         stripped = line.strip()
         if stripped.startswith("import ") or stripped.startswith("from "):
             return "import"
-        elif stripped.startswith("class "):
-            return "class"
+        elif stripped.startswith("def "):
+            return "function"
         elif " = " in stripped and "." in stripped:
             # Likely an alias like "sql = Query.sql"
             return "alias"

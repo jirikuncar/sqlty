@@ -371,13 +371,12 @@ class TypeStubGenerator:
         output_path: Path,
         new_calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         full_mode: bool = False,
         export_name: str = "sql",
     ) -> str:
         """Merge new calls with existing stub file."""
         return self._stub_merger.merge_stub_incremental(
-            output_path, new_calls, class_name, base_class, full_mode, export_name
+            output_path, new_calls, class_name, full_mode, export_name
         )
 
     def _resolve_registry_source_for_class(
@@ -576,18 +575,17 @@ class TypeStubGenerator:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
         relative_to: Path | None = None,
     ) -> str:
         """Generate class-based stub content from collected calls.
 
-        This generates a Query class that inherits from SQLRegistry with
-        @overload @classmethod sql() methods for each unique query literal.
+        This generates a Query class with @overload @classmethod sql() methods
+        for each unique query literal.
 
         Uses the new IR-based approach for better structure and maintainability.
         """
-        stub_ir = self.generate_stub_ir(calls, class_name, base_class, export_name)
+        stub_ir = self.generate_stub_ir(calls, class_name, export_name)
 
         from ._stub_serializer import IRToTextSerializer
 
@@ -598,7 +596,6 @@ class TypeStubGenerator:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
     ) -> "StubFile":
         """Generate stub IR from collected calls.
@@ -609,7 +606,7 @@ class TypeStubGenerator:
         from ._stub_parser import CallInfoToIRParser
 
         parser = CallInfoToIRParser(self.function_name)
-        stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
+        stub_ir = parser.parse_calls(calls, class_name, export_name)
         return stub_ir
 
     def generate_stub_file(
@@ -617,7 +614,6 @@ class TypeStubGenerator:
         source_path: Path,
         output_path: Path | None = None,
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         mode: str = "incremental,prune,create",
     ) -> Path:
         """Generate a .pyi stub file for the given source file or directory.
@@ -626,7 +622,6 @@ class TypeStubGenerator:
             source_path: Path to source file or directory to analyze
             output_path: Path for the generated stub file
             class_name: Name of the Query class (used as fallback)
-            base_class: Name of the base class
             mode: Generation mode - comma-separated list of actions:
                 - incremental: Add new overloads to existing stub
                 - prune: Remove overloads no longer in source
@@ -708,7 +703,6 @@ class TypeStubGenerator:
                     )
                     registry = RegistryDecorator(
                         name=reg_class,
-                        base_class=base_class,
                         export_name=export_name,
                         overloads=set(),  # Empty set for minimal stub
                     )
@@ -718,7 +712,6 @@ class TypeStubGenerator:
                 actual_class = registry_classes[0] if registry_classes else class_name
                 registry = RegistryDecorator(
                     name=actual_class,
-                    base_class=base_class,
                     export_name=self.function_name,
                     overloads=set(),  # Empty set for minimal stub
                 )
@@ -859,7 +852,7 @@ class TypeStubGenerator:
                         )
                         # If decorated function, ensure registry is created with is_function=True
                         new_stub = call_parser.parse_calls(
-                            cls_calls, cls_name, base_class, export_name, is_function
+                            cls_calls, cls_name, export_name, is_function
                         )
                         for registry in new_stub.registries.values():
                             registry.is_function = is_function
@@ -942,17 +935,15 @@ class TypeStubGenerator:
                             stub_path,
                             registry_calls,
                             actual_class_name,
-                            base_class,
                             full_mode,
                             export_name,
-                            prune=prune_mode,
+                            prune_mode,
                         )
                     else:
                         # Fresh generation
                         stub_content = self.generate_stub_content(
                             registry_calls,
                             actual_class_name,
-                            base_class,
                             export_name,
                             relative_to=stub_path.parent,
                         )
@@ -987,17 +978,15 @@ class TypeStubGenerator:
                     stub_path,
                     registry_calls,
                     actual_class_name,
-                    base_class,
                     full_mode,
                     export_name,
-                    prune=prune_mode,
+                    prune_mode,
                 )
             else:
                 # Fresh generation
                 stub_content = self.generate_stub_content(
                     registry_calls,
                     actual_class_name,
-                    base_class,
                     export_name,
                     relative_to=stub_path.parent,
                 )

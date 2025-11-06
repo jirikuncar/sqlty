@@ -51,7 +51,7 @@ Welcome to the SQLType documentation!
 ### Reference
 
 6. **[API Reference](api.md)**
-   - SQLRegistry class
+   - `@sqlty` decorator
    - SQL type
    - Generator CLI
    - Type mappings

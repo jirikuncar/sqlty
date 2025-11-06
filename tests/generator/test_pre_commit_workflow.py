@@ -189,14 +189,12 @@ def test_full_mode_respects_write_if_changed(tmp_path: Path) -> None:
     """Test that full mode also respects the write_if_changed behavior."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text(
-        """from sqlty import SQLRegistry
+        """from sqlty import sqlty
 
+@sqlty
+def sql(query: str):
+    return query
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
 query1 = sql("SELECT id::INTEGER FROM users")
 """
     )
@@ -204,14 +202,14 @@ query1 = sql("SELECT id::INTEGER FROM users")
     generator = TypeStubGenerator(sql_dialect="postgres")
 
     # First generation
-    stub_path = generator.generate_stub_file(queries_file, mode="fresh")
+    stub_path = generator.generate_stub_file(tmp_path)
     initial_mtime = os.path.getmtime(stub_path)
     initial_content = stub_path.read_text()
 
     time.sleep(0.01)
 
-    # Second generation with full mode (same queries)
-    generator.generate_stub_file(queries_file, mode="full")
+    # Second generation
+    generator.generate_stub_file(tmp_path)
     second_mtime = os.path.getmtime(stub_path)
     second_content = stub_path.read_text()
 

@@ -305,7 +305,6 @@ class CallInfoToIRParser:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
         is_function: bool = False,
     ) -> StubFile:
