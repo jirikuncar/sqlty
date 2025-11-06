@@ -217,9 +217,9 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
 
 
 @pytest.fixture
-def stubtest() -> (
-    Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]]
-):
+def stubtest() -> Callable[
+    [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
+]:
     """Fixture to run stubtest for validating stub files.
 
     Returns a callable that runs stubtest with the given arguments.

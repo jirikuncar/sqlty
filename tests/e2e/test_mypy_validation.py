@@ -292,6 +292,6 @@ def main() -> None:  # Should be allowed by allowlist
         ["queries", "--concise"],
         {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
     )
-    assert (
-        stubtest_result.returncode == 0
-    ), f"stubtest should pass with allowlist: {stubtest_result.stdout}"
+    assert stubtest_result.returncode == 0, (
+        f"stubtest should pass with allowlist: {stubtest_result.stdout}"
+    )

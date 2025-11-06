@@ -1,9 +1,9 @@
 # Stubtest allowlist for sqlty examples
-# 
+#
 # Generated stub files (.pyi) only contain type-safe overloads for SQL queries.
 # They intentionally omit runtime implementation details like:
 # - __schema_path__ class variables
-# - main() functions  
+# - main() functions
 # - SQL query variables (these use the overloaded sql() method)
 #
 # This is by design - stubs provide type hints, not complete implementations.
