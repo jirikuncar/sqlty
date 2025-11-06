@@ -51,9 +51,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.registry_aliases: dict[
             str, str
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
-        self.decorated_functions: set[str] = (
-            set()
-        )  # Track functions decorated with @sqlty
+        self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
 
     def _offset_to_line(self, offset: int) -> tuple[int, int]:
@@ -153,20 +151,7 @@ class LiteralCallCollector(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Visit assignment nodes to capture type context and track .sql aliases."""
-        # Check if this is an assignment like: user_sql = UserQueries.sql or qa = A.sql
-        if (
-            isinstance(node.value, ast.Attribute)
-            and node.value.attr == self.function_name
-            and isinstance(node.value.value, ast.Name)
-        ):
-            class_name = node.value.value.id
-            # Check if it's a local registry class OR an imported class (by class name)
-            if class_name in self.local_registry_classes or class_name in self.class_imports:
-                # Track the alias
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        self.registry_aliases[target.id] = class_name
-
+        # TODO remove ???
         old_assignment = self.current_assignment
         self.current_assignment = node
         self.generic_visit(node)
@@ -197,12 +182,7 @@ class LiteralCallCollector(ast.NodeVisitor):
                 is_target_call = True
                 registry_class = func_name  # Use function name as registry identifier
                 # registry_source will be set later by the generator based on the current file
-            # Priority 2: Check if this is an alias to a local registry's .sql method
-            elif func_name in self.registry_aliases:
-                is_target_call = True
-                registry_class = self.registry_aliases[func_name]
-                # registry_source will be set later by the generator based on the current file
-            # Priority 3: Check if it's imported from another module
+            # Priority 2: Check if it's imported from another module
             elif func_name in self.import_sources:
                 is_target_call = True
                 registry_source = self.import_sources[func_name]

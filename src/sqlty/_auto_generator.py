@@ -34,7 +34,6 @@ def auto_generate_stub(cls: type) -> None:
         generator.generate_stub_file(
             source_file,
             class_name=cls.__name__,
-            base_class="SQLRegistry",
             mode="incremental",  # Don't overwrite existing stubs
         )
 

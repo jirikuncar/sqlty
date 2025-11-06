@@ -14,7 +14,7 @@ def post_sql(
 @overload
 def post_sql(
     query: Literal[
-        "\n    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id\n"
+        "\n    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id AND user_id = :user_id\n"
     ],
 ) -> SQL[tuple[int, str, str]]: ...
 @overload

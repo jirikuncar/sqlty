@@ -12,7 +12,7 @@ def post_sql(query: str) -> Any:
 
 # Define queries in the same file as the registry
 get_post = post_sql("""
-    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id
+    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id AND user_id = :user_id
 """)
 
 list_posts = post_sql("""

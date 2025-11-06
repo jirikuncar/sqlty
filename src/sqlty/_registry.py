@@ -8,6 +8,8 @@ import ast
 import logging
 from pathlib import Path
 
+from sqlty import sqlty
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,14 +17,13 @@ class RegistryDetector:
     """Detect SQLRegistry subclasses and resolve their schemas."""
 
     def get_schema_path_from_registry(
-        self, module_path: Path, class_name: str | None = None
+        self, module_path: Path, name: str | None = None
     ) -> Path | None:
         """Extract __schema_path__ from a SQLRegistry subclass or decorated function.
 
         Args:
             module_path: Path to the Python module to check
-            class_name: Optional specific registry class name or function name to look for.
-                       If None, returns the first __schema_path__ found (backward compatible).
+            name: Optional specific function name to look for.
 
         Returns:
             Resolved schema path if found, None otherwise
@@ -34,34 +35,9 @@ class RegistryDetector:
             source = module_path.read_text()
             tree = ast.parse(source)
             for node in ast.walk(tree):
-                # Check SQLRegistry subclasses
-                if isinstance(node, ast.ClassDef):
-                    # If class_name is specified, only check that specific class
-                    if class_name and node.name != class_name:
-                        continue
-
-                    for base in node.bases:
-                        if (isinstance(base, ast.Name) and base.id == "SQLRegistry") or (
-                            isinstance(base, ast.Attribute) and base.attr == "SQLRegistry"
-                        ):
-                            # Look for __schema_path__ assignment
-                            for stmt in node.body:
-                                if (
-                                    isinstance(stmt, ast.Assign)
-                                    and len(stmt.targets) == 1
-                                    and isinstance(stmt.targets[0], ast.Name)
-                                    and stmt.targets[0].id == "__schema_path__"
-                                    and isinstance(stmt.value, ast.Constant)
-                                    and isinstance(stmt.value.value, str)
-                                ):
-                                    # Resolve path relative to module
-                                    schema_path = module_path.parent / stmt.value.value
-                                    return schema_path
-
                 # Check decorated functions with @sqlty(schema="...")
-                elif isinstance(node, ast.FunctionDef):
-                    # If class_name is specified, only check that specific function
-                    if class_name and node.name != class_name:
+                if isinstance(node, ast.FunctionDef):
+                    if name and node.name != name:
                         continue
 
                     # Check if function has @sqlty decorator
@@ -70,8 +46,9 @@ class RegistryDetector:
                         if isinstance(decorator, ast.Call):
                             if (
                                 isinstance(decorator.func, ast.Name)
-                                and decorator.func.id == "sqlty"
+                                and decorator.func.id == sqlty.__name__
                             ):
+                                # TODO check the source module of the sqlty function
                                 # Look for schema keyword argument
                                 for keyword in decorator.keywords:
                                     if (
@@ -85,34 +62,24 @@ class RegistryDetector:
             pass
         return None
 
-    def get_registry_class_names(self, module_path: Path) -> list[str]:
+    def get_registry_names(self, module_path: Path) -> list[str]:
         """Get the names of all SQLRegistry subclasses in a module.
 
         Args:
             module_path: Path to the Python module to check
 
         Returns:
-            List of SQLRegistry subclass names found in the module
+            List of detectedd
         """
         if not module_path.exists():
             return []
 
-        registry_classes = []
+        registry_classes: list[str] = []
         try:
             with open(module_path) as f:
                 source = f.read()
             tree = ast.parse(source)
 
-            # Look for class definitions that inherit from SQLRegistry
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    for base in node.bases:
-                        if isinstance(base, ast.Name) and base.id == "SQLRegistry":
-                            registry_classes.append(node.name)
-                            break
-                        if isinstance(base, ast.Attribute) and base.attr == "SQLRegistry":
-                            registry_classes.append(node.name)
-                            break
             # Always include functions decorated with @sqlty
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
@@ -125,9 +92,10 @@ class RegistryDetector:
                             if node.name not in registry_classes:
                                 registry_classes.append(node.name)
                             break
-            return registry_classes
         except Exception:
-            return registry_classes
+            logger.debug("Failed to parse for decorated functions: %s", module_path)
+
+        return registry_classes
 
     def get_registry_export_name(self, module_path: Path, class_name: str) -> str:
         """Get the exported name for the registry's sql method.
@@ -280,7 +248,7 @@ class RegistryDetector:
                 # Check for __init__.py in target directory
                 init_file = target_dir / "__init__.py"
                 logger.debug("Checking __init__.py: %s", init_file)
-                if self.get_registry_class_names(init_file):
+                if self.get_registry_names(init_file):
                     # Return the module name based on the directory path
                     resolved = target_dir.name
                     logger.debug("Found registry in __init__.py, returning: %s", resolved)
@@ -298,7 +266,7 @@ class RegistryDetector:
             module_file = module_file / f"{module_path_parts[-1]}.py"
 
             logger.debug("Trying module file: %s", module_file)
-            if self.get_registry_class_names(module_file):
+            if self.get_registry_names(module_file):
                 logger.debug("Found registry in module file, returning: %s", import_source)
                 return import_source
 
@@ -309,7 +277,7 @@ class RegistryDetector:
             package_init = package_init / "__init__.py"
 
             logger.debug("Trying package __init__: %s", package_init)
-            if self.get_registry_class_names(package_init):
+            if self.get_registry_names(package_init):
                 logger.debug("Found registry in package __init__, returning: %s", import_source)
                 return import_source
 
@@ -322,14 +290,14 @@ class RegistryDetector:
         # Try as a simple relative import first (e.g., "queries" from same directory)
         module_file = source_dir / f"{import_source}.py"
         logger.debug("Trying simple module: %s", module_file)
-        if self.get_registry_class_names(module_file):
+        if self.get_registry_names(module_file):
             logger.debug("Found registry, returning: %s", import_source)
             return import_source
 
         # Try as a package with __init__.py
         package_init = source_dir / import_source / "__init__.py"
         logger.debug("Trying package: %s", package_init)
-        if self.get_registry_class_names(package_init):
+        if self.get_registry_names(package_init):
             logger.debug("Found registry in package, returning: %s", import_source)
             return import_source
 
@@ -343,7 +311,7 @@ class RegistryDetector:
                 module_file = module_file / part
             module_file = module_file / f"{module_path_parts[-1]}.py"
 
-            if self.get_registry_class_names(module_file):
+            if self.get_registry_names(module_file):
                 return import_source
 
             # Strategy 2: Resolve as absolute import from parent directories
@@ -362,7 +330,7 @@ class RegistryDetector:
                     module_file = module_file / part
                 module_file = module_file / f"{module_path_parts[-1]}.py"
 
-                if self.get_registry_class_names(module_file):
+                if self.get_registry_names(module_file):
                     return import_source
 
                 # Also try as package
@@ -371,7 +339,7 @@ class RegistryDetector:
                     package_init = package_init / part
                 package_init = package_init / "__init__.py"
 
-                if self.get_registry_class_names(package_init):
+                if self.get_registry_names(package_init):
                     return import_source
 
         # If not found, return None
@@ -394,7 +362,7 @@ class RegistryDetector:
         for py_file in python_files:
             try:
                 # Get all registry class names in this file
-                class_names = self.get_registry_class_names(py_file)
+                class_names = self.get_registry_names(py_file)
                 for class_name in class_names:
                     registries.append((py_file, class_name))
             except (SyntaxError, UnicodeDecodeError, OSError):

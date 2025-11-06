@@ -134,45 +134,6 @@ class PyiToIRParser:
 
         return stub
 
-    def _parse_registry_class(self, node: ast.ClassDef) -> RegistryClass | None:
-        """Parse a class definition into a RegistryClass.
-
-        Args:
-            node: AST ClassDef node
-
-        Returns:
-            RegistryClass or None if not a valid registry
-        """
-        base_class = "SQLRegistry"
-        if node.bases:
-            base = node.bases[0]
-            if isinstance(base, ast.Name):
-                base_class = base.id
-
-        docstring = "Application-specific SQL query registry with type-safe overloads."
-        if (
-            node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-            and isinstance(node.body[0].value.value, str)
-        ):
-            docstring = node.body[0].value.value
-
-        registry = RegistryClass(
-            name=node.name,
-            base_class=base_class,
-            docstring=docstring,
-            ast_node=node,
-        )
-
-        for item in node.body:
-            if isinstance(item, ast.FunctionDef) and item.name == self.function_name:
-                overload = self._parse_overload_method(item)
-                if overload:
-                    registry.add_overload(overload)
-
-        return registry
-
     def _parse_overload_method(self, node: ast.FunctionDef) -> OverloadSignature | None:
         """Parse a method definition into an OverloadSignature.
 

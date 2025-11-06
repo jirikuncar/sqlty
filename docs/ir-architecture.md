@@ -30,7 +30,6 @@ Source/Pyi → Parse → IR → Manipulate → IR → Serialize → Output
 
 - **`RegistryClass`**: Represents a SQLRegistry subclass with its overloads
   - `name`: Class name (e.g., "UserQueries")
-  - `base_class`: Base class name (e.g., "SQLRegistry")
   - `overloads`: Set of `OverloadSignature` objects
   - `export_name`: Name for module-level alias (e.g., "sql", "user_sql")
   - Methods: `add_overload()`, `remove_overload()`, `has_overload()`

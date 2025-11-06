@@ -391,7 +391,7 @@ class TypeStubGenerator:
 
             # Fallback to first registry class if resolution failed
             if not class_name:
-                class_names = self._registry_detector.get_registry_class_names(registry_module_path)
+                class_names = self._registry_detector.get_registry_names(registry_module_path)
                 class_name = class_names[0] if class_names else None
 
             if class_name:
@@ -412,7 +412,7 @@ class TypeStubGenerator:
             # - If registry_name is None, registry_class contains the direct class name
             lookup_class_name = class_name if registry_name else registry_class
             detected_schema = self._registry_detector.get_schema_path_from_registry(
-                registry_module_path, class_name=lookup_class_name
+                registry_module_path, name=lookup_class_name
             )
             if detected_schema:
                 schema_to_use = detected_schema
@@ -435,7 +435,7 @@ class TypeStubGenerator:
     # Delegation methods for backward compatibility with tests
     def _get_registry_class_names(self, module_path: Path) -> list[str]:
         """Get the names of all SQLRegistry subclasses in a module."""
-        return self._registry_detector.get_registry_class_names(module_path)
+        return self._registry_detector.get_registry_names(module_path)
 
     def _get_registry_export_name(self, module_path: Path, class_name: str) -> str:
         """Get the exported name for the registry's sql method."""
@@ -515,7 +515,7 @@ class TypeStubGenerator:
         registry_sources: set[str] = set()
 
         # Check if current file has a registry
-        if self._registry_detector.get_registry_class_names(filepath):
+        if self._registry_detector.get_registry_names(filepath):
             # Use the module name (filename without .py)
             current_module = filepath.stem
             registry_sources.add(current_module)
@@ -776,7 +776,7 @@ class TypeStubGenerator:
 
             # Check if source file has multiple registry classes
             if source_path.is_file():
-                registry_classes = self._registry_detector.get_registry_class_names(source_path)
+                registry_classes = self._registry_detector.get_registry_names(source_path)
             else:
                 registry_classes = []
 
@@ -847,7 +847,7 @@ class TypeStubGenerator:
                     call_path = Path(call_file)
 
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_class_names(candidate):
+                        if self._registry_detector.get_registry_names(candidate):
                             # If the call is from the registry file itself
                             if call_path == candidate:
                                 registry_file = candidate
@@ -861,7 +861,7 @@ class TypeStubGenerator:
                 # use the first candidate with a registry class
                 if registry_file is None:
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_class_names(candidate):
+                        if self._registry_detector.get_registry_names(candidate):
                             registry_file = candidate
                             break
 
@@ -886,7 +886,7 @@ class TypeStubGenerator:
                     registry_source,
                     stub_path,
                 )
-                class_names = self._registry_detector.get_registry_class_names(registry_file)
+                class_names = self._registry_detector.get_registry_names(registry_file)
 
                 # Unified path: handle one or multiple classes the same way
                 if class_names:
@@ -1194,7 +1194,7 @@ def main(argv: list[str] | None = None) -> None:
         mode = "incremental,prune,create" if args.source.is_dir() else "incremental,create"
 
     # Validate mode string
-    valid_actions = {"incremental", "prune", "create", "full", "fresh"}
+    valid_actions = {"incremental", "prune", "create"}
     mode_actions = {m.strip() for m in mode.split(",")}
     invalid_actions = mode_actions - valid_actions
     if invalid_actions:
