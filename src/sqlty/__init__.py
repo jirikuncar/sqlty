@@ -16,6 +16,9 @@ class SQL[T](str):
     pass
 
 
+# TODO make sure F is (query: str) -> Any
+
+
 @overload
 def sqlty[F](func: F, /) -> F:
     """Decorator to mark functions for SQLTy type inference and stub generation.

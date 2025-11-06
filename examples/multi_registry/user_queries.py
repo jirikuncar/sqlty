@@ -1,16 +1,13 @@
 """User-related queries registry."""
 
-from sqlty import SQLRegistry
+from typing import Any
+
+from sqlty import sqlty
 
 
-class UserQueries(SQLRegistry):
-    """Registry for user-related SQL queries."""
-
-    pass
-
-
-# Export the sql method
-user_sql = UserQueries.sql
+@sqlty
+def user_sql(query: str) -> Any:
+    return query
 
 
 # Define queries in the same file as the registry

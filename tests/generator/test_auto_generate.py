@@ -1,6 +1,7 @@
 """Tests for automatic stub file generation at runtime."""
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -84,30 +85,29 @@ def test_auto_generate_incremental(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     existing_stub = """# Custom stub content
 from typing import overload
 
-class IncrementalQuery:
-    @overload
-    @classmethod
-    def sql(cls, query: str) -> str: ...
+@overload
+def sql(cls, query: str) -> str: ...
 """
     stub_path.write_text(existing_stub)
 
     # Create module that would generate a different stub
     module_path.write_text("""
-from sqlty import SQLRegistry
+from typing import Any
+from sqlty import sqlty
 
-class IncrementalQuery(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str) -> Any:
+    return query
 
-sql = IncrementalQuery.sql
 query = sql("SELECT new_query FROM table")
 """)
 
-    # Set environment variable
-    monkeypatch.setenv("SQLTY_AUTO_GENERATE", "true")
-
-    sys.path.insert(0, str(tmp_path))
     try:
-        import test_incremental  # type: ignore[import-not-found] # noqa: F401
+        subprocess.run(
+            [sys.executable, "-m", str(module_path)],
+            check=True,
+            env={"SQLTY_AUTO_GENERATE": "true"},
+        )
 
         # Stub should still exist
         assert stub_path.exists()

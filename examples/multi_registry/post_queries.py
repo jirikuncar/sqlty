@@ -1,16 +1,13 @@
 """Post-related queries registry."""
 
-from sqlty import SQLRegistry
+from typing import Any
+
+from sqlty import sqlty
 
 
-class PostQueries(SQLRegistry):
-    """Registry for post-related SQL queries."""
-
-    pass
-
-
-# Export the sql method
-post_sql = PostQueries.sql
+@sqlty
+def post_sql(query: str) -> Any:
+    return query
 
 
 # Define queries in the same file as the registry
