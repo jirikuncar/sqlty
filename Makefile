@@ -96,10 +96,10 @@ verify-examples: generate-examples
 		dir=$$(dirname $$pyi); \
 		modname=$$(basename $${pyi%.pyi}); \
 		echo "  → $$pyi"; \
-		cd $$dir && PYTHONPATH=.:$(ROOT_DIR)/src uv run python -m mypy.stubtest $$modname \
+		(cd $$dir && PYTHONPATH=.:$(ROOT_DIR)/src $(ROOT_DIR)/.venv/bin/python -m mypy.stubtest $$modname \
 			--allowlist $(ROOT_DIR)/.stubtest-allowlist \
 			--ignore-unused-allowlist \
 			--concise \
-			--mypy-config-file $(ROOT_DIR)/pyproject.toml && cd - > /dev/null; \
+			--mypy-config-file $(ROOT_DIR)/pyproject.toml); \
 	done
 	@echo "✅ stubtest verification passed"
