@@ -51,9 +51,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.registry_aliases: dict[
             str, str
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
-        self.decorated_functions: set[str] = (
-            set()
-        )  # Track functions decorated with @sqlty
+        self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
 
     def _offset_to_line(self, offset: int) -> tuple[int, int]:
