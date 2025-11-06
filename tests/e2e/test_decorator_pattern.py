@@ -8,6 +8,7 @@ Test the decorator workflow:
 """
 
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ def test_simple_decorator_pattern(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test basic @sqlty decorator without schema."""
     # Create app.py with @sqlty decorator
@@ -64,11 +66,19 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
 
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["app", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
+
 
 def test_decorator_with_schema(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test @sqlty decorator with schema parameter."""
     # Create schema file
@@ -120,11 +130,19 @@ q: SQL[tuple[int, str]] = sql_with_schema("SELECT id, name FROM users")
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
 
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["app", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
+
 
 def test_multiple_decorated_functions(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test multiple functions with @sqlty decorator."""
     # Create app.py with multiple decorated functions
@@ -174,6 +192,13 @@ q2: SQL[tuple[int, str]] = sql_with_schema("SELECT id::INTEGER, name::TEXT FROM 
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
 
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["app", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
+
 
 def test_decorator_function_attributes(
     tmp_path: Path,
@@ -210,7 +235,7 @@ print("All attribute tests passed!")
 
     # Run the test script
     result = subprocess.run(
-        ["python3", str(test_script)],
+        [sys.executable, str(test_script)],
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
