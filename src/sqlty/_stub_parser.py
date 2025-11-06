@@ -122,15 +122,33 @@ class PyiToIRParser:
                     )
                 )
 
+        # Group function overloads by name
+        function_overloads: dict[str, list[ast.FunctionDef]] = {}
+
         for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                registry = self._parse_registry_class(node)
-                if registry:
-                    stub.add_registry(registry)
-            elif isinstance(node, ast.FunctionDef):
-                registry = self._parse_function_registry(node)
-                if registry:
-                    stub.add_registry(registry)
+            if isinstance(node, ast.FunctionDef):
+                overload = self._parse_overload_method(node)
+                if overload:
+                    if node.name not in function_overloads:
+                        function_overloads[node.name] = []
+                    function_overloads[node.name].append(node)
+
+        # Create registries for overloaded functions
+        for func_name, overload_nodes in function_overloads.items():
+            if overload_nodes:
+                registry = RegistryDecorator(
+                    name=func_name,
+                    export_name=func_name,
+                    docstring="",
+                    ast_node=overload_nodes[0],  # Use first node for AST reference
+                )
+
+                for node in overload_nodes:
+                    overload = self._parse_overload_method(node)
+                    if overload:
+                        registry.add_overload(overload)
+
+                stub.add_registry(registry)
 
         for node in tree.body:
             if isinstance(node, ast.Assign):

@@ -62,7 +62,9 @@ class TypeStubGenerator:
         self._registry_detector = RegistryDetector()
 
         # Track files that have differences (for check mode)
-        self._files_with_differences: list[tuple[Path, str, str]] = []
+        self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
+        # Track text-based differences for legacy check mode
+        self._text_differences: list[tuple[Path, str, str]] = []
 
     def check(
         self,
@@ -89,6 +91,7 @@ class TypeStubGenerator:
 
         # Clear any previous differences
         self._files_with_differences.clear()
+        self._text_differences.clear()
 
         try:
             # Generate stubs (in check mode, this collects IRs without writing)
@@ -112,30 +115,12 @@ class TypeStubGenerator:
             print("✓ All stub files are up to date")
             return 0
 
-        from ._stub_ir import StubFile
-        from ._stub_parser import PyiToIRParser
-
-        parser = PyiToIRParser(self.function_name)
-
         print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
 
-        for stub_path, existing_text, expected_text in self._files_with_differences:
+        for stub_path, existing_ir, expected_ir in self._files_with_differences:
             print(f"\n  {stub_path}")
 
-            # Parse existing and expected stubs to IR
-            import ast
-
-            if existing_text:
-                # Parse from text (we already have it serialized)
-                existing_tree = ast.parse(existing_text)
-                existing_ir = parser.parse_ast(existing_tree, stub_path)
-            else:
-                existing_ir = StubFile(source_path=stub_path)
-
-            expected_tree = ast.parse(expected_text)
-            expected_ir = parser.parse_ast(expected_tree, stub_path)
-
-            # Compute IR-level diff
+            # Compute IR-level diff directly (no serialization/parsing round-trip)
             diff = existing_ir.compute_overload_diff(expected_ir)
 
             # Display compact diff
@@ -195,20 +180,8 @@ class TypeStubGenerator:
                 # No differences
                 return False
 
-            # Differences found - serialize for diff display
-            from ._stub_serializer import IRToTextSerializer
-
-            serializer = IRToTextSerializer(self.function_name)
-
-            existing_text = (
-                serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
-                if stub_path.exists()
-                else ""
-            )
-            new_text = serializer.serialize_to_text(stub_ir, relative_to=stub_path.parent)
-
-            # IRs differ, record for reporting
-            self._files_with_differences.append((stub_path, existing_text, new_text))
+            # Differences found - store IRs for diff display
+            self._files_with_differences.append((stub_path, existing_ir, stub_ir))
             return True
         else:
             # Normal mode: serialize and write
@@ -261,7 +234,7 @@ class TypeStubGenerator:
         if self._check_mode:
             if existing_content is None:
                 existing_content = ""
-            self._files_with_differences.append((stub_path, existing_content, content))
+            self._text_differences.append((stub_path, existing_content, content))
             return True
 
         # Write the file
