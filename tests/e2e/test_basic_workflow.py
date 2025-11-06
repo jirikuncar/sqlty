@@ -7,22 +7,23 @@ Test the complete workflow:
 4. Run mypy on queries to validate type annotations
 """
 
+# TODO review these tests
+
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from inline_snapshot import snapshot
 
 
 def test_basic_query_generation(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
-    mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str], Path],
+    mypy: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test basic query generation and mypy validation."""
-    setup_queries_file(tmp_path, "Query", "Application query registry.")
+    setup_queries_file(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using SQL queries."""
@@ -39,7 +40,7 @@ query2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users WH
 query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 ''')
 
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)])
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     stub_file = tmp_path / "queries.pyi"
@@ -47,35 +48,27 @@ query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 
     stub_content = stub_file.read_text()
 
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
@@ -83,12 +76,12 @@ sql = Query.sql
 
 def test_typed_query_annotation(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
-    mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str], Path],
+    mypy: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test that explicitly typed queries work with mypy."""
-    setup_queries_file(tmp_path)
+    setup_queries_file(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -101,7 +94,7 @@ if TYPE_CHECKING:
 q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -117,11 +110,11 @@ q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 
 def test_incremental_stub_update(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str], Path],
 ) -> None:
     """Test that incremental mode preserves existing queries while adding new ones."""
-    setup_queries_file(tmp_path)
+    setup_queries_file(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -134,7 +127,7 @@ if TYPE_CHECKING:
 query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -152,46 +145,39 @@ query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     updated_stub = stub_file.read_text()
     assert "SELECT id::INTEGER FROM users" in updated_stub
     assert "SELECT name::TEXT FROM users WHERE id = :id" in updated_stub
 
-    assert updated_stub == snapshot('''\
+    assert updated_stub == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
 
 def test_multiline_query_formatting(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str], Path],
 ) -> None:
     """Test that multiline queries are properly formatted in Literal types."""
-    setup_queries_file(tmp_path)
+    setup_queries_file(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING
@@ -211,32 +197,22 @@ query: SQL[tuple[int, str, str]] = sql("""
 """)
 ''')
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
     stub_content = stub_file.read_text()
 
-    assert '"""' in stub_content
-    assert "SELECT" in stub_content
-    assert "FROM users" in stub_content
-
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['\\n    SELECT\\n        id::INTEGER,\\n        name::TEXT,\\n        email::TEXT\\n    FROM users\\n    WHERE active = true\\n']) -> SQL[tuple[int, str, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['\\n    SELECT\\n        id::INTEGER,\\n        name::TEXT,\\n        email::TEXT\\n    FROM users\\n    WHERE active = true\\n']) -> SQL[tuple[int, str, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")

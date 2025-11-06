@@ -3,54 +3,53 @@
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 
 def test_registries_find_single_file(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test finding registries in a single file."""
     # Create a test file with a registry
     test_file = tmp_path / "test.py"
-    test_file.write_text("""from sqlty import SQLRegistry
+    test_file.write_text("""from sqlty import sqlty
 
-class TestRegistry(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     # Run the registries command
     result = registries_cli([test_file])
 
     assert result.returncode == 0
-    assert str(test_file) + ":TestRegistry" in result.stdout
+    assert str(test_file) + ":sql" in result.stdout
 
 
 def test_registries_find_in_directory(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test finding registries in a directory."""
     # Create multiple files with registries
     file1 = tmp_path / "queries1.py"
-    file1.write_text("""from sqlty import SQLRegistry
+    file1.write_text("""from sqlty import sqlty
 
-class QueryA(SQLRegistry):
-    pass
+@sqlty
+def sql_a(query: str):
+    return query
 """)
 
     file2 = tmp_path / "queries2.py"
-    file2.write_text("""from sqlty import SQLRegistry
+    file2.write_text("""from sqlty import sqlty
 
-class QueryB(SQLRegistry):
-    pass
+@sqlty
+def sql_b(query: str):
+    return query
 
-class QueryC(SQLRegistry):
-    pass
+@sqlty
+def sql_c(query: str):
+    return query
 """)
 
     # Run the registries command
@@ -59,57 +58,54 @@ class QueryC(SQLRegistry):
     assert result.returncode == 0
     output_lines = result.stdout.strip().split("\n")
     assert len(output_lines) == 3
-    assert any("queries1.py:QueryA" in line for line in output_lines)
-    assert any("queries2.py:QueryB" in line for line in output_lines)
-    assert any("queries2.py:QueryC" in line for line in output_lines)
+    assert any("queries1.py:sql_a" in line for line in output_lines)
+    assert any("queries2.py:sql_b" in line for line in output_lines)
+    assert any("queries2.py:sql_c" in line for line in output_lines)
 
 
 def test_registries_indirect_import(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test finding registries with indirect imports (module.Class)."""
     test_file = tmp_path / "test.py"
-    test_file.write_text("""import sqlty
+    test_file.write_text("""from sqlty import sqlty
 
-class IndirectRegistry(sqlty.SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     result = registries_cli([test_file])
 
     assert result.returncode == 0
-    assert str(test_file) + ":IndirectRegistry" in result.stdout
+    assert str(test_file) + ":sql" in result.stdout
 
 
 def test_registries_default_path(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test using default path (current directory)."""
     test_file = tmp_path / "test.py"
-    test_file.write_text("""from sqlty import SQLRegistry
+    test_file.write_text("""from sqlty import sqlty
 
-class DefaultRegistry(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     result = registries_cli([], {"cwd": str(tmp_path)})
 
     assert result.returncode == 0
-    assert "test.py:DefaultRegistry" in result.stdout
+    assert "test.py:sql" in result.stdout
 
 
-def test_registries_nonexistent_path(
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+def test_registries_invalid_path(
+    tmp_path: Path,
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
-    """Test error handling for nonexistent path."""
+    """Test error handling for nonexistent paths."""
     result = registries_cli(["/nonexistent/path"])
 
     assert result.returncode == 1
@@ -117,9 +113,8 @@ def test_registries_nonexistent_path(
 
 
 def test_registries_too_many_args(
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    tmp_path: Path,
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test error handling for too many arguments."""
     result = registries_cli(["arg1", "arg2"])
@@ -130,17 +125,9 @@ def test_registries_too_many_args(
 
 def test_registries_no_registries(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
-    """Test when no registries are found."""
-    test_file = tmp_path / "test.py"
-    test_file.write_text("""# Just a regular Python file
-def some_function():
-    pass
-""")
-
+    """Test behavior when no registries are found."""
     result = registries_cli([tmp_path])
 
     assert result.returncode == 0
@@ -149,9 +136,7 @@ def some_function():
 
 def test_registries_nested_directories(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test finding registries in nested directories."""
     # Create nested structure
@@ -159,17 +144,19 @@ def test_registries_nested_directories(
     subdir.mkdir()
 
     file1 = tmp_path / "top.py"
-    file1.write_text("""from sqlty import SQLRegistry
+    file1.write_text("""from sqlty import sqlty
 
-class TopRegistry(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     file2 = subdir / "nested.py"
-    file2.write_text("""from sqlty import SQLRegistry
+    file2.write_text("""from sqlty import sqlty
 
-class NestedRegistry(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     result = registries_cli([tmp_path])
@@ -177,5 +164,5 @@ class NestedRegistry(SQLRegistry):
     assert result.returncode == 0
     output_lines = result.stdout.strip().split("\n")
     assert len(output_lines) == 2
-    assert any("top.py:TopRegistry" in line for line in output_lines)
-    assert any("nested.py:NestedRegistry" in line for line in output_lines)
+    assert any("top.py:sql" in line for line in output_lines)
+    assert any("nested.py:sql" in line for line in output_lines)

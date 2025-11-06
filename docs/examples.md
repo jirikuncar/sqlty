@@ -19,7 +19,7 @@ This guide provides complete working examples, organized from simplest to most c
 The simplest approach - use explicit SQL type casts (`::TYPE`) for type inference. This is the best starting point.
 
 **What you'll learn:**
-- Creating a basic SQLRegistry
+- Creating a basic `@sqlty` decorated function
 - Using type casts for explicit typing
 - Generating and using stub files
 
@@ -37,20 +37,20 @@ examples/query/
 
 **queries.py:**
 ```python
-from sqlty import SQLRegistry
+from typing import Any
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    """Application SQL queries."""
-    pass
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    """Execute SQL queries."""
+    return query
 ```
 
 **query.py:**
 ```python
-from .queries import Query as Q
+from .queries import sql
 
-query = Q.sql(
+query = sql(
     """
     SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id
     """
@@ -100,12 +100,12 @@ examples/schema_based/
 
 **query.py:**
 ```python
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class SchemaQueries(SQLRegistry):
-    __schema_path__ = "schema.sql"  # Relative to this file
-
-sql = SchemaQueries.sql
+@sqlty(schema="schema.sql")  # Relative to this file
+def sql(query: str):
+    """Execute SQL queries with schema-based inference."""
+    return query
 
 # Query using table defined in schema.sql
 user_query = sql("SELECT id, name FROM users")
@@ -163,44 +163,44 @@ examples/multi_schema/
 
 **users_queries.py:**
 ```python
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class UserQueries(SQLRegistry):
-    __schema_path__ = "users.sql"
-
-sql = UserQueries.sql
+@sqlty(schema="users.sql")
+def sql(query: str):
+    """Execute user database queries."""
+    return query
 ```
 
 **orders_queries.py:**
 ```python
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class OrderQueries(SQLRegistry):
-    __schema_path__ = "orders.sql"
-
-sql = OrderQueries.sql
+@sqlty(schema="orders.sql")
+def sql(query: str):
+    """Execute order database queries."""
+    return query
 ```
 
 **main.py:**
 ```python
-from users_queries import UserQueries
-from orders_queries import OrderQueries
+from users_queries import sql as user_sql
+from orders_queries import sql as order_sql
 
 # Separate concerns - different schemas
-user = UserQueries.sql("SELECT id, name FROM users WHERE id = :id")
-orders = OrderQueries.sql("SELECT id, total FROM orders WHERE user_id = :user_id")
+user = user_sql("SELECT id, name FROM users WHERE id = :id")
+orders = order_sql("SELECT id, total FROM orders WHERE user_id = :user_id")
 ```
 
 ### Generate Stubs
 
 ```bash
-# Option 1: Auto-detect from __schema_path__
+# Option 1: Auto-detect from schema parameter
 sqlty examples/multi_schema/ --mode=full
 
 # Option 2: Explicit schema mapping
 sqlty examples/multi_schema/ --mode=full \
-    --schema UserQueries:users.sql \
-    --schema OrderQueries:orders.sql
+    --schema users_queries:users.sql \
+    --schema orders_queries:orders.sql
 ```
 
 **Best for:** Microservices, multiple databases, logical separation
@@ -233,13 +233,12 @@ examples/multi_registry/
 
 **user_queries.py:**
 ```python
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class UserQueries(SQLRegistry):
-    """All user-related database queries."""
-    pass
-
-sql = UserQueries.sql
+@sqlty
+def sql(query: str):
+    """Execute user-related database queries."""
+    return query
 
 # User domain queries
 get_user = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
@@ -248,13 +247,12 @@ list_active_users = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE active 
 
 **post_queries.py:**
 ```python
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class PostQueries(SQLRegistry):
-    """All post-related database queries."""
-    pass
-
-sql = PostQueries.sql
+@sqlty
+def sql(query: str):
+    """Execute post-related database queries."""
+    return query
 
 # Post domain queries
 get_post = sql("SELECT id::INTEGER, title::TEXT FROM posts WHERE id = :id")
@@ -263,12 +261,12 @@ list_user_posts = sql("SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id 
 
 **app.py:**
 ```python
-from user_queries import UserQueries
-from post_queries import PostQueries
+from user_queries import sql as user_sql
+from post_queries import sql as post_sql
 
 # Clear separation of concerns
-user = UserQueries.sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
-posts = PostQueries.sql("SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id")
+user = user_sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
+posts = post_sql("SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id")
 
 # Each team can work on their domain independently
 ```
@@ -331,11 +329,11 @@ mode = "full"
 
 # Schema mappings
 [[tool.sqlty.schema]]
-registry = "UserQueries"
+registry = "users_queries"
 path = "users.sql"
 
 [[tool.sqlty.schema]]
-registry = "OrderQueries"
+registry = "orders_queries"
 path = "orders.sql"
 ```
 
@@ -356,8 +354,8 @@ sqlty .
 
 # Or manually with all options
 sqlty . --mode=full --dialect=postgres \
-    --schema UserQueries:users.sql \
-    --schema OrderQueries:orders.sql
+    --schema users_queries:users.sql \
+    --schema orders_queries:orders.sql
 ```
 
 ### Development Workflow
@@ -370,8 +368,8 @@ sqlty . --mode=full --dialect=postgres \
 
 2. **Write queries:**
    ```python
-   from users_queries import UserQueries
-   query = UserQueries.sql("SELECT id, name FROM users")
+   from users_queries import sql as user_sql
+   query = user_sql("SELECT id, name FROM users")
    ```
 
 3. **Generate stubs automatically on commit:**

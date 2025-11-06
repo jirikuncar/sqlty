@@ -7,8 +7,9 @@ back to AST nodes and formatted Python code.
 import ast
 from collections import Counter
 from pathlib import Path
+from typing import Literal
 
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
 
 
 class IRToASTSerializer:
@@ -37,18 +38,11 @@ class IRToASTSerializer:
         for import_stmt in imports:
             module_body.append(self._serialize_import(import_stmt))
 
+        # Emit top-level function overloads for all decorated functions
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
-            class_node = self._serialize_registry_class(registry)
-            module_body.append(class_node)
-
-        # Only create aliases for unique export names
-        export_name_counts = self._count_export_names(stub)
-        for registry_name in sorted(stub.registries.keys()):
-            registry = stub.registries[registry_name]
-            if registry.export_name and export_name_counts[registry.export_name] == 1:
-                alias_node = self._serialize_export_alias(registry)
-                module_body.append(alias_node)
+            function_overloads = self._serialize_function_overloads(registry)
+            module_body.extend(function_overloads)
 
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
@@ -64,7 +58,9 @@ class IRToASTSerializer:
             Counter mapping export names to their usage count
         """
         return Counter(
-            registry.export_name for registry in stub.registries.values() if registry.export_name
+            registry.export_name
+            for registry in stub.registries.values()
+            if registry.export_name and not registry.is_function
         )
 
     def _sort_imports(self, imports: set[ImportStatement]) -> list[ImportStatement]:
@@ -121,11 +117,11 @@ class IRToASTSerializer:
         else:
             return ast.Import(names=[ast.alias(name=import_stmt.module, asname=None)])
 
-    def _serialize_registry_class(self, registry: RegistryClass) -> ast.ClassDef:
-        """Serialize a RegistryClass to AST ClassDef.
+    def _serialize_registry_class(self, registry: RegistryDecorator) -> ast.ClassDef:
+        """Serialize a RegistryDecorator to AST ClassDef.
 
         Args:
-            registry: RegistryClass to serialize
+            registry: RegistryDecorator to serialize
 
         Returns:
             AST ClassDef node
@@ -143,7 +139,7 @@ class IRToASTSerializer:
 
         return ast.ClassDef(
             name=registry.name,
-            bases=[ast.Name(id=registry.base_class, ctx=ast.Load())],
+            bases=[ast.Name(id="SQLRegistry", ctx=ast.Load())],
             keywords=[],
             body=class_body,
             decorator_list=[],
@@ -221,22 +217,97 @@ class IRToASTSerializer:
             type_params=[type_param],
         )
 
-    def _serialize_export_alias(self, registry: RegistryClass) -> ast.Assign:
-        """Serialize export alias (e.g., sql = Query.sql).
+    def _serialize_function_overloads(self, registry: RegistryDecorator) -> list[ast.stmt]:
+        """Serialize function overloads for @sqlty decorated functions.
 
         Args:
-            registry: RegistryClass to create alias for
+            registry: RegistryDecorator representing a decorated function
 
         Returns:
-            AST Assign node
+            List of AST FunctionDef nodes (overloads + fallback)
         """
-        return ast.Assign(
-            targets=[ast.Name(id=registry.export_name, ctx=ast.Store())],
-            value=ast.Attribute(
-                value=ast.Name(id=registry.name, ctx=ast.Load()),
-                attr=self.function_name,
-                ctx=ast.Load(),
+        function_overloads: list[ast.stmt] = []
+
+        for overload in registry.get_sorted_overloads():
+            func_node = self._serialize_function_overload(overload, registry.name)
+            function_overloads.append(func_node)
+
+        fallback = self._serialize_function_fallback(registry.name)
+        function_overloads.append(fallback)
+
+        return function_overloads
+
+    def _serialize_function_overload(
+        self, overload: OverloadSignature, function_name: str
+    ) -> ast.FunctionDef:
+        """Serialize a function overload (without classmethod decorator).
+
+        Args:
+            overload: OverloadSignature to serialize
+            function_name: Name of the function
+
+        Returns:
+            AST FunctionDef node
+        """
+        decorators: list[ast.expr] = [
+            ast.Name(id="overload", ctx=ast.Load()),
+        ]
+
+        literal_annotation = ast.Subscript(
+            value=ast.Name(id="Literal", ctx=ast.Load()),
+            slice=ast.Constant(value=overload.query_literal),
+            ctx=ast.Load(),
+        )
+
+        query_arg = ast.arg(arg="query", annotation=literal_annotation)
+        return_annotation = ast.parse(overload.return_type, mode="eval").body
+
+        return ast.FunctionDef(
+            name=function_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[query_arg],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
             ),
+            body=[ast.Expr(value=ast.Constant(value=...))],
+            decorator_list=decorators,
+            returns=return_annotation,
+            type_params=[],
+        )
+
+    def _serialize_function_fallback(self, function_name: str) -> ast.FunctionDef:
+        """Serialize the generic fallback overload for a decorated function.
+
+        Args:
+            function_name: Name of the function
+
+        Returns:
+            AST FunctionDef node for the fallback
+        """
+        decorators: list[ast.expr] = [
+            ast.Name(id="overload", ctx=ast.Load()),
+        ]
+
+        # Use simple annotation without TypeVar for stub files
+        # This creates: def func(query: str) -> str: ...
+        # Which acts as a catch-all for string literals
+        query_arg = ast.arg(arg="query", annotation=ast.Name(id="str", ctx=ast.Load()))
+
+        return ast.FunctionDef(
+            name=function_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[query_arg],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            ),
+            body=[ast.Expr(value=ast.Constant(value=...))],
+            decorator_list=decorators,
+            returns=ast.Name(id="str", ctx=ast.Load()),
+            type_params=[],  # No type params for simpler stub
         )
 
 
@@ -425,8 +496,8 @@ class IRToTextSerializer:
     def _generate_overload_insertions(
         self,
         overloads: list[OverloadSignature],
-        new_registry: RegistryClass,
-        original_registry: RegistryClass,
+        new_registry: RegistryDecorator,
+        original_registry: RegistryDecorator,
     ) -> tuple[int | None, str]:
         """Generate text for new overloads and find insertion offset.
 
@@ -499,12 +570,12 @@ class IRToTextSerializer:
                 elif prev_line_type == "import" and line_type != "import":
                     # Between imports and code
                     result.append("")
-                elif prev_line_type == "class" and line_type == "class":
-                    # Between classes
+                elif prev_line_type == "function" and line_type == "function":
+                    # Between functions
                     result.append("")
                     result.append("")
-                elif prev_line_type == "class" and line_type == "alias":
-                    # Between class and alias
+                elif prev_line_type == "function" and line_type == "alias":
+                    # Between function and alias
                     result.append("")
 
             result.append(line)
@@ -512,20 +583,20 @@ class IRToTextSerializer:
 
         return result
 
-    def _classify_line(self, line: str) -> str:
+    def _classify_line(self, line: str) -> Literal["import", "function", "alias", "other"]:
         """Classify a line of code.
 
         Args:
             line: Line of code
 
         Returns:
-            Classification: "import", "class", "alias", or "other"
+            Classification: "import", "function", "alias", or "other"
         """
         stripped = line.strip()
         if stripped.startswith("import ") or stripped.startswith("from "):
             return "import"
-        elif stripped.startswith("class "):
-            return "class"
+        elif stripped.startswith("def "):
+            return "function"
         elif " = " in stripped and "." in stripped:
             # Likely an alias like "sql = Query.sql"
             return "alias"

@@ -4,21 +4,21 @@ This module contains helper functions that generate or update .pyi stub files
 when SQLRegistry subclasses are defined at runtime (opt-in via environment).
 """
 
-from __future__ import annotations
-
 import inspect
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 
-def auto_generate_stub(cls: type) -> None:
-    """Generate or update a stub file for the module that defines ``cls``.
+def auto_generate_stub(fn: Callable[[str], Any]) -> None:
+    """Generate or update a stub file for the module that defines `fn`.
 
-    This function is intended to be called from SQLRegistry.__init_subclass__
+    This function is intended to be called by @sqlty decorator
     when the SQLTY_AUTO_GENERATE environment variable is enabled.
     """
-    # Get the module where this class is defined
-    module = inspect.getmodule(cls)
+    # Get the module where this function is defined
+    module = inspect.getmodule(fn)
     if not module or not hasattr(module, "__file__") or not module.__file__:
         return
 
@@ -33,8 +33,7 @@ def auto_generate_stub(cls: type) -> None:
         generator = TypeStubGenerator()
         generator.generate_stub_file(
             source_file,
-            class_name=cls.__name__,
-            base_class="SQLRegistry",
+            class_name=fn.__name__,
             mode="incremental",  # Don't overwrite existing stubs
         )
 

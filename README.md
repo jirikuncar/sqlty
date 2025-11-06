@@ -14,12 +14,12 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
 SQLTy provides type-safe SQL query execution with automatic type inference and stub generation. Write SQL queries with explicit type casts, and let SQLTy generate precise type stubs for full mypy integration.
 
 ```python
-from sqlty import SQLRegistry
+from typing import Any
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 
 # Type-safe query with automatic inference
 query = sql("SELECT id::INTEGER, name::TEXT FROM users")
@@ -75,12 +75,11 @@ See [advanced usage documentation](https://github.com/jirikuncar/sqlty/blob/main
 
 ```python
 # queries.py
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 ```
 
 ```python

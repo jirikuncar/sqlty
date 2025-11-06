@@ -30,7 +30,6 @@ Source/Pyi → Parse → IR → Manipulate → IR → Serialize → Output
 
 - **`RegistryClass`**: Represents a SQLRegistry subclass with its overloads
   - `name`: Class name (e.g., "UserQueries")
-  - `base_class`: Base class name (e.g., "SQLRegistry")
   - `overloads`: Set of `OverloadSignature` objects
   - `export_name`: Name for module-level alias (e.g., "sql", "user_sql")
   - Methods: `add_overload()`, `remove_overload()`, `has_overload()`
@@ -203,7 +202,7 @@ from sqlty._stub_ir import StubFile, RegistryClass, OverloadSignature
 stub = StubFile()
 
 # Create a registry
-registry = RegistryClass(name="UserQueries", base_class="SQLRegistry")
+registry = RegistryClass(name="UserQueries")
 
 # Add overloads
 registry.add_overload(OverloadSignature(
@@ -245,7 +244,7 @@ from sqlty._stub_ir import StubFile, RegistryClass, OverloadSignature
 existing = parser.parse_file(Path("query.pyi"))
 
 # Create new overloads
-new_registry = RegistryClass(name="Query", base_class="SQLRegistry")
+new_registry = RegistryClass(name="Query")
 new_registry.add_overload(OverloadSignature(
     query_literal="SELECT COUNT(*) FROM users",
     return_type="SQL[tuple[int]]"

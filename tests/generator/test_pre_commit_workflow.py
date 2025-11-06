@@ -26,28 +26,27 @@ def test_pre_commit_workflow_non_changing_file(tmp_path: Path) -> None:
     # Step 1: Create new query
     queries_file = tmp_path / "queries.py"
     queries_file.write_text(
-        """from sqlty import SQLRegistry
+        """from sqlty import sqlty
 
+@sqlty
+def sql(query: str):
+    return query
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
 query1 = sql("SELECT id::INTEGER FROM users")
 """
     )
 
     # Step 2: Run generator
     generator = TypeStubGenerator(sql_dialect="postgres")
-    stub_path = generator.generate_stub_file(queries_file)
+    stub_path = generator.generate_stub_file(queries_file, mode="incremental,create")
 
     # Step 3: Check pyi has been generated and typing is correct
     assert stub_path.exists()
     assert stub_path == queries_file.with_suffix(".pyi")
 
     stub_content = stub_path.read_text()
-    assert "class Query(SQLRegistry):" in stub_content
+    assert "@overload" in stub_content
+    assert "def sql(" in stub_content
     assert "SELECT id::INTEGER FROM users" in stub_content
     assert "SQL[tuple[int]]" in stub_content
     assert "@overload" in stub_content
@@ -60,7 +59,7 @@ query1 = sql("SELECT id::INTEGER FROM users")
     time.sleep(0.01)
 
     # Step 4: Run generator again - should return status 0 and pyi file should not be modified
-    stub_path2 = generator.generate_stub_file(queries_file)
+    stub_path2 = generator.generate_stub_file(queries_file, mode="incremental,create")
     assert stub_path2 == stub_path
 
     # Verify file was NOT modified (same timestamp and content)
@@ -77,14 +76,12 @@ query1 = sql("SELECT id::INTEGER FROM users")
 
     # Step 5: Add new query to source file
     queries_file.write_text(
-        """from sqlty import SQLRegistry
+        """from sqlty import sqlty
 
+@sqlty
+def sql(query: str):
+    return query
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
 query1 = sql("SELECT id::INTEGER FROM users")
 query2 = sql("SELECT name::TEXT FROM users")
 """
@@ -192,14 +189,12 @@ def test_full_mode_respects_write_if_changed(tmp_path: Path) -> None:
     """Test that full mode also respects the write_if_changed behavior."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text(
-        """from sqlty import SQLRegistry
+        """from sqlty import sqlty
 
+@sqlty
+def sql(query: str):
+    return query
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
 query1 = sql("SELECT id::INTEGER FROM users")
 """
     )
@@ -207,14 +202,14 @@ query1 = sql("SELECT id::INTEGER FROM users")
     generator = TypeStubGenerator(sql_dialect="postgres")
 
     # First generation
-    stub_path = generator.generate_stub_file(queries_file, mode="fresh")
+    stub_path = generator.generate_stub_file(tmp_path)
     initial_mtime = os.path.getmtime(stub_path)
     initial_content = stub_path.read_text()
 
     time.sleep(0.01)
 
-    # Second generation with full mode (same queries)
-    generator.generate_stub_file(queries_file, mode="full")
+    # Second generation
+    generator.generate_stub_file(tmp_path)
     second_mtime = os.path.getmtime(stub_path)
     second_content = stub_path.read_text()
 

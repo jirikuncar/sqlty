@@ -21,16 +21,13 @@ def test_example_basic_pattern(tmp_path: Path) -> None:
     """Example: Basic test pattern with snapshot."""
     # Step 1: Create source files
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text('''from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    """Your query registry."""
-
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    """Your SQL query function."""
+    return query
 ''')
 
     app_file = tmp_path / "app.py"
@@ -42,7 +39,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
     # Step 2: Run sqlty generator via subprocess
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -56,25 +53,19 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
     # Step 4: Snapshot the generated content
     stub_content = stub_file.read_text()
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
     # Step 5 (Optional): Run mypy to validate type checking
     mypy_result = subprocess.run(
@@ -89,14 +80,12 @@ sql = Query.sql
 def test_example_without_mypy(tmp_path: Path) -> None:
     """Example: Test without mypy validation (for CLI behavior tests)."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -141,14 +130,12 @@ def test_example_error_case(tmp_path: Path) -> None:
 def test_example_cli_options(tmp_path: Path) -> None:
     """Example: Testing CLI options."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -170,14 +157,12 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_example_incremental_behavior(tmp_path: Path) -> None:
     """Example: Testing incremental updates."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -188,7 +173,7 @@ query1 = sql("SELECT id::INTEGER FROM users")
 
     # Initial generation
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -207,7 +192,7 @@ query2 = sql("SELECT name::TEXT FROM users")
 
     # Regenerate
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )

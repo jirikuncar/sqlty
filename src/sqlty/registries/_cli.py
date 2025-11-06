@@ -1,10 +1,10 @@
-"""Command-line interface for discovering SQLRegistry subclasses.
+"""Command-line interface for discovering SQLTy decorated functions.
 
 Usage:
     python -m sqlty.registries [path]
 
-Discovers and lists all SQLRegistry subclasses in the specified path (default: current directory).
-Output format: <file_path>:<registry_name>
+Discovers and lists all @sqlty decorated functions (default: current directory).
+Output format: <file_path>:<function_name>
 """
 
 import sys
@@ -29,10 +29,6 @@ def main() -> None:
         print(f"Error: Path '{path_arg}' does not exist", file=sys.stderr)
         sys.exit(1)
 
-    # Find all registries
-    detector = RegistryDetector()
-    registries = detector.find_registries(search_path)
-
     # Print results
-    for file_path, class_name in registries:
+    for file_path, class_name in RegistryDetector().find_registries(search_path):
         print(f"{file_path}:{class_name}")

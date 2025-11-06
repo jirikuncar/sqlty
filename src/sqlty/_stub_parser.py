@@ -12,7 +12,7 @@ from pathlib import Path
 import asttokens
 
 from ._collector import CallInfo
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, SourceSpan, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, SourceSpan, StubFile
 
 
 class PyiToIRParser:
@@ -73,7 +73,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path)
+        stub = StubFile(source_path=file_path)
 
         if not file_path.exists():
             return stub
@@ -98,7 +98,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path, ast_module=tree)
+        stub = StubFile(source_path=file_path, ast_module=tree)
 
         for node in tree.body:
             if isinstance(node, ast.Import):
@@ -122,56 +122,39 @@ class PyiToIRParser:
                     )
                 )
 
+        # Group function overloads by name
+        function_overloads: dict[str, list[ast.FunctionDef]] = {}
+
         for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                registry = self._parse_registry_class(node)
-                if registry:
-                    stub.add_registry(registry)
+            if isinstance(node, ast.FunctionDef):
+                overload = self._parse_overload_method(node)
+                if overload:
+                    if node.name not in function_overloads:
+                        function_overloads[node.name] = []
+                    function_overloads[node.name].append(node)
+
+        # Create registries for overloaded functions
+        for func_name, overload_nodes in function_overloads.items():
+            if overload_nodes:
+                registry = RegistryDecorator(
+                    name=func_name,
+                    export_name=func_name,
+                    docstring="",
+                    ast_node=overload_nodes[0],  # Use first node for AST reference
+                )
+
+                for node in overload_nodes:
+                    overload = self._parse_overload_method(node)
+                    if overload:
+                        registry.add_overload(overload)
+
+                stub.add_registry(registry)
 
         for node in tree.body:
             if isinstance(node, ast.Assign):
                 self._parse_export_alias(node, stub)
 
         return stub
-
-    def _parse_registry_class(self, node: ast.ClassDef) -> RegistryClass | None:
-        """Parse a class definition into a RegistryClass.
-
-        Args:
-            node: AST ClassDef node
-
-        Returns:
-            RegistryClass or None if not a valid registry
-        """
-        base_class = "SQLRegistry"
-        if node.bases:
-            base = node.bases[0]
-            if isinstance(base, ast.Name):
-                base_class = base.id
-
-        docstring = "Application-specific SQL query registry with type-safe overloads."
-        if (
-            node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-            and isinstance(node.body[0].value.value, str)
-        ):
-            docstring = node.body[0].value.value
-
-        registry = RegistryClass(
-            name=node.name,
-            base_class=base_class,
-            docstring=docstring,
-            ast_node=node,
-        )
-
-        for item in node.body:
-            if isinstance(item, ast.FunctionDef) and item.name == self.function_name:
-                overload = self._parse_overload_method(item)
-                if overload:
-                    registry.add_overload(overload)
-
-        return registry
 
     def _parse_overload_method(self, node: ast.FunctionDef) -> OverloadSignature | None:
         """Parse a method definition into an OverloadSignature.
@@ -208,6 +191,28 @@ class PyiToIRParser:
             source_span=source_span,
             ast_node=node,
         )
+
+    def _parse_function_registry(self, node: ast.FunctionDef) -> RegistryDecorator | None:
+        """Parse a top-level @overload function into a RegistryDecorator.
+
+        Args:
+            node: AST FunctionDef node
+
+        Returns:
+            RegistryDecorator with is_function=True or None if not a valid overload
+        """
+        overload = self._parse_overload_method(node)
+        if not overload:
+            return None
+
+        registry = RegistryDecorator(
+            name=node.name,
+            export_name=node.name,  # For functions, export name is the function name
+            docstring="",  # Functions don't have docstrings in this context
+            ast_node=node,
+        )
+        registry.add_overload(overload)
+        return registry
 
     def _extract_source_span(self, node: ast.AST) -> SourceSpan | None:
         """Extract source span from an AST node using asttokens.
@@ -300,8 +305,8 @@ class CallInfoToIRParser:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
+        is_function: bool = False,
     ) -> StubFile:
         """Parse a list of CallInfo objects into IR.
 
@@ -310,6 +315,7 @@ class CallInfoToIRParser:
             class_name: Default class name if not specified in calls
             base_class: Base class name
             export_name: Name for the module-level alias
+            is_function: Whether this represents a decorated function
 
         Returns:
             StubFile IR representing the calls
@@ -331,9 +337,8 @@ class CallInfoToIRParser:
             if cls_name is None:
                 cls_name = class_name
 
-            registry = RegistryClass(
+            registry = RegistryDecorator(
                 name=cls_name,
-                base_class=base_class,
                 export_name=export_name,
             )
 

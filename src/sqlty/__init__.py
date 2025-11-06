@@ -1,55 +1,86 @@
 """SQLTy - Type-safe SQL queries for Python with automatic stub generation."""
 
 import importlib.metadata
+import os
+from collections.abc import Callable
+from typing import overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
 except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
-__all__ = ["SQL", "SQLRegistry"]
+__all__ = ["SQL", "sqlty"]
 
 
 class SQL[T](str):
     pass
 
 
-class SQLRegistry:
-    """Base class for SQL query registries with type-safe query construction.
+# TODO make sure F is (query: str) -> Any
 
-    Subclasses can define @overload methods for specific SQL queries,
-    allowing type-safe query definitions with proper return type inference.
 
-    Automatic stub generation can be enabled by setting the SQLTY_AUTO_GENERATE
-    environment variable to '1' or 'true'. When enabled, stub files will be
-    automatically generated or updated when a SQLRegistry subclass is defined.
+@overload
+def sqlty[F](func: F, /) -> F:
+    """Decorator to mark functions for SQLTy type inference and stub generation.
+
+    Usage:
+        @sqlty
+        def sql[T](query: T) -> T:
+            return query
+    """
+    ...
+
+
+@overload
+def sqlty[F](*, schema: str | None = None) -> Callable[[F], F]:
+    """Decorator to mark functions for SQLTy type inference and stub generation.
+
+    Usage:
+        @sqlty(schema="schema.sql")
+        def sql[T](query: T) -> T:
+            return query
+    """
+    ...
+
+
+def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callable[[F], F]:
+    """Decorator to mark functions for SQLTy type inference and stub generation.
+
+    Usage:
+        # Simple decoration without schema
+        @sqlty
+        def sql[T](query: T) -> T:
+            return query
+
+        # Decoration with schema path
+        @sqlty(schema="schema.sql")
+        def sql_with_schema[T](query: T) -> T:
+            return query
     """
 
-    def __init_subclass__(cls, **kwargs: object) -> None:
-        """Hook called when a subclass is created.
+    def decorator(fn: F) -> F:
+        # Mark the function as a sqlty function
+        if hasattr(fn, "__sqlty__"):
+            raise TypeError("Function is already decorated with @sqlty")
 
-        If SQLTY_AUTO_GENERATE environment variable is set, this will
-        automatically generate or update the stub file for the module.
-        """
-        super().__init_subclass__(**kwargs)
+        fn.__sqlty__ = True  # type: ignore[attr-defined]
+        # Store schema path if provided
+        if schema is not None:
+            fn.__schema_path__ = schema  # type: ignore[attr-defined]
 
-        import os
-
-        auto_generate = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in ("1", "true", "yes")
-
-        if auto_generate:
-            # Delegate to helper to avoid bloating the base class and to prevent
-            # circular imports across modules.
+        # Auto-generate stub if environment variable is set
+        if os.getenv("SQLTY_AUTO_GENERATE", "").lower() in {"1", "true", "yes"}:
             from sqlty._auto_generator import auto_generate_stub
 
-            auto_generate_stub(cls)
+            auto_generate_stub(fn)  # type: ignore
 
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        """Create a typed SQL value from a literal string.
+        return fn
 
-        This base implementation returns the query as-is at runtime.
-        Subclasses should define @overload methods in their stub files
-        to provide specific type information for known queries.
-        """
-        return query
+    # Handle both @sqlty and @sqlty(...) usage
+    if func is not None:
+        # Called as @sqlty (without parentheses)
+        return decorator(func)
+    else:
+        # Called as @sqlty(...) (with parentheses)
+        return decorator

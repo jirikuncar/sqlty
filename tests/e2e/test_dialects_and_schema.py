@@ -13,14 +13,12 @@ from inline_snapshot import snapshot
 def test_postgres_dialect(tmp_path: Path) -> None:
     """Test PostgreSQL-specific type inference."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -39,7 +37,6 @@ query3 = sql("SELECT tags::TEXT[] FROM posts")
             "-m",
             "sqlty",
             str(tmp_path),
-            "--mode=full",
             "--dialect=postgres",
         ],
         capture_output=True,
@@ -62,14 +59,12 @@ query3 = sql("SELECT tags::TEXT[] FROM posts")
 def test_mysql_dialect(tmp_path: Path) -> None:
     """Test MySQL-specific type inference."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -86,7 +81,6 @@ query = sql("SELECT CAST(id AS SIGNED), CAST(name AS CHAR), CAST(price AS DECIMA
             "-m",
             "sqlty",
             str(tmp_path),
-            "--mode=full",
             "--dialect=mysql",
         ],
         capture_output=True,
@@ -124,14 +118,12 @@ CREATE TABLE posts (
 """)
 
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -149,7 +141,6 @@ query2 = sql("SELECT id, title FROM posts")
             "-m",
             "sqlty",
             str(tmp_path),
-            "--mode=full",
             f"--schema={schema_file}",
         ],
         capture_output=True,
@@ -171,14 +162,12 @@ query2 = sql("SELECT id, title FROM posts")
 def test_without_type_casts_fallback(tmp_path: Path) -> None:
     """Test that queries without casts fall back to generic string types."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -190,7 +179,7 @@ query = sql("SELECT id, name FROM users")
 
     # Generate stub without schema
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -209,14 +198,12 @@ query = sql("SELECT id, name FROM users")
 def test_mixed_typed_and_untyped_queries(tmp_path: Path) -> None:
     """Test mix of queries with and without type casts."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -231,7 +218,7 @@ untyped_query = sql("SELECT id, name FROM posts")
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -246,43 +233,34 @@ untyped_query = sql("SELECT id, name FROM posts")
     assert "SELECT id, name FROM posts" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT id, name FROM posts']) -> SQL[tuple[str, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id, name FROM posts']) -> SQL[tuple[str, str]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
 
 def test_uuid_type_inference(tmp_path: Path) -> None:
     """Test UUID type inference."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -299,7 +277,6 @@ query = sql("SELECT id::UUID, name::TEXT FROM users")
             "-m",
             "sqlty",
             str(tmp_path),
-            "--mode=full",
             "--dialect=postgres",
         ],
         capture_output=True,
@@ -336,29 +313,25 @@ def test_multi_schema_with_schema_path_attribute(tmp_path: Path) -> None:
 );
 """)
 
-    # Create separate registry files with __schema_path__
+    # Create separate registry files with schema parameter
     orders_queries = tmp_path / "orders_queries.py"
-    orders_queries.write_text("""from sqlty import SQLRegistry
+    orders_queries.write_text("""from sqlty import sqlty
 
 
-class OrdersQueries(SQLRegistry):
-    __schema_path__ = "orders.sql"
-
-
-sql = OrdersQueries.sql
+@sqlty(schema="orders.sql")
+def sql(query: str):
+    return query
 
 order_query = sql("SELECT id, total FROM orders")
 """)
 
     users_queries = tmp_path / "users_queries.py"
-    users_queries.write_text("""from sqlty import SQLRegistry
+    users_queries.write_text("""from sqlty import sqlty
 
 
-class UsersQueries(SQLRegistry):
-    __schema_path__ = "users.sql"
-
-
-sql = UsersQueries.sql
+@sqlty(schema="users.sql")
+def sql(query: str):
+    return query
 
 user_query = sql("SELECT id, name FROM users")
 """)
@@ -380,7 +353,6 @@ order_result = order_sql("SELECT id, total FROM orders")
             "-m",
             "sqlty",
             str(tmp_path),
-            "--mode=full",
         ],
         capture_output=True,
         text=True,

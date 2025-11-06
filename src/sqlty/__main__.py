@@ -1,5 +1,5 @@
 """Enable running sqlty as a module: python -m sqlty"""
 
-from sqlty._generator import main
+from sqlty._cli import main
 
 main()

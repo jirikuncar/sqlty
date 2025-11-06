@@ -15,8 +15,6 @@ Main orchestrator that delegates to specialized modules for:
 """
 
 import ast
-import difflib
-import io
 import logging
 import os
 import sys
@@ -44,7 +42,6 @@ class TypeStubGenerator:
         sql_dialect: str = "postgres",
         schema_mappings: dict[str | None, Path] | None = None,
         format_command: str | None = None,
-        check_mode: bool = False,
         verbose: int = 0,
     ) -> None:
         self.function_name = "sql"  # Always use 'sql' as the method name
@@ -58,14 +55,16 @@ class TypeStubGenerator:
         # Cache analyzers per registry for performance
         self._analyzer_cache: dict[str, SQLAnalyzer] = {}
         self._format_command = format_command
-        self._check_mode = check_mode
+        self._check_mode = False
         self._verbose = verbose
 
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector()
 
         # Track files that have differences (for check mode)
-        self._files_with_differences: list[tuple[Path, str, str]] = []
+        self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
+        # Track text-based differences for legacy check mode
+        self._text_differences: list[tuple[Path, str, str]] = []
 
     def check(
         self,
@@ -92,15 +91,15 @@ class TypeStubGenerator:
 
         # Clear any previous differences
         self._files_with_differences.clear()
+        self._text_differences.clear()
 
         try:
             # Generate stubs (in check mode, this collects IRs without writing)
             self.generate_stub_file(
                 source_path=source_path,
                 output_path=output_path,
-                mode=mode,
+                mode="incremental,create",
             )
-
         finally:
             self._check_mode = original_check_mode
 
@@ -116,30 +115,12 @@ class TypeStubGenerator:
             print("✓ All stub files are up to date")
             return 0
 
-        from ._stub_ir import StubFile
-        from ._stub_parser import PyiToIRParser
-
-        parser = PyiToIRParser(self.function_name)
-
         print(f"✗ Found {len(self._files_with_differences)} file(s) with differences:")
 
-        for stub_path, existing_text, expected_text in self._files_with_differences:
+        for stub_path, existing_ir, expected_ir in self._files_with_differences:
             print(f"\n  {stub_path}")
 
-            # Parse existing and expected stubs to IR
-            if existing_text:
-                # Parse from text (we already have it serialized)
-                import ast
-
-                existing_tree = ast.parse(existing_text)
-                existing_ir = parser.parse_ast(existing_tree, stub_path)
-            else:
-                existing_ir = StubFile(file_path=stub_path)
-
-            expected_tree = ast.parse(expected_text)
-            expected_ir = parser.parse_ast(expected_tree, stub_path)
-
-            # Compute IR-level diff
+            # Compute IR-level diff directly (no serialization/parsing round-trip)
             diff = existing_ir.compute_overload_diff(expected_ir)
 
             # Display compact diff
@@ -162,15 +143,6 @@ class TypeStubGenerator:
                             print(f"        • {query_preview} → {return_type}")
                         if len(changes["extra"]) > 3:
                             print(f"        ... and {len(changes['extra']) - 3} more")
-
-            # Show traditional diff in verbose mode
-            if self._verbose >= 1:
-                print("\n    Detailed diff:")
-                diff_output = self._render_diff(stub_path, existing_text, expected_text)
-                if diff_output:
-                    # Indent the diff
-                    for line in diff_output.split("\n"):
-                        print(f"    {line}")
 
         if self._verbose == 0:
             print("\nRun with --verbose to see detailed text diffs.")
@@ -201,27 +173,15 @@ class TypeStubGenerator:
                 existing_ir = parser.parse_file(stub_path)
             else:
                 # No existing file - create empty IR
-                existing_ir = StubFile(file_path=stub_path)
+                existing_ir = StubFile(source_path=stub_path)
 
             # Compare using the StubFile method
             if existing_ir.has_same_overloads(stub_ir):
                 # No differences
                 return False
 
-            # Differences found - serialize for diff display
-            from ._stub_serializer import IRToTextSerializer
-
-            serializer = IRToTextSerializer(self.function_name)
-
-            existing_text = (
-                serializer.serialize_to_text(existing_ir, relative_to=stub_path.parent)
-                if stub_path.exists()
-                else ""
-            )
-            new_text = serializer.serialize_to_text(stub_ir, relative_to=stub_path.parent)
-
-            # IRs differ, record for reporting
-            self._files_with_differences.append((stub_path, existing_text, new_text))
+            # Differences found - store IRs for diff display
+            self._files_with_differences.append((stub_path, existing_ir, stub_ir))
             return True
         else:
             # Normal mode: serialize and write
@@ -250,52 +210,6 @@ class TypeStubGenerator:
             stub_path.write_text(formatted, encoding="utf-8")
             return True
 
-    def _render_diff(self, filepath: Path, old_content: str, new_content: str) -> str:
-        """Render a unified diff between old and new content.
-
-        Uses rich library for colored output if verbose mode is enabled.
-        """
-        old_lines = old_content.splitlines(keepends=True)
-        new_lines = new_content.splitlines(keepends=True)
-
-        diff_lines = list(
-            difflib.unified_diff(
-                old_lines,
-                new_lines,
-                fromfile=str(filepath) + " (existing)",
-                tofile=str(filepath) + " (expected)",
-                lineterm="",
-            )
-        )
-
-        if not diff_lines:
-            return ""
-
-        # For verbose level 2+, use rich for syntax highlighting
-        if self._verbose >= 2:
-            try:
-                from rich.console import Console
-                from rich.syntax import Syntax
-
-                # Join diff lines back into a string
-                diff_text = "\n".join(diff_lines)
-
-                # Create a string buffer to capture rich output
-                buffer = io.StringIO()
-                console = Console(file=buffer, force_terminal=True, width=120)
-
-                # Use Syntax for diff highlighting
-                syntax = Syntax(diff_text, "diff", theme="monokai", line_numbers=False)
-                console.print(syntax)
-
-                return buffer.getvalue()
-            except ImportError:
-                # Fall back to plain diff if rich is not available
-                pass
-
-        # Plain diff output
-        return "\n".join(diff_lines)
-
     def _write_stub_if_changed(self, stub_path: Path, content: str) -> bool:
         """Write stub file only if content has changed.
 
@@ -320,7 +234,7 @@ class TypeStubGenerator:
         if self._check_mode:
             if existing_content is None:
                 existing_content = ""
-            self._files_with_differences.append((stub_path, existing_content, content))
+            self._text_differences.append((stub_path, existing_content, content))
             return True
 
         # Write the file
@@ -391,7 +305,7 @@ class TypeStubGenerator:
 
             # Fallback to first registry class if resolution failed
             if not class_name:
-                class_names = self._registry_detector.get_registry_class_names(registry_module_path)
+                class_names = self._registry_detector.get_registry_names(registry_module_path)
                 class_name = class_names[0] if class_names else None
 
             if class_name:
@@ -412,7 +326,7 @@ class TypeStubGenerator:
             # - If registry_name is None, registry_class contains the direct class name
             lookup_class_name = class_name if registry_name else registry_class
             detected_schema = self._registry_detector.get_schema_path_from_registry(
-                registry_module_path, class_name=lookup_class_name
+                registry_module_path, name=lookup_class_name
             )
             if detected_schema:
                 schema_to_use = detected_schema
@@ -435,7 +349,7 @@ class TypeStubGenerator:
     # Delegation methods for backward compatibility with tests
     def _get_registry_class_names(self, module_path: Path) -> list[str]:
         """Get the names of all SQLRegistry subclasses in a module."""
-        return self._registry_detector.get_registry_class_names(module_path)
+        return self._registry_detector.get_registry_names(module_path)
 
     def _get_registry_export_name(self, module_path: Path, class_name: str) -> str:
         """Get the exported name for the registry's sql method."""
@@ -457,13 +371,12 @@ class TypeStubGenerator:
         output_path: Path,
         new_calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         full_mode: bool = False,
         export_name: str = "sql",
     ) -> str:
         """Merge new calls with existing stub file."""
         return self._stub_merger.merge_stub_incremental(
-            output_path, new_calls, class_name, base_class, full_mode, export_name
+            output_path, new_calls, class_name, full_mode, export_name
         )
 
     def _resolve_registry_source_for_class(
@@ -504,6 +417,7 @@ class TypeStubGenerator:
             return []
         # First pass: collect calls
         collector = LiteralCallCollector(atok=atok)
+        collector.current_file = str(filepath)  # Set current file for variable collection
         collector.visit(tree)
 
         logger.debug("Found %d calls in %s", len(collector.calls), filepath)
@@ -515,11 +429,17 @@ class TypeStubGenerator:
         registry_sources: set[str] = set()
 
         # Check if current file has a registry
-        if self._registry_detector.get_registry_class_names(filepath):
+        if self._registry_detector.get_registry_names(filepath):
             # Use the module name (filename without .py)
             current_module = filepath.stem
             registry_sources.add(current_module)
             logger.debug("Current file has registry: %s", current_module)
+
+        # Check if current file has decorated functions
+        if collector.decorated_functions:
+            current_module = filepath.stem
+            registry_sources.add(current_module)
+            logger.debug("Current file has decorated functions: %s", current_module)
 
         # Resolve imported sources
         for local_name, module_name in collector.import_sources.items():
@@ -655,18 +575,17 @@ class TypeStubGenerator:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
         relative_to: Path | None = None,
     ) -> str:
         """Generate class-based stub content from collected calls.
 
-        This generates a Query class that inherits from SQLRegistry with
-        @overload @classmethod sql() methods for each unique query literal.
+        This generates a Query class with @overload @classmethod sql() methods
+        for each unique query literal.
 
         Uses the new IR-based approach for better structure and maintainability.
         """
-        stub_ir = self.generate_stub_ir(calls, class_name, base_class, export_name)
+        stub_ir = self.generate_stub_ir(calls, class_name, export_name)
 
         from ._stub_serializer import IRToTextSerializer
 
@@ -677,7 +596,6 @@ class TypeStubGenerator:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
     ) -> "StubFile":
         """Generate stub IR from collected calls.
@@ -688,7 +606,7 @@ class TypeStubGenerator:
         from ._stub_parser import CallInfoToIRParser
 
         parser = CallInfoToIRParser(self.function_name)
-        stub_ir = parser.parse_calls(calls, class_name, base_class, export_name)
+        stub_ir = parser.parse_calls(calls, class_name, export_name)
         return stub_ir
 
     def generate_stub_file(
@@ -696,8 +614,7 @@ class TypeStubGenerator:
         source_path: Path,
         output_path: Path | None = None,
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
-        mode: str = "fresh",
+        mode: str = "incremental,prune,create",
     ) -> Path:
         """Generate a .pyi stub file for the given source file or directory.
 
@@ -705,7 +622,6 @@ class TypeStubGenerator:
             source_path: Path to source file or directory to analyze
             output_path: Path for the generated stub file
             class_name: Name of the Query class (used as fallback)
-            base_class: Name of the base class
             mode: Generation mode - comma-separated list of actions:
                 - incremental: Add new overloads to existing stub
                 - prune: Remove overloads no longer in source
@@ -717,12 +633,6 @@ class TypeStubGenerator:
         incremental = "incremental" in modes
         prune_mode = "prune" in modes
         create_only = "create" in modes
-
-        # Legacy mode support (for backward compatibility)
-        if mode in ("full", "fresh"):
-            incremental = False
-            prune_mode = False
-            create_only = False
 
         is_directory = source_path.is_dir()
 
@@ -776,14 +686,14 @@ class TypeStubGenerator:
 
             # Check if source file has multiple registry classes
             if source_path.is_file():
-                registry_classes = self._registry_detector.get_registry_class_names(source_path)
+                registry_classes = self._registry_detector.get_registry_names(source_path)
             else:
                 registry_classes = []
 
             # Create minimal stub IR for empty registries
-            from ._stub_ir import RegistryClass, StubFile
+            from ._stub_ir import RegistryDecorator, StubFile
 
-            minimal_stub_ir = StubFile(file_path=stub_path)
+            minimal_stub_ir = StubFile(source_path=stub_path)
 
             if len(registry_classes) > 1:
                 # Generate minimal stubs for all registry classes
@@ -791,9 +701,8 @@ class TypeStubGenerator:
                     export_name = self._registry_detector.get_registry_export_name(
                         source_path, reg_class
                     )
-                    registry = RegistryClass(
+                    registry = RegistryDecorator(
                         name=reg_class,
-                        base_class=base_class,
                         export_name=export_name,
                         overloads=set(),  # Empty set for minimal stub
                     )
@@ -801,9 +710,8 @@ class TypeStubGenerator:
             else:
                 # Single registry class or no registry detected
                 actual_class = registry_classes[0] if registry_classes else class_name
-                registry = RegistryClass(
+                registry = RegistryDecorator(
                     name=actual_class,
-                    base_class=base_class,
                     export_name=self.function_name,
                     overloads=set(),  # Empty set for minimal stub
                 )
@@ -821,6 +729,12 @@ class TypeStubGenerator:
             registry_source = call["registry_source"]
             if not registry_source:
                 # Skip calls that don't belong to a SQLRegistry
+                logging.getLogger(__name__).info(
+                    "Skipping call without registry_source: %s:%s",
+                    call.get("file", "unknown file"),
+                    call.get("lineno", "?"),
+                )
+                continue
                 logging.getLogger(__name__).info(
                     "Skipping call without registry_source: %s:%s",
                     call.get("file", "unknown file"),
@@ -847,7 +761,7 @@ class TypeStubGenerator:
                     call_path = Path(call_file)
 
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_class_names(candidate):
+                        if self._registry_detector.get_registry_names(candidate):
                             # If the call is from the registry file itself
                             if call_path == candidate:
                                 registry_file = candidate
@@ -861,7 +775,7 @@ class TypeStubGenerator:
                 # use the first candidate with a registry class
                 if registry_file is None:
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_class_names(candidate):
+                        if self._registry_detector.get_registry_names(candidate):
                             registry_file = candidate
                             break
 
@@ -886,7 +800,7 @@ class TypeStubGenerator:
                     registry_source,
                     stub_path,
                 )
-                class_names = self._registry_detector.get_registry_class_names(registry_file)
+                class_names = self._registry_detector.get_registry_names(registry_file)
 
                 # Unified path: handle one or multiple classes the same way
                 if class_names:
@@ -926,16 +840,22 @@ class TypeStubGenerator:
                     call_parser = CallInfoToIRParser(self.function_name)
 
                     # Create stub with all new registries
-                    all_new_registries = StubFile(file_path=stub_path)
+                    all_new_registries = StubFile(source_path=stub_path)
                     for cls_name in class_names:
                         cls_calls = calls_by_class.get(cls_name, [])
                         export_name = self._registry_detector.get_registry_export_name(
                             registry_file, cls_name
                         )
+                        # Check if this is a decorated function
+                        is_function = self._registry_detector.is_decorated_function(
+                            registry_file, cls_name
+                        )
+                        # If decorated function, ensure registry is created with is_function=True
                         new_stub = call_parser.parse_calls(
-                            cls_calls, cls_name, base_class, export_name
+                            cls_calls, cls_name, export_name, is_function
                         )
                         for registry in new_stub.registries.values():
+                            registry.is_function = is_function
                             all_new_registries.add_registry(registry)
 
                     # Merge with existing stub if it exists
@@ -1015,17 +935,15 @@ class TypeStubGenerator:
                             stub_path,
                             registry_calls,
                             actual_class_name,
-                            base_class,
                             full_mode,
                             export_name,
-                            prune=prune_mode,
+                            prune_mode,
                         )
                     else:
                         # Fresh generation
                         stub_content = self.generate_stub_content(
                             registry_calls,
                             actual_class_name,
-                            base_class,
                             export_name,
                             relative_to=stub_path.parent,
                         )
@@ -1060,17 +978,15 @@ class TypeStubGenerator:
                     stub_path,
                     registry_calls,
                     actual_class_name,
-                    base_class,
                     full_mode,
                     export_name,
-                    prune=prune_mode,
+                    prune_mode,
                 )
             else:
                 # Fresh generation
                 stub_content = self.generate_stub_content(
                     registry_calls,
                     actual_class_name,
-                    base_class,
                     export_name,
                     relative_to=stub_path.parent,
                 )
@@ -1103,163 +1019,3 @@ class TypeStubGenerator:
             if generated_paths
             else (output_path or source_path.with_suffix(".pyi"))
         )
-
-
-def main(argv: list[str] | None = None) -> None:
-    """CLI entry point for stub file generation."""
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Generate .pyi stub files with overloads from SQL function calls."
-    )
-    parser.add_argument(
-        "source",
-        type=Path,
-        help="Source file or directory to analyze",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="Output stub file path (default: source.pyi or directory/__init__.pyi)",
-    )
-    parser.add_argument(
-        "--dialect",
-        default="postgres",
-        choices=["postgres", "sqlite", "mysql"],
-        help="SQL dialect for parsing (default: postgres)",
-    )
-    parser.add_argument(
-        "--schema",
-        action="append",
-        type=str,
-        help=(
-            "Schema specification. Either a single path applying to all registries, "
-            "or a registry-specific mapping in the form registry_name:path/to/schema.sql "
-            "or module.ClassName:path/to/schema.sql for fully qualified names. "
-            "Can be provided multiple times for multiple mappings."
-        ),
-    )
-    parser.add_argument(
-        "--mode",
-        type=str,
-        help=(
-            "Stub generation mode (comma-separated actions):\n"
-            "  - incremental: Add new overloads to existing stubs\n"
-            "  - prune: Remove overloads no longer in source\n"
-            "  - create: Only create missing stubs (skip if exists)\n"
-            "Examples: 'incremental', 'incremental,prune', 'incremental,prune,create'\n"
-            "Default: 'incremental,create' (single file), 'incremental,prune,create' (directory)"
-        ),
-    )
-    parser.add_argument(
-        "--format-command",
-        type=str,
-        help="Shell command to format generated stubs. Use {filename} as placeholder for the output file path.",
-    )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Check if stub files are up-to-date without modifying them. Exits with code 1 if differences found.",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity level. Use -v for basic diff output, -vv for colored diff with rich library.",
-    )
-
-    args = parser.parse_args(argv)
-
-    # Validate mutually exclusive options
-    if args.check and args.format_command:
-        logging.getLogger(__name__).error(
-            "Error: --check and --format-command are mutually exclusive. "
-            "Check mode compares overload content, not formatted output."
-        )
-        sys.exit(1)
-
-    # Determine the mode with smart defaults
-    if args.mode:
-        mode = args.mode
-    else:
-        # Default mode detection based on source type
-        mode = "incremental,prune,create" if args.source.is_dir() else "incremental,create"
-
-    # Validate mode string
-    valid_actions = {"incremental", "prune", "create", "full", "fresh"}
-    mode_actions = {m.strip() for m in mode.split(",")}
-    invalid_actions = mode_actions - valid_actions
-    if invalid_actions:
-        logging.getLogger(__name__).error(
-            "Invalid mode action(s): %s. Valid actions: %s",
-            ", ".join(invalid_actions),
-            ", ".join(valid_actions),
-        )
-        sys.exit(1)
-
-    # Parse unified --schema options into base schema and mappings
-    schema_mappings: dict[str | None, Path] = {}
-    base_schema: Path | None = None
-    if args.schema:
-        for entry in args.schema:
-            # Registry-specific mapping using ':' delimiter
-            if ":" in entry:
-                registry_name, schema_path_str = entry.split(":", 1)
-                registry_name = registry_name.strip()
-                schema_path_str = schema_path_str.strip()
-                if not registry_name or not schema_path_str:
-                    logging.getLogger(__name__).error("Invalid --schema mapping: %s", entry)
-                    logging.getLogger(__name__).error(
-                        "Expected format: module.ClassName:path/to/schema.sql"
-                    )
-                    sys.exit(1)
-                # Enforce fully qualified registry names (module.ClassName)
-                if "." not in registry_name:
-                    logging.getLogger(__name__).error(
-                        "Invalid --schema mapping: '%s' is not fully qualified. Use module.ClassName:path",
-                        entry,
-                    )
-                    sys.exit(1)
-                schema_mappings[registry_name] = Path(schema_path_str)
-            else:
-                # Single schema path applying to all registries
-                try:
-                    base_schema = Path(entry)
-                except Exception:
-                    logging.getLogger(__name__).error("Invalid --schema path: %s", entry)
-                    sys.exit(1)
-
-    # Merge base schema into mappings under key None for unified handling
-    if base_schema is not None:
-        schema_mappings = dict(schema_mappings)
-        schema_mappings[None] = base_schema
-
-    generator = TypeStubGenerator(
-        sql_dialect=args.dialect,
-        schema_mappings=schema_mappings,
-        format_command=args.format_command,
-        check_mode=False,  # Check mode is now handled by .check() method
-        verbose=args.verbose,
-    )
-
-    try:
-        if args.check:
-            # Use dedicated check method
-            exit_code = generator.check(
-                source_path=args.source,
-                output_path=args.output,
-                mode=mode,
-            )
-            sys.exit(exit_code)
-        else:
-            # Normal generation mode
-            generator.generate_stub_file(
-                source_path=args.source,
-                output_path=args.output,
-                mode=mode,
-            )
-    except Exception as e:
-        logging.getLogger(__name__).error("%s", e)
-        sys.exit(1)

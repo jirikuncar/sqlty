@@ -14,17 +14,13 @@ from inline_snapshot import snapshot
 def test_psycopg_driver_pattern(tmp_path: Path) -> None:
     """Test stub generation for code using psycopg driver pattern."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text('''from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    """Query registry for database operations."""
-
-    pass
-
-
-sql = Query.sql
-''')
+@sqlty
+def sql(query: str):
+    return query
+""")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -57,7 +53,7 @@ def example_usage() -> None:
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -79,35 +75,27 @@ def example_usage() -> None:
     assert "SELECT COUNT(*)::INTEGER FROM users" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id']) -> SQL[tuple[int, str, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE user_id = :user_id']) -> SQL[tuple[int, str, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
     # Validate with mypy
     mypy_result = subprocess.run(
@@ -122,14 +110,12 @@ sql = Query.sql
 def test_query_with_iterator_return_type(tmp_path: Path) -> None:
     """Test that SQL[tuple[...]] works with Iterator[tuple[...]] in type checking."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -156,7 +142,7 @@ def fetch_users() -> None:
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -176,14 +162,12 @@ def fetch_users() -> None:
 def test_parameterized_query_type_safety(tmp_path: Path) -> None:
     """Test that parameterized queries maintain type safety."""
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -212,7 +196,7 @@ result_tuple: tuple[int, str, str]
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -243,31 +227,23 @@ def test_multiple_registries_in_driver_code(tmp_path: Path) -> None:
     """Test multiple registries as used in multi-schema applications."""
     # Create user registry
     user_queries_file = tmp_path / "user_queries.py"
-    user_queries_file.write_text('''from sqlty import SQLRegistry
+    user_queries_file.write_text("""from sqlty import sqlty
 
 
-class UserQuery(SQLRegistry):
-    """User database queries."""
-
-    pass
-
-
-sql = UserQuery.sql
-''')
+@sqlty
+def sql(query: str):
+    return query
+""")
 
     # Create order registry
     order_queries_file = tmp_path / "order_queries.py"
-    order_queries_file.write_text('''from sqlty import SQLRegistry
+    order_queries_file.write_text("""from sqlty import sqlty
 
 
-class OrderQuery(SQLRegistry):
-    """Order database queries."""
-
-    pass
-
-
-sql = OrderQuery.sql
-''')
+@sqlty
+def sql(query: str):
+    return query
+""")
 
     # Create app using both
     app_file = tmp_path / "app.py"
@@ -299,7 +275,7 @@ def get_order_data() -> None:
 
     # Generate stubs
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )

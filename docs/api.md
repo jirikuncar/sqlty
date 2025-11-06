@@ -4,38 +4,18 @@ Complete API documentation for SQLType.
 
 ## Core Classes
 
-### SQLRegistry
+### `@sqlty` Decorator
 
-Base class for SQL query registries.
+Decorator to mark functions for SQLTy type inference and stub generation.
 
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    """Your SQL query registry."""
-    pass
+@sqlty
+def sql(query: str) -> Any:
+    """Execute a SQL query and return typed results."""
+    return query
 ```
-
-#### Class Methods
-
-##### `sql(query: str) -> SQL[T]`
-
-Execute a SQL query and return typed results.
-
-**Signature:**
-```python
-@classmethod
-def sql(cls, query: str) -> SQL[T]: ...
-```
-
-**Parameters:**
-- `query` (str): SQL query string. Can include:
-  - Type casts (e.g., `::INTEGER`, `::TEXT`)
-  - Named parameters (e.g., `:user_id`)
-  - Positional parameters (e.g., `?`)
-
-**Returns:**
-- `SQL[T]`: Iterator over query results with inferred type `T`
 
 **Type Inference:**
 
@@ -59,38 +39,6 @@ The return type is inferred based on:
    # Returns: SQL[tuple[Any, ...]]
    ```
 
-**Example:**
-```python
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
-
-# Create typed query
-query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-# Type: SQL[tuple[int, str]]
-
-# Execute query
-result = execute(conn, query, {})
-# Type: Iterator[tuple[int, str]]
-
-for user_id, name in result:
-    print(f"{user_id}: {name}")
-
-# Parameterized query
-user_query = sql("""
-    SELECT id::INTEGER, name::TEXT, email::TEXT
-    FROM users
-    WHERE id = :user_id
-""")
-# Type: SQL[tuple[int, str, str]]
-
-user_result = execute(conn, user_query, {"user_id": 123})
-# Type: Iterator[tuple[int, str, str]]
-
-first_user = next(user_result, None)
-```
-
 **Stub Generation:**
 
 The `sqlty` tool creates `@overload` declarations for each unique query:
@@ -98,15 +46,10 @@ The `sqlty` tool creates `@overload` declarations for each unique query:
 ```python
 # Generated stub
 @overload
-@classmethod
 def sql(
     cls,
     query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
 ) -> SQL[tuple[int, str]]: ...
-
-@overload
-@classmethod
-def sql[T](cls, query: T) -> T: ...  # Fallback for dynamic queries
 ```
 
 ---
@@ -116,58 +59,15 @@ def sql[T](cls, query: T) -> T: ...  # Fallback for dynamic queries
 Generic type representing SQL query results.
 
 ```python
-from sqltype import SQL
+from sqlty import SQL
 ```
 
 **Type Parameters:**
-- `T`: Tuple type representing the row structure
+- `T`: Represents the row structure
 
 **Protocol:**
 ```python
-class SQL(Protocol[T]):
-    def __iter__(self) -> Iterator[T]: ...
-```
-
-**Usage:**
-
-```python
-from sqltype import SQL
-
-def get_users() -> SQL[tuple[int, str]]:
-    return sql("SELECT id::INTEGER, name::TEXT FROM users")
-
-# Type-safe iteration
-query = get_users()
-# Type: SQL[tuple[int, str]]
-
-result = execute(conn, query, {})
-# Type: Iterator[tuple[int, str]]
-
-for user_id, name in result:
-    print(f"User {user_id}: {name}")
-
-# Convert to list
-users_list: list[tuple[int, str]] = list(result)
-
-# Get first result
-first_user: tuple[int, str] | None = next(result, None)
-```
-
-**Type Safety:**
-
-```python
-# ✓ Correct usage
-query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-# Type: SQL[tuple[int, str]]
-
-result = execute(conn, query, {})
-# Type: Iterator[tuple[int, str]]
-
-for user_id, name in result:  # OK
-    pass
-
-# ✗ Type error
-for user_id, name, email in result:  # Error: too many values to unpack
+class SQL[T](str):
     pass
 ```
 
@@ -209,7 +109,7 @@ Output `.pyi` file path.
 sqlty app.py
 
 # Explicit output
-sqlty app.py --output stubs/queries.pyi
+sqlty app.py --output stubs/app.pyi
 ```
 
 **`--dialect DIALECT`**
@@ -232,30 +132,6 @@ Supported dialects:
 sqlty . --dialect mysql
 ```
 
-**`--class-name NAME`**
-
-Name of the generated Query class (default: `Query`).
-
-```bash
-sqlty . --class-name MyQuery
-```
-
-Output:
-```python
-class MyQuery(SQLRegistry):
-    @overload
-    @classmethod
-    def sql(...) -> ...: ...
-```
-
-**`--base-class NAME`**
-
-Name of the base class (default: `SQLRegistry`).
-
-```bash
-sqlty . --base-class CustomRegistry
-```
-
 **`--mode=incremental`**
 
 Add new overloads to existing stub file without removing old ones.
@@ -273,18 +149,15 @@ Use cases:
 - Large codebases where full regeneration is slow
 - Preserving overloads for temporarily disabled code
 
-**`--mode=full`**
+**`--mode=prune`**
 
 Remove overloads for queries that no longer exist in source code.
 
 ```bash
-sqlty . --mode=full
+sqlty . --mode=prune
 ```
 
-This is the default for directory mode. Use it to:
-- Clean up stubs after removing queries
-- Ensure stubs match current source code exactly
-- Avoid accumulation of unused overloads
+Use it to avoid accumulation of unused overloads after removing queries.
 
 **`--schema PATH | --schema registry:PATH`**
 
@@ -326,27 +199,6 @@ CLI mappings always override `__schema_path__` when provided.
 - `0`: Success
 - `1`: Error (source path doesn't exist, parse error, etc.)
 
-#### Output
-
-The generator prints information about the generation process:
-
-```
-Detected SQLRegistry subclass in 'queries', writing to queries.pyi
-Generated stub file (full): queries.pyi
-Found 6 call(s) to sql
-```
-
-For multiple registries:
-
-```
-Warning: Multiple import sources found: {'user_queries', 'post_queries'}. Using: user_queries
-Detected SQLRegistry subclass in 'user_queries', writing to user_queries.pyi
-Generated stub file (full): user_queries.pyi
-Found 3 call(s) to sql
-Detected SQLRegistry subclass in 'post_queries', writing to post_queries.pyi
-Generated stub file (full): post_queries.pyi
-Found 3 call(s) to sql
-```
 
 ---
 
@@ -420,53 +272,26 @@ Generated `.pyi` files have this structure:
 
 ```python
 from typing import overload, Literal
-from sqltype import SQL, SQLRegistry
+from sqltype import SQL
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(
+    cls,
+    query: Literal["""
+SELECT id::INTEGER, name::TEXT FROM users
+"""],
+) -> SQL[tuple[int, str]]: ...
 
-    # from app.py:15
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["""
-    SELECT id::INTEGER, name::TEXT FROM users
-    """],
-    ) -> SQL[tuple[int, str]]: ...
+@overload
+def sql(
+    cls,
+    query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
+) -> SQL[tuple[int]]: ...
 
-    # from app.py:23
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT COUNT(*)::INTEGER FROM users"],
-    ) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-# Type alias for the sql function
-sql = Query.sql
+@overload
+def sql[T](cls, query: T) -> T: ...
 ```
 
-### Source Location Comments
-
-Each overload includes a comment with the source location:
-
-```python
-# from app.py:15
-```
-
-This shows:
-- Relative file path from the stub location
-- Line number where the query appears
-
-Benefits:
-- Easy traceability from stub to source
-- Helps during debugging
-- Useful for code review
 
 ### Fallback Overload
 
@@ -474,7 +299,6 @@ Every stub includes a generic fallback:
 
 ```python
 @overload
-@classmethod
 def sql[T](cls, query: T) -> T: ...
 ```
 
@@ -529,90 +353,6 @@ first_row = next(result)
 user_id: str = first_row[0]  # Expected int, got str
 ```
 
-### Using with Pylance/Pyright
-
-**VS Code settings (.vscode/settings.json):**
-
-```json
-{
-  "python.analysis.typeCheckingMode": "strict",
-  "python.analysis.useLibraryCodeForTypes": true
-}
-```
-
-**Type hints in editor:**
-
-Hover over variables to see inferred types:
-```python
-query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-# Type: SQL[tuple[int, str]]
-
-result = execute(conn, query, {})
-# Type: Iterator[tuple[int, str]]
-```
-
----
-
-## Advanced Usage
-
-### Custom Registry Classes
-
-Create domain-specific registries:
-
-```python
-from sqlty.drivers.psycopg import execute
-
-class UserQueries(SQLRegistry):
-    """User-related queries."""
-
-    @classmethod
-    def get_by_email(cls, email: str):
-        query = cls.sql("""
-            SELECT id::INTEGER, name::TEXT
-            FROM users
-            WHERE email = :email
-        """)
-        # Type: SQL[tuple[int, str]]
-
-        return execute(conn, query, {"email": email})
-        # Type: Iterator[tuple[int, str]]
-
-user_sql = UserQueries.sql
-```
-
-### Type Annotations in Registry
-
-Add type hints for better IDE support:
-
-```python
-from sqltype import SQL, execute
-
-class Query(SQLRegistry):
-    @classmethod
-    def get_users(cls) -> Iterator[tuple[int, str]]:
-        query = cls.sql("SELECT id::INTEGER, name::TEXT FROM users")
-        # Type: SQL[tuple[int, str]]
-
-        return execute(conn, query, {})
-        # Type: Iterator[tuple[int, str]]
-```
-
-### Dynamic Queries
-
-For dynamic queries, use the fallback overload:
-
-```python
-def search_users(field: str, value: str):
-    # Dynamic query - no type inference
-    query = f"SELECT * FROM users WHERE {field} = :value"
-    result = sql(query)  # Type: str (no SQL wrapper)
-
-    # This won't have type safety
-    return result
-```
-
-Consider using query builders or parameterized queries instead for safety.
-
 ---
 
 ## Error Handling
@@ -639,19 +379,8 @@ The overload is still generated but with `Any` types:
 
 ```python
 @overload
-@classmethod
 def sql(cls, query: Literal["INVALID SQL"]) -> SQL[tuple[Any, ...]]: ...
 ```
-
-### Missing Registry
-
-If no registry is detected, a warning is shown:
-
-```
-Warning: No SQLRegistry subclass detected, using default Query class
-```
-
-A default stub is generated with the `--class-name` option.
 
 ---
 
@@ -666,14 +395,9 @@ For large projects:
    sqlty . --mode=incremental
    ```
 
-2. **Use `--mode=full` in CI/CD:**
+2. **Use `--check` in CI/CD:**
    ```bash
-   sqlty . --mode=full
-   ```
-
-3. **Analyze specific directories:**
-   ```bash
-   sqlty src/queries/ --mode=full
+   sqlty . --check
    ```
 
 ### Stub File Size
@@ -687,27 +411,6 @@ Each unique query adds one overload. To keep stubs manageable:
 ---
 
 ## Integration Examples
-
-### With pytest
-
-```python
-from queries import sql
-from sqlty.drivers.psycopg import execute
-
-def test_get_users():
-    query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-    # Type: SQL[tuple[int, str]]
-
-    result = execute(conn, query, {})
-    # Type: Iterator[tuple[int, str]]
-
-    users_list = list(result)
-
-    # Type checker knows the shape
-    user_id, name = users_list[0]
-    assert isinstance(user_id, int)
-    assert isinstance(name, str)
-```
 
 ### With FastAPI
 
@@ -727,25 +430,4 @@ async def get_users() -> list[tuple[int, str]]:
     # Type: Iterator[tuple[int, str]]
 
     return list(result)
-```
-
-### With SQLAlchemy
-
-```python
-from sqlalchemy import create_engine
-from queries import sql
-from sqlty.drivers.psycopg import execute
-
-engine = create_engine("postgresql://...")
-
-with engine.connect() as conn:
-    query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-    # Type: SQL[tuple[int, str]]
-
-    result = execute(conn, query, {})
-    # Type: Iterator[tuple[int, str]]
-
-    # Process results with full type safety
-    for user_id, name in result:
-        print(f"{user_id}: {name}")
 ```

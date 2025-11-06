@@ -33,6 +33,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.function_name = "sql"  # Always look for .sql() method calls
         self.calls: list[CallInfo] = []
         self.current_assignment: ast.AnnAssign | ast.Assign | None = None
+        self.current_file: str = ""
         self.import_sources: dict[
             str, str
         ] = {}  # Map import name -> module (e.g., {"user_sql": "user_queries"})
@@ -51,6 +52,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.registry_aliases: dict[
             str, str
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
+        self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
 
     def _offset_to_line(self, offset: int) -> tuple[int, int]:
@@ -133,29 +135,24 @@ class LiteralCallCollector(ast.NodeVisitor):
                 break
         self.generic_visit(node)
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Track functions decorated with @sqlty."""
+        # Check if the function has @sqlty decorator
+        for decorator in node.decorator_list:
+            # Handle @sqlty (simple name)
+            if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
+                self.decorated_functions.add(node.name)
+                break
+            # Handle @sqlty(...) (call expression)
+            elif isinstance(decorator, ast.Call):
+                if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
+                    self.decorated_functions.add(node.name)
+                    break
+        self.generic_visit(node)
+
     def visit_Assign(self, node: ast.Assign) -> None:
         """Visit assignment nodes to capture type context and track .sql aliases."""
-        # Check if this is an assignment like: user_sql = UserQueries.sql or qa = A.sql
-        if (
-            isinstance(node.value, ast.Attribute)
-            and node.value.attr == self.function_name
-            and isinstance(node.value.value, ast.Name)
-        ):
-            class_name = node.value.value.id
-            # Check if it's a local registry class OR an imported class (by class name)
-            if class_name in self.local_registry_classes or class_name in self.class_imports:
-                # Track the alias
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        self.registry_aliases[target.id] = class_name
-
-        old_assignment = self.current_assignment
-        self.current_assignment = node
-        self.generic_visit(node)
-        self.current_assignment = old_assignment
-
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Visit annotated assignment nodes."""
+        # TODO remove ???
         old_assignment = self.current_assignment
         self.current_assignment = node
         self.generic_visit(node)
@@ -174,12 +171,12 @@ class LiteralCallCollector(ast.NodeVisitor):
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
 
-            # Check if this is an alias to a local registry's .sql method
-            if func_name in self.registry_aliases:
+            # Priority 1: Check if this is a decorated function with @sqlty
+            if func_name in self.decorated_functions:
                 is_target_call = True
-                registry_class = self.registry_aliases[func_name]
+                registry_class = func_name  # Use function name as registry identifier
                 # registry_source will be set later by the generator based on the current file
-            # Check if it's imported from another module
+            # Priority 2: Check if it's imported from another module
             elif func_name in self.import_sources:
                 is_target_call = True
                 registry_source = self.import_sources[func_name]
@@ -198,18 +195,6 @@ class LiteralCallCollector(ast.NodeVisitor):
                 # Priority 2: Check if it's a class imported from somewhere (e.g., QueryRegistry.sql or A.sql where A is an alias)
                 elif module_or_class_name in self.import_sources:
                     registry_source = self.import_sources[module_or_class_name]
-                    # Check if this is an aliased import and get the original class name
-                    if module_or_class_name in self.class_imports:
-                        registry_class = self.class_imports[module_or_class_name]
-                    else:
-                        # Not aliased, use the name as-is
-                        registry_class = module_or_class_name
-                    is_target_call = True
-                # Priority 3: Check if it's a local SQLRegistry class (e.g., RegistryA.sql())
-                elif module_or_class_name in self.local_registry_classes:
-                    registry_class = module_or_class_name
-                    is_target_call = True
-                    # registry_source will be set later by the generator based on the current file
 
         # Add any direct or qualified call to the target function with a literal argument
         if is_target_call:

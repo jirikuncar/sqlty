@@ -72,9 +72,6 @@ class StubASTUnparser:
                 names = ", ".join(alias.name for alias in node.names)
                 lines.append(f"import {names}")
                 prev_group = group
-            elif isinstance(node, ast.ClassDef):
-                # Format class definition
-                lines.extend(self.unparse_class_def(node, calls, relative_to))
             elif isinstance(node, ast.Assign):
                 # Format alias assignment without custom comments
                 if (

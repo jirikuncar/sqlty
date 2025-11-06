@@ -25,7 +25,7 @@ Schema precedence for a given registry:
 
 1. `--schema registry:PATH` (registry-specific)
 2. `--schema PATH` (global)
-3. `__schema_path__` on the registry class
+3. `__schema_path__` on the decorated function
 
 This ensures explicit CLI mappings always win over in-code defaults.
 
@@ -54,24 +54,6 @@ Stub generation:
 
 ```bash
 uv run sqlty examples/multi_schema_pkg/ --mode=full
-```
-
-Output:
-
-```
-Using schema from examples/multi_schema_pkg/orders.sql (mapping for 'orders_queries')
-Using schema from examples/multi_schema_pkg/users.sql (mapping for 'users_queries')
-Detected SQLRegistry subclass in 'orders_queries', writing to examples/multi_schema_pkg/orders_queries.pyi
-Generated stub file (full): examples/multi_schema_pkg/orders_queries.pyi
-Found 2 call(s) to sql
-Detected SQLRegistry subclass in 'users_queries', writing to examples/multi_schema_pkg/users_queries.pyi
-Generated stub file (full): examples/multi_schema_pkg/users_queries.pyi
-Found 2 call(s) to sql
-
-To use this stub file, ensure it's in the same directory as your source or in a location where mypy can find it.
-
-Generated Query class stub with CustomQuery class.
-Import and use: from your_module import sql
 ```
 
 Usage:
@@ -135,6 +117,6 @@ export SQLTY_AUTO_GENERATE=1
 python my_app.py  # Stubs will be auto-generated on first import
 ```
 
-This will automatically generate or update stub files whenever a `SQLRegistry` subclass is imported. The feature uses incremental mode by default, so it won't overwrite your existing stubs but will add new queries as they're discovered.
+This will automatically generate or update stub files whenever a decorator is used. The feature uses incremental mode by default, so it won't overwrite your existing stubs but will add new queries as they're discovered.
 
 **Note:** Auto-generation is intended for development only. In production, generate stubs once and commit them to your repository for faster startup times.

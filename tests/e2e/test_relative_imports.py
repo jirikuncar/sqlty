@@ -21,14 +21,14 @@ def test_child_imports_from_parent_package(tmp_path: Path, cli, mypy) -> None:
 
     # Create registry in parent package
     parent_registry = parent_pkg / "queries.py"
-    parent_registry.write_text("""from sqlty import SQLRegistry
+    parent_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class AppQuery(SQLRegistry):
-    pass
-
-
-sql = AppQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create child package
@@ -64,22 +64,16 @@ user_query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM user
     # Snapshot the result
     assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class AppQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = AppQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Validate with mypy
@@ -100,14 +94,14 @@ def test_parent_imports_from_child_package(tmp_path: Path, cli, mypy) -> None:
     (child_pkg / "__init__.py").write_text("")
 
     child_registry = child_pkg / "user_queries.py"
-    child_registry.write_text("""from sqlty import SQLRegistry
+    child_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class UserQuery(SQLRegistry):
-    pass
-
-
-sql = UserQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create module in parent that imports from child
@@ -138,22 +132,16 @@ query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users
     # Snapshot the result
     assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class UserQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT id::INTEGER, username::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, username::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = UserQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Validate with mypy
@@ -174,14 +162,14 @@ def test_sibling_packages_import_from_each_other(tmp_path: Path, cli, mypy) -> N
     (users_pkg / "__init__.py").write_text("")
 
     users_registry = users_pkg / "queries.py"
-    users_registry.write_text("""from sqlty import SQLRegistry
+    users_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class UserQuery(SQLRegistry):
-    pass
-
-
-sql = UserQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create second sibling package with registry
@@ -190,14 +178,14 @@ sql = UserQuery.sql
     (posts_pkg / "__init__.py").write_text("")
 
     posts_registry = posts_pkg / "queries.py"
-    posts_registry.write_text("""from sqlty import SQLRegistry
+    posts_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class PostQuery(SQLRegistry):
-    pass
-
-
-sql = PostQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create module in second sibling that imports from first sibling
@@ -238,43 +226,31 @@ posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM pos
     # Snapshot users stub
     assert users_stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class UserQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = UserQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Snapshot posts stub
     assert posts_stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class PostQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT id::INTEGER, title::TEXT FROM posts']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, title::TEXT FROM posts']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = PostQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Validate with mypy
@@ -303,14 +279,14 @@ def test_deeply_nested_package_structure(tmp_path: Path, cli, mypy) -> None:
 
     # Create registry in deeply nested package
     auth_registry = queries_pkg / "user_auth.py"
-    auth_registry.write_text("""from sqlty import SQLRegistry
+    auth_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class AuthQuery(SQLRegistry):
-    pass
-
-
-sql = AuthQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create module that imports from deeply nested package
@@ -355,27 +331,20 @@ query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
     # Snapshot the result
     assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class AuthQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM users']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER, email::TEXT FROM users WHERE active = true']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, email::TEXT FROM users WHERE active = true']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = AuthQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Validate both files with mypy
@@ -400,14 +369,14 @@ def test_relative_import_from_package_init(tmp_path: Path, cli, mypy) -> None:
     (queries_pkg / "__init__.py").write_text("")
 
     registry_file = queries_pkg / "db.py"
-    registry_file.write_text("""from sqlty import SQLRegistry
+    registry_file.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class DBQuery(SQLRegistry):
-    pass
-
-
-sql = DBQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create package __init__.py that imports registry using relative import
@@ -450,30 +419,23 @@ query: SQL[tuple[str]] = sql("SELECT 'hello'::TEXT")
     assert "SELECT 'hello'::TEXT" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class DBQuery(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]:
-        ...
+@overload
+def sql(query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = DBQuery.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
     # Validate with mypy
     mypy_result = mypy([str(app_module), "--strict"], {"cwd": str(tmp_path)})
@@ -493,14 +455,14 @@ def test_cross_package_relative_imports_with_aliases(tmp_path: Path, cli, mypy) 
     (db_pkg / "__init__.py").write_text("")
 
     db_registry = db_pkg / "queries.py"
-    db_registry.write_text("""from sqlty import SQLRegistry
+    db_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class DatabaseQuery(SQLRegistry):
-    pass
-
-
-sql = DatabaseQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create second registry
@@ -509,14 +471,14 @@ sql = DatabaseQuery.sql
     (api_pkg / "__init__.py").write_text("")
 
     api_registry = api_pkg / "queries.py"
-    api_registry.write_text("""from sqlty import SQLRegistry
+    api_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class APIQuery(SQLRegistry):
-    pass
-
-
-sql = APIQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create module that imports both with relative imports and aliases
@@ -555,43 +517,31 @@ api_query: SQL[tuple[str]] = api_sql("SELECT endpoint::TEXT FROM api_routes")
     # Snapshot database stub
     assert db_stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class DatabaseQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = DatabaseQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Snapshot API stub
     assert api_stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class APIQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT endpoint::TEXT FROM api_routes']) -> SQL[tuple[str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT endpoint::TEXT FROM api_routes']) -> SQL[tuple[str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = APIQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Validate with mypy
@@ -609,14 +559,14 @@ def test_very_deep_nesting_with_level_3_plus_imports(tmp_path: Path, cli, mypy) 
 
     # Create registry at app level
     app_registry = app_pkg / "queries.py"
-    app_registry.write_text("""from sqlty import SQLRegistry
+    app_registry.write_text("""from typing import Any
+
+from sqlty import sqlty
 
 
-class AppQuery(SQLRegistry):
-    pass
-
-
-sql = AppQuery.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     # Create deep nested structure
@@ -676,27 +626,20 @@ query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM sessions")
     # Snapshot the result
     assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class AppQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+@overload
+def sql(query: Literal['SELECT COUNT(*)::INTEGER FROM sessions']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM sessions']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT id::INTEGER, username::TEXT FROM users WHERE active = true']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, username::TEXT FROM users WHERE active = true']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = AppQuery.sql
+@overload
+def sql(query: str) -> str:
+    ...
 """)
 
     # Validate with mypy

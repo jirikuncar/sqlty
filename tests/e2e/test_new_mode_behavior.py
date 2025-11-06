@@ -167,12 +167,12 @@ query1 = sql("SELECT 1::INTEGER")
 def test_incremental_create_mode_updates_existing_creates_new(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_registry_file: Callable[[Path, str, str, str | None], Path],
+    setup_queries_file: Callable[..., Path],
 ) -> None:
     """Test that incremental,create updates existing stubs but creates new ones."""
     # Create two query files
-    setup_registry_file(tmp_path, "queries1.py", "Query1")
-    setup_registry_file(tmp_path, "queries2.py", "Query2")
+    setup_queries_file(tmp_path, "queries1.py", "sql")
+    setup_queries_file(tmp_path, "queries2.py", "sql")
 
     app1_file = tmp_path / "app1.py"
     app1_file.write_text("""from queries1 import sql
@@ -201,7 +201,7 @@ q1b = sql("SELECT 10::INTEGER")
 """)
 
     # Run on directory with incremental,create mode
-    result = cli([str(tmp_path), "--mode=incremental,create"])
+    result = cli([str(tmp_path), "--mode=incremental,create"], {"cwd": str(tmp_path)})
     assert result.returncode == 0
 
     # Check queries1 stub was updated (incremental)
@@ -243,8 +243,9 @@ query1 = sql("SELECT 1::INTEGER")
 query2 = sql("SELECT 2::INTEGER")
 """)
 
-    # Run with fresh mode (replaces entirely)
-    result = cli([str(tmp_path), "--mode=fresh"])
+    # Delete existing stub and run create mode (replaces entirely)
+    stub_file.unlink()
+    result = cli([str(tmp_path), "--mode=create"])
     assert result.returncode == 0
 
     content = stub_file.read_text()

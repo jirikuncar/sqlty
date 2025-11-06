@@ -1,17 +1,11 @@
-"""Query registry for the example application."""
+"""Query registry using @sqlty decorator."""
 
-from sqlty import SQLRegistry
+from typing import Any
 
-
-class Query(SQLRegistry):
-    """Application-specific SQL query registry.
-
-    This class serves as a registry for all SQL queries in the application.
-    Type-safe overloads are defined in the companion .pyi stub file.
-    """
-
-    pass
+from sqlty import sqlty
 
 
-# Export as the main sql interface
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    """Execute SQL queries."""
+    return query

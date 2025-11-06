@@ -69,24 +69,24 @@ class OverloadSignature:
 
 
 @dataclass
-class RegistryClass:
-    """Represents a SQLRegistry subclass with its overloads.
+class RegistryDecorator:
+    """Represents a SQLRegistry subclass or @sqlty decorated function with its overloads.
 
     Attributes:
-        name: Class name (e.g., "UserQueries")
-        base_class: Base class name (e.g., "SQLRegistry")
-        overloads: Set of overload signatures for this registry
-        export_name: Name used for the module-level alias (e.g., "sql", "user_sql")
-        docstring: Optional class docstring
-        ast_node: Optional reference to original AST ClassDef node from stub
+        name: Registry name (class name or function name)
+        overloads: Set of function overloads
+        export_name: Name used for module-level export
+        docstring: Docstring for the registry
+        ast_node: Original AST node if available
+        is_function: Whether this represents a decorated function vs a class
     """
 
     name: str
-    base_class: str = "SQLRegistry"
     overloads: set[OverloadSignature] = field(default_factory=set)
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
-    ast_node: ast.ClassDef | None = None
+    ast_node: ast.FunctionDef | None = None
+    is_function: bool = False
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -156,33 +156,33 @@ class ImportStatement:
 
 @dataclass
 class StubFile:
-    """Represents the complete structure of a .pyi stub file.
+    """Represents a .pyi stub file with SQLRegistry classes and @sqlty decorated functions.
 
     Attributes:
-        imports: Set of import statements
-        registries: Dictionary mapping class name to RegistryClass
-        file_path: Optional path to the stub file
-        ast_module: Optional reference to original AST Module node from stub
+        registries: Dict of registry name to RegistryDecorator for both classes and functions
+        imports: Set of import statements needed for the stub
+        source_path: Optional path to the source .py file this stub corresponds to
+        ast_module: Optional reference to the original AST Module node
     """
 
+    registries: dict[str, RegistryDecorator] = field(default_factory=dict)
     imports: set[ImportStatement] = field(default_factory=set)
-    registries: dict[str, RegistryClass] = field(default_factory=dict)
-    file_path: Path | None = None
+    source_path: Path | None = None
     ast_module: ast.Module | None = None
 
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""
         self.imports.add(import_stmt)
 
-    def add_registry(self, registry: RegistryClass) -> None:
-        """Add or replace a registry class."""
+    def add_registry(self, registry: RegistryDecorator) -> None:
+        """Add or replace a registry class or function."""
         self.registries[registry.name] = registry
 
-    def get_registry(self, name: str) -> RegistryClass | None:
+    def get_registry(self, name: str) -> RegistryDecorator | None:
         """Get a registry by name."""
         return self.registries.get(name)
 
-    def merge_registry(self, registry: RegistryClass, mode: str = "incremental") -> None:
+    def merge_registry(self, registry: RegistryDecorator, mode: str = "incremental") -> None:
         """Merge a registry into this stub file.
 
         Args:
@@ -225,9 +225,7 @@ class StubFile:
             ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
         )
 
-        base_classes = {r.base_class for r in self.registries.values()}
-        sqlty_imports = ["SQL"] + sorted(base_classes)
-        required.add(ImportStatement(module="sqlty", names=sqlty_imports, from_import=True))
+        required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
 
         type_patterns = {
             r"\buuid\.UUID\b": ImportStatement(module="uuid", names=[], from_import=False),
@@ -308,15 +306,15 @@ class StubFile:
             match self_registry, other_registry:
                 case (None, None):
                     continue  # Should not happen
-                case (None, RegistryClass(overloads=other_overloads)):
+                case (None, RegistryDecorator(overloads=other_overloads)):
                     # Registry exists in other but not in self (new registry)
                     extra = [(o.query_literal, o.return_type) for o in other_overloads]
-                case (RegistryClass(overloads=self_overloads), None):
+                case (RegistryDecorator(overloads=self_overloads), None):
                     # Registry exists in self but not in other (removed registry)
                     missing = [(o.query_literal, o.return_type) for o in self_overloads]
                 case (
-                    RegistryClass(overloads=self_overloads),
-                    RegistryClass(overloads=other_overloads),
+                    RegistryDecorator(overloads=self_overloads),
+                    RegistryDecorator(overloads=other_overloads),
                 ):
                     # Both registries exist, compare overloads
                     unique_self_overloads: set[tuple[str, str]] = {

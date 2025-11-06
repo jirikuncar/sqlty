@@ -8,10 +8,10 @@ import pytest
 
 def test_cli_help_command(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    cli: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test that --help flag works."""
-    result = cli(["--help"], {"cwd": str(tmp_path)})
+    result = cli(["--help"])
 
     assert result.returncode == 0
     assert "Generate .pyi stub files" in result.stdout or "sqlty" in result.stdout.lower()
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 q2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -97,7 +97,7 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_specific_file_generation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_queries_file: Callable[[Path], Path],
 ) -> None:
     """Test generating stub for a specific file."""
     setup_queries_file(tmp_path)
@@ -108,7 +108,7 @@ def test_specific_file_generation(
 query = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = cli([str(app_file)], {"cwd": str(tmp_path)})
+    result = cli([str(app_file)])
     assert result.returncode in (0, 1)
 
 
@@ -292,7 +292,7 @@ def test_cli_output_messages(
 query = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     output = result.stdout + result.stderr
