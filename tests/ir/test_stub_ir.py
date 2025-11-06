@@ -221,35 +221,28 @@ def test_call_info_to_ir_parser():
 
 def test_pyi_to_ir_parser():
     """Test parsing .pyi AST to IR."""
-    pyi_source = '''from typing import Literal, overload
+    pyi_source = """from typing import Literal, overload
 
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     tree = ast.parse(pyi_source)
     parser = PyiToIRParser()
     stub = parser.parse_ast(tree)
 
-    assert "Query" in stub.registries
-    assert len(stub.registries["Query"].overloads) == 1
-    assert stub.registries["Query"].export_name == "sql"
+    assert "sql" in stub.registries
+    assert len(stub.registries["sql"].overloads) == 1
+    assert stub.registries["sql"].export_name == "sql"
 
     # Check the overload
-    overloads = list(stub.registries["Query"].overloads)
+    overloads = list(stub.registries["sql"].overloads)
     assert overloads[0].query_literal == "SELECT 1::INTEGER"
     assert overloads[0].return_type == "SQL[tuple[int]]"
 
@@ -274,7 +267,8 @@ def test_ir_to_ast_serializer():
 
     # Check that we can unparse it
     code = ast.unparse(module)
-    assert "class Query(SQLRegistry):" in code
+    assert "@overload" in code
+    assert "def Query(" in code
     assert "SELECT 1" in code
 
 
@@ -297,37 +291,29 @@ def test_ir_to_text_serializer():
 
     # Verify basic structure
     assert "from typing import Literal, overload" in text
-    assert "from sqlty import SQL, SQLRegistry" in text
-    assert "class Query(SQLRegistry):" in text
+    assert "from sqlty import SQL" in text
+    assert "@overload" in text
+    assert "def Query(" in text
     assert "SELECT 1" in text
     assert "SELECT 2" in text
-    assert "sql = Query.sql" in text
 
 
 def test_round_trip_pyi_to_ir_to_text():
     """Test round-trip conversion: pyi -> IR -> text."""
-    original_pyi = '''from typing import Literal, overload
+    original_pyi = """from typing import Literal, overload
 
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+@overload
+def sql(query: Literal["SELECT 2::TEXT"]) -> SQL[tuple[str]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 2::TEXT"]) -> SQL[tuple[str]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     # Parse to IR
     tree = ast.parse(original_pyi)
@@ -343,7 +329,6 @@ sql = Query.sql
     assert "SELECT 2::TEXT" in new_text
     assert "SQL[tuple[int]]" in new_text
     assert "SQL[tuple[str]]" in new_text
-    assert "sql = Query.sql" in new_text
 
 
 def test_compute_required_imports():
@@ -378,23 +363,16 @@ def test_compute_required_imports():
 
 def test_ast_node_references_preserved():
     """Test that AST node references are preserved during parsing."""
-    pyi_source = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    pyi_source = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     tree = ast.parse(pyi_source)
     parser = PyiToIRParser()
@@ -405,11 +383,11 @@ sql = Query.sql
     assert isinstance(stub.ast_module, ast.Module)
 
     # Verify RegistryDecorator has AST node reference
-    registry = stub.get_registry("Query")
+    registry = stub.get_registry("sql")
     assert registry is not None
     assert registry.ast_node is not None
-    assert isinstance(registry.ast_node, ast.ClassDef)
-    assert registry.ast_node.name == "Query"
+    assert isinstance(registry.ast_node, ast.FunctionDef)
+    assert registry.ast_node.name == "sql"
 
     # Verify OverloadSignature has AST node reference
     overloads = list(registry.overloads)
@@ -447,14 +425,10 @@ def test_duplicate_alias_omission():
     serializer = IRToTextSerializer()
     text = serializer.serialize_to_text(stub)
 
-    # Both classes should be present
-    assert "class QueryA(SQLRegistry):" in text
-    assert "class QueryB(SQLRegistry):" in text
-
-    # No duplicate aliases should be present
-    # Count how many times "sql = " appears (should be 0 because export name is duplicated)
-    alias_count = text.count("sql = ")
-    assert alias_count == 0, f"Expected 0 aliases but found {alias_count}"
+    # Both functions should be present
+    assert "@overload" in text
+    assert "def QueryA(" in text
+    assert "def QueryB(" in text
 
 
 def test_unique_alias_inclusion():
@@ -479,13 +453,10 @@ def test_unique_alias_inclusion():
     serializer = IRToTextSerializer()
     text = serializer.serialize_to_text(stub)
 
-    # Both classes should be present
-    assert "class UserQuery(SQLRegistry):" in text
-    assert "class PostQuery(SQLRegistry):" in text
-
-    # Both unique aliases should be present
-    assert "user_sql = UserQuery.sql" in text
-    assert "post_sql = PostQuery.sql" in text
+    # Both functions should be present
+    assert "@overload" in text
+    assert "def UserQuery(" in text
+    assert "def PostQuery(" in text
 
 
 def test_mixed_alias_scenario():
@@ -517,42 +488,28 @@ def test_mixed_alias_scenario():
     serializer = IRToTextSerializer()
     text = serializer.serialize_to_text(stub)
 
-    # All classes should be present
-    assert "class QueryA(SQLRegistry):" in text
-    assert "class QueryB(SQLRegistry):" in text
-    assert "class SpecialQuery(SQLRegistry):" in text
-
-    # Duplicate aliases should NOT be present
-    assert "sql = QueryA.sql" not in text
-    assert "sql = QueryB.sql" not in text
-
-    # Unique alias should be present
-    assert "special_sql = SpecialQuery.sql" in text
+    # All functions should be present
+    assert "@overload" in text
+    assert "def QueryA(" in text
+    assert "def QueryB(" in text
+    assert "def SpecialQuery(" in text
 
 
 def test_source_span_tracking_in_pyi_parser():
     """Test that source spans are tracked when parsing .pyi files."""
-    pyi_source = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    pyi_source = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+@overload
+def sql(query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     tree = ast.parse(pyi_source)
     parser = PyiToIRParser()
@@ -561,7 +518,7 @@ sql = Query.sql
     stub = parser.parse_ast(tree)
 
     # Verify overloads have source spans
-    registry = stub.get_registry("Query")
+    registry = stub.get_registry("sql")
     assert registry is not None
 
     overloads = list(registry.overloads)
@@ -627,27 +584,19 @@ def test_source_span_tracking_from_call_info():
 
 def test_source_span_stability_across_edits():
     """Test that source spans remain stable when unrelated parts are edited."""
-    original_pyi = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    original_pyi = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+@overload
+def sql(query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     # Parse original
     tree = ast.parse(original_pyi)
@@ -656,21 +605,19 @@ sql = Query.sql
     parser.atok = asttokens.ASTTokens(original_pyi, tree=tree)
     stub = parser.parse_ast(tree)
 
-    registry = stub.get_registry("Query")
+    registry = stub.get_registry("sql")
     assert registry is not None
 
     original_overloads = {o.query_literal: o.source_span for o in registry.overloads}
 
     # Simulate editing: add a new overload to the source
     edited_pyi = original_pyi.replace(
-        "    def sql[T](cls, query: T) -> T: ...",
-        """    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
+        "@overload\ndef sql[T](query: T) -> T: ...",
+        """@overload
+def sql(query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...""",
+@overload
+def sql[T](query: T) -> T: ...""",
     )
 
     # Parse edited version
@@ -679,7 +626,7 @@ sql = Query.sql
     parser2.atok = asttokens.ASTTokens(edited_pyi, tree=tree2)
     stub2 = parser2.parse_ast(tree2)
 
-    registry2 = stub2.get_registry("Query")
+    registry2 = stub2.get_registry("sql")
     assert registry2 is not None
 
     # Original overloads should have similar (but not necessarily identical) positions
@@ -698,35 +645,26 @@ sql = Query.sql
 def test_incremental_mode_preserves_existing_overloads():
     """Test that incremental mode only adds new overloads without modifying existing ones."""
     # Parse existing stub
-    existing_pyi = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    existing_pyi = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     tree = ast.parse(existing_pyi)
     parser = PyiToIRParser()
     existing_stub = parser.parse_ast(tree)
 
     # Verify initial state
-    registry = existing_stub.get_registry("Query")
+    registry = existing_stub.get_registry("sql")
     assert registry is not None
     assert len(registry.overloads) == 1
-    assert registry.has_overload("SELECT 1::INTEGER")
-
-    # Create new calls to add
+    assert registry.has_overload("SELECT 1::INTEGER")  # Create new calls to add
     new_calls: list[CallInfo] = [
         {
             "literal": "SELECT 2::INTEGER",
@@ -744,14 +682,14 @@ sql = Query.sql
     ]
 
     call_parser = CallInfoToIRParser()
-    new_stub = call_parser.parse_calls(new_calls, class_name="Query", export_name="sql")
+    new_stub = call_parser.parse_calls(new_calls, class_name="sql", export_name="sql")
 
     # Merge in incremental mode
     for new_registry in new_stub.registries.values():
         existing_stub.merge_registry(new_registry, mode="incremental")
 
     # Verify that both old and new overloads exist
-    registry = existing_stub.get_registry("Query")
+    registry = existing_stub.get_registry("sql")
     assert registry is not None
     assert len(registry.overloads) == 2
     assert registry.has_overload("SELECT 1::INTEGER")  # Preserved
@@ -761,38 +699,29 @@ sql = Query.sql
 def test_prune_mode_preserves_existing_overloads():
     """Test that prune mode only removes stale overloads without modifying kept ones."""
     # Parse existing stub with 3 overloads
-    existing_pyi = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    existing_pyi = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+@overload
+def sql(query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
+@overload
+def sql(query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 3::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     tree = ast.parse(existing_pyi)
     parser = PyiToIRParser()
     existing_stub = parser.parse_ast(tree)
 
     # Verify initial state
-    registry = existing_stub.get_registry("Query")
+    registry = existing_stub.get_registry("sql")
     assert registry is not None
     assert len(registry.overloads) == 3
 
@@ -827,14 +756,14 @@ sql = Query.sql
     ]
 
     call_parser = CallInfoToIRParser()
-    new_stub = call_parser.parse_calls(new_calls, class_name="Query", export_name="sql")
+    new_stub = call_parser.parse_calls(new_calls, class_name="sql", export_name="sql")
 
     # Merge in prune mode
     for new_registry in new_stub.registries.values():
         existing_stub.merge_registry(new_registry, mode="prune")
 
     # Verify that SELECT 2 was removed, but others were preserved
-    registry = existing_stub.get_registry("Query")
+    registry = existing_stub.get_registry("sql")
     assert registry is not None
     assert len(registry.overloads) == 2
     assert registry.has_overload("SELECT 1::INTEGER")  # Preserved
@@ -848,29 +777,21 @@ def test_surgical_editing_preserves_comments():
     from pathlib import Path
 
     # Create a temporary stub file with comments
-    stub_content = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    stub_content = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+# This is a comment about query 1
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    # This is a comment about query 1
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
+# This is a comment about query 2
+@overload
+def sql(query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    # This is a comment about query 2
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 2::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         stub_path = Path(tmpdir) / "queries.pyi"
@@ -917,7 +838,7 @@ sql = Query.sql
         ]
 
         call_parser = CallInfoToIRParser()
-        new_stub = call_parser.parse_calls(new_calls, class_name="Query", export_name="sql")
+        new_stub = call_parser.parse_calls(new_calls, class_name="sql", export_name="sql")
 
         # Synchronize by applying incremental then prune
         for new_registry in new_stub.registries.values():
@@ -956,23 +877,16 @@ def test_surgical_editing_incremental_mode_preserves_structure():
     from pathlib import Path
 
     # Create a temporary stub file
-    stub_content = '''from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+    stub_content = """from typing import Literal, overload
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry."""
+@overload
+def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
-'''
+@overload
+def sql[T](query: T) -> T: ...
+"""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         stub_path = Path(tmpdir) / "queries.pyi"
@@ -1002,7 +916,7 @@ sql = Query.sql
         ]
 
         call_parser = CallInfoToIRParser()
-        new_stub = call_parser.parse_calls(new_calls, class_name="Query", export_name="sql")
+        new_stub = call_parser.parse_calls(new_calls, class_name="sql", export_name="sql")
 
         # Merge in incremental mode
         for new_registry in new_stub.registries.values():
@@ -1023,9 +937,6 @@ sql = Query.sql
         # Verify both overloads are present
         assert "SELECT 1::INTEGER" in result
         assert "SELECT 2::INTEGER" in result
-
-        # The docstring should be preserved
-        assert "Application-specific SQL query registry." in result
 
 
 def test_blank_line_removal_logic():
