@@ -3,7 +3,7 @@
 import importlib.metadata
 import os
 from collections.abc import Callable
-from typing import Any, cast, overload
+from typing import overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
@@ -73,8 +73,7 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
         if os.getenv("SQLTY_AUTO_GENERATE", "").lower() in {"1", "true", "yes"}:
             from sqlty._auto_generator import auto_generate_stub
 
-            # TODO remove cast and make F more specific
-            auto_generate_stub(cast(Callable[[str], Any], fn))
+            auto_generate_stub(fn)  # type: ignore
 
         return fn
 

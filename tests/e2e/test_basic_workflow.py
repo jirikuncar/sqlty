@@ -150,29 +150,23 @@ query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
     assert "SELECT id::INTEGER FROM users" in updated_stub
     assert "SELECT name::TEXT FROM users WHERE id = :id" in updated_stub
 
-    assert updated_stub == snapshot('''\
+    assert updated_stub == snapshot("""\
 from typing import Literal, overload
 from sqlty import SQL
 
 
-class sql(SQLRegistry):
-    """"""
+@overload
+def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
-        ...
+@overload
+def sql(query: Literal['SELECT name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
 
 def test_multiline_query_formatting(
