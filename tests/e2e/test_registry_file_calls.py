@@ -20,7 +20,7 @@ from pathlib import Path
 from inline_snapshot import snapshot
 
 
-def test_sql_call_in_registry_file(tmp_path: Path, cli) -> None:
+def test_sql_call_in_registry_file(tmp_path: Path, cli, stubtest) -> None:
     """Test that sql calls in the same file as registry definition are detected."""
     # Create schema file
     schema_file = tmp_path / "orders.sql"
@@ -32,7 +32,12 @@ def test_sql_call_in_registry_file(tmp_path: Path, cli) -> None:
 
     # Create registry file with sql calls in the same file
     registry_file = tmp_path / "orders_queries.py"
-    registry_file.write_text("""from sqlty import SQLRegistry
+    registry_file.write_text("""from typing import TYPE_CHECKING
+
+from sqlty import SQLRegistry
+
+if TYPE_CHECKING:
+    from sqlty import SQL
 
 
 class OrdersQueries(SQLRegistry):
@@ -42,7 +47,7 @@ class OrdersQueries(SQLRegistry):
 sql = OrdersQueries.sql
 
 # This should be detected and typed
-order_query = sql("SELECT id, total FROM orders")
+order_query: SQL[tuple[int, float]] = sql("SELECT id, total FROM orders")
 """)
 
     # Generate stubs
@@ -81,8 +86,15 @@ class OrdersQueries(SQLRegistry):
 sql = OrdersQueries.sql
 ''')
 
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["orders_queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
-def test_multiple_aliases_in_registry_file(tmp_path: Path, cli) -> None:
+
+def test_multiple_aliases_in_registry_file(tmp_path: Path, cli, stubtest) -> None:
     """Test that multiple aliases to sql method are all detected."""
     # Create schema file
     schema_file = tmp_path / "orders.sql"
@@ -94,7 +106,12 @@ def test_multiple_aliases_in_registry_file(tmp_path: Path, cli) -> None:
 
     # Create registry file with multiple aliases
     registry_file = tmp_path / "orders_queries.py"
-    registry_file.write_text("""from sqlty import SQLRegistry
+    registry_file.write_text("""from typing import TYPE_CHECKING
+
+from sqlty import SQLRegistry
+
+if TYPE_CHECKING:
+    from sqlty import SQL
 
 
 class OrdersQueries(SQLRegistry):
@@ -107,12 +124,12 @@ query = OrdersQueries.sql
 order_sql = OrdersQueries.sql
 
 # Calls using different aliases
-q1 = sql("SELECT id, total FROM orders WHERE id = 1")
-q2 = query("SELECT id, total FROM orders WHERE id = 2")
-q3 = order_sql("SELECT id, total FROM orders WHERE id = 3")
+q1: SQL[tuple[int, float]] = sql("SELECT id, total FROM orders WHERE id = 1")
+q2: SQL[tuple[int, float]] = query("SELECT id, total FROM orders WHERE id = 2")
+q3: SQL[tuple[int, float]] = order_sql("SELECT id, total FROM orders WHERE id = 3")
 
 # Direct call
-q4 = OrdersQueries.sql("SELECT id, total FROM orders WHERE id = 4")
+q4: SQL[tuple[int, float]] = OrdersQueries.sql("SELECT id, total FROM orders WHERE id = 4")
 """)
 
     # Generate stubs
@@ -135,8 +152,15 @@ q4 = OrdersQueries.sql("SELECT id, total FROM orders WHERE id = 4")
     # All should have correct type
     assert stub_content.count("tuple[int, float]") >= 4
 
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["orders_queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
-def test_multiple_registries_in_same_file(tmp_path: Path, cli) -> None:
+
+def test_multiple_registries_in_same_file(tmp_path: Path, cli, stubtest) -> None:
     """Test that multiple registry classes in same file are all handled."""
     # Create schema file
     schema_file = tmp_path / "schema.sql"
@@ -152,7 +176,12 @@ CREATE TABLE users (
 
     # Create file with multiple registries
     registry_file = tmp_path / "queries.py"
-    registry_file.write_text("""from sqlty import SQLRegistry
+    registry_file.write_text("""from typing import TYPE_CHECKING
+
+from sqlty import SQLRegistry
+
+if TYPE_CHECKING:
+    from sqlty import SQL
 
 
 class OrderQueries(SQLRegistry):
@@ -168,12 +197,12 @@ order_sql = OrderQueries.sql
 user_sql = UserQueries.sql
 
 # Calls using different registries
-order = order_sql("SELECT id, total FROM orders")
-user = user_sql("SELECT id, name FROM users")
+order: SQL[tuple[int, float]] = order_sql("SELECT id, total FROM orders")
+user: SQL[tuple[int, str]] = user_sql("SELECT id, name FROM users")
 
 # Direct calls
-order2 = OrderQueries.sql("SELECT total FROM orders WHERE id = 1")
-user2 = UserQueries.sql("SELECT name FROM users WHERE id = 1")
+order2: SQL[tuple[float]] = OrderQueries.sql("SELECT total FROM orders WHERE id = 1")
+user2: SQL[tuple[str]] = UserQueries.sql("SELECT name FROM users WHERE id = 1")
 """)
 
     # Generate stubs
@@ -202,3 +231,10 @@ user2 = UserQueries.sql("SELECT name FROM users WHERE id = 1")
     # Check types
     assert "tuple[int, float]" in stub_content  # orders: id, total
     assert "tuple[int, str]" in stub_content  # users: id, name
+
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
