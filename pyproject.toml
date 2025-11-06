@@ -43,7 +43,7 @@ Changelog = "https://github.com/jirikuncar/sqlty/releases"
 Issues = "https://github.com/jirikuncar/sqlty/issues"
 
 [project.scripts]
-sqlty = "sqlty._generator:main"
+sqlty = "sqlty._cli:main"
 
 [project.optional-dependencies]
 psycopg = [

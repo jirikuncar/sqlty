@@ -875,7 +875,7 @@ class TypeStubGenerator:
                         new_stub = call_parser.parse_calls(
                             cls_calls, cls_name, base_class, export_name, is_function
                         )
-                        for registry in new_stub.all_registries.values():
+                        for registry in new_stub.registries.values():
                             registry.is_function = is_function
                             all_new_registries.add_registry(registry)
 
@@ -899,7 +899,7 @@ class TypeStubGenerator:
                             final_stub_ir = all_new_registries
                         else:
                             # Apply modes in order: incremental first, then prune
-                            for new_registry in all_new_registries.all_registries.values():
+                            for new_registry in all_new_registries.registries.values():
                                 if incremental:
                                     # Add new overloads
                                     existing_stub.merge_registry(new_registry, mode="incremental")

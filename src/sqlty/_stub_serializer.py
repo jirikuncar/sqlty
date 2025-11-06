@@ -38,30 +38,10 @@ class IRToASTSerializer:
             module_body.append(self._serialize_import(import_stmt))
 
         # Emit top-level function overloads for all decorated functions
-        for registry_name in sorted(stub.all_registries.keys()):
-            registry = stub.all_registries[registry_name]
-            if registry.is_function:
-                function_overloads = self._serialize_function_overloads(registry)
-                module_body.extend(function_overloads)
-
-        # Emit registry classes for all non-function registries
-        for registry_name in sorted(stub.all_registries.keys()):
-            registry = stub.all_registries[registry_name]
-            if not registry.is_function:
-                class_node = self._serialize_registry_class(registry)
-                module_body.append(class_node)
-
-        # Only create aliases for unique export names (and only for classes, not functions)
-        export_name_counts = self._count_export_names(stub)
-        for registry_name in sorted(stub.all_registries.keys()):
-            registry = stub.all_registries[registry_name]
-            if (
-                not registry.is_function
-                and registry.export_name
-                and export_name_counts[registry.export_name] == 1
-            ):
-                alias_node = self._serialize_export_alias(registry)
-                module_body.append(alias_node)
+        for registry_name in sorted(stub.registries.keys()):
+            registry = stub.registries[registry_name]
+            function_overloads = self._serialize_function_overloads(registry)
+            module_body.extend(function_overloads)
 
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
@@ -77,7 +57,9 @@ class IRToASTSerializer:
             Counter mapping export names to their usage count
         """
         return Counter(
-            registry.export_name for registry in stub.all_registries.values() if registry.export_name and not registry.is_function
+            registry.export_name
+            for registry in stub.registries.values()
+            if registry.export_name and not registry.is_function
         )
 
     def _sort_imports(self, imports: set[ImportStatement]) -> list[ImportStatement]:
@@ -327,24 +309,6 @@ class IRToASTSerializer:
             type_params=[],  # No type params for simpler stub
         )
 
-    def _serialize_export_alias(self, registry: RegistryDecorator) -> ast.Assign:
-        """Serialize export alias (e.g., sql = Query.sql).
-
-        Args:
-            registry: RegistryDecorator to create alias for
-
-        Returns:
-            AST Assign node
-        """
-        return ast.Assign(
-            targets=[ast.Name(id=registry.export_name, ctx=ast.Store())],
-            value=ast.Attribute(
-                value=ast.Name(id=registry.name, ctx=ast.Load()),
-                attr=self.function_name,
-                ctx=ast.Load(),
-            ),
-        )
-
 
 class IRToTextSerializer:
     """Serializes intermediate representation to formatted Python code."""
@@ -411,8 +375,8 @@ class IRToTextSerializer:
         replacements: list[tuple[int, int, str]] = []
 
         # For each registry in the stub, identify changes
-        for registry_name, new_registry in stub.all_registries.items():
-            original_registry = original_stub.all_registries.get(registry_name)
+        for registry_name, new_registry in stub.registries.items():
+            original_registry = original_stub.registries.get(registry_name)
             if not original_registry:
                 # Registry doesn't exist in original - fallback to full regeneration
                 return self._fallback_to_full_generation(stub)

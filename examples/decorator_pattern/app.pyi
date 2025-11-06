@@ -1,5 +1,5 @@
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 @overload
 def sql(query: Literal["SELECT 1::INTEGER"]) -> SQL[tuple[int]]: ...

@@ -79,7 +79,7 @@ class StubMerger:
             )
 
         # Apply incremental and optionally prune to existing stub
-        for new_registry in new_stub.all_registries.values():
+        for new_registry in new_stub.registries.values():
             # Add new overloads
             existing_stub.merge_registry(new_registry, mode="incremental")
             if prune:

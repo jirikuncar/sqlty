@@ -74,21 +74,17 @@ class RegistryDecorator:
 
     Attributes:
         name: Class or function name (e.g., "UserQueries" or "sql")
-        base_class: Base class name for classes (e.g., "SQLRegistry"), unused for functions
         overloads: Set of overload signatures for this registry
         export_name: Name used for the module-level alias (e.g., "sql", "user_sql")
         docstring: Optional class docstring
         ast_node: Optional reference to original AST ClassDef/FunctionDef node from stub
-        is_function: If True, this represents a decorated function, not a class
     """
 
     name: str
-    base_class: str = "SQLRegistry"
     overloads: set[OverloadSignature] = field(default_factory=set)
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
-    ast_node: ast.ClassDef | ast.FunctionDef | None = None
-    is_function: bool = False
+    ast_node: ast.FunctionDef | None = None
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -172,11 +168,6 @@ class StubFile:
     source_path: Path | None = None
     ast_module: ast.Module | None = None
 
-    @property
-    def all_registries(self) -> dict[str, RegistryDecorator]:
-        """Get all registries (both class and function) combined."""
-        return self.registries
-
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""
         self.imports.add(import_stmt)
@@ -232,9 +223,7 @@ class StubFile:
             ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
         )
 
-        base_classes = {r.base_class for r in self.all_registries.values()}
-        sqlty_imports = ["SQL"] + sorted(base_classes)
-        required.add(ImportStatement(module="sqlty", names=sqlty_imports, from_import=True))
+        required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
 
         type_patterns = {
             r"\buuid\.UUID\b": ImportStatement(module="uuid", names=[], from_import=False),
@@ -244,7 +233,7 @@ class StubFile:
             r"\bdecimal\.Decimal\b": ImportStatement(module="decimal", names=[], from_import=False),
         }
 
-        for registry in self.all_registries.values():
+        for registry in self.registries.values():
             for overload in registry.overloads:
                 return_type = overload.return_type
                 for pattern, import_stmt in type_patterns.items():
@@ -266,13 +255,13 @@ class StubFile:
             True if both have the same registries with same overloads
         """
         # Check if registry sets differ
-        if set(self.all_registries.keys()) != set(other.all_registries.keys()):
+        if set(self.registries.keys()) != set(other.registries.keys()):
             return False
 
         # Check each registry for differences in overloads only
-        for name in self.all_registries:
-            self_registry = self.all_registries[name]
-            other_registry = other.all_registries[name]
+        for name in self.registries:
+            self_registry = self.registries[name]
+            other_registry = other.registries[name]
 
             # Compare overload signatures (query literals and return types)
             self_overloads = {(o.query_literal, o.return_type) for o in self_registry.overloads}
@@ -303,11 +292,11 @@ class StubFile:
         diff_result: dict[str, dict[str, list[tuple[str, str]]]] = {}
 
         # Get all registry names from both
-        all_registry_names = set(self.all_registries.keys()) | set(other.all_registries.keys())
+        all_registry_names = set(self.registries.keys()) | set(other.registries.keys())
 
         for name in all_registry_names:
-            self_registry = self.all_registries.get(name)
-            other_registry = other.all_registries.get(name)
+            self_registry = self.registries.get(name)
+            other_registry = other.registries.get(name)
 
             missing = []
             extra = []

@@ -189,52 +189,11 @@ class PyiToIRParser:
 
         registry = RegistryDecorator(
             name=node.name,
-            is_function=True,
             export_name=node.name,  # For functions, export name is the function name
             docstring="",  # Functions don't have docstrings in this context
             ast_node=node,
         )
         registry.add_overload(overload)
-        return registry
-
-    def _parse_registry_class(self, node: ast.ClassDef) -> RegistryDecorator | None:
-        """Parse a SQLRegistry class into a RegistryDecorator.
-
-        Args:
-            node: AST ClassDef node
-
-        Returns:
-            RegistryDecorator or None if not a valid registry class
-        """
-        # Check if it's a SQLRegistry subclass
-        base_class = None
-        for base in node.bases:
-            if isinstance(base, ast.Name) and base.id == "SQLRegistry":
-                base_class = "SQLRegistry"
-                break
-
-        if not base_class:
-            return None
-
-        registry = RegistryDecorator(
-            name=node.name,
-            base_class=base_class,
-            is_function=False,
-            export_name=node.name.lower(),  # Default export name
-            docstring=ast.get_docstring(node) or "",
-            ast_node=node,
-        )
-
-        # Parse overload methods
-        for item in node.body:
-            if isinstance(item, ast.FunctionDef):
-                overload = self._parse_overload_method(item)
-                if overload:
-                    registry.add_overload(overload)
-
-        # Check if there's an export alias assignment
-        # This will be handled separately in _parse_export_alias
-
         return registry
 
     def _extract_source_span(self, node: ast.AST) -> SourceSpan | None:
@@ -363,9 +322,7 @@ class CallInfoToIRParser:
 
             registry = RegistryDecorator(
                 name=cls_name,
-                base_class=base_class,
                 export_name=export_name,
-                is_function=is_function,
             )
 
             for call in cls_calls:
