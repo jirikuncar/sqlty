@@ -70,9 +70,9 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
 
 
 @pytest.fixture
-def registries_cli() -> (
-    Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]]
-):
+def registries_cli() -> Callable[
+    [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
+]:
     """Fixture to run sqlty.registries CLI commands.
 
     Returns a callable that runs the sqlty.registries CLI with the given arguments.

@@ -179,4 +179,3 @@ class NestedRegistry(SQLRegistry):
     assert len(output_lines) == 2
     assert any("top.py:TopRegistry" in line for line in output_lines)
     assert any("nested.py:NestedRegistry" in line for line in output_lines)
-
