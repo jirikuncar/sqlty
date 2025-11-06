@@ -1,6 +1,9 @@
 # Discover all example directories automatically
 EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d)
 
+# Get the absolute path to the repository root
+ROOT_DIR := $(shell pwd)
+
 .PHONY: help
 help:
 	@echo "Available targets:"
@@ -93,10 +96,10 @@ verify-examples: generate-examples
 		dir=$$(dirname $$pyi); \
 		modname=$$(basename $${pyi%.pyi}); \
 		echo "  → $$pyi"; \
-		cd $$dir && PYTHONPATH=.:../../src uv run python -m mypy.stubtest $$modname \
-			--allowlist ../../.stubtest-allowlist \
+		cd $$dir && PYTHONPATH=.:$(ROOT_DIR)/src uv run python -m mypy.stubtest $$modname \
+			--allowlist $(ROOT_DIR)/.stubtest-allowlist \
 			--ignore-unused-allowlist \
 			--concise \
-			--mypy-config-file ../../pyproject.toml && cd - > /dev/null; \
+			--mypy-config-file $(ROOT_DIR)/pyproject.toml && cd - > /dev/null; \
 	done
 	@echo "✅ stubtest verification passed"
