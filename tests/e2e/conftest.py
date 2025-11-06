@@ -248,10 +248,6 @@ def stubtest() -> (
         if kwargs is None:
             kwargs = {}
 
-        # Extract env from kwargs early, before updating default_kwargs
-        # If not provided, use a copy of the current environment
-        env = kwargs.pop("env", os.environ.copy())
-
         # Set default kwargs for stubtest execution
         default_kwargs = {
             "capture_output": True,
@@ -267,12 +263,16 @@ def stubtest() -> (
             str_args.extend(["--allowlist", str(allowlist), "--ignore-unused-allowlist"])
 
         # Set PYTHONPATH to include src directory so stubtest can find sqlty module
-        # Always prepend src_dir to whatever PYTHONPATH is provided
+        env = kwargs.get("env", os.environ.copy())
         pythonpath = env.get("PYTHONPATH", "")
         if pythonpath:
             env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
         else:
             env["PYTHONPATH"] = str(src_dir)
+
+        # Remove env from kwargs if it was there, we'll add it back
+        if "env" in default_kwargs:
+            del default_kwargs["env"]
 
         return subprocess.run(
             [sys.executable, "-m", "mypy.stubtest"] + str_args,
