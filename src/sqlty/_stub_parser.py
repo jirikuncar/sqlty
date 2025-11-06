@@ -12,7 +12,7 @@ from pathlib import Path
 import asttokens
 
 from ._collector import CallInfo
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, SourceSpan, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, SourceSpan, StubFile
 
 
 class PyiToIRParser:
@@ -73,7 +73,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path)
+        stub = StubFile(source_path=file_path)
 
         if not file_path.exists():
             return stub
@@ -98,7 +98,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path, ast_module=tree)
+        stub = StubFile(source_path=file_path, ast_module=tree)
 
         for node in tree.body:
             if isinstance(node, ast.Import):
@@ -174,20 +174,20 @@ class PyiToIRParser:
             ast_node=node,
         )
 
-    def _parse_function_registry(self, node: ast.FunctionDef) -> RegistryClass | None:
-        """Parse a top-level @overload function into a RegistryClass.
+    def _parse_function_registry(self, node: ast.FunctionDef) -> RegistryDecorator | None:
+        """Parse a top-level @overload function into a RegistryDecorator.
 
         Args:
             node: AST FunctionDef node
 
         Returns:
-            RegistryClass with is_function=True or None if not a valid overload
+            RegistryDecorator with is_function=True or None if not a valid overload
         """
         overload = self._parse_overload_method(node)
         if not overload:
             return None
 
-        registry = RegistryClass(
+        registry = RegistryDecorator(
             name=node.name,
             is_function=True,
             export_name=node.name,  # For functions, export name is the function name
@@ -195,6 +195,46 @@ class PyiToIRParser:
             ast_node=node,
         )
         registry.add_overload(overload)
+        return registry
+
+    def _parse_registry_class(self, node: ast.ClassDef) -> RegistryDecorator | None:
+        """Parse a SQLRegistry class into a RegistryDecorator.
+
+        Args:
+            node: AST ClassDef node
+
+        Returns:
+            RegistryDecorator or None if not a valid registry class
+        """
+        # Check if it's a SQLRegistry subclass
+        base_class = None
+        for base in node.bases:
+            if isinstance(base, ast.Name) and base.id == "SQLRegistry":
+                base_class = "SQLRegistry"
+                break
+
+        if not base_class:
+            return None
+
+        registry = RegistryDecorator(
+            name=node.name,
+            base_class=base_class,
+            is_function=False,
+            export_name=node.name.lower(),  # Default export name
+            docstring=ast.get_docstring(node) or "",
+            ast_node=node,
+        )
+
+        # Parse overload methods
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef):
+                overload = self._parse_overload_method(item)
+                if overload:
+                    registry.add_overload(overload)
+
+        # Check if there's an export alias assignment
+        # This will be handled separately in _parse_export_alias
+
         return registry
 
     def _extract_source_span(self, node: ast.AST) -> SourceSpan | None:
@@ -321,7 +361,7 @@ class CallInfoToIRParser:
             if cls_name is None:
                 cls_name = class_name
 
-            registry = RegistryClass(
+            registry = RegistryDecorator(
                 name=cls_name,
                 base_class=base_class,
                 export_name=export_name,

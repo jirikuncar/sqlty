@@ -130,7 +130,7 @@ class TypeStubGenerator:
                 existing_tree = ast.parse(existing_text)
                 existing_ir = parser.parse_ast(existing_tree, stub_path)
             else:
-                existing_ir = StubFile(file_path=stub_path)
+                existing_ir = StubFile(source_path=stub_path)
 
             expected_tree = ast.parse(expected_text)
             expected_ir = parser.parse_ast(expected_tree, stub_path)
@@ -188,7 +188,7 @@ class TypeStubGenerator:
                 existing_ir = parser.parse_file(stub_path)
             else:
                 # No existing file - create empty IR
-                existing_ir = StubFile(file_path=stub_path)
+                existing_ir = StubFile(source_path=stub_path)
 
             # Compare using the StubFile method
             if existing_ir.has_same_overloads(stub_ir):
@@ -716,9 +716,9 @@ class TypeStubGenerator:
                 registry_classes = []
 
             # Create minimal stub IR for empty registries
-            from ._stub_ir import RegistryClass, StubFile
+            from ._stub_ir import RegistryDecorator, StubFile
 
-            minimal_stub_ir = StubFile(file_path=stub_path)
+            minimal_stub_ir = StubFile(source_path=stub_path)
 
             if len(registry_classes) > 1:
                 # Generate minimal stubs for all registry classes
@@ -726,7 +726,7 @@ class TypeStubGenerator:
                     export_name = self._registry_detector.get_registry_export_name(
                         source_path, reg_class
                     )
-                    registry = RegistryClass(
+                    registry = RegistryDecorator(
                         name=reg_class,
                         base_class=base_class,
                         export_name=export_name,
@@ -736,7 +736,7 @@ class TypeStubGenerator:
             else:
                 # Single registry class or no registry detected
                 actual_class = registry_classes[0] if registry_classes else class_name
-                registry = RegistryClass(
+                registry = RegistryDecorator(
                     name=actual_class,
                     base_class=base_class,
                     export_name=self.function_name,
@@ -861,7 +861,7 @@ class TypeStubGenerator:
                     call_parser = CallInfoToIRParser(self.function_name)
 
                     # Create stub with all new registries
-                    all_new_registries = StubFile(file_path=stub_path)
+                    all_new_registries = StubFile(source_path=stub_path)
                     for cls_name in class_names:
                         cls_calls = calls_by_class.get(cls_name, [])
                         export_name = self._registry_detector.get_registry_export_name(

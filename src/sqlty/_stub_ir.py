@@ -69,7 +69,7 @@ class OverloadSignature:
 
 
 @dataclass
-class RegistryClass:
+class RegistryDecorator:
     """Represents a SQLRegistry subclass or @sqlty decorated function with its overloads.
 
     Attributes:
@@ -158,43 +158,38 @@ class ImportStatement:
 
 @dataclass
 class StubFile:
-    """Represents the complete structure of a .pyi stub file.
+    """Represents a .pyi stub file with SQLRegistry classes and @sqlty decorated functions.
 
     Attributes:
-        imports: Set of import statements
-        class_registries: Dictionary mapping class name to RegistryClass for SQLRegistry subclasses
-        function_registries: Dictionary mapping function name to RegistryClass for @sqlty decorated functions
-        file_path: Optional path to the stub file
-        ast_module: Optional reference to original AST Module node from stub
+        registries: Dict of registry name to RegistryDecorator for both classes and functions
+        imports: Set of import statements needed for the stub
+        source_path: Optional path to the source .py file this stub corresponds to
+        ast_module: Optional reference to the original AST Module node
     """
 
+    registries: dict[str, RegistryDecorator] = field(default_factory=dict)
     imports: set[ImportStatement] = field(default_factory=set)
-    class_registries: dict[str, RegistryClass] = field(default_factory=dict)
-    function_registries: dict[str, RegistryClass] = field(default_factory=dict)
-    file_path: Path | None = None
+    source_path: Path | None = None
     ast_module: ast.Module | None = None
 
     @property
-    def all_registries(self) -> dict[str, RegistryClass]:
+    def all_registries(self) -> dict[str, RegistryDecorator]:
         """Get all registries (both class and function) combined."""
-        return {**self.class_registries, **self.function_registries}
+        return self.registries
 
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""
         self.imports.add(import_stmt)
 
-    def add_registry(self, registry: RegistryClass) -> None:
+    def add_registry(self, registry: RegistryDecorator) -> None:
         """Add or replace a registry class or function."""
-        if registry.is_function:
-            self.function_registries[registry.name] = registry
-        else:
-            self.class_registries[registry.name] = registry
+        self.registries[registry.name] = registry
 
-    def get_registry(self, name: str) -> RegistryClass | None:
+    def get_registry(self, name: str) -> RegistryDecorator | None:
         """Get a registry by name."""
-        return self.all_registries.get(name)
+        return self.registries.get(name)
 
-    def merge_registry(self, registry: RegistryClass, mode: str = "incremental") -> None:
+    def merge_registry(self, registry: RegistryDecorator, mode: str = "incremental") -> None:
         """Merge a registry into this stub file.
 
         Args:
@@ -203,17 +198,16 @@ class StubFile:
                 - incremental: Add new overloads, keep existing ones (never removes)
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
-        target_dict = self.function_registries if registry.is_function else self.class_registries
         if mode == "incremental":
-            if registry.name in target_dict:
-                existing = target_dict[registry.name]
+            if registry.name in self.registries:
+                existing = self.registries[registry.name]
                 for overload in registry.overloads:
                     existing.add_overload(overload)
             else:
-                target_dict[registry.name] = registry
+                self.registries[registry.name] = registry
         elif mode == "prune":
-            if registry.name in target_dict:
-                existing = target_dict[registry.name]
+            if registry.name in self.registries:
+                existing = self.registries[registry.name]
                 new_literals = {o.query_literal for o in registry.overloads}
                 # Remove overloads not in new registry (never adds new ones)
                 to_remove = [
@@ -321,15 +315,15 @@ class StubFile:
             match self_registry, other_registry:
                 case (None, None):
                     continue  # Should not happen
-                case (None, RegistryClass(overloads=other_overloads)):
+                case (None, RegistryDecorator(overloads=other_overloads)):
                     # Registry exists in other but not in self (new registry)
                     extra = [(o.query_literal, o.return_type) for o in other_overloads]
-                case (RegistryClass(overloads=self_overloads), None):
+                case (RegistryDecorator(overloads=self_overloads), None):
                     # Registry exists in self but not in other (removed registry)
                     missing = [(o.query_literal, o.return_type) for o in self_overloads]
                 case (
-                    RegistryClass(overloads=self_overloads),
-                    RegistryClass(overloads=other_overloads),
+                    RegistryDecorator(overloads=self_overloads),
+                    RegistryDecorator(overloads=other_overloads),
                 ):
                     # Both registries exist, compare overloads
                     unique_self_overloads: set[tuple[str, str]] = {

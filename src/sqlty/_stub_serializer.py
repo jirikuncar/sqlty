@@ -8,7 +8,7 @@ import ast
 from collections import Counter
 from pathlib import Path
 
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
 
 
 class IRToASTSerializer:
@@ -134,11 +134,11 @@ class IRToASTSerializer:
         else:
             return ast.Import(names=[ast.alias(name=import_stmt.module, asname=None)])
 
-    def _serialize_registry_class(self, registry: RegistryClass) -> ast.ClassDef:
-        """Serialize a RegistryClass to AST ClassDef.
+    def _serialize_registry_class(self, registry: RegistryDecorator) -> ast.ClassDef:
+        """Serialize a RegistryDecorator to AST ClassDef.
 
         Args:
-            registry: RegistryClass to serialize
+            registry: RegistryDecorator to serialize
 
         Returns:
             AST ClassDef node
@@ -234,11 +234,11 @@ class IRToASTSerializer:
             type_params=[type_param],
         )
 
-    def _serialize_function_overloads(self, registry: RegistryClass) -> list[ast.stmt]:
+    def _serialize_function_overloads(self, registry: RegistryDecorator) -> list[ast.stmt]:
         """Serialize function overloads for @sqlty decorated functions.
 
         Args:
-            registry: RegistryClass representing a decorated function
+            registry: RegistryDecorator representing a decorated function
 
         Returns:
             List of AST FunctionDef nodes (overloads + fallback)
@@ -327,11 +327,11 @@ class IRToASTSerializer:
             type_params=[],  # No type params for simpler stub
         )
 
-    def _serialize_export_alias(self, registry: RegistryClass) -> ast.Assign:
+    def _serialize_export_alias(self, registry: RegistryDecorator) -> ast.Assign:
         """Serialize export alias (e.g., sql = Query.sql).
 
         Args:
-            registry: RegistryClass to create alias for
+            registry: RegistryDecorator to create alias for
 
         Returns:
             AST Assign node
@@ -531,8 +531,8 @@ class IRToTextSerializer:
     def _generate_overload_insertions(
         self,
         overloads: list[OverloadSignature],
-        new_registry: RegistryClass,
-        original_registry: RegistryClass,
+        new_registry: RegistryDecorator,
+        original_registry: RegistryDecorator,
     ) -> tuple[int | None, str]:
         """Generate text for new overloads and find insertion offset.
 
