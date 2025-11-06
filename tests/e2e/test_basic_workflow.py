@@ -201,26 +201,16 @@ query: SQL[tuple[int, str, str]] = sql("""
     stub_file = tmp_path / "queries.pyi"
     stub_content = stub_file.read_text()
 
-    assert '"""' in stub_content
-    assert "SELECT" in stub_content
-    assert "FROM users" in stub_content
-
-    assert stub_content == snapshot('''\
+    assert stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['\\n    SELECT\\n        id::INTEGER,\\n        name::TEXT,\\n        email::TEXT\\n    FROM users\\n    WHERE active = true\\n']) -> SQL[tuple[int, str, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['\\n    SELECT\\n        id::INTEGER,\\n        name::TEXT,\\n        email::TEXT\\n    FROM users\\n    WHERE active = true\\n']) -> SQL[tuple[int, str, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = Query.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
