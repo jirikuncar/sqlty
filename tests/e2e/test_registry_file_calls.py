@@ -6,6 +6,13 @@ This test validates the scenario described in the issue:
 - sql() calls are made in the same file
 
 All calls should be properly detected and typed.
+
+The implementation in _collector.py handles this through:
+1. visit_ClassDef: Tracks SQLRegistry subclasses in local_registry_classes
+2. visit_Assign: Tracks assignments like "sql = Registry.sql" in registry_aliases
+3. visit_Call: Detects calls using tracked aliases and associates them with the correct registry
+
+This feature is already demonstrated in examples/multi_schema/orders_queries.py.
 """
 
 from pathlib import Path
