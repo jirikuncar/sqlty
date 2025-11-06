@@ -1,15 +1,13 @@
-"""Application that uses multiple registries."""
-
-from .post_queries import get_post, get_user_posts, list_posts
-from .user_queries import get_user, get_user_with_email, list_users
+from .post_queries import sql as post_sql
+from .user_queries import sql as user_sql
 
 
-def get_user_data(user_id: int) -> tuple[object, object]:
+def get_user_data(user_id: int) -> tuple[SQL[tuple[int, str, str]], SQL[int, str]]:
     """Get user and their posts."""
     # Using queries from UserQueries registry
-    user = get_user_with_email
+    user = user_sql("SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id")
 
     # Using queries from PostQueries registry
-    posts = get_user_posts
+    posts = post_sql("SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id")
 
     return user, posts
