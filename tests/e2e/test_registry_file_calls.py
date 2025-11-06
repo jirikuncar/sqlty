@@ -2,7 +2,7 @@
 
 This test validates the scenario described in the issue:
 - SQLRegistry subclass is defined in a file
-- sql = Registry.sql alias is created in the same file  
+- sql = Registry.sql alias is created in the same file
 - sql() calls are made in the same file
 
 All calls should be properly detected and typed.
