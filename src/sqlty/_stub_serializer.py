@@ -8,7 +8,7 @@ import ast
 from collections import Counter
 from pathlib import Path
 
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile, Variable
 
 
 class IRToASTSerializer:
@@ -42,6 +42,10 @@ class IRToASTSerializer:
             registry = stub.registries[registry_name]
             function_overloads = self._serialize_function_overloads(registry)
             module_body.extend(function_overloads)
+
+        # Emit variables
+        for variable in stub.variables:
+            module_body.append(self._serialize_variable(variable))
 
         module = ast.Module(body=module_body, type_ignores=[])
         ast.fix_missing_locations(module)
@@ -307,6 +311,25 @@ class IRToASTSerializer:
             decorator_list=decorators,
             returns=ast.Name(id="str", ctx=ast.Load()),
             type_params=[],  # No type params for simpler stub
+        )
+
+    def _serialize_variable(self, variable: Variable) -> ast.stmt:
+        """Serialize a Variable to AST AnnAssign.
+
+        Args:
+            variable: Variable to serialize
+
+        Returns:
+            AST AnnAssign node
+        """
+        # Parse the type annotation string to AST
+        type_annotation_ast = ast.parse(variable.type_annotation, mode="eval").body
+
+        return ast.AnnAssign(
+            target=ast.Name(id=variable.name, ctx=ast.Store()),
+            annotation=type_annotation_ast,
+            value=None,  # No initial value in stubs
+            simple=1,  # Simple assignment
         )
 
 

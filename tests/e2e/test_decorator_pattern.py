@@ -144,6 +144,8 @@ def test_multiple_decorated_functions(
     """Test multiple functions with @sqlty decorator."""
     # Create app.py with multiple decorated functions
     app_file = tmp_path / "app.py"
+    schema_file = tmp_path / "schema.sql"
+    schema_file.write_text("CREATE TABLE users (id INTEGER, name TEXT);")
     app_file.write_text('''"""Application with multiple @sqlty decorated functions."""
 
 from typing import TYPE_CHECKING, Any
@@ -167,7 +169,7 @@ q2: SQL[tuple[int, str]] = sql_with_schema("SELECT id::INTEGER, name::TEXT FROM 
 
     # Generate stubs
     stub_file = tmp_path / "app.pyi"
-    result = cli([str(tmp_path), f"--output={stub_file}"], {"cwd": str(tmp_path)})
+    result = cli([str(app_file)], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated

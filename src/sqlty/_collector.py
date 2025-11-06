@@ -23,6 +23,15 @@ class CallInfo(TypedDict):
     end_col: int | None  # Ending column number (0-indexed)
 
 
+class VariableInfo(TypedDict):
+    """Information about a variable with SQL type annotation."""
+
+    name: str
+    type_annotation: str
+    lineno: int
+    file: str
+
+
 class LiteralCallCollector(ast.NodeVisitor):
     """Collects function calls with literal string arguments.
 
@@ -32,7 +41,9 @@ class LiteralCallCollector(ast.NodeVisitor):
     def __init__(self, atok: asttokens.ASTTokens | None = None) -> None:
         self.function_name = "sql"  # Always look for .sql() method calls
         self.calls: list[CallInfo] = []
+        self.variables: list[VariableInfo] = []
         self.current_assignment: ast.AnnAssign | ast.Assign | None = None
+        self.current_file: str = ""
         self.import_sources: dict[
             str, str
         ] = {}  # Map import name -> module (e.g., {"user_sql": "user_queries"})
@@ -161,6 +172,20 @@ class LiteralCallCollector(ast.NodeVisitor):
         """Visit annotated assignment nodes."""
         old_assignment = self.current_assignment
         self.current_assignment = node
+
+        # Check if this is a variable with SQL[...] type annotation
+        if isinstance(node.annotation, ast.Subscript):
+            annotation_str = ast.unparse(node.annotation)
+            if annotation_str.startswith("SQL[") and isinstance(node.target, ast.Name):
+                self.variables.append(
+                    {
+                        "name": node.target.id,
+                        "type_annotation": annotation_str,
+                        "lineno": node.lineno,
+                        "file": self.current_file,
+                    }
+                )
+
         self.generic_visit(node)
         self.current_assignment = old_assignment
 

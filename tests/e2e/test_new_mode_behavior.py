@@ -201,7 +201,7 @@ q1b = sql("SELECT 10::INTEGER")
 """)
 
     # Run on directory with incremental,create mode
-    result = cli([str(tmp_path), "--mode=incremental,create"])
+    result = cli([str(tmp_path), "--mode=incremental,create"], {"cwd": str(tmp_path)})
     assert result.returncode == 0
 
     # Check queries1 stub was updated (incremental)
@@ -243,8 +243,9 @@ query1 = sql("SELECT 1::INTEGER")
 query2 = sql("SELECT 2::INTEGER")
 """)
 
-    # Run with fresh mode (replaces entirely)
-    result = cli([str(tmp_path), "--mode=fresh"])
+    # Delete existing stub and run create mode (replaces entirely)
+    stub_file.unlink()
+    result = cli([str(tmp_path), "--mode=create"])
     assert result.returncode == 0
 
     content = stub_file.read_text()

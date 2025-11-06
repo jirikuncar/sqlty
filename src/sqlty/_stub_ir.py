@@ -157,17 +157,36 @@ class ImportStatement:
 
 
 @dataclass
+class Variable:
+    """Represents a variable with SQL type annotation.
+
+    Attributes:
+        name: Variable name
+        type_annotation: The type annotation (e.g., "SQL[tuple[int, str]]")
+        lineno: Line number where the variable is defined
+        source_file: Source file where the variable is defined
+    """
+
+    name: str
+    type_annotation: str
+    lineno: int
+    source_file: str
+
+
+@dataclass
 class StubFile:
     """Represents a .pyi stub file with SQLRegistry classes and @sqlty decorated functions.
 
     Attributes:
         registries: Dict of registry name to RegistryDecorator for both classes and functions
+        variables: List of variables with SQL type annotations
         imports: Set of import statements needed for the stub
         source_path: Optional path to the source .py file this stub corresponds to
         ast_module: Optional reference to the original AST Module node
     """
 
     registries: dict[str, RegistryDecorator] = field(default_factory=dict)
+    variables: list[Variable] = field(default_factory=list)
     imports: set[ImportStatement] = field(default_factory=set)
     source_path: Path | None = None
     ast_module: ast.Module | None = None
@@ -243,6 +262,13 @@ class StubFile:
                 for pattern, import_stmt in type_patterns.items():
                     if re.search(pattern, return_type):
                         required.add(import_stmt)
+
+        # Also check variable type annotations
+        for variable in self.variables:
+            type_annotation = variable.type_annotation
+            for pattern, import_stmt in type_patterns.items():
+                if re.search(pattern, type_annotation):
+                    required.add(import_stmt)
 
         return required
 
@@ -333,3 +359,7 @@ class StubFile:
                 diff_result[name] = {"missing": missing, "extra": extra}
 
         return diff_result
+
+    def add_variable(self, variable: Variable) -> None:
+        """Add a variable to this stub file."""
+        self.variables.append(variable)
