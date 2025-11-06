@@ -13,12 +13,12 @@ def test_auto_generate_disabled_by_default(tmp_path: Path) -> None:
     # Create a temporary module file
     module_path = tmp_path / "test_registry.py"
     module_path.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class MyQuery(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 
-sql = MyQuery.sql
 query = sql("SELECT 1")
 """)
 
@@ -42,12 +42,12 @@ def test_auto_generate_with_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     # Create a temporary module file
     module_path = tmp_path / "test_auto_gen.py"
     module_path.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class AutoQuery(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 
-sql = AutoQuery.sql
 query1 = sql("SELECT id, name FROM users")
 query2 = sql("SELECT COUNT(*) FROM posts")
 """)

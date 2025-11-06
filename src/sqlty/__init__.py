@@ -1,8 +1,9 @@
 """SQLTy - Type-safe SQL queries for Python with automatic stub generation."""
 
 import importlib.metadata
+import os
 from collections.abc import Callable
-from typing import overload
+from typing import Any, cast, overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
@@ -67,6 +68,14 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
         # Store schema path if provided
         if schema is not None:
             fn.__schema_path__ = schema  # type: ignore[attr-defined]
+
+        # Auto-generate stub if environment variable is set
+        if os.getenv("SQLTY_AUTO_GENERATE", "").lower() in {"1", "true", "yes"}:
+            from sqlty._auto_generator import auto_generate_stub
+
+            # TODO remove cast and make F more specific
+            auto_generate_stub(cast(Callable[[str], Any], fn))
+
         return fn
 
     # Handle both @sqlty and @sqlty(...) usage
