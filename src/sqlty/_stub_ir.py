@@ -162,27 +162,37 @@ class StubFile:
 
     Attributes:
         imports: Set of import statements
-        registries: Dictionary mapping class name to RegistryClass
+        class_registries: Dictionary mapping class name to RegistryClass for SQLRegistry subclasses
+        function_registries: Dictionary mapping function name to RegistryClass for @sqlty decorated functions
         file_path: Optional path to the stub file
         ast_module: Optional reference to original AST Module node from stub
     """
 
     imports: set[ImportStatement] = field(default_factory=set)
-    registries: dict[str, RegistryClass] = field(default_factory=dict)
+    class_registries: dict[str, RegistryClass] = field(default_factory=dict)
+    function_registries: dict[str, RegistryClass] = field(default_factory=dict)
     file_path: Path | None = None
     ast_module: ast.Module | None = None
+
+    @property
+    def all_registries(self) -> dict[str, RegistryClass]:
+        """Get all registries (both class and function) combined."""
+        return {**self.class_registries, **self.function_registries}
 
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""
         self.imports.add(import_stmt)
 
     def add_registry(self, registry: RegistryClass) -> None:
-        """Add or replace a registry class."""
-        self.registries[registry.name] = registry
+        """Add or replace a registry class or function."""
+        if registry.is_function:
+            self.function_registries[registry.name] = registry
+        else:
+            self.class_registries[registry.name] = registry
 
     def get_registry(self, name: str) -> RegistryClass | None:
         """Get a registry by name."""
-        return self.registries.get(name)
+        return self.all_registries.get(name)
 
     def merge_registry(self, registry: RegistryClass, mode: str = "incremental") -> None:
         """Merge a registry into this stub file.
@@ -193,16 +203,17 @@ class StubFile:
                 - incremental: Add new overloads, keep existing ones (never removes)
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
+        target_dict = self.function_registries if registry.is_function else self.class_registries
         if mode == "incremental":
-            if registry.name in self.registries:
-                existing = self.registries[registry.name]
+            if registry.name in target_dict:
+                existing = target_dict[registry.name]
                 for overload in registry.overloads:
                     existing.add_overload(overload)
             else:
-                self.registries[registry.name] = registry
+                target_dict[registry.name] = registry
         elif mode == "prune":
-            if registry.name in self.registries:
-                existing = self.registries[registry.name]
+            if registry.name in target_dict:
+                existing = target_dict[registry.name]
                 new_literals = {o.query_literal for o in registry.overloads}
                 # Remove overloads not in new registry (never adds new ones)
                 to_remove = [
@@ -227,7 +238,7 @@ class StubFile:
             ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
         )
 
-        base_classes = {r.base_class for r in self.registries.values()}
+        base_classes = {r.base_class for r in self.all_registries.values()}
         sqlty_imports = ["SQL"] + sorted(base_classes)
         required.add(ImportStatement(module="sqlty", names=sqlty_imports, from_import=True))
 
@@ -239,7 +250,7 @@ class StubFile:
             r"\bdecimal\.Decimal\b": ImportStatement(module="decimal", names=[], from_import=False),
         }
 
-        for registry in self.registries.values():
+        for registry in self.all_registries.values():
             for overload in registry.overloads:
                 return_type = overload.return_type
                 for pattern, import_stmt in type_patterns.items():
@@ -261,13 +272,13 @@ class StubFile:
             True if both have the same registries with same overloads
         """
         # Check if registry sets differ
-        if set(self.registries.keys()) != set(other.registries.keys()):
+        if set(self.all_registries.keys()) != set(other.all_registries.keys()):
             return False
 
         # Check each registry for differences in overloads only
-        for name in self.registries:
-            self_registry = self.registries[name]
-            other_registry = other.registries[name]
+        for name in self.all_registries:
+            self_registry = self.all_registries[name]
+            other_registry = other.all_registries[name]
 
             # Compare overload signatures (query literals and return types)
             self_overloads = {(o.query_literal, o.return_type) for o in self_registry.overloads}
@@ -298,11 +309,11 @@ class StubFile:
         diff_result: dict[str, dict[str, list[tuple[str, str]]]] = {}
 
         # Get all registry names from both
-        all_registry_names = set(self.registries.keys()) | set(other.registries.keys())
+        all_registry_names = set(self.all_registries.keys()) | set(other.all_registries.keys())
 
         for name in all_registry_names:
-            self_registry = self.registries.get(name)
-            other_registry = other.registries.get(name)
+            self_registry = self.all_registries.get(name)
+            other_registry = other.all_registries.get(name)
 
             missing = []
             extra = []

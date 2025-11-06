@@ -38,23 +38,23 @@ class IRToASTSerializer:
             module_body.append(self._serialize_import(import_stmt))
 
         # Emit top-level function overloads for all decorated functions
-        for registry_name in sorted(stub.registries.keys()):
-            registry = stub.registries[registry_name]
+        for registry_name in sorted(stub.all_registries.keys()):
+            registry = stub.all_registries[registry_name]
             if registry.is_function:
                 function_overloads = self._serialize_function_overloads(registry)
                 module_body.extend(function_overloads)
 
         # Emit registry classes for all non-function registries
-        for registry_name in sorted(stub.registries.keys()):
-            registry = stub.registries[registry_name]
+        for registry_name in sorted(stub.all_registries.keys()):
+            registry = stub.all_registries[registry_name]
             if not registry.is_function:
                 class_node = self._serialize_registry_class(registry)
                 module_body.append(class_node)
 
         # Only create aliases for unique export names (and only for classes, not functions)
         export_name_counts = self._count_export_names(stub)
-        for registry_name in sorted(stub.registries.keys()):
-            registry = stub.registries[registry_name]
+        for registry_name in sorted(stub.all_registries.keys()):
+            registry = stub.all_registries[registry_name]
             if (
                 not registry.is_function
                 and registry.export_name
@@ -77,7 +77,7 @@ class IRToASTSerializer:
             Counter mapping export names to their usage count
         """
         return Counter(
-            registry.export_name for registry in stub.registries.values() if registry.export_name
+            registry.export_name for registry in stub.all_registries.values() if registry.export_name and not registry.is_function
         )
 
     def _sort_imports(self, imports: set[ImportStatement]) -> list[ImportStatement]:
@@ -411,8 +411,8 @@ class IRToTextSerializer:
         replacements: list[tuple[int, int, str]] = []
 
         # For each registry in the stub, identify changes
-        for registry_name, new_registry in stub.registries.items():
-            original_registry = original_stub.registries.get(registry_name)
+        for registry_name, new_registry in stub.all_registries.items():
+            original_registry = original_stub.all_registries.get(registry_name)
             if not original_registry:
                 # Registry doesn't exist in original - fallback to full regeneration
                 return self._fallback_to_full_generation(stub)

@@ -51,7 +51,9 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.registry_aliases: dict[
             str, str
         ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
-        self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
+        self.decorated_functions: set[str] = (
+            set()
+        )  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
 
     def _offset_to_line(self, offset: int) -> tuple[int, int]:
@@ -201,18 +203,6 @@ class LiteralCallCollector(ast.NodeVisitor):
                 # Priority 2: Check if it's a class imported from somewhere (e.g., QueryRegistry.sql or A.sql where A is an alias)
                 elif module_or_class_name in self.import_sources:
                     registry_source = self.import_sources[module_or_class_name]
-                    # Check if this is an aliased import and get the original class name
-                    if module_or_class_name in self.class_imports:
-                        registry_class = self.class_imports[module_or_class_name]
-                    else:
-                        # Not aliased, use the name as-is
-                        registry_class = module_or_class_name
-                    is_target_call = True
-                # Priority 3: Check if it's a local SQLRegistry class (e.g., RegistryA.sql())
-                elif module_or_class_name in self.local_registry_classes:
-                    registry_class = module_or_class_name
-                    is_target_call = True
-                    # registry_source will be set later by the generator based on the current file
 
         # Add any direct or qualified call to the target function with a literal argument
         if is_target_call:

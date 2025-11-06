@@ -95,7 +95,7 @@ class TypeStubGenerator:
             self.generate_stub_file(
                 source_path=source_path,
                 output_path=output_path,
-                mode="full",
+                mode="incremental,create",
             )
         finally:
             self._check_mode = original_check_mode
@@ -123,10 +123,10 @@ class TypeStubGenerator:
             print(f"\n  {stub_path}")
 
             # Parse existing and expected stubs to IR
+            import ast
+
             if existing_text:
                 # Parse from text (we already have it serialized)
-                import ast
-
                 existing_tree = ast.parse(existing_text)
                 existing_ir = parser.parse_ast(existing_tree, stub_path)
             else:
@@ -875,7 +875,7 @@ class TypeStubGenerator:
                         new_stub = call_parser.parse_calls(
                             cls_calls, cls_name, base_class, export_name, is_function
                         )
-                        for registry in new_stub.registries.values():
+                        for registry in new_stub.all_registries.values():
                             registry.is_function = is_function
                             all_new_registries.add_registry(registry)
 
@@ -899,7 +899,7 @@ class TypeStubGenerator:
                             final_stub_ir = all_new_registries
                         else:
                             # Apply modes in order: incremental first, then prune
-                            for new_registry in all_new_registries.registries.values():
+                            for new_registry in all_new_registries.all_registries.values():
                                 if incremental:
                                     # Add new overloads
                                     existing_stub.merge_registry(new_registry, mode="incremental")

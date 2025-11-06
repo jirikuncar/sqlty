@@ -63,7 +63,7 @@ def test_stub_file_merge_incremental():
     )
 
     stub.merge_registry(registry1, mode="incremental")
-    assert len(stub.registries["Query"].overloads) == 2
+    assert len(stub.class_registries["Query"].overloads) == 2
 
     # Add more overloads
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
@@ -75,7 +75,7 @@ def test_stub_file_merge_incremental():
     )  # Duplicate
 
     stub.merge_registry(registry2, mode="incremental")
-    assert len(stub.registries["Query"].overloads) == 3  # Only SELECT 3 added
+    assert len(stub.class_registries["Query"].overloads) == 3  # Only SELECT 3 added
 
 
 def test_stub_file_replace_via_add_registry():
@@ -91,7 +91,7 @@ def test_stub_file_replace_via_add_registry():
     )
 
     stub.add_registry(registry1)
-    assert len(stub.registries["Query"].overloads) == 2
+    assert len(stub.class_registries["Query"].overloads) == 2
 
     # Replace with new registry
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
@@ -100,9 +100,9 @@ def test_stub_file_replace_via_add_registry():
     )
 
     stub.add_registry(registry2)
-    assert len(stub.registries["Query"].overloads) == 1  # Only SELECT 3
-    assert stub.registries["Query"].has_overload("SELECT 3")
-    assert not stub.registries["Query"].has_overload("SELECT 1")
+    assert len(stub.class_registries["Query"].overloads) == 1  # Only SELECT 3
+    assert stub.class_registries["Query"].has_overload("SELECT 3")
+    assert not stub.class_registries["Query"].has_overload("SELECT 1")
 
 
 def test_stub_file_merge_prune():
@@ -121,7 +121,7 @@ def test_stub_file_merge_prune():
     )
 
     stub.add_registry(registry1)
-    assert len(stub.registries["Query"].overloads) == 3
+    assert len(stub.class_registries["Query"].overloads) == 3
 
     # Prune to keep only SELECT 1 and SELECT 3 (removes SELECT 2)
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
@@ -133,10 +133,10 @@ def test_stub_file_merge_prune():
     )
 
     stub.merge_registry(registry2, mode="prune")
-    assert len(stub.registries["Query"].overloads) == 2
-    assert stub.registries["Query"].has_overload("SELECT 1")
-    assert not stub.registries["Query"].has_overload("SELECT 2")
-    assert stub.registries["Query"].has_overload("SELECT 3")
+    assert len(stub.class_registries["Query"].overloads) == 2
+    assert stub.class_registries["Query"].has_overload("SELECT 1")
+    assert not stub.class_registries["Query"].has_overload("SELECT 2")
+    assert stub.class_registries["Query"].has_overload("SELECT 3")
 
 
 def test_stub_file_merge_prune_never_adds():
@@ -153,7 +153,7 @@ def test_stub_file_merge_prune_never_adds():
     )
 
     stub.add_registry(registry1)
-    assert len(stub.registries["Query"].overloads) == 2
+    assert len(stub.class_registries["Query"].overloads) == 2
 
     # Try to prune with a superset (includes SELECT 3 and SELECT 4 which are new)
     registry2 = RegistryClass(name="Query", base_class="SQLRegistry")
@@ -173,11 +173,11 @@ def test_stub_file_merge_prune_never_adds():
     stub.merge_registry(registry2, mode="prune")
 
     # Prune should NOT add the new overloads
-    assert len(stub.registries["Query"].overloads) == 2
-    assert stub.registries["Query"].has_overload("SELECT 1")
-    assert stub.registries["Query"].has_overload("SELECT 2")
-    assert not stub.registries["Query"].has_overload("SELECT 3")  # Not added
-    assert not stub.registries["Query"].has_overload("SELECT 4")  # Not added
+    assert len(stub.class_registries["Query"].overloads) == 2
+    assert stub.class_registries["Query"].has_overload("SELECT 1")
+    assert stub.class_registries["Query"].has_overload("SELECT 2")
+    assert not stub.class_registries["Query"].has_overload("SELECT 3")  # Not added
+    assert not stub.class_registries["Query"].has_overload("SELECT 4")  # Not added
 
 
 def test_call_info_to_ir_parser():
@@ -206,9 +206,9 @@ def test_call_info_to_ir_parser():
         calls, class_name="Query", base_class="SQLRegistry", export_name="sql"
     )
 
-    assert "Query" in stub.registries
-    assert len(stub.registries["Query"].overloads) == 2
-    assert stub.registries["Query"].export_name == "sql"
+    assert "Query" in stub.class_registries
+    assert len(stub.class_registries["Query"].overloads) == 2
+    assert stub.class_registries["Query"].export_name == "sql"
 
 
 def test_pyi_to_ir_parser():
@@ -236,12 +236,12 @@ sql = Query.sql
     parser = PyiToIRParser()
     stub = parser.parse_ast(tree)
 
-    assert "Query" in stub.registries
-    assert len(stub.registries["Query"].overloads) == 1
-    assert stub.registries["Query"].export_name == "sql"
+    assert "Query" in stub.class_registries
+    assert len(stub.class_registries["Query"].overloads) == 1
+    assert stub.class_registries["Query"].export_name == "sql"
 
     # Check the overload
-    overloads = list(stub.registries["Query"].overloads)
+    overloads = list(stub.class_registries["Query"].overloads)
     assert overloads[0].query_literal == "SELECT 1::INTEGER"
     assert overloads[0].return_type == "SQL[tuple[int]]"
 
@@ -745,7 +745,7 @@ sql = Query.sql
     )
 
     # Merge in incremental mode
-    for new_registry in new_stub.registries.values():
+    for new_registry in new_stub.class_registries.values():
         existing_stub.merge_registry(new_registry, mode="incremental")
 
     # Verify that both old and new overloads exist
@@ -830,7 +830,7 @@ sql = Query.sql
     )
 
     # Merge in prune mode
-    for new_registry in new_stub.registries.values():
+    for new_registry in new_stub.class_registries.values():
         existing_stub.merge_registry(new_registry, mode="prune")
 
     # Verify that SELECT 2 was removed, but others were preserved
@@ -922,7 +922,7 @@ sql = Query.sql
         )
 
         # Synchronize by applying incremental then prune
-        for new_registry in new_stub.registries.values():
+        for new_registry in new_stub.class_registries.values():
             # Add new overloads
             existing_stub.merge_registry(new_registry, mode="incremental")
             # Remove stale ones
@@ -1009,7 +1009,7 @@ sql = Query.sql
         )
 
         # Merge in incremental mode
-        for new_registry in new_stub.registries.values():
+        for new_registry in new_stub.class_registries.values():
             existing_stub.merge_registry(new_registry, mode="incremental")
 
         # Re-parse to get original stub with source spans for comparison

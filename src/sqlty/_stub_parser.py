@@ -127,6 +127,10 @@ class PyiToIRParser:
                 registry = self._parse_registry_class(node)
                 if registry:
                     stub.add_registry(registry)
+            elif isinstance(node, ast.FunctionDef):
+                registry = self._parse_function_registry(node)
+                if registry:
+                    stub.add_registry(registry)
 
         for node in tree.body:
             if isinstance(node, ast.Assign):
@@ -169,6 +173,29 @@ class PyiToIRParser:
             source_span=source_span,
             ast_node=node,
         )
+
+    def _parse_function_registry(self, node: ast.FunctionDef) -> RegistryClass | None:
+        """Parse a top-level @overload function into a RegistryClass.
+
+        Args:
+            node: AST FunctionDef node
+
+        Returns:
+            RegistryClass with is_function=True or None if not a valid overload
+        """
+        overload = self._parse_overload_method(node)
+        if not overload:
+            return None
+
+        registry = RegistryClass(
+            name=node.name,
+            is_function=True,
+            export_name=node.name,  # For functions, export name is the function name
+            docstring="",  # Functions don't have docstrings in this context
+            ast_node=node,
+        )
+        registry.add_overload(overload)
+        return registry
 
     def _extract_source_span(self, node: ast.AST) -> SourceSpan | None:
         """Extract source span from an AST node using asttokens.
