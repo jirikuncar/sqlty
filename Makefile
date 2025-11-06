@@ -1,6 +1,9 @@
 # Discover all example directories automatically
 EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d)
 
+# Get the absolute path to the repository root
+ROOT_DIR := $(shell pwd)
+
 .PHONY: help
 help:
 	@echo "Available targets:"
@@ -18,7 +21,7 @@ help:
 	@echo "Examples:"
 	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
 	@echo "  generate-examples - Generate stubs for all examples"
-	@echo "  verify-examples   - Generate stubs and verify with mypy and ty"
+	@echo "  verify-examples   - Generate stubs and verify with mypy, ty, and stubtest"
 	@echo ""
 	@echo "Example directories found: $(EXAMPLE_DIRS)"
 
@@ -87,3 +90,16 @@ verify-examples: generate-examples
 		uv run mypy $$dir/; \
 	done
 	@echo "✅ mypy verification passed"
+	@echo ""
+	@echo "🔍 Verifying examples with stubtest..."
+	@for pyi in $$(find examples -name "*.pyi" -type f); do \
+		dir=$$(dirname $$pyi); \
+		modname=$$(basename $${pyi%.pyi}); \
+		echo "  → $$pyi"; \
+		(cd $$dir && PYTHONPATH=.:$(ROOT_DIR)/src $(ROOT_DIR)/.venv/bin/python -m mypy.stubtest $$modname \
+			--allowlist $(ROOT_DIR)/.stubtest-allowlist \
+			--ignore-unused-allowlist \
+			--concise \
+			--mypy-config-file $(ROOT_DIR)/pyproject.toml); \
+	done
+	@echo "✅ stubtest verification passed"

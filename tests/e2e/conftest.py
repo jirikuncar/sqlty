@@ -248,3 +248,70 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
         )
 
     return _run_mypy
+
+
+@pytest.fixture
+def stubtest() -> Callable[
+    [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
+]:
+    """Fixture to run stubtest for validating stub files.
+
+    Returns a callable that runs stubtest with the given arguments.
+
+    Args:
+        args: List of arguments to pass to stubtest (e.g., ["queries", "--concise"])
+        kwargs: Optional keyword arguments to pass to subprocess.run
+
+    Returns:
+        A CompletedProcess instance from subprocess.run
+
+    Example:
+        result = stubtest(["queries", "--concise"], {"env": {"PYTHONPATH": str(tmp_path)}})
+        assert result.returncode == 0
+    """
+    import os
+
+    # Get the source directory path (assuming tests are in tests/e2e/)
+    src_dir = Path(__file__).parent.parent.parent / "src"
+    allowlist = Path(__file__).parent.parent.parent / ".stubtest-allowlist"
+
+    def _run_stubtest(
+        args: list[str | Path], kwargs: dict[str, Any] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Run stubtest with given arguments."""
+        if kwargs is None:
+            kwargs = {}
+
+        # Set default kwargs for stubtest execution
+        default_kwargs = {
+            "capture_output": True,
+            "text": True,
+        }
+        default_kwargs.update(kwargs)
+
+        # Convert Path objects to strings
+        str_args = [str(arg) for arg in args]
+
+        # Add allowlist and ignore-unused-allowlist if allowlist exists and not already in args
+        if allowlist.exists() and "--allowlist" not in str_args:
+            str_args.extend(["--allowlist", str(allowlist), "--ignore-unused-allowlist"])
+
+        # Set PYTHONPATH to include src directory so stubtest can find sqlty module
+        env = kwargs.get("env", os.environ.copy())
+        pythonpath = env.get("PYTHONPATH", "")
+        if pythonpath:
+            env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
+        else:
+            env["PYTHONPATH"] = str(src_dir)
+
+        # Remove env from kwargs if it was there, we'll add it back
+        if "env" in default_kwargs:
+            del default_kwargs["env"]
+
+        return subprocess.run(
+            [sys.executable, "-m", "mypy.stubtest"] + str_args,
+            env=env,
+            **default_kwargs,
+        )
+
+    return _run_stubtest
