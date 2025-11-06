@@ -1,0 +1,19 @@
+from typing import Literal, overload
+from sqlty import SQL, SQLRegistry
+
+
+@overload
+def sql(query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
+    ...
+
+@overload
+def sql[T](query: T) -> T:
+    ...
+
+@overload
+def sql_with_schema(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
+
+@overload
+def sql_with_schema[T](query: T) -> T:
+    ...
