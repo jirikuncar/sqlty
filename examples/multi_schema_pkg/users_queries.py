@@ -1,10 +1,14 @@
-from sqlty import SQLRegistry
+"""User queries using @sqlty decorator."""
+
+from typing import Any
+
+from sqlty import sqlty
 
 
-class UsersQueries(SQLRegistry):
-    __schema_path__ = "users.sql"
+@sqlty(schema="users.sql")
+def sql(query: str) -> Any:
+    """Execute user-related SQL queries."""
+    return query
 
-
-sql = UsersQueries.sql
 
 user_query = sql("SELECT id, name FROM users")

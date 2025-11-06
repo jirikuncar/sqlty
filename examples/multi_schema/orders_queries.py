@@ -1,10 +1,14 @@
-from sqlty import SQLRegistry
+"""Order queries using @sqlty decorator."""
+
+from typing import Any
+
+from sqlty import sqlty
 
 
-class OrdersQueries(SQLRegistry):
-    __schema_path__ = "orders.sql"
+@sqlty(schema="orders.sql")
+def sql(query: str) -> Any:
+    """Execute order-related SQL queries."""
+    return query
 
-
-sql = OrdersQueries.sql
 
 order_query = sql("SELECT id, total FROM orders")

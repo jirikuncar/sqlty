@@ -19,19 +19,17 @@ def test_config_via_pyproject_toml(tmp_path: Path) -> None:
     pyproject_file = tmp_path / "pyproject.toml"
     pyproject_file.write_text("""[tool.sqlty]
 dialect = "postgres"
-mode = "full"
 """)
 
     # Create source files
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from typing import Any
+from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -48,14 +46,13 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
         cwd=str(tmp_path),
     )
 
-    # Should handle config gracefully (may not be fully implemented yet)
-    # 0 = success, 1 = general error, 2 = argument error
-    assert result.returncode in (0, 1, 2)
+    # Should handle config gracefully
+    assert result.returncode == 0
 
     # If successful, verify stub was created
     stub_file = tmp_path / "queries.pyi"
-    if stub_file.exists():
-        assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_file.read_text()
+    assert stub_file.exists()
+    assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_file.read_text()
 
 
 def test_schema_path_in_config(tmp_path: Path) -> None:
@@ -77,14 +74,13 @@ dialect = "postgres"
 
     # Create source files
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from typing import Any
+from sqlty import sqlty
 
 
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -140,7 +136,7 @@ query = sql("SELECT id::INTEGER FROM users")
     )
 
     # Should succeed
-    assert result.returncode in (0, 1, 2)
+    assert result.returncode == 0
 
 
 def test_multiple_registries_in_config(tmp_path: Path) -> None:

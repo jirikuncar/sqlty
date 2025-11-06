@@ -4,6 +4,7 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
 
 ## Table of Contents
 
+- [Motivation](motivation.md)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Basic Usage](#basic-usage)
@@ -340,11 +341,11 @@ class Query(SQLRegistry):
     @overload
     @classmethod
     def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]: ...
-    
+
     @overload
     @classmethod
     def sql(cls, query: Literal['SELECT COUNT(*)::INTEGER FROM posts']) -> SQL[tuple[int]]: ...
-    
+
     @overload
     @classmethod
     def sql[T](cls, query: T) -> T: ...

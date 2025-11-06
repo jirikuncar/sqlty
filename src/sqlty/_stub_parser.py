@@ -9,8 +9,10 @@ import ast
 import logging
 from pathlib import Path
 
+import asttokens
+
 from ._collector import CallInfo
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryClass, StubFile
+from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, SourceSpan, StubFile
 
 
 class PyiToIRParser:
@@ -23,6 +25,44 @@ class PyiToIRParser:
             function_name: Name of the SQL function to parse (e.g., "sql")
         """
         self.function_name = function_name
+        self.atok: asttokens.ASTTokens | None = None
+
+    def _offset_to_line(self, offset: int) -> tuple[int, int]:
+        """Convert a character offset to (line, col) tuple.
+
+        Args:
+            offset: 0-based character offset in the source text
+
+        Returns:
+            Tuple of (line, col) where line is 1-indexed and col is 0-indexed
+        """
+        if not self.atok:
+            return (1, 0)
+
+        # Use asttokens' internal line offset tracking for O(log n) conversion
+        # This mimics asttokens' offset_to_line implementation
+        text = self.atok.text
+
+        # Build line offsets if not already cached
+        if not hasattr(self, "_line_offsets"):
+            self._line_offsets = [0]
+            for i, char in enumerate(text):
+                if char == "\n":
+                    self._line_offsets.append(i + 1)
+            # Add end of file as final offset
+            self._line_offsets.append(len(text))
+
+        # Clamp offset to valid range
+        offset = max(0, min(len(text), offset))
+
+        # Binary search to find line (O(log n))
+        import bisect
+
+        line_index = bisect.bisect_right(self._line_offsets, offset) - 1
+        line = line_index + 1  # 1-indexed
+        col = offset - self._line_offsets[line_index]  # 0-indexed
+
+        return (line, col)
 
     def parse_file(self, file_path: Path) -> StubFile:
         """Parse a .pyi file into IR.
@@ -33,7 +73,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path)
+        stub = StubFile(source_path=file_path)
 
         if not file_path.exists():
             return stub
@@ -41,6 +81,8 @@ class PyiToIRParser:
         try:
             source = file_path.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(file_path))
+            # Create ASTTokens object to track source ranges
+            self.atok = asttokens.ASTTokens(source, tree=tree)
             return self.parse_ast(tree, file_path)
         except Exception as e:
             logging.getLogger(__name__).warning("Failed to parse stub file %s: %s", file_path, e)
@@ -56,7 +98,7 @@ class PyiToIRParser:
         Returns:
             StubFile IR representing the parsed content
         """
-        stub = StubFile(file_path=file_path, ast_module=tree)
+        stub = StubFile(source_path=file_path, ast_module=tree)
 
         for node in tree.body:
             if isinstance(node, ast.Import):
@@ -80,56 +122,39 @@ class PyiToIRParser:
                     )
                 )
 
+        # Group function overloads by name
+        function_overloads: dict[str, list[ast.FunctionDef]] = {}
+
         for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                registry = self._parse_registry_class(node)
-                if registry:
-                    stub.add_registry(registry)
+            if isinstance(node, ast.FunctionDef):
+                overload = self._parse_overload_method(node)
+                if overload:
+                    if node.name not in function_overloads:
+                        function_overloads[node.name] = []
+                    function_overloads[node.name].append(node)
+
+        # Create registries for overloaded functions
+        for func_name, overload_nodes in function_overloads.items():
+            if overload_nodes:
+                registry = RegistryDecorator(
+                    name=func_name,
+                    export_name=func_name,
+                    docstring="",
+                    ast_node=overload_nodes[0],  # Use first node for AST reference
+                )
+
+                for node in overload_nodes:
+                    overload = self._parse_overload_method(node)
+                    if overload:
+                        registry.add_overload(overload)
+
+                stub.add_registry(registry)
 
         for node in tree.body:
             if isinstance(node, ast.Assign):
                 self._parse_export_alias(node, stub)
 
         return stub
-
-    def _parse_registry_class(self, node: ast.ClassDef) -> RegistryClass | None:
-        """Parse a class definition into a RegistryClass.
-
-        Args:
-            node: AST ClassDef node
-
-        Returns:
-            RegistryClass or None if not a valid registry
-        """
-        base_class = "SQLRegistry"
-        if node.bases:
-            base = node.bases[0]
-            if isinstance(base, ast.Name):
-                base_class = base.id
-
-        docstring = "Application-specific SQL query registry with type-safe overloads."
-        if (
-            node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-            and isinstance(node.body[0].value.value, str)
-        ):
-            docstring = node.body[0].value.value
-
-        registry = RegistryClass(
-            name=node.name,
-            base_class=base_class,
-            docstring=docstring,
-            ast_node=node,
-        )
-
-        for item in node.body:
-            if isinstance(item, ast.FunctionDef) and item.name == self.function_name:
-                overload = self._parse_overload_method(item)
-                if overload:
-                    registry.add_overload(overload)
-
-        return registry
 
     def _parse_overload_method(self, node: ast.FunctionDef) -> OverloadSignature | None:
         """Parse a method definition into an OverloadSignature.
@@ -155,11 +180,70 @@ class PyiToIRParser:
         if node.returns:
             return_type = ast.unparse(node.returns)
 
+        # Extract source span if asttokens is available
+        source_span = None
+        if self.atok:
+            source_span = self._extract_source_span(node)
+
         return OverloadSignature(
             query_literal=query_literal,
             return_type=return_type,
+            source_span=source_span,
             ast_node=node,
         )
+
+    def _parse_function_registry(self, node: ast.FunctionDef) -> RegistryDecorator | None:
+        """Parse a top-level @overload function into a RegistryDecorator.
+
+        Args:
+            node: AST FunctionDef node
+
+        Returns:
+            RegistryDecorator with is_function=True or None if not a valid overload
+        """
+        overload = self._parse_overload_method(node)
+        if not overload:
+            return None
+
+        registry = RegistryDecorator(
+            name=node.name,
+            export_name=node.name,  # For functions, export name is the function name
+            docstring="",  # Functions don't have docstrings in this context
+            ast_node=node,
+        )
+        registry.add_overload(overload)
+        return registry
+
+    def _extract_source_span(self, node: ast.AST) -> SourceSpan | None:
+        """Extract source span from an AST node using asttokens.
+
+        Args:
+            node: AST node
+
+        Returns:
+            SourceSpan or None if extraction fails
+        """
+        if not self.atok:
+            return None
+
+        try:
+            # Get text range for the node
+            start_offset, end_offset = self.atok.get_text_range(node)
+            # Get positions
+            start_line, start_col = self._offset_to_line(start_offset)
+            end_line, end_col = self._offset_to_line(end_offset)
+
+            return SourceSpan(
+                start_offset=start_offset,
+                end_offset=end_offset,
+                start_line=start_line,
+                start_col=start_col,
+                end_line=end_line,
+                end_col=end_col,
+            )
+        except Exception as e:
+            logging.getLogger(__name__).debug("Failed to extract source span: %s", e)
+            return None
 
     def _extract_literal_from_annotation(self, node: ast.FunctionDef) -> str | None:
         """Extract the query literal from a Literal[...] type annotation.
@@ -221,8 +305,8 @@ class CallInfoToIRParser:
         self,
         calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         export_name: str = "sql",
+        is_function: bool = False,
     ) -> StubFile:
         """Parse a list of CallInfo objects into IR.
 
@@ -231,6 +315,7 @@ class CallInfoToIRParser:
             class_name: Default class name if not specified in calls
             base_class: Base class name
             export_name: Name for the module-level alias
+            is_function: Whether this represents a decorated function
 
         Returns:
             StubFile IR representing the calls
@@ -252,9 +337,8 @@ class CallInfoToIRParser:
             if cls_name is None:
                 cls_name = class_name
 
-            registry = RegistryClass(
+            registry = RegistryDecorator(
                 name=cls_name,
-                base_class=base_class,
                 export_name=export_name,
             )
 
@@ -279,9 +363,37 @@ class CallInfoToIRParser:
         Returns:
             OverloadSignature
         """
+        # Extract source span if available
+        source_span = None
+        if (
+            call.get("start_offset") is not None
+            and call.get("end_offset") is not None
+            and call.get("lineno") is not None
+            and call.get("start_col") is not None
+            and call.get("end_line") is not None
+            and call.get("end_col") is not None
+        ):
+            # Extract with type assertions since we've checked for None
+            start_offset: int = call["start_offset"]  # type: ignore[assignment]
+            end_offset: int = call["end_offset"]  # type: ignore[assignment]
+            start_line: int = call["lineno"]
+            start_col: int = call["start_col"]  # type: ignore[assignment]
+            end_line: int = call["end_line"]  # type: ignore[assignment]
+            end_col: int = call["end_col"]  # type: ignore[assignment]
+
+            source_span = SourceSpan(
+                start_offset=start_offset,
+                end_offset=end_offset,
+                start_line=start_line,
+                start_col=start_col,
+                end_line=end_line,
+                end_col=end_col,
+            )
+
         return OverloadSignature(
             query_literal=call["literal"],
             return_type=call.get("return_type") or "Any",
             source_file=call.get("file"),
             source_line=call.get("lineno"),
+            source_span=source_span,
         )

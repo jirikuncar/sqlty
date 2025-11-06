@@ -31,6 +31,8 @@ classifiers = [
 ]
 dependencies = [
     "sqlglot>=27.29.0",
+    "asttokens>=3.0.0",
+    "rich>=13.0.0",
 ]
 
 [project.urls]
@@ -41,7 +43,7 @@ Changelog = "https://github.com/jirikuncar/sqlty/releases"
 Issues = "https://github.com/jirikuncar/sqlty/issues"
 
 [project.scripts]
-sqlty = "sqlty._generator:main"
+sqlty = "sqlty._cli:main"
 
 [project.optional-dependencies]
 psycopg = [

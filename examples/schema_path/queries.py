@@ -1,23 +1,17 @@
-"""Query registry for the example application."""
+"""Query registries using @sqlty decorator with different schemas."""
 
-from sqlty import SQLRegistry
+from typing import Any
 
-
-class QueryA(SQLRegistry):
-    """Application-specific SQL query registry.
-
-    This class serves as a registry for all SQL queries in the application.
-    Type-safe overloads are defined in the companion .pyi stub file.
-    """
-
-    __schema_path__ = "schema_a.sql"
+from sqlty import sqlty
 
 
-class QueryB(SQLRegistry):
-    """Application-specific SQL query registry.
+@sqlty(schema="schema_a.sql")
+def sql_a(query: str) -> Any:
+    """Execute SQL queries against schema A."""
+    return query
 
-    This class serves as a registry for all SQL queries in the application.
-    Type-safe overloads are defined in the companion .pyi stub file.
-    """
 
-    __schema_path__ = "schema_b.sql"
+@sqlty(schema="schema_b.sql")
+def sql_b(query: str) -> Any:
+    """Execute SQL queries against schema B."""
+    return query

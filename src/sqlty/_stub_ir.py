@@ -17,6 +17,27 @@ from pathlib import Path
 
 
 @dataclass
+class SourceSpan:
+    """Represents precise source location information.
+
+    Attributes:
+        start_offset: Starting byte offset in source file
+        end_offset: Ending byte offset in source file
+        start_line: Starting line number (1-indexed)
+        start_col: Starting column number (0-indexed)
+        end_line: Ending line number (1-indexed)
+        end_col: Ending column number (0-indexed)
+    """
+
+    start_offset: int
+    end_offset: int
+    start_line: int
+    start_col: int
+    end_line: int
+    end_col: int
+
+
+@dataclass
 class OverloadSignature:
     """Represents a single @overload method signature.
 
@@ -25,6 +46,7 @@ class OverloadSignature:
         return_type: The return type annotation (e.g., "SQL[tuple[int, str]]")
         source_file: Optional source file where this query appears
         source_line: Optional line number in source file
+        source_span: Optional precise source location information
         ast_node: Optional reference to original AST FunctionDef node from stub
     """
 
@@ -32,6 +54,7 @@ class OverloadSignature:
     return_type: str
     source_file: str | None = None
     source_line: int | None = None
+    source_span: SourceSpan | None = None
     ast_node: ast.FunctionDef | None = None
 
     def __hash__(self) -> int:
@@ -46,24 +69,24 @@ class OverloadSignature:
 
 
 @dataclass
-class RegistryClass:
-    """Represents a SQLRegistry subclass with its overloads.
+class RegistryDecorator:
+    """Represents a SQLRegistry subclass or @sqlty decorated function with its overloads.
 
     Attributes:
-        name: Class name (e.g., "UserQueries")
-        base_class: Base class name (e.g., "SQLRegistry")
-        overloads: Set of overload signatures for this registry
-        export_name: Name used for the module-level alias (e.g., "sql", "user_sql")
-        docstring: Optional class docstring
-        ast_node: Optional reference to original AST ClassDef node from stub
+        name: Registry name (class name or function name)
+        overloads: Set of function overloads
+        export_name: Name used for module-level export
+        docstring: Docstring for the registry
+        ast_node: Original AST node if available
+        is_function: Whether this represents a decorated function vs a class
     """
 
     name: str
-    base_class: str = "SQLRegistry"
     overloads: set[OverloadSignature] = field(default_factory=set)
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
-    ast_node: ast.ClassDef | None = None
+    ast_node: ast.FunctionDef | None = None
+    is_function: bool = False
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -133,45 +156,42 @@ class ImportStatement:
 
 @dataclass
 class StubFile:
-    """Represents the complete structure of a .pyi stub file.
+    """Represents a .pyi stub file with SQLRegistry classes and @sqlty decorated functions.
 
     Attributes:
-        imports: Set of import statements
-        registries: Dictionary mapping class name to RegistryClass
-        file_path: Optional path to the stub file
-        ast_module: Optional reference to original AST Module node from stub
+        registries: Dict of registry name to RegistryDecorator for both classes and functions
+        imports: Set of import statements needed for the stub
+        source_path: Optional path to the source .py file this stub corresponds to
+        ast_module: Optional reference to the original AST Module node
     """
 
+    registries: dict[str, RegistryDecorator] = field(default_factory=dict)
     imports: set[ImportStatement] = field(default_factory=set)
-    registries: dict[str, RegistryClass] = field(default_factory=dict)
-    file_path: Path | None = None
+    source_path: Path | None = None
     ast_module: ast.Module | None = None
 
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""
         self.imports.add(import_stmt)
 
-    def add_registry(self, registry: RegistryClass) -> None:
-        """Add or replace a registry class."""
+    def add_registry(self, registry: RegistryDecorator) -> None:
+        """Add or replace a registry class or function."""
         self.registries[registry.name] = registry
 
-    def get_registry(self, name: str) -> RegistryClass | None:
+    def get_registry(self, name: str) -> RegistryDecorator | None:
         """Get a registry by name."""
         return self.registries.get(name)
 
-    def merge_registry(self, registry: RegistryClass, mode: str = "incremental") -> None:
+    def merge_registry(self, registry: RegistryDecorator, mode: str = "incremental") -> None:
         """Merge a registry into this stub file.
 
         Args:
             registry: The registry to merge
-            mode: Merge mode - "incremental", "full", or "prune"
-                - incremental: Add new overloads, keep existing ones
-                - full: Replace entire registry with new one
+            mode: Merge mode - "incremental" or "prune"
+                - incremental: Add new overloads, keep existing ones (never removes)
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
-        if mode == "full":
-            self.registries[registry.name] = registry
-        elif mode == "incremental":
+        if mode == "incremental":
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 for overload in registry.overloads:
@@ -182,6 +202,7 @@ class StubFile:
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
                 new_literals = {o.query_literal for o in registry.overloads}
+                # Remove overloads not in new registry (never adds new ones)
                 to_remove = [
                     o.query_literal
                     for o in existing.overloads
@@ -204,9 +225,7 @@ class StubFile:
             ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
         )
 
-        base_classes = {r.base_class for r in self.registries.values()}
-        sqlty_imports = ["SQL"] + sorted(base_classes)
-        required.add(ImportStatement(module="sqlty", names=sqlty_imports, from_import=True))
+        required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
 
         type_patterns = {
             r"\buuid\.UUID\b": ImportStatement(module="uuid", names=[], from_import=False),
@@ -224,3 +243,91 @@ class StubFile:
                         required.add(import_stmt)
 
         return required
+
+    def has_same_overloads(self, other: "StubFile") -> bool:
+        """Check if two StubFiles have the same overloads per registry.
+
+        Compares only the semantic content (overloads) per registry,
+        ignoring metadata like export names, base classes, etc.
+
+        Args:
+            other: Another StubFile to compare with
+
+        Returns:
+            True if both have the same registries with same overloads
+        """
+        # Check if registry sets differ
+        if set(self.registries.keys()) != set(other.registries.keys()):
+            return False
+
+        # Check each registry for differences in overloads only
+        for name in self.registries:
+            self_registry = self.registries[name]
+            other_registry = other.registries[name]
+
+            # Compare overload signatures (query literals and return types)
+            self_overloads = {(o.query_literal, o.return_type) for o in self_registry.overloads}
+            other_overloads = {(o.query_literal, o.return_type) for o in other_registry.overloads}
+
+            if self_overloads != other_overloads:
+                return False
+
+        return True
+
+    def compute_overload_diff(
+        self, other: "StubFile"
+    ) -> dict[str, dict[str, list[tuple[str, str]]]]:
+        """Compute differences in overloads between two StubFiles.
+
+        Args:
+            other: Another StubFile to compare with (expected/new state)
+
+        Returns:
+            Dictionary mapping registry names to their differences:
+            {
+                "RegistryName": {
+                    "missing": [(query, return_type), ...],  # In self but not in other
+                    "extra": [(query, return_type), ...],     # In other but not in self
+                }
+            }
+        """
+        diff_result: dict[str, dict[str, list[tuple[str, str]]]] = {}
+
+        # Get all registry names from both
+        all_registry_names = set(self.registries.keys()) | set(other.registries.keys())
+
+        for name in all_registry_names:
+            self_registry = self.registries.get(name)
+            other_registry = other.registries.get(name)
+
+            missing = []
+            extra = []
+
+            match self_registry, other_registry:
+                case (None, None):
+                    continue  # Should not happen
+                case (None, RegistryDecorator(overloads=other_overloads)):
+                    # Registry exists in other but not in self (new registry)
+                    extra = [(o.query_literal, o.return_type) for o in other_overloads]
+                case (RegistryDecorator(overloads=self_overloads), None):
+                    # Registry exists in self but not in other (removed registry)
+                    missing = [(o.query_literal, o.return_type) for o in self_overloads]
+                case (
+                    RegistryDecorator(overloads=self_overloads),
+                    RegistryDecorator(overloads=other_overloads),
+                ):
+                    # Both registries exist, compare overloads
+                    unique_self_overloads: set[tuple[str, str]] = {
+                        (o.query_literal, o.return_type) for o in self_overloads
+                    }
+                    unique_other_overloads: set[tuple[str, str]] = {
+                        (o.query_literal, o.return_type) for o in other_overloads
+                    }
+
+                    missing = sorted(unique_self_overloads - unique_other_overloads)
+                    extra = sorted(unique_other_overloads - unique_self_overloads)
+
+            if missing or extra:
+                diff_result[name] = {"missing": missing, "extra": extra}
+
+        return diff_result

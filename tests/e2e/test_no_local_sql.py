@@ -1,9 +1,13 @@
 """Test that local sql() functions not from SQLRegistry are ignored."""
 
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 
-def test_local_sql_function_ignored(tmp_path: Path, cli) -> None:
+def test_local_sql_function_ignored(
+    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
     """Test that a local sql() function is ignored if not from SQLRegistry."""
     # Create a file with a local sql() function (NOT from SQLRegistry)
     local_file = tmp_path / "local_helper.py"
@@ -23,7 +27,7 @@ result = sql("SELECT * FROM users")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that NO stub was generated for local_helper
@@ -31,17 +35,18 @@ result = sql("SELECT * FROM users")
     assert not stub_file.exists(), "Stub should not be generated for local sql() function"
 
 
-def test_registry_sql_function_generates_stub(tmp_path: Path, cli) -> None:
+def test_registry_sql_function_generates_stub(
+    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
     """Test that sql() from SQLRegistry is correctly processed."""
     # Create a registry file
     registry_file = tmp_path / "queries.py"
     registry_file.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
+@sqlty
+def sql(query: str):
+    return query
 """)
 
     # Create a file that imports and uses the registry sql()
@@ -54,7 +59,7 @@ result = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that a stub WAS generated for queries
@@ -63,25 +68,25 @@ result = sql("SELECT id::INTEGER FROM users")
 
     stub_content = stub_file.read_text()
     assert "SELECT id::INTEGER FROM users" in stub_content, "Query should be in stub"
-    assert "class Query(SQLRegistry)" in stub_content, "Query class should be in stub"
+    assert "@overload" in stub_content, "Overloads should be in stub"
 
 
-def test_multi_registry_with_aliases(tmp_path: Path, cli) -> None:
+def test_multi_registry_with_aliases(
+    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
     """Test the example from issue: multiple registries with aliases."""
     # Create query.py with two registries
     query_file = tmp_path / "query.py"
     query_file.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class A(SQLRegistry):
-    pass
+@sqlty
+def qa(query: str):
+    return query
 
-qa = A.sql
-
-class B(SQLRegistry):
-    pass
-
-qb = B.sql
+@sqlty
+def qb(query: str):
+    return query
 """)
 
     # Create app.py that uses both registries
@@ -98,7 +103,7 @@ b: SQL[tuple[str]] = qb("SELECT 'a'::TEXT")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that a stub was generated with both classes
@@ -106,51 +111,44 @@ b: SQL[tuple[str]] = qb("SELECT 'a'::TEXT")
     assert stub_file.exists(), "Stub should be generated for query.py"
 
     stub_content = stub_file.read_text()
-    assert "class A(SQLRegistry)" in stub_content, "Class A should be in stub"
-    assert "class B(SQLRegistry)" in stub_content, "Class B should be in stub"
-    assert "SELECT 1::INTEGER" in stub_content, "Query for A should be in stub"
-    assert "SELECT 'a'::TEXT" in stub_content, "Query for B should be in stub"
-    assert "qa = A.sql" in stub_content, "Alias qa should be in stub"
-    assert "qb = B.sql" in stub_content, "Alias qb should be in stub"
+    assert "@overload" in stub_content, "Overloads should be in stub"
+    assert "SELECT 1::INTEGER" in stub_content, "Query for qa should be in stub"
+    assert "SELECT 'a'::TEXT" in stub_content, "Query for qb should be in stub"
 
 
-def test_import_registry_class_directly(tmp_path: Path, cli) -> None:
+def test_import_registry_class_directly(
+    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
     """Test importing and using registry class directly (from issue example variant)."""
     # Create query.py with two registries
     query_file = tmp_path / "query.py"
     query_file.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class A(SQLRegistry):
-    pass
+@sqlty
+def qa(query: str):
+    return query
 
-qa = A.sql
-
-class B(SQLRegistry):
-    pass
-
-qb = B.sql
+@sqlty
+def qb(query: str):
+    return query
 """)
 
-    # Create app.py that imports classes directly
+    # Create app.py that imports functions directly
     app_file = tmp_path / "app.py"
     app_file.write_text("""
 from typing import TYPE_CHECKING
-from query import A, B
+from query import qa, qb
 
 if TYPE_CHECKING:
     from sqlty import SQL
-
-# Use classes directly with local aliases
-qa = A.sql
-qb = B.sql
 
 a: SQL[tuple[int]] = qa("SELECT 2::INTEGER")
 b: SQL[tuple[str]] = qb("SELECT 'b'::TEXT")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that a stub was generated with both classes
@@ -158,8 +156,7 @@ b: SQL[tuple[str]] = qb("SELECT 'b'::TEXT")
     assert stub_file.exists(), "Stub should be generated for query.py"
 
     stub_content = stub_file.read_text()
-    assert "class A(SQLRegistry)" in stub_content, "Class A should be in stub"
-    assert "class B(SQLRegistry)" in stub_content, "Class B should be in stub"
-    # These queries are in app.py but should be in query.pyi since they reference query module classes
-    assert "SELECT 2::INTEGER" in stub_content, "Query for A should be in stub"
-    assert "SELECT 'b'::TEXT" in stub_content, "Query for B should be in stub"
+    assert "@overload" in stub_content, "Overloads should be in stub"
+    # These queries are in app.py but should be in query.pyi since they reference query module functions
+    assert "SELECT 2::INTEGER" in stub_content, "Query for qa should be in stub"
+    assert "SELECT 'b'::TEXT" in stub_content, "Query for qb should be in stub"

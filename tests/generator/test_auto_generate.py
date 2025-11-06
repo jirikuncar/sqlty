@@ -1,6 +1,7 @@
 """Tests for automatic stub file generation at runtime."""
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,12 +13,12 @@ def test_auto_generate_disabled_by_default(tmp_path: Path) -> None:
     # Create a temporary module file
     module_path = tmp_path / "test_registry.py"
     module_path.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class MyQuery(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 
-sql = MyQuery.sql
 query = sql("SELECT 1")
 """)
 
@@ -41,12 +42,12 @@ def test_auto_generate_with_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     # Create a temporary module file
     module_path = tmp_path / "test_auto_gen.py"
     module_path.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class AutoQuery(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 
-sql = AutoQuery.sql
 query1 = sql("SELECT id, name FROM users")
 query2 = sql("SELECT COUNT(*) FROM posts")
 """)
@@ -65,7 +66,7 @@ query2 = sql("SELECT COUNT(*) FROM posts")
 
         # Check stub content
         content = stub_path.read_text()
-        assert "class AutoQuery(SQLRegistry):" in content
+        assert "@overload" in content
         assert "SELECT id, name FROM users" in content
         assert "SELECT COUNT(*) FROM posts" in content
 
@@ -84,43 +85,36 @@ def test_auto_generate_incremental(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     existing_stub = """# Custom stub content
 from typing import overload
 
-class IncrementalQuery:
-    @overload
-    @classmethod
-    def sql(cls, query: str) -> str: ...
+@overload
+def sql(query: str) -> str: ...
 """
     stub_path.write_text(existing_stub)
 
     # Create module that would generate a different stub
     module_path.write_text("""
-from sqlty import SQLRegistry
+from typing import Any
+from sqlty import sqlty
 
-class IncrementalQuery(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str) -> Any:
+    return query
 
-sql = IncrementalQuery.sql
 query = sql("SELECT new_query FROM table")
 """)
 
-    # Set environment variable
-    monkeypatch.setenv("SQLTY_AUTO_GENERATE", "true")
+    subprocess.run(
+        [sys.executable, str(module_path)],
+        check=True,
+        env={"SQLTY_AUTO_GENERATE": "true"},
+    )
 
-    sys.path.insert(0, str(tmp_path))
-    try:
-        import test_incremental  # type: ignore[import-not-found] # noqa: F401
+    # Stub should still exist
+    assert stub_path.exists()
 
-        # Stub should still exist
-        assert stub_path.exists()
-
-        # Check that it was updated incrementally (new query added)
-        content = stub_path.read_text()
-        # In incremental mode, the new query should be added
-        assert "SELECT new_query FROM table" in content
-
-    finally:
-        sys.path.remove(str(tmp_path))
-        if "test_incremental" in sys.modules:
-            del sys.modules["test_incremental"]
+    # Check that it was updated incrementally (new query added)
+    content = stub_path.read_text()
+    # In incremental mode, the new query should be added
+    assert "SELECT new_query FROM table" in content
 
 
 def test_auto_generate_with_different_values(
@@ -135,13 +129,13 @@ def test_auto_generate_with_different_values(
         test_dir.mkdir(exist_ok=True)
 
         module_path = test_dir / f"test_value_{value}.py"
-        module_path.write_text(f"""
-from sqlty import SQLRegistry
+        module_path.write_text("""
+from sqlty import sqlty
 
-class Query{value}(SQLRegistry):
-    pass
+@sqlty
+def sql(query: str):
+    return query
 
-sql = Query{value}.sql
 query = sql("SELECT 1")
 """)
 
@@ -176,11 +170,13 @@ def test_auto_generate_error_handling(tmp_path: Path, monkeypatch: pytest.Monkey
     # a module without sql calls can still be imported successfully
     module_path = tmp_path / "test_no_sql.py"
     module_path.write_text("""
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class NoSQLQuery(SQLRegistry):
-    # No sql() calls, which should generate a minimal stub
-    pass
+@sqlty
+def sql(query: str):
+    return query
+
+# No sql() calls, which should generate a minimal stub
 """)
 
     stub_path = module_path.with_suffix(".pyi")
@@ -199,7 +195,7 @@ class NoSQLQuery(SQLRegistry):
         # Stub should still have been generated (minimal stub)
         assert stub_path.exists()
         content = stub_path.read_text()
-        assert "class NoSQLQuery(SQLRegistry):" in content
+        assert "@overload" in content
 
     finally:
         sys.path.remove(str(tmp_path))

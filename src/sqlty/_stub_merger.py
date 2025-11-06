@@ -44,7 +44,6 @@ class StubMerger:
         output_path: Path,
         new_calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         full_mode: bool = False,
         export_name: str = "sql",
         prune: bool = False,
@@ -55,7 +54,6 @@ class StubMerger:
             output_path: Path to stub file
             new_calls: SQL calls to add
             class_name: Registry class name
-            base_class: Base class name
             full_mode: Replace entire registry
             export_name: Exported function name
             prune: Remove stale overloads
@@ -63,16 +61,35 @@ class StubMerger:
         Returns:
             Generated stub content
         """
-        new_stub = self._call_parser.parse_calls(new_calls, class_name, base_class, export_name)
+        new_stub = self._call_parser.parse_calls(new_calls, class_name, export_name)
 
         if not output_path.exists():
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
 
+        # Read original source and parse existing stub
+        original_source = output_path.read_text(encoding="utf-8")
         existing_stub = self._pyi_parser.parse_file(output_path)
 
-        mode = "prune" if prune else ("full" if full_mode else "incremental")
+        if full_mode:
+            # Full replace: ignore existing, serialize new stub without preservation
+            return self._serializer.serialize_to_text(
+                new_stub, relative_to=output_path.parent, preserve_structure=False
+            )
 
+        # Apply incremental and optionally prune to existing stub
         for new_registry in new_stub.registries.values():
-            existing_stub.merge_registry(new_registry, mode=mode)
+            # Add new overloads
+            existing_stub.merge_registry(new_registry, mode="incremental")
+            if prune:
+                # Remove stale overloads
+                existing_stub.merge_registry(new_registry, mode="prune")
 
-        return self._serializer.serialize_to_text(existing_stub, relative_to=output_path.parent)
+        # Use surgical editing to preserve comments and structure
+        # Reuse existing_stub which already has source spans from line 73
+        return self._serializer.serialize_to_text(
+            existing_stub,
+            relative_to=output_path.parent,
+            preserve_structure=True,
+            original_source=original_source,
+            original_stub=existing_stub,
+        )

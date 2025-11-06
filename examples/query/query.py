@@ -15,9 +15,9 @@ from psycopg.abc import Params
 
 from sqlty.drivers.psycopg import execute
 
-from .queries import Query as Q
+from .queries import sql
 
-query = Q.sql(
+query = sql(
     """
     SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id
     """

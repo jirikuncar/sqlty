@@ -4,56 +4,45 @@ This module contains helper functions that generate or update .pyi stub files
 when SQLRegistry subclasses are defined at runtime (opt-in via environment).
 """
 
-from __future__ import annotations
-
 import inspect
-import logging
-from pathlib import Path
+from collections.abc import Callable
+from typing import Any
+
+from sqlty._runtime_registry import get_runtime_registry
 
 
-def auto_generate_stub(cls: type) -> None:
-    """Generate or update a stub file for the module that defines ``cls``.
+def auto_generate_stub(fn: Callable[[str], Any], query: str) -> None:
+    """Generate or update a stub file for the module that defines `fn`.
 
-    This function is intended to be called from SQLRegistry.__init_subclass__
+    This function is intended to be called by @sqlty decorator
     when the SQLTY_AUTO_GENERATE environment variable is enabled.
-    
+
     If a .pyi file already exists, it will be updated incrementally.
     If no .pyi file exists, stub generation is deferred to the atexit handler
     which will have collected all runtime sql() calls.
     """
-    # Get the module where this class is defined
-    module = inspect.getmodule(cls)
-    if not module or not hasattr(module, "__file__") or not module.__file__:
+    # Get the module for this registry class
+    module = inspect.getmodule(fn)
+    if not module:
         return
 
-    source_file = Path(module.__file__)
-    if not source_file.exists():
-        return
-    
-    # Check if stub file already exists
-    stub_file = source_file.with_suffix(".pyi")
-    if not stub_file.exists():
-        # No stub exists yet - defer to atexit handler which will have
-        # all runtime calls collected
-        logging.getLogger(__name__).debug(
-            "[sqlty] Deferring stub generation for %s to atexit (no existing stub)",
-            source_file.name
-        )
-        return
+    module_name = module.__name__
 
+    # Get the source file where the registry class is defined
     try:
-        # Import lazily to avoid circular imports
-        from sqlty._generator import TypeStubGenerator
+        registry_file = inspect.getfile(fn)
+    except (TypeError, OSError):
+        return None
 
-        generator = TypeStubGenerator()
-        generator.generate_stub_file(
-            source_file,
-            class_name=cls.__name__,
-            base_class="SQLRegistry",
-            mode="incremental",  # Don't overwrite existing stubs
-        )
+    # Build fully qualified class name
+    fully_qualified_name = f"{registry_file}.{fn.__name__}"
 
-        logging.getLogger(__name__).info("[sqlty] Auto-generated stub for %s", source_file.name)
-    except Exception as e:  # pragma: no cover - best-effort logging only
-        # Don't crash the application if stub generation fails
-        logging.getLogger(__name__).warning("[sqlty] Failed to auto-generate stub: %s", e)
+    # Register the call
+    registry = get_runtime_registry()
+    registry.register_call(
+        query=query,
+        registry_class=fn.__name__,
+        fully_qualified_name=fully_qualified_name,
+        registry_file=registry_file,
+        module_name=module_name,
+    )

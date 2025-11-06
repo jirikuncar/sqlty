@@ -1,0 +1,16 @@
+
+# Ignore runtime-only symbols, but do not ignore everything
+.*\.__schema_path__
+.*\.main
+.*\.get_.*
+.*\.list_.*
+.*\..*_query
+.*\..*_with_.*
+
+# Ignore SQL-typed variables that have runtime string values
+.*\.q
+.*\.q2
+.*\.query
+
+# Ignore mypy-generated attributes
+.*\.__conditional_annotations__

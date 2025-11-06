@@ -1,23 +1,24 @@
 """Post-related queries registry."""
 
-from sqlty import SQLRegistry
+from typing import Any
+
+from sqlty import sqlty
 
 
-class PostQueries(SQLRegistry):
-    """Registry for post-related SQL queries."""
-
-    pass
-
-
-# Export the sql method
-post_sql = PostQueries.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 
 
 # Define queries in the same file as the registry
-get_post = post_sql("""
-    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id
+get_post = sql("""
+    SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id AND user_id = :user_id
 """)
 
-list_posts = post_sql("""
+list_posts = sql("""
     SELECT id::INTEGER, title::TEXT FROM posts ORDER BY created_at DESC
+""")
+
+get_user_posts = sql("""
+    SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id
 """)

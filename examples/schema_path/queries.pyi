@@ -1,26 +1,15 @@
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
-class QueryA(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
-
-    @overload
-    @classmethod
-    def sql(
-        cls, query: Literal["\n    SELECT id, name, age FROM users WHERE id = :id\n    "]
-    ) -> SQL[tuple[int, str, int]]: ...
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-class QueryB(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
-
-    @overload
-    @classmethod
-    def sql(
-        cls, query: Literal["\n    SELECT id, name, age FROM users WHERE id = :id\n    "]
-    ) -> SQL[tuple[int, str, float]]: ...
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
+@overload
+def sql_a(
+    query: Literal["\n    SELECT id, name, age FROM users WHERE id = :id\n    "],
+) -> SQL[tuple[int, str, int]]: ...
+@overload
+def sql_a(query: str) -> str: ...
+@overload
+def sql_b(
+    query: Literal["\n    SELECT id, name, age FROM users WHERE id = :id\n    "],
+) -> SQL[tuple[int, str, float]]: ...
+@overload
+def sql_b(query: str) -> str: ...

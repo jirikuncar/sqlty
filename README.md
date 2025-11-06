@@ -14,12 +14,12 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
 SQLTy provides type-safe SQL query execution with automatic type inference and stub generation. Write SQL queries with explicit type casts, and let SQLTy generate precise type stubs for full mypy integration.
 
 ```python
-from sqlty import SQLRegistry
+from typing import Any
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 
 # Type-safe query with automatic inference
 query = sql("SELECT id::INTEGER, name::TEXT FROM users")
@@ -34,6 +34,17 @@ result = execute(conn, query, {})
 for user_id, name in result:
     print(f"User {user_id}: {name}")
 ```
+
+## Why SQLTy?
+
+**For teams working with raw SQL in large codebases.** If you're using an ORM, stick with its type system.
+
+SQLTy provides:
+- **Minimal runtime overhead** - Type checking happens at analysis time, not runtime
+- **Fast imports** - Stub-based typing avoids expensive runtime introspection
+- **Scale** - Designed for large codebases with thousands of queries
+
+See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/docs/motivation.md) for details.
 
 ## Features
 
@@ -64,12 +75,11 @@ See [advanced usage documentation](https://github.com/jirikuncar/sqlty/blob/main
 
 ```python
 # queries.py
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
+@sqlty
+def sql(query: str) -> Any:
+    return query
 ```
 
 ```python
@@ -98,6 +108,19 @@ sqlty . --mode=create
 
 # Custom mode combinations
 sqlty . --mode=incremental,prune
+```
+
+**Check stubs are up-to-date:**
+
+```bash
+# Check without modifying files
+sqlty . --check
+
+# Check with detailed diff output
+sqlty . --check --verbose
+
+# Check with colored diff (requires rich library)
+sqlty . --check -vv
 ```
 
 **Type check:**
@@ -133,10 +156,28 @@ sqlty queries.py --mode=fresh
 
 **Safety:** Prune mode prompts for confirmation when used on single files to prevent accidentally removing stubs for queries defined elsewhere.
 
+## Check Mode
+
+The `--check` flag verifies that stub files are up-to-date without modifying them. This is useful for CI/CD pipelines and pre-commit hooks to ensure type stubs match the current code.
+
+**Note:** `--check` and `--format-command` are mutually exclusive. Check mode compares the intermediate representations (IR) of registries - specifically the query literals and return types of each overload - rather than text output. This provides semantic comparison that ignores formatting, whitespace, and comment differences, ensuring only meaningful changes trigger failures.
+
+```bash
+# Basic check (exit code 0 if up-to-date, 1 if differences found)
+sqlty . --check
+
+# Show unified diff of changes
+sqlty . --check --verbose
+
+# Show colored diff with syntax highlighting (requires rich library)
+sqlty . --check -vv
+```
+
 ### Pre-commit Hook
 
-Automatically generate stubs on commit by adding to your `.pre-commit-config.yaml`:
+Automatically generate or check stubs on commit by adding to your `.pre-commit-config.yaml`:
 
+**Generate stubs automatically:**
 ```yaml
 repos:
   - repo: https://github.com/jirikuncar/sqlty
@@ -146,6 +187,17 @@ repos:
         # Optional: customize with args
         # Default mode for directories: incremental,prune,create
         # args: [".", "--schema=schema.sql"]
+```
+
+**Check stubs are up-to-date (recommended for CI):**
+```yaml
+repos:
+  - repo: https://github.com/jirikuncar/sqlty
+    rev: v0.1.0  # Use the latest version
+    hooks:
+      - id: sqlty-check
+        # Shows verbose diff output when stubs are outdated
+        # args: [".", "--check", "--verbose"]
 ```
 
 For more targeted stub generation (e.g., only for specific directories), you can use a local hook:
