@@ -70,6 +70,68 @@ def cli() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Comp
 
 
 @pytest.fixture
+def registries_cli() -> (
+    Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]]
+):
+    """Fixture to run sqlty.registries CLI commands.
+
+    Returns a callable that runs the sqlty.registries CLI with the given arguments.
+
+    Args:
+        args: List of arguments to pass to sqlty.registries (e.g., [str(tmp_path)])
+        kwargs: Optional keyword arguments to pass to subprocess.run
+
+    Returns:
+        A CompletedProcess instance from subprocess.run
+
+    Example:
+        result = registries_cli([str(tmp_path)])
+        assert result.returncode == 0
+    """
+    import os
+
+    # Get the source directory path (assuming tests are in tests/e2e/)
+    src_dir = Path(__file__).parent.parent.parent / "src"
+
+    def _run_registries_cli(
+        args: list[str | Path], kwargs: dict[str, Any] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Run sqlty.registries CLI with given arguments."""
+        if kwargs is None:
+            kwargs = {}
+
+        # Set default kwargs for CLI execution
+        default_kwargs = {
+            "capture_output": True,
+            "text": True,
+        }
+        default_kwargs.update(kwargs)
+
+        # Convert Path objects to strings
+        str_args = [str(arg) for arg in args]
+
+        # Set PYTHONPATH to include src directory
+        env = kwargs.get("env", os.environ.copy())
+        pythonpath = env.get("PYTHONPATH", "")
+        if pythonpath:
+            env["PYTHONPATH"] = f"{src_dir}:{pythonpath}"
+        else:
+            env["PYTHONPATH"] = str(src_dir)
+
+        # Remove env from kwargs if it was there, we'll add it back
+        if "env" in default_kwargs:
+            del default_kwargs["env"]
+
+        return subprocess.run(
+            [sys.executable, "-m", "sqlty.registries"] + str_args,
+            env=env,
+            **default_kwargs,
+        )
+
+    return _run_registries_cli
+
+
+@pytest.fixture
 def setup_queries_file() -> Callable[[Path, str, str | None], Path]:
     """Fixture to create a queries.py file with SQLRegistry.
 

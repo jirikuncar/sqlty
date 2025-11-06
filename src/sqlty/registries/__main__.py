@@ -13,34 +13,6 @@ from pathlib import Path
 from sqlty._registry import RegistryDetector
 
 
-def find_registries(root_path: Path) -> list[tuple[Path, str]]:
-    """Find all SQLRegistry subclasses in Python files under the given path.
-
-    Args:
-        root_path: The root directory to search for Python files
-
-    Returns:
-        List of tuples containing (file_path, registry_class_name)
-    """
-    detector = RegistryDetector()
-    registries: list[tuple[Path, str]] = []
-
-    # Find all Python files
-    python_files = [root_path] if root_path.is_file() else sorted(root_path.rglob("*.py"))
-
-    for py_file in python_files:
-        try:
-            # Get all registry class names in this file
-            class_names = detector.get_registry_class_names(py_file)
-            for class_name in class_names:
-                registries.append((py_file, class_name))
-        except (SyntaxError, UnicodeDecodeError, OSError):
-            # Skip files that can't be parsed or read
-            continue
-
-    return registries
-
-
 def main() -> None:
     """Main entry point for the registries command."""
     # Parse command-line arguments
@@ -58,7 +30,8 @@ def main() -> None:
         sys.exit(1)
 
     # Find all registries
-    registries = find_registries(search_path)
+    detector = RegistryDetector()
+    registries = detector.find_registries(search_path)
 
     # Print results
     for file_path, class_name in registries:
