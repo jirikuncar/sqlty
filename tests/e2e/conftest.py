@@ -34,17 +34,38 @@ def _create_cli_runner(
             "capture_output": True,
             "text": True,
         }
-        
+
         # Only update with valid subprocess.run parameters
         valid_keys = {
-            "capture_output", "text", "input", "stdin", "stdout", "stderr",
-            "shell", "cwd", "timeout", "check", "encoding", "errors",
-            "universal_newlines", "bufsize", "executable",
-            "preexec_fn", "close_fds", "pass_fds", "restore_signals",
-            "start_new_session", "process_group", "group", "user",
-            "umask", "pipesize", "env", "extra_groups"
+            "capture_output",
+            "text",
+            "input",
+            "stdin",
+            "stdout",
+            "stderr",
+            "shell",
+            "cwd",
+            "timeout",
+            "check",
+            "encoding",
+            "errors",
+            "universal_newlines",
+            "bufsize",
+            "executable",
+            "preexec_fn",
+            "close_fds",
+            "pass_fds",
+            "restore_signals",
+            "start_new_session",
+            "process_group",
+            "group",
+            "user",
+            "umask",
+            "pipesize",
+            "env",
+            "extra_groups",
         }
-        
+
         for key, value in (kwargs or {}).items():
             if key in valid_keys:
                 run_kwargs[key] = value
@@ -114,7 +135,7 @@ def registries_cli() -> Callable[..., subprocess.CompletedProcess[str]]:
 
 
 @pytest.fixture
-def setup_queries_file() -> Callable[[Path, str], Path]:
+def setup_queries_file() -> Callable[..., Path]:
     """Fixture to create a queries.py file with SQLRegistry.
 
     Returns a callable that creates a queries.py file with the given
@@ -122,21 +143,23 @@ def setup_queries_file() -> Callable[[Path, str], Path]:
 
     Args:
         tmp_path: The temporary directory path
+        filename: Name of the file to create (e.g., "queries.py") (default: "queries.py")
         function_name: Name of the SQL function (default: "sql")
 
     Returns:
         Path to the created queries.py file
 
     Example:
-        queries_file = setup_queries_file(tmp_path, "sql")
-        queries_file = setup_queries_file(tmp_path, "user_sql")
+        queries_file = setup_queries_file(tmp_path, "queries.py", "sql")
+        queries_file = setup_queries_file(tmp_path, "user_queries.py", "user_sql")
+        queries_file = setup_queries_file(tmp_path)  # creates queries.py with sql function
     """
 
     def _create_queries_file(
-        tmp_path: Path, function_name: str = "sql"
+        tmp_path: Path, filename: str = "queries.py", function_name: str = "sql"
     ) -> Path:
         """Create a queries.py file with SQLRegistry."""
-        queries_file = tmp_path / "queries.py"
+        queries_file = tmp_path / filename
 
         content = f"""from typing import Any
 from sqlty import sqlty
@@ -153,7 +176,7 @@ def {function_name}(query: str) -> Any:
 
 
 @pytest.fixture
-def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]]:
+def mypy() -> Callable[..., subprocess.CompletedProcess[str]]:
     """Fixture to run mypy type checker.
 
     Returns a callable that runs mypy with the given arguments.
@@ -184,17 +207,38 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
             "capture_output": True,
             "text": True,
         }
-        
+
         # Only update with valid subprocess.run parameters
         valid_keys = {
-            "capture_output", "text", "input", "stdin", "stdout", "stderr",
-            "shell", "cwd", "timeout", "check", "encoding", "errors",
-            "universal_newlines", "bufsize", "executable",
-            "preexec_fn", "close_fds", "pass_fds", "restore_signals",
-            "start_new_session", "process_group", "group", "user",
-            "umask", "pipesize", "env", "extra_groups"
+            "capture_output",
+            "text",
+            "input",
+            "stdin",
+            "stdout",
+            "stderr",
+            "shell",
+            "cwd",
+            "timeout",
+            "check",
+            "encoding",
+            "errors",
+            "universal_newlines",
+            "bufsize",
+            "executable",
+            "preexec_fn",
+            "close_fds",
+            "pass_fds",
+            "restore_signals",
+            "start_new_session",
+            "process_group",
+            "group",
+            "user",
+            "umask",
+            "pipesize",
+            "env",
+            "extra_groups",
         }
-        
+
         for key, value in (kwargs or {}).items():
             if key in valid_keys:
                 run_kwargs[key] = value
@@ -224,9 +268,7 @@ def mypy() -> Callable[[list[str | Path], dict[str, Any] | None], subprocess.Com
 
 
 @pytest.fixture
-def stubtest() -> Callable[
-    [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-]:
+def stubtest() -> Callable[..., subprocess.CompletedProcess[str]]:
     """Fixture to run stubtest for validating stub files.
 
     Returns a callable that runs stubtest with the given arguments.
@@ -260,17 +302,38 @@ def stubtest() -> Callable[
             "capture_output": True,
             "text": True,
         }
-        
+
         # Only update with valid subprocess.run parameters
         valid_keys = {
-            "capture_output", "text", "input", "stdin", "stdout", "stderr",
-            "shell", "cwd", "timeout", "check", "encoding", "errors",
-            "universal_newlines", "bufsize", "executable",
-            "preexec_fn", "close_fds", "pass_fds", "restore_signals",
-            "start_new_session", "process_group", "group", "user",
-            "umask", "pipesize", "env", "extra_groups"
+            "capture_output",
+            "text",
+            "input",
+            "stdin",
+            "stdout",
+            "stderr",
+            "shell",
+            "cwd",
+            "timeout",
+            "check",
+            "encoding",
+            "errors",
+            "universal_newlines",
+            "bufsize",
+            "executable",
+            "preexec_fn",
+            "close_fds",
+            "pass_fds",
+            "restore_signals",
+            "start_new_session",
+            "process_group",
+            "group",
+            "user",
+            "umask",
+            "pipesize",
+            "env",
+            "extra_groups",
         }
-        
+
         for key, value in (kwargs or {}).items():
             if key in valid_keys:
                 run_kwargs[key] = value

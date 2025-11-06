@@ -3,12 +3,19 @@
 Tests the workflow with multiple SQL registries in the same project.
 """
 
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from inline_snapshot import snapshot
 
 
-def test_multi_registry_different_files(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
+def test_multi_registry_different_files(
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    mypy: Callable[..., subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str], Path],
+) -> None:
     """Test multiple registries in different files."""
     # Create first registry
     setup_queries_file(tmp_path, "user_queries.py")
@@ -47,47 +54,35 @@ posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM pos
 
     # Snapshot user stub
     user_stub_content = user_stub.read_text()
-    assert user_stub_content == snapshot('''\
+    assert user_stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class UserQuery(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, name::TEXT FROM users']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = UserQuery.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
     # Snapshot post stub
     post_stub_content = post_stub.read_text()
-    assert post_stub_content == snapshot('''\
+    assert post_stub_content == snapshot("""\
 from typing import Literal, overload
-from sqlty import SQL, SQLRegistry
+from sqlty import SQL
 
 
-class PostQuery(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+@overload
+def sql(query: Literal['SELECT id::INTEGER, title::TEXT FROM posts']) -> SQL[tuple[int, str]]:
+    ...
 
-    @overload
-    @classmethod
-    def sql(cls, query: Literal['SELECT id::INTEGER, title::TEXT FROM posts']) -> SQL[tuple[int, str]]:
-        ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T:
-        ...
-sql = PostQuery.sql
-''')
+@overload
+def sql(query: str) -> str:
+    ...
+""")
 
     # Validate with mypy
     mypy_result = mypy([str(app_file), "--strict"])
@@ -96,14 +91,16 @@ sql = PostQuery.sql
 
 
 def test_multi_registry_same_query_different_registries(
-    tmp_path: Path, cli, setup_queries_file
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[[Path, str, str], Path],
 ) -> None:
     """Test that same query in different registries creates separate overloads."""
     # Create first registry
-    setup_queries_file(tmp_path, "registry1.py", "Registry1")
+    setup_queries_file(tmp_path, "registry1.py", "sql")
 
     # Create second registry
-    setup_queries_file(tmp_path, "registry2.py", "Registry2")
+    setup_queries_file(tmp_path, "registry2.py", "sql")
 
     # Create app using the same query with both registries
     app_file = tmp_path / "app.py"
@@ -140,7 +137,9 @@ query2: SQL[tuple[int]] = sql2("SELECT 1::INTEGER")
     assert "SELECT 1::INTEGER" in stub2_content
 
 
-def test_nested_package_structure(tmp_path: Path, cli) -> None:
+def test_nested_package_structure(
+    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
     """Test multi-registry in nested package structure."""
     # Create package structure
     package_dir = tmp_path / "myapp"
@@ -210,7 +209,9 @@ sql = UserQuery.sql
 ''')
 
 
-def test_multi_registry_same_file_no_duplicate_aliases(tmp_path: Path, cli) -> None:
+def test_multi_registry_same_file_no_duplicate_aliases(
+    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
     """Test that multiple registries in the same file don't create duplicate aliases."""
     # Create a single file with two registries
     queries_file = tmp_path / "queries.py"
