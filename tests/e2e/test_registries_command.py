@@ -8,9 +8,7 @@ from typing import Any
 
 def test_registries_find_single_file(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test finding registries in a single file."""
     # Create a test file with a registry
@@ -30,9 +28,7 @@ class TestRegistry(SQLRegistry):
 
 def test_registries_find_in_directory(
     tmp_path: Path,
-    registries_cli: Callable[
-        [list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]
-    ],
+    registries_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test finding registries in a directory."""
     # Create multiple files with registries

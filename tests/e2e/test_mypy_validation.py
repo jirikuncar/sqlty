@@ -242,11 +242,10 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
     stub_content = stub_file.read_text()
 
     # Add a method that doesn't exist in the runtime
-    modified_stub = stub_content.replace(
-        "class Query(SQLRegistry):",
-        """class Query(SQLRegistry):
-    def nonexistent_method(self) -> None: ...""",
-    )
+    modified_stub = stub_content + """
+
+def nonexistent_method(self) -> None: ..."""
+
     stub_file.write_text(modified_stub)
 
     # Run stubtest - it should detect the inconsistency

@@ -190,6 +190,11 @@ def test_call_info_to_ir_parser():
             "file": "test.py",
             "registry_source": None,
             "registry_class": None,
+            "start_offset": None,
+            "end_offset": None,
+            "start_col": None,
+            "end_line": None,
+            "end_col": None,
         },
         {
             "literal": "SELECT 'hello'::TEXT",
@@ -198,6 +203,11 @@ def test_call_info_to_ir_parser():
             "file": "test.py",
             "registry_source": None,
             "registry_class": None,
+            "start_offset": None,
+            "end_offset": None,
+            "start_col": None,
+            "end_line": None,
+            "end_col": None,
         },
     ]
 

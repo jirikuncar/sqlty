@@ -47,7 +47,7 @@ def hello() -> str:
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -118,7 +118,7 @@ static_query = sql("SELECT id::INTEGER FROM users")
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -156,7 +156,7 @@ query3 = sql("SELECT id::INTEGER FROM users")
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -192,7 +192,7 @@ query = sql("SELECT {columns} FROM big_table")
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -223,7 +223,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE name = :name")
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -259,7 +259,7 @@ query = sql("""
 ''')
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -291,7 +291,7 @@ query = sql("SELECT id::INTEGER FROM users;")
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -333,7 +333,7 @@ def get_posts_query():
 ''')
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -378,7 +378,7 @@ class UserRepository:
 ''')
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -420,7 +420,7 @@ user_query = sql("SELECT id::INTEGER FROM users")
 """)
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )

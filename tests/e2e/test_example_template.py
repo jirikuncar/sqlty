@@ -42,7 +42,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
     # Step 2: Run sqlty generator via subprocess
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -188,7 +188,7 @@ query1 = sql("SELECT id::INTEGER FROM users")
 
     # Initial generation
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -207,7 +207,7 @@ query2 = sql("SELECT name::TEXT FROM users")
 
     # Regenerate
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )

@@ -78,6 +78,8 @@ class RegistryDecorator:
         export_name: Name used for the module-level alias (e.g., "sql", "user_sql")
         docstring: Optional class docstring
         ast_node: Optional reference to original AST ClassDef/FunctionDef node from stub
+        base_class: Base class name for registry classes
+        is_function: Whether this represents a decorated function
     """
 
     name: str
@@ -85,6 +87,8 @@ class RegistryDecorator:
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
     ast_node: ast.FunctionDef | None = None
+    base_class: str = "SQLRegistry"
+    is_function: bool = False
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.

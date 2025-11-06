@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 q2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -292,7 +292,7 @@ def test_cli_output_messages(
 query = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     output = result.stdout + result.stderr

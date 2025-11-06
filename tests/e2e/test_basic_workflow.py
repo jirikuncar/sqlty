@@ -18,11 +18,11 @@ from inline_snapshot import snapshot
 def test_basic_query_generation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_queries_file: Callable[[Path], Path],
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test basic query generation and mypy validation."""
-    setup_queries_file(tmp_path, "Query", "Application query registry.")
+    setup_queries_file(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using SQL queries."""
@@ -39,7 +39,7 @@ query2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users WH
 query3: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 ''')
 
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)])
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     stub_file = tmp_path / "queries.pyi"
@@ -101,7 +101,7 @@ if TYPE_CHECKING:
 q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -134,7 +134,7 @@ if TYPE_CHECKING:
 query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -152,7 +152,7 @@ query1: SQL[tuple[int]] = sql("SELECT id::INTEGER FROM users")
 query2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users WHERE id = :id")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     updated_stub = stub_file.read_text()
@@ -211,7 +211,7 @@ query: SQL[tuple[int, str, str]] = sql("""
 """)
 ''')
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"

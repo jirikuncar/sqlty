@@ -190,7 +190,7 @@ query = sql("SELECT id, name FROM users")
 
     # Generate stub without schema
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -231,7 +231,7 @@ untyped_query = sql("SELECT id, name FROM posts")
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )

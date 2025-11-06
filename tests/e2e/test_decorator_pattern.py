@@ -44,7 +44,7 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated
@@ -108,7 +108,7 @@ q: SQL[tuple[int, str]] = sql_with_schema("SELECT id, name FROM users")
 ''')
 
     # Generate stubs with schema
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated
@@ -167,7 +167,7 @@ q2: SQL[tuple[int, str]] = sql_with_schema("SELECT id::INTEGER, name::TEXT FROM 
 
     # Generate stubs
     stub_file = tmp_path / "app.pyi"
-    result = cli([str(tmp_path), "--mode=full", f"--output={stub_file}"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path), f"--output={stub_file}"], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated

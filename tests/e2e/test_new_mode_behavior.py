@@ -167,12 +167,12 @@ query1 = sql("SELECT 1::INTEGER")
 def test_incremental_create_mode_updates_existing_creates_new(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_registry_file: Callable[[Path, str, str, str | None], Path],
+    setup_queries_file: Callable[[Path, str, str, str | None], Path],
 ) -> None:
     """Test that incremental,create updates existing stubs but creates new ones."""
     # Create two query files
-    setup_registry_file(tmp_path, "queries1.py", "Query1")
-    setup_registry_file(tmp_path, "queries2.py", "Query2")
+    setup_queries_file(tmp_path, "queries1.py", "Query1")
+    setup_queries_file(tmp_path, "queries2.py", "Query2")
 
     app1_file = tmp_path / "app1.py"
     app1_file.write_text("""from queries1 import sql

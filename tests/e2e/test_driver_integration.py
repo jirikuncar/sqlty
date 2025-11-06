@@ -57,7 +57,7 @@ def example_usage() -> None:
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -156,7 +156,7 @@ def fetch_users() -> None:
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -212,7 +212,7 @@ result_tuple: tuple[int, str, str]
 
     # Generate stub
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )
@@ -299,7 +299,7 @@ def get_order_data() -> None:
 
     # Generate stubs
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--mode=full"],
+        [sys.executable, "-m", "sqlty", str(tmp_path)],
         capture_output=True,
         text=True,
     )

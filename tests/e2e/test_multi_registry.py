@@ -8,13 +8,13 @@ from pathlib import Path
 from inline_snapshot import snapshot
 
 
-def test_multi_registry_different_files(tmp_path: Path, cli, mypy, setup_registry_file) -> None:
+def test_multi_registry_different_files(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
     """Test multiple registries in different files."""
     # Create first registry
-    setup_registry_file(tmp_path, "user_queries.py", "UserQuery", "User-related queries.")
+    setup_queries_file(tmp_path, "user_queries.py")
 
     # Create second registry
-    setup_registry_file(tmp_path, "post_queries.py", "PostQuery", "Post-related queries.")
+    setup_queries_file(tmp_path, "post_queries.py")
 
     # Create app using both registries
     app_file = tmp_path / "app.py"
@@ -34,7 +34,7 @@ posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM pos
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -96,14 +96,14 @@ sql = PostQuery.sql
 
 
 def test_multi_registry_same_query_different_registries(
-    tmp_path: Path, cli, setup_registry_file
+    tmp_path: Path, cli, setup_queries_file
 ) -> None:
     """Test that same query in different registries creates separate overloads."""
     # Create first registry
-    setup_registry_file(tmp_path, "registry1.py", "Registry1")
+    setup_queries_file(tmp_path, "registry1.py", "Registry1")
 
     # Create second registry
-    setup_registry_file(tmp_path, "registry2.py", "Registry2")
+    setup_queries_file(tmp_path, "registry2.py", "Registry2")
 
     # Create app using the same query with both registries
     app_file = tmp_path / "app.py"
@@ -121,7 +121,7 @@ query2: SQL[tuple[int]] = sql2("SELECT 1::INTEGER")
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -176,7 +176,7 @@ query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     print(result.stdout)
     assert result.returncode == 0
@@ -242,7 +242,7 @@ query_b: SQL[tuple[str]] = QueryB.sql("SELECT 'hello'::TEXT")
 """)
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 

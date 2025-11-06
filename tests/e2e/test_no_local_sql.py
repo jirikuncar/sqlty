@@ -23,7 +23,7 @@ result = sql("SELECT * FROM users")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that NO stub was generated for local_helper
@@ -54,7 +54,7 @@ result = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that a stub WAS generated for queries
@@ -98,7 +98,7 @@ b: SQL[tuple[str]] = qb("SELECT 'a'::TEXT")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that a stub was generated with both classes
@@ -150,7 +150,7 @@ b: SQL[tuple[str]] = qb("SELECT 'b'::TEXT")
 """)
 
     # Run the generator
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Check that a stub was generated with both classes

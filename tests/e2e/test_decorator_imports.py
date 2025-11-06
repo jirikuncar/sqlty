@@ -53,7 +53,7 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
     # Generate stubs
-    result = cli([str(pkg_dir), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(pkg_dir)], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated for sql.py
@@ -117,7 +117,7 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
     # Generate stubs
-    result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated for sql.py
