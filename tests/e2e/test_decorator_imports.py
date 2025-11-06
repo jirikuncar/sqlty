@@ -20,10 +20,10 @@ def test_decorated_function_imported_from_another_module(
     # Create package structure
     pkg_dir = tmp_path / "mypackage"
     pkg_dir.mkdir()
-    
+
     # Create __init__.py
     (pkg_dir / "__init__.py").write_text("")
-    
+
     # Create sql.py with decorated function
     sql_file = pkg_dir / "sql.py"
     sql_file.write_text('''"""SQL query function."""
@@ -32,10 +32,10 @@ from sqlty import sqlty
 
 
 @sqlty
-def sql[T](query: T) -> T:
+def sql(query: str) -> Any:
     return query
 ''')
-    
+
     # Create app.py that imports from sql
     app_file = pkg_dir / "app.py"
     app_file.write_text('''"""Application using imported SQL function."""
@@ -51,17 +51,17 @@ from .sql import sql
 q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
-    
+
     # Generate stubs
     result = cli([str(pkg_dir), "--mode=full"], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
-    
+
     # Check that stub file was generated for sql.py
     sql_stub = pkg_dir / "sql.pyi"
     assert sql_stub.exists(), "sql.pyi was not generated"
-    
+
     stub_content = sql_stub.read_text()
-    
+
     # Verify stub contains both queries (from sql.py definition and app.py usage)
     assert "@overload" in stub_content
     assert "def sql(" in stub_content
@@ -69,11 +69,11 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_content
     assert "SQL[tuple[int]]" in stub_content
     assert "SQL[tuple[int, str]]" in stub_content
-    
+
     # Run mypy to validate type safety
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
-    
+
     # Verify with stubtest
     stubtest_result = stubtest(
         ["mypackage.sql", "--concise"],
@@ -99,7 +99,7 @@ from sqlty import sqlty
 def sql[T](query: T) -> T:
     return query
 ''')
-    
+
     # Create app.py that imports from sql (same directory)
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using imported SQL function."""
@@ -115,23 +115,23 @@ from sql import sql
 q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
-    
+
     # Generate stubs
     result = cli([str(tmp_path), "--mode=full"], {"cwd": str(tmp_path)})
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
-    
+
     # Check that stub file was generated for sql.py
     sql_stub = tmp_path / "sql.pyi"
     assert sql_stub.exists(), "sql.pyi was not generated"
-    
+
     stub_content = sql_stub.read_text()
-    
+
     # Verify stub contains both queries
     assert "@overload" in stub_content
     assert "def sql(" in stub_content
     assert "SELECT 1::INTEGER" in stub_content
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_content
-    
+
     # Run mypy to validate type safety
     mypy_result = mypy([str(app_file), "--strict"], {"cwd": str(tmp_path)})
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
@@ -145,22 +145,22 @@ def test_decorated_function_runtime_attributes_after_import(
     pkg_dir = tmp_path / "mypackage"
     pkg_dir.mkdir()
     (pkg_dir / "__init__.py").write_text("")
-    
+
     # Create sql.py with decorated function
-    (pkg_dir / "sql.py").write_text('''from sqlty import sqlty
+    (pkg_dir / "sql.py").write_text("""from sqlty import sqlty
 
 @sqlty
 def sql[T](query: T) -> T:
     return query
 
 @sqlty(schema="schema.sql")
-def sql_with_schema[T](query: T) -> T:
+def sql_with_schema(query: str) -> Any:
     return query
-''')
-    
+""")
+
     # Create test script that imports and checks attributes
     test_script = tmp_path / "test_attrs.py"
-    test_script.write_text(f'''import sys
+    test_script.write_text(f"""import sys
 sys.path.insert(0, {str(tmp_path)!r})
 
 from mypackage.sql import sql, sql_with_schema
@@ -179,8 +179,8 @@ assert hasattr(sql_with_schema, "__schema_path__"), "sql_with_schema should have
 assert sql_with_schema.__schema_path__ == "schema.sql", f"Expected 'schema.sql', got {{sql_with_schema.__schema_path__}}"
 
 print("All attribute tests passed!")
-''')
-    
+""")
+
     # Run the test script
     result = subprocess.run(
         [sys.executable, str(test_script)],
@@ -188,6 +188,6 @@ print("All attribute tests passed!")
         text=True,
         cwd=str(tmp_path),
     )
-    
+
     assert result.returncode == 0, f"Attribute test failed: {result.stderr}\n{result.stdout}"
     assert "All attribute tests passed!" in result.stdout

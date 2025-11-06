@@ -62,13 +62,13 @@ user_query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM user
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_content
 
     # Snapshot the result
-    assert stub_content == snapshot("""\
+    assert stub_content == snapshot('''\
 from typing import Literal, overload
 from sqlty import SQL, SQLRegistry
 
 
 class AppQuery(SQLRegistry):
-    \"\"\"Application-specific SQL query registry with type-safe overloads.\"\"\"
+    """Application-specific SQL query registry with type-safe overloads."""
 
     @overload
     @classmethod
@@ -80,7 +80,7 @@ class AppQuery(SQLRegistry):
     def sql[T](cls, query: T) -> T:
         ...
 sql = AppQuery.sql
-""")
+''')
 
     # Validate with mypy
     mypy_result = mypy([str(child_module), "--strict"], {"cwd": str(tmp_path)})

@@ -9,10 +9,12 @@ The `@sqlty` decorator provides an alternative pattern to the `SQLRegistry` clas
 ### Simple Decorator
 
 ```python
+from typing import Any
 from sqlty import sqlty
 
+
 @sqlty
-def sql[T](query: T) -> T:
+def sql(query: str) -> Any:
     return query
 
 # Usage
@@ -27,8 +29,9 @@ assert sql.__sqlty__ is True
 ### Decorator with Schema
 
 ```python
+
 @sqlty(schema="schema.sql")
-def sql_with_schema[T](query: T) -> T:
+def sql_with_schema(query: str) -> Any:
     return query
 ```
 
@@ -43,19 +46,19 @@ assert sql_with_schema.__schema_path__ == "schema.sql"
 Use with TYPE_CHECKING for type annotations:
 
 ```python
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from sqlty import sqlty
 
 if TYPE_CHECKING:
     from sqlty import SQL
 
+
 @sqlty
-def sql[T](query: T) -> T:
+def sql(query: str) -> Any:
     return query
 
 # Type-safe usage
-if TYPE_CHECKING:
-    q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
+q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 ```
 
 ## Stub Generation
@@ -73,15 +76,15 @@ sqlty app.py --mode=full
 This creates an `app.pyi` file with `@overload` declarations:
 
 ```python
-from typing import Literal, overload
+from typing import Any, Literal, overload
 from sqlty import SQL
+
 
 @overload
 def sql(query: Literal['SELECT 1::INTEGER']) -> SQL[tuple[int]]:
     ...
-
 @overload
-def sql[T](query: T) -> T:
+def sql(query: str) -> Any:
     ...
 ```
 
@@ -102,14 +105,16 @@ CREATE TABLE users (
 );
 ```
 
-```python
-@sqlty(schema="schema.sql")
-def sql[T](query: T) -> T:
     return query
+
+@sqlty(schema="schema.sql")
+def sql_with_schema(query: str) -> Any:
+    return query
+
 
 # With schema, types can be inferred even without explicit casts
 if TYPE_CHECKING:
-    q: SQL[tuple[int, str]] = sql("SELECT id, name FROM users")
+    q: SQL[tuple[int, str]] = sql_with_schema("SELECT id, name FROM users")
 ```
 
 ## Comparison with Registry Pattern
@@ -134,7 +139,7 @@ q = sql("SELECT 1")
 from sqlty import sqlty
 
 @sqlty
-def sql[T](query: T) -> T:
+def sql(query: str) -> Any:
     return query
 
 # Usage

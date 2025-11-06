@@ -1060,9 +1060,7 @@ def test_blank_line_removal_logic():
     source4 = "content\n\n\n"
     end_offset4 = 8  # After "content\n"
     result4 = serializer._find_removal_end_offset(source4, end_offset4)
-    assert result4 == 10, (
-        f"Expected 10, got {result4} - should skip all trailing blank lines up to EOF"
-    )
+    assert result4 == 10, f"Expected 10, got {result4} - should skip all trailing blank lines"
 
     # Test case 5: Already at end of file
     source5 = "content"

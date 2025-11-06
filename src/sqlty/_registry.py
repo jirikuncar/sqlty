@@ -57,22 +57,25 @@ class RegistryDetector:
                                     # Resolve path relative to module
                                     schema_path = module_path.parent / stmt.value.value
                                     return schema_path
-                
+
                 # Check decorated functions with @sqlty(schema="...")
                 elif isinstance(node, ast.FunctionDef):
                     # If class_name is specified, only check that specific function
                     if class_name and node.name != class_name:
                         continue
-                    
+
                     # Check if function has @sqlty decorator
                     for decorator in node.decorator_list:
                         # Handle @sqlty(schema="...")
                         if isinstance(decorator, ast.Call):
-                            if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
+                            if (
+                                isinstance(decorator.func, ast.Name)
+                                and decorator.func.id == "sqlty"
+                            ):
                                 # Look for schema keyword argument
                                 for keyword in decorator.keywords:
                                     if (
-                                        keyword.arg == "schema" 
+                                        keyword.arg == "schema"
                                         and isinstance(keyword.value, ast.Constant)
                                         and isinstance(keyword.value.value, str)
                                     ):
@@ -94,40 +97,37 @@ class RegistryDetector:
         if not module_path.exists():
             return []
 
+        registry_classes = []
         try:
             with open(module_path) as f:
                 source = f.read()
             tree = ast.parse(source)
 
             # Look for class definitions that inherit from SQLRegistry
-            registry_classes = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     for base in node.bases:
-                        # Check if base is Name node with id "SQLRegistry"
                         if isinstance(base, ast.Name) and base.id == "SQLRegistry":
                             registry_classes.append(node.name)
                             break
-                        # Check if base is Attribute node like sqlty.SQLRegistry
-                        if isinstance(base, ast.Attribute):
-                            if base.attr == "SQLRegistry":
-                                registry_classes.append(node.name)
-                                break
-                # Also look for functions decorated with @sqlty
-                elif isinstance(node, ast.FunctionDef):
-                    for decorator in node.decorator_list:
-                        # Handle @sqlty (simple name)
-                        if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
+                        if isinstance(base, ast.Attribute) and base.attr == "SQLRegistry":
                             registry_classes.append(node.name)
                             break
-                        # Handle @sqlty(...) (call expression)
-                        elif isinstance(decorator, ast.Call):
-                            if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
+            # Always include functions decorated with @sqlty
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    for decorator in node.decorator_list:
+                        if (isinstance(decorator, ast.Name) and decorator.id == "sqlty") or (
+                            isinstance(decorator, ast.Call)
+                            and isinstance(decorator.func, ast.Name)
+                            and decorator.func.id == "sqlty"
+                        ):
+                            if node.name not in registry_classes:
                                 registry_classes.append(node.name)
-                                break
+                            break
             return registry_classes
         except Exception:
-            return []
+            return registry_classes
 
     def get_registry_export_name(self, module_path: Path, class_name: str) -> str:
         """Get the exported name for the registry's sql method.
@@ -223,7 +223,10 @@ class RegistryDetector:
                         if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
                             return True
                         elif isinstance(decorator, ast.Call):
-                            if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
+                            if (
+                                isinstance(decorator.func, ast.Name)
+                                and decorator.func.id == "sqlty"
+                            ):
                                 return True
             return False
         except Exception:

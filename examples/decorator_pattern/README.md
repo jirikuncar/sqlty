@@ -37,10 +37,12 @@ sql = Query.sql
 
 New decorator pattern:
 ```python
+from typing import Any
 from sqlty import sqlty
 
+
 @sqlty
-def sql[T](query: T) -> T:
+def sql(query: str) -> Any:
     return query
 ```
 

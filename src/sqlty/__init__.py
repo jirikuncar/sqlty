@@ -1,6 +1,8 @@
 """SQLTy - Type-safe SQL queries for Python with automatic stub generation."""
 
 import importlib.metadata
+from collections.abc import Callable
+from typing import overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
@@ -55,7 +57,31 @@ class SQLRegistry:
         return query
 
 
-def sqlty(func=None, *, schema: str | None = None):
+@overload
+def sqlty[F](func: F, /) -> F:
+    """Decorator to mark functions for SQLTy type inference and stub generation.
+
+    Usage:
+        @sqlty
+        def sql[T](query: T) -> T:
+            return query
+    """
+    ...
+
+
+@overload
+def sqlty[F](*, schema: str | None = None) -> Callable[[F], F]:
+    """Decorator to mark functions for SQLTy type inference and stub generation.
+
+    Usage:
+        @sqlty(schema="schema.sql")
+        def sql[T](query: T) -> T:
+            return query
+    """
+    ...
+
+
+def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callable[[F], F]:
     """Decorator to mark functions for SQLTy type inference and stub generation.
 
     This decorator can be used with or without parameters:
@@ -76,12 +102,12 @@ def sqlty(func=None, *, schema: str | None = None):
             return query
     """
 
-    def decorator(fn):
+    def decorator(fn: F) -> F:
         # Mark the function as a sqlty function
-        fn.__sqlty__ = True
+        fn.__sqlty__ = True  # type: ignore[attr-defined]
         # Store schema path if provided
         if schema is not None:
-            fn.__schema_path__ = schema
+            fn.__schema_path__ = schema  # type: ignore[attr-defined]
         return fn
 
     # Handle both @sqlty and @sqlty(...) usage

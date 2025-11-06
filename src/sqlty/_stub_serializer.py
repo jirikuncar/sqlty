@@ -37,14 +37,17 @@ class IRToASTSerializer:
         for import_stmt in imports:
             module_body.append(self._serialize_import(import_stmt))
 
+        # Emit top-level function overloads for all decorated functions
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
             if registry.is_function:
-                # Serialize as function overloads
                 function_overloads = self._serialize_function_overloads(registry)
                 module_body.extend(function_overloads)
-            else:
-                # Serialize as class
+
+        # Emit registry classes for all non-function registries
+        for registry_name in sorted(stub.registries.keys()):
+            registry = stub.registries[registry_name]
+            if not registry.is_function:
                 class_node = self._serialize_registry_class(registry)
                 module_body.append(class_node)
 
@@ -304,8 +307,10 @@ class IRToASTSerializer:
             ast.Name(id="overload", ctx=ast.Load()),
         ]
 
-        type_param = ast.TypeVar(name="T")
-        query_arg = ast.arg(arg="query", annotation=ast.Name(id="T", ctx=ast.Load()))
+        # Use simple annotation without TypeVar for stub files
+        # This creates: def func(query: str) -> str: ...
+        # Which acts as a catch-all for string literals
+        query_arg = ast.arg(arg="query", annotation=ast.Name(id="str", ctx=ast.Load()))
 
         return ast.FunctionDef(
             name=function_name,
@@ -318,8 +323,8 @@ class IRToASTSerializer:
             ),
             body=[ast.Expr(value=ast.Constant(value=...))],
             decorator_list=decorators,
-            returns=ast.Name(id="T", ctx=ast.Load()),
-            type_params=[type_param],
+            returns=ast.Name(id="str", ctx=ast.Load()),
+            type_params=[],  # No type params for simpler stub
         )
 
     def _serialize_export_alias(self, registry: RegistryClass) -> ast.Assign:

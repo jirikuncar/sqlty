@@ -936,10 +936,12 @@ class TypeStubGenerator:
                         is_function = self._registry_detector.is_decorated_function(
                             registry_file, cls_name
                         )
+                        # If decorated function, ensure registry is created with is_function=True
                         new_stub = call_parser.parse_calls(
                             cls_calls, cls_name, base_class, export_name, is_function
                         )
                         for registry in new_stub.registries.values():
+                            registry.is_function = is_function
                             all_new_registries.add_registry(registry)
 
                     # Merge with existing stub if it exists
