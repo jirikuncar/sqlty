@@ -302,6 +302,7 @@ class CallInfoToIRParser:
         class_name: str = "Query",
         base_class: str = "SQLRegistry",
         export_name: str = "sql",
+        is_function: bool = False,
     ) -> StubFile:
         """Parse a list of CallInfo objects into IR.
 
@@ -310,6 +311,7 @@ class CallInfoToIRParser:
             class_name: Default class name if not specified in calls
             base_class: Base class name
             export_name: Name for the module-level alias
+            is_function: Whether this represents a decorated function
 
         Returns:
             StubFile IR representing the calls
@@ -335,6 +337,7 @@ class CallInfoToIRParser:
                 name=cls_name,
                 base_class=base_class,
                 export_name=export_name,
+                is_function=is_function,
             )
 
             for call in cls_calls:

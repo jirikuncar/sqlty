@@ -70,15 +70,16 @@ class OverloadSignature:
 
 @dataclass
 class RegistryClass:
-    """Represents a SQLRegistry subclass with its overloads.
+    """Represents a SQLRegistry subclass or @sqlty decorated function with its overloads.
 
     Attributes:
-        name: Class name (e.g., "UserQueries")
-        base_class: Base class name (e.g., "SQLRegistry")
+        name: Class or function name (e.g., "UserQueries" or "sql")
+        base_class: Base class name for classes (e.g., "SQLRegistry"), unused for functions
         overloads: Set of overload signatures for this registry
         export_name: Name used for the module-level alias (e.g., "sql", "user_sql")
         docstring: Optional class docstring
-        ast_node: Optional reference to original AST ClassDef node from stub
+        ast_node: Optional reference to original AST ClassDef/FunctionDef node from stub
+        is_function: If True, this represents a decorated function, not a class
     """
 
     name: str
@@ -86,7 +87,8 @@ class RegistryClass:
     overloads: set[OverloadSignature] = field(default_factory=set)
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
-    ast_node: ast.ClassDef | None = None
+    ast_node: ast.ClassDef | ast.FunctionDef | None = None
+    is_function: bool = False
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.

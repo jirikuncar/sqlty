@@ -7,7 +7,7 @@ try:
 except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
-__all__ = ["SQL", "SQLRegistry"]
+__all__ = ["SQL", "SQLRegistry", "sqlty"]
 
 
 class SQL[T](str):
@@ -53,3 +53,41 @@ class SQLRegistry:
         to provide specific type information for known queries.
         """
         return query
+
+
+def sqlty(func=None, *, schema: str | None = None):
+    """Decorator to mark functions for SQLTy type inference and stub generation.
+
+    This decorator can be used with or without parameters:
+    - @sqlty: Simple decoration without schema
+    - @sqlty(schema="schema.sql"): Decoration with schema path
+
+    The decorated function will have:
+    - __sqlty__: Set to True to mark it as a SQLTy function
+    - __schema_path__: Set to the schema path (if provided)
+
+    Example:
+        @sqlty
+        def sql[T](query: T) -> T:
+            return query
+
+        @sqlty(schema="schema.sql")
+        def sql_with_schema[T](query: T) -> T:
+            return query
+    """
+
+    def decorator(fn):
+        # Mark the function as a sqlty function
+        fn.__sqlty__ = True
+        # Store schema path if provided
+        if schema is not None:
+            fn.__schema_path__ = schema
+        return fn
+
+    # Handle both @sqlty and @sqlty(...) usage
+    if func is not None:
+        # Called as @sqlty (without parentheses)
+        return decorator(func)
+    else:
+        # Called as @sqlty(...) (with parentheses)
+        return decorator

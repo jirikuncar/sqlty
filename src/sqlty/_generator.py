@@ -932,8 +932,12 @@ class TypeStubGenerator:
                         export_name = self._registry_detector.get_registry_export_name(
                             registry_file, cls_name
                         )
+                        # Check if this is a decorated function
+                        is_function = self._registry_detector.is_decorated_function(
+                            registry_file, cls_name
+                        )
                         new_stub = call_parser.parse_calls(
-                            cls_calls, cls_name, base_class, export_name
+                            cls_calls, cls_name, base_class, export_name, is_function
                         )
                         for registry in new_stub.registries.values():
                             all_new_registries.add_registry(registry)

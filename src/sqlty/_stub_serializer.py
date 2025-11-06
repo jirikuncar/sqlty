@@ -39,14 +39,24 @@ class IRToASTSerializer:
 
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
-            class_node = self._serialize_registry_class(registry)
-            module_body.append(class_node)
+            if registry.is_function:
+                # Serialize as function overloads
+                function_overloads = self._serialize_function_overloads(registry)
+                module_body.extend(function_overloads)
+            else:
+                # Serialize as class
+                class_node = self._serialize_registry_class(registry)
+                module_body.append(class_node)
 
-        # Only create aliases for unique export names
+        # Only create aliases for unique export names (and only for classes, not functions)
         export_name_counts = self._count_export_names(stub)
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
-            if registry.export_name and export_name_counts[registry.export_name] == 1:
+            if (
+                not registry.is_function
+                and registry.export_name
+                and export_name_counts[registry.export_name] == 1
+            ):
                 alias_node = self._serialize_export_alias(registry)
                 module_body.append(alias_node)
 
@@ -211,6 +221,97 @@ class IRToASTSerializer:
             args=ast.arguments(
                 posonlyargs=[],
                 args=[cls_arg, query_arg],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            ),
+            body=[ast.Expr(value=ast.Constant(value=...))],
+            decorator_list=decorators,
+            returns=ast.Name(id="T", ctx=ast.Load()),
+            type_params=[type_param],
+        )
+
+    def _serialize_function_overloads(self, registry: RegistryClass) -> list[ast.stmt]:
+        """Serialize function overloads for @sqlty decorated functions.
+
+        Args:
+            registry: RegistryClass representing a decorated function
+
+        Returns:
+            List of AST FunctionDef nodes (overloads + fallback)
+        """
+        function_overloads: list[ast.stmt] = []
+
+        for overload in registry.get_sorted_overloads():
+            func_node = self._serialize_function_overload(overload, registry.name)
+            function_overloads.append(func_node)
+
+        fallback = self._serialize_function_fallback(registry.name)
+        function_overloads.append(fallback)
+
+        return function_overloads
+
+    def _serialize_function_overload(
+        self, overload: OverloadSignature, function_name: str
+    ) -> ast.FunctionDef:
+        """Serialize a function overload (without classmethod decorator).
+
+        Args:
+            overload: OverloadSignature to serialize
+            function_name: Name of the function
+
+        Returns:
+            AST FunctionDef node
+        """
+        decorators: list[ast.expr] = [
+            ast.Name(id="overload", ctx=ast.Load()),
+        ]
+
+        literal_annotation = ast.Subscript(
+            value=ast.Name(id="Literal", ctx=ast.Load()),
+            slice=ast.Constant(value=overload.query_literal),
+            ctx=ast.Load(),
+        )
+
+        query_arg = ast.arg(arg="query", annotation=literal_annotation)
+        return_annotation = ast.parse(overload.return_type, mode="eval").body
+
+        return ast.FunctionDef(
+            name=function_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[query_arg],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            ),
+            body=[ast.Expr(value=ast.Constant(value=...))],
+            decorator_list=decorators,
+            returns=return_annotation,
+            type_params=[],
+        )
+
+    def _serialize_function_fallback(self, function_name: str) -> ast.FunctionDef:
+        """Serialize the generic fallback overload for a decorated function.
+
+        Args:
+            function_name: Name of the function
+
+        Returns:
+            AST FunctionDef node for the fallback
+        """
+        decorators: list[ast.expr] = [
+            ast.Name(id="overload", ctx=ast.Load()),
+        ]
+
+        type_param = ast.TypeVar(name="T")
+        query_arg = ast.arg(arg="query", annotation=ast.Name(id="T", ctx=ast.Load()))
+
+        return ast.FunctionDef(
+            name=function_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[query_arg],
                 kwonlyargs=[],
                 kw_defaults=[],
                 defaults=[],

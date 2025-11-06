@@ -17,11 +17,11 @@ class RegistryDetector:
     def get_schema_path_from_registry(
         self, module_path: Path, class_name: str | None = None
     ) -> Path | None:
-        """Extract __schema_path__ from a SQLRegistry subclass.
+        """Extract __schema_path__ from a SQLRegistry subclass or decorated function.
 
         Args:
             module_path: Path to the Python module to check
-            class_name: Optional specific registry class name to look for.
+            class_name: Optional specific registry class name or function name to look for.
                        If None, returns the first __schema_path__ found (backward compatible).
 
         Returns:
@@ -34,6 +34,7 @@ class RegistryDetector:
             source = module_path.read_text()
             tree = ast.parse(source)
             for node in ast.walk(tree):
+                # Check SQLRegistry subclasses
                 if isinstance(node, ast.ClassDef):
                     # If class_name is specified, only check that specific class
                     if class_name and node.name != class_name:
@@ -56,6 +57,27 @@ class RegistryDetector:
                                     # Resolve path relative to module
                                     schema_path = module_path.parent / stmt.value.value
                                     return schema_path
+                
+                # Check decorated functions with @sqlty(schema="...")
+                elif isinstance(node, ast.FunctionDef):
+                    # If class_name is specified, only check that specific function
+                    if class_name and node.name != class_name:
+                        continue
+                    
+                    # Check if function has @sqlty decorator
+                    for decorator in node.decorator_list:
+                        # Handle @sqlty(schema="...")
+                        if isinstance(decorator, ast.Call):
+                            if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
+                                # Look for schema keyword argument
+                                for keyword in decorator.keywords:
+                                    if (
+                                        keyword.arg == "schema" 
+                                        and isinstance(keyword.value, ast.Constant)
+                                        and isinstance(keyword.value.value, str)
+                                    ):
+                                        schema_path = module_path.parent / keyword.value.value
+                                        return schema_path
         except Exception:
             pass
         return None
@@ -89,6 +111,18 @@ class RegistryDetector:
                         # Check if base is Attribute node like sqlty.SQLRegistry
                         if isinstance(base, ast.Attribute):
                             if base.attr == "SQLRegistry":
+                                registry_classes.append(node.name)
+                                break
+                # Also look for functions decorated with @sqlty
+                elif isinstance(node, ast.FunctionDef):
+                    for decorator in node.decorator_list:
+                        # Handle @sqlty (simple name)
+                        if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
+                            registry_classes.append(node.name)
+                            break
+                        # Handle @sqlty(...) (call expression)
+                        elif isinstance(decorator, ast.Call):
+                            if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
                                 registry_classes.append(node.name)
                                 break
             return registry_classes
@@ -165,6 +199,35 @@ class RegistryDetector:
             return None
         except Exception:
             return None
+
+    def is_decorated_function(self, module_path: Path, name: str) -> bool:
+        """Check if a name in a module is a decorated function rather than a class.
+
+        Args:
+            module_path: Path to the Python module to check
+            name: Name to check (could be class or function name)
+
+        Returns:
+            True if name is a function decorated with @sqlty, False otherwise
+        """
+        if not module_path.exists():
+            return False
+
+        try:
+            source = module_path.read_text()
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == name:
+                    # Check if it has @sqlty decorator
+                    for decorator in node.decorator_list:
+                        if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
+                            return True
+                        elif isinstance(decorator, ast.Call):
+                            if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
+                                return True
+            return False
+        except Exception:
+            return False
 
     def resolve_import_to_registry_module(
         self, import_source: str, source_file: Path, import_level: int = 0
