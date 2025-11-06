@@ -105,10 +105,7 @@ def registries_cli() -> Callable[..., subprocess.CompletedProcess[str]]:
 
 @pytest.fixture
 def setup_queries_file() -> Callable[..., Path]:
-    """Fixture to create a queries.py file with SQLRegistry.
-
-    Returns a callable that creates a queries.py file with the given
-    registry class name and optional docstring.
+    """Fixture to create a queries.py file with @sqlty decorator.
 
     Args:
         tmp_path: The temporary directory path
@@ -127,10 +124,20 @@ def setup_queries_file() -> Callable[..., Path]:
     def _create_queries_file(
         tmp_path: Path, filename: str = "queries.py", function_name: str = "sql"
     ) -> Path:
-        """Create a queries.py file with SQLRegistry."""
+        """Create a queries.py file with @sqlty decorator or SQLRegistry class."""
         queries_file = tmp_path / filename
 
-        content = f"""from typing import Any
+        if function_name[0].isupper():
+            # Create SQLRegistry class for backward compatibility
+            content = f"""from sqlty import SQLRegistry
+
+
+class {function_name}(SQLRegistry):
+    pass
+"""
+        else:
+            # Create @sqlty decorated function
+            content = f"""from typing import Any
 from sqlty import sqlty
 
 

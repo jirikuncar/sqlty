@@ -11,3 +11,6 @@ def sql_with_schema(
 ) -> SQL[tuple[int, str]]: ...
 @overload
 def sql_with_schema(query: str) -> str: ...
+
+q: SQL[tuple[int]]
+q2: SQL[tuple[int, str]]

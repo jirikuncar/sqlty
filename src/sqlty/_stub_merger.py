@@ -44,7 +44,6 @@ class StubMerger:
         output_path: Path,
         new_calls: list[CallInfo],
         class_name: str = "Query",
-        base_class: str = "SQLRegistry",
         full_mode: bool = False,
         export_name: str = "sql",
         prune: bool = False,
@@ -55,7 +54,6 @@ class StubMerger:
             output_path: Path to stub file
             new_calls: SQL calls to add
             class_name: Registry class name
-            base_class: Base class name
             full_mode: Replace entire registry
             export_name: Exported function name
             prune: Remove stale overloads
@@ -63,7 +61,7 @@ class StubMerger:
         Returns:
             Generated stub content
         """
-        new_stub = self._call_parser.parse_calls(new_calls, class_name, base_class, export_name)
+        new_stub = self._call_parser.parse_calls(new_calls, class_name, export_name)
 
         if not output_path.exists():
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)

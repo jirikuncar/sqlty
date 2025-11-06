@@ -26,7 +26,7 @@ import asttokens
 from sqlty._formatter import formatter
 from sqlty._sql_analyzer import SQLAnalyzer
 
-from ._collector import CallInfo, LiteralCallCollector, VariableInfo
+from ._collector import CallInfo, LiteralCallCollector
 from ._registry import RegistryDetector
 from ._stub_merger import StubMerger
 
@@ -402,8 +402,8 @@ class TypeStubGenerator:
                 if import_module in registry_sources:
                     call["registry_source"] = import_module
 
-    def analyze_file(self, filepath: Path) -> tuple[list[CallInfo], dict[str, list[VariableInfo]]]:
-        """Analyze a single Python file and collect function calls and variables."""
+    def analyze_file(self, filepath: Path) -> list[CallInfo]:
+        """Analyze a single Python file and collect function calls."""
         logger = logging.getLogger(__name__)
         logger.debug("Analyzing file: %s", filepath)
 
@@ -505,15 +505,7 @@ class TypeStubGenerator:
         # Infer types from SQL query analysis (with registry-specific analyzers)
         self._infer_types_from_sql(calls, filepath)
 
-        # Group variables by file
-        variables_by_file: dict[str, list[VariableInfo]] = {}
-        for var in collector.variables:
-            file_path = var["file"]
-            if file_path not in variables_by_file:
-                variables_by_file[file_path] = []
-            variables_by_file[file_path].append(var)
-
-        return calls, variables_by_file
+        return calls
 
     def _infer_types_from_sql(self, calls: list[CallInfo], module_path: Path) -> None:
         """Infer return types by analyzing SQL queries using sqlglot.
@@ -545,12 +537,9 @@ class TypeStubGenerator:
                     query_preview,
                 )
 
-    def analyze_directory(
-        self, dirpath: Path
-    ) -> tuple[list[CallInfo], dict[str, list[VariableInfo]]]:
+    def analyze_directory(self, dirpath: Path) -> list[CallInfo]:
         """Recursively analyze all Python files in a directory."""
         all_calls: list[CallInfo] = []
-        all_variables: dict[str, list[VariableInfo]] = {}
         import_sources: set[str] = set()
 
         for filepath in dirpath.rglob("*.py"):
@@ -558,16 +547,10 @@ class TypeStubGenerator:
             if filepath.name.startswith("_") and filepath.name != "__init__.py":
                 continue
             try:
-                calls, variables_by_file = self.analyze_file(filepath)
+                calls = self.analyze_file(filepath)
                 for call in calls:
                     call["file"] = str(filepath)
                 all_calls.extend(calls)
-
-                # Merge variables
-                for file_path, variables in variables_by_file.items():
-                    if file_path not in all_variables:
-                        all_variables[file_path] = []
-                    all_variables[file_path].extend(variables)
 
                 # Track import sources
                 if self.last_import_source:
@@ -587,7 +570,7 @@ class TypeStubGenerator:
                     self.last_import_source,
                 )
 
-        return all_calls, all_variables
+        return all_calls
 
     def generate_stub_content(
         self,
@@ -686,9 +669,9 @@ class TypeStubGenerator:
             raise FileNotFoundError(f"Source path does not exist: {source_path}")
 
         if source_path.is_file():
-            calls, variables_by_file = self.analyze_file(source_path)
+            calls = self.analyze_file(source_path)
         else:
-            calls, variables_by_file = self.analyze_directory(source_path)
+            calls = self.analyze_directory(source_path)
 
         if not calls:
             logging.getLogger(__name__).info(
@@ -881,19 +864,6 @@ class TypeStubGenerator:
                         for registry in new_stub.registries.values():
                             registry.is_function = is_function
                             all_new_registries.add_registry(registry)
-
-                    # Add variables for this registry file
-                    if str(registry_file) in variables_by_file:
-                        from ._stub_ir import Variable
-
-                        for var_info in variables_by_file[str(registry_file)]:
-                            variable = Variable(
-                                name=var_info["name"],
-                                type_annotation=var_info["type_annotation"],
-                                lineno=var_info["lineno"],
-                                source_file=var_info["file"],
-                            )
-                            all_new_registries.add_variable(variable)
 
                     # Merge with existing stub if it exists
                     if stub_path.exists():
