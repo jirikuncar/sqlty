@@ -89,19 +89,14 @@ verify-examples: generate-examples
 	@echo "✅ mypy verification passed"
 	@echo ""
 	@echo "🔍 Verifying examples with stubtest..."
-	@for dir in $(EXAMPLE_DIRS); do \
-		module=$$(basename $$dir); \
-		for pyfile in $$dir/*.py; do \
-			[ -f $$pyfile ] || continue; \
-			stub=$${pyfile%.py}.pyi; \
-			[ -f $$stub ] || continue; \
-			modname=$$(basename $${pyfile%.py}); \
-			echo "  → $$module/$$modname"; \
-			PYTHONPATH=$$dir:src uv run python -m mypy.stubtest $$modname \
-				--allowlist .stubtest-allowlist \
-				--ignore-unused-allowlist \
-				--concise \
-				--mypy-config-file pyproject.toml; \
-		done; \
+	@for pyi in $$(find examples -name "*.pyi" -type f); do \
+		dir=$$(dirname $$pyi); \
+		modname=$$(basename $${pyi%.pyi}); \
+		echo "  → $$pyi"; \
+		cd $$dir && PYTHONPATH=.:../../src uv run python -m mypy.stubtest $$modname \
+			--allowlist ../../.stubtest-allowlist \
+			--ignore-unused-allowlist \
+			--concise \
+			--mypy-config-file ../../pyproject.toml && cd - > /dev/null; \
 	done
 	@echo "✅ stubtest verification passed"

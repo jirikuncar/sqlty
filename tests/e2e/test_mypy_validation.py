@@ -7,7 +7,9 @@ and that type annotations are properly inferred and validated.
 from pathlib import Path
 
 
-def test_mypy_validates_query_types(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
+def test_mypy_validates_query_types(
+    tmp_path: Path, cli, mypy, stubtest, setup_queries_file
+) -> None:
     """Test that mypy validates query return types correctly."""
     setup_queries_file(tmp_path)
 
@@ -34,13 +36,20 @@ for user_id, user_name in execute(conn, q, {}):
     print(f"User {user_id}: {user_name}")
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     mypy_result = mypy(
         [str(app_file), "--strict"],
     )
     assert mypy_result.returncode == 0, mypy_result.stdout
+
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
 
 def test_mypy_catches_type_mismatch(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
@@ -59,7 +68,7 @@ q: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 wrong: SQL[tuple[str, int]] = q
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     mypy_result = mypy([str(app_file), "--strict"])
@@ -94,14 +103,16 @@ if TYPE_CHECKING:
         process_user(user_id, name, email)
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     mypy_result = mypy([str(app_file), "--strict"])
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_mypy_with_multiple_queries(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
+def test_mypy_with_multiple_queries(
+    tmp_path: Path, cli, mypy, stubtest, setup_queries_file
+) -> None:
     """Test mypy validation with multiple queries of different types."""
     setup_queries_file(tmp_path)
 
@@ -129,7 +140,7 @@ def check_types() -> None:
 """)
 
     # Generate stub
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -145,6 +156,13 @@ def check_types() -> None:
     mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
+
+    # Verify with stubtest
+    stubtest_result = stubtest(
+        ["queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert stubtest_result.returncode == 0, f"stubtest failed: {stubtest_result.stdout}"
 
 
 def test_mypy_with_query_parameters(tmp_path: Path, cli, mypy, setup_queries_file) -> None:
@@ -165,7 +183,7 @@ query: SQL[tuple[int, str]] = sql(
 result_type: SQL[tuple[int, str]] = query
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -195,8 +213,85 @@ query: SQL[tuple[int, str, str]] = sql(
 )
 """)
 
-    result = cli([str(tmp_path), "--mode=full"])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     mypy_result = mypy([str(app_file), "--strict"])
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
+
+
+def test_stubtest_detects_stub_inconsistencies(
+    tmp_path: Path, cli, stubtest, setup_queries_file
+) -> None:
+    """Test that stubtest detects inconsistencies between stub and implementation."""
+    setup_queries_file(tmp_path)
+
+    # Create an app file with queries so stubs are generated
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+query = sql("SELECT id::INTEGER, name::TEXT FROM users")
+""")
+
+    # Generate stub
+    result = cli([str(tmp_path)])
+    assert result.returncode == 0
+
+    # Manually modify the stub to introduce an inconsistency
+    stub_file = tmp_path / "queries.pyi"
+    stub_content = stub_file.read_text()
+
+    # Add a method that doesn't exist in the runtime
+    modified_stub = stub_content.replace(
+        "class Query(SQLRegistry):",
+        """class Query(SQLRegistry):
+    def nonexistent_method(self) -> None: ...""",
+    )
+    stub_file.write_text(modified_stub)
+
+    # Run stubtest - it should detect the inconsistency
+    stubtest_result = stubtest(
+        ["queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    # This should fail because we added a non-existent method
+    assert stubtest_result.returncode != 0
+    assert "nonexistent_method" in stubtest_result.stdout
+
+
+def test_stubtest_with_allowlist(tmp_path: Path, cli, stubtest, setup_queries_file) -> None:
+    """Test that stubtest allowlist is properly applied."""
+    setup_queries_file(tmp_path)
+
+    # Create a file with runtime-only elements that should be in the allowlist
+    queries_file = tmp_path / "queries.py"
+    queries_file.write_text("""from sqlty import SQLRegistry
+
+
+class Query(SQLRegistry):
+    __schema_path__ = "schema.sql"  # This should be allowed by allowlist
+    pass
+
+
+sql = Query.sql
+
+# Runtime query variable - should be allowed by allowlist
+user_query = sql("SELECT id::INTEGER, name::TEXT FROM users")
+
+
+def main() -> None:  # Should be allowed by allowlist
+    print("Hello")
+""")
+
+    # Generate stub
+    result = cli([str(tmp_path)])
+    assert result.returncode == 0
+
+    # Run stubtest - should pass because allowlist covers these cases
+    stubtest_result = stubtest(
+        ["queries", "--concise"],
+        {"env": {"PYTHONPATH": str(tmp_path)}, "cwd": str(tmp_path)},
+    )
+    assert (
+        stubtest_result.returncode == 0
+    ), f"stubtest should pass with allowlist: {stubtest_result.stdout}"
