@@ -7,6 +7,8 @@ Test the complete workflow:
 4. Run mypy on queries to validate type annotations
 """
 
+# TODO review these tests
+
 import subprocess
 from collections.abc import Callable
 from pathlib import Path

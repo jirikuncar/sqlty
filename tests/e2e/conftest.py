@@ -124,20 +124,10 @@ def setup_queries_file() -> Callable[..., Path]:
     def _create_queries_file(
         tmp_path: Path, filename: str = "queries.py", function_name: str = "sql"
     ) -> Path:
-        """Create a queries.py file with @sqlty decorator or SQLRegistry class."""
+        """Create a queries.py file with @sqlty decorator."""
         queries_file = tmp_path / filename
 
-        if function_name[0].isupper():
-            # Create SQLRegistry class for backward compatibility
-            content = f"""from sqlty import SQLRegistry
-
-
-class {function_name}(SQLRegistry):
-    pass
-"""
-        else:
-            # Create @sqlty decorated function
-            content = f"""from typing import Any
+        content = f"""from typing import Any
 from sqlty import sqlty
 
 
