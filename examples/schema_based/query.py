@@ -1,16 +1,17 @@
 from collections.abc import Iterator
 
-from sqlty import SQLRegistry
+from typing import Any
+
+from sqlty import sqlty
 
 
-class SchemaQueries(SQLRegistry):
-    __schema_path__ = "schema.sql"  # Relative to this file
+@sqlty(schema="schema.sql")
+def sql(query: str) -> Any:
+    """Execute SQL queries with schema-based type inference."""
+    return query
 
 
-sql = SchemaQueries.sql
-
-
-# Query using table defined in schema.sql (auto-detected via __schema_path__)
+# Query using table defined in schema.sql (auto-detected via schema parameter)
 user_query = sql("SELECT id, name FROM users")
 # Type: SQL[tuple[int, str]]
 

@@ -15,16 +15,15 @@ from psycopg.abc import Params
 
 from sqlty.drivers.psycopg import execute
 
-from .queries import QueryA as A
-from .queries import QueryB
+from .queries import sql_a, sql_b
 
-query_a = A.sql(
+query_a = sql_a(
     """
     SELECT id, name, age FROM users WHERE id = :id
     """
 )
 
-query_b = QueryB.sql(
+query_b = sql_b(
     """
     SELECT id, name, age FROM users WHERE id = :id
     """

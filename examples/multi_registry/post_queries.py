@@ -6,15 +6,19 @@ from sqlty import sqlty
 
 
 @sqlty
-def post_sql(query: str) -> Any:
+def sql(query: str) -> Any:
     return query
 
 
 # Define queries in the same file as the registry
-get_post = post_sql("""
+get_post = sql("""
     SELECT id::INTEGER, title::TEXT, content::TEXT FROM posts WHERE id = :id AND user_id = :user_id
 """)
 
-list_posts = post_sql("""
+list_posts = sql("""
     SELECT id::INTEGER, title::TEXT FROM posts ORDER BY created_at DESC
+""")
+
+get_user_posts = sql("""
+    SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id
 """)
