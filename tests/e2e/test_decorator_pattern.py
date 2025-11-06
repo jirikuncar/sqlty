@@ -16,7 +16,7 @@ from typing import Any
 
 def test_simple_decorator_pattern(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    cli: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
@@ -44,7 +44,7 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
     # Generate stubs
-    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)])
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated

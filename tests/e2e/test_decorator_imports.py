@@ -7,14 +7,13 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 
 def test_decorated_function_imported_from_another_module(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    cli: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
+    mypy: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
+    stubtest: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test that decorated functions work when imported using relative imports."""
     # Create package structure
@@ -53,7 +52,7 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
     # Generate stubs
-    result = cli([str(pkg_dir)], {"cwd": str(tmp_path)})
+    result = cli([str(pkg_dir)])
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated for sql.py
@@ -84,8 +83,8 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 
 def test_decorated_function_imported_with_absolute_import(
     tmp_path: Path,
-    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    cli: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
+    mypy: Callable[[list[str | Path]], subprocess.CompletedProcess[str]],
 ) -> None:
     """Test that decorated functions work with absolute imports (from same directory)."""
     # Create sql.py with decorated function
@@ -117,7 +116,7 @@ q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
     # Generate stubs
-    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
+    result = cli([str(tmp_path)])
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated for sql.py
