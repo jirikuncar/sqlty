@@ -88,7 +88,6 @@ psycopg = [
 
 [tool.pytest.ini_options]
 addopts = [
-    "--cov=src/sqlty",
     "--cov-report=term-missing",
     "--cov-report=html",
     "-v",
@@ -99,6 +98,15 @@ concurrency = ["multiprocessing"]
 parallel = true
 sigterm = true
 patch = ["subprocess"]
+omit = [
+    "tests/*",
+    "examples/*",
+]
+
+[tool.coverage.paths]
+source = [
+    "src/",
+]
 
 [tool.coverage.combine]
 show_missing = true
