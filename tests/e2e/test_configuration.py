@@ -238,3 +238,82 @@ test_query = sql("SELECT * FROM test_table")
         assert "SELECT id::INTEGER FROM users" in stub_content
         # Test query should ideally not be present (if exclude works)
         # But we won't strictly assert this as the feature may not be implemented yet
+
+
+def test_schema_paths_resolved_relative_to_pyproject_toml(
+    tmp_path: Path, cli, setup_queries_file
+) -> None:
+    """Test that schema paths in pyproject.toml are resolved relative to the pyproject.toml file location, not cwd."""
+    # Create a subdirectory for the project
+    project_dir = tmp_path / "my_project"
+    project_dir.mkdir()
+
+    # Create pyproject.toml in the subdirectory with schema configurations
+    pyproject_file = project_dir / "pyproject.toml"
+    pyproject_file.write_text("""[tool.sqlty]
+dialect = "sqlite"
+schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }
+""")
+
+    # Create schema files in the same directory as pyproject.toml
+    users_schema = project_dir / "users.sql"
+    users_schema.write_text("""CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+""")
+
+    orders_schema = project_dir / "orders.sql"
+    orders_schema.write_text("""CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    total FLOAT NOT NULL
+);
+""")
+
+    # Create query modules in the project directory using the fixture
+    setup_queries_file(project_dir, "users_queries.py", "sql")
+    setup_queries_file(project_dir, "orders_queries.py", "sql")
+
+    # Add query calls to the files
+    users_queries_file = project_dir / "users_queries.py"
+    users_queries_file.write_text(
+        users_queries_file.read_text() + '\n\nuser_query = sql("SELECT id, name FROM users")'
+    )
+
+    orders_queries_file = project_dir / "orders_queries.py"
+    orders_queries_file.write_text(
+        orders_queries_file.read_text() + '\n\norder_query = sql("SELECT id, total FROM orders")'
+    )
+
+    # Create app file
+    app_file = project_dir / "app.py"
+    app_file.write_text("""from users_queries import sql as user_sql
+from orders_queries import sql as order_sql
+
+users = user_sql("SELECT id, name FROM users")
+orders = order_sql("SELECT id, total FROM orders")
+""")
+
+    # Run sqlty from the parent directory (tmp_path), not from project_dir
+    # This tests that schema paths are resolved relative to pyproject.toml location
+    result = cli([str(project_dir)], {"cwd": str(tmp_path)})
+
+    # Should succeed and find the schema files
+    assert result.returncode == 0
+    assert "Using schema from" in result.stderr
+    assert "users.sql" in result.stderr
+    assert "orders.sql" in result.stderr
+
+    # Check that correct stub files were generated with proper types
+    users_stub = project_dir / "users_queries.pyi"
+    orders_stub = project_dir / "orders_queries.pyi"
+
+    assert users_stub.exists()
+    assert orders_stub.exists()
+
+    # Verify the types are correct (schema-based inference worked)
+    users_content = users_stub.read_text()
+    orders_content = orders_stub.read_text()
+
+    assert "SQL[tuple[int, str]]" in users_content  # id INTEGER, name TEXT
+    assert "SQL[tuple[int, float]]" in orders_content  # id INTEGER, total FLOAT

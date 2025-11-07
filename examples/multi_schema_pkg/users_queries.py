@@ -5,7 +5,7 @@ from typing import Any
 from sqlty import sqlty
 
 
-@sqlty(schema="users.sql")
+@sqlty
 def sql(query: str) -> Any:
     """Execute user-related SQL queries."""
     return query

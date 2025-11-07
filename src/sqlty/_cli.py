@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     # Load configuration from pyproject.toml
-    config = load_config(args.source.parent if args.source.is_file() else args.source)
+    config, config_dir = load_config(args.source.parent if args.source.is_file() else args.source)
 
     # Prepare CLI args for merging
     cli_config = {}
@@ -126,9 +126,13 @@ def main(argv: list[str] | None = None) -> None:
         for registry_name, schema_path_str in merged_config["schemas"].items():
             try:
                 if registry_name == "":  # Base schema
-                    base_schema = Path(schema_path_str)
+                    base_schema = (
+                        config_dir / schema_path_str if config_dir else Path(schema_path_str)
+                    )
                 else:
-                    schema_mappings[registry_name] = Path(schema_path_str)
+                    schema_mappings[registry_name] = (
+                        config_dir / schema_path_str if config_dir else Path(schema_path_str)
+                    )
             except Exception:
                 logging.getLogger(__name__).warning(
                     "Invalid schema path in config: %s", schema_path_str

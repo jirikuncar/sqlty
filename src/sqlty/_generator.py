@@ -281,21 +281,27 @@ class TypeStubGenerator:
                     registry_module_path = registry_file
 
         # Priority 1: Registry-specific schema from mappings
-        # Only support fully qualified names (e.g., 'user_queries.UserQueries')
+        # Support both module names (e.g., 'user_queries') and fully qualified names (e.g., 'user_queries.UserQueries')
+        class_name = None  # Initialize for later use
         if registry_name:
-            # If registry_class is provided, use it; otherwise get the first one
-            class_name = registry_class or None
+            # First try the module name directly (from pyproject.toml)
+            if registry_name in self.schema_mappings:
+                schema_to_use = self.schema_mappings[registry_name]
+                schema_source = f"mapping for '{registry_name}'"
+            else:
+                # Fallback to fully qualified name for backward compatibility
+                class_name = registry_class or None
 
-            # Fallback to first registry class if resolution failed
-            if not class_name:
-                class_names = self._registry_detector.get_registry_names(registry_module_path)
-                class_name = class_names[0] if class_names else None
+                # Fallback to first registry class if resolution failed
+                if not class_name:
+                    class_names = self._registry_detector.get_registry_names(registry_module_path)
+                    class_name = class_names[0] if class_names else None
 
-            if class_name:
-                fqn = f"{registry_name}.{class_name}"
-                if fqn in self.schema_mappings:
-                    schema_to_use = self.schema_mappings[fqn]
-                    schema_source = f"mapping for '{fqn}'"
+                if class_name:
+                    fqn = f"{registry_name}.{class_name}"
+                    if fqn in self.schema_mappings:
+                        schema_to_use = self.schema_mappings[fqn]
+                        schema_source = f"mapping for '{fqn}'"
 
         # Priority 2: Default CLI schema provided via schema_mappings[None]
         if schema_to_use is None and None in self.schema_mappings:
