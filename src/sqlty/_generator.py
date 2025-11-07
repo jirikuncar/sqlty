@@ -63,8 +63,6 @@ class TypeStubGenerator:
 
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
-        # Track text-based differences for legacy check mode
-        self._text_differences: list[tuple[Path, str, str]] = []
 
     def check(
         self,
@@ -91,7 +89,6 @@ class TypeStubGenerator:
 
         # Clear any previous differences
         self._files_with_differences.clear()
-        self._text_differences.clear()
 
         try:
             # Generate stubs (in check mode, this collects IRs without writing)
@@ -234,7 +231,6 @@ class TypeStubGenerator:
         if self._check_mode:
             if existing_content is None:
                 existing_content = ""
-            self._text_differences.append((stub_path, existing_content, content))
             return True
 
         # Write the file
@@ -288,20 +284,7 @@ class TypeStubGenerator:
         # Only support fully qualified names (e.g., 'user_queries.UserQueries')
         if registry_name:
             # If registry_class is provided, use it; otherwise get the first one
-            class_name: str | None
-            if registry_class:
-                # If registry_class is "sql", it's likely from "import sql" - resolve to actual class
-                if registry_class == "sql":
-                    class_name = self._registry_detector.get_class_name_from_export(
-                        registry_module_path, "sql"
-                    )
-                    logging.getLogger(__name__).debug(
-                        f"Resolved registry_class='sql' to class_name='{class_name}' from {registry_module_path}"
-                    )
-                else:
-                    class_name = registry_class
-            else:
-                class_name = None
+            class_name = registry_class or None
 
             # Fallback to first registry class if resolution failed
             if not class_name:
@@ -804,18 +787,6 @@ class TypeStubGenerator:
 
                 # Unified path: handle one or multiple classes the same way
                 if class_names:
-                    # Resolve registry_class names that might be export aliases
-                    for call in registry_calls:
-                        registry_class = call.get("registry_class")
-                        if registry_class and registry_class not in class_names:
-                            # This might be an export alias (e.g., 'qa' instead of 'A')
-                            # Try to resolve it to the actual class name
-                            resolved_class = self._registry_detector.get_class_name_from_export(
-                                registry_file, registry_class
-                            )
-                            if resolved_class and resolved_class in class_names:
-                                call["registry_class"] = resolved_class
-
                     # Group calls by registry_class
                     calls_by_class: dict[str | None, list[CallInfo]] = {}
                     for call in registry_calls:
