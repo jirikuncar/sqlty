@@ -10,20 +10,20 @@ help:
 
 run:
 	@echo "Running demo with auto-generation enabled..."
-	PYTHONPATH=../../src SQLTY_AUTO_GENERATE=1 uv run demo.py
+	pushd ../../ && SQLTY_AUTO_GENERATE=1 uv run python examples/runtime_autogen/demo.py && popd
 	@echo ""
 	@echo "Stub file generated! Use 'make show-stub' to view it."
 
 show-stub:
-	@if [ -f demo.pyi ]; then \
-		echo "Generated stub file (demo.pyi):"; \
+	@if [ -f queries.pyi ]; then \
+		echo "Generated stub file (queries.pyi):"; \
 		echo "================================"; \
-		cat demo.pyi; \
+		cat queries.pyi; \
 	else \
 		echo "No stub file found. Run 'make run' first."; \
 	fi
 
 clean:
 	@echo "Cleaning generated files..."
-	rm -f demo.pyi demo.pyi.lock
+	rm -f *.pyi *.pyi.lock
 	@echo "Done!"

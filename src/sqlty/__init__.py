@@ -79,9 +79,12 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
 
             from sqlty._auto_generator import auto_generate_stub
 
+            # Store the original function's file before wrapping
+            call = functools.partial(auto_generate_stub, fn)  # type: ignore
+
             @functools.wraps(fn)  # type: ignore
             def wrapper(query: str) -> Any:
-                auto_generate_stub(fn, query)  # type: ignore
+                call(query)
                 return fn(query)  # type: ignore
 
             return wrapper  # type: ignore

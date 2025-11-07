@@ -102,7 +102,7 @@ class RegistryDetector:
 
         Args:
             module_path: Path to the Python module to check
-            class_name: Name of the registry class
+            class_name: Name of the registry class or @sqlty function
 
         Returns:
             The export name (e.g., 'user_sql'), or 'sql' as default
@@ -115,7 +115,7 @@ class RegistryDetector:
                 source = f.read()
             tree = ast.parse(source)
 
-            # Look for assignments like: user_sql = UserQueries.sql
+            # First check for assignments like: user_sql = UserQueries.sql
             # Iterate through top-level statements only
             for node in tree.body:
                 if isinstance(node, ast.Assign):
@@ -129,6 +129,19 @@ class RegistryDetector:
                             # Found it! Get the target name
                             if node.targets and isinstance(node.targets[0], ast.Name):
                                 return node.targets[0].id
+
+            # For @sqlty decorated functions, check if class_name is a decorated function
+            for desc in ast.walk(tree):
+                if isinstance(desc, ast.FunctionDef) and desc.name == class_name:
+                    for decorator in desc.decorator_list:
+                        if (isinstance(decorator, ast.Name) and decorator.id == "sqlty") or (
+                            isinstance(decorator, ast.Call)
+                            and isinstance(decorator.func, ast.Name)
+                            and decorator.func.id == "sqlty"
+                        ):
+                            # This is a @sqlty decorated function, so export name is the function name
+                            return class_name
+
             return "sql"
         except Exception:
             return "sql"

@@ -71,8 +71,13 @@ class RuntimeCallRegistry:
                 return
 
             # Get the source file and line number
-            source_file = caller_frame.f_code.co_filename
-            lineno = caller_frame.f_lineno
+            if registry_file:
+                source_file = registry_file
+                lineno = 1  # Default line number when registry_file is provided
+            else:
+                # Get the source file and line number from call stack
+                source_file = caller_frame.f_code.co_filename
+                lineno = caller_frame.f_lineno
 
             logger.debug(f"Call from {source_file}:{lineno}")
 
@@ -86,7 +91,7 @@ class RuntimeCallRegistry:
                 return
 
             # Create call info
-            call_info = {
+            call_info: dict[str, Any] = {
                 "literal": query,
                 "lineno": lineno,
                 "file": str(source_path),
@@ -179,43 +184,80 @@ class RuntimeCallRegistry:
                         logger.warning("No registry class found in %s", source_path)
                         return
 
-                    # Use the first registry class or match by registry_class
                     # Group calls by registry class
                     calls_by_class: dict[str | None, list[dict[str, Any]]] = defaultdict(list)
                     for call in calls:
                         reg_class = call.get("registry_class")
                         calls_by_class[reg_class].append(call)
 
-                    # Generate stubs for each registry class
-                    for reg_class_name, class_calls in calls_by_class.items():
-                        # Determine which registry class to use
-                        if reg_class_name and reg_class_name in registry_classes:
-                            class_name = reg_class_name
-                        else:
-                            class_name = registry_classes[0]
+                    # For @sqlty functions, merge all functions into one stub
+                    # Check if this is a @sqlty file (all registry classes are @sqlty functions)
+                    is_sqlty_file = all(
+                        reg_class and reg_class in registry_classes
+                        for reg_class in calls_by_class
+                        if reg_class is not None
+                    )
 
-                        # Get the export name for this registry
+                    if is_sqlty_file and len(calls_by_class) > 1:
+                        # Merge all @sqlty functions into one stub
+                        all_calls = []
+                        for class_calls in calls_by_class.values():
+                            all_calls.extend(class_calls)
+
+                        # Use the first registry class name for the stub
+                        class_name = registry_classes[0]
                         export_name = generator._get_registry_export_name(source_path, class_name)
 
-                        # Use incremental mode to merge with existing stub
+                        # Generate merged stub for all functions
                         stub_content = generator.merge_stub_incremental(
                             stub_path,
-                            class_calls,
+                            all_calls,
                             class_name=class_name,
-                            base_class="SQLRegistry",
                             full_mode=False,
                             export_name=export_name,
                         )
 
-                        # Write the stub file
+                        # Write the merged stub file
                         stub_path.write_text(stub_content, encoding="utf-8")
 
                         logger.info(
-                            "Generated stub for %s (%s.sql, %d calls)",
+                            "Generated merged stub for %s (%d functions, %d calls)",
                             source_path.name,
-                            export_name,
-                            len(class_calls),
+                            len(calls_by_class),
+                            len(all_calls),
                         )
+                    else:
+                        # Generate stubs for each registry class (legacy behavior)
+                        for reg_class_name, class_calls in calls_by_class.items():
+                            # Determine which registry class to use
+                            if reg_class_name and reg_class_name in registry_classes:
+                                class_name = reg_class_name
+                            else:
+                                class_name = registry_classes[0]
+
+                            # Get the export name for this registry
+                            export_name = generator._get_registry_export_name(
+                                source_path, class_name
+                            )
+
+                            # Use incremental mode to merge with existing stub
+                            stub_content = generator.merge_stub_incremental(
+                                stub_path,
+                                class_calls,
+                                class_name=class_name,
+                                full_mode=False,
+                                export_name=export_name,
+                            )
+
+                            # Write the stub file
+                            stub_path.write_text(stub_content, encoding="utf-8")
+
+                            logger.info(
+                                "Generated stub for %s (%s.sql, %d calls)",
+                                source_path.name,
+                                export_name,
+                                len(class_calls),
+                            )
 
                 finally:
                     # Release lock

@@ -28,7 +28,6 @@ def auto_generate_stub(fn: Callable[[str], Any], query: str) -> None:
 
     module_name = module.__name__
 
-    # Get the source file where the registry class is defined
     try:
         registry_file = inspect.getfile(fn)
     except (TypeError, OSError):

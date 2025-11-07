@@ -12,47 +12,19 @@ This example shows:
 Note: Only literal string queries are supported for type stub generation.
 """
 
-from sqlty import SQLRegistry
+from queries import comment_sql, post_sql, user_sql
 
-
-# Example 1: Single Registry
-print("=== Example 1: Single Registry ===")
-
-
-class UserQueries(SQLRegistry):
-    """User-related queries."""
-
-    pass
-
-
-user_sql = UserQueries.sql
+from sqlty import SQL
 
 # These queries will be automatically added to the stub
-user_by_id = user_sql("SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id")
+user_by_id: SQL[tuple[int, str, str]] = user_sql(
+    "SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id"
+)
 all_users = user_sql("SELECT id::INTEGER, name::TEXT FROM users")
 user_count = user_sql("SELECT COUNT(*)::INTEGER FROM users")
 
-print(f"✓ User queries registered: {len([user_by_id, all_users, user_count])}")
+print("✓ User queries registered: 3")
 
-
-# Example 2: Multiple Registries
-print("\n=== Example 2: Multiple Registries ===")
-
-
-class PostQueries(SQLRegistry):
-    """Post-related queries."""
-
-    pass
-
-
-class CommentQueries(SQLRegistry):
-    """Comment-related queries."""
-
-    pass
-
-
-post_sql = PostQueries.sql
-comment_sql = CommentQueries.sql
 
 # Queries for different registries
 post_by_id = post_sql("SELECT id::INTEGER, title::TEXT, body::TEXT FROM posts WHERE id = :id")
@@ -64,13 +36,5 @@ comments_by_post = comment_sql(
 )
 comment_count = comment_sql("SELECT COUNT(*)::INTEGER FROM comments")
 
-print(f"✓ Post queries registered: 3")
-print(f"✓ Comment queries registered: 2")
-
-
-# Summary
-print("\n=== Summary ===")
-print("When this script exits, the following stub files will be created/updated:")
-print("  - demo.pyi (with all UserQueries, PostQueries, and CommentQueries)")
-print("\nAll queries will have proper type annotations based on SQL type casts.")
-print("\nYou can verify by checking the generated .pyi file after running this script.")
+print("✓ Post queries registered: 3")
+print("✓ Comment queries registered: 2")

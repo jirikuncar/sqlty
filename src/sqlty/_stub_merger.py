@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from ._collector import CallInfo
+from ._stub_ir import StubFile
 from ._stub_parser import CallInfoToIRParser, PyiToIRParser
 from ._stub_serializer import IRToTextSerializer
 
@@ -67,8 +68,7 @@ class StubMerger:
             return self._serializer.serialize_to_text(new_stub, relative_to=output_path.parent)
 
         # Read original source and parse existing stub
-        original_source = output_path.read_text(encoding="utf-8")
-        existing_stub = self._pyi_parser.parse_file(output_path)
+        original_stub = self._pyi_parser.parse_file(output_path)
 
         if full_mode:
             # Full replace: ignore existing, serialize new stub without preservation
@@ -76,20 +76,27 @@ class StubMerger:
                 new_stub, relative_to=output_path.parent, preserve_structure=False
             )
 
-        # Apply incremental and optionally prune to existing stub
+        # Create merged stub by copying original and applying changes
+        merged_stub = StubFile(source_path=output_path)
+        # Copy imports
+        for import_stmt in original_stub.imports:
+            merged_stub.add_import(import_stmt)
+        # Copy registries
+        for _reg_name, reg in original_stub.registries.items():
+            merged_stub.add_registry(reg)
+
+        # Apply incremental and optionally prune to merged stub
         for new_registry in new_stub.registries.values():
             # Add new overloads
-            existing_stub.merge_registry(new_registry, mode="incremental")
+            merged_stub.merge_registry(new_registry, mode="incremental")
             if prune:
                 # Remove stale overloads
-                existing_stub.merge_registry(new_registry, mode="prune")
+                merged_stub.merge_registry(new_registry, mode="prune")
 
         # Use surgical editing to preserve comments and structure
-        # Reuse existing_stub which already has source spans from line 73
+        # For incremental merges, regenerate from scratch to ensure correctness
         return self._serializer.serialize_to_text(
-            existing_stub,
+            merged_stub,
             relative_to=output_path.parent,
-            preserve_structure=True,
-            original_source=original_source,
-            original_stub=existing_stub,
+            preserve_structure=False,  # Regenerate from scratch for incremental merges
         )
