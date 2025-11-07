@@ -427,11 +427,11 @@ Precedence when choosing a schema for a registry:
 
 1. Registry-specific mapping from `--schema registry:PATH`
 2. Global mapping from `--schema PATH`
-3. `__schema_path__` attribute on the registry class
+3. `__schema_path__` attribute on the registry function
 
 CLI mappings, when present, always override `__schema_path__`.
 
-### Custom Class and Export Names
+### Custom Function and Export Names
 
 You can customize the generated function and export names:
 
@@ -832,14 +832,6 @@ Supported dialects:
 
 ```bash
 sqlty . --dialect mysql
-```
-
-##### `--class-name NAME`
-
-Name of the Query class. Default: `Query`
-
-```bash
-sqlty . --class-name MyQuery
 ```
 
 ##### `--function-name NAME`

@@ -1,7 +1,7 @@
 """Automatic stub generation utilities.
 
 This module contains helper functions that generate or update .pyi stub files
-when SQLRegistry subclasses are defined at runtime (opt-in via environment).
+when @sqlty decorated functions are defined at runtime (opt-in via environment).
 """
 
 import inspect

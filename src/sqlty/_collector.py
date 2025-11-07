@@ -26,7 +26,7 @@ class CallInfo(TypedDict):
 class LiteralCallCollector(ast.NodeVisitor):
     """Collects function calls with literal string arguments.
 
-    Only collects calls that are verified to come from SQLRegistry subclasses.
+    Only collects calls that are verified to come from @sqlty decorated functions.
     """
 
     def __init__(self, atok: asttokens.ASTTokens | None = None) -> None:
@@ -45,13 +45,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         ] = {}  # Track module imports (e.g., import queries -> {"queries": "queries"})
         self.class_imports: dict[
             str, str
-        ] = {}  # Track class imports with aliases (e.g., {"A": "QueryA"})
-        self.local_registry_classes: set[str] = (
-            set()
-        )  # Track SQLRegistry subclasses defined in current file
-        self.registry_aliases: dict[
-            str, str
-        ] = {}  # Track aliases to .sql methods (e.g., {"user_sql": "UserQueries"})
+        ] = {}  # Track class/function imports with aliases (e.g., {"A": "QueryA"})
         self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
 
@@ -121,20 +115,6 @@ class LiteralCallCollector(ast.NodeVisitor):
                 self.class_imports[local_name] = imported_name
         self.generic_visit(node)
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Track SQLRegistry subclasses defined in the current file."""
-        # Check if this class inherits from SQLRegistry
-        for base in node.bases:
-            if (
-                isinstance(base, ast.Name)
-                and base.id == "SQLRegistry"
-                or isinstance(base, ast.Attribute)
-                and base.attr == "SQLRegistry"
-            ):
-                self.local_registry_classes.add(node.name)
-                break
-        self.generic_visit(node)
-
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Track functions decorated with @sqlty."""
         # Check if the function has @sqlty decorator
@@ -161,7 +141,7 @@ class LiteralCallCollector(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         """Visit function calls to find target function with literal arguments.
 
-        Only accepts calls that are verified to come from SQLRegistry subclasses.
+        Only accepts calls that are verified to come from @sqlty decorated functions.
         """
         # Check for direct call: sql(...) or user_sql(...) etc.
         registry_source: str | None = None

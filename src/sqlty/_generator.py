@@ -11,7 +11,7 @@ Main orchestrator that delegates to specialized modules for:
 - AST Building: Constructing Python AST nodes
 - Unparsing: Converting AST to formatted Python code
 - Merging: Incremental stub file updates
-- Registry Detection: Finding SQLRegistry subclasses
+- Registry Detection: Finding @sqlty decorated functions
 """
 
 import ast
@@ -347,8 +347,8 @@ class TypeStubGenerator:
         return analyzer
 
     # Delegation methods for backward compatibility with tests
-    def _get_registry_class_names(self, module_path: Path) -> list[str]:
-        """Get the names of all SQLRegistry subclasses in a module."""
+    def _get_registry_names(self, module_path: Path) -> list[str]:
+        """Get the names of all @sqlty decorated functions in a module."""
         return self._registry_detector.get_registry_names(module_path)
 
     def _get_registry_export_name(self, module_path: Path, class_name: str) -> str:
@@ -356,13 +356,13 @@ class TypeStubGenerator:
         return self._registry_detector.get_registry_export_name(module_path, class_name)
 
     def _get_schema_path_from_registry(self, module_path: Path) -> Path | None:
-        """Extract __schema_path__ from a SQLRegistry subclass."""
+        """Extract __schema_path__ from a @sqlty decorated function."""
         return self._registry_detector.get_schema_path_from_registry(module_path)
 
     def _resolve_import_to_registry_module(
         self, import_source: str, source_file: Path
     ) -> str | None:
-        """Resolve an import to find which module contains the SQLRegistry subclass."""
+        """Resolve an import to find which module contains the @sqlty decorated function."""
         return self._registry_detector.resolve_import_to_registry_module(import_source, source_file)
 
     # Delegation method for merging (used by tests)
@@ -397,7 +397,7 @@ class TypeStubGenerator:
             registry_class = call["registry_class"]
             if registry_class in collector.import_sources:
                 import_module = collector.import_sources[registry_class]
-                # Check if this module is in registry_sources (i.e., it has a SQLRegistry)
+                # Check if this module is in registry_sources (i.e., it has a @sqlty decorated function)
                 if import_module in registry_sources:
                     call["registry_source"] = import_module
 
@@ -424,8 +424,8 @@ class TypeStubGenerator:
         logger.debug("Import sources: %s", collector.import_sources)
         logger.debug("Import levels: %s", collector.import_levels)
 
-        # Resolve each import source to find modules with SQLRegistry subclass
-        # Also check if the current file itself has a SQLRegistry subclass
+        # Resolve each import source to find modules with @sqlty decorated function
+        # Also check if the current file itself has a @sqlty decorated function
         registry_sources: set[str] = set()
 
         # Check if current file has a registry
@@ -464,7 +464,7 @@ class TypeStubGenerator:
                         logger.debug("Updated call registry_source to: %s", resolved_module)
             else:
                 logger.debug("Import does not resolve to a registry")
-                # If the module doesn't contain a SQLRegistry, clear registry_source for those calls
+                # If the module doesn't contain a @sqlty decorated function, clear registry_source for those calls
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
                         call["registry_source"] = None
@@ -728,7 +728,7 @@ class TypeStubGenerator:
         for call in calls:
             registry_source = call["registry_source"]
             if not registry_source:
-                # Skip calls that don't belong to a SQLRegistry
+                # Skip calls that don't belong to a @sqlty decorated function
                 logging.getLogger(__name__).info(
                     "Skipping call without registry_source: %s:%s",
                     call.get("file", "unknown file"),
@@ -754,7 +754,7 @@ class TypeStubGenerator:
                 # Check which one actually has a registry class defined
                 candidates = list(source_path.rglob(f"{registry_source}.py"))
 
-                # For each candidate, check if it defines a SQLRegistry subclass
+                # For each candidate, check if it defines a @sqlty decorated function
                 # and if THIS CALL references it (not other calls)
                 call_file = call.get("file")
                 if call_file:
@@ -796,7 +796,7 @@ class TypeStubGenerator:
                 stub_path = registry_file.with_suffix(".pyi")
                 registry_source = registry_file.stem
                 logging.getLogger(__name__).info(
-                    "Detected SQLRegistry subclass in '%s', writing to %s",
+                    "Detected registry in '%s', writing to %s",
                     registry_source,
                     stub_path,
                 )

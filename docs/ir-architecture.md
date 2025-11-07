@@ -28,8 +28,8 @@ Source/Pyi → Parse → IR → Manipulate → IR → Serialize → Output
   - `source_file`, `source_line`: Optional provenance information
   - Equality based on query literal for deduplication
 
-- **`RegistryClass`**: Represents a SQLRegistry subclass with its overloads
-  - `name`: Class name (e.g., "UserQueries")
+- **`RegistryClass`**: Represents a SQLRegistry subclass or @sqlty decorated function with its overloads
+  - `name`: Class name or function name (e.g., "UserQueries" or "user_sql")
   - `overloads`: Set of `OverloadSignature` objects
   - `export_name`: Name for module-level alias (e.g., "sql", "user_sql")
   - Methods: `add_overload()`, `remove_overload()`, `has_overload()`

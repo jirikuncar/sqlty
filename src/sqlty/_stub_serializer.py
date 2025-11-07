@@ -117,35 +117,6 @@ class IRToASTSerializer:
         else:
             return ast.Import(names=[ast.alias(name=import_stmt.module, asname=None)])
 
-    def _serialize_registry_class(self, registry: RegistryDecorator) -> ast.ClassDef:
-        """Serialize a RegistryDecorator to AST ClassDef.
-
-        Args:
-            registry: RegistryDecorator to serialize
-
-        Returns:
-            AST ClassDef node
-        """
-        class_body: list[ast.stmt] = []
-
-        class_body.append(ast.Expr(value=ast.Constant(value=registry.docstring)))
-
-        for overload in registry.get_sorted_overloads():
-            method_node = self._serialize_overload(overload)
-            class_body.append(method_node)
-
-        fallback = self._serialize_fallback()
-        class_body.append(fallback)
-
-        return ast.ClassDef(
-            name=registry.name,
-            bases=[ast.Name(id="SQLRegistry", ctx=ast.Load())],
-            keywords=[],
-            body=class_body,
-            decorator_list=[],
-            type_params=[],
-        )
-
     def _serialize_overload(self, overload: OverloadSignature) -> ast.FunctionDef:
         """Serialize an OverloadSignature to AST FunctionDef.
 
