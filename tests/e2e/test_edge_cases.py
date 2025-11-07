@@ -3,24 +3,20 @@
 Tests error handling, edge cases, and unusual but valid scenarios.
 """
 
-import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
 
 
-def test_empty_project(tmp_path: Path) -> None:
+def test_empty_project(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test running sqlty on empty directory."""
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     # Should handle gracefully - either exit 0 (no-op) or 1 (no files found)
     assert result.returncode in (0, 1)
 
 
-def test_no_queries_found(tmp_path: Path) -> None:
+def test_no_queries_found(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test how the tool handles a project with registry but no queries.
 
     The tool should complete successfully, either creating a minimal
@@ -44,11 +40,7 @@ def hello() -> str:
     return "Hello, World!"
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     # Should succeed - the tool handles this gracefully
     assert result.returncode == 0
@@ -60,7 +52,7 @@ def hello() -> str:
         assert "Query" in stub_content
 
 
-def test_syntax_error_in_source(tmp_path: Path) -> None:
+def test_syntax_error_in_source(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test handling of syntax errors in source files."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -79,17 +71,15 @@ def broken(
     # Missing closing parenthesis and body
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     # Should handle gracefully without crashing
     assert result.returncode in (0, 1)
 
 
-def test_non_literal_query_string(tmp_path: Path) -> None:
+def test_non_literal_query_string(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test that non-literal query strings are skipped with warning."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -111,11 +101,7 @@ query = sql(dynamic_query)
 static_query = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -127,7 +113,9 @@ static_query = sql("SELECT id::INTEGER FROM users")
     assert "SELECT id::INTEGER FROM users" in stub_content
 
 
-def test_duplicate_queries_same_file(tmp_path: Path) -> None:
+def test_duplicate_queries_same_file(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test handling of duplicate queries in the same file."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -147,11 +135,7 @@ query2 = sql("SELECT id::INTEGER FROM users")
 query3 = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -162,7 +146,7 @@ query3 = sql("SELECT id::INTEGER FROM users")
     assert stub_content.count("SELECT id::INTEGER FROM users") == 1
 
 
-def test_very_long_query(tmp_path: Path) -> None:
+def test_very_long_query(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test handling of very long SQL queries."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -181,17 +165,13 @@ def sql(query: str):
 query = sql("SELECT {columns} FROM big_table")
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     # Should handle long queries
     assert result.returncode == 0
 
 
-def test_unicode_in_query(tmp_path: Path) -> None:
+def test_unicode_in_query(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test handling of Unicode characters in queries."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -210,16 +190,12 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE name = :name")
 # params = {"name": "José García"} -- would contain unicode
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
 
-def test_comments_in_queries(tmp_path: Path) -> None:
+def test_comments_in_queries(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test SQL queries with SQL comments."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -244,11 +220,7 @@ query = sql("""
 """)
 ''')
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -256,7 +228,7 @@ query = sql("""
     assert stub_file.exists()
 
 
-def test_query_with_semicolon(tmp_path: Path) -> None:
+def test_query_with_semicolon(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test query ending with semicolon."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -274,11 +246,7 @@ def sql(query: str):
 query = sql("SELECT id::INTEGER FROM users;")
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -289,7 +257,7 @@ query = sql("SELECT id::INTEGER FROM users;")
     assert "SELECT id::INTEGER FROM users" in stub_content
 
 
-def test_nested_function_calls(tmp_path: Path) -> None:
+def test_nested_function_calls(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test sql() calls inside function definitions."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -314,11 +282,7 @@ def get_posts_query():
     return sql("SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id")
 ''')
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -330,7 +294,7 @@ def get_posts_query():
     assert "SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id" in stub_content
 
 
-def test_class_method_queries(tmp_path: Path) -> None:
+def test_class_method_queries(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test sql() calls inside class methods."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -357,11 +321,7 @@ class UserRepository:
         return sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -373,7 +333,7 @@ class UserRepository:
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_content
 
 
-def test_query_in_conditional(tmp_path: Path) -> None:
+def test_query_in_conditional(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test sql() calls inside conditional blocks."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -397,11 +357,7 @@ if DEBUG:
 user_query = sql("SELECT id::INTEGER FROM users")
 """)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 

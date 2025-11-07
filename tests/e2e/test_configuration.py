@@ -3,12 +3,14 @@
 Tests that sqlty can be configured via pyproject.toml file.
 """
 
-import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
 
 
-def test_config_via_pyproject_toml(tmp_path: Path) -> None:
+def test_config_via_pyproject_toml(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test that the tool accepts pyproject.toml configuration.
 
     This test validates that the tool can read and process a pyproject.toml
@@ -39,12 +41,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 """)
 
     # Run generator - should pick up config from pyproject.toml
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should handle config gracefully
     assert result.returncode == 0
@@ -55,7 +52,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_file.read_text()
 
 
-def test_schema_path_in_config(tmp_path: Path) -> None:
+def test_schema_path_in_config(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test schema path configuration in pyproject.toml."""
     # Create schema file
     schema_file = tmp_path / "db_schema.sql"
@@ -90,18 +87,15 @@ query = sql("SELECT id, name FROM users")
 """)
 
     # Run generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should succeed or gracefully handle config
     assert result.returncode in (0, 1, 2)
 
 
-def test_cli_args_override_config(tmp_path: Path) -> None:
+def test_cli_args_override_config(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test that CLI arguments override pyproject.toml configuration."""
     # Create pyproject.toml with one dialect
     pyproject_file = tmp_path / "pyproject.toml"
@@ -125,18 +119,15 @@ query = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Run with different dialect via CLI - should override config
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--dialect=postgres"],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path), "--dialect=postgres"], {"cwd": str(tmp_path)})
 
     # Should succeed
     assert result.returncode == 0
 
 
-def test_multiple_registries_in_config(tmp_path: Path) -> None:
+def test_multiple_registries_in_config(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test configuring multiple registries in pyproject.toml."""
     # Create pyproject.toml with registry configuration
     pyproject_file = tmp_path / "pyproject.toml"
@@ -176,18 +167,15 @@ orders = order_sql("SELECT id::INTEGER FROM orders")
 """)
 
     # Run generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should handle registry configuration
     assert result.returncode in (0, 1, 2)
 
 
-def test_exclude_patterns_in_config(tmp_path: Path) -> None:
+def test_exclude_patterns_in_config(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test exclude patterns in pyproject.toml configuration."""
     # Create pyproject.toml with exclude patterns
     pyproject_file = tmp_path / "pyproject.toml"
@@ -220,12 +208,7 @@ test_query = sql("SELECT * FROM test_table")
 """)
 
     # Run generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should succeed
     assert result.returncode in (0, 1, 2)

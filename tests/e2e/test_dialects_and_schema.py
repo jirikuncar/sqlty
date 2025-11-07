@@ -3,14 +3,14 @@
 Tests different SQL dialects and schema file usage.
 """
 
-import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from inline_snapshot import snapshot
 
 
-def test_postgres_dialect(tmp_path: Path) -> None:
+def test_postgres_dialect(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test PostgreSQL-specific type inference."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -31,17 +31,7 @@ query3 = sql("SELECT tags::TEXT[] FROM posts")
 """)
 
     # Generate stub with PostgreSQL dialect
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sqlty",
-            str(tmp_path),
-            "--dialect=postgres",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--dialect=postgres"])
 
     assert result.returncode == 0
 
@@ -56,7 +46,7 @@ query3 = sql("SELECT tags::TEXT[] FROM posts")
     assert "SQL[tuple[int, str, str]]" in stub_content or "tuple[int, str" in stub_content
 
 
-def test_mysql_dialect(tmp_path: Path) -> None:
+def test_mysql_dialect(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test MySQL-specific type inference."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -75,17 +65,7 @@ query = sql("SELECT CAST(id AS SIGNED), CAST(name AS CHAR), CAST(price AS DECIMA
 """)
 
     # Generate stub with MySQL dialect
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sqlty",
-            str(tmp_path),
-            "--dialect=mysql",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--dialect=mysql"])
 
     assert result.returncode == 0
 
@@ -98,7 +78,9 @@ query = sql("SELECT CAST(id AS SIGNED), CAST(name AS CHAR), CAST(price AS DECIMA
     assert "tuple[int," in stub_content
 
 
-def test_schema_based_type_inference(tmp_path: Path) -> None:
+def test_schema_based_type_inference(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test type inference using a schema file."""
     # Create schema file
     schema_file = tmp_path / "schema.sql"
@@ -135,17 +117,7 @@ query2 = sql("SELECT id, title FROM posts")
 """)
 
     # Generate stub with schema file
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sqlty",
-            str(tmp_path),
-            f"--schema={schema_file}",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), f"--schema={schema_file}"])
 
     assert result.returncode == 0
 
@@ -159,7 +131,9 @@ query2 = sql("SELECT id, title FROM posts")
     assert "tuple[int, str, str]" in stub_content or "tuple[int, str]" in stub_content
 
 
-def test_without_type_casts_fallback(tmp_path: Path) -> None:
+def test_without_type_casts_fallback(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test that queries without casts fall back to generic string types."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -178,11 +152,7 @@ query = sql("SELECT id, name FROM users")
 """)
 
     # Generate stub without schema
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -195,7 +165,9 @@ query = sql("SELECT id, name FROM users")
     assert "tuple[str, str]" in stub_content or "SQL[tuple[" in stub_content
 
 
-def test_mixed_typed_and_untyped_queries(tmp_path: Path) -> None:
+def test_mixed_typed_and_untyped_queries(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test mix of queries with and without type casts."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -217,11 +189,7 @@ untyped_query = sql("SELECT id, name FROM posts")
 """)
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -252,7 +220,7 @@ def sql(query: str) -> str:
 """)
 
 
-def test_uuid_type_inference(tmp_path: Path) -> None:
+def test_uuid_type_inference(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test UUID type inference."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -271,17 +239,7 @@ query = sql("SELECT id::UUID, name::TEXT FROM users")
 """)
 
     # Generate stub
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sqlty",
-            str(tmp_path),
-            "--dialect=postgres",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--dialect=postgres"])
 
     assert result.returncode == 0
 
@@ -296,7 +254,9 @@ query = sql("SELECT id::UUID, name::TEXT FROM users")
     assert "SELECT id::UUID, name::TEXT FROM users" in stub_content
 
 
-def test_multi_schema_with_schema_path_attribute(tmp_path: Path) -> None:
+def test_multi_schema_with_schema_path_attribute(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test type inference with multiple registries using __schema_path__ attribute."""
     # Create separate schema files for different domains
     orders_schema = tmp_path / "orders.sql"
@@ -347,16 +307,7 @@ order_result = order_sql("SELECT id, total FROM orders")
 """)
 
     # Generate stubs
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sqlty",
-            str(tmp_path),
-        ],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 

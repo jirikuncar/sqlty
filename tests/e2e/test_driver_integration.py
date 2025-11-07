@@ -4,14 +4,18 @@ Tests that the generated stubs work correctly with driver code patterns,
 particularly the psycopg driver integration.
 """
 
-import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from inline_snapshot import snapshot
 
 
-def test_psycopg_driver_pattern(tmp_path: Path) -> None:
+def test_psycopg_driver_pattern(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    mypy: Callable[..., CompletedProcess[str]],
+) -> None:
     """Test stub generation for code using psycopg driver pattern."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -52,11 +56,7 @@ def example_usage() -> None:
 """)
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -98,16 +98,16 @@ def sql(query: str) -> str:
 """)
 
     # Validate with mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_query_with_iterator_return_type(tmp_path: Path) -> None:
+def test_query_with_iterator_return_type(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    mypy: Callable[..., CompletedProcess[str]],
+) -> None:
     """Test that SQL[tuple[...]] works with Iterator[tuple[...]] in type checking."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -141,25 +141,21 @@ def fetch_users() -> None:
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
     # Validate with mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_parameterized_query_type_safety(tmp_path: Path) -> None:
+def test_parameterized_query_type_safety(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    mypy: Callable[..., CompletedProcess[str]],
+) -> None:
     """Test that parameterized queries maintain type safety."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -195,11 +191,7 @@ result_tuple: tuple[int, str, str]
 ''')
 
     # Generate stub
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -214,16 +206,16 @@ result_tuple: tuple[int, str, str]
     assert "SQL[tuple[int, str, str]]" in stub_content
 
     # Validate with mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"
 
 
-def test_multiple_registries_in_driver_code(tmp_path: Path) -> None:
+def test_multiple_registries_in_driver_code(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    mypy: Callable[..., CompletedProcess[str]],
+) -> None:
     """Test multiple registries as used in multi-schema applications."""
     # Create user registry
     user_queries_file = tmp_path / "user_queries.py"
@@ -263,6 +255,7 @@ def get_user_data() -> None:
         "SELECT id::INTEGER, username::TEXT FROM users WHERE id = :id"
     )
     # result: Iterator[tuple[int, str]] = execute(conn, query, {"id": 1})
+    # result: Iterator[tuple[int, str]] = execute(conn, query, {"id": 1})
 
 
 def get_order_data() -> None:
@@ -274,11 +267,7 @@ def get_order_data() -> None:
 ''')
 
     # Generate stubs
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(app_file)])
 
     assert result.returncode == 0
 
@@ -287,10 +276,6 @@ def get_order_data() -> None:
     assert (tmp_path / "order_queries.pyi").exists()
 
     # Validate with mypy
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy failed: {mypy_result.stdout}"

@@ -10,14 +10,18 @@ Key principles:
 4. Test complete workflows from source to validation
 """
 
-import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from inline_snapshot import snapshot
 
 
-def test_example_basic_pattern(tmp_path: Path) -> None:
+def test_example_basic_pattern(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    mypy: Callable[..., CompletedProcess[str]],
+) -> None:
     """Example: Basic test pattern with snapshot."""
     # Step 1: Create source files
     queries_file = tmp_path / "queries.py"
@@ -38,11 +42,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 """)
 
     # Step 2: Run sqlty generator via subprocess
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     # Verify generator succeeded
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
@@ -68,16 +68,12 @@ def sql(query: str) -> str:
 """)
 
     # Step 5 (Optional): Run mypy to validate type checking
-    mypy_result = subprocess.run(
-        [sys.executable, "-m", "mypy", str(app_file), "--strict"],
-        capture_output=True,
-        text=True,
-    )
+    mypy_result = mypy([str(app_file), "--strict"])
 
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
 
 
-def test_example_without_mypy(tmp_path: Path) -> None:
+def test_example_without_mypy(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Example: Test without mypy validation (for CLI behavior tests)."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -95,11 +91,7 @@ query = sql("SELECT 1::INTEGER")
 """)
 
     # Test CLI behavior without mypy
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
 
     assert result.returncode == 0
 
@@ -112,22 +104,18 @@ query = sql("SELECT 1::INTEGER")
     assert "SELECT 1::INTEGER" in stub_content
 
 
-def test_example_error_case(tmp_path: Path) -> None:
+def test_example_error_case(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Example: Testing error handling."""
     # Test with invalid input
     nonexistent = tmp_path / "nonexistent"
 
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(nonexistent)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(nonexistent)])
 
     # Expect non-zero exit code
     assert result.returncode != 0 or "not found" in result.stderr.lower()
 
 
-def test_example_cli_options(tmp_path: Path) -> None:
+def test_example_cli_options(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Example: Testing CLI options."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -145,16 +133,14 @@ query = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Test with specific CLI option
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--dialect=postgres"],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path), "--dialect=postgres"])
 
     assert result.returncode in (0, 2)  # 2 if option not recognized
 
 
-def test_example_incremental_behavior(tmp_path: Path) -> None:
+def test_example_incremental_behavior(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Example: Testing incremental updates."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -172,11 +158,7 @@ query1 = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Initial generation
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     stub_file = tmp_path / "queries.pyi"
@@ -191,11 +173,7 @@ query2 = sql("SELECT name::TEXT FROM users")
 """)
 
     # Regenerate
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
+    result = cli([str(tmp_path)])
     assert result.returncode == 0
 
     # Verify both queries are present
