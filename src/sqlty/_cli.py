@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 
+from sqlty._config import load_config, merge_config
 from sqlty._generator import TypeStubGenerator
 
 
@@ -72,8 +73,25 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
 
+    # Load configuration from pyproject.toml
+    config = load_config(args.source.parent if args.source.is_file() else args.source)
+
+    # Prepare CLI args for merging
+    cli_config = {}
+    if args.dialect != "postgres":  # Only include if different from default
+        cli_config["dialect"] = args.dialect
+    if args.format_command:
+        cli_config["format_command"] = args.format_command
+
+    # Merge config with CLI args (CLI takes precedence)
+    merged_config = merge_config(config, cli_config)
+
+    # Use merged config values, with CLI args taking precedence
+    sql_dialect = merged_config.get("dialect", args.dialect)
+    format_command = merged_config.get("format_command", args.format_command)
+
     # Validate mutually exclusive options
-    if args.check and args.format_command:
+    if args.check and format_command:
         logging.getLogger(__name__).error(
             "Error: --check and --format-command are mutually exclusive. "
             "Check mode compares overload content, not formatted output."
@@ -102,6 +120,20 @@ def main(argv: list[str] | None = None) -> None:
     # Parse unified --schema options into base schema and mappings
     schema_mappings: dict[str | None, Path] = {}
     base_schema: Path | None = None
+
+    # Start with schemas from config
+    if "schemas" in merged_config:
+        for registry_name, schema_path_str in merged_config["schemas"].items():
+            try:
+                if registry_name == "":  # Base schema
+                    base_schema = Path(schema_path_str)
+                else:
+                    schema_mappings[registry_name] = Path(schema_path_str)
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Invalid schema path in config: %s", schema_path_str
+                )
+
     if args.schema:
         for entry in args.schema:
             # Registry-specific mapping using ':' delimiter
@@ -137,9 +169,9 @@ def main(argv: list[str] | None = None) -> None:
         schema_mappings[None] = base_schema
 
     generator = TypeStubGenerator(
-        sql_dialect=args.dialect,
+        sql_dialect=sql_dialect,
         schema_mappings=schema_mappings,
-        format_command=args.format_command,
+        format_command=format_command,
         verbose=args.verbose,
     )
 
