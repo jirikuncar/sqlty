@@ -13,14 +13,14 @@ class SQLTyConfig(TypedDict, total=False):
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
 
 
-def load_config(project_root: Path | None = None) -> SQLTyConfig:
+def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
     """Load SQLTy configuration from pyproject.toml.
 
     Args:
         project_root: Root directory of the project. If None, searches from cwd upward.
 
     Returns:
-        Configuration dictionary with SQLTy settings
+        Tuple of (configuration dictionary, directory containing pyproject.toml or None if not found)
     """
     if project_root is None:
         project_root = Path.cwd()
@@ -31,14 +31,15 @@ def load_config(project_root: Path | None = None) -> SQLTyConfig:
         pyproject_path = current / "pyproject.toml"
         if pyproject_path.exists():
             try:
-                return _parse_pyproject(pyproject_path)
+                config = _parse_pyproject(pyproject_path)
+                return config, current
             except Exception as e:
                 logging.getLogger(__name__).warning("Failed to parse %s: %s", pyproject_path, e)
-                return {}
+                return {}, None
         current = current.parent
 
     # No pyproject.toml found
-    return {}
+    return {}, None
 
 
 def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:

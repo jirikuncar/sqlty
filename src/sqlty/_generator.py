@@ -63,8 +63,6 @@ class TypeStubGenerator:
 
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
-        # Track text-based differences for legacy check mode
-        self._text_differences: list[tuple[Path, str, str]] = []
 
     def check(
         self,
@@ -91,7 +89,6 @@ class TypeStubGenerator:
 
         # Clear any previous differences
         self._files_with_differences.clear()
-        self._text_differences.clear()
 
         try:
             # Generate stubs (in check mode, this collects IRs without writing)
@@ -234,7 +231,6 @@ class TypeStubGenerator:
         if self._check_mode:
             if existing_content is None:
                 existing_content = ""
-            self._text_differences.append((stub_path, existing_content, content))
             return True
 
         # Write the file
@@ -285,34 +281,27 @@ class TypeStubGenerator:
                     registry_module_path = registry_file
 
         # Priority 1: Registry-specific schema from mappings
-        # Only support fully qualified names (e.g., 'user_queries.UserQueries')
+        # Support both module names (e.g., 'user_queries') and fully qualified names (e.g., 'user_queries.UserQueries')
+        class_name = None  # Initialize for later use
         if registry_name:
-            # If registry_class is provided, use it; otherwise get the first one
-            class_name: str | None
-            if registry_class:
-                # If registry_class is "sql", it's likely from "import sql" - resolve to actual class
-                if registry_class == "sql":
-                    class_name = self._registry_detector.get_class_name_from_export(
-                        registry_module_path, "sql"
-                    )
-                    logging.getLogger(__name__).debug(
-                        f"Resolved registry_class='sql' to class_name='{class_name}' from {registry_module_path}"
-                    )
-                else:
-                    class_name = registry_class
+            # First try the module name directly (from pyproject.toml)
+            if registry_name in self.schema_mappings:
+                schema_to_use = self.schema_mappings[registry_name]
+                schema_source = f"mapping for '{registry_name}'"
             else:
-                class_name = None
+                # Fallback to fully qualified name for backward compatibility
+                class_name = registry_class or None
 
-            # Fallback to first registry class if resolution failed
-            if not class_name:
-                class_names = self._registry_detector.get_registry_names(registry_module_path)
-                class_name = class_names[0] if class_names else None
+                # Fallback to first registry class if resolution failed
+                if not class_name:
+                    class_names = self._registry_detector.get_registry_names(registry_module_path)
+                    class_name = class_names[0] if class_names else None
 
-            if class_name:
-                fqn = f"{registry_name}.{class_name}"
-                if fqn in self.schema_mappings:
-                    schema_to_use = self.schema_mappings[fqn]
-                    schema_source = f"mapping for '{fqn}'"
+                if class_name:
+                    fqn = f"{registry_name}.{class_name}"
+                    if fqn in self.schema_mappings:
+                        schema_to_use = self.schema_mappings[fqn]
+                        schema_source = f"mapping for '{fqn}'"
 
         # Priority 2: Default CLI schema provided via schema_mappings[None]
         if schema_to_use is None and None in self.schema_mappings:
@@ -804,18 +793,6 @@ class TypeStubGenerator:
 
                 # Unified path: handle one or multiple classes the same way
                 if class_names:
-                    # Resolve registry_class names that might be export aliases
-                    for call in registry_calls:
-                        registry_class = call.get("registry_class")
-                        if registry_class and registry_class not in class_names:
-                            # This might be an export alias (e.g., 'qa' instead of 'A')
-                            # Try to resolve it to the actual class name
-                            resolved_class = self._registry_detector.get_class_name_from_export(
-                                registry_file, registry_class
-                            )
-                            if resolved_class and resolved_class in class_names:
-                                call["registry_class"] = resolved_class
-
                     # Group calls by registry_class
                     calls_by_class: dict[str | None, list[CallInfo]] = {}
                     for call in registry_calls:

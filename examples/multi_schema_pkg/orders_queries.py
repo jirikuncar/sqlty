@@ -5,7 +5,7 @@ from typing import Any
 from sqlty import sqlty
 
 
-@sqlty(schema="orders.sql")
+@sqlty
 def sql(query: str) -> Any:
     """Execute order-related SQL queries."""
     return query

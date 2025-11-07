@@ -24,13 +24,13 @@ def auto_generate_stub(fn: Callable[[str], Any], query: str) -> None:
     # Get the module for this registry class
     module = inspect.getmodule(fn)
     if not module:
-        return
+        return  # pragma: no cover
 
     module_name = module.__name__
 
     try:
         registry_file = inspect.getfile(fn)
-    except (TypeError, OSError):
+    except (TypeError, OSError):  # pragma: no cover
         return None
 
     # Build fully qualified class name

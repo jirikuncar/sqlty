@@ -88,11 +88,28 @@ psycopg = [
 
 [tool.pytest.ini_options]
 addopts = [
-    "--cov=src/sqlty",
     "--cov-report=term-missing",
     "--cov-report=html",
     "-v",
 ]
+
+[tool.coverage.run]
+concurrency = ["multiprocessing"]
+parallel = true
+sigterm = true
+patch = ["subprocess"]
+omit = [
+    "tests/*",
+    "examples/*",
+]
+
+[tool.coverage.paths]
+source = [
+    "src/",
+]
+
+[tool.coverage.combine]
+show_missing = true
 
 [tool.mypy]
 python_version = "3.14"
