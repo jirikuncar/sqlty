@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `@sqlty` decorator provides an alternative pattern to the `SQLRegistry` class for marking functions for SQL type inference and stub generation. This pattern offers a simpler, more direct approach while maintaining all the power of the registry system.
+The `@sqlty` decorator provides a simple and direct approach for marking functions for SQL type inference and stub generation.
 
 ## Basic Usage
 
@@ -116,41 +116,6 @@ def sql_with_schema(query: str) -> Any:
 if TYPE_CHECKING:
     q: SQL[tuple[int, str]] = sql_with_schema("SELECT id, name FROM users")
 ```
-
-## Comparison with Registry Pattern
-
-### Registry Pattern (Original)
-
-```python
-from sqlty import SQLRegistry
-
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
-
-# Usage
-q = sql("SELECT 1")
-```
-
-### Decorator Pattern (New)
-
-```python
-from sqlty import sqlty
-
-@sqlty
-def sql(query: str) -> Any:
-    return query
-
-# Usage
-q = sql("SELECT 1")
-```
-
-Both patterns:
-- Generate the same stub files
-- Provide the same type safety
-- Work with mypy
-- Support schema integration
 
 ## Multiple Functions
 

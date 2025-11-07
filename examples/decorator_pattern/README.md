@@ -23,17 +23,14 @@ sqlty . --mode=full
 
 3. Check the generated `app.pyi` file for type-safe overloads
 
-## Comparison with Registry Pattern
+## Usage
 
-Traditional registry pattern:
 ```python
-from sqlty import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
-```
+@sqlty
+def sql[T](query: T) -> T:
+    return query
 
 New decorator pattern:
 ```python

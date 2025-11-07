@@ -58,7 +58,7 @@ class RuntimeCallRegistry:
             # Walk up the stack to find the actual caller
             # We need to skip:
             # 1. This method (register_call)
-            # 2. The sql() method in SQLRegistry or @sqlty decorated function
+            # 2. The @sqlty decorated function
             # 3. Any intermediate frames
             caller_frame = frame.f_back  # sql() method
             if caller_frame is None:
