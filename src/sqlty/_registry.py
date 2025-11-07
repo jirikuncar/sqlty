@@ -1,7 +1,7 @@
 """Registry detection and schema resolution utilities.
 
-This module handles detecting SQLRegistry subclasses in Python modules
-and resolving their associated schema files.
+This module handles detecting @sqlty decorated functions
+in Python modules and resolving their associated schema files.
 """
 
 import ast
@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class RegistryDetector:
-    """Detect SQLRegistry subclasses and resolve their schemas."""
+    """Detect @sqlty decorated functions and resolve their schemas."""
 
     def get_schema_path_from_registry(
         self, module_path: Path, name: str | None = None
     ) -> Path | None:
-        """Extract __schema_path__ from a SQLRegistry subclass or decorated function.
+        """Extract __schema_path__ from a @sqlty decorated function.
 
         Args:
             module_path: Path to the Python module to check
@@ -63,13 +63,13 @@ class RegistryDetector:
         return None
 
     def get_registry_names(self, module_path: Path) -> list[str]:
-        """Get the names of all SQLRegistry subclasses in a module.
+        """Get the names of all @sqlty decorated functions in a module.
 
         Args:
             module_path: Path to the Python module to check
 
         Returns:
-            List of detectedd
+            List of detected registry names
         """
         if not module_path.exists():
             return []
@@ -97,41 +97,18 @@ class RegistryDetector:
 
         return registry_classes
 
-    def get_registry_export_name(self, module_path: Path, class_name: str) -> str:
-        """Get the exported name for the registry's sql method.
+    def get_registry_export_name(self, module_path: Path, function_name: str) -> str:
+        """Get the exported name for the @sqlty decorated function.
 
         Args:
             module_path: Path to the Python module to check
-            class_name: Name of the registry class
+            function_name: Name of the @sqlty decorated function
 
         Returns:
-            The export name (e.g., 'user_sql'), or 'sql' as default
+            The export name (the function name itself)
         """
-        if not module_path.exists():
-            return "sql"
-
-        try:
-            with open(module_path) as f:
-                source = f.read()
-            tree = ast.parse(source)
-
-            # Look for assignments like: user_sql = UserQueries.sql
-            # Iterate through top-level statements only
-            for node in tree.body:
-                if isinstance(node, ast.Assign):
-                    # Check if the value is ClassName.sql
-                    if isinstance(node.value, ast.Attribute):
-                        if (
-                            node.value.attr == "sql"
-                            and isinstance(node.value.value, ast.Name)
-                            and node.value.value.id == class_name
-                        ):
-                            # Found it! Get the target name
-                            if node.targets and isinstance(node.targets[0], ast.Name):
-                                return node.targets[0].id
-            return "sql"
-        except Exception:
-            return "sql"
+        # For @sqlty decorated functions, the export name is the function name
+        return function_name
 
     def get_class_name_from_export(self, module_path: Path, export_name: str) -> str | None:
         """Get the registry class name from an exported .sql method name.
@@ -203,7 +180,7 @@ class RegistryDetector:
     def resolve_import_to_registry_module(
         self, import_source: str, source_file: Path, import_level: int = 0
     ) -> str | None:
-        """Resolve an import to find which module contains the SQLRegistry subclass.
+        """Resolve an import to find which module contains the @sqlty decorated function.
 
         Args:
             import_source: The module name from the import statement
@@ -214,7 +191,7 @@ class RegistryDetector:
                          Level 3 = ... (grandparent package), etc.
 
         Returns:
-            The module name that contains the SQLRegistry subclass, or None
+            The module name that contains the @sqlty decorated function, or None
         """
         logger.debug(
             "Resolving import: source='%s', file='%s', level=%d",
@@ -346,13 +323,13 @@ class RegistryDetector:
         return None
 
     def find_registries(self, root_path: Path) -> list[tuple[Path, str]]:
-        """Find all SQLRegistry subclasses in Python files under the given path.
+        """Find all @sqlty decorated functions in Python files under the given path.
 
         Args:
             root_path: The root directory or file to search for Python files
 
         Returns:
-            List of tuples containing (file_path, registry_class_name)
+            List of tuples containing (file_path, function_name)
         """
         registries: list[tuple[Path, str]] = []
 

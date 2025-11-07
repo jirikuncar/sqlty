@@ -18,7 +18,7 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
   - [Type Inference](#type-inference)
   - [AST Analysis](#ast-analysis)
 - [API Reference](#api-reference)
-  - [SQLRegistry Class](#sqlregistry-class)
+  - [@sqlty Decorator](#sqlty-decorator)
   - [SQL Type](#sql-type)
   - [Generator CLI](#generator-cli)
 - [Examples](#examples)
@@ -54,17 +54,16 @@ uv pip install -e .
 
 ## Quick Start
 
-1. **Define your SQL registry:**
+1. **Define your SQL query function:**
 
 ```python
 # queries.py
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    """Your SQL query registry."""
-    pass
-
-sql = Query.sql
+@sqlty
+def sql[T](query: T) -> T:
+    """Your SQL query function."""
+    return query
 ```
 
 2. **Write SQL queries in your code:**
@@ -106,24 +105,22 @@ mypy .
 
 ## Basic Usage
 
-### Creating a SQL Registry
+### Creating a SQL Query Function
 
-A SQL registry is a class that inherits from `SQLRegistry` and provides type-safe SQL query execution:
+Use the `@sqlty` decorator to mark functions for type-safe SQL query execution:
 
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
-    pass
-
-# Export the sql function for convenience
-sql = Query.sql
+@sqlty
+def sql[T](query: T) -> T:
+    """Application-specific SQL query function with type-safe overloads."""
+    return query
 ```
 
 ### Writing SQL Queries
 
-Use the `sql()` function to create typed queries, then execute them with the `execute()` function:
+Use the decorated `sql()` function to create typed queries, then execute them with the `execute()` function:
 
 ```python
 from queries import sql
@@ -241,26 +238,24 @@ for user_id, name, email in result:  # Error: too many values to unpack
 
 ### Multi-Registry Pattern
 
-For larger applications, you can organize queries into multiple registries:
+For larger applications, you can organize queries into multiple functions:
 
 ```python
 # user_queries.py
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class UserQueries(SQLRegistry):
+@sqlty
+def user_sql[T](query: T) -> T:
     """User-related queries."""
-    pass
-
-user_sql = UserQueries.sql
+    return query
 
 # post_queries.py
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class PostQueries(SQLRegistry):
+@sqlty
+def post_sql[T](query: T) -> T:
     """Post-related queries."""
-    pass
-
-post_sql = PostQueries.sql
+    return query
 ```
 
 Use them in your application:
@@ -271,7 +266,7 @@ from user_queries import user_sql
 from post_queries import post_sql
 from sqlty.drivers.psycopg import execute
 
-# Each registry maintains its own type overloads
+# Each function maintains its own type overloads
 user_query = user_sql("SELECT id::INTEGER, name::TEXT FROM users")
 # Type: SQL[tuple[int, str]]
 
@@ -285,15 +280,72 @@ posts = execute(conn, post_query, {})
 # Type: Iterator[tuple[int, str]]
 ```
 
-Generate stubs for multiple registries:
+Generate stubs for multiple functions:
 
 ```bash
 sqlty . --mode=full
-# Detected SQLRegistry subclass in 'user_queries', writing to user_queries.pyi
-# Detected SQLRegistry subclass in 'post_queries', writing to post_queries.pyi
+# Detected @sqlty decorated function in 'user_queries', writing to user_queries.pyi
+# Detected @sqlty decorated function in 'post_queries', writing to post_queries.pyi
 ```
 
-The generator automatically detects multiple registries and creates separate stub files for each.
+The generator automatically detects multiple decorated functions and creates separate stub files for each.
+
+### Runtime Auto-Generation
+
+SQLTy can automatically generate and update stubs at runtime when you set the `SQLTY_AUTO_GENERATE` environment variable:
+
+```bash
+export SQLTY_AUTO_GENERATE=1
+python your_app.py
+```
+
+When enabled:
+
+1. **Function Definition**: Stubs are generated when a function is decorated with `@sqlty`
+2. **Runtime Calls**: Additional `sql()` calls made during execution are tracked
+3. **Exit Hook**: At script exit, all tracked calls are added to stubs using incremental mode
+4. **File Locking**: Safe concurrent access in multi-threaded or multi-process environments
+
+**Example workflow:**
+
+```python
+# development.py
+import os
+os.environ["SQLTY_AUTO_GENERATE"] = "1"
+
+from sqlty import sqlty
+
+@sqlty
+def sql[T](query: T) -> T:
+    return query
+
+# These calls are tracked and added to the stub at exit
+user = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
+posts = sql("SELECT COUNT(*)::INTEGER FROM posts")
+```
+
+Running this script will automatically create or update `development.pyi`:
+
+```python
+# development.pyi (generated automatically)
+from typing import Literal, overload
+from sqlty import SQL
+
+@overload
+def sql(query: Literal['SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id']) -> SQL[tuple[int, str]]: ...
+
+@overload
+def sql(query: Literal['SELECT COUNT(*)::INTEGER FROM posts']) -> SQL[tuple[int]]: ...
+
+@overload
+def sql[T](query: T) -> T: ...
+```
+
+**Use cases:**
+- Development workflows with reload (e.g., running dev server with auto-reload)
+- Running tests to ensure .pyi stubs are up-to-date with the codebase
+
+**Performance:** The runtime registry uses caching and lazy initialization to minimize overhead. The auto-generation check is cached per decorated function, and frame inspection only happens when auto-generation is enabled. When `SQLTY_AUTO_GENERATE` is not set (default), there is negligible performance impact.
 
 ### Custom SQL Dialects
 
@@ -375,18 +427,17 @@ Precedence when choosing a schema for a registry:
 
 1. Registry-specific mapping from `--schema registry:PATH`
 2. Global mapping from `--schema PATH`
-3. `__schema_path__` attribute on the registry class
+3. `__schema_path__` attribute on the registry function
 
 CLI mappings, when present, always override `__schema_path__`.
 
-### Custom Class and Export Names
+### Custom Function and Export Names
 
-You can customize the generated class and export names:
+You can customize the generated function and export names:
 
 ```bash
 sqlty . \
-  --class-name MyQuery \
-  --base-class SQLRegistry \
+  --function-name my_sql \
   --output my_queries.pyi
 ```
 
@@ -394,12 +445,11 @@ This generates:
 
 ```python
 # my_queries.pyi
-class MyQuery(SQLRegistry):
-    @overload
-    @classmethod
-    def sql(cls, query: Literal["SELECT ..."]) -> SQL[tuple[int, str]]: ...
+@overload
+def my_sql(query: Literal["SELECT ..."]) -> SQL[tuple[int, str]]: ...
 
-my_sql = MyQuery.sql
+@overload
+def my_sql[T](query: T) -> T: ...
 ```
 
 ### Specifying Output Path
@@ -422,7 +472,7 @@ Without `--output`, the generator auto-detects output paths based on registry im
 
 SQLType consists of three main components:
 
-1. **SQLRegistry**: Runtime base class that provides the `sql()` classmethod
+1. **@sqlty Decorator**: Marks functions for type-safe SQL query execution
 2. **TypeStubGenerator**: AST-based analyzer that collects SQL calls and generates stubs
 3. **Type Inference Engine**: Uses sqlglot to parse SQL and infer Python types
 
@@ -581,10 +631,11 @@ Registries are detected in two ways:
    from queries import sql  # Detects 'queries' as registry source
    ```
 
-2. **Class definition detection**:
+2. **Function definition detection**:
    ```python
-   class Query(SQLRegistry):  # Detects 'Query' as registry class
-       pass
+   @sqlty
+   def sql[T](query: T) -> T:  # Detects 'sql' as decorated function
+       return query
    ```
 
 #### Source Location Tracking
@@ -659,43 +710,46 @@ result = sql(query_str)  # Type: str (falls back to T -> T)
 
 ## API Reference
 
-### SQLRegistry Class
+### @sqlty Decorator
 
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 ```
 
-Base class for SQL query registries.
+Decorator to mark functions for SQLTy type inference and stub generation.
 
-#### Methods
+#### Usage
 
-##### `sql(query: str) -> SQL[T]`
+```python
+@sqlty
+def sql[T](query: T) -> T:
+    """SQL query function with type-safe overloads."""
+    return query
+```
 
-Execute a SQL query and return results.
+#### Parameters
 
-**Parameters:**
-- `query` (str): SQL query string with optional type casts
+- `schema` (str, optional): Path to database schema file for enhanced type inference
 
-**Returns:**
-- `SQL[T]`: Typed SQL result iterator
+#### Type Inference
 
-**Type Inference:**
 The return type `T` is inferred from:
 1. SQL type casts (e.g., `::INTEGER`)
 2. Table schema (if available)
 3. Usage patterns in code
 4. Falls back to `Any` if unknown
 
-**Example:**
+#### Example
 
 ```python
-class Query(SQLRegistry):
-    pass
-
-sql = Query.sql
+@sqlty
+def sql[T](query: T) -> T:
+    return query
 
 # Simple query
 users = sql("SELECT id::INTEGER, name::TEXT FROM users")
+# Type: SQL[tuple[int, str]]
+```
 # Type: SQL[tuple[int, str]]
 
 # Parameterized query
@@ -705,8 +759,10 @@ user = sql("SELECT * FROM users WHERE id = :user_id")
 
 ### SQL Type
 
+#### Usage
+
 ```python
-from sqltype import SQL
+from sqlty import SQL
 ```
 
 Generic type representing SQL query results.
@@ -727,7 +783,7 @@ class SQL(Protocol[T]):
 #### Usage
 
 ```python
-from sqltype import SQL
+from sqlty import SQL
 
 def get_users() -> SQL[tuple[int, str]]:
     return sql("SELECT id::INTEGER, name::TEXT FROM users")
@@ -778,20 +834,12 @@ Supported dialects:
 sqlty . --dialect mysql
 ```
 
-##### `--class-name NAME`
+##### `--function-name NAME`
 
-Name of the Query class. Default: `Query`
-
-```bash
-sqlty . --class-name MyQuery
-```
-
-##### `--base-class NAME`
-
-Name of the base class. Default: `SQLRegistry`
+Name of the generated function. Default: `sql`
 
 ```bash
-sqlty . --base-class CustomRegistry
+sqlty . --function-name my_query
 ```
 
 ##### `--mode=incremental`
@@ -830,12 +878,12 @@ sqlty src/ --mode=full
 sqlty . --output typings/queries.pyi
 ```
 
-**Multiple registries:**
+**Multiple functions:**
 
 ```bash
 sqlty src/
-# Detected SQLRegistry subclass in 'user_queries', writing to src/user_queries.pyi
-# Detected SQLRegistry subclass in 'post_queries', writing to src/post_queries.pyi
+# Detected @sqlty decorated function in 'user_queries', writing to src/user_queries.pyi
+# Detected @sqlty decorated function in 'post_queries', writing to src/post_queries.pyi
 ```
 
 **Incremental updates:**
@@ -862,13 +910,12 @@ project/
 
 **queries.py:**
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class Query(SQLRegistry):
+@sqlty
+def sql[T](query: T) -> T:
     """Application SQL queries."""
-    pass
-
-sql = Query.sql
+    return query
 ```
 
 **app.py:**
@@ -906,36 +953,26 @@ mypy .
 **Generated queries.pyi:**
 ```python
 from typing import overload, Literal
-from sqltype import SQL, SQLRegistry
+from sqlty import SQL
 
-class Query(SQLRegistry):
-    """Application-specific SQL query registry with type-safe overloads."""
+# from queries.py:3
+@overload
+def sql(
+    query: Literal["""
+    SELECT id::INTEGER, name::TEXT, email::TEXT
+    FROM users
+    WHERE id = :user_id
+"""],
+) -> SQL[tuple[int, str, str]]: ...
 
-    # from app.py:5
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["""
-        SELECT id::INTEGER, name::TEXT, email::TEXT
-        FROM users
-        WHERE id = :user_id
-    """],
-    ) -> SQL[tuple[int, str, str]]: ...
+# from queries.py:11
+@overload
+def sql(
+    query: Literal["SELECT id::INTEGER, name::TEXT FROM users ORDER BY name"],
+) -> SQL[tuple[int, str]]: ...
 
-    # from app.py:13
-    @overload
-    @classmethod
-    def sql(
-        cls,
-        query: Literal["SELECT id::INTEGER, name::TEXT FROM users ORDER BY name"],
-    ) -> SQL[tuple[int, str]]: ...
-
-    @overload
-    @classmethod
-    def sql[T](cls, query: T) -> T: ...
-
-sql = Query.sql
+@overload
+def sql[T](query: T) -> T: ...
 ```
 
 ### Example 2: Multi-Registry Application
@@ -950,24 +987,22 @@ project/
 
 **user_queries.py:**
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class UserQueries(SQLRegistry):
+@sqlty
+def user_sql[T](query: T) -> T:
     """User-related queries."""
-    pass
-
-user_sql = UserQueries.sql
+    return query
 ```
 
 **post_queries.py:**
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class PostQueries(SQLRegistry):
+@sqlty
+def post_sql[T](query: T) -> T:
     """Post-related queries."""
-    pass
-
-post_sql = PostQueries.sql
+    return query
 ```
 
 **app.py:**
@@ -1001,8 +1036,8 @@ def get_user_with_posts(user_id: int):
 **Generate stubs:**
 ```bash
 sqlty . --mode=full
-# Detected SQLRegistry subclass in 'user_queries', writing to user_queries.pyi
-# Detected SQLRegistry subclass in 'post_queries', writing to post_queries.pyi
+# Detected @sqlty decorated function in 'user_queries', writing to user_queries.pyi
+# Detected @sqlty decorated function in 'post_queries', writing to post_queries.pyi
 ```
 
 This creates separate stub files for each registry, keeping types organized.

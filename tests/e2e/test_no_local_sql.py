@@ -1,4 +1,4 @@
-"""Test that local sql() functions not from SQLRegistry are ignored."""
+"""Test that local sql() functions not decorated with @sqlty are ignored."""
 
 import subprocess
 from collections.abc import Callable
@@ -8,8 +8,8 @@ from pathlib import Path
 def test_local_sql_function_ignored(
     tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
-    """Test that a local sql() function is ignored if not from SQLRegistry."""
-    # Create a file with a local sql() function (NOT from SQLRegistry)
+    """Test that a local sql() function is ignored if not decorated with @sqlty."""
+    # Create a file with a local sql() function (NOT decorated with @sqlty)
     local_file = tmp_path / "local_helper.py"
     local_file.write_text("""
 def sql(query: str) -> str:
@@ -38,7 +38,7 @@ result = sql("SELECT * FROM users")
 def test_registry_sql_function_generates_stub(
     tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
-    """Test that sql() from SQLRegistry is correctly processed."""
+    """Test that sql() from @sqlty decorated function is correctly processed."""
     # Create a registry file
     registry_file = tmp_path / "queries.py"
     registry_file.write_text("""
@@ -64,7 +64,7 @@ result = sql("SELECT id::INTEGER FROM users")
 
     # Check that a stub WAS generated for queries
     stub_file = tmp_path / "queries.pyi"
-    assert stub_file.exists(), "Stub should be generated for SQLRegistry sql() function"
+    assert stub_file.exists(), "Stub should be generated for @sqlty decorated sql() function"
 
     stub_content = stub_file.read_text()
     assert "SELECT id::INTEGER FROM users" in stub_content, "Query should be in stub"

@@ -70,7 +70,7 @@ class OverloadSignature:
 
 @dataclass
 class RegistryDecorator:
-    """Represents a SQLRegistry subclass or @sqlty decorated function with its overloads.
+    """Represents a @sqlty decorated function with its overloads.
 
     Attributes:
         name: Registry name (class name or function name)
@@ -156,7 +156,7 @@ class ImportStatement:
 
 @dataclass
 class StubFile:
-    """Represents a .pyi stub file with SQLRegistry classes and @sqlty decorated functions.
+    """Represents a .pyi stub file with @sqlty decorated functions.
 
     Attributes:
         registries: Dict of registry name to RegistryDecorator for both classes and functions

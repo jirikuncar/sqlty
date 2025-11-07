@@ -181,15 +181,17 @@ Precedence when selecting the schema for a registry:
 
 1. Registry-specific mapping from `--schema registry:PATH`
 2. Global mapping from `--schema PATH`
-3. `__schema_path__` attribute declared on the registry class
+3. `__schema_path__` attribute declared on the registry function
 
 Examples of a registry with `__schema_path__`:
 
 ```python
-from sqltype import SQLRegistry
+from sqlty import sqlty
 
-class Users(SQLRegistry):
-        __schema_path__ = "schema.sql"
+@sqlty
+def users_sql[T](query: T) -> T:
+    __schema_path__ = "schema.sql"
+    return query
 ```
 
 CLI mappings always override `__schema_path__` when provided.

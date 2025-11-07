@@ -111,14 +111,11 @@ dialect = "mysql"
 
     # Create source files
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql[T](query: T) -> T:
+    return query
 """)
 
     app_file = tmp_path / "app.py"
@@ -156,29 +153,23 @@ module = "order_queries"
 """)
 
     # Create registries
-    (tmp_path / "user_queries.py").write_text("""from sqlty import SQLRegistry
+    (tmp_path / "user_queries.py").write_text("""from sqlty import sqlty
 
-
-class UserQuery(SQLRegistry):
-    pass
-
-
-sql = UserQuery.sql
+@sqlty
+def user_sql[T](query: T) -> T:
+    return query
 """)
 
-    (tmp_path / "order_queries.py").write_text("""from sqlty import SQLRegistry
+    (tmp_path / "order_queries.py").write_text("""from sqlty import sqlty
 
-
-class OrderQuery(SQLRegistry):
-    pass
-
-
-sql = OrderQuery.sql
+@sqlty
+def order_sql[T](query: T) -> T:
+    return query
 """)
 
     # Create app
-    (tmp_path / "app.py").write_text("""from user_queries import sql as user_sql
-from order_queries import sql as order_sql
+    (tmp_path / "app.py").write_text("""from user_queries import user_sql
+from order_queries import order_sql
 
 users = user_sql("SELECT id::INTEGER FROM users")
 orders = order_sql("SELECT id::INTEGER FROM orders")
@@ -206,14 +197,11 @@ exclude = ["tests/**", "build/**"]
 
     # Create main queries
     queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import SQLRegistry
+    queries_file.write_text("""from sqlty import sqlty
 
-
-class Query(SQLRegistry):
-    pass
-
-
-sql = Query.sql
+@sqlty
+def sql[T](query: T) -> T:
+    return query
 """)
 
     # Create app

@@ -3,7 +3,7 @@
 import importlib.metadata
 import os
 from collections.abc import Callable
-from typing import overload
+from typing import Any, overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
@@ -11,6 +11,10 @@ except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
 __all__ = ["SQL", "sqlty"]
+
+
+# Determine if auto-generation is enabled via environment variable
+_auto_generate = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in {"1", "true", "yes"}
 
 
 class SQL[T](str):
@@ -70,10 +74,20 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
             fn.__schema_path__ = schema  # type: ignore[attr-defined]
 
         # Auto-generate stub if environment variable is set
-        if os.getenv("SQLTY_AUTO_GENERATE", "").lower() in {"1", "true", "yes"}:
+        if _auto_generate:
+            import functools
+
             from sqlty._auto_generator import auto_generate_stub
 
-            auto_generate_stub(fn)  # type: ignore
+            # Store the original function's file before wrapping
+            call = functools.partial(auto_generate_stub, fn)  # type: ignore
+
+            @functools.wraps(fn)  # type: ignore
+            def wrapper(query: str) -> Any:
+                call(query)
+                return fn(query)  # type: ignore
+
+            return wrapper  # type: ignore
 
         return fn
 
