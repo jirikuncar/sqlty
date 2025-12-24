@@ -2,9 +2,12 @@
 
 import ast
 import logging
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import asttokens
+
+if TYPE_CHECKING:
+    from sqlty._config import FunctionConfigComplete
 
 
 class CallInfo(TypedDict):
@@ -21,15 +24,26 @@ class CallInfo(TypedDict):
     start_col: int | None  # Starting column number (0-indexed)
     end_line: int | None  # Ending line number (1-indexed)
     end_col: int | None  # Ending column number (0-indexed)
+    # NEW: Fields for tracking configured functions with multiple parameters
+    query_param_name: str | None  # Name of the query parameter (e.g., "query")
+    return_type_param_name: str | None  # Name of the return type parameter (e.g., "return_tp")
+    return_type_param_value: str | None  # Actual value passed to return_type param (e.g., "int")
+    schema_path: str | None  # Path to SQL schema file for type inference (from function config)
+    function_name: str | None  # Name of the function being called (for configured functions)
 
 
 class LiteralCallCollector(ast.NodeVisitor):
     """Collects function calls with literal string arguments.
 
-    Only collects calls that are verified to come from @sqlty decorated functions.
+    Only collects calls that are verified to come from @sqlty decorated functions
+    or functions configured in pyproject.toml.
     """
 
-    def __init__(self, atok: asttokens.ASTTokens | None = None) -> None:
+    def __init__(
+        self,
+        atok: asttokens.ASTTokens | None = None,
+        function_configs: list["FunctionConfigComplete"] | None = None,
+    ) -> None:
         self.function_name = "sql"  # Always look for .sql() method calls
         self.calls: list[CallInfo] = []
         self.current_assignment: ast.AnnAssign | ast.Assign | None = None
@@ -48,6 +62,14 @@ class LiteralCallCollector(ast.NodeVisitor):
         ] = {}  # Track class/function imports with aliases (e.g., {"A": "QueryA"})
         self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
+
+        # NEW: Support for configured functions
+        self.function_configs = function_configs or []
+        # Build a mapping for quick lookup: function_name -> config
+        self.configured_functions: dict[str, FunctionConfigComplete] = {}
+        for config in self.function_configs:
+            func_name = config["import_path"].split(".")[-1]
+            self.configured_functions[func_name] = config
 
     def _offset_to_line(self, offset: int) -> tuple[int, int]:
         """Convert a character offset to (line, col) tuple.
@@ -141,8 +163,71 @@ class LiteralCallCollector(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         """Visit function calls to find target function with literal arguments.
 
-        Only accepts calls that are verified to come from @sqlty decorated functions.
+        Only accepts calls that are verified to come from @sqlty decorated functions
+        or configured functions.
         """
+        # NEW: Check if this is a configured function call FIRST
+        # This takes priority over @sqlty decorated functions
+        func_name_to_check = None
+        if isinstance(node.func, ast.Name):
+            func_name_to_check = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            func_name_to_check = node.func.attr
+
+        if func_name_to_check and func_name_to_check in self.configured_functions:
+            config = self.configured_functions[func_name_to_check]
+
+            # Find the query argument
+            query_value, is_query_literal = self._extract_param_value(node, config["query_param"])
+
+            # Only proceed if we have a literal SQL query
+            if query_value and is_query_literal:
+                # Find the return type argument (if specified in config)
+                return_type_value = None
+                return_type_param_name = config.get("return_type_param")
+
+                if return_type_param_name:
+                    return_type_value, _ = self._extract_param_value(node, return_type_param_name)
+
+                # Extract source range information
+                start_offset = None
+                end_offset = None
+                start_col = None
+                end_line = None
+                end_col = None
+
+                if self.atok:
+                    try:
+                        start_offset, end_offset = self.atok.get_text_range(node)
+                        _, start_col = self._offset_to_line(start_offset)
+                        end_line, end_col = self._offset_to_line(end_offset)
+                    except Exception as e:
+                        logging.getLogger(__name__).debug("Failed to extract source range: %s", e)
+
+                call_info: CallInfo = {
+                    "literal": query_value,
+                    "return_type": return_type_value,  # This may be used by generator
+                    "lineno": node.lineno,
+                    "file": "",
+                    "registry_source": config["import_path"].rsplit(".", 1)[0],
+                    "registry_class": func_name_to_check,
+                    "start_offset": start_offset,
+                    "end_offset": end_offset,
+                    "start_col": start_col,
+                    "end_line": end_line,
+                    "end_col": end_col,
+                    "query_param_name": config["query_param"],
+                    "return_type_param_name": return_type_param_name,
+                    "return_type_param_value": return_type_value,
+                    "schema_path": config.get("schema"),  # Optional schema path from config
+                    "function_name": func_name_to_check,  # Store the function name
+                }
+                self.calls.append(call_info)
+
+            # Early return - don't check for @sqlty decorated functions
+            self.generic_visit(node)
+            return
+
         # Check for direct call: sql(...) or user_sql(...) etc.
         registry_source: str | None = None
         registry_class: str | None = None
@@ -216,6 +301,11 @@ class LiteralCallCollector(ast.NodeVisitor):
                     "start_col": start_col,
                     "end_line": end_line,
                     "end_col": end_col,
+                    "query_param_name": None,
+                    "return_type_param_name": None,
+                    "return_type_param_value": None,
+                    "schema_path": None,  # Schema not set for @sqlty decorated functions (uses __schema_path__ attribute)
+                    "function_name": None,  # Not applicable for @sqlty decorated functions
                 }
                 self.calls.append(call_info)
             elif node.args:
@@ -241,3 +331,45 @@ class LiteralCallCollector(ast.NodeVisitor):
         """Infer type from how the result is used (simplified)."""
         # This is a placeholder - in a full implementation, we'd do data flow analysis
         return None
+
+    def _extract_param_value(self, node: ast.Call, param_name: str) -> tuple[str | None, bool]:
+        """Extract the value of a parameter from a function call.
+
+        Args:
+            node: The function call AST node
+            param_name: The name of the parameter to extract
+
+        Returns:
+            Tuple of (value, is_literal) where:
+            - value: The extracted value as a string (None if not found or not extractable)
+            - is_literal: True if the value is a literal string, False if it's a type or expression
+        """
+        # Check keyword arguments
+        for keyword in node.keywords:
+            if keyword.arg == param_name:
+                if isinstance(keyword.value, ast.Constant):
+                    # String literals
+                    if isinstance(keyword.value.value, str):
+                        return keyword.value.value, True
+                    # Other constants (numbers, bool, None)
+                    return str(keyword.value.value), False
+                elif isinstance(keyword.value, ast.Name):
+                    # Type references like `return_tp=int` or variable names
+                    return keyword.value.id, False
+                elif isinstance(keyword.value, ast.Attribute):
+                    # Qualified names like `return_tp=module.Type`
+                    return ast.unparse(keyword.value), False
+                elif isinstance(keyword.value, ast.Subscript):
+                    # Generic types like `return_tp=list[int]`
+                    return ast.unparse(keyword.value), False
+                else:
+                    # Try to unparse for more complex expressions
+                    try:
+                        return ast.unparse(keyword.value), False
+                    except Exception:
+                        return None, False
+
+        # For positional arguments, we'd need function signature analysis
+        # This is more complex and might require importing the module
+        # For now, we only support keyword arguments
+        return None, False

@@ -19,7 +19,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import asttokens
 
@@ -43,6 +43,7 @@ class TypeStubGenerator:
         schema_mappings: dict[str | None, Path] | None = None,
         format_command: str | None = None,
         verbose: int = 0,
+        function_configs: list[Any] | None = None,
     ) -> None:
         self.function_name = "sql"  # Always use 'sql' as the method name
         self.sql_dialect = sql_dialect
@@ -57,9 +58,10 @@ class TypeStubGenerator:
         self._format_command = format_command
         self._check_mode = False
         self._verbose = verbose
+        self._function_configs = function_configs or []
 
         self._stub_merger = StubMerger(function_name=self.function_name)
-        self._registry_detector = RegistryDetector()
+        self._registry_detector = RegistryDetector(function_configs=self._function_configs)
 
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
@@ -405,7 +407,7 @@ class TypeStubGenerator:
             logger.warning("Failed to parse %s: %s", filepath, e)
             return []
         # First pass: collect calls
-        collector = LiteralCallCollector(atok=atok)
+        collector = LiteralCallCollector(atok=atok, function_configs=self._function_configs)
         collector.current_file = str(filepath)  # Set current file for variable collection
         collector.visit(tree)
 
@@ -503,6 +505,13 @@ class TypeStubGenerator:
             module_path: Path to the module containing these calls
         """
         for call in calls:
+            # Check if return type was already provided via return_type_param
+            if call.get("return_type_param_value"):
+                # Use the explicit return type from the parameter
+                # No SQL[...] wrapping - the function signature itself defines the return type
+                call["return_type"] = call["return_type_param_value"]
+                continue
+
             literal = call["literal"]
             registry_name = call.get("registry_source")
             registry_class = call.get("registry_class")
@@ -512,7 +521,7 @@ class TypeStubGenerator:
 
             sql_type = analyzer.generate_return_type(literal)
             if sql_type:
-                call["return_type"] = f"SQL[{sql_type}]"
+                call["return_type"] = sql_type
             else:
                 # Warn about missing type information
                 file_info = f" in {call.get('file', 'unknown')}" if call.get("file") else ""
@@ -594,7 +603,11 @@ class TypeStubGenerator:
         """
         from ._stub_parser import CallInfoToIRParser
 
-        parser = CallInfoToIRParser(self.function_name)
+        parser = CallInfoToIRParser(
+            self.function_name,
+            registry_detector=self._registry_detector,
+            function_configs=self._function_configs,
+        )
         stub_ir = parser.parse_calls(calls, class_name, export_name)
         return stub_ir
 
@@ -814,7 +827,11 @@ class TypeStubGenerator:
                     from ._stub_ir import StubFile
                     from ._stub_parser import CallInfoToIRParser
 
-                    call_parser = CallInfoToIRParser(self.function_name)
+                    call_parser = CallInfoToIRParser(
+                        self.function_name,
+                        registry_detector=self._registry_detector,
+                        function_configs=self._function_configs,
+                    )
 
                     # Create stub with all new registries
                     all_new_registries = StubFile(source_path=stub_path)

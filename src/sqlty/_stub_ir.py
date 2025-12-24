@@ -48,6 +48,9 @@ class OverloadSignature:
         source_line: Optional line number in source file
         source_span: Optional precise source location information
         ast_node: Optional reference to original AST FunctionDef node from stub
+        function_signature: Optional AST arguments node for full function signature (for configured functions)
+        query_param_name: Name of the query parameter (default "query")
+        source_return_annotation: Optional AST return annotation from source function
     """
 
     query_literal: str
@@ -56,6 +59,9 @@ class OverloadSignature:
     source_line: int | None = None
     source_span: SourceSpan | None = None
     ast_node: ast.FunctionDef | None = None
+    function_signature: ast.arguments | None = None  # Full signature for configured functions
+    query_param_name: str = "query"  # Name of the query parameter to replace with Literal
+    source_return_annotation: ast.expr | None = None  # Return annotation from source function
 
     def __hash__(self) -> int:
         """Hash based on query literal for deduplication."""
@@ -225,7 +231,8 @@ class StubFile:
             ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
         )
 
-        required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
+        # Note: SQL import removed since we no longer wrap return types in SQL[...]
+        # required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
 
         type_patterns = {
             r"\buuid\.UUID\b": ImportStatement(module="uuid", names=[], from_import=False),
@@ -235,12 +242,33 @@ class StubFile:
             r"\bdecimal\.Decimal\b": ImportStatement(module="decimal", names=[], from_import=False),
         }
 
+        # Check if Any is used in any return type or function signature
+        uses_any = False
         for registry in self.registries.values():
             for overload in registry.overloads:
                 return_type = overload.return_type
+                # Check for patterns that require imports
                 for pattern, import_stmt in type_patterns.items():
                     if re.search(pattern, return_type):
                         required.add(import_stmt)
+                # Check if Any is used in return type
+                if re.search(r"\bAny\b", return_type):
+                    uses_any = True
+                # Check if Any is used in function signature
+                if overload.function_signature:
+                    sig_str = ast.unparse(overload.function_signature)
+                    if re.search(r"\bAny\b", sig_str):
+                        uses_any = True
+
+        # Add Any import if needed
+        if uses_any:
+            # Update the existing typing import to include Any
+            typing_import = ImportStatement(
+                module="typing", names=["Literal", "overload", "Any"], from_import=True
+            )
+            # Remove the old one and add the new one with Any
+            required = {imp for imp in required if imp.module != "typing"}
+            required.add(typing_import)
 
         return required
 
