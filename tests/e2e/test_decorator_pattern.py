@@ -2,9 +2,13 @@
 
 Test the decorator workflow:
 1. Define functions decorated with @sqlty
-2. Run stub generator via subprocess
-3. Validate generated stubs
-4. Run mypy to ensure type safety
+2. Register functions in pyproject.toml (required for stub generation)
+3. Run stub generator via subprocess
+4. Validate generated stubs
+5. Run mypy to ensure type safety
+
+Note: Auto-detection has been removed. Functions must be explicitly
+registered in pyproject.toml for stub generation to work.
 """
 
 import subprocess
@@ -20,7 +24,17 @@ def test_simple_decorator_pattern(
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
-    """Test basic @sqlty decorator without schema."""
+    """Test basic @sqlty decorator without schema (requires pyproject.toml registration)."""
+    # Create pyproject.toml with function registration
+    pyproject_file = tmp_path / "pyproject.toml"
+    pyproject_file.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "app.sql"
+query_param = "query"
+""")
+
     # Create app.py with @sqlty decorator
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using @sqlty decorator."""
@@ -79,7 +93,7 @@ def test_decorator_with_schema(
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
-    """Test @sqlty decorator with schema parameter."""
+    """Test @sqlty decorator with schema parameter (requires pyproject.toml registration)."""
     # Create schema file
     schema_file = tmp_path / "schema.sql"
     schema_file.write_text("""
@@ -87,6 +101,17 @@ CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL
 );
+""")
+
+    # Create pyproject.toml with function registration
+    pyproject_file = tmp_path / "pyproject.toml"
+    pyproject_file.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "app.sql_with_schema"
+query_param = "query"
+schema = "schema.sql"
 """)
 
     # Create app.py with @sqlty(schema="schema.sql")
@@ -141,7 +166,22 @@ def test_multiple_decorated_functions(
     mypy: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     stubtest: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
 ) -> None:
-    """Test multiple functions with @sqlty decorator."""
+    """Test multiple functions with @sqlty decorator (requires pyproject.toml registration)."""
+    # Create pyproject.toml with function registrations
+    pyproject_file = tmp_path / "pyproject.toml"
+    pyproject_file.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "app.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "app.sql_with_schema"
+query_param = "query"
+schema = "schema.sql"
+""")
+
     # Create app.py with multiple decorated functions
     app_file = tmp_path / "app.py"
     schema_file = tmp_path / "schema.sql"

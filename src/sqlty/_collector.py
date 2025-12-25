@@ -35,8 +35,9 @@ class CallInfo(TypedDict):
 class LiteralCallCollector(ast.NodeVisitor):
     """Collects function calls with literal string arguments.
 
-    Only collects calls that are verified to come from @sqlty decorated functions
-    or functions configured in pyproject.toml.
+    Only collects calls from functions explicitly configured in pyproject.toml.
+    Auto-detection of @sqlty decorators has been removed - functions must be
+    registered in the configuration file.
     """
 
     def __init__(
@@ -60,16 +61,41 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.class_imports: dict[
             str, str
         ] = {}  # Track class/function imports with aliases (e.g., {"A": "QueryA"})
-        self.decorated_functions: set[str] = set()  # Track functions decorated with @sqlty
         self.atok = atok  # ASTTokens for source range extraction
 
         # NEW: Support for configured functions
         self.function_configs = function_configs or []
         # Build a mapping for quick lookup: function_name -> config
         self.configured_functions: dict[str, FunctionConfigComplete] = {}
+        # Track which function names are registered locally (for local calls)
+        # This will be populated after current_file is set
+        self.registered_function_names: set[str] = set()
         for config in self.function_configs:
             func_name = config["import_path"].split(".")[-1]
             self.configured_functions[func_name] = config
+
+    def set_current_file_registrations(self, filepath: str) -> None:
+        """Populate registered_function_names for the current file.
+
+        Args:
+            filepath: Absolute path to the file being analyzed
+        """
+        from pathlib import Path
+
+        # Extract module name from filepath (e.g., /path/to/app.py -> app)
+        module_name = Path(filepath).stem
+
+        # Find all registered functions that belong to this module
+        for config in self.function_configs:
+            import_path = config["import_path"]
+            # import_path format: "module.function" or "package.module.function"
+            parts = import_path.split(".")
+            if len(parts) >= 2:
+                # Check if the module part matches our file
+                config_module = parts[-2]  # Second to last is the module
+                if config_module == module_name:
+                    func_name = parts[-1]
+                    self.registered_function_names.add(func_name)
 
     def _offset_to_line(self, offset: int) -> tuple[int, int]:
         """Convert a character offset to (line, col) tuple.
@@ -138,18 +164,9 @@ class LiteralCallCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Track functions decorated with @sqlty."""
-        # Check if the function has @sqlty decorator
-        for decorator in node.decorator_list:
-            # Handle @sqlty (simple name)
-            if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
-                self.decorated_functions.add(node.name)
-                break
-            # Handle @sqlty(...) (call expression)
-            elif isinstance(decorator, ast.Call):
-                if isinstance(decorator.func, ast.Name) and decorator.func.id == "sqlty":
-                    self.decorated_functions.add(node.name)
-                    break
+        """Visit function definitions (no longer tracks @sqlty decorators)."""
+        # Auto-detection of @sqlty decorators has been removed
+        # Functions must be explicitly registered in pyproject.toml
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -229,6 +246,8 @@ class LiteralCallCollector(ast.NodeVisitor):
             return
 
         # Check for direct call: sql(...) or user_sql(...) etc.
+        # Note: Auto-detection of @sqlty decorators has been removed.
+        # Only functions registered in pyproject.toml or imported will be tracked.
         registry_source: str | None = None
         registry_class: str | None = None
         is_target_call = False
@@ -236,18 +255,18 @@ class LiteralCallCollector(ast.NodeVisitor):
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
 
-            # Priority 1: Check if this is a decorated function with @sqlty
-            if func_name in self.decorated_functions:
-                is_target_call = True
-                registry_class = func_name  # Use function name as registry identifier
-                # registry_source will be set later by the generator based on the current file
-            # Priority 2: Check if it's imported from another module
-            elif func_name in self.import_sources:
+            # Priority 1: Check if it's imported from another module (registered in pyproject.toml)
+            if func_name in self.import_sources:
                 is_target_call = True
                 registry_source = self.import_sources[func_name]
                 # Also check if we know the original class name
                 if func_name in self.class_imports:
                     registry_class = self.class_imports[func_name]
+            # Priority 2: Check if it's a locally-defined registered function
+            elif func_name in self.registered_function_names:
+                is_target_call = True
+                registry_class = func_name
+                # registry_source will be determined by the generator based on the current file
 
         # Check for qualified call: module.sql(...) or RegistryClass.sql(...)
         elif isinstance(node.func, ast.Attribute) and node.func.attr == self.function_name:

@@ -1,7 +1,8 @@
-"""Registry detection and schema resolution utilities.
+"""Registry and schema resolution utilities.
 
-This module handles detecting @sqlty decorated functions
-in Python modules and resolving their associated schema files.
+This module handles schema resolution for functions registered in pyproject.toml.
+Auto-detection of @sqlty decorators has been removed - functions must be explicitly
+registered in the configuration file.
 """
 
 import ast
@@ -18,7 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class RegistryDetector:
-    """Detect @sqlty decorated functions and resolve their schemas."""
+    """Resolve schemas for functions registered in pyproject.toml.
+
+    Note: Auto-detection of @sqlty decorators has been removed.
+    This class now only works with explicitly registered functions.
+    """
 
     def __init__(self, function_configs: list["FunctionConfigComplete"] | None = None) -> None:
         self.function_configs = function_configs or []
@@ -74,39 +79,20 @@ class RegistryDetector:
         return None
 
     def get_registry_names(self, module_path: Path) -> list[str]:
-        """Get the names of all @sqlty decorated functions and configured functions in a module.
+        """Get the names of configured functions in a module from pyproject.toml.
 
         Args:
             module_path: Path to the Python module to check
 
         Returns:
-            List of detected registry names
+            List of configured function names in this module
         """
         if not module_path.exists():
             return []
 
         registry_classes: list[str] = []
-        try:
-            with open(module_path) as f:
-                source = f.read()
-            tree = ast.parse(source)
 
-            # Always include functions decorated with @sqlty
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    for decorator in node.decorator_list:
-                        if (isinstance(decorator, ast.Name) and decorator.id == "sqlty") or (
-                            isinstance(decorator, ast.Call)
-                            and isinstance(decorator.func, ast.Name)
-                            and decorator.func.id == "sqlty"
-                        ):
-                            if node.name not in registry_classes:
-                                registry_classes.append(node.name)
-                            break
-        except Exception:
-            logger.debug("Failed to parse for decorated functions: %s", module_path)
-
-        # NEW: Check for configured functions
+        # Check for configured functions only
         # Build a module path string to match against import_path in configs
         module_str = str(module_path)
         for config in self.function_configs:
@@ -327,13 +313,13 @@ class RegistryDetector:
         return None
 
     def find_registries(self, root_path: Path) -> list[tuple[Path, str]]:
-        """Find all @sqlty decorated functions in Python files under the given path.
+        """Find all configured functions in Python files under the given path.
 
         Args:
             root_path: The root directory or file to search for Python files
 
         Returns:
-            List of tuples containing (file_path, function_name)
+            List of tuples containing (file_path, function_name) for configured functions only
         """
         registries: list[tuple[Path, str]] = []
 
@@ -342,7 +328,7 @@ class RegistryDetector:
 
         for py_file in python_files:
             try:
-                # Get all registry class names in this file
+                # Get all configured function names in this file
                 class_names = self.get_registry_names(py_file)
                 for class_name in class_names:
                     registries.append((py_file, class_name))

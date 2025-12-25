@@ -1,0 +1,11 @@
+[tool.sqlty]
+dialect = "postgres"
+
+# Register the @sqlty decorated sql functions from each module
+[[tool.sqlty.functions]]
+import_path = "user_queries.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "post_queries.sql"
+query_param = "query"

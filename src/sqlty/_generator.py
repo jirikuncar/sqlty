@@ -409,6 +409,7 @@ class TypeStubGenerator:
         # First pass: collect calls
         collector = LiteralCallCollector(atok=atok, function_configs=self._function_configs)
         collector.current_file = str(filepath)  # Set current file for variable collection
+        collector.set_current_file_registrations(str(filepath))  # Populate local registrations
         collector.visit(tree)
 
         logger.debug("Found %d calls in %s", len(collector.calls), filepath)
@@ -419,18 +420,12 @@ class TypeStubGenerator:
         # Also check if the current file itself has a @sqlty decorated function
         registry_sources: set[str] = set()
 
-        # Check if current file has a registry
+        # Check if current file has registered functions (from pyproject.toml)
         if self._registry_detector.get_registry_names(filepath):
             # Use the module name (filename without .py)
             current_module = filepath.stem
             registry_sources.add(current_module)
-            logger.debug("Current file has registry: %s", current_module)
-
-        # Check if current file has decorated functions
-        if collector.decorated_functions:
-            current_module = filepath.stem
-            registry_sources.add(current_module)
-            logger.debug("Current file has decorated functions: %s", current_module)
+            logger.debug("Current file has registered functions: %s", current_module)
 
         # Resolve imported sources
         for local_name, module_name in collector.import_sources.items():
