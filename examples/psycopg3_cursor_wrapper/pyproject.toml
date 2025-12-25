@@ -1,0 +1,48 @@
+[project]
+name = "psycopg3-cursor-wrapper-example"
+version = "0.1.0"
+description = "Example demonstrating psycopg3 cursor wrapper with query-level type inference"
+requires-python = ">=3.12"
+
+dependencies = [
+    "psycopg[binary]>=3.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.0.0",
+    "pyright>=1.1.0",
+]
+
+[tool.sqlty]
+dialect = "postgres"
+
+# Configuration for automatic stub generation (optional)
+# Uncomment these if you want SQLTy to generate stubs automatically
+
+# [[tool.sqlty.functions]]
+# import_path = "app.TypedCursor.execute"
+# query_param = "query"
+# schema = "schema.sql"
+
+# [[tool.sqlty.functions]]
+# import_path = "app.TypedCursor.execute_one"
+# query_param = "query"
+# schema = "schema.sql"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "psycopg.*"
+ignore_missing_imports = false
+follow_imports = "normal"
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
