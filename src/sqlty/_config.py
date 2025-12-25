@@ -10,11 +10,16 @@ class FunctionConfig(TypedDict, total=False):
 
     Example:
         {
-            "import_path": "logfire_db.psycopg.pg_fetchvalue",
+            "import_path": "db.pg_fetchvalue",
             "query_param": "query",
             "return_type_param": "return_tp",
-            "schema": "path/to/schema.sql"
+            "schema": "path/to/schema.sql",
+            "return_type_template": "list[{sqlty}]",
+            "imports": ["from typing import Any"]
         }
+
+    Note: Class methods (e.g., "module.Class.method") are not currently supported.
+          Use module-level functions instead.
     """
 
     import_path: (
@@ -23,6 +28,11 @@ class FunctionConfig(TypedDict, total=False):
     query_param: str  # Name of the parameter containing the SQL query (required)
     return_type_param: str  # Name of the parameter specifying the return type (optional)
     schema: str  # Path to SQL schema file for type inference (optional)
+    return_type_template: str  # Template for return type with {sqlty} placeholder (optional)
+    self_type_template: (
+        str  # TODO: Template for self parameter - currently not supported for methods (optional)
+    )
+    imports: list[str]  # List of import statements needed for the stub (optional)
 
 
 # Define required fields separately for type checking
@@ -38,6 +48,9 @@ class FunctionConfigComplete(_FunctionConfigRequired, total=False):
 
     return_type_param: str
     schema: str
+    return_type_template: str
+    self_type_template: str
+    imports: list[str]
 
 
 class SQLTyConfig(TypedDict, total=False):
@@ -134,7 +147,7 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
                 continue
 
             # Build function config with all fields
-            function_dict: dict[str, str] = {
+            function_dict: dict[str, Any] = {
                 "import_path": str(func_config["import_path"]),
                 "query_param": str(func_config["query_param"]),
             }
@@ -146,6 +159,23 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
             # Optional schema field
             if "schema" in func_config:
                 function_dict["schema"] = str(func_config["schema"])
+
+            # Optional return_type_template field
+            if "return_type_template" in func_config:
+                function_dict["return_type_template"] = str(func_config["return_type_template"])
+
+            # Optional self_type_template field
+            if "self_type_template" in func_config:
+                function_dict["self_type_template"] = str(func_config["self_type_template"])
+
+            # Optional imports field
+            if "imports" in func_config:
+                imports_value = func_config["imports"]
+                if isinstance(imports_value, list):
+                    function_dict["imports"] = [str(imp) for imp in imports_value]
+                elif isinstance(imports_value, str):
+                    # Support single string import
+                    function_dict["imports"] = [str(imports_value)]
 
             # Cast to FunctionConfigComplete after all fields are set
             function = cast(FunctionConfigComplete, function_dict)

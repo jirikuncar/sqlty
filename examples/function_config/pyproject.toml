@@ -6,6 +6,7 @@ dialect = "postgres"
 import_path = "db.pg_fetchvalue"
 query_param = "query"
 return_type_param = "return_tp"
+return_type_template = "{sqlty} | None"
 schema = "schema.sql"  # Optional: use schema for additional type validation
 
 # Configure pg_fetchall function with explicit return type parameter
@@ -13,11 +14,5 @@ schema = "schema.sql"  # Optional: use schema for additional type validation
 import_path = "db.pg_fetchall"
 query_param = "query"
 return_type_param = "return_tp"
+return_type_template = "list[{sqlty}]"
 schema = "schema.sql"  # Optional: use schema for additional type validation
-
-# Configure execute_query function without return type parameter
-# Type inference will be based on the SQL query structure
-[[tool.sqlty.functions]]
-import_path = "db.execute_query"
-query_param = "query"
-schema = "schema.sql"  # Use schema for type inference

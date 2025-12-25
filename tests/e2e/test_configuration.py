@@ -224,7 +224,7 @@ test_query = sql("SELECT * FROM test_table")
 
 
 def test_schema_paths_resolved_relative_to_pyproject_toml(
-    tmp_path: Path, cli, setup_queries_file
+    tmp_path: Path, cli, setup_sqlty_package
 ) -> None:
     """Test that schema paths in pyproject.toml are resolved relative to the pyproject.toml file location, not cwd."""
     # Create a subdirectory for the project
@@ -254,8 +254,8 @@ schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }
 """)
 
     # Create query modules in the project directory using the fixture
-    setup_queries_file(project_dir, "users_queries.py", "sql")
-    setup_queries_file(project_dir, "orders_queries.py", "sql")
+    setup_sqlty_package(project_dir, "users_queries.py", "sql")
+    setup_sqlty_package(project_dir, "orders_queries.py", "sql")
 
     # Add query calls to the files
     users_queries_file = project_dir / "users_queries.py"

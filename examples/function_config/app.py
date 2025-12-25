@@ -4,7 +4,7 @@ This example demonstrates how to use SQLTy with functions configured
 in pyproject.toml rather than using @sqlty decorators.
 """
 
-from db import execute_query, pg_fetchall, pg_fetchvalue
+from db import pg_fetchall, pg_fetchvalue
 
 # =============================================================================
 # POSITIVE EXAMPLES: Correct type usage
@@ -13,45 +13,45 @@ from db import execute_query, pg_fetchall, pg_fetchvalue
 # Example 1: Integer query with matching return_tp
 user_id: int | None = pg_fetchvalue(
     None,
-    query="SELECT id::INTEGER FROM users WHERE email = :email",
-    return_tp=int,
+    "SELECT id::INTEGER FROM users WHERE email = :email",
+    int,
     email="user@example.com",
 )
 
 # Example 2: Count query
 count: int | None = pg_fetchvalue(
     None,
-    query="SELECT COUNT(*)::INTEGER FROM users",
-    return_tp=int,
+    "SELECT COUNT(*)::INTEGER FROM users",
+    int,
 )
 
 # Example 3: String query with matching return_tp
-user_name: str | None = pg_fetchvalue(
+user_name = pg_fetchvalue(
     None,
-    query="SELECT name::TEXT FROM users WHERE id = :id",
-    return_tp=str,
+    "SELECT name::TEXT FROM users WHERE id = :id",
+    str,
     id=1,
 )
 
 # Example 4: Fetch all values
 user_ids: list[int] = pg_fetchall(
     None,
-    query="SELECT id::INTEGER FROM users",
-    return_tp=int,
+    "SELECT id::INTEGER FROM users",
+    int,
 )
 
 # Example 5: Function without return_type_param (using schema for inference)
 # Type inference happens based on the SQL query and schema
-results = execute_query(
-    query="SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id",
-    id=1,
-)
+# results = execute_query(
+#     query="SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id",
+#     id=1,
+# )
 
-# Example 6: Boolean query with schema
-published_posts = execute_query(
-    query="SELECT title::TEXT FROM posts WHERE published = :published",
-    published=True,
-)
+# # Example 6: Boolean query with schema
+# published_posts = execute_query(
+#     query="SELECT title::TEXT FROM posts WHERE published = :published",
+#     published=True,
+# )
 
 
 # =============================================================================

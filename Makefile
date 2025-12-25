@@ -22,6 +22,7 @@ help:
 	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
 	@echo "  generate-examples - Generate stubs for all examples"
 	@echo "  verify-examples   - Generate stubs and verify with mypy, ty, and stubtest"
+	@echo "  example-registries- List registered functions in all examples"
 	@echo ""
 	@echo "Example directories found: $(EXAMPLE_DIRS)"
 
@@ -103,3 +104,14 @@ verify-examples: generate-examples
 			--mypy-config-file $(ROOT_DIR)/pyproject.toml); \
 	done
 	@echo "✅ stubtest verification passed"
+
+.PHONY: example-registries
+example-registries:
+	@echo "🔍 Listing registered functions in all examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo ""; \
+		echo "📁 $$dir"; \
+		uv run python -m sqlty.registries $$dir/; \
+	done
+	@echo ""
+	@echo "✅ Done"

@@ -1,6 +1,0 @@
-from typing import Literal, overload
-
-@overload
-def sql(query: Literal["SELECT id, total FROM orders"]) -> tuple[int, float]: ...
-@overload
-def sql(query: str) -> str: ...

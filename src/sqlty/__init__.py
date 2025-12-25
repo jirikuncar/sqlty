@@ -10,7 +10,7 @@ try:
 except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
-__all__ = ["SQL", "sqlty"]
+__all__ = ["sqlty"]
 
 
 # Determine if auto-generation is enabled via environment variable
@@ -21,16 +21,13 @@ class SQL[T](str):
     pass
 
 
-# TODO make sure F is (query: str) -> Any
-
-
 @overload
 def sqlty[F](func: F, /) -> F:
     """Decorator to mark functions for SQLTy type inference and stub generation.
 
     Usage:
         @sqlty
-        def sql[T](query: T) -> T:
+        def sql(query: Literal) -> Any:
             return query
     """
     ...
@@ -42,7 +39,7 @@ def sqlty[F](*, schema: str | None = None) -> Callable[[F], F]:
 
     Usage:
         @sqlty(schema="schema.sql")
-        def sql[T](query: T) -> T:
+        def sql(query: Literal) -> Any:
             return query
     """
     ...
@@ -54,12 +51,12 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
     Usage:
         # Simple decoration without schema
         @sqlty
-        def sql[T](query: T) -> T:
+        def sql(query: Literal) -> Any:
             return query
 
         # Decoration with schema path
         @sqlty(schema="schema.sql")
-        def sql_with_schema[T](query: T) -> T:
+        def sql_with_schema(query: Literal) -> Any:
             return query
 
     When _auto_generate is enabled:
@@ -131,6 +128,7 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
 
                 @functools.wraps(fn)  # type: ignore
                 def wrapper(query: str) -> Any:
+                    # TODO use query_param name from config or inspect signature and allow automatic detection for only one param
                     call(query)
                     return fn(query)  # type: ignore
 

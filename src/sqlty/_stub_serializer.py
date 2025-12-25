@@ -199,11 +199,31 @@ class IRToASTSerializer:
         """
         function_overloads: list[ast.stmt] = []
 
-        for overload in registry.get_sorted_overloads():
+        # Check if any overload has a custom function signature (configured function)
+        # Only treat it as custom if it's non-trivial (has pos-only params or more than just query param)
+        overload_list = registry.get_sorted_overloads()
+        template_sig = None
+
+        if overload_list and overload_list[0].function_signature:
+            sig = overload_list[0].function_signature
+            # Check if signature is non-trivial:
+            # - Has positional-only parameters, OR
+            # - Has more than one regular argument, OR
+            # - Has keyword-only arguments
+            if len(sig.posonlyargs) > 0 or len(sig.args) > 1 or len(sig.kwonlyargs) > 0:
+                template_sig = sig
+
+        for overload in overload_list:
             func_node = self._serialize_function_overload(overload, registry.name)
             function_overloads.append(func_node)
 
-        fallback = self._serialize_function_fallback(registry.name)
+        # Only use template signature if it's non-trivial
+        if template_sig:
+            fallback = self._serialize_function_fallback(
+                registry.name, template_signature=template_sig
+            )
+        else:
+            fallback = self._serialize_function_fallback(registry.name)
         function_overloads.append(fallback)
 
         return function_overloads
@@ -240,7 +260,9 @@ class IRToASTSerializer:
                 return node
 
         substitutor = TypeSubstitutor(replacement)
-        return substitutor.visit(annotation)
+        result = substitutor.visit(annotation)
+        assert isinstance(result, ast.expr)
+        return result
 
     def _serialize_function_overload(
         self, overload: OverloadSignature, function_name: str
@@ -266,8 +288,16 @@ class IRToASTSerializer:
             ctx=ast.Load(),
         )
 
-        # Build return annotation - use source annotation if available
-        if overload.source_return_annotation:
+        # Build return annotation
+        # Priority 1: Use return_type_template if provided
+        if overload.return_type_template:
+            # Replace {sqlty} placeholder with the inferred type
+            templated_return_type = overload.return_type_template.replace(
+                "{sqlty}", overload.return_type
+            )
+            return_annotation = ast.parse(templated_return_type, mode="eval").body
+        # Priority 2: Use source annotation if available
+        elif overload.source_return_annotation:
             # We have a source return annotation from the function definition
             import copy
 
@@ -326,6 +356,14 @@ class IRToASTSerializer:
                 elif arg.arg == "return_tp" and return_tp_annotation:
                     # Replace return_tp type with specific type constraint
                     arg.annotation = return_tp_annotation
+                elif arg.arg == "self" and overload.self_type_template:
+                    # TODO: self_type_template is not currently supported for methods
+                    # Keeping this code for future implementation when method support is added
+                    # Apply self type template with {sqlty} substitution
+                    templated_self_type = overload.self_type_template.replace(
+                        "{sqlty}", overload.return_type
+                    )
+                    arg.annotation = ast.parse(templated_self_type, mode="eval").body
 
             # Check in keyword-only args if not found
             if not param_found:
@@ -365,38 +403,71 @@ class IRToASTSerializer:
             type_params=[],
         )
 
-    def _serialize_function_fallback(self, function_name: str) -> ast.FunctionDef:
-        """Serialize the generic fallback overload for a decorated function.
+    def _serialize_function_fallback(
+        self, function_name: str, template_signature: ast.arguments | None = None
+    ) -> ast.FunctionDef:
+        """Serialize the generic fallback overload for a decorated/configured function.
 
         Args:
             function_name: Name of the function
+            template_signature: Optional signature to use as template for configured functions.
+                               If provided, uses this as the fallback signature with generic
+                               Any annotations for all parameters. If not provided, uses simple
+                               (query: str) -> str. Both cases include @overload decorator since
+                               this is for .pyi stub files.
 
         Returns:
-            AST FunctionDef node for the fallback
+            AST FunctionDef node for the fallback with @overload decorator
         """
+        import copy
+
         decorators: list[ast.expr] = [
             ast.Name(id="overload", ctx=ast.Load()),
         ]
 
-        # Use simple annotation without TypeVar for stub files
-        # This creates: def func(query: str) -> str: ...
-        # Which acts as a catch-all for string literals
-        query_arg = ast.arg(arg="query", annotation=ast.Name(id="str", ctx=ast.Load()))
+        if template_signature:
+            # For configured functions, use the template signature but set all annotations to Any
+            args = copy.deepcopy(template_signature)
 
-        return ast.FunctionDef(
-            name=function_name,
-            args=ast.arguments(
-                posonlyargs=[],
-                args=[query_arg],
-                kwonlyargs=[],
-                kw_defaults=[],
-                defaults=[],
-            ),
-            body=[ast.Expr(value=ast.Constant(value=...))],
-            decorator_list=decorators,
-            returns=ast.Name(id="str", ctx=ast.Load()),
-            type_params=[],  # No type params for simpler stub
-        )
+            # Replace all annotations with Any
+            any_annotation = ast.Name(id="Any", ctx=ast.Load())
+            for arg in args.args:
+                arg.annotation = copy.deepcopy(any_annotation)
+            for arg in args.posonlyargs:
+                arg.annotation = copy.deepcopy(any_annotation)
+            for arg in args.kwonlyargs:
+                arg.annotation = copy.deepcopy(any_annotation)
+            # Note: **params: Any should already have Any annotation, keep it
+
+            # Use Any as the generic fallback return type for configured functions
+            return ast.FunctionDef(
+                name=function_name,
+                args=args,
+                body=[ast.Expr(value=ast.Constant(value=...))],
+                decorator_list=decorators,
+                returns=ast.Name(id="Any", ctx=ast.Load()),
+                type_params=[],
+            )
+        else:
+            # Default: simple query parameter
+            # This creates: @overload def func(query: str) -> str: ...
+            # Which acts as a catch-all for string literals
+            query_arg = ast.arg(arg="query", annotation=ast.Name(id="str", ctx=ast.Load()))
+
+            return ast.FunctionDef(
+                name=function_name,
+                args=ast.arguments(
+                    posonlyargs=[],
+                    args=[query_arg],
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    defaults=[],
+                ),
+                body=[ast.Expr(value=ast.Constant(value=...))],
+                decorator_list=decorators,
+                returns=ast.Name(id="str", ctx=ast.Load()),
+                type_params=[],  # No type params for simpler stub
+            )
 
 
 class IRToTextSerializer:

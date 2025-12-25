@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from subprocess import CompletedProcess
 
+from tests.e2e.conftest import create_pyproject_toml
+
 
 def test_empty_project(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test running sqlty on empty directory."""
@@ -39,6 +41,9 @@ def sql(query: str):
 def hello() -> str:
     return "Hello, World!"
 """)
+
+    # Create pyproject.toml
+    create_pyproject_toml(tmp_path)
 
     result = cli([str(tmp_path)])
 
@@ -78,17 +83,12 @@ def broken(
 
 
 def test_non_literal_query_string(
-    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
 ) -> None:
     """Test that non-literal query strings are skipped with warning."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -114,17 +114,12 @@ static_query = sql("SELECT id::INTEGER FROM users")
 
 
 def test_duplicate_queries_same_file(
-    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
 ) -> None:
     """Test handling of duplicate queries in the same file."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -195,16 +190,13 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE name = :name")
     assert result.returncode == 0
 
 
-def test_comments_in_queries(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_comments_in_queries(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
+) -> None:
     """Test SQL queries with SQL comments."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from queries import sql
@@ -228,16 +220,13 @@ query = sql("""
     assert stub_file.exists()
 
 
-def test_query_with_semicolon(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_query_with_semicolon(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
+) -> None:
     """Test query ending with semicolon."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -257,16 +246,13 @@ query = sql("SELECT id::INTEGER FROM users;")
     assert "SELECT id::INTEGER FROM users" in stub_content
 
 
-def test_nested_function_calls(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_nested_function_calls(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
+) -> None:
     """Test sql() calls inside function definitions."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from queries import sql
@@ -294,16 +280,13 @@ def get_posts_query():
     assert "SELECT id::INTEGER, title::TEXT FROM posts WHERE user_id = :user_id" in stub_content
 
 
-def test_class_method_queries(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_class_method_queries(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
+) -> None:
     """Test sql() calls inside class methods."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from queries import sql
@@ -333,16 +316,13 @@ class UserRepository:
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_content
 
 
-def test_query_in_conditional(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_query_in_conditional(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str], Path],
+) -> None:
     """Test sql() calls inside conditional blocks."""
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql(query: str):
-    return query
-""")
+    setup_sqlty_package(tmp_path, "queries.py")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql

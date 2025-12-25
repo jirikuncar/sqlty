@@ -14,14 +14,14 @@ def test_multi_registry_different_files(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str], Path],
+    setup_sqlty_package: Callable[[Path, str], Path],
 ) -> None:
     """Test multiple registries in different files."""
     # Create first registry
-    setup_queries_file(tmp_path, "user_queries.py")
+    setup_sqlty_package(tmp_path, "user_queries.py")
 
     # Create second registry
-    setup_queries_file(tmp_path, "post_queries.py")
+    setup_sqlty_package(tmp_path, "post_queries.py")
 
     # Create app using both registries
     app_file = tmp_path / "app.py"
@@ -38,6 +38,20 @@ users: SQL[tuple[int, str]] = user_sql("SELECT id::INTEGER, name::TEXT FROM user
 
 # Post queries
 posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM posts")
+""")
+
+    # Create pyproject.toml to configure the functions with SQL wrapping
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "user_queries.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "post_queries.sql"
+query_param = "query"
 """)
 
     # Generate stubs
@@ -93,14 +107,14 @@ def sql(query: str) -> str:
 def test_multi_registry_same_query_different_registries(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str], Path],
+    setup_sqlty_package: Callable[[Path, str, str], Path],
 ) -> None:
     """Test that same query in different registries creates separate overloads."""
     # Create first registry
-    setup_queries_file(tmp_path, "registry1.py", "sql")
+    setup_sqlty_package(tmp_path, "registry1.py", "sql")
 
     # Create second registry
-    setup_queries_file(tmp_path, "registry2.py", "sql")
+    setup_sqlty_package(tmp_path, "registry2.py", "sql")
 
     # Create app using the same query with both registries
     app_file = tmp_path / "app.py"
@@ -172,6 +186,16 @@ if TYPE_CHECKING:
 query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users")
 """)
 
+    # Create pyproject.toml at root
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.queries.users.sql"
+query_param = "query"
+""")
+
     # Generate stubs
     result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
@@ -202,23 +226,13 @@ def sql(query: str) -> str:
 
 
 def test_multi_registry_same_file_no_duplicate_aliases(
-    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    setup_sqlty_package: Callable[[Path, str, str | list[str]], Path],
 ) -> None:
     """Test that multiple registries in the same file don't create duplicate aliases."""
-    # Create a single file with two registries
-    queries_file = tmp_path / "queries.py"
-    queries_file.write_text("""from sqlty import sqlty
-
-
-@sqlty
-def sql_a(query: str):
-    return query
-
-
-@sqlty
-def sql_b(query: str):
-    return query
-""")
+    # Create a single file with two registries using the fixture
+    setup_sqlty_package(tmp_path, "queries.py", ["sql_a", "sql_b"])
 
     # Create app that uses both registries
     app_file = tmp_path / "app.py"

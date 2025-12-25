@@ -19,11 +19,11 @@ from inline_snapshot import snapshot
 def test_basic_query_generation(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str], Path],
+    setup_sqlty_package: Callable[..., Path],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test basic query generation and mypy validation."""
-    setup_queries_file(tmp_path, "queries.py", "sql")
+    setup_sqlty_package(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''"""Application using SQL queries."""
@@ -77,11 +77,11 @@ def sql(query: str) -> str:
 def test_typed_query_annotation(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str], Path],
+    setup_sqlty_package: Callable[..., Path],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Test that explicitly typed queries work with mypy."""
-    setup_queries_file(tmp_path, "queries.py", "sql")
+    setup_sqlty_package(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -111,10 +111,10 @@ q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 def test_incremental_stub_update(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str], Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that incremental mode preserves existing queries while adding new ones."""
-    setup_queries_file(tmp_path, "queries.py", "sql")
+    setup_sqlty_package(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -174,10 +174,10 @@ def sql(query: str) -> str:
 def test_multiline_query_formatting(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str], Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that multiline queries are properly formatted in Literal types."""
-    setup_queries_file(tmp_path, "queries.py", "sql")
+    setup_sqlty_package(tmp_path, "queries.py", "sql")
 
     app_file = tmp_path / "app.py"
     app_file.write_text('''from typing import TYPE_CHECKING

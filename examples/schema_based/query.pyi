@@ -1,9 +1,0 @@
-import uuid
-from typing import Literal, overload
-
-@overload
-def sql(query: Literal["SELECT id, name FROM users"]) -> tuple[int, str]: ...
-@overload
-def sql(query: Literal["SELECT id, user_id, name FROM users"]) -> tuple[int, uuid.UUID, str]: ...
-@overload
-def sql(query: str) -> str: ...

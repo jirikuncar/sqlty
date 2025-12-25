@@ -35,10 +35,10 @@ def test_cli_version_command(
 def test_full_mode_generation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test full mode that analyzes all files."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     (tmp_path / "file1.py").write_text("""from typing import TYPE_CHECKING
 
@@ -76,10 +76,10 @@ q2: SQL[tuple[str]] = sql("SELECT name::TEXT FROM users")
 def test_incremental_mode_generation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test incremental mode that only processes changed files."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -97,10 +97,10 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_specific_file_generation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path], Path],
+    setup_sqlty_package: Callable[[Path], Path],
 ) -> None:
     """Test generating stub for a specific file."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -115,10 +115,10 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_output_path_option(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test specifying custom output path."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -140,10 +140,10 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_dialect_option(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test --dialect option."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -162,7 +162,7 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_schema_option(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test --schema option."""
     schema_file = tmp_path / "schema.sql"
@@ -172,7 +172,7 @@ def test_schema_option(
 );
 """)
 
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -190,10 +190,10 @@ query = sql("SELECT id, name FROM users")
 def test_prune_mode_removes_stale_overloads(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test prune mode that removes overloads for queries no longer in source."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     # Initial file with 3 queries
     app_file = tmp_path / "app.py"
@@ -263,10 +263,10 @@ def hello() -> str:
 def test_cli_handles_syntax_errors(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that CLI handles syntax errors gracefully."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     bad_file = tmp_path / "bad.py"
     bad_file.write_text("""from queries import sql
@@ -281,10 +281,10 @@ def broken(
 def test_cli_output_messages(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that CLI provides informative output messages."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql

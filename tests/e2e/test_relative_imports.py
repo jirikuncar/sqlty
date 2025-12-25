@@ -49,6 +49,16 @@ if TYPE_CHECKING:
 user_query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 """)
 
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.queries.sql"
+query_param = "query"
+""")
+
     # Generate stubs
     result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
@@ -115,6 +125,16 @@ if TYPE_CHECKING:
 
 # Use registry from child package
 query: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, username::TEXT FROM users")
+""")
+
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.queries.user_queries.sql"
+query_param = "query"
 """)
 
     # Generate stubs
@@ -203,6 +223,20 @@ users: SQL[tuple[int, str]] = user_sql("SELECT id::INTEGER, name::TEXT FROM user
 
 # Use post registry from same package
 posts: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM posts")
+""")
+
+    # Create pyproject.toml with function configurations for both registries
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.users.queries.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.posts.queries.sql"
+query_param = "query"
 """)
 
     # Generate stubs

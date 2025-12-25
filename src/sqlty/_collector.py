@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from sqlty._config import FunctionConfigComplete
 
 
-class CallInfo(TypedDict):
+class CallInfo(TypedDict, total=False):
     """Information about a function call with literal argument."""
 
     literal: str
@@ -30,6 +30,10 @@ class CallInfo(TypedDict):
     return_type_param_value: str | None  # Actual value passed to return_type param (e.g., "int")
     schema_path: str | None  # Path to SQL schema file for type inference (from function config)
     function_name: str | None  # Name of the function being called (for configured functions)
+    # Template fields for custom type generation
+    return_type_template: str | None  # Template for return type with {sqlty} placeholder
+    self_type_template: str | None  # Template for self parameter type with {sqlty} placeholder
+    imports: list[str] | None  # List of import statements needed for the stub
 
 
 class LiteralCallCollector(ast.NodeVisitor):
@@ -191,11 +195,44 @@ class LiteralCallCollector(ast.NodeVisitor):
         elif isinstance(node.func, ast.Attribute):
             func_name_to_check = node.func.attr
 
+        config = None
+
+        # First, check direct match in configured_functions
         if func_name_to_check and func_name_to_check in self.configured_functions:
             config = self.configured_functions[func_name_to_check]
+        # Second, check if func_name_to_check is an imported alias for a configured function
+        elif func_name_to_check and func_name_to_check in self.import_sources:
+            imported_module = self.import_sources[func_name_to_check]
+            import_level = self.import_levels.get(func_name_to_check, 0)
 
+            # Get the original name if this is an alias
+            original_func_name = self.class_imports.get(func_name_to_check, func_name_to_check)
+
+            # For relative imports, we need to resolve the module name
+            if import_level > 0:
+                # This is a relative import - need to resolve it
+                # We'll only try to match if we have a configured package
+                # For now, skip relative imports to avoid complexity
+                pass
+            else:
+                # For absolute imports, direct matching
+                for potential_config in self.function_configs:
+                    import_path = potential_config["import_path"]
+                    parts = import_path.split(".")
+                    if len(parts) >= 2:
+                        # Check if last two parts match: module.function
+                        config_module = parts[-2]
+                        config_func = parts[-1]
+
+                        if config_module == imported_module and config_func == original_func_name:
+                            config = potential_config
+                            break
+
+        if config:
             # Find the query argument
-            query_value, is_query_literal = self._extract_param_value(node, config["query_param"])
+            query_value, is_query_literal = self._extract_param_value(
+                node, config["query_param"], config
+            )
 
             # Only proceed if we have a literal SQL query
             if query_value and is_query_literal:
@@ -204,7 +241,9 @@ class LiteralCallCollector(ast.NodeVisitor):
                 return_type_param_name = config.get("return_type_param")
 
                 if return_type_param_name:
-                    return_type_value, _ = self._extract_param_value(node, return_type_param_name)
+                    return_type_value, _ = self._extract_param_value(
+                        node, return_type_param_name, config
+                    )
 
                 # Extract source range information
                 start_offset = None
@@ -221,13 +260,32 @@ class LiteralCallCollector(ast.NodeVisitor):
                     except Exception as e:
                         logging.getLogger(__name__).debug("Failed to extract source range: %s", e)
 
+                # Parse import_path to extract registry_source and registry_class
+                # Format: "module.function"
+                # TODO: Add support for class methods (e.g., "module.Class.method")
+                # This will require:
+                # 1. Parsing class.method from import_path
+                # 2. Detecting method calls on instances (obj.method(...))
+                # 3. Type inference for self parameter from instance type
+                # 4. Generating proper stub structure with class definitions
+                import_path_parts = config["import_path"].rsplit(".", 1)
+                if len(import_path_parts) == 2:
+                    config_registry_source = import_path_parts[0]
+                    config_registry_class = import_path_parts[
+                        1
+                    ]  # Use the real function name from config
+                else:
+                    # Fallback
+                    config_registry_source = config["import_path"]
+                    config_registry_class = func_name_to_check or config["import_path"]
+
                 call_info: CallInfo = {
                     "literal": query_value,
                     "return_type": return_type_value,  # This may be used by generator
                     "lineno": node.lineno,
                     "file": "",
-                    "registry_source": config["import_path"].rsplit(".", 1)[0],
-                    "registry_class": func_name_to_check,
+                    "registry_source": config_registry_source,
+                    "registry_class": config_registry_class,
                     "start_offset": start_offset,
                     "end_offset": end_offset,
                     "start_col": start_col,
@@ -238,6 +296,13 @@ class LiteralCallCollector(ast.NodeVisitor):
                     "return_type_param_value": return_type_value,
                     "schema_path": config.get("schema"),  # Optional schema path from config
                     "function_name": func_name_to_check,  # Store the function name
+                    "return_type_template": config.get(
+                        "return_type_template"
+                    ),  # Template for return type
+                    "self_type_template": config.get(
+                        "self_type_template"
+                    ),  # Template for self parameter
+                    "imports": config.get("imports"),  # Custom imports for the stub
                 }
                 self.calls.append(call_info)
 
@@ -308,7 +373,7 @@ class LiteralCallCollector(ast.NodeVisitor):
                     except Exception as e:
                         logging.getLogger(__name__).debug("Failed to extract source range: %s", e)
 
-                call_info: CallInfo = {
+                sql_call_info: CallInfo = {
                     "literal": literal_value,
                     "return_type": return_type,
                     "lineno": node.lineno,  # This is start_line (1-indexed from AST)
@@ -326,7 +391,7 @@ class LiteralCallCollector(ast.NodeVisitor):
                     "schema_path": None,  # Schema not set for @sqlty decorated functions (uses __schema_path__ attribute)
                     "function_name": None,  # Not applicable for @sqlty decorated functions
                 }
-                self.calls.append(call_info)
+                self.calls.append(sql_call_info)
             elif node.args:
                 logging.getLogger(__name__).warning(
                     "Call to %s() at line %s uses a non-literal argument. Type inference requires literal strings.",
@@ -351,19 +416,22 @@ class LiteralCallCollector(ast.NodeVisitor):
         # This is a placeholder - in a full implementation, we'd do data flow analysis
         return None
 
-    def _extract_param_value(self, node: ast.Call, param_name: str) -> tuple[str | None, bool]:
+    def _extract_param_value(
+        self, node: ast.Call, param_name: str, config: "FunctionConfigComplete"
+    ) -> tuple[str | None, bool]:
         """Extract the value of a parameter from a function call.
 
         Args:
             node: The function call AST node
             param_name: The name of the parameter to extract
+            config: The function configuration
 
         Returns:
             Tuple of (value, is_literal) where:
             - value: The extracted value as a string (None if not found or not extractable)
             - is_literal: True if the value is a literal string, False if it's a type or expression
         """
-        # Check keyword arguments
+        # Check keyword arguments first
         for keyword in node.keywords:
             if keyword.arg == param_name:
                 if isinstance(keyword.value, ast.Constant):
@@ -388,7 +456,23 @@ class LiteralCallCollector(ast.NodeVisitor):
                     except Exception:
                         return None, False
 
-        # For positional arguments, we'd need function signature analysis
-        # This is more complex and might require importing the module
-        # For now, we only support keyword arguments
+        # Try to extract from positional arguments
+        # For methods, the signature is typically: def method(self, param1, param2, ...)
+        # So positional arg 0 maps to param1 (first param after self)
+        # For functions, positional arg 0 maps to param0 (first param)
+
+        # Get the parameter name we're looking for
+        # For query_param: support it as the first positional argument
+        # OR if there's only one string literal argument, use that automatically
+        if param_name == config["query_param"]:
+            # If there's exactly one positional argument and it's a string literal,
+            # use it automatically (automatic detection)
+            if len(node.args) == 1 or len(node.args) > 0:
+                arg = node.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    return arg.value, True
+
+        # For return_type_param, it's typically not a positional argument
+        # but we could support it if needed in the future
+
         return None, False

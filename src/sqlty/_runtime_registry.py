@@ -129,12 +129,28 @@ class RuntimeCallRegistry:
 
         # Import here to avoid circular imports
         try:
+            from sqlty._config import load_config
             from sqlty._generator import TypeStubGenerator
         except ImportError as e:
             logger.warning("Failed to import generator: %s", e)
             return
 
-        generator = TypeStubGenerator()
+        # Load configuration from pyproject.toml
+        # Use the first source file's directory as a starting point for config search
+        source_paths = list(self._calls.keys())
+        if source_paths:
+            config, _ = load_config(source_paths[0].parent)
+        else:
+            config, _ = load_config()
+
+        # Extract function configs and other settings from config
+        function_configs = config.get("functions", [])
+        sql_dialect = config.get("dialect", "postgres")
+
+        generator = TypeStubGenerator(
+            sql_dialect=sql_dialect,
+            function_configs=function_configs,
+        )
 
         with self._lock:
             # Process each source file

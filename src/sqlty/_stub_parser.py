@@ -8,6 +8,7 @@ This module provides parsers to convert:
 import ast
 import logging
 from pathlib import Path
+from typing import Any
 
 import asttokens
 
@@ -350,9 +351,19 @@ class CallInfoToIRParser:
             if cls_name is None:
                 cls_name = class_name
 
+            # Collect custom imports from all calls in this registry
+            custom_imports: list[str] = []
+            for call in cls_calls:
+                call_imports = call.get("imports")
+                if call_imports:
+                    custom_imports.extend(call_imports)
+            # Deduplicate imports
+            custom_imports = list(dict.fromkeys(custom_imports))
+
             registry = RegistryDecorator(
                 name=cls_name,
                 export_name=export_name,
+                custom_imports=custom_imports,
             )
 
             for call in cls_calls:
@@ -409,8 +420,6 @@ class CallInfoToIRParser:
         query_param_name = "query"  # default
 
         # Check if this call is from a configured function
-        registry_source = call.get("registry_source")
-        registry_class = call.get("registry_class")
         query_param_from_call = call.get("query_param_name")
 
         if query_param_from_call:
@@ -481,4 +490,6 @@ class CallInfoToIRParser:
             function_signature=function_signature,
             query_param_name=query_param_name,
             source_return_annotation=source_return_annotation,
+            return_type_template=call.get("return_type_template"),
+            self_type_template=call.get("self_type_template"),
         )

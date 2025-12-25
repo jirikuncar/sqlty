@@ -100,12 +100,26 @@ class RegistryDetector:
             func_name = import_path.split(".")[-1]
             module_part = ".".join(import_path.split(".")[:-1])
 
+            # Special case for __main__ module (when running scripts directly)
+            # If import_path is "__main__.func", it should match any .py file
+            is_main_module = module_part == "__main__"
+
             # Check if this module matches the configured import_path
-            # For example: if import_path is "db.pg_fetchvalue" and module_path ends with "db.py"
+            # For example:
+            # - "db.sql" -> module_path ends with "db.py"
+            # - "app.db.pg_fetchvalue" -> module_path ends with "app/db.py" or "app\\db.py"
+
+            # Convert module_part dots to path separators for nested modules
+            module_as_path = module_part.replace(".", "/")
+            module_as_path_win = module_part.replace(".", "\\")
+
             if (
-                module_path.stem == module_part
-                or module_str.endswith(f"/{module_part}.py")
-                or module_str.endswith(f"\\{module_part}.py")
+                is_main_module  # Match __main__ to any .py file
+                or module_path.stem == module_part  # Simple case: "db" matches "db.py"
+                or module_str.endswith(f"/{module_part}.py")  # "queries/db.py" matches "queries.db"
+                or module_str.endswith(f"\\{module_part}.py")  # Windows version
+                or module_str.endswith(f"/{module_as_path}.py")  # "app/db.py" matches "app.db"
+                or module_str.endswith(f"\\{module_as_path_win}.py")  # Windows version
             ):
                 # Check if the function actually exists in this file
                 try:

@@ -142,6 +142,143 @@ def {function_name}(query: str) -> Any:
 
 
 @pytest.fixture
+def setup_sqlty_package() -> Callable[..., Path]:
+    """Fixture to create a complete sqlty package with pyproject.toml configuration.
+
+    Creates a proper package structure with:
+    - A Python file with @sqlty decorated function(s)
+    - A pyproject.toml that registers the function(s)
+    - Optionally a schema file
+
+    Args:
+        tmp_path: The temporary directory path
+        filename: Name of the Python file to create (e.g., "queries.py") (default: "queries.py")
+        function_names: Name(s) of the SQL function(s). Can be a string or list of strings (default: "sql")
+        schema_content: Optional SQL schema content (default: None)
+
+    Returns:
+        Path to the temporary directory containing the package
+
+    Example:
+        package_dir = setup_sqlty_package(tmp_path)
+        package_dir = setup_sqlty_package(tmp_path, "db.py", "execute")
+        package_dir = setup_sqlty_package(tmp_path, "db.py", ["sql_a", "sql_b"])
+        package_dir = setup_sqlty_package(tmp_path, schema_content="CREATE TABLE users (...)")
+    """
+
+    def _create_package(
+        tmp_path: Path,
+        filename: str = "queries.py",
+        function_names: str | list[str] = "sql",
+        schema_content: str | None = None,
+    ) -> Path:
+        """Create a complete sqlty package with pyproject.toml."""
+        # Normalize function_names to a list
+        if isinstance(function_names, str):
+            function_names = [function_names]
+
+        # Create the Python file with @sqlty decorator
+        py_file = tmp_path / filename
+        module_name = filename.replace(".py", "")
+
+        # Generate function definitions
+        function_defs = []
+        for function_name in function_names:
+            function_defs.append(f"""@sqlty
+def {function_name}(query: str) -> Any:
+    return query
+""")
+
+        content = f"""from typing import Any
+from sqlty import sqlty
+
+
+{"".join(function_defs)}"""
+        py_file.write_text(content)
+
+        # Create or update pyproject.toml with function configuration
+        pyproject = tmp_path / "pyproject.toml"
+
+        # Read existing config if it exists
+        if pyproject.exists():
+            config_lines = pyproject.read_text().rstrip("\n").split("\n")
+        else:
+            config_lines = [
+                "[tool.sqlty]",
+                'dialect = "postgres"',
+                "",
+            ]
+
+        # Add each function to the config
+        for function_name in function_names:
+            config_lines.extend(
+                [
+                    "[[tool.sqlty.functions]]",
+                    f'import_path = "{module_name}.{function_name}"',
+                    'query_param = "query"',
+                ]
+            )
+            # Add schema if provided (for the first function)
+            if schema_content and function_name == function_names[0]:
+                schema_file = tmp_path / "schema.sql"
+                schema_file.write_text(schema_content)
+                config_lines.append('schema = "schema.sql"')
+            config_lines.append("")
+
+        pyproject.write_text("\n".join(config_lines))
+
+        return tmp_path
+
+    return _create_package
+
+
+def create_pyproject_toml(
+    tmp_path: Path,
+    function_configs: list[tuple[str, str]] | None = None,
+    dialect: str = "postgres",
+) -> Path:
+    """Helper function to create pyproject.toml with function configurations.
+
+    Args:
+        tmp_path: Directory where pyproject.toml will be created
+        function_configs: List of (import_path, query_param) tuples. If None, auto-detects from queries.sql
+        dialect: SQL dialect (default: postgres)
+
+    Returns:
+        Path to created pyproject.toml
+
+    Example:
+        create_pyproject_toml(tmp_path, [("queries.sql", "query")])
+        create_pyproject_toml(tmp_path, [("db.execute", "sql"), ("db.fetchone", "query")])
+        create_pyproject_toml(tmp_path)  # Auto-detects queries.sql
+    """
+    pyproject = tmp_path / "pyproject.toml"
+
+    # Auto-detect if not specified
+    if function_configs is None:
+        function_configs = [("queries.sql", "query")]
+
+    config_lines = [
+        "[tool.sqlty]",
+        f'dialect = "{dialect}"',
+        "",
+    ]
+
+    for import_path, query_param in function_configs:
+        config_lines.extend(
+            [
+                "[[tool.sqlty.functions]]",
+                f'import_path = "{import_path}"',
+                f'query_param = "{query_param}"',
+                "",
+            ]
+        )
+
+    pyproject.write_text("\n".join(config_lines))
+    return pyproject
+
+
+@pytest.fixture
 def mypy() -> Callable[..., subprocess.CompletedProcess[str]]:
     """Fixture to run mypy type checker.
 
