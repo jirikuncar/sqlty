@@ -349,6 +349,16 @@ if TYPE_CHECKING:
 query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM users")
 """)
 
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.features.auth.queries.user_auth.sql"
+query_param = "query"
+""")
+
     # Generate stubs
     result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
@@ -437,6 +447,16 @@ if TYPE_CHECKING:
 
 # Use the same registry
 query: SQL[tuple[str]] = sql("SELECT 'hello'::TEXT")
+""")
+
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.queries.db.sql"
+query_param = "query"
 """)
 
     # Generate stubs
@@ -528,6 +548,20 @@ if TYPE_CHECKING:
 # Use both registries with aliases
 db_query: SQL[tuple[int, str]] = db_sql("SELECT id::INTEGER, name::TEXT FROM users")
 api_query: SQL[tuple[str]] = api_sql("SELECT endpoint::TEXT FROM api_routes")
+""")
+
+    # Create pyproject.toml with function configurations for both registries
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.database.queries.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.api.queries.sql"
+query_param = "query"
 """)
 
     # Generate stubs
@@ -640,6 +674,16 @@ if TYPE_CHECKING:
 
 # Use registry from 2 levels up via ... import
 query: SQL[tuple[int]] = sql("SELECT COUNT(*)::INTEGER FROM sessions")
+""")
+
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "myapp.queries.sql"
+query_param = "query"
 """)
 
     # Generate stubs

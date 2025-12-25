@@ -210,10 +210,60 @@ class LiteralCallCollector(ast.NodeVisitor):
 
             # For relative imports, we need to resolve the module name
             if import_level > 0:
-                # This is a relative import - need to resolve it
-                # We'll only try to match if we have a configured package
-                # For now, skip relative imports to avoid complexity
-                pass
+                # Resolve relative import to absolute module path
+                # We need to build the full module path from the current file's location
+                from pathlib import Path
+
+                # Get current file's package path
+                if self.current_file:
+                    current_path = Path(self.current_file)
+                    # Build the resolved absolute module path
+                    # Start from current file's parent and go up (level-1) times
+                    target_parts: list[str] = []
+
+                    # Navigate up to find the package root by walking up until we find a directory without __init__.py
+                    check_dir = current_path.parent
+                    while (check_dir / "__init__.py").exists():
+                        target_parts.insert(0, check_dir.name)
+                        check_dir = check_dir.parent
+
+                    # Now navigate up based on import level
+                    # Level 1 (.) = current package directory
+                    # Level 2 (..) = parent package directory
+                    # Remove (level - 1) parts from the end
+                    if import_level <= len(target_parts):
+                        target_parts = (
+                            target_parts[: -(import_level - 1)]
+                            if import_level > 1
+                            else target_parts
+                        )
+                    else:
+                        # Can't navigate up that far, skip
+                        pass
+
+                    # Add the imported module parts
+                    if imported_module:
+                        target_parts.extend(imported_module.split("."))
+
+                    # Build the resolved absolute module path
+                    resolved_module_path = ".".join(target_parts) if target_parts else None
+
+                    # Match against configured functions
+                    if resolved_module_path:
+                        for potential_config in self.function_configs:
+                            import_path = potential_config["import_path"]
+                            parts = import_path.split(".")
+                            if len(parts) >= 2:
+                                config_func = parts[-1]
+                                config_module_path = ".".join(parts[:-1])
+
+                                # Check if the function name matches and module path matches exactly
+                                if (
+                                    config_func == original_func_name
+                                    and config_module_path == resolved_module_path
+                                ):
+                                    config = potential_config
+                                    break
             else:
                 # For absolute imports, direct matching
                 for potential_config in self.function_configs:
