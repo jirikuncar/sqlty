@@ -1,7 +1,5 @@
 """Tests for the magic module and --sql string prefix transformation."""
 
-import pytest
-
 from sqlty.magic import _infer_sql_type, _transform_sql_string
 
 

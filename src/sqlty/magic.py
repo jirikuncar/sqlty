@@ -21,12 +21,16 @@ import encodings
 import io
 import token
 import tokenize
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlty._sql_analyzer import SQLAnalyzer
 
+if TYPE_CHECKING:
+    from codecs import CodecInfo
+
 # Get the standard UTF-8 codec
-utf_8 = encodings.search_function("utf8")
+utf_8_codec = encodings.search_function("utf8")
+assert utf_8_codec is not None, "UTF-8 codec not found"
 
 
 def _infer_sql_type(sql_query: str) -> str:
@@ -68,15 +72,10 @@ def _transform_sql_string(string_literal: str) -> str:
     """
     # Parse the string literal to extract the actual content
     # Handle both single and double quotes, and triple quotes
-    quote_char = None
-    is_triple = False
 
     if string_literal.startswith('"""') or string_literal.startswith("'''"):
-        is_triple = True
-        quote_char = string_literal[:3]
         content = string_literal[3:-3]
     elif string_literal.startswith('"') or string_literal.startswith("'"):
-        quote_char = string_literal[0]
         content = string_literal[1:-1]
     else:
         # Not a valid string literal
@@ -107,7 +106,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         A tuple of (decoded_string, length)
     """
     # First decode as UTF-8
-    u, length = utf_8.decode(b, errors)
+    u, length = utf_8_codec.decode(b, errors)  # type: ignore[union-attr]
 
     try:
         # Tokenize the source
@@ -143,7 +142,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
     """Incremental decoder for the sqlty-magic codec."""
 
-    def _buffer_decode(
+    def _buffer_decode(  # type: ignore[override]
         self, input: bytes, errors: str, final: bool
     ) -> tuple[str, int]:  # pragma: no cover
         if final:
@@ -152,7 +151,7 @@ class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
             return "", 0
 
 
-class StreamReader(utf_8.streamreader, object):
+class StreamReader(utf_8_codec.streamreader):  # type: ignore[name-defined,misc]
     """Stream reader for the sqlty-magic codec.
 
     Decode is deferred to support better error messages.
@@ -178,15 +177,15 @@ class StreamReader(utf_8.streamreader, object):
 
 
 # Codec map for registration
-codec_map = {
+codec_map: dict[str, CodecInfo] = {
     name: codecs.CodecInfo(
         name=name,
-        encode=utf_8.encode,
-        decode=decode,
-        incrementalencoder=utf_8.incrementalencoder,
+        encode=utf_8_codec.encode,
+        decode=decode,  # type: ignore[arg-type]
+        incrementalencoder=utf_8_codec.incrementalencoder,
         incrementaldecoder=IncrementalDecoder,
         streamreader=StreamReader,
-        streamwriter=utf_8.streamwriter,
+        streamwriter=utf_8_codec.streamwriter,
     )
     for name in ("sqlty-magic", "sqlty_magic")
 }

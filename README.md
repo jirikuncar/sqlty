@@ -54,6 +54,31 @@ See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/doc
 - 📦 **Multi-Registry Support**: Organize queries into multiple registries
 - 🔍 **Source Tracking**: Generated stubs include source location comments
 - 🌐 **Multiple SQL Dialects**: Support for PostgreSQL, MySQL, SQLite, and more via sqlglot
+- ✨ **Magic Codec**: Optional codec for automatic string transformation with `--sql` prefix
+
+## Magic Codec (Experimental)
+
+SQLTy includes an experimental codec that allows you to write SQL queries as simple strings:
+
+```python
+# coding: sqlty-magic
+from sqlty import magic
+
+# Strings with --sql prefix are automatically transformed
+q = "--sql SELECT 1::INTEGER"
+# Becomes: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+
+# Works with multiple columns and complex queries
+query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# Becomes: query = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+```
+
+The codec:
+- Detects strings starting with `--sql`
+- Analyzes the SQL to infer return types
+- Transforms them into `SQL[T](...)` calls automatically
+
+**Note:** This is an experimental feature inspired by [future-fstrings](https://github.com/asottile-archive/future-fstrings). See [examples/magic_codec](examples/magic_codec) for more details.
 
 ## Quick Start
 

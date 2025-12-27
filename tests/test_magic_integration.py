@@ -46,12 +46,11 @@ q = "--sql SELECT 1::INTEGER"
 
 def test_magic_module_can_be_imported():
     """Test that the magic module can be imported and registers the codec."""
-    from sqlty import magic
-
-    # Verify the codec is registered
     import codecs
 
-    # Try to look up the codec
+    from sqlty import magic  # noqa: F401
+
+    # Verify the codec is registered
     codec_info = codecs.lookup("sqlty-magic")
     assert codec_info is not None
     assert codec_info.name in ("sqlty-magic", "sqlty_magic")
