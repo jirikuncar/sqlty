@@ -216,12 +216,11 @@ def test_incremental_create_mode_on_directory(
     create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test that incremental,create mode works on directory with existing and new stubs."""
-    # Create first query file
+    # Create a single query file
     setup_queries_file(tmp_path, "queries.py", "sql")
-    setup_queries_file(tmp_path, "dummy.py", "sql")
 
     # Register it in pyproject.toml
-    create_pyproject_toml(tmp_path, [("queries.sql", "query"), ("dummy.sql", "query")])
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql

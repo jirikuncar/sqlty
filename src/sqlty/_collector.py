@@ -69,14 +69,16 @@ class LiteralCallCollector(ast.NodeVisitor):
 
         # NEW: Support for configured functions
         self.function_configs = function_configs or []
-        # Build a mapping for quick lookup: function_name -> config
+        # Build a mapping for quick lookup: (module.function) -> config
+        # Using full import_path as key to handle multiple functions with same name in different modules
         self.configured_functions: dict[str, FunctionConfigComplete] = {}
         # Track which function names are registered locally (for local calls)
         # This will be populated after current_file is set
         self.registered_function_names: set[str] = set()
         for config in self.function_configs:
-            func_name = config["import_path"].split(".")[-1]
-            self.configured_functions[func_name] = config
+            # Use full import_path as key to avoid collisions when multiple modules have same function name
+            import_path = config["import_path"]
+            self.configured_functions[import_path] = config
 
     def set_current_file_registrations(self, filepath: str) -> None:
         """Populate registered_function_names for the current file.
@@ -197,10 +199,15 @@ class LiteralCallCollector(ast.NodeVisitor):
 
         config = None
 
-        # First, check direct match in configured_functions
-        if func_name_to_check and func_name_to_check in self.configured_functions:
-            config = self.configured_functions[func_name_to_check]
-        # Second, check if func_name_to_check is an imported alias for a configured function
+        # Priority 1: Check if this is a locally-registered function (defined in current file)
+        if func_name_to_check and func_name_to_check in self.registered_function_names:
+            # Look up the config for this local function
+            for potential_config in self.function_configs:
+                func_name = potential_config["import_path"].split(".")[-1]
+                if func_name == func_name_to_check:
+                    config = potential_config
+                    break
+        # Priority 2: Check if func_name_to_check is an imported alias for a configured function
         elif func_name_to_check and func_name_to_check in self.import_sources:
             imported_module = self.import_sources[func_name_to_check]
             import_level = self.import_levels.get(func_name_to_check, 0)
@@ -270,11 +277,15 @@ class LiteralCallCollector(ast.NodeVisitor):
                     import_path = potential_config["import_path"]
                     parts = import_path.split(".")
                     if len(parts) >= 2:
-                        # Check if last two parts match: module.function
-                        config_module = parts[-2]
+                        # Extract module and function from config's import_path
                         config_func = parts[-1]
+                        config_module_path = ".".join(parts[:-1])
 
-                        if config_module == imported_module and config_func == original_func_name:
+                        # Check if the function name matches and full module path matches
+                        if (
+                            config_module_path == imported_module
+                            and config_func == original_func_name
+                        ):
                             config = potential_config
                             break
 
