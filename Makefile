@@ -1,5 +1,5 @@
-# Discover all example directories automatically
-EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d)
+# Discover all example directories automatically (excluding hidden directories)
+EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*")
 
 # Get the absolute path to the repository root
 ROOT_DIR := $(shell pwd)
@@ -79,7 +79,7 @@ generate-examples: clean-examples
 	@echo "🔧 Generating stubs for all examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  → $$dir"; \
-		uv run sqlty $$dir/ --format-command "uv run ruff format --stdin-filename {filename}"; \
+		uv run sqlty $$dir/ --format-command "uv run ruff format --stdin-filename {filename}" || exit 1; \
 	done
 	@echo "✅ All stubs generated"
 
@@ -101,7 +101,7 @@ verify-examples: generate-examples
 			--allowlist $(ROOT_DIR)/.stubtest-allowlist \
 			--ignore-unused-allowlist \
 			--concise \
-			--mypy-config-file $(ROOT_DIR)/pyproject.toml); \
+			--mypy-config-file $(ROOT_DIR)/pyproject.toml) || exit 1; \
 	done
 	@echo "✅ stubtest verification passed"
 

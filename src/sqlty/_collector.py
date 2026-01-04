@@ -201,12 +201,30 @@ class LiteralCallCollector(ast.NodeVisitor):
 
         # Priority 1: Check if this is a locally-registered function (defined in current file)
         if func_name_to_check and func_name_to_check in self.registered_function_names:
-            # Look up the config for this local function
+            # Look up the config for this local function.
+            # IMPORTANT: We must match both the function name AND the module name.
+            # This is crucial for multi-registry patterns where multiple files define
+            # functions with the same name (e.g., both user_queries.py and post_queries.py
+            # define sql()). Without matching the module, we'd incorrectly pick the first
+            # config entry for all files, causing stubs to be incorrectly combined.
+            from pathlib import Path
+
+            current_module = Path(self.current_file).stem if self.current_file else None
             for potential_config in self.function_configs:
-                func_name = potential_config["import_path"].split(".")[-1]
-                if func_name == func_name_to_check:
-                    config = potential_config
-                    break
+                import_path_parts = potential_config["import_path"].split(".")
+                if len(import_path_parts) >= 2:
+                    config_module = import_path_parts[-2]  # Module name (e.g., "user_queries")
+                    config_func = import_path_parts[-1]  # Function name (e.g., "sql")
+                    # Match both module and function name to ensure correct config selection
+                    if config_func == func_name_to_check and config_module == current_module:
+                        config = potential_config
+                        break
+                else:
+                    # Fallback for simple import paths (just function name)
+                    func_name = import_path_parts[-1]
+                    if func_name == func_name_to_check:
+                        config = potential_config
+                        break
         # Priority 2: Check if func_name_to_check is an imported alias for a configured function
         elif func_name_to_check and func_name_to_check in self.import_sources:
             imported_module = self.import_sources[func_name_to_check]
@@ -264,13 +282,22 @@ class LiteralCallCollector(ast.NodeVisitor):
                                 config_func = parts[-1]
                                 config_module_path = ".".join(parts[:-1])
 
-                                # Check if the function name matches and module path matches exactly
-                                if (
-                                    config_func == original_func_name
-                                    and config_module_path == resolved_module_path
-                                ):
-                                    config = potential_config
-                                    break
+                                # Check if the function name matches
+                                if config_func == original_func_name:
+                                    # Try exact match first
+                                    if config_module_path == resolved_module_path:
+                                        config = potential_config
+                                        break
+                                    # Fallback: for relative imports within a package, the resolved path
+                                    # may include the package name (e.g., "multi_registry.user_queries")
+                                    # while the config may only have the module name (e.g., "user_queries")
+                                    # Check if resolved path ENDS WITH config path
+                                    if (
+                                        resolved_module_path.endswith("." + config_module_path)
+                                        or resolved_module_path == config_module_path
+                                    ):
+                                        config = potential_config
+                                        break
             else:
                 # For absolute imports, direct matching
                 for potential_config in self.function_configs:

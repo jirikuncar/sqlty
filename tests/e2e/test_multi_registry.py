@@ -293,3 +293,100 @@ def sql_b(query: Literal["SELECT 'hello'::TEXT"]) -> SQL[tuple[str]]:
 def sql_b(query: str) -> str:
     ...
 """)
+
+
+def test_multi_registry_separate_stubs_per_file(
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Test that multiple registries in different files generate separate stubs.
+
+    Regression test for the bug where multiple files in the same directory
+    that define functions with the same name (e.g., both user_queries.py and
+    post_queries.py define sql()) would have their stubs incorrectly combined
+    into a single .pyi file.
+
+    EXPECTED: Each file should get its own .pyi file with only its own queries.
+    This test uses registered functions (pyproject.toml) not @sqlty decorators.
+    """
+    # Create user_queries.py with registered function (no decorator needed)
+    user_queries = tmp_path / "user_queries.py"
+    user_queries.write_text("""\"\"\"User-related queries registry.
+
+Functions are registered in pyproject.toml.
+\"\"\"
+from typing import Any
+
+
+def sql(query: str) -> Any:
+    \"\"\"Execute user queries.\"\"\"
+    return query
+""")
+
+    # Create post_queries.py with registered function (no decorator needed)
+    post_queries = tmp_path / "post_queries.py"
+    post_queries.write_text("""\"\"\"Post-related queries registry.
+
+Functions are registered in pyproject.toml.
+\"\"\"
+from typing import Any
+
+
+def sql(query: str) -> Any:
+    \"\"\"Execute post queries.\"\"\"
+    return query
+""")
+
+    # Create app.py that uses both registries
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from typing import TYPE_CHECKING
+
+from user_queries import sql as user_sql
+from post_queries import sql as post_sql
+
+if TYPE_CHECKING:
+    from sqlty import SQL
+
+# User queries
+user_data: SQL[tuple[int, str]] = user_sql("SELECT id::INTEGER, name::TEXT FROM users")
+
+# Post queries
+post_data: SQL[tuple[int, str]] = post_sql("SELECT id::INTEGER, title::TEXT FROM posts")
+""")
+
+    # Create pyproject.toml with both registries
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "user_queries.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "post_queries.sql"
+query_param = "query"
+""")
+
+    # Generate stubs for the entire directory
+    result = cli([str(tmp_path)])
+    assert result.returncode == 0, f"CLI failed: {result.stdout}\n{result.stderr}"
+
+    # Verify both stub files were created
+    user_stub = tmp_path / "user_queries.pyi"
+    post_stub = tmp_path / "post_queries.pyi"
+
+    assert user_stub.exists(), "user_queries.pyi should exist"
+    assert post_stub.exists(), "post_queries.pyi should exist"
+
+    # Verify each stub contains only its own queries
+    user_stub_content = user_stub.read_text()
+    post_stub_content = post_stub.read_text()
+
+    # User stub should have the user query
+    assert "FROM users" in user_stub_content, "user_queries.pyi should contain user query"
+    assert "FROM posts" not in user_stub_content, "user_queries.pyi should not contain post queries"
+
+    # Post stub should have the post query
+    assert "FROM posts" in post_stub_content, "post_queries.pyi should contain post query"
+    assert "FROM users" not in post_stub_content, "post_queries.pyi should not contain user queries"

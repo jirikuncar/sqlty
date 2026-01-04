@@ -789,31 +789,25 @@ class TypeStubGenerator:
                 registry_file = source_path.parent / f"{registry_source}.py"
             else:
                 # Search for files matching the registry_source name
-                # Check which one actually has a registry class defined
                 candidates = list(source_path.rglob(f"{registry_source}.py"))
 
-                # For each candidate, check if it defines a @sqlty decorated function
-                # and if THIS CALL references it (not other calls)
+                # The registry_source should uniquely identify the file
+                # For calls defined in the registry file itself, use that file
                 call_file = call.get("file")
                 if call_file:
                     call_path = Path(call_file)
 
+                    # First, check if the call is from the registry file itself
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_names(candidate):
-                            # If the call is from the registry file itself
-                            if call_path == candidate:
-                                registry_file = candidate
-                                break
-                            # Or if they're in the same directory (likely related)
-                            if call_path.parent == candidate.parent:
-                                registry_file = candidate
-                                break
+                        if call_path == candidate:
+                            registry_file = candidate
+                            break
 
-                # If we didn't find a match through directory relationship,
-                # use the first candidate with a registry class
+                # If not found by exact file match, match by registry_source name
                 if registry_file is None:
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_names(candidate):
+                        # Match by module name: candidate stem should match registry_source
+                        if candidate.stem == Path(registry_source).stem:
                             registry_file = candidate
                             break
 

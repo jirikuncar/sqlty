@@ -160,26 +160,25 @@ schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }
 
 CLI arguments always take precedence over configuration file values.
 
-## Full Example: Multi-Registry Package
+## Full Example: Multi-Schema Package
 
-See `examples/multi_schema_pkg/` for a complete package example:
+See `examples/multi_schema/` for a complete package example:
 
 - `users_queries.py` with `users.sql`
 - `orders_queries.py` with `orders.sql`
-- `app.py` using both registries
-- `pyproject.toml` with schema mappings
+- `main.py` using both registries
 
 Stub generation:
 
 ```bash
-uv run sqlty examples/multi_schema_pkg/ --mode=full
+uv run sqlty examples/multi_schema/ --mode=full
 ```
 
 Usage:
 
 ```python
-from users_queries import sql as user_sql
-from orders_queries import sql as order_sql
+from .users_queries import sql as user_sql
+from .orders_queries import sql as order_sql
 
 user_result = user_sql("SELECT id, name FROM users")  # SQL[tuple[int, str]]
 order_result = order_sql("SELECT id, total FROM orders")  # SQL[tuple[int, float]]
