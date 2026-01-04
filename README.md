@@ -52,6 +52,7 @@ See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/doc
 - 🚀 **Automatic Stub Generation**: Analyze code and generate `.pyi` files automatically
 - 🎯 **SQL Type Casts**: Use PostgreSQL-style `::TYPE` casts for explicit typing
 - 📦 **Multi-Registry Support**: Organize queries into multiple registries
+- ⚙️ **Function Configuration**: Analyze existing functions without code changes via `pyproject.toml`
 - 🔍 **Source Tracking**: Generated stubs include source location comments
 - 🌐 **Multiple SQL Dialects**: Support for PostgreSQL, MySQL, SQLite, and more via sqlglot
 

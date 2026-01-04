@@ -3,12 +3,16 @@
 Tests that sqlty can be configured via pyproject.toml file.
 """
 
-import subprocess
-import sys
+from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
 
 
-def test_config_via_pyproject_toml(tmp_path: Path) -> None:
+def test_config_via_pyproject_toml(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
     """Test that the tool accepts pyproject.toml configuration.
 
     This test validates that the tool can read and process a pyproject.toml
@@ -16,10 +20,8 @@ def test_config_via_pyproject_toml(tmp_path: Path) -> None:
     if the feature is implemented, or gracefully ignore it if not yet supported.
     """
     # Create pyproject.toml with sqlty configuration
-    pyproject_file = tmp_path / "pyproject.toml"
-    pyproject_file.write_text("""[tool.sqlty]
-dialect = "postgres"
-""")
+    # Create pyproject.toml with dialect and register queries.sql
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")], dialect="postgres")
 
     # Create source files
     queries_file = tmp_path / "queries.py"
@@ -39,12 +41,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 """)
 
     # Run generator - should pick up config from pyproject.toml
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should handle config gracefully
     assert result.returncode == 0
@@ -55,7 +52,7 @@ query = sql("SELECT id::INTEGER, name::TEXT FROM users")
     assert "SELECT id::INTEGER, name::TEXT FROM users" in stub_file.read_text()
 
 
-def test_schema_path_in_config(tmp_path: Path) -> None:
+def test_schema_path_in_config(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test schema path configuration in pyproject.toml."""
     # Create schema file
     schema_file = tmp_path / "db_schema.sql"
@@ -90,18 +87,15 @@ query = sql("SELECT id, name FROM users")
 """)
 
     # Run generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should succeed or gracefully handle config
     assert result.returncode in (0, 1, 2)
 
 
-def test_cli_args_override_config(tmp_path: Path) -> None:
+def test_cli_args_override_config(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test that CLI arguments override pyproject.toml configuration."""
     # Create pyproject.toml with one dialect
     pyproject_file = tmp_path / "pyproject.toml"
@@ -125,18 +119,15 @@ query = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Run with different dialect via CLI - should override config
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path), "--dialect=postgres"],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path), "--dialect=postgres"], {"cwd": str(tmp_path)})
 
     # Should succeed
     assert result.returncode == 0
 
 
-def test_multiple_registries_in_config(tmp_path: Path) -> None:
+def test_multiple_registries_in_config(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test configuring multiple registries in pyproject.toml."""
     # Create pyproject.toml with registry configuration
     pyproject_file = tmp_path / "pyproject.toml"
@@ -176,18 +167,15 @@ orders = order_sql("SELECT id::INTEGER FROM orders")
 """)
 
     # Run generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should handle registry configuration
     assert result.returncode in (0, 1, 2)
 
 
-def test_exclude_patterns_in_config(tmp_path: Path) -> None:
+def test_exclude_patterns_in_config(
+    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+) -> None:
     """Test exclude patterns in pyproject.toml configuration."""
     # Create pyproject.toml with exclude patterns
     pyproject_file = tmp_path / "pyproject.toml"
@@ -220,12 +208,7 @@ test_query = sql("SELECT * FROM test_table")
 """)
 
     # Run generator
-    result = subprocess.run(
-        [sys.executable, "-m", "sqlty", str(tmp_path)],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-    )
+    result = cli([str(tmp_path)], {"cwd": str(tmp_path)})
 
     # Should succeed
     assert result.returncode in (0, 1, 2)
@@ -241,7 +224,7 @@ test_query = sql("SELECT * FROM test_table")
 
 
 def test_schema_paths_resolved_relative_to_pyproject_toml(
-    tmp_path: Path, cli, setup_queries_file
+    tmp_path: Path, cli, setup_sqlty_package
 ) -> None:
     """Test that schema paths in pyproject.toml are resolved relative to the pyproject.toml file location, not cwd."""
     # Create a subdirectory for the project
@@ -271,8 +254,8 @@ schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }
 """)
 
     # Create query modules in the project directory using the fixture
-    setup_queries_file(project_dir, "users_queries.py", "sql")
-    setup_queries_file(project_dir, "orders_queries.py", "sql")
+    setup_sqlty_package(project_dir, "users_queries.py", "sql")
+    setup_sqlty_package(project_dir, "orders_queries.py", "sql")
 
     # Add query calls to the files
     users_queries_file = project_dir / "users_queries.py"

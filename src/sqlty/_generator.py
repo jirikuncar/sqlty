@@ -27,6 +27,7 @@ from sqlty._formatter import formatter
 from sqlty._sql_analyzer import SQLAnalyzer
 
 from ._collector import CallInfo, LiteralCallCollector
+from ._config import FunctionConfigComplete
 from ._registry import RegistryDetector
 from ._stub_merger import StubMerger
 
@@ -43,6 +44,7 @@ class TypeStubGenerator:
         schema_mappings: dict[str | None, Path] | None = None,
         format_command: str | None = None,
         verbose: int = 0,
+        function_configs: list[FunctionConfigComplete] | None = None,
     ) -> None:
         self.function_name = "sql"  # Always use 'sql' as the method name
         self.sql_dialect = sql_dialect
@@ -57,9 +59,10 @@ class TypeStubGenerator:
         self._format_command = format_command
         self._check_mode = False
         self._verbose = verbose
+        self._function_configs = function_configs or []
 
         self._stub_merger = StubMerger(function_name=self.function_name)
-        self._registry_detector = RegistryDetector()
+        self._registry_detector = RegistryDetector(function_configs=self._function_configs)
 
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
@@ -405,8 +408,9 @@ class TypeStubGenerator:
             logger.warning("Failed to parse %s: %s", filepath, e)
             return []
         # First pass: collect calls
-        collector = LiteralCallCollector(atok=atok)
+        collector = LiteralCallCollector(atok=atok, function_configs=self._function_configs)
         collector.current_file = str(filepath)  # Set current file for variable collection
+        collector.set_current_file_registrations(str(filepath))  # Populate local registrations
         collector.visit(tree)
 
         logger.debug("Found %d calls in %s", len(collector.calls), filepath)
@@ -417,18 +421,12 @@ class TypeStubGenerator:
         # Also check if the current file itself has a @sqlty decorated function
         registry_sources: set[str] = set()
 
-        # Check if current file has a registry
+        # Check if current file has registered functions (from pyproject.toml)
         if self._registry_detector.get_registry_names(filepath):
             # Use the module name (filename without .py)
             current_module = filepath.stem
             registry_sources.add(current_module)
-            logger.debug("Current file has registry: %s", current_module)
-
-        # Check if current file has decorated functions
-        if collector.decorated_functions:
-            current_module = filepath.stem
-            registry_sources.add(current_module)
-            logger.debug("Current file has decorated functions: %s", current_module)
+            logger.debug("Current file has registered functions: %s", current_module)
 
         # Resolve imported sources
         for local_name, module_name in collector.import_sources.items():
@@ -454,9 +452,15 @@ class TypeStubGenerator:
             else:
                 logger.debug("Import does not resolve to a registry")
                 # If the module doesn't contain a @sqlty decorated function, clear registry_source for those calls
+                # UNLESS they come from configured functions (which don't require @sqlty decorators)
                 for call in collector.calls:
                     if call["registry_source"] == module_name:
-                        call["registry_source"] = None
+                        # Check if this call comes from a configured function
+                        # If it does, don't clear the registry_source (trust the config)
+                        if not call.get("query_param_name"):
+                            # This is a regular @sqlty call, clear it if the module doesn't have a registry
+                            call["registry_source"] = None
+                        # Otherwise, keep the registry_source from the config
 
         # For calls with registry_class but no registry_source, check if the class is imported
         for call in collector.calls:
@@ -490,10 +494,35 @@ class TypeStubGenerator:
             if not c.get("file"):
                 c["file"] = str(filepath)
 
+        # Apply default templates if not specified
+        self._apply_default_templates(calls)
+
         # Infer types from SQL query analysis (with registry-specific analyzers)
         self._infer_types_from_sql(calls, filepath)
 
         return calls
+
+    def _apply_default_templates(self, calls: list[CallInfo]) -> None:
+        """Apply default templates if not specified in config.
+
+        Default: return_type_template = "SQL[{sqlty}]" with import "from sqlty import SQL"
+
+        Only applies to configured functions (those with query_param_name set).
+        """
+        for call in calls:
+            # Only apply to configured functions
+            if not call.get("query_param_name"):
+                continue
+
+            # Apply default return_type_template if not set
+            if not call.get("return_type_template"):
+                call["return_type_template"] = "SQL[{sqlty}]"
+                # Add default import if not already present
+                imports = call.get("imports")
+                if imports is None:
+                    call["imports"] = ["from sqlty import SQL"]
+                elif "from sqlty import SQL" not in imports:
+                    imports.append("from sqlty import SQL")
 
     def _infer_types_from_sql(self, calls: list[CallInfo], module_path: Path) -> None:
         """Infer return types by analyzing SQL queries using sqlglot.
@@ -503,6 +532,13 @@ class TypeStubGenerator:
             module_path: Path to the module containing these calls
         """
         for call in calls:
+            # Check if return type was already provided via return_type_param
+            if call.get("return_type_param_value"):
+                # Use the explicit return type from the parameter
+                # No SQL[...] wrapping - the function signature itself defines the return type
+                call["return_type"] = call["return_type_param_value"]
+                continue
+
             literal = call["literal"]
             registry_name = call.get("registry_source")
             registry_class = call.get("registry_class")
@@ -512,7 +548,7 @@ class TypeStubGenerator:
 
             sql_type = analyzer.generate_return_type(literal)
             if sql_type:
-                call["return_type"] = f"SQL[{sql_type}]"
+                call["return_type"] = sql_type
             else:
                 # Warn about missing type information
                 file_info = f" in {call.get('file', 'unknown')}" if call.get("file") else ""
@@ -594,7 +630,11 @@ class TypeStubGenerator:
         """
         from ._stub_parser import CallInfoToIRParser
 
-        parser = CallInfoToIRParser(self.function_name)
+        parser = CallInfoToIRParser(
+            self.function_name,
+            registry_detector=self._registry_detector,
+            function_configs=self._function_configs,
+        )
         stub_ir = parser.parse_calls(calls, class_name, export_name)
         return stub_ir
 
@@ -661,7 +701,16 @@ class TypeStubGenerator:
             logging.getLogger(__name__).info(
                 "No calls to %s found in %s", self.function_name, source_path
             )
-            # Always create a minimal stub file (unless create_only and file exists and no other operations)
+
+            # For directories with no calls, skip creating a stub file
+            # (they may have no SQL code or SQL code only in subdirectories)
+            if is_directory:
+                logging.getLogger(__name__).info(
+                    "Skipping stub generation for directory with no calls: %s", source_path
+                )
+                return source_path / "__init__.pyi"  # Return the path that would have been created
+
+            # For single files, create a minimal stub file (unless create_only and file exists and no other operations)
             stub_path = output_path or source_path.with_suffix(".pyi")
 
             # Skip if create_only mode and file already exists and no other operations
@@ -740,31 +789,25 @@ class TypeStubGenerator:
                 registry_file = source_path.parent / f"{registry_source}.py"
             else:
                 # Search for files matching the registry_source name
-                # Check which one actually has a registry class defined
                 candidates = list(source_path.rglob(f"{registry_source}.py"))
 
-                # For each candidate, check if it defines a @sqlty decorated function
-                # and if THIS CALL references it (not other calls)
+                # The registry_source should uniquely identify the file
+                # For calls defined in the registry file itself, use that file
                 call_file = call.get("file")
                 if call_file:
                     call_path = Path(call_file)
 
+                    # First, check if the call is from the registry file itself
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_names(candidate):
-                            # If the call is from the registry file itself
-                            if call_path == candidate:
-                                registry_file = candidate
-                                break
-                            # Or if they're in the same directory (likely related)
-                            if call_path.parent == candidate.parent:
-                                registry_file = candidate
-                                break
+                        if call_path == candidate:
+                            registry_file = candidate
+                            break
 
-                # If we didn't find a match through directory relationship,
-                # use the first candidate with a registry class
+                # If not found by exact file match, match by registry_source name
                 if registry_file is None:
                     for candidate in candidates:
-                        if self._registry_detector.get_registry_names(candidate):
+                        # Match by module name: candidate stem should match registry_source
+                        if candidate.stem == Path(registry_source).stem:
                             registry_file = candidate
                             break
 
@@ -814,7 +857,11 @@ class TypeStubGenerator:
                     from ._stub_ir import StubFile
                     from ._stub_parser import CallInfoToIRParser
 
-                    call_parser = CallInfoToIRParser(self.function_name)
+                    call_parser = CallInfoToIRParser(
+                        self.function_name,
+                        registry_detector=self._registry_detector,
+                        function_configs=self._function_configs,
+                    )
 
                     # Create stub with all new registries
                     all_new_registries = StubFile(source_path=stub_path)

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id INTEGER PRIMARY KEY,
-    total FLOAT NOT NULL
-);

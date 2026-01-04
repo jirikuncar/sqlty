@@ -48,6 +48,11 @@ class OverloadSignature:
         source_line: Optional line number in source file
         source_span: Optional precise source location information
         ast_node: Optional reference to original AST FunctionDef node from stub
+        function_signature: Optional AST arguments node for full function signature (for configured functions)
+        query_param_name: Name of the query parameter (default "query")
+        source_return_annotation: Optional AST return annotation from source function
+        return_type_template: Optional template for return type with {sqlty} placeholder
+        self_type_template: Optional template for self parameter type with {sqlty} placeholder
     """
 
     query_literal: str
@@ -56,6 +61,13 @@ class OverloadSignature:
     source_line: int | None = None
     source_span: SourceSpan | None = None
     ast_node: ast.FunctionDef | None = None
+    function_signature: ast.arguments | None = None  # Full signature for configured functions
+    query_param_name: str = "query"  # Name of the query parameter to replace with Literal
+    source_return_annotation: ast.expr | None = None  # Return annotation from source function
+    return_type_template: str | None = None  # Template for return type with {sqlty} placeholder
+    self_type_template: str | None = (
+        None  # Template for self parameter type with {sqlty} placeholder
+    )
 
     def __hash__(self) -> int:
         """Hash based on query literal for deduplication."""
@@ -79,6 +91,7 @@ class RegistryDecorator:
         docstring: Docstring for the registry
         ast_node: Original AST node if available
         is_function: Whether this represents a decorated function vs a class
+        custom_imports: List of custom import statements from function config
     """
 
     name: str
@@ -87,6 +100,7 @@ class RegistryDecorator:
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
     ast_node: ast.FunctionDef | None = None
     is_function: bool = False
+    custom_imports: list[str] = field(default_factory=list)
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -225,8 +239,6 @@ class StubFile:
             ImportStatement(module="typing", names=["Literal", "overload"], from_import=True)
         )
 
-        required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
-
         type_patterns = {
             r"\buuid\.UUID\b": ImportStatement(module="uuid", names=[], from_import=False),
             r"\bdatetime\.(datetime|date|time|timedelta)\b": ImportStatement(
@@ -235,14 +247,82 @@ class StubFile:
             r"\bdecimal\.Decimal\b": ImportStatement(module="decimal", names=[], from_import=False),
         }
 
+        # Check if Any or SQL is used in any return type or function signature
+        uses_any = False
+        uses_sql = False
         for registry in self.registries.values():
             for overload in registry.overloads:
                 return_type = overload.return_type
+                # Check for patterns that require imports
                 for pattern, import_stmt in type_patterns.items():
                     if re.search(pattern, return_type):
                         required.add(import_stmt)
+                # Check if Any is used in return type
+                if re.search(r"\bAny\b", return_type):
+                    uses_any = True
+                # Check if SQL is used in return type
+                if re.search(r"\bSQL\[", return_type):
+                    uses_sql = True
+                # Check if Any is used in function signature
+                if overload.function_signature:
+                    sig_str = ast.unparse(overload.function_signature)
+                    if re.search(r"\bAny\b", sig_str):
+                        uses_any = True
+                    # Only import Any for non-trivial function signatures
+                    # (those with pos-only params or multiple args)
+                    sig = overload.function_signature
+                    if len(sig.posonlyargs) > 0 or len(sig.args) > 1 or len(sig.kwonlyargs) > 0:
+                        uses_any = True
+
+        # Add Any import if needed
+        if uses_any:
+            # Update the existing typing import to include Any
+            typing_import = ImportStatement(
+                module="typing", names=["Literal", "overload", "Any"], from_import=True
+            )
+            # Remove the old one and add the new one with Any
+            required = {imp for imp in required if imp.module != "typing"}
+            required.add(typing_import)
+
+        # Add SQL import if needed
+        if uses_sql:
+            required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
+
+        # Add custom imports from registries
+        for registry in self.registries.values():
+            for import_str in registry.custom_imports:
+                # Parse the import string to create ImportStatement
+                parsed_import = self._parse_import_string(import_str)
+                if parsed_import is not None:
+                    required.add(parsed_import)
 
         return required
+
+    def _parse_import_string(self, import_str: str) -> ImportStatement | None:
+        """Parse an import string into an ImportStatement.
+
+        Args:
+            import_str: Import string like "from psycopg import Cursor" or "import psycopg"
+
+        Returns:
+            ImportStatement or None if parsing fails
+        """
+        import_str = import_str.strip()
+
+        # Handle "from X import Y, Z" format
+        if import_str.startswith("from "):
+            parts = import_str[5:].split(" import ", 1)
+            if len(parts) == 2:
+                module = parts[0].strip()
+                names = [name.strip() for name in parts[1].split(",")]
+                return ImportStatement(module=module, names=names, from_import=True)
+
+        # Handle "import X" format
+        elif import_str.startswith("import "):
+            module = import_str[7:].strip()
+            return ImportStatement(module=module, names=[], from_import=False)
+
+        return None
 
     def has_same_overloads(self, other: "StubFile") -> bool:
         """Check if two StubFiles have the same overloads per registry.

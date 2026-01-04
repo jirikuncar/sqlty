@@ -3,14 +3,14 @@
 import importlib.metadata
 import os
 from collections.abc import Callable
-from typing import Any, overload
+from typing import overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
 except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
-__all__ = ["SQL", "sqlty"]
+__all__ = ["sqlty"]
 
 
 # Determine if auto-generation is enabled via environment variable
@@ -21,16 +21,13 @@ class SQL[T](str):
     pass
 
 
-# TODO make sure F is (query: str) -> Any
-
-
 @overload
 def sqlty[F](func: F, /) -> F:
     """Decorator to mark functions for SQLTy type inference and stub generation.
 
     Usage:
         @sqlty
-        def sql[T](query: T) -> T:
+        def sql(query: Literal) -> Any:
             return query
     """
     ...
@@ -42,7 +39,7 @@ def sqlty[F](*, schema: str | None = None) -> Callable[[F], F]:
 
     Usage:
         @sqlty(schema="schema.sql")
-        def sql[T](query: T) -> T:
+        def sql(query: Literal) -> Any:
             return query
     """
     ...
@@ -54,13 +51,17 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
     Usage:
         # Simple decoration without schema
         @sqlty
-        def sql[T](query: T) -> T:
+        def sql(query: Literal) -> Any:
             return query
 
         # Decoration with schema path
         @sqlty(schema="schema.sql")
-        def sql_with_schema[T](query: T) -> T:
+        def sql_with_schema(query: Literal) -> Any:
             return query
+
+    When _auto_generate is enabled:
+    - Verifies the decorated function is registered in pyproject.toml
+    - Keeps automatic generation of stub files
     """
 
     def decorator(fn: F) -> F:
@@ -73,21 +74,82 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
         if schema is not None:
             fn.__schema_path__ = schema  # type: ignore[attr-defined]
 
-        # Auto-generate stub if environment variable is set
+        # When auto-generate is enabled, verify registration and enable runtime stub generation
         if _auto_generate:
             import functools
+            import inspect
+            import warnings
+            from pathlib import Path
+            from typing import Any, cast
 
             from sqlty._auto_generator import auto_generate_stub
+            from sqlty._config import load_config
 
-            # Store the original function's file before wrapping
-            call = functools.partial(auto_generate_stub, fn)  # type: ignore
+            # Get the module and file path of the decorated function
+            is_registered = False
+            try:
+                module = inspect.getmodule(fn)
+                if module:
+                    module_name = module.__name__
+                    file_path = inspect.getfile(cast(Any, fn))
+                    function_name = getattr(fn, "__name__", None)
 
-            @functools.wraps(fn)  # type: ignore
-            def wrapper(query: str) -> Any:
-                call(query)
-                return fn(query)  # type: ignore
+                    if function_name:
+                        # Load config from pyproject.toml
+                        config, _ = load_config(Path(file_path).parent)
 
-            return wrapper  # type: ignore
+                        # Check if this function is registered in pyproject.toml
+                        # Expected format: [tool.sqlty.functions] with import_path
+                        functions = config.get("functions", [])
+                        expected_import_path = f"{module_name}.{function_name}"
+
+                        is_registered = any(
+                            func_config["import_path"] == expected_import_path
+                            for func_config in functions
+                        )
+
+                        # If not registered and module is __main__, also check using file basename
+                        # This handles the case when a script is run directly (python script.py)
+                        if not is_registered and module_name == "__main__":
+                            file_basename = Path(file_path).stem
+                            fallback_import_path = f"{file_basename}.{function_name}"
+                            is_registered = any(
+                                func_config["import_path"] == fallback_import_path
+                                for func_config in functions
+                            )
+                            if is_registered:
+                                expected_import_path = fallback_import_path
+
+                        if not is_registered:
+                            warnings.warn(
+                                f"Function {expected_import_path} is decorated with @sqlty but not "
+                                f"registered in pyproject.toml under [tool.sqlty.functions]. "
+                                f"Add this configuration:\n\n"
+                                f"[[tool.sqlty.functions]]\n"
+                                f'import_path = "{expected_import_path}"\n'
+                                f'query_param = "query"\n',
+                                stacklevel=2,
+                            )
+            except Exception:
+                # Silently ignore errors during registration check
+                pass
+
+            # Enable runtime stub generation for registered functions
+            if is_registered:
+                call = functools.partial(auto_generate_stub, fn)  # type: ignore
+
+                @functools.wraps(fn)  # type: ignore
+                def wrapper(query: str) -> Any:
+                    # TODO use query_param name from config or inspect signature and allow automatic detection for only one param
+                    call(query)
+                    return fn(query)  # type: ignore
+
+                # Copy over the attributes to the wrapper
+                wrapper.__sqlty__ = True  # type: ignore[attr-defined]
+                if schema is not None:
+                    wrapper.__schema_path__ = schema  # type: ignore[attr-defined]
+
+                return wrapper  # type: ignore
 
         return fn
 

@@ -14,10 +14,10 @@ def test_mypy_validates_query_types(
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
     stubtest: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that mypy validates query return types correctly."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -62,10 +62,10 @@ def test_mypy_catches_type_mismatch(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that mypy catches type mismatches in query usage."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -91,10 +91,10 @@ def test_mypy_infers_tuple_unpacking(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that mypy correctly infers types from tuple unpacking with execute function."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -131,10 +131,10 @@ def test_mypy_with_multiple_queries(
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
     stubtest: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test mypy validation with multiple queries of different types."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -189,10 +189,10 @@ def test_mypy_with_query_parameters(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test mypy validation for queries with parameters."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -225,10 +225,10 @@ def test_mypy_with_complex_types(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     mypy: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test mypy validation with complex SQL types like arrays or JSON."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from typing import TYPE_CHECKING
@@ -254,10 +254,10 @@ def test_stubtest_detects_stub_inconsistencies(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     stubtest: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that stubtest detects inconsistencies between stub and implementation."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     # Create an app file with queries so stubs are generated
     app_file = tmp_path / "app.py"
@@ -298,10 +298,10 @@ def test_stubtest_with_allowlist(
     tmp_path: Path,
     cli: Callable[..., subprocess.CompletedProcess[str]],
     stubtest: Callable[..., subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[..., Path],
+    setup_sqlty_package: Callable[..., Path],
 ) -> None:
     """Test that stubtest allowlist is properly applied."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     # Create a file with runtime-only elements that should be in the allowlist
     queries_file = tmp_path / "queries.py"

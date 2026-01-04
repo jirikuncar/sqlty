@@ -35,7 +35,9 @@ query_a = sql("SELECT id::INTEGER FROM users")
     source_file.write_text(source_content_order1)
 
     # Step 2: Generate initial pyi stub
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_file = generator.generate_stub_file(source_file, mode="incremental,create")
 
     assert stub_file.exists()
@@ -97,7 +99,9 @@ b = sql("SELECT id::INTEGER, active::BOOLEAN FROM users")
     source_file.write_text(source_order1)
 
     # Generate initial stub
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_file = generator.generate_stub_file(source_file, mode="incremental,create")
     initial_stub = stub_file.read_text()
 
@@ -148,7 +152,9 @@ mango = sql("mango query")
 """
     source_file.write_text(source_content)
 
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_file = generator.generate_stub_file(source_file, mode="incremental,create")
     stub_content = stub_file.read_text()
 
@@ -185,7 +191,9 @@ query_b = sql("SELECT name::TEXT FROM users")
 query_a = sql("SELECT id::INTEGER FROM users")
 """)
 
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_file = generator.generate_stub_file(source_file, mode="incremental,create")
     initial_stub = stub_file.read_text()
     initial_id_pos = initial_stub.find("SELECT id::INTEGER FROM users")

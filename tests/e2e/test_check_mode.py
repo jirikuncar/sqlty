@@ -9,10 +9,10 @@ from typing import Any
 def test_check_mode_with_up_to_date_stubs(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode succeeds when stub files are up to date."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -33,10 +33,10 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_check_mode_with_outdated_stubs(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode fails when stub files are outdated."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -64,10 +64,10 @@ query2 = sql("SELECT name::TEXT FROM users")
 def test_check_mode_with_missing_stubs(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode fails when stub files are missing."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -84,10 +84,10 @@ query = sql("SELECT id::INTEGER FROM users")
 def test_check_mode_with_verbose_flag(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode with --verbose shows diff output."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -117,10 +117,10 @@ query2 = sql("SELECT name::TEXT FROM users")
 def test_check_mode_with_multiple_verbose_levels(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode supports multiple verbose levels."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -155,10 +155,10 @@ query2 = sql("SELECT name::TEXT FROM users")
 def test_check_mode_does_not_modify_files(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode does not modify stub files."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -191,10 +191,10 @@ query2 = sql("SELECT name::TEXT FROM users")
 def test_check_mode_with_directory_mode(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode works with directory analysis."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     (tmp_path / "file1.py").write_text("""from queries import sql
 
@@ -218,10 +218,10 @@ q2 = sql("SELECT name::TEXT FROM users")
 def test_check_mode_exit_codes(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check mode returns correct exit codes."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -252,10 +252,10 @@ query2 = sql("SELECT name::TEXT FROM users")
 def test_check_and_format_command_are_mutually_exclusive(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that --check and --format-command cannot be used together."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql

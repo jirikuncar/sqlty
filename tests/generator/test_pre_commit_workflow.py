@@ -37,7 +37,10 @@ query1 = sql("SELECT id::INTEGER FROM users")
     )
 
     # Step 2: Run generator
-    generator = TypeStubGenerator(sql_dialect="postgres")
+    generator = TypeStubGenerator(
+        sql_dialect="postgres",
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}],
+    )
     stub_path = generator.generate_stub_file(queries_file, mode="incremental,create")
 
     # Step 3: Check pyi has been generated and typing is correct
@@ -110,7 +113,9 @@ query2 = sql("SELECT name::TEXT FROM users")
 
 def test_write_stub_if_changed_returns_correct_status(tmp_path: Path) -> None:
     """Test that _write_stub_if_changed returns correct boolean status."""
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_path = tmp_path / "test.pyi"
     content = "# Test content\n"
 
@@ -133,7 +138,9 @@ def test_write_stub_if_changed_returns_correct_status(tmp_path: Path) -> None:
 
 def test_write_stub_if_changed_preserves_timestamp(tmp_path: Path) -> None:
     """Test that _write_stub_if_changed preserves file timestamp when content is unchanged."""
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_path = tmp_path / "test.pyi"
     content = "# Test content\n"
 
@@ -154,7 +161,9 @@ def test_write_stub_if_changed_preserves_timestamp(tmp_path: Path) -> None:
 
 def test_write_stub_if_changed_updates_timestamp_on_change(tmp_path: Path) -> None:
     """Test that _write_stub_if_changed updates file timestamp when content changes."""
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_path = tmp_path / "test.pyi"
 
     # Write initial content
@@ -174,7 +183,9 @@ def test_write_stub_if_changed_updates_timestamp_on_change(tmp_path: Path) -> No
 
 def test_write_stub_if_changed_handles_nonexistent_file(tmp_path: Path) -> None:
     """Test that _write_stub_if_changed handles nonexistent files correctly."""
-    generator = TypeStubGenerator()
+    generator = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}]
+    )
     stub_path = tmp_path / "nonexistent.pyi"
     content = "# New file\n"
 
@@ -199,7 +210,10 @@ query1 = sql("SELECT id::INTEGER FROM users")
 """
     )
 
-    generator = TypeStubGenerator(sql_dialect="postgres")
+    generator = TypeStubGenerator(
+        sql_dialect="postgres",
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}],
+    )
 
     # First generation
     stub_path = generator.generate_stub_file(tmp_path)

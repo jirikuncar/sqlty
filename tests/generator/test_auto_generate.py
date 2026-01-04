@@ -35,6 +35,16 @@ query = sql("SELECT 1")
 
 def test_auto_generate_with_env_var(tmp_path: Path) -> None:
     """Test that auto-generation works when SQLTY_AUTO_GENERATE is set."""
+    # Create pyproject.toml with function configuration
+    pyproject_path = tmp_path / "pyproject.toml"
+    pyproject_path.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "__main__.sql"
+query_param = "query"
+""")
+
     # Create a temporary module file
     module_path = tmp_path / "test_auto_gen.py"
     module_path.write_text("""
@@ -71,6 +81,16 @@ query2 = sql("SELECT COUNT(*) FROM posts")
 
 def test_auto_generate_incremental(tmp_path: Path) -> None:
     """Test that auto-generation creates stubs when they don't exist."""
+    # Create pyproject.toml with function configuration
+    pyproject_path = tmp_path / "pyproject.toml"
+    pyproject_path.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "__main__.sql"
+query_param = "query"
+""")
+
     module_path = tmp_path / "test_incremental.py"
     stub_path = module_path.with_suffix(".pyi")
 
@@ -109,6 +129,16 @@ def test_auto_generate_with_different_values(tmp_path: Path) -> None:
         test_dir = tmp_path / f"test_{value}"
         test_dir.mkdir(exist_ok=True)
 
+        # Create pyproject.toml with function configuration
+        pyproject_path = test_dir / "pyproject.toml"
+        pyproject_path.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "__main__.sql"
+query_param = "query"
+""")
+
         module_path = test_dir / f"test_value_{value}.py"
         module_path.write_text("""
 from sqlty import sqlty
@@ -137,6 +167,17 @@ query = sql("SELECT 1")
 
 def test_auto_generate_error_handling(tmp_path: Path) -> None:
     """Test that errors during auto-generation don't crash the application."""
+
+    # Create pyproject.toml with function configuration
+    pyproject_path = tmp_path / "pyproject.toml"
+    pyproject_path.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "__main__.sql"
+query_param = "query"
+""")
+
     # We test error handling by ensuring that even with auto-generate enabled,
     # a module without sql calls can still be imported successfully
     module_path = tmp_path / "test_no_sql.py"

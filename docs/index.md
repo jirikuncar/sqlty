@@ -9,6 +9,7 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
 - [Quick Start](#quick-start)
 - [Basic Usage](#basic-usage)
 - [Advanced Usage](#advanced-usage)
+  - [Function Configuration](#function-configuration)
   - [Multi-Registry Pattern](#multi-registry-pattern)
   - [Custom SQL Dialects](#custom-sql-dialects)
   - [Incremental Mode](#incremental-mode)
@@ -235,6 +236,55 @@ for user_id, name, email in result:  # Error: too many values to unpack
 ```
 
 ## Advanced Usage
+
+### Function Configuration
+
+You can configure SQLTy to analyze functions without using the `@sqlty` decorator. This is useful for existing codebases, third-party libraries, or when you can't modify source code.
+
+**Configuration in `pyproject.toml`:**
+
+```toml
+[tool.sqlty]
+dialect = "postgresql"
+
+[[tool.sqlty.functions]]
+import_path = "db.execute_query"
+query_param = "query"
+schema = "schema.sql"
+```
+
+**Your existing code (no decorators needed):**
+
+```python
+# db.py
+def execute_query(conn, query: str, **params):
+    """Execute a query and return results."""
+    # Implementation details...
+    return []
+```
+
+**Usage with full type safety:**
+
+```python
+from db import execute_query
+
+# Type inferred from SQL and schema
+results = execute_query(
+    conn,
+    query="SELECT id::INTEGER, name::TEXT FROM users"
+)
+# Type: list[tuple[int, str]]
+```
+
+**Configuration options:**
+- `import_path` (required): Full import path to function (e.g., `"module.function"`)
+- `query_param` (required): Parameter name containing the SQL query
+- `return_type_param` (optional): Parameter name specifying return type
+- `schema` (optional): Path to SQL schema file
+- `return_type_template` (optional): Template with `{sqlty}` placeholder
+- `imports` (optional): List of import statements for the stub
+
+See [Advanced Usage - Function Configuration](advanced-usage.md#function-configuration) and the [`examples/function_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/function_config) example for details.
 
 ### Multi-Registry Pattern
 

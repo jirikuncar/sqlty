@@ -1,0 +1,18 @@
+[tool.sqlty]
+dialect = "postgres"
+
+# Configure pg_fetchvalue function with explicit return type parameter
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchvalue"
+query_param = "query"
+return_type_param = "return_tp"
+return_type_template = "{sqlty} | None"
+schema = "schema.sql"  # Optional: use schema for additional type validation
+
+# Configure pg_fetchall function with explicit return type parameter
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchall"
+query_param = "query"
+return_type_param = "return_tp"
+return_type_template = "list[{sqlty}]"
+schema = "schema.sql"  # Optional: use schema for additional type validation
