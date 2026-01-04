@@ -124,7 +124,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Install or uninstall sqlty magic codec globally")
     parser.add_argument(
-        "action", choices=["install", "uninstall", "status"], help="Action to perform"
+        "action", choices=["install", "uninstall", "status", "decode"], help="Action to perform"
     )
 
     args = parser.parse_args()
@@ -155,6 +155,10 @@ def main() -> None:
             print("Run 'python -m sqlty.magic install' to enable it")
 
         sys.exit(0 if found else 1)
+    elif args.action == "decode":
+        from sqlty.magic import decode
+
+        print(decode(sys.stdin.read().encode("utf-8"))[0])
 
 
 if __name__ == "__main__":

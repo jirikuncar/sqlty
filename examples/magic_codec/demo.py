@@ -24,12 +24,12 @@ Note: No encoding declaration change is needed. The magic codec overrides
 UTF-8, so files can continue using # coding: utf-8 or no declaration.
 """
 
-from sqlty import magic
+from sqlty import SQL, magic  # pyright: ignore[reportUnusedImport] # noqa: F401
 
 # These strings will be automatically transformed by the codec
 
 # Simple SELECT with single column
-query1 = "--sql SELECT 1::INTEGER"
+query1: SQL[tuple[int]] = "--sql SELECT 1::INTEGER"
 # After transformation: query1 = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
 
 # SELECT with multiple columns
@@ -51,9 +51,9 @@ WHERE active = true
 def main() -> None:
     """Demonstrate the transformed queries."""
     print("Magic codec example")
-    print(f"Query 1: {query1}")
-    print(f"Query 2: {query2}")
-    print(f"Query 3: {query3}")
+    print(f"Query 1: {query1}", type(query1))
+    print(f"Query 2: {query2}", type(query2))
+    print(f"Query 3: {query3}", type(query3))
 
 
 if __name__ == "__main__":
