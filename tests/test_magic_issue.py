@@ -56,8 +56,8 @@ def test_issue_example_without_cast():
 
 def test_complete_example_from_issue():
     """Test a complete file based on the issue example."""
-    test_code = '''# coding: sqlty-magic
-from sqlty import magic
+    # No encoding declaration needed - magic codec overrides UTF-8
+    test_code = '''from sqlty import magic
 
 q = "--sql SELECT 1::INTEGER"
 '''

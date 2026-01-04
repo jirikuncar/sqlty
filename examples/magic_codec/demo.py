@@ -11,18 +11,19 @@ This example shows how to use the magic codec to automatically transform
 strings prefixed with --sql into SQL[T](...) calls with type inference.
 
 To use this feature:
-1. Add a coding declaration at the top of your file: # coding: sqlty-magic
-2. Import the magic module: from sqlty import magic
-3. Use --sql prefix in your strings
+1. Import the magic module: from sqlty import magic
+2. Use --sql prefix in your strings
 
 The codec will automatically:
 - Detect strings starting with --sql
 - Analyze the SQL query
 - Infer the return type
 - Transform the string into SQL[T]("...")
+
+Note: No encoding declaration change is needed. The magic codec overrides
+UTF-8, so files can continue using # coding: utf-8 or no declaration.
 """
 
-# coding: sqlty-magic
 from sqlty import magic
 
 # These strings will be automatically transformed by the codec

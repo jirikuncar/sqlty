@@ -1,17 +1,25 @@
 """Custom codec for --sql string prefix transformation.
 
-This module provides a custom encoding codec that automatically transforms
-string literals prefixed with '--sql' into SQL[T](...) calls with type inference.
+This module provides utilities to transform string literals prefixed with '--sql'
+into SQL[T](...) calls with type inference.
 
-Usage:
-    # At the top of your file (before any imports)
-    # coding: sqlty-magic
+Due to Python's codec caching, automatic transformation requires setup via
+sitecustomize.py or similar mechanism. See docs/magic-codec.md for details.
 
-    from sqlty import magic
+Direct Usage:
+    from sqlty.magic import decode
 
-    # This string will be automatically transformed
-    q = "--sql SELECT 1"
-    # Becomes: q = SQL[int]("--sql SELECT 1")
+    code = b'q = "--sql SELECT 1::INTEGER"'
+    transformed, _ = decode(code)
+    # transformed: 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+
+For Automatic Transformation:
+    Create sitecustomize.py in your site-packages:
+        import sqlty.magic
+
+    Then in your code (no encoding declaration needed):
+        q = "--sql SELECT 1::INTEGER"
+        # Automatically transforms to: SQL[tuple[int]]("--sql SELECT 1::INTEGER")
 """
 
 from __future__ import annotations
@@ -176,29 +184,69 @@ class StreamReader(utf_8_codec.streamreader):  # type: ignore[name-defined,misc]
         self._decoded = False
 
 
-# Codec map for registration
-codec_map: dict[str, CodecInfo] = {
-    name: codecs.CodecInfo(
-        name=name,
-        encode=utf_8_codec.encode,
-        decode=decode,  # type: ignore[arg-type]
-        incrementalencoder=utf_8_codec.incrementalencoder,
-        incrementaldecoder=IncrementalDecoder,
-        streamreader=StreamReader,
-        streamwriter=utf_8_codec.streamwriter,
-    )
-    for name in ("sqlty-magic", "sqlty_magic")
-}
+# Create the custom codec info that will be used for UTF-8
+_custom_codec_info = codecs.CodecInfo(
+    name="utf-8",
+    encode=utf_8_codec.encode,
+    decode=decode,  # type: ignore[arg-type]
+    incrementalencoder=utf_8_codec.incrementalencoder,
+    incrementaldecoder=IncrementalDecoder,
+    streamreader=StreamReader,
+    streamwriter=utf_8_codec.streamwriter,
+)
+
+
+def _codec_search(encoding: str) -> CodecInfo | None:
+    """Search function for codec registration.
+
+    This function overrides UTF-8 (and its aliases) to use our custom
+    decode function that transforms --sql strings.
+
+    Args:
+        encoding: The encoding name being looked up
+
+    Returns:
+        Custom CodecInfo for UTF-8 variants, None otherwise
+    """
+    # Normalize the encoding name (lowercase, remove hyphens and underscores)
+    normalized = encoding.lower().replace("-", "").replace("_", "")
+
+    # Handle UTF-8 and its common aliases
+    if normalized in ("utf8", "utf", "u8"):
+        return _custom_codec_info
+
+    return None
 
 
 def register() -> None:
-    """Register the sqlty-magic codec with Python's codec registry.
+    """Register the custom codec with Python's codec registry.
 
-    This function should be called before importing any modules that use
-    the --sql string prefix syntax.
+    This attempts to override UTF-8 codec for automatic --sql string transformation.
+
+    Note: Due to Python's codec caching (built-in codecs are registered before user
+    code runs), this only works when called very early, ideally from sitecustomize.py.
+
+    For reliable automatic transformation, create a sitecustomize.py file in your
+    site-packages directory containing:
+        import sqlty.magic
+
+    Alternatively, use the decode() function directly to transform source code.
     """
-    codecs.register(codec_map.get)
+    import _codecs
+
+    # Register our search function
+    codecs.register(_codec_search)
+
+    # Attempt to clear the codec cache
+    # This may not work if UTF-8 was already cached before this runs
+    try:
+        _codecs.unregister(_codec_search)
+        codecs.register(_codec_search)
+    except Exception:
+        # If unregister fails, just continue with registration
+        pass
 
 
 # Automatically register when the module is imported
+# This works best when imported from sitecustomize.py
 register()

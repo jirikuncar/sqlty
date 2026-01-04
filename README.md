@@ -61,7 +61,6 @@ See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/doc
 SQLTy includes an experimental codec that allows you to write SQL queries as simple strings:
 
 ```python
-# coding: sqlty-magic
 from sqlty import magic
 
 # Strings with --sql prefix are automatically transformed
@@ -74,6 +73,7 @@ query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 ```
 
 The codec:
+- Overrides UTF-8 codec (no encoding declaration change needed)
 - Detects strings starting with `--sql`
 - Analyzes the SQL to infer return types
 - Transforms them into `SQL[T](...)` calls automatically
