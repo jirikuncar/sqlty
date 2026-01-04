@@ -164,15 +164,110 @@ query1 = sql("SELECT 1::INTEGER")
     assert "WARNING" in output or "warning" in output.lower()
 
 
+def test_incremental_mode_updates_existing_stub(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[..., Path],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
+    """Test that incremental mode updates existing stubs with new queries."""
+    # Create a single query file
+    setup_queries_file(tmp_path, "queries.py", "sql")
+
+    # Register it in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+""")
+
+    # Generate initial stub
+    result = cli([str(app_file), "--mode=incremental"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0
+
+    stub_path = tmp_path / "queries.pyi"
+    assert stub_path.exists()
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+
+    # Update the app file with a new query
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+q2 = sql("SELECT 2::INTEGER")
+""")
+
+    # Run incremental mode again
+    result = cli([str(app_file), "--mode=incremental"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0
+
+    # Verify the stub was updated with the new query
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+    assert "SELECT 2::INTEGER" in content
+
+
+def test_incremental_create_mode_on_directory(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[..., Path],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
+    """Test that incremental,create mode works on directory with existing and new stubs."""
+    # Create first query file
+    setup_queries_file(tmp_path, "queries.py", "sql")
+    setup_queries_file(tmp_path, "dummy.py", "sql")
+
+    # Register it in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query"), ("dummy.sql", "query")])
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+""")
+
+    # Generate initial stub for queries
+    result = cli([str(tmp_path), "--mode=incremental"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0
+
+    stub_path = tmp_path / "queries.pyi"
+    assert stub_path.exists()
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+
+    # Now add a new query to the app file
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+q2 = sql("SELECT 2::INTEGER")
+""")
+
+    # Run on directory with incremental,create mode
+    result = cli([str(tmp_path), "--mode=incremental,create"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0, f"CLI failed: {result.stdout}\n{result.stderr}"
+
+    # Verify the stub was updated (incremental)
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+    assert "SELECT 2::INTEGER" in content
+
+
 def test_incremental_create_mode_updates_existing_creates_new(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_sqlty_package: Callable[..., Path],
+    setup_queries_file: Callable[..., Path],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test that incremental,create updates existing stubs but creates new ones."""
-    # Create two query files
-    setup_sqlty_package(tmp_path, "queries1.py", "sql")
-    setup_sqlty_package(tmp_path, "queries2.py", "sql")
+    # Create query files separately
+    setup_queries_file(tmp_path, "queries1.py", "sql")
+    setup_queries_file(tmp_path, "queries2.py", "sql")
+
+    # Register them in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries1.sql", "query"), ("queries2.sql", "query")])
 
     app1_file = tmp_path / "app1.py"
     app1_file.write_text("""from queries1 import sql

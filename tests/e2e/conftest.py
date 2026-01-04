@@ -232,50 +232,58 @@ from sqlty import sqlty
     return _create_package
 
 
-def create_pyproject_toml(
-    tmp_path: Path,
-    function_configs: list[tuple[str, str]] | None = None,
-    dialect: str = "postgres",
-) -> Path:
-    """Helper function to create pyproject.toml with function configurations.
+@pytest.fixture
+def create_pyproject_toml() -> Callable[..., Path]:
+    """Fixture to create pyproject.toml with function configurations.
 
-    Args:
+    Returns a callable that creates pyproject.toml with the given configurations.
+
+    Args (via returned callable):
         tmp_path: Directory where pyproject.toml will be created
         function_configs: List of (import_path, query_param) tuples. If None, auto-detects from queries.sql
         dialect: SQL dialect (default: postgres)
 
     Returns:
-        Path to created pyproject.toml
+        A callable function that returns the Path to created pyproject.toml
 
     Example:
         create_pyproject_toml(tmp_path, [("queries.sql", "query")])
         create_pyproject_toml(tmp_path, [("db.execute", "sql"), ("db.fetchone", "query")])
         create_pyproject_toml(tmp_path)  # Auto-detects queries.sql
     """
-    pyproject = tmp_path / "pyproject.toml"
 
-    # Auto-detect if not specified
-    if function_configs is None:
-        function_configs = [("queries.sql", "query")]
+    def _create_config(
+        tmp_path: Path,
+        function_configs: list[tuple[str, str]] | None = None,
+        dialect: str = "postgres",
+    ) -> Path:
+        """Create pyproject.toml with function configurations."""
+        pyproject = tmp_path / "pyproject.toml"
 
-    config_lines = [
-        "[tool.sqlty]",
-        f'dialect = "{dialect}"',
-        "",
-    ]
+        # Auto-detect if not specified
+        if function_configs is None:
+            function_configs = [("queries.sql", "query")]
 
-    for import_path, query_param in function_configs:
-        config_lines.extend(
-            [
-                "[[tool.sqlty.functions]]",
-                f'import_path = "{import_path}"',
-                f'query_param = "{query_param}"',
-                "",
-            ]
-        )
+        config_lines = [
+            "[tool.sqlty]",
+            f'dialect = "{dialect}"',
+            "",
+        ]
 
-    pyproject.write_text("\n".join(config_lines))
-    return pyproject
+        for import_path, query_param in function_configs:
+            config_lines.extend(
+                [
+                    "[[tool.sqlty.functions]]",
+                    f'import_path = "{import_path}"',
+                    f'query_param = "{query_param}"',
+                    "",
+                ]
+            )
+
+        pyproject.write_text("\n".join(config_lines))
+        return pyproject
+
+    return _create_config
 
 
 @pytest.fixture

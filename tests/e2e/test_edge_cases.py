@@ -7,8 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from subprocess import CompletedProcess
 
-from tests.e2e.conftest import create_pyproject_toml
-
 
 def test_empty_project(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
     """Test running sqlty on empty directory."""
@@ -18,7 +16,11 @@ def test_empty_project(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
     assert result.returncode in (0, 1)
 
 
-def test_no_queries_found(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_no_queries_found(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
     """Test how the tool handles a project with registry but no queries.
 
     The tool should complete successfully, either creating a minimal

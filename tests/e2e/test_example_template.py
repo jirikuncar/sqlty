@@ -16,13 +16,12 @@ from subprocess import CompletedProcess
 
 from inline_snapshot import snapshot
 
-from tests.e2e.conftest import create_pyproject_toml
-
 
 def test_example_basic_pattern(
     tmp_path: Path,
     cli: Callable[..., CompletedProcess[str]],
     mypy: Callable[..., CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Example: Basic test pattern with snapshot."""
     # Step 1: Create source files
@@ -78,7 +77,11 @@ def sql(query: str) -> str:
     assert mypy_result.returncode == 0, f"Mypy validation failed: {mypy_result.stdout}"
 
 
-def test_example_without_mypy(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:
+def test_example_without_mypy(
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
     """Example: Test without mypy validation (for CLI behavior tests)."""
     queries_file = tmp_path / "queries.py"
     queries_file.write_text("""from sqlty import sqlty
@@ -146,7 +149,9 @@ query = sql("SELECT id::INTEGER FROM users")
 
 
 def test_example_incremental_behavior(
-    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Example: Testing incremental updates."""
     queries_file = tmp_path / "queries.py"

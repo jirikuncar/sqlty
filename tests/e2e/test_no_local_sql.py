@@ -4,8 +4,6 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tests.e2e.conftest import create_pyproject_toml
-
 
 def test_local_sql_function_ignored(
     tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
@@ -38,7 +36,9 @@ result = sql("SELECT * FROM users")
 
 
 def test_registry_sql_function_generates_stub(
-    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test that sql() from @sqlty decorated function is correctly processed."""
     # Create a registry file
@@ -76,7 +76,9 @@ result = sql("SELECT id::INTEGER FROM users")
 
 
 def test_multi_registry_with_aliases(
-    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test the example from issue: multiple registries with aliases."""
     # Create query.py with two registries
@@ -123,7 +125,9 @@ b: SQL[tuple[str]] = qb("SELECT 'a'::TEXT")
 
 
 def test_import_registry_class_directly(
-    tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., subprocess.CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test importing and using registry class directly (from issue example variant)."""
     # Create query.py with two registries

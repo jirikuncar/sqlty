@@ -12,10 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.e2e.conftest import create_pyproject_toml
 
-
-def test_runtime_autogen_single_registry(tmp_path: Path) -> None:
+def test_runtime_autogen_single_registry(tmp_path: Path, create_pyproject_toml: callable) -> None:
     """Test runtime auto-generation for a single registry."""
     # Create a test script that uses sql() at runtime
     test_script = tmp_path / "test_queries.py"
@@ -74,7 +72,9 @@ print("Queries executed")
     assert "SQL[tuple[int]]" in stub_content  # query3
 
 
-def test_runtime_autogen_multiple_registries(tmp_path: Path) -> None:
+def test_runtime_autogen_multiple_registries(
+    tmp_path: Path, create_pyproject_toml: callable
+) -> None:
     """Test runtime auto-generation with multiple registries in a single file."""
     test_script = tmp_path / "multi_queries.py"
     test_script.write_text("""
@@ -133,7 +133,7 @@ print("Multi-registry queries executed")
     assert "SELECT COUNT(*)::INTEGER FROM users" in stub_content
 
 
-def test_runtime_autogen_incremental(tmp_path: Path) -> None:
+def test_runtime_autogen_incremental(tmp_path: Path, create_pyproject_toml: callable) -> None:
     """Test that runtime auto-generation works incrementally."""
     test_script = tmp_path / "incremental.py"
 
@@ -202,7 +202,9 @@ print("Second run")
     assert "SELECT name::TEXT FROM users" in second_content
 
 
-def test_runtime_autogen_parallel_processes(tmp_path: Path) -> None:
+def test_runtime_autogen_parallel_processes(
+    tmp_path: Path, create_pyproject_toml: callable
+) -> None:
     """Test concurrent stub generation from multiple processes."""
     # Create multiple test scripts that will run in parallel
     import os
@@ -268,7 +270,9 @@ print("Process {i} done")
         assert f"SELECT id::INTEGER, value_{i}::TEXT FROM table_{i}" in stub_content
 
 
-def test_runtime_autogen_with_existing_stub(tmp_path: Path) -> None:
+def test_runtime_autogen_with_existing_stub(
+    tmp_path: Path, create_pyproject_toml: callable
+) -> None:
     """Test that runtime auto-generation preserves existing stub content."""
     stub_file = tmp_path / "existing.pyi"
 

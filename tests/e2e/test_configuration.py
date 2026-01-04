@@ -7,11 +7,11 @@ from collections.abc import Callable
 from pathlib import Path
 from subprocess import CompletedProcess
 
-from tests.e2e.conftest import create_pyproject_toml
-
 
 def test_config_via_pyproject_toml(
-    tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
+    tmp_path: Path,
+    cli: Callable[..., CompletedProcess[str]],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test that the tool accepts pyproject.toml configuration.
 
