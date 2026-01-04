@@ -1,5 +1,5 @@
-# Discover all example directories automatically
-EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d)
+# Discover all example directories automatically (excluding hidden directories)
+EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*")
 
 # Get the absolute path to the repository root
 ROOT_DIR := $(shell pwd)
@@ -22,6 +22,7 @@ help:
 	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
 	@echo "  generate-examples - Generate stubs for all examples"
 	@echo "  verify-examples   - Generate stubs and verify with mypy, ty, and stubtest"
+	@echo "  example-registries- List registered functions in all examples"
 	@echo ""
 	@echo "Example directories found: $(EXAMPLE_DIRS)"
 
@@ -78,7 +79,7 @@ generate-examples: clean-examples
 	@echo "🔧 Generating stubs for all examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  → $$dir"; \
-		uv run sqlty $$dir/ --format-command "uv run ruff format --stdin-filename {filename}"; \
+		uv run sqlty $$dir/ --format-command "uv run ruff format --stdin-filename {filename}" || exit 1; \
 	done
 	@echo "✅ All stubs generated"
 
@@ -100,6 +101,17 @@ verify-examples: generate-examples
 			--allowlist $(ROOT_DIR)/.stubtest-allowlist \
 			--ignore-unused-allowlist \
 			--concise \
-			--mypy-config-file $(ROOT_DIR)/pyproject.toml); \
+			--mypy-config-file $(ROOT_DIR)/pyproject.toml) || exit 1; \
 	done
 	@echo "✅ stubtest verification passed"
+
+.PHONY: example-registries
+example-registries:
+	@echo "🔍 Listing registered functions in all examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo ""; \
+		echo "📁 $$dir"; \
+		uv run python -m sqlty.registries $$dir/; \
+	done
+	@echo ""
+	@echo "✅ Done"

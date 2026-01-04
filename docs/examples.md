@@ -4,33 +4,91 @@ This guide provides complete working examples, organized from simplest to most c
 
 ## Getting Started: Which Example Should I Use?
 
-- **New to SQLTy?** Start with [Basic Query with Type Casts](#1-basic-query-with-type-casts)
+- **New to SQLTy?** Start with [Decorator Pattern](#1-decorator-pattern)
 - **Have schema files?** Jump to [Schema-Based Type Inference](#2-schema-based-type-inference)
-- **Multiple databases?** See [Multiple Schemas](#3-multiple-schemas)
-- **Large application?** Check [Multi-Registry Pattern](#4-multi-registry-pattern)
-- **Production setup?** Review [Full Package Integration](#5-full-package-integration)
+- **Can't modify source code?** See [Function Configuration](#3-function-configuration-no-decorators)
+- **Multiple schemas?** See [Multiple Schemas](#4-multiple-schemas)
+- **Large application?** Check [Multi-Registry Pattern](#5-multi-registry-pattern)
+- **Runtime stub generation?** Review [Runtime Auto-Generation](#6-runtime-auto-generation)
 
 ---
 
-## 1. Basic Query with Type Casts
+## 1. Decorator Pattern
 
-**Location:** [`examples/query/`](https://github.com/jirikuncar/sqlty/tree/main/examples/query)
+**Location:** [`examples/decorator_pattern/`](https://github.com/jirikuncar/sqlty/tree/main/examples/decorator_pattern)
 
-The simplest approach - use explicit SQL type casts (`::TYPE`) for type inference. This is the best starting point.
+The simplest approach - use the `@sqlty` decorator to mark functions for type inference. Shows both plain decorator and decorator with schema.
 
 **What you'll learn:**
 - Creating a basic `@sqlty` decorated function
+- Using `@sqlty(schema="...")` for schema-based inference
 - Using type casts for explicit typing
 - Generating and using stub files
 
 ### File Structure
 
 ```
-examples/query/
-├── queries.py      # Registry definition
+examples/decorator_pattern/
+├── app.py         # Application with decorated functions
+├── app.pyi        # Generated stub file
+├── schema.sql     # Optional schema
+├── pyproject.toml # Configuration
+└── README.md      # Documentation
+```
+
+### Code
+
+**app.py:**
+```python
+from typing import Any
+from sqlty import SQL, sqlty
+
+@sqlty
+def sql(query: str) -> Any:
+    """Simple SQL function decorated with @sqlty."""
+    return query
+
+@sqlty(schema="schema.sql")
+def sql_with_schema(query: str) -> Any:
+    """SQL function with schema path for schema-based type inference."""
+    return query
+
+# Use with type casts
+q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
+
+# Or use with schema
+q2: SQL[tuple[int, str]] = sql_with_schema("SELECT id, name FROM users")
+```
+
+### Generate Stubs
+
+```bash
+sqlty examples/decorator_pattern/ --mode=full
+```
+
+**Best for:** Quick start, simple queries, learning SQLTy basics
+
+---
+
+## 2. Schema-Based Type Inference
+
+**Location:** [`examples/schema_path/`](https://github.com/jirikuncar/sqlty/tree/main/examples/schema_path)
+
+Use different schema files for different query functions - types are inferred automatically from the schema files.
+
+**What you'll learn:**
+- Using `@sqlty(schema="...")` for automatic type inference
+- Cleaner SQL without explicit casts
+- Working with multiple schema files
+
+### File Structure
+
+```
+examples/schema_path/
+├── queries.py      # Registry with different schema paths
 ├── query.py        # Main application
-├── queries.pyi     # Generated stub file
-└── schema.sql      # Optional schema
+├── schema_a.sql    # First database schema
+└── schema_b.sql    # Second database schema
 ```
 
 ### Code
@@ -40,102 +98,201 @@ examples/query/
 from typing import Any
 from sqlty import sqlty
 
-@sqlty
-def sql(query: str) -> Any:
-    """Execute SQL queries."""
+@sqlty(schema="schema_a.sql")
+def sql_a(query: str) -> Any:
+    """Execute SQL queries against schema A."""
+    return query
+
+@sqlty(schema="schema_b.sql")
+def sql_b(query: str) -> Any:
+    """Execute SQL queries against schema B."""
     return query
 ```
 
 **query.py:**
 ```python
-from .queries import sql
+from .queries import sql_a, sql_b
 
-query = sql(
-    """
-    SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id
-    """
-)
-# Type: SQL[tuple[int, str]]
+# Query using schema_a.sql
+query_a = sql_a("SELECT id, name, age FROM users WHERE id = :id")
+# Type: SQL[tuple[int, str, int]] (inferred from schema_a.sql!)
 
-# Execute with full type safety
-from sqlty.drivers.psycopg import execute
-result = execute(conn, query, {"id": 1})
-# Type: Iterator[tuple[int, str]]
-
-for user_id, name in result:
-    print(f"User {user_id}: {name}")
+# Query using schema_b.sql (age is REAL instead of INTEGER)
+query_b = sql_b("SELECT id, name, age FROM users WHERE id = :id")
+# Type: SQL[tuple[int, str, float]] (inferred from schema_b.sql!)
 ```
 
-### Generate Stubs
-
-```bash
-sqlty examples/query/ --mode=full
-```
-
-**Best for:** Quick start, simple queries, learning SQLTy basics
-
----
-
-## 2. Schema-Based Type Inference
-
-**Location:** [`examples/schema_based/`](https://github.com/jirikuncar/sqlty/tree/main/examples/schema_based)
-
-Use a schema file to avoid explicit type casts - types are inferred automatically from `schema.sql`.
-
-**What you'll learn:**
-- Using `__schema_path__` for automatic type inference
-- Cleaner SQL without explicit casts
-- Schema file management
-
-### File Structure
-
-```
-examples/schema_based/
-├── query.py        # Registry with __schema_path__
-├── query.pyi       # Generated stub
-└── schema.sql      # Database schema
-```
-
-### Code
-
-**query.py:**
-```python
-from sqlty import sqlty
-
-@sqlty(schema="schema.sql")  # Relative to this file
-def sql(query: str):
-    """Execute SQL queries with schema-based inference."""
-    return query
-
-# Query using table defined in schema.sql
-user_query = sql("SELECT id, name FROM users")
-# Type: SQL[tuple[int, str]]  (inferred from schema!)
-
-# No ::TYPE casts needed!
-email_query = sql("SELECT email FROM users WHERE id = :id")
-# Type: SQL[tuple[str]]  (inferred from schema!)
-```
-
-**schema.sql:**
+**schema_a.sql:**
 ```sql
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    email TEXT NOT NULL
+    age INTEGER
+);
+```
+
+**schema_b.sql:**
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    age REAL  -- Different type!
 );
 ```
 
 ### Generate Stubs
 
 ```bash
-sqlty examples/schema_based/ --mode=full
+sqlty examples/schema_path/ --mode=full
 ```
 
-**Best for:** Projects with existing schema files, cleaner SQL queries
+**Best for:** Projects with existing schema files, cleaner SQL queries, working with multiple schemas
 
 ---
 
-## 3. Multiple Schemas
+## 3. Function Configuration (No Decorators)
+
+**Location:** [`examples/function_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/function_config)
+
+Configure functions for SQLTy analysis via `pyproject.toml` instead of using decorators. Perfect for existing codebases, third-party libraries, or when you can't modify source code.
+
+**What you'll learn:**
+- Configuring functions via `pyproject.toml`
+- Working with existing code without modifications
+- Supporting functions with custom parameter names
+- Using `return_type_param` for explicit type control
+
+### File Structure
+
+```
+examples/function_config/
+├── app.py              # Application code using configured functions
+├── db.py               # Database utility functions (no decorators)
+├── db.pyi              # Generated stub file
+├── pyproject.toml      # SQLTy configuration
+├── schema.sql          # Database schema for type inference
+└── README.md           # Documentation
+```
+
+### Configuration
+
+**pyproject.toml:**
+```toml
+[tool.sqlty]
+dialect = "postgresql"
+
+# Function with explicit return type parameter
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchvalue"
+query_param = "query"
+return_type_param = "return_tp"
+schema = "schema.sql"
+
+# Function without return type parameter (infers from SQL)
+[[tool.sqlty.functions]]
+import_path = "db.execute_query"
+query_param = "query"
+schema = "schema.sql"
+```
+
+**Configuration Fields:**
+- `import_path` (required): Full import path to the function (e.g., `"module.submodule.function_name"`)
+- `query_param` (required): Name of the parameter containing the SQL query string
+- `return_type_param` (optional): Name of the parameter specifying the expected return type
+- `schema` (optional): Path to SQL schema file for type inference
+- `return_type_template` (optional): Template for return type with `{sqlty}` placeholder
+- `imports` (optional): List of import statements needed for the stub
+
+**Note:** Class methods (e.g., `"module.Class.method"`) are not currently supported. Use module-level functions instead.
+
+### Code
+
+**db.py (no decorators needed):**
+```python
+def pg_fetchvalue(conn, query: str, return_tp=None, **params):
+    """Fetch a single value from the database."""
+    # Implementation details...
+    return execute_query(conn, query, params)
+
+def execute_query(conn, query: str, **params):
+    """Execute a query and return results."""
+    # Implementation details...
+    return []
+```
+
+**app.py:**
+```python
+from db import pg_fetchvalue, execute_query
+
+# With return_type_param - type comes from parameter
+user_id = pg_fetchvalue(
+    conn,
+    query="SELECT id FROM users WHERE email = :email",
+    return_tp=int,  # This determines the return type
+    email="user@example.com"
+)
+# Type: int | None
+
+# Without return_type_param - types inferred from SQL
+results = execute_query(
+    conn,
+    query="SELECT id::INTEGER, name::TEXT FROM users"
+)
+# Type: list[tuple[int, str]]
+```
+
+### Generate Stubs
+
+```bash
+sqlty examples/function_config/
+```
+
+This creates `db.pyi` with type-safe overloads:
+
+```python
+from typing import overload, Literal
+from typing import Any
+
+@overload
+def pg_fetchvalue(
+    conn,
+    query: Literal["SELECT id FROM users WHERE email = :email"],
+    return_tp=int,
+    **params
+) -> int: ...
+
+@overload
+def execute_query(
+    conn,
+    query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
+    **params
+) -> list[tuple[int, str]]: ...
+```
+
+### Benefits
+
+1. **No code changes**: Works with existing functions and libraries
+2. **Type safety**: Full mypy type checking for SQL queries
+3. **IDE support**: Autocomplete and type hints
+4. **Clean separation**: Configuration separate from implementation
+5. **Flexible**: Works with any function signature
+
+### Comparison with Decorator Pattern
+
+| Aspect | Function Config | Decorator Pattern |
+|--------|----------------|-------------------|
+| **Source modification** | None required | Requires adding `@sqlty` |
+| **Configuration** | `pyproject.toml` | In-code with decorator |
+| **Use case** | Existing code, libraries | New code, full control |
+| **Flexibility** | Custom parameter names | Standard signature |
+
+Both approaches can be used together in the same project.
+
+**Best for:** Legacy codebases, third-party libraries, when you can't modify source code
+
+---
+
+## 4. Multiple Schemas
 
 **Location:** [`examples/multi_schema/`](https://github.com/jirikuncar/sqlty/tree/main/examples/multi_schema)
 
@@ -207,7 +364,7 @@ sqlty examples/multi_schema/ --mode=full \
 
 ---
 
-## 4. Multi-Registry Pattern
+## 5. Multi-Registry Pattern
 
 **Location:** [`examples/multi_registry/`](https://github.com/jirikuncar/sqlty/tree/main/examples/multi_registry)
 
@@ -287,104 +444,64 @@ sqlty examples/multi_registry/ --mode=full
 
 ---
 
-## 5. Full Package Integration
+## 6. Runtime Auto-Generation
 
-**Location:** [`examples/multi_schema_pkg/`](https://github.com/jirikuncar/sqlty/tree/main/examples/multi_schema_pkg)
+**Location:** [`examples/runtime_autogen/`](https://github.com/jirikuncar/sqlty/tree/main/examples/runtime_autogen)
 
-Complete package structure showing how to integrate SQLTy into a real Python package with proper configuration, pre-commit hooks, and project setup.
+Demonstrates SQLTy's runtime auto-generation feature, which automatically creates and updates type stub files when `SQLTY_AUTO_GENERATE=1` is set.
 
 **What you'll learn:**
-- Production-ready package structure
-- Configuration via `pyproject.toml`
-- Pre-commit hook setup
-- Complete development workflow
+- Runtime tracking of SQL queries
+- Automatic stub file updates on script exit
+- Development workflow with auto-reload
 
 ### File Structure
 
 ```
-examples/multi_schema_pkg/
-├── pyproject.toml           # Package configuration with [tool.sqlty]
-├── .pre-commit-config.yaml  # Pre-commit hook configuration
-├── orders.sql               # Order schema
-├── users.sql                # User schema
-├── orders_queries.py        # Order queries
-├── orders_queries.pyi       # Generated stubs
-├── users_queries.py         # User queries
-├── users_queries.pyi        # Generated stubs
-└── app.py                   # Main application
+examples/runtime_autogen/
+├── demo.py         # Example script
+├── queries.py      # Query registry
+├── queries.pyi     # Auto-generated stubs
+├── Makefile        # Helper commands
+└── README.md       # Documentation
 ```
 
-### Configuration
+### Code
 
-**pyproject.toml:**
-```toml
-[project]
-name = "my-app"
-requires-python = ">=3.14"
-dependencies = ["sqlty"]
+**queries.py:**
+```python
+from typing import Any
+from sqlty import sqlty
 
-[tool.sqlty]
-dialect = "postgres"
-mode = "full"
-
-# Schema mappings
-[[tool.sqlty.schema]]
-registry = "users_queries"
-path = "users.sql"
-
-[[tool.sqlty.schema]]
-registry = "orders_queries"
-path = "orders.sql"
+@sqlty
+def sql(query: str) -> Any:
+    """Execute SQL queries."""
+    return query
 ```
 
-**.pre-commit-config.yaml:**
-```yaml
-repos:
-  - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.1.0
-    hooks:
-      - id: sqlty
+**demo.py:**
+```python
+from queries import sql
+
+# Queries are tracked at runtime
+user = sql("SELECT id::INTEGER, name::TEXT FROM users")
+count = sql("SELECT COUNT(*)::INTEGER FROM users")
 ```
 
-### Generate Stubs
+### Running with Auto-Generation
 
 ```bash
-# Using configuration from pyproject.toml
-sqlty .
-
-# Or manually with all options
-sqlty . --mode=full --dialect=postgres \
-    --schema users_queries:users.sql \
-    --schema orders_queries:orders.sql
+cd examples/runtime_autogen
+SQLTY_AUTO_GENERATE=1 python demo.py
+# Stubs are automatically updated in queries.pyi
 ```
 
-### Development Workflow
+**Use Cases:**
+- Development workflows with auto-reload (e.g., dev servers)
+- Testing to ensure .pyi stubs stay up-to-date with the codebase
+- Rapid prototyping without manual stub generation
 
-1. **Initial setup:**
-   ```bash
-   uv sync
-   pre-commit install
-   ```
-
-2. **Write queries:**
-   ```python
-   from users_queries import sql as user_sql
-   query = user_sql("SELECT id, name FROM users")
-   ```
-
-3. **Generate stubs automatically on commit:**
-   ```bash
-   git add users_queries.py
-   git commit -m "Add user query"
-   # Pre-commit hook runs sqlty automatically
-   ```
-
-4. **Type check:**
-   ```bash
-   mypy .
-   ```
-
-**Best for:** Production applications, understanding full integration, team projects
+**Best for:** Development environments, rapid iteration, keeping stubs in sync
 
 ---
 

@@ -1,12 +1,14 @@
-"""User-related queries registry."""
+"""User-related queries registry.
+
+Functions are registered in pyproject.toml rather than using decorators.
+This allows SQLTy to properly track which file each query belongs to.
+"""
 
 from typing import Any
 
-from sqlty import sqlty
 
-
-@sqlty
 def sql(query: str) -> Any:
+    """Execute user queries (registered in pyproject.toml)."""
     return query
 
 
@@ -17,8 +19,4 @@ get_user = sql("""
 
 list_users = sql("""
     SELECT id::INTEGER, name::TEXT FROM users ORDER BY name
-""")
-
-get_user_with_email = sql("""
-    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id
 """)

@@ -1,20 +1,36 @@
-"""Registry detection and schema resolution utilities.
+"""Registry and schema resolution utilities.
 
-This module handles detecting @sqlty decorated functions
-in Python modules and resolving their associated schema files.
+This module handles schema resolution for functions registered in pyproject.toml.
+Auto-detection of @sqlty decorators has been removed - functions must be explicitly
+registered in the configuration file.
 """
 
 import ast
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlty import sqlty
+
+if TYPE_CHECKING:
+    from sqlty._config import FunctionConfigComplete
 
 logger = logging.getLogger(__name__)
 
 
 class RegistryDetector:
-    """Detect @sqlty decorated functions and resolve their schemas."""
+    """Resolve schemas for functions registered in pyproject.toml.
+
+    Note: Auto-detection of @sqlty decorators has been removed.
+    This class now only works with explicitly registered functions.
+    """
+
+    def __init__(self, function_configs: list["FunctionConfigComplete"] | None = None) -> None:
+        self.function_configs = function_configs or []
+        # Build a mapping: import_path -> config for quick lookup
+        self._config_by_path: dict[str, FunctionConfigComplete] = {}
+        for config in self.function_configs:
+            self._config_by_path[config["import_path"]] = config
 
     def get_schema_path_from_registry(
         self, module_path: Path, name: str | None = None
@@ -63,37 +79,60 @@ class RegistryDetector:
         return None
 
     def get_registry_names(self, module_path: Path) -> list[str]:
-        """Get the names of all @sqlty decorated functions in a module.
+        """Get the names of configured functions in a module from pyproject.toml.
 
         Args:
             module_path: Path to the Python module to check
 
         Returns:
-            List of detected registry names
+            List of configured function names in this module
         """
         if not module_path.exists():
             return []
 
         registry_classes: list[str] = []
-        try:
-            with open(module_path) as f:
-                source = f.read()
-            tree = ast.parse(source)
 
-            # Always include functions decorated with @sqlty
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    for decorator in node.decorator_list:
-                        if (isinstance(decorator, ast.Name) and decorator.id == "sqlty") or (
-                            isinstance(decorator, ast.Call)
-                            and isinstance(decorator.func, ast.Name)
-                            and decorator.func.id == "sqlty"
-                        ):
-                            if node.name not in registry_classes:
-                                registry_classes.append(node.name)
+        # Check for configured functions only
+        # Build a module path string to match against import_path in configs
+        module_str = str(module_path)
+        for config in self.function_configs:
+            import_path = config["import_path"]
+            func_name = import_path.split(".")[-1]
+            module_part = ".".join(import_path.split(".")[:-1])
+
+            # Special case for __main__ module (when running scripts directly)
+            # If import_path is "__main__.func", it should match any .py file
+            is_main_module = module_part == "__main__"
+
+            # Check if this module matches the configured import_path
+            # For example:
+            # - "db.sql" -> module_path ends with "db.py"
+            # - "app.db.pg_fetchvalue" -> module_path ends with "app/db.py" or "app\\db.py"
+
+            # Convert module_part dots to path separators for nested modules
+            module_as_path = module_part.replace(".", "/")
+            module_as_path_win = module_part.replace(".", "\\")
+
+            if (
+                is_main_module  # Match __main__ to any .py file
+                or module_path.stem == module_part  # Simple case: "db" matches "db.py"
+                or module_str.endswith(f"/{module_part}.py")  # "queries/db.py" matches "queries.db"
+                or module_str.endswith(f"\\{module_part}.py")  # Windows version
+                or module_str.endswith(f"/{module_as_path}.py")  # "app/db.py" matches "app.db"
+                or module_str.endswith(f"\\{module_as_path_win}.py")  # Windows version
+            ):
+                # Check if the function actually exists in this file
+                try:
+                    with open(module_path) as f:
+                        source = f.read()
+                    tree = ast.parse(source)
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                            if func_name not in registry_classes:
+                                registry_classes.append(func_name)
                             break
-        except Exception:
-            logger.debug("Failed to parse for decorated functions: %s", module_path)
+                except Exception:
+                    logger.debug("Failed to parse for configured function: %s", module_path)
 
         return registry_classes
 
@@ -288,13 +327,13 @@ class RegistryDetector:
         return None
 
     def find_registries(self, root_path: Path) -> list[tuple[Path, str]]:
-        """Find all @sqlty decorated functions in Python files under the given path.
+        """Find all configured functions in Python files under the given path.
 
         Args:
             root_path: The root directory or file to search for Python files
 
         Returns:
-            List of tuples containing (file_path, function_name)
+            List of tuples containing (file_path, function_name) for configured functions only
         """
         registries: list[tuple[Path, str]] = []
 
@@ -303,7 +342,7 @@ class RegistryDetector:
 
         for py_file in python_files:
             try:
-                # Get all registry class names in this file
+                # Get all configured function names in this file
                 class_names = self.get_registry_names(py_file)
                 for class_name in class_names:
                     registries.append((py_file, class_name))
@@ -312,3 +351,53 @@ class RegistryDetector:
                 continue
 
         return registries
+
+    def get_function_signature(self, module_path: Path, function_name: str) -> ast.arguments | None:
+        """Get the function signature (ast.arguments) for a given function.
+
+        Args:
+            module_path: Path to the Python module
+            function_name: Name of the function
+
+        Returns:
+            The ast.arguments node representing the function signature, or None if not found
+        """
+        if not module_path.exists():
+            return None
+
+        try:
+            source = module_path.read_text()
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    return node.args
+        except Exception:
+            pass
+
+        return None
+
+    def get_function_return_annotation(
+        self, module_path: Path, function_name: str
+    ) -> ast.expr | None:
+        """Get the function return type annotation for a given function.
+
+        Args:
+            module_path: Path to the Python module
+            function_name: Name of the function
+
+        Returns:
+            The AST expr node representing the return annotation, or None if not found
+        """
+        if not module_path.exists():
+            return None
+
+        try:
+            source = module_path.read_text()
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    return node.returns
+        except Exception:
+            pass
+
+        return None

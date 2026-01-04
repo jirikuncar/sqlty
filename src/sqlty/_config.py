@@ -2,7 +2,55 @@
 
 import logging
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
+
+
+class FunctionConfig(TypedDict, total=False):
+    """Configuration for a specific function to track.
+
+    Example:
+        {
+            "import_path": "db.pg_fetchvalue",
+            "query_param": "query",
+            "return_type_param": "return_tp",
+            "schema": "path/to/schema.sql",
+            "return_type_template": "list[{sqlty}]",
+            "imports": ["from typing import Any"]
+        }
+
+    Note: Class methods (e.g., "module.Class.method") are not currently supported.
+          Use module-level functions instead.
+    """
+
+    import_path: (
+        str  # Full import path to the function, e.g., "module.submodule.function_name" (required)
+    )
+    query_param: str  # Name of the parameter containing the SQL query (required)
+    return_type_param: str  # Name of the parameter specifying the return type (optional)
+    schema: str  # Path to SQL schema file for type inference (optional)
+    return_type_template: str  # Template for return type with {sqlty} placeholder (optional)
+    self_type_template: (
+        str  # TODO: Template for self parameter - currently not supported for methods (optional)
+    )
+    imports: list[str]  # List of import statements needed for the stub (optional)
+
+
+# Define required fields separately for type checking
+class _FunctionConfigRequired(TypedDict):
+    """Required fields for FunctionConfig."""
+
+    import_path: str
+    query_param: str
+
+
+class FunctionConfigComplete(_FunctionConfigRequired, total=False):
+    """Complete FunctionConfig with optional fields."""
+
+    return_type_param: str
+    schema: str
+    return_type_template: str
+    self_type_template: str
+    imports: list[str]
 
 
 class SQLTyConfig(TypedDict, total=False):
@@ -11,6 +59,7 @@ class SQLTyConfig(TypedDict, total=False):
     dialect: str
     schemas: dict[str, str]  # registry_name -> schema_path
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
+    functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
@@ -82,6 +131,58 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
     # Allow hyphenated key in pyproject: format-command
     if "format-command" in tool_config:
         config["format_command"] = str(tool_config["format-command"])  # expects {filename}
+
+    # Parse function configurations
+    if "functions" in tool_config and isinstance(tool_config["functions"], list):
+        functions: list[FunctionConfigComplete] = []
+        for func_config in tool_config["functions"]:
+            if not isinstance(func_config, dict):
+                continue
+
+            # Validate required fields
+            if "import_path" not in func_config or "query_param" not in func_config:
+                logging.getLogger(__name__).warning(
+                    "Skipping function config missing required fields: %s", func_config
+                )
+                continue
+
+            # Build function config with all fields
+            function_dict: dict[str, Any] = {
+                "import_path": str(func_config["import_path"]),
+                "query_param": str(func_config["query_param"]),
+            }
+
+            # Optional return_type_param field
+            if "return_type_param" in func_config:
+                function_dict["return_type_param"] = str(func_config["return_type_param"])
+
+            # Optional schema field
+            if "schema" in func_config:
+                function_dict["schema"] = str(func_config["schema"])
+
+            # Optional return_type_template field
+            if "return_type_template" in func_config:
+                function_dict["return_type_template"] = str(func_config["return_type_template"])
+
+            # Optional self_type_template field
+            if "self_type_template" in func_config:
+                function_dict["self_type_template"] = str(func_config["self_type_template"])
+
+            # Optional imports field
+            if "imports" in func_config:
+                imports_value = func_config["imports"]
+                if isinstance(imports_value, list):
+                    function_dict["imports"] = [str(imp) for imp in imports_value]
+                elif isinstance(imports_value, str):
+                    # Support single string import
+                    function_dict["imports"] = [str(imports_value)]
+
+            # Cast to FunctionConfigComplete after all fields are set
+            function = cast(FunctionConfigComplete, function_dict)
+            functions.append(function)
+
+        if functions:
+            config["functions"] = functions
 
     return config
 

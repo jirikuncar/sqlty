@@ -172,11 +172,15 @@ def main(argv: list[str] | None = None) -> None:
         schema_mappings = dict(schema_mappings)
         schema_mappings[None] = base_schema
 
+    # Get function configs from merged config
+    function_configs = merged_config.get("functions", [])
+
     generator = TypeStubGenerator(
         sql_dialect=sql_dialect,
         schema_mappings=schema_mappings,
         format_command=format_command,
         verbose=args.verbose,
+        function_configs=function_configs,
     )
 
     try:

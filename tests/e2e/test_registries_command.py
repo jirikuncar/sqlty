@@ -19,6 +19,16 @@ def sql(query: str):
     return query
 """)
 
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "test.sql"
+query_param = "query"
+""")
+
     # Run the registries command
     result = registries_cli([test_file])
 
@@ -52,6 +62,24 @@ def sql_c(query: str):
     return query
 """)
 
+    # Create pyproject.toml with function configurations
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "queries1.sql_a"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "queries2.sql_b"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "queries2.sql_c"
+query_param = "query"
+""")
+
     # Run the registries command
     result = registries_cli([tmp_path])
 
@@ -76,6 +104,16 @@ def sql(query: str):
     return query
 """)
 
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "test.sql"
+query_param = "query"
+""")
+
     result = registries_cli([test_file])
 
     assert result.returncode == 0
@@ -93,6 +131,16 @@ def test_registries_default_path(
 @sqlty
 def sql(query: str):
     return query
+""")
+
+    # Create pyproject.toml with function configuration
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "test.sql"
+query_param = "query"
 """)
 
     result = registries_cli([], {"cwd": str(tmp_path)})
@@ -157,6 +205,22 @@ def sql(query: str):
 @sqlty
 def sql(query: str):
     return query
+""")
+
+    # Create pyproject.toml with function configurations
+    # Note: For nested files, we need to use the module stem only since
+    # the matching logic in RegistryDetector checks module_path.stem == module_part
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "top.sql"
+query_param = "query"
+
+[[tool.sqlty.functions]]
+import_path = "nested.sql"
+query_param = "query"
 """)
 
     result = registries_cli([tmp_path])

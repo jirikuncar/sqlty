@@ -8,6 +8,7 @@ This module provides parsers to convert:
 import ast
 import logging
 from pathlib import Path
+from typing import Any
 
 import asttokens
 
@@ -293,13 +294,26 @@ class PyiToIRParser:
 class CallInfoToIRParser:
     """Parses CallInfo objects to intermediate representation."""
 
-    def __init__(self, function_name: str = "sql") -> None:
+    def __init__(
+        self,
+        function_name: str = "sql",
+        registry_detector: Any | None = None,
+        function_configs: list[Any] | None = None,
+    ) -> None:
         """Initialize the parser.
 
         Args:
             function_name: Name of the SQL function (e.g., "sql")
+            registry_detector: Optional RegistryDetector for extracting function signatures
+            function_configs: Optional list of function configurations
         """
         self.function_name = function_name
+        self.registry_detector = registry_detector
+        self.function_configs = function_configs or []
+        # Build mapping of import_path -> config for quick lookup
+        self._config_by_import_path: dict[str, Any] = {}
+        for config in self.function_configs:
+            self._config_by_import_path[config["import_path"]] = config
 
     def parse_calls(
         self,
@@ -337,9 +351,19 @@ class CallInfoToIRParser:
             if cls_name is None:
                 cls_name = class_name
 
+            # Collect custom imports from all calls in this registry
+            custom_imports: list[str] = []
+            for call in cls_calls:
+                call_imports = call.get("imports")
+                if call_imports:
+                    custom_imports.extend(call_imports)
+            # Deduplicate imports
+            custom_imports = list(dict.fromkeys(custom_imports))
+
             registry = RegistryDecorator(
                 name=cls_name,
                 export_name=export_name,
+                custom_imports=custom_imports,
             )
 
             for call in cls_calls:
@@ -390,10 +414,82 @@ class CallInfoToIRParser:
                 end_col=end_col,
             )
 
+        # Extract function signature for configured functions
+        function_signature = None
+        source_return_annotation = None
+        query_param_name = "query"  # default
+
+        # Check if this call is from a configured function
+        query_param_from_call = call.get("query_param_name")
+
+        if query_param_from_call:
+            # This is a configured function
+            query_param_name = query_param_from_call
+
+            # Try to extract the full function signature and return annotation
+            # For configured functions, we need to find the function definition
+            if self.registry_detector:
+                # Get the function name from the call info
+                function_name = call.get("function_name")
+                source_path = None
+
+                if function_name:
+                    # Find the matching config by function name
+                    for config in self.function_configs or []:
+                        import_path = config.get("import_path", "")
+                        if not import_path:
+                            continue
+
+                        # Extract module path and function name from import_path
+                        # e.g., "db.execute_query" -> module="db", function="execute_query"
+                        parts = import_path.split(".")
+                        if len(parts) >= 2:
+                            module_name = ".".join(parts[:-1])
+                            func_name = parts[-1]
+
+                            # Check if this is the right function
+                            if func_name == function_name:
+                                # Try to find the module file
+                                source_file = call.get("file")
+                                if source_file:
+                                    from pathlib import Path
+
+                                    # Try various paths to find the module
+                                    possible_paths = [
+                                        Path(source_file).parent / f"{module_name}.py",
+                                        Path(source_file).parent / f"{parts[-2]}.py"
+                                        if len(parts) > 2
+                                        else None,
+                                    ]
+
+                                    for p in possible_paths:
+                                        if p and p.exists():
+                                            source_path = p
+                                            break
+
+                                    if source_path:
+                                        break
+
+                # If we found the source file and function name, extract signature and annotation
+                if source_path and function_name:
+                    function_signature = self.registry_detector.get_function_signature(
+                        source_path, function_name
+                    )
+                    source_return_annotation = (
+                        self.registry_detector.get_function_return_annotation(
+                            source_path, function_name
+                        )
+                    )
+
         return OverloadSignature(
             query_literal=call["literal"],
             return_type=call.get("return_type") or "Any",
             source_file=call.get("file"),
             source_line=call.get("lineno"),
             source_span=source_span,
+            function_signature=function_signature,
+            query_param_name=query_param_name,
+            source_return_annotation=source_return_annotation,
+            return_type_template=call.get("return_type_template"),
+            self_type_template=call.get("self_type_template"),
         )

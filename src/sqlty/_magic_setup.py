@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-def install_sitecustomize():
+def install_sitecustomize() -> bool:
     """Install sitecustomize.py to enable sqlty magic codec."""
     # Get site-packages directories
     site_packages = site.getsitepackages()
@@ -76,7 +76,7 @@ except ImportError:
     return True
 
 
-def uninstall_sitecustomize():
+def uninstall_sitecustomize() -> bool:
     """Remove sqlty.magic from sitecustomize.py."""
     site_packages = site.getsitepackages()
 
@@ -91,7 +91,7 @@ def uninstall_sitecustomize():
 
             # Remove sqlty.magic lines
             lines = content.splitlines()
-            new_lines = []
+            new_lines: list[str] = []
             skip_next = 0
 
             for line in lines:
@@ -118,17 +118,13 @@ def uninstall_sitecustomize():
     return False
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Install or uninstall sqlty magic codec globally"
-    )
+    parser = argparse.ArgumentParser(description="Install or uninstall sqlty magic codec globally")
     parser.add_argument(
-        "action",
-        choices=["install", "uninstall", "status"],
-        help="Action to perform"
+        "action", choices=["install", "uninstall", "status"], help="Action to perform"
     )
 
     args = parser.parse_args()

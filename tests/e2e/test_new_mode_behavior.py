@@ -9,10 +9,10 @@ from typing import Any
 def test_single_file_default_mode(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that single file mode defaults to incremental,create."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -32,10 +32,10 @@ query1 = sql("SELECT 1::INTEGER")
 def test_directory_default_mode(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that directory mode defaults to incremental,prune,create."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -55,10 +55,10 @@ query1 = sql("SELECT 1::INTEGER")
 def test_create_mode_skips_existing_stub(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that create mode skips files that already exist."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -94,10 +94,10 @@ query2 = sql("SELECT 2::INTEGER")
 def test_incremental_prune_mode_adds_and_removes_queries(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that incremental,prune mode both adds new queries and removes stale ones."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -138,10 +138,10 @@ query3 = sql("SELECT 3::INTEGER")
 def test_prune_mode_on_single_file_requires_confirmation(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that prune mode on single file prompts for confirmation."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -164,15 +164,109 @@ query1 = sql("SELECT 1::INTEGER")
     assert "WARNING" in output or "warning" in output.lower()
 
 
+def test_incremental_mode_updates_existing_stub(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[..., Path],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
+    """Test that incremental mode updates existing stubs with new queries."""
+    # Create a single query file
+    setup_queries_file(tmp_path, "queries.py", "sql")
+
+    # Register it in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+""")
+
+    # Generate initial stub
+    result = cli([str(app_file), "--mode=incremental"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0
+
+    stub_path = tmp_path / "queries.pyi"
+    assert stub_path.exists()
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+
+    # Update the app file with a new query
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+q2 = sql("SELECT 2::INTEGER")
+""")
+
+    # Run incremental mode again
+    result = cli([str(app_file), "--mode=incremental"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0
+
+    # Verify the stub was updated with the new query
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+    assert "SELECT 2::INTEGER" in content
+
+
+def test_incremental_create_mode_on_directory(
+    tmp_path: Path,
+    cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
+    setup_queries_file: Callable[..., Path],
+    create_pyproject_toml: Callable[..., Path],
+) -> None:
+    """Test that incremental,create mode works on directory with existing and new stubs."""
+    # Create a single query file
+    setup_queries_file(tmp_path, "queries.py", "sql")
+
+    # Register it in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+""")
+
+    # Generate initial stub for queries
+    result = cli([str(tmp_path), "--mode=incremental"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0
+
+    stub_path = tmp_path / "queries.pyi"
+    assert stub_path.exists()
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+
+    # Now add a new query to the app file
+    app_file.write_text("""from queries import sql
+
+q1 = sql("SELECT 1::INTEGER")
+q2 = sql("SELECT 2::INTEGER")
+""")
+
+    # Run on directory with incremental,create mode
+    result = cli([str(tmp_path), "--mode=incremental,create"], {"cwd": str(tmp_path)})
+    assert result.returncode == 0, f"CLI failed: {result.stdout}\n{result.stderr}"
+
+    # Verify the stub was updated (incremental)
+    content = stub_path.read_text()
+    assert "SELECT 1::INTEGER" in content
+    assert "SELECT 2::INTEGER" in content
+
+
 def test_incremental_create_mode_updates_existing_creates_new(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
     setup_queries_file: Callable[..., Path],
+    create_pyproject_toml: Callable[..., Path],
 ) -> None:
     """Test that incremental,create updates existing stubs but creates new ones."""
-    # Create two query files
+    # Create query files separately
     setup_queries_file(tmp_path, "queries1.py", "sql")
     setup_queries_file(tmp_path, "queries2.py", "sql")
+
+    # Register them in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries1.sql", "query"), ("queries2.sql", "query")])
 
     app1_file = tmp_path / "app1.py"
     app1_file.write_text("""from queries1 import sql
@@ -188,10 +282,12 @@ q2 = sql("SELECT 2::INTEGER")
 
     # Generate stub for queries1
     result = cli([str(app1_file), "--mode=incremental"], {"cwd": str(tmp_path)})
-    assert result.returncode == 0
+    assert result.returncode == 0, f"CLI failed: {result.stdout}\n{result.stderr}"
 
     stub1_path = tmp_path / "queries1.pyi"
-    assert stub1_path.exists()
+    assert stub1_path.exists(), (
+        f"Stub file not found. Files: {list(tmp_path.glob('*'))}, CLI output: {result.stdout}"
+    )
 
     # Update queries1 with new query
     app1_file.write_text("""from queries1 import sql
@@ -219,10 +315,10 @@ q1b = sql("SELECT 10::INTEGER")
 def test_fresh_mode_replaces_stub_completely(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that fresh mode replaces the entire stub content."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql
@@ -256,10 +352,10 @@ query2 = sql("SELECT 2::INTEGER")
 def test_prune_mode_directory_does_not_prompt(
     tmp_path: Path,
     cli: Callable[[list[str | Path], dict[str, Any] | None], subprocess.CompletedProcess[str]],
-    setup_queries_file: Callable[[Path, str, str | None], Path],
+    setup_sqlty_package: Callable[[Path, str, str | None], Path],
 ) -> None:
     """Test that prune mode on directory doesn't prompt for confirmation."""
-    setup_queries_file(tmp_path)
+    setup_sqlty_package(tmp_path)
 
     app_file = tmp_path / "app.py"
     app_file.write_text("""from queries import sql

@@ -11,7 +11,9 @@ def sql(
 ) -> SQL[tuple[int, str, str]]: ...
 @overload
 def sql(
-    query: Literal["SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id"],
+    query: Literal[
+        "\n    SELECT id::INTEGER, name::TEXT, email::TEXT FROM users WHERE id = :id OR email = :email\n"
+    ],
 ) -> SQL[tuple[int, str, str]]: ...
 @overload
 def sql(query: str) -> str: ...

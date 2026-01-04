@@ -51,8 +51,18 @@ q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
 
+    # Create pyproject.toml
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "mypackage.sql.sql"
+query_param = "query"
+""")
+
     # Generate stubs
-    result = cli([str(pkg_dir)])
+    result = cli([str(tmp_path)])
     assert result.returncode == 0, f"Generator failed: {result.stderr}"
 
     # Check that stub file was generated for sql.py
@@ -114,6 +124,16 @@ from sql import sql
 q: SQL[tuple[int]] = sql("SELECT 1::INTEGER")
 q2: SQL[tuple[int, str]] = sql("SELECT id::INTEGER, name::TEXT FROM users")
 ''')
+
+    # Create pyproject.toml
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("""[tool.sqlty]
+dialect = "postgres"
+
+[[tool.sqlty.functions]]
+import_path = "sql.sql"
+query_param = "query"
+""")
 
     # Generate stubs
     result = cli([str(tmp_path)])

@@ -1,5 +1,124 @@
 # Advanced Usage: Multi-Registry, Multiple Schemas, and Configuration
 
+## Function Configuration
+
+SQLTy can analyze functions without requiring the `@sqlty` decorator by configuring them in `pyproject.toml`. This is useful for:
+
+- **Existing codebases** where you don't want to modify source code
+- **Third-party libraries** with database helper functions
+- **Legacy applications** where adding decorators is impractical
+- **Custom function signatures** with non-standard parameter names
+
+### Basic Configuration
+
+Add function configurations to your `pyproject.toml`:
+
+```toml
+[tool.sqlty]
+dialect = "postgresql"
+
+[[tool.sqlty.functions]]
+import_path = "db.execute_query"
+query_param = "query"
+schema = "schema.sql"
+```
+
+**Required fields:**
+- `import_path`: Full import path to the function (e.g., `"module.submodule.function_name"`)
+- `query_param`: Name of the parameter containing the SQL query string
+
+**Optional fields:**
+- `return_type_param`: Name of the parameter that specifies the expected return type
+- `schema`: Path to SQL schema file for type inference
+- `return_type_template`: Template for the return type with `{sqlty}` placeholder (e.g., `"list[{sqlty}]"`)
+- `imports`: List of import statements needed for the stub
+
+### Example: Function with Return Type Parameter
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchvalue"
+query_param = "query"
+return_type_param = "return_tp"
+schema = "schema.sql"
+```
+
+**Usage:**
+```python
+from db import pg_fetchvalue
+
+# Type determined by return_tp parameter
+user_id = pg_fetchvalue(
+    conn,
+    query="SELECT id FROM users WHERE email = :email",
+    return_tp=int,
+    email="user@example.com"
+)
+# Type: int | None
+```
+
+**Generated stub:**
+```python
+@overload
+def pg_fetchvalue(
+    conn,
+    query: Literal["SELECT id FROM users WHERE email = :email"],
+    return_tp=int,
+    **params
+) -> int: ...
+```
+
+### Example: Function with Return Type Template
+
+For functions that wrap results in containers (like lists), use `return_type_template`:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.fetch_all"
+query_param = "sql"
+return_type_template = "list[{sqlty}]"
+schema = "schema.sql"
+```
+
+**Usage:**
+```python
+from db import fetch_all
+
+# Type inferred from SQL and wrapped in list
+users = fetch_all(conn, sql="SELECT id::INTEGER, name::TEXT FROM users")
+# Type: list[tuple[int, str]]
+```
+
+### Example: Custom Imports
+
+If your function requires specific imports for type annotations:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.query_json"
+query_param = "query"
+imports = [
+    "from typing import Any",
+    "import json"
+]
+```
+
+### Limitations
+
+- **Class methods** (e.g., `"module.Class.method"`) are not currently supported
+- Use module-level functions instead
+- The `self_type_template` field is reserved for future method support
+
+### Complete Example
+
+See [`examples/function_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/function_config) for a working example with:
+- Database helper functions without decorators
+- Configuration in `pyproject.toml`
+- Generated type stubs
+- Full mypy integration
+
+---
+
 ## Multi-Registry and Multiple Schema Support
 
 You can organize queries into multiple registries, each with its own schema file for type inference. Use the unified `--schema` option to provide schemas:
@@ -41,26 +160,25 @@ schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }
 
 CLI arguments always take precedence over configuration file values.
 
-## Full Example: Multi-Registry Package
+## Full Example: Multi-Schema Package
 
-See `examples/multi_schema_pkg/` for a complete package example:
+See `examples/multi_schema/` for a complete package example:
 
 - `users_queries.py` with `users.sql`
 - `orders_queries.py` with `orders.sql`
-- `app.py` using both registries
-- `pyproject.toml` with schema mappings
+- `main.py` using both registries
 
 Stub generation:
 
 ```bash
-uv run sqlty examples/multi_schema_pkg/ --mode=full
+uv run sqlty examples/multi_schema/ --mode=full
 ```
 
 Usage:
 
 ```python
-from users_queries import sql as user_sql
-from orders_queries import sql as order_sql
+from .users_queries import sql as user_sql
+from .orders_queries import sql as order_sql
 
 user_result = user_sql("SELECT id, name FROM users")  # SQL[tuple[int, str]]
 order_result = order_sql("SELECT id, total FROM orders")  # SQL[tuple[int, float]]
