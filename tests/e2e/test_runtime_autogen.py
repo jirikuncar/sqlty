@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.e2e.conftest import create_pyproject_toml
+
 
 def test_runtime_autogen_single_registry(tmp_path: Path) -> None:
     """Test runtime auto-generation for a single registry."""
@@ -34,6 +36,9 @@ print("Queries executed")
 
     # Run the script with SQLTY_AUTO_GENERATE env var
     import os
+
+    # Register the function defined in test_queries.py
+    create_pyproject_toml(tmp_path, [("test_queries.sql", "query")])
 
     env = os.environ.copy()
     env["SQLTY_AUTO_GENERATE"] = "1"
@@ -93,6 +98,11 @@ print("Multi-registry queries executed")
 
     import os
 
+    # Register both functions defined in multi_queries.py
+    create_pyproject_toml(
+        tmp_path, [("multi_queries.user_sql", "query"), ("multi_queries.post_sql", "query")]
+    )
+
     env = os.environ.copy()
     env["SQLTY_AUTO_GENERATE"] = "1"
 
@@ -143,6 +153,9 @@ def sql[T](query: T) -> T:
 query1 = sql("SELECT id::INTEGER FROM users")
 print("First run")
 """)
+
+    # Register the function defined in incremental.py
+    create_pyproject_toml(tmp_path, [("incremental.sql", "query")])
 
     result = subprocess.run(
         [sys.executable, str(test_script)],
@@ -216,6 +229,10 @@ print("Process {i} done")
 """)
         scripts.append(script)
 
+    # Register functions for all parallel_* scripts
+    function_configs = [(f"parallel_{i}.sql", "query") for i in range(3)]
+    create_pyproject_toml(tmp_path, function_configs)
+
     # Run all scripts in parallel
     processes = []
     for script in scripts:
@@ -284,6 +301,9 @@ print("New query added")
 
     env = os.environ.copy()
     env["SQLTY_AUTO_GENERATE"] = "1"
+
+    # Register the function defined in existing.py
+    create_pyproject_toml(tmp_path, [("existing.sql", "query")])
 
     result = subprocess.run(
         [sys.executable, str(test_script)],

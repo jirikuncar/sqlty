@@ -16,6 +16,8 @@ from subprocess import CompletedProcess
 
 from inline_snapshot import snapshot
 
+from tests.e2e.conftest import create_pyproject_toml
+
 
 def test_example_basic_pattern(
     tmp_path: Path,
@@ -40,6 +42,9 @@ def sql(query: str):
 # Your SQL queries here
 query = sql("SELECT id::INTEGER, name::TEXT FROM users")
 """)
+
+    # Ensure functions are registered via pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
 
     # Step 2: Run sqlty generator via subprocess
     result = cli([str(tmp_path)])
@@ -91,6 +96,8 @@ query = sql("SELECT 1::INTEGER")
 """)
 
     # Test CLI behavior without mypy
+    # Ensure functions are registered via pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
     result = cli([str(tmp_path)])
 
     assert result.returncode == 0
@@ -158,6 +165,8 @@ query1 = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Initial generation
+    # Ensure functions are registered via pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
     result = cli([str(tmp_path)])
     assert result.returncode == 0
 

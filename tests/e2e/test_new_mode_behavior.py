@@ -188,10 +188,12 @@ q2 = sql("SELECT 2::INTEGER")
 
     # Generate stub for queries1
     result = cli([str(app1_file), "--mode=incremental"], {"cwd": str(tmp_path)})
-    assert result.returncode == 0
+    assert result.returncode == 0, f"CLI failed: {result.stdout}\n{result.stderr}"
 
     stub1_path = tmp_path / "queries1.pyi"
-    assert stub1_path.exists()
+    assert stub1_path.exists(), (
+        f"Stub file not found. Files: {list(tmp_path.glob('*'))}, CLI output: {result.stdout}"
+    )
 
     # Update queries1 with new query
     app1_file.write_text("""from queries1 import sql

@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from subprocess import CompletedProcess
 
+from tests.e2e.conftest import create_pyproject_toml
+
 
 def test_config_via_pyproject_toml(
     tmp_path: Path, cli: Callable[..., CompletedProcess[str]]
@@ -18,10 +20,8 @@ def test_config_via_pyproject_toml(
     if the feature is implemented, or gracefully ignore it if not yet supported.
     """
     # Create pyproject.toml with sqlty configuration
-    pyproject_file = tmp_path / "pyproject.toml"
-    pyproject_file.write_text("""[tool.sqlty]
-dialect = "postgres"
-""")
+    # Create pyproject.toml with dialect and register queries.sql
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")], dialect="postgres")
 
     # Create source files
     queries_file = tmp_path / "queries.py"

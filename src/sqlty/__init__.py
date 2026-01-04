@@ -108,6 +108,18 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                             for func_config in functions
                         )
 
+                        # If not registered and module is __main__, also check using file basename
+                        # This handles the case when a script is run directly (python script.py)
+                        if not is_registered and module_name == "__main__":
+                            file_basename = Path(file_path).stem
+                            fallback_import_path = f"{file_basename}.{function_name}"
+                            is_registered = any(
+                                func_config["import_path"] == fallback_import_path
+                                for func_config in functions
+                            )
+                            if is_registered:
+                                expected_import_path = fallback_import_path
+
                         if not is_registered:
                             warnings.warn(
                                 f"Function {expected_import_path} is decorated with @sqlty but not "

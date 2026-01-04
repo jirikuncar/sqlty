@@ -191,6 +191,9 @@ class RuntimeCallRegistry:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
                 try:
+                    # Enrich calls with configuration information
+                    self._enrich_calls_with_config(calls, generator)
+
                     # Infer types from SQL for all calls
                     generator._infer_types_from_sql(calls, source_path)
 
@@ -282,6 +285,62 @@ class RuntimeCallRegistry:
             # Clean up lock file
             with contextlib.suppress(Exception):
                 lock_path.unlink()
+
+    def _enrich_calls_with_config(self, calls: list[dict[str, Any]], generator: Any) -> None:
+        """Enrich runtime calls with configuration information.
+
+        This ensures that configured functions get the correct return type template
+        and other settings from pyproject.toml.
+
+        Args:
+            calls: List of call information dictionaries to enrich
+            generator: TypeStubGenerator instance with config
+        """
+        # Get function configs from the generator
+        function_configs = getattr(generator, "_function_configs", None) or []
+
+        for call in calls:
+            registry_class = call.get("registry_class")
+
+            if not registry_class:
+                continue
+
+            # Try to find a matching configuration
+            # Configuration import_path format: "module.function_name"
+            # We need to match this with registry_class
+            for config in function_configs:
+                import_path = config.get("import_path", "")
+                if not import_path:
+                    continue
+
+                # Split import path to get the function name
+                parts = import_path.split(".")
+                if len(parts) < 2:
+                    continue
+
+                config_func_name = parts[-1]
+
+                # Check if this config matches our call
+                # Match by function name (last part of import_path)
+                if config_func_name == registry_class:
+                    # Enrich the call with configuration
+                    call["query_param_name"] = config.get("query_param", "query")
+                    call["return_type_template"] = config.get(
+                        "return_type_template", "SQL[{sqlty}]"
+                    )
+                    call["self_type_template"] = config.get("self_type_template")
+                    call["schema_path"] = config.get("schema")
+
+                    # Add default imports if using SQL[...] template
+                    if "SQL[" in call.get("return_type_template", ""):
+                        imports = call.get("imports", [])
+                        if not imports:
+                            imports = []
+                        if "from sqlty import SQL" not in imports:
+                            imports.append("from sqlty import SQL")
+                        call["imports"] = imports
+
+                    break
 
 
 # Global singleton registry instance

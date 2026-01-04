@@ -4,6 +4,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from tests.e2e.conftest import create_pyproject_toml
+
 
 def test_local_sql_function_ignored(
     tmp_path: Path, cli: Callable[..., subprocess.CompletedProcess[str]]
@@ -59,6 +61,8 @@ result = sql("SELECT id::INTEGER FROM users")
 """)
 
     # Run the generator
+    # Register the queries.sql function in pyproject.toml
+    create_pyproject_toml(tmp_path, [("queries.sql", "query")])
     result = cli([str(tmp_path)])
     assert result.returncode == 0
 
@@ -103,6 +107,8 @@ b: SQL[tuple[str]] = qb("SELECT 'a'::TEXT")
 """)
 
     # Run the generator
+    # Register both functions defined in query.py
+    create_pyproject_toml(tmp_path, [("query.qa", "query"), ("query.qb", "query")])
     result = cli([str(tmp_path)])
     assert result.returncode == 0
 
@@ -148,6 +154,8 @@ b: SQL[tuple[str]] = qb("SELECT 'b'::TEXT")
 """)
 
     # Run the generator
+    # Register both functions defined in query.py
+    create_pyproject_toml(tmp_path, [("query.qa", "query"), ("query.qb", "query")])
     result = cli([str(tmp_path)])
     assert result.returncode == 0
 

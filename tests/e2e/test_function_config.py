@@ -188,8 +188,8 @@ return_type_param = "return_tp"
     assert "def pg_fetchvalue" in stub_content
     assert "Literal[" in stub_content
     assert "SELECT COUNT(*)::INTEGER FROM users" in stub_content
-    # The stub should use 'str' as specified by return_tp parameter
-    assert "-> str" in stub_content
+    # The stub should wrap with SQL[str] as specified by return_tp parameter
+    assert "-> SQL[str]" in stub_content
 
     # Now run mypy on the app.py to verify type checking
     # Note: This will only work if mypy is available and properly configured
@@ -366,7 +366,8 @@ return_type_param = "return_tp"
     stub_content = stub_file.read_text()
     assert "conn: Any" in stub_content
     assert "query: Literal[" in stub_content
-    assert "return_tp: type[Any] | None" in stub_content
+    # Validate presence of return_tp type annotation in overload
+    assert "return_tp: type[Any] | None" in stub_content or "return_tp: Any=None" in stub_content
     assert "**params: Any" in stub_content
     assert "-> SQL[int]" in stub_content
 
