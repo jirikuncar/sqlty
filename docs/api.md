@@ -73,6 +73,90 @@ class SQL[T](str):
 
 ---
 
+## Configuration
+
+### pyproject.toml Configuration
+
+SQLTy can be configured via `[tool.sqlty]` in your `pyproject.toml` file.
+
+#### Basic Settings
+
+```toml
+[tool.sqlty]
+dialect = "postgresql"
+format-command = "ruff format --stdin-filename {filename} -"
+```
+
+**Available settings:**
+- `dialect`: SQL dialect to use (default: `"postgres"`)
+- `format-command`: External formatter command with `{filename}` placeholder
+- `schemas`: Dictionary mapping registry names to schema file paths
+
+#### Schema Mappings
+
+```toml
+[tool.sqlty]
+schemas = { users_queries = "users.sql", orders_queries = "orders.sql" }
+```
+
+#### Function Configuration
+
+Configure functions for analysis without using the `@sqlty` decorator:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.execute_query"
+query_param = "query"
+schema = "schema.sql"
+```
+
+**Required fields:**
+- `import_path` (string): Full import path to the function (e.g., `"module.submodule.function_name"`)
+- `query_param` (string): Name of the parameter containing the SQL query string
+
+**Optional fields:**
+- `return_type_param` (string): Name of the parameter specifying the expected return type
+- `schema` (string): Path to SQL schema file for type inference
+- `return_type_template` (string): Template for return type with `{sqlty}` placeholder (e.g., `"list[{sqlty}]"`)
+- `self_type_template` (string): Reserved for future method support (not currently used)
+- `imports` (list of strings): Import statements needed for the stub file
+
+**Example with all fields:**
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchvalue"
+query_param = "query"
+return_type_param = "return_tp"
+schema = "schema.sql"
+return_type_template = "Optional[{sqlty}]"
+imports = [
+    "from typing import Optional",
+    "from typing import Any"
+]
+```
+
+**Multiple function configurations:**
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.execute_query"
+query_param = "query"
+schema = "schema.sql"
+
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchvalue"
+query_param = "query"
+return_type_param = "return_tp"
+schema = "schema.sql"
+```
+
+**Limitations:**
+- Class methods (e.g., `"module.Class.method"`) are not currently supported
+- Use module-level functions instead
+
+See the [Advanced Usage](advanced-usage.md#function-configuration) guide and [`examples/function_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/function_config) for complete examples.
+
+---
+
 ## Generator CLI
 
 ### Command Line Interface

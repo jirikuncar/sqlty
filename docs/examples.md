@@ -6,9 +6,10 @@ This guide provides complete working examples, organized from simplest to most c
 
 - **New to SQLTy?** Start with [Basic Query with Type Casts](#1-basic-query-with-type-casts)
 - **Have schema files?** Jump to [Schema-Based Type Inference](#2-schema-based-type-inference)
-- **Multiple databases?** See [Multiple Schemas](#3-multiple-schemas)
-- **Large application?** Check [Multi-Registry Pattern](#4-multi-registry-pattern)
-- **Production setup?** Review [Full Package Integration](#5-full-package-integration)
+- **Can't modify source code?** See [Function Configuration](#3-function-configuration-no-decorators)
+- **Multiple databases?** See [Multiple Schemas](#4-multiple-schemas)
+- **Large application?** Check [Multi-Registry Pattern](#5-multi-registry-pattern)
+- **Production setup?** Review [Full Package Integration](#6-full-package-integration)
 
 ---
 
@@ -135,7 +136,149 @@ sqlty examples/schema_based/ --mode=full
 
 ---
 
-## 3. Multiple Schemas
+## 3. Function Configuration (No Decorators)
+
+**Location:** [`examples/function_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/function_config)
+
+Configure functions for SQLTy analysis via `pyproject.toml` instead of using decorators. Perfect for existing codebases, third-party libraries, or when you can't modify source code.
+
+**What you'll learn:**
+- Configuring functions via `pyproject.toml`
+- Working with existing code without modifications
+- Supporting functions with custom parameter names
+- Using `return_type_param` for explicit type control
+
+### File Structure
+
+```
+examples/function_config/
+├── app.py              # Application code using configured functions
+├── db.py               # Database utility functions (no decorators)
+├── db.pyi              # Generated stub file
+├── pyproject.toml      # SQLTy configuration
+├── schema.sql          # Database schema for type inference
+└── README.md           # Documentation
+```
+
+### Configuration
+
+**pyproject.toml:**
+```toml
+[tool.sqlty]
+dialect = "postgresql"
+
+# Function with explicit return type parameter
+[[tool.sqlty.functions]]
+import_path = "db.pg_fetchvalue"
+query_param = "query"
+return_type_param = "return_tp"
+schema = "schema.sql"
+
+# Function without return type parameter (infers from SQL)
+[[tool.sqlty.functions]]
+import_path = "db.execute_query"
+query_param = "query"
+schema = "schema.sql"
+```
+
+**Configuration Fields:**
+- `import_path` (required): Full import path to the function (e.g., `"module.submodule.function_name"`)
+- `query_param` (required): Name of the parameter containing the SQL query string
+- `return_type_param` (optional): Name of the parameter specifying the expected return type
+- `schema` (optional): Path to SQL schema file for type inference
+- `return_type_template` (optional): Template for return type with `{sqlty}` placeholder
+- `imports` (optional): List of import statements needed for the stub
+
+**Note:** Class methods (e.g., `"module.Class.method"`) are not currently supported. Use module-level functions instead.
+
+### Code
+
+**db.py (no decorators needed):**
+```python
+def pg_fetchvalue(conn, query: str, return_tp=None, **params):
+    """Fetch a single value from the database."""
+    # Implementation details...
+    return execute_query(conn, query, params)
+
+def execute_query(conn, query: str, **params):
+    """Execute a query and return results."""
+    # Implementation details...
+    return []
+```
+
+**app.py:**
+```python
+from db import pg_fetchvalue, execute_query
+
+# With return_type_param - type comes from parameter
+user_id = pg_fetchvalue(
+    conn,
+    query="SELECT id FROM users WHERE email = :email",
+    return_tp=int,  # This determines the return type
+    email="user@example.com"
+)
+# Type: int | None
+
+# Without return_type_param - types inferred from SQL
+results = execute_query(
+    conn,
+    query="SELECT id::INTEGER, name::TEXT FROM users"
+)
+# Type: list[tuple[int, str]]
+```
+
+### Generate Stubs
+
+```bash
+sqlty examples/function_config/
+```
+
+This creates `db.pyi` with type-safe overloads:
+
+```python
+from typing import overload, Literal
+from typing import Any
+
+@overload
+def pg_fetchvalue(
+    conn,
+    query: Literal["SELECT id FROM users WHERE email = :email"],
+    return_tp=int,
+    **params
+) -> int: ...
+
+@overload
+def execute_query(
+    conn,
+    query: Literal["SELECT id::INTEGER, name::TEXT FROM users"],
+    **params
+) -> list[tuple[int, str]]: ...
+```
+
+### Benefits
+
+1. **No code changes**: Works with existing functions and libraries
+2. **Type safety**: Full mypy type checking for SQL queries
+3. **IDE support**: Autocomplete and type hints
+4. **Clean separation**: Configuration separate from implementation
+5. **Flexible**: Works with any function signature
+
+### Comparison with Decorator Pattern
+
+| Aspect | Function Config | Decorator Pattern |
+|--------|----------------|-------------------|
+| **Source modification** | None required | Requires adding `@sqlty` |
+| **Configuration** | `pyproject.toml` | In-code with decorator |
+| **Use case** | Existing code, libraries | New code, full control |
+| **Flexibility** | Custom parameter names | Standard signature |
+
+Both approaches can be used together in the same project.
+
+**Best for:** Legacy codebases, third-party libraries, when you can't modify source code
+
+---
+
+## 4. Multiple Schemas
 
 **Location:** [`examples/multi_schema/`](https://github.com/jirikuncar/sqlty/tree/main/examples/multi_schema)
 
@@ -207,7 +350,7 @@ sqlty examples/multi_schema/ --mode=full \
 
 ---
 
-## 4. Multi-Registry Pattern
+## 5. Multi-Registry Pattern
 
 **Location:** [`examples/multi_registry/`](https://github.com/jirikuncar/sqlty/tree/main/examples/multi_registry)
 
@@ -287,7 +430,7 @@ sqlty examples/multi_registry/ --mode=full
 
 ---
 
-## 5. Full Package Integration
+## 6. Full Package Integration
 
 **Location:** [`examples/multi_schema_pkg/`](https://github.com/jirikuncar/sqlty/tree/main/examples/multi_schema_pkg)
 
