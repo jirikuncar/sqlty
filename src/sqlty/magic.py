@@ -120,14 +120,24 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         # Tokenize the source
         tokens = list(tokenize.generate_tokens(io.StringIO(u).readline))
 
-        # Track which tokens need transformation
+        # Track which tokens need transformation and which imports are needed
         new_tokens = []
+        needs_datetime = False
+        needs_uuid = False
+
         for tok in tokens:
             if tok.type == token.STRING:
                 # Check if this is a --sql string
                 if "--sql" in tok.string:
                     # Transform the token
                     new_string = _transform_sql_string(tok.string)
+
+                    # Check if the transformation needs imports
+                    if "datetime." in new_string:
+                        needs_datetime = True
+                    if "uuid." in new_string:
+                        needs_uuid = True
+
                     # Create a new token with the transformed string
                     new_tok = tokenize.TokenInfo(
                         tok.type, new_string, tok.start, tok.end, tok.line
@@ -140,6 +150,19 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
 
         # Reconstruct the source from tokens
         result = tokenize.untokenize(new_tokens)
+
+        # Add necessary imports at the top if needed
+        imports = []
+        if needs_datetime:
+            imports.append("import datetime")
+        if needs_uuid:
+            imports.append("import uuid")
+
+        if imports:
+            # Add imports at the beginning
+            import_lines = "\n".join(imports) + "\n"
+            result = import_lines + result
+
         return result, length
 
     except Exception:
@@ -184,9 +207,20 @@ class StreamReader(utf_8_codec.streamreader):  # type: ignore[name-defined,misc]
         self._decoded = False
 
 
-# Create the custom codec info that will be used for UTF-8
+# Create the custom codec info that will be used for UTF-8 and sqlty
 _custom_codec_info = codecs.CodecInfo(
     name="utf-8",
+    encode=utf_8_codec.encode,
+    decode=decode,  # type: ignore[arg-type]
+    incrementalencoder=utf_8_codec.incrementalencoder,
+    incrementaldecoder=IncrementalDecoder,
+    streamreader=StreamReader,
+    streamwriter=utf_8_codec.streamwriter,
+)
+
+# Also create a separate codec info for "sqlty" for testing purposes
+_sqlty_codec_info = codecs.CodecInfo(
+    name="sqlty",
     encode=utf_8_codec.encode,
     decode=decode,  # type: ignore[arg-type]
     incrementalencoder=utf_8_codec.incrementalencoder,
@@ -199,14 +233,15 @@ _custom_codec_info = codecs.CodecInfo(
 def _codec_search(encoding: str) -> CodecInfo | None:
     """Search function for codec registration.
 
-    This function overrides UTF-8 (and its aliases) to use our custom
-    decode function that transforms --sql strings.
+    This function provides the custom codec for:
+    - UTF-8 and its aliases (for automatic transformation)
+    - "sqlty" (for explicit testing)
 
     Args:
         encoding: The encoding name being looked up
 
     Returns:
-        Custom CodecInfo for UTF-8 variants, None otherwise
+        Custom CodecInfo for supported encodings, None otherwise
     """
     # Normalize the encoding name (lowercase, remove hyphens and underscores)
     normalized = encoding.lower().replace("-", "").replace("_", "")
@@ -214,6 +249,10 @@ def _codec_search(encoding: str) -> CodecInfo | None:
     # Handle UTF-8 and its common aliases
     if normalized in ("utf8", "utf", "u8"):
         return _custom_codec_info
+
+    # Handle "sqlty" for explicit testing
+    if normalized == "sqlty":
+        return _sqlty_codec_info
 
     return None
 

@@ -4,10 +4,87 @@ This test demonstrates the full codec functionality by creating a test file
 that uses the --sql prefix and verifying it works correctly.
 """
 
+import codecs
 import tempfile
 from pathlib import Path
 
 import pytest
+
+
+def test_sqlty_codec_registration():
+    """Test that the sqlty codec is registered for explicit testing."""
+    from sqlty import magic  # noqa: F401
+
+    # The codec should be available as "sqlty"
+    codec_info = codecs.lookup("sqlty")
+    assert codec_info is not None
+
+    # Test that it transforms --sql strings
+    test_bytes = b'q = "--sql SELECT 1::INTEGER"'
+    result, _ = codec_info.decode(test_bytes)
+    assert "SQL[tuple[int]]" in result
+
+
+def test_codec_adds_datetime_import():
+    """Test that the codec adds datetime import when needed."""
+    from sqlty import magic  # noqa: F401
+
+    codec_info = codecs.lookup("sqlty")
+
+    test_bytes = b'q = "--sql SELECT created_at::TIMESTAMP"'
+    result, _ = codec_info.decode(test_bytes)
+
+    # Should have datetime import
+    assert "import datetime" in result
+    assert "SQL[tuple[datetime.datetime]]" in result
+
+
+def test_codec_adds_uuid_import():
+    """Test that the codec adds uuid import when needed."""
+    from sqlty import magic  # noqa: F401
+
+    codec_info = codecs.lookup("sqlty")
+
+    test_bytes = b'q = "--sql SELECT user_id::UUID"'
+    result, _ = codec_info.decode(test_bytes)
+
+    # Should have uuid import
+    assert "import uuid" in result
+    assert "SQL[tuple[uuid.UUID]]" in result
+
+
+def test_codec_adds_multiple_imports():
+    """Test that the codec adds multiple imports when needed."""
+    from sqlty import magic  # noqa: F401
+
+    codec_info = codecs.lookup("sqlty")
+
+    test_bytes = b'''
+q1 = "--sql SELECT created_at::TIMESTAMP"
+q2 = "--sql SELECT user_id::UUID"
+'''
+    result, _ = codec_info.decode(test_bytes)
+
+    # Should have both imports
+    assert "import datetime" in result
+    assert "import uuid" in result
+    assert "SQL[tuple[datetime.datetime]]" in result
+    assert "SQL[tuple[uuid.UUID]]" in result
+
+
+def test_codec_no_unnecessary_imports():
+    """Test that the codec doesn't add imports when not needed."""
+    from sqlty import magic  # noqa: F401
+
+    codec_info = codecs.lookup("sqlty")
+
+    test_bytes = b'q = "--sql SELECT id::INTEGER, name::TEXT"'
+    result, _ = codec_info.decode(test_bytes)
+
+    # Should NOT have datetime or uuid imports
+    assert "import datetime" not in result
+    assert "import uuid" not in result
+    assert "SQL[tuple[int, str]]" in result
 
 
 def test_magic_codec_integration():

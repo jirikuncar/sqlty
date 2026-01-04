@@ -71,6 +71,13 @@ q = "--sql SELECT 1::INTEGER"
 # Works with multiple columns and complex queries
 query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 # Becomes: query = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+
+# Automatically adds imports for datetime/uuid types
+q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
+# Becomes:
+# import datetime
+# import uuid
+# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
 ```
 
 The codec:
@@ -78,6 +85,7 @@ The codec:
 - Detects strings starting with `--sql`
 - Analyzes the SQL to infer return types
 - Transforms them into `SQL[T](...)` calls automatically
+- Adds necessary imports (datetime, uuid) when needed
 
 **Note:** This is an experimental feature inspired by [future-fstrings](https://github.com/asottile-archive/future-fstrings). See [examples/magic_codec](examples/magic_codec) for more details.
 

@@ -10,6 +10,16 @@ q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 # q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
 ```
 
+The codec automatically adds necessary imports when types require them:
+
+```python
+q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
+# Transforms to:
+# import datetime
+# import uuid
+# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
+```
+
 ## Installation for Global Use
 
 Due to Python's codec caching, the magic codec requires setup via `sitecustomize.py`:
@@ -46,15 +56,40 @@ query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 # Transforms to: SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
 ```
 
+### Automatic Import Injection
+
+The codec automatically adds imports for types that require them:
+
+- **datetime types** (`DATE`, `TIMESTAMP`, `TIME`, `INTERVAL`) → adds `import datetime`
+- **UUID type** → adds `import uuid`
+- **Built-in types** (`int`, `str`, `bool`, `float`, `list`, `dict`) → no imports needed
+
 ## Type Inference
 
 The codec infers types based on explicit SQL type casts:
 
 - `--sql SELECT 1::INTEGER` → `SQL[tuple[int]](...)`
 - `--sql SELECT id::INTEGER, name::TEXT` → `SQL[tuple[int, str]](...)`
-- `--sql SELECT email::TEXT, created_at::TIMESTAMP` → `SQL[tuple[str, datetime.datetime]](...)`
+- `--sql SELECT email::TEXT, created_at::TIMESTAMP` → `SQL[tuple[str, datetime.datetime]](...)` (+ `import datetime`)
+- `--sql SELECT user_id::UUID` → `SQL[tuple[uuid.UUID]](...)` (+ `import uuid`)
 
 Without casts, defaults to `SQL[Any](...)`.
+
+## Testing with the "sqlty" Codec
+
+For explicit testing, the codec is also registered as "sqlty":
+
+```python
+# coding: sqlty
+import codecs
+
+codec = codecs.lookup("sqlty")
+code = b'q = "--sql SELECT 1::INTEGER"'
+result, _ = codec.decode(code)
+# result: 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+```
+
+This allows testing the codec transformation without affecting UTF-8 globally.
 
 ## Direct Usage (Without Global Setup)
 
