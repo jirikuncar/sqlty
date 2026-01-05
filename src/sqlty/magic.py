@@ -151,17 +151,35 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         # Reconstruct the source from tokens
         result = tokenize.untokenize(new_tokens)
 
-        # Add necessary imports at the top if needed
-        imports = []
-        if needs_datetime:
-            imports.append("import datetime")
-        if needs_uuid:
-            imports.append("import uuid")
+        # Add necessary imports using isort for proper placement
+        if needs_datetime or needs_uuid:
+            try:
+                from isort import code as isort_code
 
-        if imports:
-            # Add imports at the beginning
-            import_lines = "\n".join(imports) + "\n"
-            result = import_lines + result
+                # Build the list of imports to add
+                add_imports = []
+                if needs_datetime:
+                    add_imports.append("datetime")
+                if needs_uuid:
+                    add_imports.append("uuid")
+
+                # Use isort to add imports in the correct location
+                result = isort_code(
+                    result,
+                    add_imports=add_imports,
+                    force_single_line=False,
+                    line_length=100,
+                )
+            except ImportError:
+                # Fallback to simple prepending if isort is not available
+                imports = []
+                if needs_datetime:
+                    imports.append("import datetime")
+                if needs_uuid:
+                    imports.append("import uuid")
+                if imports:
+                    import_lines = "\n".join(imports) + "\n"
+                    result = import_lines + result
 
         return result, length
 
