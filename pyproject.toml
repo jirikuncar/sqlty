@@ -4,10 +4,8 @@ dynamic = ["version"]
 description = "Type-safe SQL queries for Python with automatic stub generation"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {file = "LICENSE"}
-authors = [
-    {name = "Jiri Kuncar", email = "jiri.kuncar@gmail.com"},
-]
+license = { file = "LICENSE" }
+authors = [{ name = "Jiri Kuncar", email = "jiri.kuncar@gmail.com" }]
 keywords = [
     "sql",
     "type-hints",
@@ -29,11 +27,7 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = [
-    "sqlglot>=27.29.0",
-    "asttokens>=3.0.0",
-    "rich>=13.0.0",
-]
+dependencies = ["sqlglot>=27.29.0", "asttokens>=3.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"
@@ -46,9 +40,7 @@ Issues = "https://github.com/jirikuncar/sqlty/issues"
 sqlty = "sqlty._cli:main"
 
 [project.optional-dependencies]
-psycopg = [
-    "psycopg>=3.2.12",
-]
+psycopg = ["psycopg>=3.2.12"]
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]
@@ -61,12 +53,10 @@ source = "uv-dynamic-versioning"
 packages = ["src/sqlty"]
 
 [tool.hatch.build.targets.sdist]
-only-include = [
-    "/src",
-    "/README.md",
-    "/LICENSE",
-    "/pyproject.toml",
-]
+only-include = ["/src", "/README.md", "/LICENSE", "/pyproject.toml"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"sqlty_magic.pth" = "sqlty_magic.pth"
 
 [tool.uv-dynamic-versioning]
 fallback-version = "0.0.0"
@@ -82,31 +72,22 @@ dev = [
     "ruff>=0.8.4",
     "ty",
 ]
-psycopg = [
-    "psycopg>=3.2.12",
-]
+cli = ["rich>=13.0.0"]
+magic = ["isort>=7.0.0"]
+psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]
-addopts = [
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "-v",
-]
+addopts = ["--cov-report=term-missing", "--cov-report=html", "-v"]
 
 [tool.coverage.run]
 concurrency = ["multiprocessing"]
 parallel = true
 sigterm = true
 patch = ["subprocess"]
-omit = [
-    "tests/*",
-    "examples/*",
-]
+omit = ["tests/*", "examples/*"]
 
 [tool.coverage.paths]
-source = [
-    "src/",
-]
+source = ["src/"]
 
 [tool.coverage.combine]
 show_missing = true

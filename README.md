@@ -55,6 +55,39 @@ See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/doc
 - ⚙️ **Function Configuration**: Analyze existing functions without code changes via `pyproject.toml`
 - 🔍 **Source Tracking**: Generated stubs include source location comments
 - 🌐 **Multiple SQL Dialects**: Support for PostgreSQL, MySQL, SQLite, and more via sqlglot
+- ✨ **Magic Codec**: Optional codec for automatic string transformation with `--sql` prefix
+
+## Magic Codec (Experimental)
+
+SQLTy includes an experimental codec that allows you to write SQL queries as simple strings:
+
+```python
+from sqlty import magic
+
+# Strings with --sql prefix are automatically transformed
+q = "--sql SELECT 1::INTEGER"
+# Becomes: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+
+# Works with multiple columns and complex queries
+query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# Becomes: query = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+
+# Automatically adds imports for datetime/uuid types
+q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
+# Becomes:
+# import datetime
+# import uuid
+# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
+```
+
+The codec:
+- Overrides UTF-8 codec (no encoding declaration change needed)
+- Detects strings starting with `--sql`
+- Analyzes the SQL to infer return types
+- Transforms them into `SQL[T](...)` calls automatically
+- Adds necessary imports (datetime, uuid) when needed
+
+**Note:** This is an experimental feature inspired by [future-fstrings](https://github.com/asottile-archive/future-fstrings). See [examples/magic_codec](examples/magic_codec) for more details.
 
 ## Quick Start
 

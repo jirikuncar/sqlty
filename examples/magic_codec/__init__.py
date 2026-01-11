@@ -1,0 +1,1 @@
+"""Magic codec example package."""
