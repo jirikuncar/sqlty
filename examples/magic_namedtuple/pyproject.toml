@@ -1,0 +1,2 @@
+[tool.sqlty]
+return_format = "namedtuple"

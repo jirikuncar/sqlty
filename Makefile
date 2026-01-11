@@ -105,11 +105,13 @@ verify-examples: generate-examples
 	done
 	@echo "✅ stubtest verification passed"
 	@echo ""
-	@echo "🔍 Verifying magic codec example..."
-	@if [ -d examples/magic_codec ]; then \
-		echo "  → examples/magic_codec/demo.py"; \
-		(cd examples/magic_codec && PYTHONPATH=$(ROOT_DIR)/src uv run mypy demo.py) || exit 1; \
-	fi
+	@echo "🔍 Verifying magic codec examples..."
+	@for dir in examples/magic_codec examples/magic_typeddict examples/magic_namedtuple examples/magic_pydantic; do \
+		if [ -d $$dir ]; then \
+			echo "  → $$dir/demo.py"; \
+			(cd $$dir && PYTHONPATH=$(ROOT_DIR)/src uv run mypy demo.py) || exit 1; \
+		fi; \
+	done
 	@echo "✅ magic codec verification passed"
 
 .PHONY: example-registries
