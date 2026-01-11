@@ -26,12 +26,17 @@ from sqlty import SQL
 # These strings will be automatically transformed by the codec
 
 # Simple SELECT with single column
-query1: SQL[tuple[int]] = "--sql SELECT 1::INTEGER"
-# After transformation: query1 = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+query1: SQL[tuple[int]] = """--sql
+SELECT 1::INTEGER
+"""
+# After transformation: query1 = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER\n")
 
 # SELECT with multiple columns
-query2 = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-# After transformation: query2 = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+query2 = """--sql
+SELECT id::INTEGER, name::TEXT
+FROM users
+"""
+# After transformation: query2 = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT\nFROM users\n")
 
 # Complex query
 query3: SQL[tuple[int, str, datetime.datetime]] = """--sql

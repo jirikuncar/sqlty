@@ -22,7 +22,7 @@ def test_issue_example():
     For proper type inference, use explicit casts: "--sql SELECT 1::INTEGER"
     """
     # Test with explicit cast (recommended)
-    test_code_with_cast = b'q = "--sql SELECT 1::INTEGER"'
+    test_code_with_cast = b'q = """--sql\nSELECT 1::INTEGER\n"""'
 
     from sqlty._decode import decode
 
@@ -30,11 +30,11 @@ def test_issue_example():
 
     # Should transform to SQL[tuple[int]](...)
     assert "SQL[tuple[int]]" in result
-    assert '"--sql SELECT 1::INTEGER"' in result
+    assert '"""--sql\nSELECT 1::INTEGER\n"""' in result
 
     # The transformation should preserve the original string
-    # Result should be: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
-    expected_transformation = 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+    # Result should be: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER\n")
+    expected_transformation = 'q = SQL[tuple[int]]("""--sql\nSELECT 1::INTEGER\n""")'
     assert expected_transformation in result
 
 
@@ -43,7 +43,7 @@ def test_issue_example_without_cast():
 
     Without a cast, the type cannot be precisely inferred, so it defaults to str.
     """
-    test_code = b'q = "--sql SELECT 1"'
+    test_code = b'q = """--sql\nSELECT 1\n"""'
 
     from sqlty._decode import decode
 
@@ -51,7 +51,7 @@ def test_issue_example_without_cast():
 
     # Without explicit cast, it should still transform but may use Any or str
     assert "SQL[" in result
-    assert '"--sql SELECT 1"' in result
+    assert '"""--sql\nSELECT 1\n"""' in result
 
 
 def test_complete_example_from_issue():
@@ -59,7 +59,9 @@ def test_complete_example_from_issue():
     # No encoding declaration needed - magic codec overrides UTF-8
     test_code = """from sqlty import magic
 
-q = "--sql SELECT 1::INTEGER"
+q = \"\"\"--sql
+SELECT 1::INTEGER
+\"\"\"
 """
 
     # Write to temp file and decode
@@ -77,7 +79,7 @@ q = "--sql SELECT 1::INTEGER"
 
         # Verify the transformation
         assert "SQL[tuple[int]]" in result
-        assert 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")' in result
+        assert 'q = SQL[tuple[int]]("""--sql\nSELECT 1::INTEGER\n""")' in result
 
 
 def test_demonstration():
@@ -85,13 +87,13 @@ def test_demonstration():
     from sqlty._decode import decode
 
     examples = [
-        (b'q = "--sql SELECT 1::INTEGER"', "SQL[tuple[int]]"),
+        (b'q = """--sql\nSELECT 1::INTEGER\n"""', "SQL[tuple[int]]"),
         (
-            b'q = "--sql SELECT id::INTEGER, name::TEXT"',
+            b'q = """--sql\nSELECT id::INTEGER, name::TEXT\n"""',
             "SQL[tuple[int, str]]",
         ),
         (
-            b'q = "--sql SELECT created_at::TIMESTAMP"',
+            b'q = """--sql\nSELECT created_at::TIMESTAMP\n"""',
             "SQL[tuple[datetime.datetime]]",
         ),
     ]

@@ -8,19 +8,24 @@ class TestInferSQLType:
 
     def test_simple_select_with_cast(self):
         """Test type inference for SELECT with explicit cast."""
-        sql = "--sql SELECT 1::INTEGER"
+        sql = """--sql
+SELECT 1::INTEGER
+"""
         result = _infer_sql_type(sql)
         assert result == "tuple[int]"
 
     def test_select_multiple_columns(self):
         """Test type inference for SELECT with multiple columns."""
-        sql = "--sql SELECT id::INTEGER, name::TEXT"
+        sql = """--sql
+SELECT id::INTEGER, name::TEXT
+"""
         result = _infer_sql_type(sql)
         assert result == "tuple[int, str]"
 
     def test_select_without_prefix(self):
         """Test type inference for SQL without --sql prefix."""
-        sql = "SELECT 1::INTEGER"
+        sql = """SELECT 1::INTEGER
+"""
         result = _infer_sql_type(sql)
         assert result == "tuple[int]"
 
@@ -36,24 +41,24 @@ class TestTransformSQLString:
 
     def test_double_quoted_string(self):
         """Test transformation of double-quoted string."""
-        string_literal = '"--sql SELECT 1::INTEGER"'
+        string_literal = '"""--sql\nSELECT 1::INTEGER\n"""'
         result = _transform_sql_string(string_literal)
         assert result.startswith("SQL[tuple[int]](")
-        assert '"--sql SELECT 1::INTEGER"' in result
+        assert '"""--sql\nSELECT 1::INTEGER\n"""' in result
 
     def test_single_quoted_string(self):
         """Test transformation of single-quoted string."""
-        string_literal = "'--sql SELECT 1::INTEGER'"
+        string_literal = "'''--sql\nSELECT 1::INTEGER\n'''"
         result = _transform_sql_string(string_literal)
         assert result.startswith("SQL[tuple[int]](")
-        assert "'--sql SELECT 1::INTEGER'" in result
+        assert "'''--sql\nSELECT 1::INTEGER\n'''" in result
 
     def test_triple_quoted_string(self):
         """Test transformation of triple-quoted string."""
-        string_literal = '"""--sql SELECT 1::INTEGER"""'
+        string_literal = '"""--sql\nSELECT 1::INTEGER\n"""'
         result = _transform_sql_string(string_literal)
         assert result.startswith("SQL[tuple[int]](")
-        assert '"""--sql SELECT 1::INTEGER"""' in result
+        assert '"""--sql\nSELECT 1::INTEGER\n"""' in result
 
     def test_non_sql_string(self):
         """Test that non-SQL strings are not transformed."""
@@ -63,13 +68,13 @@ class TestTransformSQLString:
 
     def test_sql_with_whitespace(self):
         """Test SQL with leading/trailing whitespace."""
-        string_literal = '"  --sql SELECT 1::INTEGER  "'
+        string_literal = '"""  --sql\nSELECT 1::INTEGER\n  """'
         result = _transform_sql_string(string_literal)
         # Should detect --sql prefix after stripping and infer type correctly
         assert result.startswith("SQL[tuple[int]](")
 
     def test_multiple_columns(self):
         """Test SQL with multiple columns."""
-        string_literal = '"--sql SELECT id::INTEGER, name::TEXT"'
+        string_literal = '"""--sql\nSELECT id::INTEGER, name::TEXT\n"""'
         result = _transform_sql_string(string_literal)
         assert result.startswith("SQL[tuple[int, str]](")

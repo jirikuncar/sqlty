@@ -23,8 +23,12 @@ def test_magic_codec_basic_transformation(tmp_project_dir: Path) -> None:
     # Create a file with --sql strings
     test_file = tmp_project_dir / "test_basic.py"
     test_file.write_text("""# coding: sqlty
-q1 = "--sql SELECT 1::INTEGER"
-q2 = "--sql SELECT id::INTEGER, name::TEXT"
+q1 = \"\"\"--sql
+SELECT 1::INTEGER
+\"\"\"
+q2 = \"\"\"--sql
+SELECT id::INTEGER, name::TEXT
+\"\"\"
 
 print("q1:", q1)
 print("q2:", q2)
@@ -50,8 +54,12 @@ def test_magic_codec_auto_imports(tmp_project_dir: Path) -> None:
     """Test that codec adds all necessary imports automatically."""
     test_file = tmp_project_dir / "test_imports.py"
     test_file.write_text("""# coding: sqlty
-q1 = "--sql SELECT created_at::TIMESTAMP"
-q2 = "--sql SELECT user_id::UUID"
+q1 = \"\"\"--sql
+SELECT created_at::TIMESTAMP
+\"\"\"
+q2 = \"\"\"--sql
+SELECT user_id::UUID
+\"\"\"
 
 print("q1:", q1)
 print("q2:", q2)
@@ -82,8 +90,12 @@ def test_magic_codec_execution(tmp_project_dir: Path) -> None:
     """Test executing transformed code produces SQL instances."""
     test_file = tmp_project_dir / "test_execution.py"
     test_file.write_text("""# coding: sqlty
-q1 = "--sql SELECT 1::INTEGER"
-q2 = "--sql SELECT id::INTEGER, name::TEXT"
+q1 = \"\"\"--sql
+SELECT 1::INTEGER
+\"\"\"
+q2 = \"\"\"--sql
+SELECT id::INTEGER, name::TEXT
+\"\"\"
 
 # Verify runtime values are strings
 assert isinstance(q1, str)
@@ -161,8 +173,12 @@ def test_magic_codec_mypy_validation(tmp_project_dir: Path) -> None:
     test_file.write_text("""# coding: sqlty
 from sqlty import SQL
 
-q1: SQL[tuple[int]] = "--sql SELECT 1::INTEGER"
-q2: SQL[tuple[int, str]] = "--sql SELECT id::INTEGER, name::TEXT"
+q1: SQL[tuple[int]] = \"\"\"--sql
+SELECT 1::INTEGER
+\"\"\"
+q2: SQL[tuple[int, str]] = \"\"\"--sql
+SELECT id::INTEGER, name::TEXT
+\"\"\"
 
 print("Type checking!")
 """)
