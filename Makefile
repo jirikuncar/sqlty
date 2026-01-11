@@ -104,6 +104,13 @@ verify-examples: generate-examples
 			--mypy-config-file $(ROOT_DIR)/pyproject.toml) || exit 1; \
 	done
 	@echo "✅ stubtest verification passed"
+	@echo ""
+	@echo "🔍 Verifying magic codec example..."
+	@if [ -d examples/magic_codec ]; then \
+		echo "  → examples/magic_codec/demo.py"; \
+		(cd examples/magic_codec && PYTHONPATH=$(ROOT_DIR)/src uv run mypy demo.py) || exit 1; \
+	fi
+	@echo "✅ magic codec verification passed"
 
 .PHONY: example-registries
 example-registries:
