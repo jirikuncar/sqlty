@@ -336,6 +336,12 @@ class StubFile:
                 uses_namedtuple = True
             elif class_def.format_type == "pydantic":
                 uses_pydantic = True
+            
+            # Check for datetime/uuid/decimal in class field types
+            for field_type in class_def.fields.values():
+                for pattern, import_stmt in type_patterns.items():
+                    if re.search(pattern, field_type):
+                        required.add(import_stmt)
 
         if uses_typeddict:
             # Add TypedDict to typing import
