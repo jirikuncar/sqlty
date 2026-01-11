@@ -647,8 +647,42 @@ class TypeStubGenerator:
             self.function_name,
             registry_detector=self._registry_detector,
             function_configs=self._function_configs,
+            return_format=self._return_format,
         )
         stub_ir = parser.parse_calls(calls, class_name, export_name)
+        
+        # If using non-tuple format, generate class definitions for unique return types
+        if self._return_format != "tuple":
+            from ._stub_ir import ClassDefinition
+            
+            for call in calls:
+                return_type = call.get("return_type")
+                if return_type and return_type != "str" and not return_type.startswith("tuple"):
+                    # This is a generated class name - create definition
+                    literal = call["literal"]
+                    
+                    # Get the analyzer to regenerate column info
+                    registry_name = call.get("registry_source")
+                    registry_class = call.get("registry_class")
+                    module_path = Path(call.get("file", "."))
+                    
+                    analyzer = self._get_analyzer_for_registry(registry_name, module_path, registry_class)
+                    columns = analyzer.analyze_select(literal)
+                    
+                    if columns:
+                        fields = {}
+                        for col in columns:
+                            col_type = col.python_type if col.python_type else "str"
+                            fields[col.name] = col_type
+                        
+                        class_def = ClassDefinition(
+                            name=return_type,
+                            format_type=self._return_format,
+                            fields=fields,
+                            source_query=literal
+                        )
+                        stub_ir.add_class_definition(class_def)
+        
         return stub_ir
 
     def generate_stub_file(
@@ -867,13 +901,14 @@ class TypeStubGenerator:
                     # Handle incremental/full mode for multiple classes
                     # Handle all modes using IR-based merge
                     # Parse all new registries first
-                    from ._stub_ir import StubFile
+                    from ._stub_ir import ClassDefinition, StubFile
                     from ._stub_parser import CallInfoToIRParser
 
                     call_parser = CallInfoToIRParser(
                         self.function_name,
                         registry_detector=self._registry_detector,
                         function_configs=self._function_configs,
+                        return_format=self._return_format,
                     )
 
                     # Create stub with all new registries
@@ -894,6 +929,42 @@ class TypeStubGenerator:
                         for registry in new_stub.registries.values():
                             registry.is_function = is_function
                             all_new_registries.add_registry(registry)
+                        
+                        # Also add any class definitions from this stub
+                        for class_def in new_stub.class_definitions:
+                            all_new_registries.add_class_definition(class_def)
+
+                    # If using non-tuple format, generate class definitions
+                    if self._return_format != "tuple":
+                        for cls_calls in calls_by_class.values():
+                            for call in cls_calls:
+                                return_type = call.get("return_type")
+                                if return_type and return_type != "str" and not return_type.startswith("tuple"):
+                                    # This is a generated class name - create definition
+                                    literal = call["literal"]
+                                    
+                                    # Get the analyzer to regenerate column info
+                                    registry_name = call.get("registry_source")
+                                    registry_class = call.get("registry_class")
+                                    
+                                    analyzer = self._get_analyzer_for_registry(
+                                        registry_name, registry_file, registry_class
+                                    )
+                                    columns = analyzer.analyze_select(literal)
+                                    
+                                    if columns:
+                                        fields = {}
+                                        for col in columns:
+                                            col_type = col.python_type if col.python_type else "str"
+                                            fields[col.name] = col_type
+                                        
+                                        class_def = ClassDefinition(
+                                            name=return_type,
+                                            format_type=self._return_format,
+                                            fields=fields,
+                                            source_query=literal
+                                        )
+                                        all_new_registries.add_class_definition(class_def)
 
                     # Merge with existing stub if it exists
                     if stub_path.exists():

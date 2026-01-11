@@ -17,6 +17,37 @@ from pathlib import Path
 
 
 @dataclass
+class ClassDefinition:
+    """Represents a class definition for non-tuple return types.
+
+    Attributes:
+        name: The class name (e.g., "QueryRow_abc123")
+        format_type: The format type - "typeddict", "namedtuple", or "pydantic"
+        fields: Dict mapping field names to their types (e.g., {"id": "int", "name": "str"})
+        source_query: The SQL query that generated this class
+    """
+
+    name: str
+    format_type: str  # "typeddict", "namedtuple", or "pydantic"
+    fields: dict[str, str] = field(default_factory=dict)
+    source_query: str = ""
+
+    def __hash__(self) -> int:
+        """Hash for deduplication."""
+        return hash((self.name, self.format_type, tuple(sorted(self.fields.items()))))
+
+    def __eq__(self, other: object) -> bool:
+        """Equality for deduplication."""
+        if not isinstance(other, ClassDefinition):
+            return NotImplemented
+        return (
+            self.name == other.name
+            and self.format_type == other.format_type
+            and self.fields == other.fields
+        )
+
+
+@dataclass
 class SourceSpan:
     """Represents precise source location information.
 
@@ -175,18 +206,24 @@ class StubFile:
     Attributes:
         registries: Dict of registry name to RegistryDecorator for both classes and functions
         imports: Set of import statements needed for the stub
+        class_definitions: Set of class definitions for non-tuple return types
         source_path: Optional path to the source .py file this stub corresponds to
         ast_module: Optional reference to the original AST Module node
     """
 
     registries: dict[str, RegistryDecorator] = field(default_factory=dict)
     imports: set[ImportStatement] = field(default_factory=set)
+    class_definitions: set[ClassDefinition] = field(default_factory=set)
     source_path: Path | None = None
     ast_module: ast.Module | None = None
 
     def add_import(self, import_stmt: ImportStatement) -> None:
         """Add an import statement (automatically deduplicated)."""
         self.imports.add(import_stmt)
+
+    def add_class_definition(self, class_def: ClassDefinition) -> None:
+        """Add a class definition (automatically deduplicated)."""
+        self.class_definitions.add(class_def)
 
     def add_registry(self, registry: RegistryDecorator) -> None:
         """Add or replace a registry class or function."""
@@ -287,6 +324,49 @@ class StubFile:
         # Add SQL import if needed
         if uses_sql:
             required.add(ImportStatement(module="sqlty", names=["SQL"], from_import=True))
+
+        # Add imports for class definitions
+        uses_typeddict = False
+        uses_namedtuple = False
+        uses_pydantic = False
+        for class_def in self.class_definitions:
+            if class_def.format_type == "typeddict":
+                uses_typeddict = True
+            elif class_def.format_type == "namedtuple":
+                uses_namedtuple = True
+            elif class_def.format_type == "pydantic":
+                uses_pydantic = True
+
+        if uses_typeddict:
+            # Add TypedDict to typing import
+            typing_import = None
+            for imp in required:
+                if imp.module == "typing":
+                    typing_import = imp
+                    break
+            if typing_import:
+                names = set(typing_import.names)
+                names.add("TypedDict")
+                required = {imp for imp in required if imp.module != "typing"}
+                required.add(
+                    ImportStatement(
+                        module="typing", names=sorted(list(names)), from_import=True
+                    )
+                )
+            else:
+                required.add(
+                    ImportStatement(module="typing", names=["TypedDict"], from_import=True)
+                )
+
+        if uses_namedtuple:
+            required.add(
+                ImportStatement(module="collections", names=["namedtuple"], from_import=True)
+            )
+
+        if uses_pydantic:
+            required.add(
+                ImportStatement(module="pydantic", names=["BaseModel"], from_import=True)
+            )
 
         # Add custom imports from registries
         for registry in self.registries.values():

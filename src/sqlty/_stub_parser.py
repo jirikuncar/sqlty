@@ -299,6 +299,7 @@ class CallInfoToIRParser:
         function_name: str = "sql",
         registry_detector: Any | None = None,
         function_configs: list[Any] | None = None,
+        return_format: str = "tuple",
     ) -> None:
         """Initialize the parser.
 
@@ -306,10 +307,12 @@ class CallInfoToIRParser:
             function_name: Name of the SQL function (e.g., "sql")
             registry_detector: Optional RegistryDetector for extracting function signatures
             function_configs: Optional list of function configurations
+            return_format: Return format - "tuple", "typeddict", "namedtuple", or "pydantic"
         """
         self.function_name = function_name
         self.registry_detector = registry_detector
         self.function_configs = function_configs or []
+        self.return_format = return_format
         # Build mapping of import_path -> config for quick lookup
         self._config_by_import_path: dict[str, Any] = {}
         for config in self.function_configs:

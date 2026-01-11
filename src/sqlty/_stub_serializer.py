@@ -38,6 +38,12 @@ class IRToASTSerializer:
         for import_stmt in imports:
             module_body.append(self._serialize_import(import_stmt))
 
+        # Add class definitions for non-tuple return types
+        for class_def in sorted(stub.class_definitions, key=lambda c: c.name):
+            class_node = self._serialize_class_definition(class_def)
+            if class_node:
+                module_body.append(class_node)
+
         # Emit top-level function overloads for all decorated functions
         for registry_name in sorted(stub.registries.keys()):
             registry = stub.registries[registry_name]
@@ -187,6 +193,86 @@ class IRToASTSerializer:
             returns=ast.Name(id="T", ctx=ast.Load()),
             type_params=[type_param],
         )
+
+    def _serialize_class_definition(self, class_def: "ClassDefinition") -> ast.stmt | None:
+        """Serialize a class definition to an AST node.
+
+        Args:
+            class_def: ClassDefinition to serialize
+
+        Returns:
+            AST ClassDef or Assign node
+        """
+        from ._stub_ir import ClassDefinition
+
+        if class_def.format_type == "typeddict":
+            # Generate: class ClassName(TypedDict):
+            #               field1: type1
+            #               field2: type2
+            class_body: list[ast.stmt] = []
+            for field_name, field_type in sorted(class_def.fields.items()):
+                # Create annotation: field_name: field_type
+                ann_assign = ast.AnnAssign(
+                    target=ast.Name(id=field_name, ctx=ast.Store()),
+                    annotation=ast.Name(id=field_type, ctx=ast.Load()),
+                    simple=1,
+                )
+                class_body.append(ann_assign)
+
+            if not class_body:
+                class_body.append(ast.Pass())
+
+            return ast.ClassDef(
+                name=class_def.name,
+                bases=[ast.Name(id="TypedDict", ctx=ast.Load())],
+                keywords=[],
+                body=class_body,
+                decorator_list=[],
+            )
+
+        elif class_def.format_type == "namedtuple":
+            # Generate: ClassName = namedtuple('ClassName', ['field1', 'field2'])
+            field_names = list(class_def.fields.keys())
+            return ast.Assign(
+                targets=[ast.Name(id=class_def.name, ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Name(id="namedtuple", ctx=ast.Load()),
+                    args=[
+                        ast.Constant(value=class_def.name),
+                        ast.List(
+                            elts=[ast.Constant(value=name) for name in field_names],
+                            ctx=ast.Load(),
+                        ),
+                    ],
+                    keywords=[],
+                ),
+            )
+
+        elif class_def.format_type == "pydantic":
+            # Generate: class ClassName(BaseModel):
+            #               field1: type1
+            #               field2: type2
+            class_body: list[ast.stmt] = []
+            for field_name, field_type in sorted(class_def.fields.items()):
+                ann_assign = ast.AnnAssign(
+                    target=ast.Name(id=field_name, ctx=ast.Store()),
+                    annotation=ast.Name(id=field_type, ctx=ast.Load()),
+                    simple=1,
+                )
+                class_body.append(ann_assign)
+
+            if not class_body:
+                class_body.append(ast.Pass())
+
+            return ast.ClassDef(
+                name=class_def.name,
+                bases=[ast.Name(id="BaseModel", ctx=ast.Load())],
+                keywords=[],
+                body=class_body,
+                decorator_list=[],
+            )
+
+        return None
 
     def _serialize_function_overloads(self, registry: RegistryDecorator) -> list[ast.stmt]:
         """Serialize function overloads for @sqlty decorated functions.
