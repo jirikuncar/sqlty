@@ -20,7 +20,7 @@ def test_sqlty_codec_registration():
     assert codec_info is not None
 
     # Test that it transforms --sql strings
-    test_bytes = b'q = "--sql SELECT 1::INTEGER"'
+    test_bytes = b'q = """--sql\nSELECT 1::INTEGER\n"""'
     result, _ = codec_info.decode(test_bytes)
     assert "SQL[tuple[int]]" in result
 
@@ -31,7 +31,7 @@ def test_codec_adds_datetime_import():
 
     codec_info = codecs.lookup("sqlty")
 
-    test_bytes = b'q = "--sql SELECT created_at::TIMESTAMP"'
+    test_bytes = b'q = """--sql\nSELECT created_at::TIMESTAMP\n"""'
     result, _ = codec_info.decode(test_bytes)
 
     # Should have datetime import
@@ -45,7 +45,7 @@ def test_codec_adds_uuid_import():
 
     codec_info = codecs.lookup("sqlty")
 
-    test_bytes = b'q = "--sql SELECT user_id::UUID"'
+    test_bytes = b'q = """--sql\nSELECT user_id::UUID\n"""'
     result, _ = codec_info.decode(test_bytes)
 
     # Should have uuid import
@@ -60,8 +60,12 @@ def test_codec_adds_multiple_imports():
     codec_info = codecs.lookup("sqlty")
 
     test_bytes = b"""
-q1 = "--sql SELECT created_at::TIMESTAMP"
-q2 = "--sql SELECT user_id::UUID"
+q1 = \"\"\"--sql
+SELECT created_at::TIMESTAMP
+\"\"\"
+q2 = \"\"\"--sql
+SELECT user_id::UUID
+\"\"\"
 """
     result, _ = codec_info.decode(test_bytes)
 
@@ -78,7 +82,7 @@ def test_codec_no_unnecessary_imports():
 
     codec_info = codecs.lookup("sqlty")
 
-    test_bytes = b'q = "--sql SELECT id::INTEGER, name::TEXT"'
+    test_bytes = b'q = """--sql\nSELECT id::INTEGER, name::TEXT\n"""'
     result, _ = codec_info.decode(test_bytes)
 
     # Should NOT have datetime or uuid imports
@@ -94,7 +98,9 @@ def test_magic_codec_integration():
     test_code = """from sqlty import magic
 
 # This should be transformed by the codec
-q = "--sql SELECT 1::INTEGER"
+q = \"\"\"--sql
+SELECT 1::INTEGER
+\"\"\"
 """
 
     # Write the test file to a temporary location
@@ -115,7 +121,7 @@ q = "--sql SELECT 1::INTEGER"
 
             # Verify the transformation
             assert "SQL[tuple[int]]" in decoded
-            assert '"--sql SELECT 1::INTEGER"' in decoded
+            assert '"""--sql\nSELECT 1::INTEGER\n"""' in decoded
 
         except Exception as e:
             pytest.skip(f"Codec integration test skipped due to: {e}")
@@ -130,7 +136,7 @@ def test_magic_module_can_be_imported():
     # Test that the decode function works directly
     from sqlty._decode import decode
 
-    test_bytes = b'q = "--sql SELECT 1::INTEGER"'
+    test_bytes = b'q = """--sql\nSELECT 1::INTEGER\n"""'
     result, _ = decode(test_bytes)
     assert "SQL[tuple[int]]" in result
 
@@ -147,7 +153,7 @@ def test_codec_works_for_subsequently_imported_files():
     # Create a test module with --sql strings
     with tempfile.TemporaryDirectory() as tmpdir:
         test_file = Path(tmpdir) / "test_sql_module.py"
-        test_file.write_text('query = "--sql SELECT 1::INTEGER"')
+        test_file.write_text('query = """--sql\nSELECT 1::INTEGER\n"""')
 
         # Add to path
         sys.path.insert(0, tmpdir)
@@ -175,7 +181,7 @@ def test_decode_function():
     from sqlty._decode import decode
 
     # Test transforming a simple --sql string
-    code = b'q = "--sql SELECT 1::INTEGER"'
+    code = b'q = """--sql\nSELECT 1::INTEGER\n"""'
     result, length = decode(code)
 
     # The result should contain the SQL[...] transformation
@@ -201,9 +207,13 @@ def test_decode_handles_multiple_strings():
     from sqlty._decode import decode
 
     code = b"""
-q1 = "--sql SELECT 1::INTEGER"
+q1 = \"\"\"--sql
+SELECT 1::INTEGER
+\"\"\"
 q2 = "Regular string"
-q3 = "--sql SELECT id::INTEGER, name::TEXT"
+q3 = \"\"\"--sql
+SELECT id::INTEGER, name::TEXT
+\"\"\"
 """
     result, length = decode(code)
 
