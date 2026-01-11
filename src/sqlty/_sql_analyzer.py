@@ -313,19 +313,31 @@ class SQLAnalyzer:
             case _:
                 return None
 
-    def generate_return_type(self, sql: str) -> str | None:
+    def generate_return_type(
+        self, sql: str, return_format: str = "tuple", class_name: str = "QueryRow"
+    ) -> str | None:
         """
         Generate a Python return type annotation for a SQL query.
 
-        For example:
-        - "SELECT id, name FROM users" -> "tuple[int, str]" (if types can be inferred)
-        - "SELECT id, name FROM users" -> "tuple[str, str]" (if types can't be inferred)
+        Args:
+            sql: SQL query string to analyze
+            return_format: Format for the return type - "tuple", "typeddict", "namedtuple", or "pydantic"
+            class_name: Name for the generated class (used for typeddict, namedtuple, pydantic)
+
+        Returns:
+            Type annotation string or None if columns can't be analyzed
+
+        Examples:
+            - tuple: "tuple[int, str]"
+            - typeddict: "UserQueryRow" (requires TypedDict class generation)
+            - namedtuple: "UserQueryRow" (requires namedtuple generation)
+            - pydantic: "UserQueryRow" (requires Pydantic model generation)
         """
         columns = self.analyze_select(sql)
         if not columns:
             return None
 
-        # Build tuple type
+        # Build list of types
         types: list[str] = []
         for col in columns:
             if col.python_type:
@@ -334,7 +346,85 @@ class SQLAnalyzer:
                 # Default to str if type can't be inferred
                 types.append("str")
 
-        if len(types) == 1:
-            return f"tuple[{types[0]}]"
+        # Generate return type based on format
+        if return_format == "tuple":
+            if len(types) == 1:
+                return f"tuple[{types[0]}]"
+            else:
+                return f"tuple[{', '.join(types)}]"
+        elif return_format == "typeddict":
+            # For TypedDict, return the class name
+            # The actual TypedDict definition needs to be generated separately
+            return class_name
+        elif return_format == "namedtuple":
+            # For namedtuple, return the class name
+            # The actual namedtuple definition needs to be generated separately
+            return class_name
+        elif return_format == "pydantic":
+            # For Pydantic, return the class name
+            # The actual Pydantic model definition needs to be generated separately
+            return class_name
         else:
-            return f"tuple[{', '.join(types)}]"
+            # Default to tuple for unknown formats
+            if len(types) == 1:
+                return f"tuple[{types[0]}]"
+            else:
+                return f"tuple[{', '.join(types)}]"
+
+    def generate_class_definition(
+        self, sql: str, return_format: str = "tuple", class_name: str = "QueryRow"
+    ) -> str | None:
+        """
+        Generate a class definition for non-tuple return formats.
+
+        Args:
+            sql: SQL query string to analyze
+            return_format: Format for the return type - "typeddict", "namedtuple", or "pydantic"
+            class_name: Name for the generated class
+
+        Returns:
+            Class definition string or None if columns can't be analyzed or format is "tuple"
+
+        Examples:
+            TypedDict:
+                class UserQueryRow(TypedDict):
+                    id: int
+                    name: str
+
+            namedtuple:
+                UserQueryRow = namedtuple('UserQueryRow', ['id', 'name'])
+
+            Pydantic:
+                class UserQueryRow(BaseModel):
+                    id: int
+                    name: str
+        """
+        if return_format == "tuple":
+            return None
+
+        columns = self.analyze_select(sql)
+        if not columns:
+            return None
+
+        if return_format == "typeddict":
+            # Generate TypedDict definition
+            lines = [f"class {class_name}(TypedDict):"]
+            for col in columns:
+                col_type = col.python_type if col.python_type else "str"
+                lines.append(f"    {col.name}: {col_type}")
+            return "\n".join(lines)
+
+        elif return_format == "namedtuple":
+            # Generate namedtuple definition
+            field_names = [col.name for col in columns]
+            return f"{class_name} = namedtuple('{class_name}', {field_names!r})"
+
+        elif return_format == "pydantic":
+            # Generate Pydantic model definition
+            lines = [f"class {class_name}(BaseModel):"]
+            for col in columns:
+                col_type = col.python_type if col.python_type else "str"
+                lines.append(f"    {col.name}: {col_type}")
+            return "\n".join(lines)
+
+        return None

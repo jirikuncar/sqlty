@@ -60,6 +60,7 @@ class SQLTyConfig(TypedDict, total=False):
     schemas: dict[str, str]  # registry_name -> schema_path
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
+    return_format: str  # Return format: "tuple" (default), "typeddict", "namedtuple", "pydantic"
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
@@ -131,6 +132,12 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
     # Allow hyphenated key in pyproject: format-command
     if "format-command" in tool_config:
         config["format_command"] = str(tool_config["format-command"])  # expects {filename}
+
+    # Parse return_format option (also supports hyphenated form)
+    if "return_format" in tool_config:
+        config["return_format"] = str(tool_config["return_format"])
+    elif "return-format" in tool_config:
+        config["return_format"] = str(tool_config["return-format"])
 
     # Parse function configurations
     if "functions" in tool_config and isinstance(tool_config["functions"], list):
@@ -206,6 +213,8 @@ def merge_config(config: SQLTyConfig, cli_args: dict[str, Any]) -> SQLTyConfig:
         merged["dialect"] = str(cli_args["dialect"])
     if cli_args.get("format_command") is not None:
         merged["format_command"] = str(cli_args["format_command"])  # expects {filename}
+    if cli_args.get("return_format") is not None:
+        merged["return_format"] = str(cli_args["return_format"])
 
     # For schemas, merge CLI schema mappings with config schemas
     if "schemas" in cli_args and cli_args["schemas"]:

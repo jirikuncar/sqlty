@@ -45,6 +45,7 @@ class TypeStubGenerator:
         format_command: str | None = None,
         verbose: int = 0,
         function_configs: list[FunctionConfigComplete] | None = None,
+        return_format: str = "tuple",
     ) -> None:
         self.function_name = "sql"  # Always use 'sql' as the method name
         self.sql_dialect = sql_dialect
@@ -60,6 +61,7 @@ class TypeStubGenerator:
         self._check_mode = False
         self._verbose = verbose
         self._function_configs = function_configs or []
+        self._return_format = return_format
 
         self._stub_merger = StubMerger(function_name=self.function_name)
         self._registry_detector = RegistryDetector(function_configs=self._function_configs)
@@ -546,7 +548,18 @@ class TypeStubGenerator:
             # Get the appropriate analyzer for this registry
             analyzer = self._get_analyzer_for_registry(registry_name, module_path, registry_class)
 
-            sql_type = analyzer.generate_return_type(literal)
+            # Generate a class name based on the query for non-tuple formats
+            class_name = "QueryRow"
+            if self._return_format != "tuple":
+                # Create a unique class name based on the query hash or line number
+                import hashlib
+
+                query_hash = hashlib.md5(literal.encode()).hexdigest()[:8]
+                class_name = f"QueryRow_{query_hash}"
+
+            sql_type = analyzer.generate_return_type(
+                literal, return_format=self._return_format, class_name=class_name
+            )
             if sql_type:
                 call["return_type"] = sql_type
             else:

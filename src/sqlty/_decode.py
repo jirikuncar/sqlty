@@ -50,11 +50,12 @@ utf_8_codec = encodings.search_function("utf8")
 assert utf_8_codec is not None, "UTF-8 codec not found"
 
 
-def _infer_sql_type(sql_query: str) -> str:
+def _infer_sql_type(sql_query: str, return_format: str = "tuple") -> str:
     """Infer the return type from a SQL query.
 
     Args:
         sql_query: The SQL query string (may include --sql prefix)
+        return_format: Format for the return type - "tuple", "typeddict", "namedtuple", or "pydantic"
 
     Returns:
         A string representation of the inferred type
@@ -69,7 +70,17 @@ def _infer_sql_type(sql_query: str) -> str:
     try:
         # Use the existing SQL analyzer to infer types
         analyzer = SQLAnalyzer()
-        inferred_type = analyzer.generate_return_type(query)
+        
+        # Generate a class name for non-tuple formats
+        class_name = "QueryRow"
+        if return_format != "tuple":
+            import hashlib
+            query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
+            class_name = f"QueryRow_{query_hash}"
+        
+        inferred_type = analyzer.generate_return_type(
+            query, return_format=return_format, class_name=class_name
+        )
         if inferred_type:
             return inferred_type
         return "Any"
@@ -78,11 +89,12 @@ def _infer_sql_type(sql_query: str) -> str:
         return "Any"
 
 
-def _transform_sql_string(string_literal: str) -> str:
+def _transform_sql_string(string_literal: str, return_format: str = "tuple") -> str:
     """Transform a --sql prefixed string into SQL[T](...) call.
 
     Args:
         string_literal: The complete string literal including quotes
+        return_format: Format for the return type - "tuple", "typeddict", "namedtuple", or "pydantic"
 
     Returns:
         The transformed string as a SQL[T](...) call
@@ -104,7 +116,7 @@ def _transform_sql_string(string_literal: str) -> str:
         return string_literal
 
     # Infer the type from the SQL query (use stripped content for inference)
-    inferred_type = _infer_sql_type(stripped_content)
+    inferred_type = _infer_sql_type(stripped_content, return_format=return_format)
 
     # Construct the SQL[T](...) call
     return f"SQL[{inferred_type}]({string_literal})"
@@ -125,6 +137,20 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
     # First decode as UTF-8
     u, length = utf_8_codec.decode(b, errors)  # type: ignore[union-attr]
 
+    # Try to load return_format from config
+    return_format = "tuple"  # Default
+    try:
+        from pathlib import Path
+        from sqlty._config import load_config
+        
+        # Try to load config from current directory
+        config, _ = load_config(Path.cwd())
+        if config:
+            return_format = config.get("return_format", "tuple")
+    except Exception:
+        # If we can't load config, use default
+        pass
+
     try:
         # Tokenize the source
         tokens = list(tokenize.generate_tokens(io.StringIO(u).readline))
@@ -135,6 +161,9 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         needs_uuid = False
         needs_sql = False
         has_sql_import = False
+        needs_typeddict = False
+        needs_namedtuple = False
+        needs_pydantic = False
 
         for tok in tokens:
             # Check if SQL is already imported
@@ -146,7 +175,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                 # Check if this is a --sql string
                 if "--sql" in tok.string:
                     # Transform the token
-                    new_string = _transform_sql_string(tok.string)
+                    new_string = _transform_sql_string(tok.string, return_format=return_format)
 
                     # Check if the transformation needs imports
                     if "datetime." in new_string:
@@ -155,6 +184,14 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                         needs_uuid = True
                     if "SQL[" in new_string:
                         needs_sql = True
+                    
+                    # Check for format-specific imports
+                    if return_format == "typeddict":
+                        needs_typeddict = True
+                    elif return_format == "namedtuple":
+                        needs_namedtuple = True
+                    elif return_format == "pydantic":
+                        needs_pydantic = True
 
                     # Create a new token with the transformed string
                     new_tok = tokenize.TokenInfo(tok.type, new_string, tok.start, tok.end, tok.line)
@@ -168,7 +205,14 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         result = tokenize.untokenize(new_tokens)
 
         # Add necessary imports using isort for proper placement
-        if needs_datetime or needs_uuid or (needs_sql and not has_sql_import):
+        if (
+            needs_datetime
+            or needs_uuid
+            or (needs_sql and not has_sql_import)
+            or needs_typeddict
+            or needs_namedtuple
+            or needs_pydantic
+        ):
             try:
                 from isort import code as isort_code  # type: ignore[import-not-found]
 
@@ -193,6 +237,17 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                     result = "from sqlty import SQL\n" + result
                     # Run through isort again to properly position it
                     result = isort_code(result, force_single_line=False, line_length=100)
+                
+                # Add format-specific imports
+                if needs_typeddict:
+                    result = "from typing import TypedDict\n" + result
+                    result = isort_code(result, force_single_line=False, line_length=100)
+                if needs_namedtuple:
+                    result = "from collections import namedtuple\n" + result
+                    result = isort_code(result, force_single_line=False, line_length=100)
+                if needs_pydantic:
+                    result = "from pydantic import BaseModel\n" + result
+                    result = isort_code(result, force_single_line=False, line_length=100)
             except ImportError:
                 # Fallback to simple prepending if isort is not available
                 imports = []
@@ -202,6 +257,12 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                     imports.append("import uuid")
                 if needs_sql and not has_sql_import:
                     imports.append("from sqlty import SQL")
+                if needs_typeddict:
+                    imports.append("from typing import TypedDict")
+                if needs_namedtuple:
+                    imports.append("from collections import namedtuple")
+                if needs_pydantic:
+                    imports.append("from pydantic import BaseModel")
                 if imports:
                     import_lines = "\n".join(imports) + "\n"
                     result = import_lines + result

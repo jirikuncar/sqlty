@@ -59,6 +59,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Shell command to format generated stubs. Use {filename} as placeholder for the output file path.",
     )
     parser.add_argument(
+        "--return-format",
+        type=str,
+        choices=["tuple", "typeddict", "namedtuple", "pydantic"],
+        help="Return type format for SQL queries. Default: tuple",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Check if stub files are up-to-date without modifying them. Exits with code 1 if differences found.",
@@ -82,6 +88,8 @@ def main(argv: list[str] | None = None) -> None:
         cli_config["dialect"] = args.dialect
     if args.format_command:
         cli_config["format_command"] = args.format_command
+    if args.return_format:
+        cli_config["return_format"] = args.return_format
 
     # Merge config with CLI args (CLI takes precedence)
     merged_config = merge_config(config, cli_config)
@@ -175,12 +183,16 @@ def main(argv: list[str] | None = None) -> None:
     # Get function configs from merged config
     function_configs = merged_config.get("functions", [])
 
+    # Get return_format from merged config (defaults to "tuple")
+    return_format = merged_config.get("return_format", "tuple")
+
     generator = TypeStubGenerator(
         sql_dialect=sql_dialect,
         schema_mappings=schema_mappings,
         format_command=format_command,
         verbose=args.verbose,
         function_configs=function_configs,
+        return_format=return_format,
     )
 
     try:
