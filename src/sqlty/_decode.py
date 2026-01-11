@@ -73,6 +73,41 @@ def _load_return_format(cwd_path: str) -> str:
     return "tuple"
 
 
+def _extract_return_format_from_coding(source: str) -> str | None:
+    """Extract return format from coding declaration.
+    
+    Parses coding declarations like:
+    - # coding: sqlty?return-format=typeddict
+    - # -*- coding: sqlty?return-format=namedtuple -*-
+    
+    Args:
+        source: The source code to parse
+    
+    Returns:
+        Return format if found in coding declaration, None otherwise
+    """
+    import re
+    
+    # Check first two lines for coding declaration
+    lines = source.split('\n', 2)[:2]
+    
+    for line in lines:
+        # Match coding declarations with query parameters
+        # Supports: # coding: sqlty?return-format=xxx
+        #           # -*- coding: sqlty?return-format=xxx -*-
+        match = re.search(r'coding[=:]\s*sqlty\?(.+?)(?:\s|$|-\*-)', line)
+        if match:
+            params_str = match.group(1)
+            # Parse query parameters
+            for param in params_str.split('&'):
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    if key in ('return-format', 'return_format'):
+                        return value.strip()
+    
+    return None
+
+
 def _infer_sql_type(sql_query: str, return_format: str = "tuple") -> str:
     """Infer the return type from a SQL query.
 
@@ -160,8 +195,14 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
     # First decode as UTF-8
     u, length = utf_8_codec.decode(b, errors)  # type: ignore[union-attr]
 
-    # Load return_format from config with caching
-    return_format = _load_return_format(str(Path.cwd()))
+    # Try to extract return format from coding declaration first
+    coding_format = _extract_return_format_from_coding(u)
+    
+    # Use coding declaration format if specified, otherwise load from config
+    if coding_format:
+        return_format = coding_format
+    else:
+        return_format = _load_return_format(str(Path.cwd()))
 
     # Track which imports are needed
     class ImportFlags:
