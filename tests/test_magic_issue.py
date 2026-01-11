@@ -24,7 +24,7 @@ def test_issue_example():
     # Test with explicit cast (recommended)
     test_code_with_cast = b'q = "--sql SELECT 1::INTEGER"'
 
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
     result, _ = decode(test_code_with_cast)
 
@@ -45,7 +45,7 @@ def test_issue_example_without_cast():
     """
     test_code = b'q = "--sql SELECT 1"'
 
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
     result, _ = decode(test_code)
 
@@ -57,10 +57,10 @@ def test_issue_example_without_cast():
 def test_complete_example_from_issue():
     """Test a complete file based on the issue example."""
     # No encoding declaration needed - magic codec overrides UTF-8
-    test_code = '''from sqlty import magic
+    test_code = """from sqlty import magic
 
 q = "--sql SELECT 1::INTEGER"
-'''
+"""
 
     # Write to temp file and decode
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -68,7 +68,7 @@ q = "--sql SELECT 1::INTEGER"
         test_file.write_text(test_code)
 
         # Read and decode
-        from sqlty.magic import decode
+        from sqlty._decode import decode
 
         with open(test_file, "rb") as f:
             content = f.read()
@@ -82,7 +82,7 @@ q = "--sql SELECT 1::INTEGER"
 
 def test_demonstration():
     """Demonstrate various SQL transformations."""
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
     examples = [
         (b'q = "--sql SELECT 1::INTEGER"', "SQL[tuple[int]]"),

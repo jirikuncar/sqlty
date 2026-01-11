@@ -1,9 +1,4 @@
-# /// script
-# requires-python = ">=3.14"
-# dependencies = [
-#     "sqlty",
-# ]
-# ///
+# coding: sqlty
 """
 Example demonstrating the magic codec for --sql prefix strings.
 
@@ -24,7 +19,9 @@ Note: No encoding declaration change is needed. The magic codec overrides
 UTF-8, so files can continue using # coding: utf-8 or no declaration.
 """
 
-from sqlty import SQL, magic  # pyright: ignore[reportUnusedImport] # noqa: F401
+import datetime
+
+from sqlty import SQL
 
 # These strings will be automatically transformed by the codec
 
@@ -37,7 +34,7 @@ query2 = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 # After transformation: query2 = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
 
 # Complex query
-query3 = """--sql
+query3: SQL[tuple[int, str, datetime.datetime]] = """--sql
 SELECT
     id::INTEGER,
     email::TEXT,
@@ -51,9 +48,9 @@ WHERE active = true
 def main() -> None:
     """Demonstrate the transformed queries."""
     print("Magic codec example")
-    print(f"Query 1: {query1}", type(query1))
-    print(f"Query 2: {query2}", type(query2))
-    print(f"Query 3: {query3}", type(query3))
+    print(f"Query 1: {query1}", type(query1), repr(query1))
+    print(f"Query 2: {query2}", type(query2), repr(query2))
+    print(f"Query 3: {query3}", type(query3), repr(query3))
 
 
 if __name__ == "__main__":

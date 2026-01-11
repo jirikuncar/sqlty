@@ -59,10 +59,10 @@ def test_codec_adds_multiple_imports():
 
     codec_info = codecs.lookup("sqlty")
 
-    test_bytes = b'''
+    test_bytes = b"""
 q1 = "--sql SELECT created_at::TIMESTAMP"
 q2 = "--sql SELECT user_id::UUID"
-'''
+"""
     result, _ = codec_info.decode(test_bytes)
 
     # Should have both imports
@@ -91,11 +91,11 @@ def test_magic_codec_integration():
     """Test the full codec integration with a real Python file."""
     # Create a test Python file that uses the magic codec
     # No encoding declaration needed - magic codec overrides UTF-8
-    test_code = '''from sqlty import magic
+    test_code = """from sqlty import magic
 
 # This should be transformed by the codec
 q = "--sql SELECT 1::INTEGER"
-'''
+"""
 
     # Write the test file to a temporary location
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -109,7 +109,7 @@ q = "--sql SELECT 1::INTEGER"
                 content = f.read()
 
             # Use the decode function to transform it
-            from sqlty.magic import decode
+            from sqlty._decode import decode
 
             decoded, _ = decode(content)
 
@@ -128,7 +128,7 @@ def test_magic_module_can_be_imported():
     # The codec is registered. Due to Python's codec caching,
     # it works for files imported AFTER magic is imported.
     # Test that the decode function works directly
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
     test_bytes = b'q = "--sql SELECT 1::INTEGER"'
     result, _ = decode(test_bytes)
@@ -155,6 +155,7 @@ def test_codec_works_for_subsequently_imported_files():
         try:
             # Import the module - it should use our codec
             import importlib.util
+
             spec = importlib.util.spec_from_file_location("test_sql_module", test_file)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
@@ -163,7 +164,7 @@ def test_codec_works_for_subsequently_imported_files():
                 # Due to codec caching, this won't be transformed
                 # unless we find a way to force cache invalidation
                 # For now, we document that the magic codec requires
-                # being imported in a sitecustomize.py or similar
+                # being imported very early (via sqlty_magic.pth or similar)
         finally:
             if tmpdir in sys.path:
                 sys.path.remove(tmpdir)
@@ -171,7 +172,7 @@ def test_codec_works_for_subsequently_imported_files():
 
 def test_decode_function():
     """Test the decode function directly."""
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
     # Test transforming a simple --sql string
     code = b'q = "--sql SELECT 1::INTEGER"'
@@ -184,7 +185,7 @@ def test_decode_function():
 
 def test_decode_preserves_non_sql_strings():
     """Test that non-SQL strings are not transformed."""
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
     code = b'q = "Hello, World!"'
     result, length = decode(code)
@@ -197,13 +198,13 @@ def test_decode_preserves_non_sql_strings():
 
 def test_decode_handles_multiple_strings():
     """Test that multiple strings are handled correctly."""
-    from sqlty.magic import decode
+    from sqlty._decode import decode
 
-    code = b'''
+    code = b"""
 q1 = "--sql SELECT 1::INTEGER"
 q2 = "Regular string"
 q3 = "--sql SELECT id::INTEGER, name::TEXT"
-'''
+"""
     result, length = decode(code)
 
     # q1 should be transformed

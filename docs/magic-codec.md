@@ -22,28 +22,40 @@ q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
 
 ## Installation for Global Use
 
-Due to Python's codec caching, the magic codec requires setup via `sitecustomize.py`:
+When you install sqlty via pip or uv, a `sqlty_magic.pth` file is automatically installed in your site-packages directory. This file enables the magic codec globally by importing `sqlty.magic` on Python startup.
 
-### Automatic Setup
+### Automatic Installation
 
 ```bash
-python -m sqlty._magic_setup install
+pip install sqlty
+# or
+uv add sqlty
 ```
 
-This creates a `sitecustomize.py` file in your Python's site-packages that automatically enables the codec on startup.
+The `sqlty_magic.pth` file is automatically placed in your site-packages, enabling the codec for all Python sessions.
 
-### Manual Setup
+### Disabling the Magic Codec
 
-Create `sitecustomize.py` in your site-packages directory:
+If you want to disable automatic codec registration, set the `SQLTY_NO_MAGIC` environment variable:
+
+```bash
+export SQLTY_NO_MAGIC=1
+```
+
+Or in Python code before importing anything:
 
 ```python
-# sitecustomize.py
-import sqlty.magic
+import os
+os.environ['SQLTY_NO_MAGIC'] = '1'
 ```
 
-Find your site-packages:
+### Verify Installation
+
+Check if the `.pth` file is installed:
+
 ```bash
-python -c "import site; print(site.getsitepackages())"
+python -c "import site; print([p for p in site.getsitepackages()])"
+# Look for sqlty_magic.pth in the site-packages directory
 ```
 
 ## Usage
@@ -91,51 +103,84 @@ result, _ = codec.decode(code)
 
 This allows testing the codec transformation without affecting UTF-8 globally.
 
-## Direct Usage (Without Global Setup)
+## Direct Usage (Without Codec Registration)
 
-Use the `decode()` function to transform source code directly:
+For programmatic transformation without codec registration, import from `sqlty._decode`:
 
 ```python
-from sqlty.magic import decode
+from sqlty._decode import decode  # No codec registration!
 
 code = b'q = "--sql SELECT 1::INTEGER"'
 transformed, _ = decode(code)
-# transformed: 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+# transformed: 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+```
+
+Or use the CLI tool:
+
+```bash
+python -m sqlty.magic input.py > output.py
 ```
 
 ## Implementation Details
 
 ### Files
 
-- **src/sqlty/magic.py**: Core codec implementation with decode function and type inference
-- **src/sqlty/_magic_setup.py**: Helper script for installing/uninstalling sitecustomize.py
-- **tests/test_magic*.py**: Comprehensive test suite (19 tests)
+- **src/sqlty/_decode.py**: Core decode logic without codec registration
+- **src/sqlty/magic.py**: Codec registration and setup
+- **sqlty_magic.pth**: Auto-installed file that enables codec on Python startup
+- **tests/test_magic*.py**: Comprehensive test suite (30 tests)
 - **examples/magic_codec/**: Example code and documentation
 
 ### How It Works
 
-1. **Codec Registration**: The magic module registers a codec search function
-2. **Source Transformation**: When Python decodes a file, the codec detects `--sql` strings  
-3. **Type Inference**: Uses SQLAnalyzer to infer return types from SQL queries
-4. **Transformation**: Wraps strings in `SQL[T](...)` where `T` is the inferred type
+1. **Installation**: When you `pip install sqlty`, the `sqlty_magic.pth` file is placed in site-packages
+2. **Startup**: Python reads `.pth` files on startup and executes `import sqlty.magic`
+3. **Registration**: The magic module registers a codec search function (unless `SQLTY_NO_MAGIC=1`)
+4. **Source Transformation**: When Python decodes files with `# coding: sqlty`, it uses the custom codec
+5. **Type Inference**: Uses SQLAnalyzer to infer return types from SQL queries
+6. **Transformation**: Wraps `--sql` strings in `SQL[T](...)` and adds necessary imports
 
-### Technical Limitations
+### Architecture
 
-- Python's codec registry caches lookups; built-in codecs (like UTF-8) are registered before user code runs
-- The codec must be registered very early (via sitecustomize.py) to work reliably
-- Cannot override UTF-8 after Python startup due to caching
-- Alternative: use `decode()` function directly for source transformation
-
-## Uninstallation
-
-```bash
-python -m sqlty._magic_setup uninstall
+```
+sqlty/_decode.py        - Pure decode logic (no side effects)
+       ↑
+       |
+sqlty/magic.py          - Codec registration + imports decode
+       ↑
+       |
+sqlty_magic.pth         - Auto-imported on Python startup
 ```
 
-## Status Check
+### Technical Notes
+
+- Python's codec registry caches lookups; the codec must be registered very early
+- The `.pth` file ensures registration happens before any other code runs
+- Use `SQLTY_NO_MAGIC=1` to disable if needed
+- Alternative: import from `sqlty._decode` for no-side-effects decode
+
+## Disabling or Uninstalling
+
+### Temporary Disable
 
 ```bash
-python -m sqlty._magic_setup status
+export SQLTY_NO_MAGIC=1
+python your_script.py
+```
+
+### Permanent Disable
+
+Remove the `.pth` file from your site-packages:
+
+```bash
+python -c "import site; print(site.getsitepackages())"
+# Then manually delete sqlty_magic.pth from that directory
+```
+
+Or uninstall sqlty:
+
+```bash
+pip uninstall sqlty
 ```
 
 ## Examples

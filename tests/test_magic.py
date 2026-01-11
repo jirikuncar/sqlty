@@ -1,6 +1,6 @@
 """Tests for the magic module and --sql string prefix transformation."""
 
-from sqlty.magic import _infer_sql_type, _transform_sql_string
+from sqlty._decode import _infer_sql_type, _transform_sql_string
 
 
 class TestInferSQLType:

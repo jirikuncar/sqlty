@@ -34,6 +34,7 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-ast
+        exclude: ^examples/magic_codec/
       - id: check-yaml
       - id: check-toml
       - id: check-json

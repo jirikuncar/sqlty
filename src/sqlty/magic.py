@@ -1,25 +1,49 @@
-"""Custom codec for --sql string prefix transformation.
+"""Magic codec for automatic --sql string transformation via Python's codec system.
 
-This module provides utilities to transform string literals prefixed with '--sql'
-into SQL[T](...) calls with type inference.
+This module registers a custom Python codec that enables automatic transformation
+of strings prefixed with '--sql' into SQL[T](...) calls with type inference.
 
-Due to Python's codec caching, automatic transformation requires setup via
-sitecustomize.py or similar mechanism. See docs/magic-codec.md for details.
+IMPORTANT: Importing this module automatically registers the codec (unless
+SQLTY_NO_MAGIC environment variable is set). If you only need the decode function
+without codec registration, use 'sqlty._decode' instead.
 
-Direct Usage:
-    from sqlty.magic import decode
+Automatic Registration (Default):
+    import sqlty.magic  # Registers codec immediately
+
+    # Now use # coding: sqlty in files
+    # coding: sqlty
+    q = "--sql SELECT 1::INTEGER"
+    # Python automatically transforms to: SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+
+Disable Auto-Registration:
+    import os
+    os.environ['SQLTY_NO_MAGIC'] = '1'
+    import sqlty.magic  # Won't register codec
+
+    # Or import decode directly without registration:
+    from sqlty._decode import decode
+
+Direct Decode Usage:
+    from sqlty._decode import decode  # No side effects
 
     code = b'q = "--sql SELECT 1::INTEGER"'
     transformed, _ = decode(code)
-    # transformed: 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
 
-For Automatic Transformation:
-    Create sitecustomize.py in your site-packages:
-        import sqlty.magic
+CLI Tool:
+    python -m sqlty.magic <filename>
+    # Transforms a file and outputs the result
 
-    Then in your code (no encoding declaration needed):
-        q = "--sql SELECT 1::INTEGER"
-        # Automatically transforms to: SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+For Global Setup:
+    When you install sqlty, a 'sqlty_magic.pth' file is automatically added to your
+    site-packages directory. This file imports sqlty.magic on Python startup, enabling
+    the codec globally.
+
+    To disable this behavior, set SQLTY_NO_MAGIC=1 environment variable:
+        export SQLTY_NO_MAGIC=1
+
+    Then use '# coding: sqlty' in any file for automatic transformation.
+
+See docs/magic-codec.md for complete documentation.
 """
 
 from __future__ import annotations
@@ -27,11 +51,15 @@ from __future__ import annotations
 import codecs
 import encodings
 import io
-import token
-import tokenize
+import os
+import sys
 from typing import TYPE_CHECKING, Any
 
-from sqlty._sql_analyzer import SQLAnalyzer
+# Import decode from _decode module to avoid circular imports
+from sqlty._decode import decode
+
+# Re-export decode for backward compatibility
+__all__ = ["decode", "register"]
 
 if TYPE_CHECKING:
     from codecs import CodecInfo
@@ -39,153 +67,6 @@ if TYPE_CHECKING:
 # Get the standard UTF-8 codec
 utf_8_codec = encodings.search_function("utf8")
 assert utf_8_codec is not None, "UTF-8 codec not found"
-
-
-def _infer_sql_type(sql_query: str) -> str:
-    """Infer the return type from a SQL query.
-
-    Args:
-        sql_query: The SQL query string (may include --sql prefix)
-
-    Returns:
-        A string representation of the inferred type
-    """
-    # Remove the --sql prefix if present
-    query = sql_query
-    if query.startswith("--sql "):
-        query = query[6:].strip()
-    elif query.startswith("--sql"):
-        query = query[5:].strip()
-
-    try:
-        # Use the existing SQL analyzer to infer types
-        analyzer = SQLAnalyzer()
-        inferred_type = analyzer.generate_return_type(query)
-        if inferred_type:
-            return inferred_type
-        return "Any"
-    except Exception:
-        # If type inference fails, default to Any
-        return "Any"
-
-
-def _transform_sql_string(string_literal: str) -> str:
-    """Transform a --sql prefixed string into SQL[T](...) call.
-
-    Args:
-        string_literal: The complete string literal including quotes
-
-    Returns:
-        The transformed string as a SQL[T](...) call
-    """
-    # Parse the string literal to extract the actual content
-    # Handle both single and double quotes, and triple quotes
-
-    if string_literal.startswith('"""') or string_literal.startswith("'''"):
-        content = string_literal[3:-3]
-    elif string_literal.startswith('"') or string_literal.startswith("'"):
-        content = string_literal[1:-1]
-    else:
-        # Not a valid string literal
-        return string_literal
-
-    # Check if content starts with --sql
-    stripped_content = content.strip()
-    if not stripped_content.startswith("--sql"):
-        return string_literal
-
-    # Infer the type from the SQL query (use stripped content for inference)
-    inferred_type = _infer_sql_type(stripped_content)
-
-    # Construct the SQL[T](...) call
-    return f"SQL[{inferred_type}]({string_literal})"
-
-
-def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
-    """Decode bytes into a string, transforming --sql prefixed strings.
-
-    This is the main entry point for the custom codec.
-
-    Args:
-        b: The bytes to decode
-        errors: Error handling scheme
-
-    Returns:
-        A tuple of (decoded_string, length)
-    """
-    # First decode as UTF-8
-    u, length = utf_8_codec.decode(b, errors)  # type: ignore[union-attr]
-
-    try:
-        # Tokenize the source
-        tokens = list(tokenize.generate_tokens(io.StringIO(u).readline))
-
-        # Track which tokens need transformation and which imports are needed
-        new_tokens = []
-        needs_datetime = False
-        needs_uuid = False
-
-        for tok in tokens:
-            if tok.type == token.STRING:
-                # Check if this is a --sql string
-                if "--sql" in tok.string:
-                    # Transform the token
-                    new_string = _transform_sql_string(tok.string)
-
-                    # Check if the transformation needs imports
-                    if "datetime." in new_string:
-                        needs_datetime = True
-                    if "uuid." in new_string:
-                        needs_uuid = True
-
-                    # Create a new token with the transformed string
-                    new_tok = tokenize.TokenInfo(
-                        tok.type, new_string, tok.start, tok.end, tok.line
-                    )
-                    new_tokens.append(new_tok)
-                else:
-                    new_tokens.append(tok)
-            else:
-                new_tokens.append(tok)
-
-        # Reconstruct the source from tokens
-        result = tokenize.untokenize(new_tokens)
-
-        # Add necessary imports using isort for proper placement
-        if needs_datetime or needs_uuid:
-            try:
-                from isort import code as isort_code
-
-                # Build the list of imports to add
-                add_imports = []
-                if needs_datetime:
-                    add_imports.append("datetime")
-                if needs_uuid:
-                    add_imports.append("uuid")
-
-                # Use isort to add imports in the correct location
-                result = isort_code(
-                    result,
-                    add_imports=add_imports,
-                    force_single_line=False,
-                    line_length=100,
-                )
-            except ImportError:
-                # Fallback to simple prepending if isort is not available
-                imports = []
-                if needs_datetime:
-                    imports.append("import datetime")
-                if needs_uuid:
-                    imports.append("import uuid")
-                if imports:
-                    import_lines = "\n".join(imports) + "\n"
-                    result = import_lines + result
-
-        return result, length
-
-    except Exception:
-        # If anything goes wrong, return the original
-        return u, length
 
 
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
@@ -281,13 +162,17 @@ def register() -> None:
     This attempts to override UTF-8 codec for automatic --sql string transformation.
 
     Note: Due to Python's codec caching (built-in codecs are registered before user
-    code runs), this only works when called very early, ideally from sitecustomize.py.
+    code runs), this only works when called very early during Python startup.
 
-    For reliable automatic transformation, create a sitecustomize.py file in your
-    site-packages directory containing:
-        import sqlty.magic
+    When you install sqlty, a 'sqlty_magic.pth' file is automatically added to your
+    site-packages directory, which imports this module on Python startup. This enables
+    the codec globally for all Python sessions.
 
-    Alternatively, use the decode() function directly to transform source code.
+    To disable automatic registration, set SQLTY_NO_MAGIC=1 environment variable
+    before starting Python.
+
+    Alternatively, use the decode() function from sqlty._decode directly to transform
+    source code without any codec registration.
     """
     import _codecs
 
@@ -305,5 +190,30 @@ def register() -> None:
 
 
 # Automatically register when the module is imported
-# This works best when imported from sitecustomize.py
-register()
+# Skip registration if SQLTY_NO_MAGIC environment variable is set
+if not os.environ.get("SQLTY_NO_MAGIC"):
+    register()
+
+
+def main(argv: list[str]) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Prints transformed source.")
+    parser.add_argument("filename")
+    args = parser.parse_args(argv)
+
+    with open(args.filename, "rb") as f:
+        text, _ = decode(f.read())
+
+    # Write to stdout buffer if available, otherwise stdout
+    stdout_buffer = getattr(sys.stdout, "buffer", None)
+    if stdout_buffer is not None:
+        stdout_buffer.write(text.encode("UTF-8"))
+    else:
+        sys.stdout.write(text)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

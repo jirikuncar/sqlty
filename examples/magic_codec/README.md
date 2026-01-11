@@ -51,4 +51,3 @@ python examples/magic_codec/demo.py
 - The `--sql` prefix remains in the string value
 - This is similar to how f-strings work in older Python versions using the `future-fstrings` package
 - The transformation happens during the decoding phase, so it works transparently with the Python import system
-
