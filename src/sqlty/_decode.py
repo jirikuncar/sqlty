@@ -40,6 +40,8 @@ import encodings
 import io
 import token
 import tokenize
+from functools import lru_cache
+from pathlib import Path
 
 from sqlty._sql_analyzer import SQLAnalyzer
 
@@ -48,6 +50,27 @@ __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
 # Get the standard UTF-8 codec
 utf_8_codec = encodings.search_function("utf8")
 assert utf_8_codec is not None, "UTF-8 codec not found"
+
+
+@lru_cache(maxsize=8)
+def _load_return_format(cwd_path: str) -> str:
+    """Load return_format from config with caching.
+    
+    Args:
+        cwd_path: Current working directory as a string (for hashability)
+    
+    Returns:
+        Return format string
+    """
+    try:
+        from sqlty._config import load_config
+        
+        config, _ = load_config(Path(cwd_path))
+        if config:
+            return config.get("return_format", "tuple")
+    except Exception:
+        pass
+    return "tuple"
 
 
 def _infer_sql_type(sql_query: str, return_format: str = "tuple") -> str:
@@ -137,39 +160,34 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
     # First decode as UTF-8
     u, length = utf_8_codec.decode(b, errors)  # type: ignore[union-attr]
 
-    # Try to load return_format from config
-    return_format = "tuple"  # Default
-    try:
-        from pathlib import Path
-        from sqlty._config import load_config
-        
-        # Try to load config from current directory
-        config, _ = load_config(Path.cwd())
-        if config:
-            return_format = config.get("return_format", "tuple")
-    except Exception:
-        # If we can't load config, use default
-        pass
+    # Load return_format from config with caching
+    return_format = _load_return_format(str(Path.cwd()))
+
+    # Track which imports are needed
+    class ImportFlags:
+        """Track which imports are needed."""
+        datetime: bool = False
+        uuid: bool = False
+        sql: bool = False
+        has_sql_import: bool = False
+        typeddict: bool = False
+        namedtuple: bool = False
+        pydantic: bool = False
+
+    flags = ImportFlags()
 
     try:
         # Tokenize the source
         tokens = list(tokenize.generate_tokens(io.StringIO(u).readline))
 
-        # Track which tokens need transformation and which imports are needed
+        # Track which tokens need transformation
         new_tokens = []
-        needs_datetime = False
-        needs_uuid = False
-        needs_sql = False
-        has_sql_import = False
-        needs_typeddict = False
-        needs_namedtuple = False
-        needs_pydantic = False
 
         for tok in tokens:
             # Check if SQL is already imported
             if tok.type == token.NAME and tok.string == "SQL":
                 # Look ahead to see if this is part of an import statement
-                has_sql_import = True
+                flags.has_sql_import = True
 
             if tok.type == token.STRING:
                 # Check if this is a --sql string
@@ -177,21 +195,24 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                     # Transform the token
                     new_string = _transform_sql_string(tok.string, return_format=return_format)
 
-                    # Check if the transformation needs imports
-                    if "datetime." in new_string:
-                        needs_datetime = True
-                    if "uuid." in new_string:
-                        needs_uuid = True
-                    if "SQL[" in new_string:
-                        needs_sql = True
+                    # Check if the transformation needs imports using match
+                    match return_format:
+                        case "typeddict":
+                            flags.typeddict = True
+                        case "namedtuple":
+                            flags.namedtuple = True
+                        case "pydantic":
+                            flags.pydantic = True
+                        case "tuple":
+                            pass  # No additional imports needed
                     
-                    # Check for format-specific imports
-                    if return_format == "typeddict":
-                        needs_typeddict = True
-                    elif return_format == "namedtuple":
-                        needs_namedtuple = True
-                    elif return_format == "pydantic":
-                        needs_pydantic = True
+                    # Check for type-specific imports
+                    if "datetime." in new_string:
+                        flags.datetime = True
+                    if "uuid." in new_string:
+                        flags.uuid = True
+                    if "SQL[" in new_string:
+                        flags.sql = True
 
                     # Create a new token with the transformed string
                     new_tok = tokenize.TokenInfo(tok.type, new_string, tok.start, tok.end, tok.line)
@@ -206,21 +227,21 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
 
         # Add necessary imports using isort for proper placement
         if (
-            needs_datetime
-            or needs_uuid
-            or (needs_sql and not has_sql_import)
-            or needs_typeddict
-            or needs_namedtuple
-            or needs_pydantic
+            flags.datetime
+            or flags.uuid
+            or (flags.sql and not flags.has_sql_import)
+            or flags.typeddict
+            or flags.namedtuple
+            or flags.pydantic
         ):
             try:
                 from isort import code as isort_code  # type: ignore[import-not-found]
 
                 # Build the list of imports to add
                 add_imports = []
-                if needs_datetime:
+                if flags.datetime:
                     add_imports.append("datetime")
-                if needs_uuid:
+                if flags.uuid:
                     add_imports.append("uuid")
 
                 # Use isort to add imports in the correct location
@@ -232,36 +253,36 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                 )
 
                 # Add SQL import separately since it's a from import
-                if needs_sql and not has_sql_import:
+                if flags.sql and not flags.has_sql_import:
                     # Add the SQL import at the beginning (isort will position it correctly)
                     result = "from sqlty import SQL\n" + result
                     # Run through isort again to properly position it
                     result = isort_code(result, force_single_line=False, line_length=100)
                 
                 # Add format-specific imports
-                if needs_typeddict:
+                if flags.typeddict:
                     result = "from typing import TypedDict\n" + result
                     result = isort_code(result, force_single_line=False, line_length=100)
-                if needs_namedtuple:
+                if flags.namedtuple:
                     result = "from collections import namedtuple\n" + result
                     result = isort_code(result, force_single_line=False, line_length=100)
-                if needs_pydantic:
+                if flags.pydantic:
                     result = "from pydantic import BaseModel\n" + result
                     result = isort_code(result, force_single_line=False, line_length=100)
             except ImportError:
                 # Fallback to simple prepending if isort is not available
                 imports = []
-                if needs_datetime:
+                if flags.datetime:
                     imports.append("import datetime")
-                if needs_uuid:
+                if flags.uuid:
                     imports.append("import uuid")
-                if needs_sql and not has_sql_import:
+                if flags.sql and not flags.has_sql_import:
                     imports.append("from sqlty import SQL")
-                if needs_typeddict:
+                if flags.typeddict:
                     imports.append("from typing import TypedDict")
-                if needs_namedtuple:
+                if flags.namedtuple:
                     imports.append("from collections import namedtuple")
-                if needs_pydantic:
+                if flags.pydantic:
                     imports.append("from pydantic import BaseModel")
                 if imports:
                     import_lines = "\n".join(imports) + "\n"

@@ -7,9 +7,9 @@ back to AST nodes and formatted Python code.
 import ast
 from collections import Counter
 from pathlib import Path
-from typing import Literal
+from typing import Literal, assert_never
 
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
+from ._stub_ir import ClassDefinition, ImportStatement, OverloadSignature, RegistryDecorator, StubFile
 
 
 class IRToASTSerializer:
@@ -194,7 +194,7 @@ class IRToASTSerializer:
             type_params=[type_param],
         )
 
-    def _serialize_class_definition(self, class_def: "ClassDefinition") -> ast.stmt | None:
+    def _serialize_class_definition(self, class_def: ClassDefinition) -> ast.stmt | None:
         """Serialize a class definition to an AST node.
 
         Args:
@@ -203,76 +203,77 @@ class IRToASTSerializer:
         Returns:
             AST ClassDef or Assign node
         """
-        from ._stub_ir import ClassDefinition
+        match class_def.format_type:
+            case "typeddict":
+                # Generate: class ClassName(TypedDict):
+                #               field1: type1
+                #               field2: type2
+                class_body: list[ast.stmt] = []
+                for field_name, field_type in sorted(class_def.fields.items()):
+                    # Create annotation: field_name: field_type
+                    ann_assign = ast.AnnAssign(
+                        target=ast.Name(id=field_name, ctx=ast.Store()),
+                        annotation=ast.Name(id=field_type, ctx=ast.Load()),
+                        simple=1,
+                    )
+                    class_body.append(ann_assign)
 
-        if class_def.format_type == "typeddict":
-            # Generate: class ClassName(TypedDict):
-            #               field1: type1
-            #               field2: type2
-            class_body: list[ast.stmt] = []
-            for field_name, field_type in sorted(class_def.fields.items()):
-                # Create annotation: field_name: field_type
-                ann_assign = ast.AnnAssign(
-                    target=ast.Name(id=field_name, ctx=ast.Store()),
-                    annotation=ast.Name(id=field_type, ctx=ast.Load()),
-                    simple=1,
-                )
-                class_body.append(ann_assign)
+                if not class_body:
+                    class_body.append(ast.Pass())
 
-            if not class_body:
-                class_body.append(ast.Pass())
-
-            return ast.ClassDef(
-                name=class_def.name,
-                bases=[ast.Name(id="TypedDict", ctx=ast.Load())],
-                keywords=[],
-                body=class_body,
-                decorator_list=[],
-            )
-
-        elif class_def.format_type == "namedtuple":
-            # Generate: ClassName = namedtuple('ClassName', ['field1', 'field2'])
-            field_names = list(class_def.fields.keys())
-            return ast.Assign(
-                targets=[ast.Name(id=class_def.name, ctx=ast.Store())],
-                value=ast.Call(
-                    func=ast.Name(id="namedtuple", ctx=ast.Load()),
-                    args=[
-                        ast.Constant(value=class_def.name),
-                        ast.List(
-                            elts=[ast.Constant(value=name) for name in field_names],
-                            ctx=ast.Load(),
-                        ),
-                    ],
+                return ast.ClassDef(
+                    name=class_def.name,
+                    bases=[ast.Name(id="TypedDict", ctx=ast.Load())],
                     keywords=[],
-                ),
-            )
-
-        elif class_def.format_type == "pydantic":
-            # Generate: class ClassName(BaseModel):
-            #               field1: type1
-            #               field2: type2
-            class_body: list[ast.stmt] = []
-            for field_name, field_type in sorted(class_def.fields.items()):
-                ann_assign = ast.AnnAssign(
-                    target=ast.Name(id=field_name, ctx=ast.Store()),
-                    annotation=ast.Name(id=field_type, ctx=ast.Load()),
-                    simple=1,
+                    body=class_body,
+                    decorator_list=[],
                 )
-                class_body.append(ann_assign)
 
-            if not class_body:
-                class_body.append(ast.Pass())
+            case "namedtuple":
+                # Generate: ClassName = namedtuple('ClassName', ['field1', 'field2'])
+                field_names = list(class_def.fields.keys())
+                return ast.Assign(
+                    targets=[ast.Name(id=class_def.name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Name(id="namedtuple", ctx=ast.Load()),
+                        args=[
+                            ast.Constant(value=class_def.name),
+                            ast.List(
+                                elts=[ast.Constant(value=name) for name in field_names],
+                                ctx=ast.Load(),
+                            ),
+                        ],
+                        keywords=[],
+                    ),
+                )
 
-            return ast.ClassDef(
-                name=class_def.name,
-                bases=[ast.Name(id="BaseModel", ctx=ast.Load())],
-                keywords=[],
-                body=class_body,
-                decorator_list=[],
-            )
+            case "pydantic":
+                # Generate: class ClassName(BaseModel):
+                #               field1: type1
+                #               field2: type2
+                class_body: list[ast.stmt] = []
+                for field_name, field_type in sorted(class_def.fields.items()):
+                    ann_assign = ast.AnnAssign(
+                        target=ast.Name(id=field_name, ctx=ast.Store()),
+                        annotation=ast.Name(id=field_type, ctx=ast.Load()),
+                        simple=1,
+                    )
+                    class_body.append(ann_assign)
 
-        return None
+                if not class_body:
+                    class_body.append(ast.Pass())
+
+                return ast.ClassDef(
+                    name=class_def.name,
+                    bases=[ast.Name(id="BaseModel", ctx=ast.Load())],
+                    keywords=[],
+                    body=class_body,
+                    decorator_list=[],
+                )
+
+            case _:
+                # This ensures all format types are handled
+                assert_never(class_def.format_type)
 
     def _serialize_function_overloads(self, registry: RegistryDecorator) -> list[ast.stmt]:
         """Serialize function overloads for @sqlty decorated functions.

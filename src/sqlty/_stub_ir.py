@@ -14,6 +14,7 @@ import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass
@@ -28,7 +29,7 @@ class ClassDefinition:
     """
 
     name: str
-    format_type: str  # "typeddict", "namedtuple", or "pydantic"
+    format_type: Literal["typeddict", "namedtuple", "pydantic"]
     fields: dict[str, str] = field(default_factory=dict)
     source_query: str = ""
 

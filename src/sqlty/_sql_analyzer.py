@@ -3,9 +3,12 @@ SQL analysis utilities using sqlglot to extract column and type information.
 """
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple, assert_never
 
 from sqlglot import exp, parse_one
+
+# Type alias for return format options
+ReturnFormat = Literal["tuple", "typeddict", "namedtuple", "pydantic"]
 
 
 class ColumnInfo(NamedTuple):
@@ -314,7 +317,7 @@ class SQLAnalyzer:
                 return None
 
     def generate_return_type(
-        self, sql: str, return_format: str = "tuple", class_name: str = "QueryRow"
+        self, sql: str, return_format: ReturnFormat = "tuple", class_name: str = "QueryRow"
     ) -> str | None:
         """
         Generate a Python return type annotation for a SQL query.
@@ -347,32 +350,21 @@ class SQLAnalyzer:
                 types.append("str")
 
         # Generate return type based on format
-        if return_format == "tuple":
-            if len(types) == 1:
-                return f"tuple[{types[0]}]"
-            else:
-                return f"tuple[{', '.join(types)}]"
-        elif return_format == "typeddict":
-            # For TypedDict, return the class name
-            # The actual TypedDict definition needs to be generated separately
-            return class_name
-        elif return_format == "namedtuple":
-            # For namedtuple, return the class name
-            # The actual namedtuple definition needs to be generated separately
-            return class_name
-        elif return_format == "pydantic":
-            # For Pydantic, return the class name
-            # The actual Pydantic model definition needs to be generated separately
-            return class_name
-        else:
-            # Default to tuple for unknown formats
-            if len(types) == 1:
-                return f"tuple[{types[0]}]"
-            else:
-                return f"tuple[{', '.join(types)}]"
+        match return_format:
+            case "tuple":
+                if len(types) == 1:
+                    return f"tuple[{types[0]}]"
+                else:
+                    return f"tuple[{', '.join(types)}]"
+            case "typeddict" | "namedtuple" | "pydantic":
+                # For TypedDict, namedtuple, and Pydantic, return the class name
+                # The actual class definition needs to be generated separately
+                return class_name
+            case _:
+                assert_never(return_format)
 
     def generate_class_definition(
-        self, sql: str, return_format: str = "tuple", class_name: str = "QueryRow"
+        self, sql: str, return_format: ReturnFormat = "tuple", class_name: str = "QueryRow"
     ) -> str | None:
         """
         Generate a class definition for non-tuple return formats.

@@ -2,7 +2,10 @@
 
 import logging
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
+
+# Type alias for return format options
+ReturnFormat = Literal["tuple", "typeddict", "namedtuple", "pydantic"]
 
 
 class FunctionConfig(TypedDict, total=False):
@@ -60,7 +63,7 @@ class SQLTyConfig(TypedDict, total=False):
     schemas: dict[str, str]  # registry_name -> schema_path
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
-    return_format: str  # Return format: "tuple" (default), "typeddict", "namedtuple", "pydantic"
+    return_format: ReturnFormat  # Return format: "tuple" (default), "typeddict", "namedtuple", "pydantic"
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
