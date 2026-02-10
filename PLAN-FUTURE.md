@@ -1,7 +1,29 @@
 # Future: Stub Generation, Protocol Support, Rust Core
 
 > **Status:** Deferred. These features are not part of the current implementation plan.
-> See `PLAN.md` for the active work (mdtest framework, TypeCodec, rewriter/strip, CLI, CI).
+> See `PLAN.md` for the active work (mdtest framework, TypeCodec, rewriter/strip, check/lint CLI, CI).
+
+---
+
+## Registries Command
+
+### What it does
+
+Discover and list all `@sqlty`-decorated functions (registries) across the project. Equivalent to the current `python -m sqlty.registries`.
+
+### CLI command (deferred)
+
+```
+sqlty registries .      # List discovered registries
+```
+
+| Command | What it does | Analogy |
+|---------|-------------|---------|
+| `sqlty registries .` | List discovered registries | `ruff rule` |
+
+### Dependencies
+
+Depends on the `_collector.py` module (`LiteralCallCollector`) which is part of the stub generation pipeline.
 
 ---
 

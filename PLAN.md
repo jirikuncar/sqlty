@@ -27,7 +27,6 @@ Commands:
   rewrite     Rewrite source files in-place: "--sql ..." → SQL[T]("--sql ...")
   strip       Strip all SQL[T](...) wrappers back to plain strings
   check       Lint: validate type annotations, check rewrites are up-to-date
-  registries  Discover and list registered @sqlty functions
   version     Print version
 
 Global options:
@@ -50,9 +49,8 @@ Global options:
 | `sqlty strip --check .` | Exit 1 if files contain SQL[T] wrappers | — |
 | `sqlty check .` | Run all lint rules (type match, star expansion, rewrite freshness) | `ruff check` |
 | `sqlty check --fix .` | Auto-fix what's fixable (expand stars, update type annotations) | `ruff check --fix` |
-| `sqlty registries .` | List discovered registries (current `python -m sqlty.registries`) | `ruff rule` |
 
-> **Note:** `generate` (stub generation) and `clean` commands are deferred — see `PLAN-FUTURE.md`.
+> **Note:** `generate` (stub generation), `clean`, and `registries` commands are deferred — see `PLAN-FUTURE.md`.
 
 ---
 
@@ -2859,7 +2857,7 @@ AST-level source transformation — finds SQL strings, calls Layer 1, produces t
 
 ### Layer 3: CLI (Python, thin)
 
-ruff-style subcommand router: `rewrite`, `strip`, `check`, `registries`.
+ruff-style subcommand router: `rewrite`, `strip`, `check`.
 
 ---
 
@@ -2954,7 +2952,7 @@ New assertion types:
 
 ### Phase 3: ruff-style CLI with check/lint
 
-**Rewrite `src/sqlty/_cli.py`** as subcommand router with `rewrite`, `strip`, `check`, `registries`.
+**Rewrite `src/sqlty/_cli.py`** as subcommand router with `rewrite`, `strip`, `check`.
 
 **Create `src/sqlty/_checker.py`** (~200 lines):
 - Type annotation resolver — AST-based, finds TypedDict/NamedTuple/dataclass definitions
@@ -3241,7 +3239,7 @@ jobs:
 ## Key Design Decisions
 
 1. **mdtest-first development** — write the markdown test before writing the code. Tests double as specification and documentation.
-2. **ruff-style subcommands** — `rewrite`, `strip`, `check`, `registries` (stub generation deferred).
+2. **ruff-style subcommands** — `rewrite`, `strip`, `check` (stub generation, registries deferred).
 3. **`strip` as first-class command** — `sqlty strip .` undoes all `SQL[T]` wrappers in one command.
 4. **`check` validates user annotations** — `SQL[User](...)` is checked against the resolved type's fields. Never overwrite user-provided types.
 5. **Star expansion** — `SELECT *` expands to explicit column list from schema. `SQT010` lint rule to disallow `*`.
