@@ -26,13 +26,15 @@ sqlty <COMMAND> [OPTIONS] [PATH...]
 Commands:
   rewrite     Rewrite source files in-place: "--sql ..." → SQL[T]("--sql ...")
   strip       Strip all SQL[T](...) wrappers back to plain strings
-  check       Check if rewritten files are up-to-date without modifying
+  check       Lint: validate type annotations, check rewrites are up-to-date
   registries  Discover and list registered @sqlty functions
   version     Print version
 
 Global options:
   --config <PATH>         Path to pyproject.toml or sqlty.toml
   --dialect <DIALECT>     SQL dialect (postgres, sqlite, mysql)
+  --select <RULES>        Comma-separated lint rules to enable
+  --ignore <RULES>        Comma-separated lint rules to disable
   -v, --verbose           Increase verbosity
   -q, --quiet             Suppress output
 ```
@@ -46,7 +48,8 @@ Global options:
 | `sqlty rewrite --diff .` | Show diff without applying | `ruff format --diff` |
 | `sqlty strip .` | Reverse of rewrite: `SQL[T]("--sql ...")` → `"--sql ..."` | (no ruff analogy — unique to sqlty) |
 | `sqlty strip --check .` | Exit 1 if files contain SQL[T] wrappers | — |
-| `sqlty check .` | Shorthand for `rewrite --check` | `ruff check` |
+| `sqlty check .` | Run all lint rules (type match, star expansion, rewrite freshness) | `ruff check` |
+| `sqlty check --fix .` | Auto-fix what's fixable (expand stars, update type annotations) | `ruff check --fix` |
 | `sqlty registries .` | List discovered registries (current `python -m sqlty.registries`) | `ruff rule` |
 
 > **Note:** `generate` (stub generation) and `clean` commands are deferred — see `PLAN-FUTURE.md`.
@@ -254,7 +257,12 @@ tests/mdtest/
 │   ├── json_typing.md                  # JSON/JSONB typing with json_build_object
 │   ├── type_coverage.md                # 100% SQL→Python type mapping matrix
 │   ├── aggregates.md                   # Aggregate functions with schema-aware SUM
-│   └── advanced.md                     # LATERAL, window functions, set operations
+│   ├── advanced.md                     # LATERAL, window functions, set operations
+│   └── star_expansion.md              # SELECT */RETURNING * with schema expansion
+├── check/
+│   ├── type_annotation.md             # SQL[User](...) validation against project types
+│   ├── star_expansion.md              # SELECT * expansion with schema
+│   └── lint_rules.md                  # Rule configuration (SQT001-SQT021)
 ├── rewrite/
 │   ├── basic_rewrite.md                # "--sql ..." → SQL[T](...)
 │   ├── multiline_queries.md            # Triple-quoted strings
@@ -2210,6 +2218,572 @@ ORDER BY dt.day
 
 ---
 
+## User-Annotated Type Checking
+
+When a user manually annotates an SQL string with a project-defined type, sqlty should validate that the annotation matches the query's actual column structure.
+
+### The problem
+
+```python
+from myapp.models import User
+
+# User manually writes this — but does User match the query?
+q = SQL[User]("--sql SELECT id, name, email FROM users")
+```
+
+If `User` is a `TypedDict`, `NamedTuple`, dataclass, or Protocol defined in the project, sqlty should verify that the SQL columns match the type's fields — both in count and in types (when schema is available).
+
+### How it works
+
+1. **Parse** the SQL query to extract column names and types (via `SQLAnalyzer`)
+2. **Resolve** the annotated type `User` from the project AST (find its definition)
+3. **Extract** the type's fields (name → Python type mapping)
+4. **Compare** SQL columns against type fields
+5. **Report** mismatches as lint errors
+
+### Supported annotation types
+
+| Python Type | How fields are extracted |
+|-------------|------------------------|
+| `TypedDict` | Class body with annotated fields |
+| `NamedTuple` | Class body or `NamedTuple('Name', [...])` |
+| `dataclass` | `@dataclass` class with annotated fields |
+| `Protocol` | Class with annotated attributes/properties |
+| `tuple[T1, T2, ...]` | Positional types (current default) |
+
+### Examples
+
+```python
+from typing import TypedDict
+
+class User(TypedDict):
+    id: int
+    name: str
+    email: str
+
+# VALID: query columns match User fields (count + types with schema)
+q1 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+
+# ERROR: SQT001 — column count mismatch (3 fields in User, 2 columns in query)
+q2 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+
+# ERROR: SQT002 — column type mismatch (User.id is int, but FLOAT inferred)
+q3 = SQL[User]("--sql SELECT id::FLOAT, name::TEXT, email::TEXT FROM users")
+
+# ERROR: SQT003 — column name mismatch (User has 'email', query has 'mail')
+q4 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT, mail::TEXT FROM users")
+```
+
+### Type resolution strategy
+
+The checker resolves types **statically** from the project AST — no runtime imports:
+
+1. Parse the annotation from the `SQL[...]` subscript
+2. Trace the import to find the source module
+3. Parse the source module's AST to extract the type definition
+4. Match field names and types against the SQL column list
+
+This works without running the code, similar to how mypy resolves types.
+
+### Interaction with rewrite
+
+When the user writes a plain `--sql` string, `sqlty rewrite` infers `tuple[T1, T2, ...]` by default. But if the user has already annotated `SQL[User](...)`, `sqlty check` validates the annotation instead of replacing it.
+
+`sqlty rewrite` **never overwrites** a user-provided type annotation. It only adds `SQL[tuple[...]]` to unannotated strings.
+
+---
+
+## Star Expansion and Lint Rules
+
+### SELECT * expansion
+
+`SELECT *` is a code smell in typed SQL — it hides which columns are returned and makes type inference impossible without a schema. With a schema available, sqlty can expand `*` to the explicit column list.
+
+### How it works
+
+```python
+# Before (with schema defining users: id INTEGER, name TEXT, email VARCHAR)
+q = "--sql SELECT * FROM users"
+
+# After `sqlty rewrite .` (or `sqlty check --fix .`)
+q = SQL[tuple[int, str, str]]("--sql SELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
+```
+
+The expansion:
+1. Finds `SELECT *` in the SQL AST (via sqlglot `exp.Star`)
+2. Looks up the table in the loaded schema
+3. Replaces `*` with the explicit column list, each cast to its schema type
+4. The rewriter then wraps with the correct `SQL[tuple[...]]`
+
+For multi-table queries with `*`:
+```sql
+-- SELECT * with JOIN expands to all columns from both tables
+SELECT * FROM users u JOIN orders o ON u.id = o.user_id
+-- Expands to:
+SELECT u.id::INTEGER, u.name::TEXT, u.email::VARCHAR,
+       o.id::INTEGER, o.user_id::INTEGER, o.total::FLOAT
+FROM users u JOIN orders o ON u.id = o.user_id
+```
+
+Table-qualified stars expand to that table's columns only:
+```sql
+SELECT u.*, o.total::FLOAT FROM users u JOIN orders o ON u.id = o.user_id
+-- Expands to:
+SELECT u.id::INTEGER, u.name::TEXT, u.email::VARCHAR, o.total::FLOAT
+FROM users u JOIN orders o ON u.id = o.user_id
+```
+
+### Lint rules
+
+Configurable rules following ruff's `--select` / `--ignore` pattern:
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+
+[tool.sqlty.lint]
+select = ["SQT"]          # Enable all sqlty rules (default)
+ignore = []               # None ignored by default
+```
+
+| Rule | Name | Default | Fixable | Description |
+|------|------|---------|---------|-------------|
+| `SQT001` | column-count-mismatch | error | no | Annotated type has different number of fields than query columns |
+| `SQT002` | column-type-mismatch | error | no | Annotated type field has incompatible type with query column |
+| `SQT003` | column-name-mismatch | warn | no | Annotated type field name doesn't match query column alias |
+| `SQT010` | select-star | warn | yes | `SELECT *` used — expand to explicit column list |
+| `SQT011` | select-star-no-schema | error | no | `SELECT *` used but no schema available to expand |
+| `SQT020` | stale-rewrite | warn | yes | Source has `--sql` strings that aren't wrapped in `SQL[T]` |
+| `SQT021` | stale-type | warn | yes | `SQL[tuple[...]]` type doesn't match current schema (drift) |
+
+### Configuration examples
+
+```toml
+# Strict mode: no stars allowed, all type checks enforced
+[tool.sqlty.lint]
+select = ["SQT"]
+
+# Lenient: allow stars, only check explicit annotations
+[tool.sqlty.lint]
+select = ["SQT001", "SQT002", "SQT020"]
+ignore = ["SQT010"]
+
+# Per-file overrides (like ruff)
+[[tool.sqlty.lint.per-file-ignores]]
+pattern = "tests/**"
+ignore = ["SQT010", "SQT011"]
+```
+
+### mdtest files for these features
+
+```
+tests/mdtest/
+├── check/
+│   ├── type_annotation.md            # SQL[User](...) validation
+│   ├── star_expansion.md             # SELECT * expansion with schema
+│   └── lint_rules.md                 # Rule configuration and error messages
+├── postgres/
+│   └── star_expansion.md             # PG-specific star expansion cases
+```
+
+### `tests/mdtest/check/type_annotation.md`
+
+```markdown
+# Type Annotation Checking
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+## TypedDict matches query — valid
+
+​```python
+from typing import TypedDict
+
+class User(TypedDict):
+    id: int
+    name: str
+
+q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# check: ok
+​```
+
+## TypedDict field count mismatch
+
+​```python
+from typing import TypedDict
+
+class User(TypedDict):
+    id: int
+    name: str
+    email: str
+
+q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# check: SQT001 — User has 3 fields but query returns 2 columns
+​```
+
+## TypedDict field type mismatch
+
+​```python
+from typing import TypedDict
+
+class User(TypedDict):
+    id: int
+    name: str
+
+q = SQL[User]("--sql SELECT id::FLOAT, name::TEXT FROM users")
+# check: SQT002 — User.id is int but query column 'id' infers float
+​```
+
+## TypedDict field name mismatch
+
+​```python
+from typing import TypedDict
+
+class User(TypedDict):
+    id: int
+    username: str
+
+q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# check: SQT003 — User.username doesn't match query column 'name'
+​```
+
+## NamedTuple matches query
+
+​```python
+from typing import NamedTuple
+
+class UserRow(NamedTuple):
+    id: int
+    name: str
+    email: str
+
+q = SQL[UserRow]("--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# check: ok
+​```
+
+## dataclass matches query
+
+​```python
+from dataclasses import dataclass
+
+@dataclass
+class UserRow:
+    id: int
+    name: str
+    created_at: datetime.datetime
+
+q = SQL[UserRow]("--sql SELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
+# check: ok
+​```
+
+## tuple annotation is not name-checked
+
+​```python
+q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# check: ok  (tuple has no field names — only count and types checked)
+​```
+
+## tuple annotation count mismatch
+
+​```python
+q = SQL[tuple[int, str, float]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# check: SQT001 — tuple has 3 elements but query returns 2 columns
+​```
+
+## Annotation imported from another module
+
+`models.py`:
+​```python
+from typing import TypedDict
+
+class Product(TypedDict):
+    id: int
+    name: str
+    price: float
+​```
+
+`app.py`:
+​```python
+from models import Product
+
+q = SQL[Product]("--sql SELECT id::INTEGER, name::TEXT, price::FLOAT FROM products")
+# check: ok
+​```
+```
+
+### `tests/mdtest/check/star_expansion.md`
+
+```markdown
+# SELECT * Expansion
+
+## Star expands to schema columns
+
+`schema.sql`:
+​```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email VARCHAR(255)
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+​```sql
+SELECT * FROM users
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+# expanded: SELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users
+​```
+
+## Star with no schema is an error
+
+​```sql
+SELECT * FROM users
+​```
+
+​```python
+# check: SQT011 — SELECT * used but no schema available
+​```
+
+## Table-qualified star
+
+`schema.sql`:
+​```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    total FLOAT NOT NULL
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+​```sql
+SELECT u.*, o.total::FLOAT FROM users u JOIN orders o ON u.id = o.user_id
+​```
+
+​```python
+# expanded: SELECT u.id::INTEGER, u.name::TEXT, o.total::FLOAT FROM users u JOIN orders o ON u.id = o.user_id
+# inferred: tuple[int, str, float]
+​```
+
+## Star in RETURNING clause
+
+`schema.sql`:
+​```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email VARCHAR(255)
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+​```sql
+INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com') RETURNING *
+​```
+
+​```python
+# expanded: INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com') RETURNING id::INTEGER, name::TEXT, email::VARCHAR
+# inferred: tuple[int, str, str]
+​```
+
+## Star expansion with lint rule disabled
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[sqlty.lint]
+ignore = ["SQT010"]
+​```
+
+​```sql
+SELECT * FROM users
+​```
+
+​```python
+# check: ok  (SQT010 disabled — star allowed, still infers types from schema)
+# inferred: tuple[int, str, str]
+​```
+```
+
+### `tests/mdtest/postgres/star_expansion.md`
+
+```markdown
+# PostgreSQL Star Expansion
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+`schema.sql`:
+​```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    active BOOLEAN DEFAULT true
+);
+
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    total FLOAT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    price FLOAT NOT NULL,
+    category TEXT,
+    metadata JSONB
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+## Simple star on single table
+
+​```sql
+SELECT * FROM users
+​```
+
+​```python
+# expanded: SELECT id::INTEGER, name::TEXT, email::VARCHAR, created_at::TIMESTAMP, active::BOOLEAN FROM users
+# inferred: tuple[int, str, str, datetime.datetime, bool]
+​```
+
+## Star with WHERE clause
+
+​```sql
+SELECT * FROM users WHERE active = true
+​```
+
+​```python
+# expanded: SELECT id::INTEGER, name::TEXT, email::VARCHAR, created_at::TIMESTAMP, active::BOOLEAN FROM users WHERE active = true
+# inferred: tuple[int, str, str, datetime.datetime, bool]
+​```
+
+## Star with JOIN
+
+​```sql
+SELECT * FROM users u JOIN orders o ON u.id = o.user_id
+​```
+
+​```python
+# expanded: SELECT u.id::INTEGER, u.name::TEXT, u.email::VARCHAR, u.created_at::TIMESTAMP, u.active::BOOLEAN, o.id::INTEGER, o.user_id::INTEGER, o.total::FLOAT, o.status::TEXT, o.created_at::TIMESTAMP FROM users u JOIN orders o ON u.id = o.user_id
+# inferred: tuple[int, str, str, datetime.datetime, bool, int, int, float, str, datetime.datetime]
+​```
+
+## Table-qualified star with explicit columns
+
+​```sql
+SELECT u.*, o.total::FLOAT, o.status::TEXT
+FROM users u
+JOIN orders o ON u.id = o.user_id
+​```
+
+​```python
+# expanded: SELECT u.id::INTEGER, u.name::TEXT, u.email::VARCHAR, u.created_at::TIMESTAMP, u.active::BOOLEAN, o.total::FLOAT, o.status::TEXT FROM users u JOIN orders o ON u.id = o.user_id
+# inferred: tuple[int, str, str, datetime.datetime, bool, float, str]
+​```
+
+## Star in CTE
+
+​```sql
+WITH active_users AS (
+    SELECT * FROM users WHERE active = true
+)
+SELECT id::INTEGER, name::TEXT FROM active_users
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## RETURNING * after INSERT
+
+​```sql
+INSERT INTO products (name, price, category)
+VALUES ('Widget', 9.99, 'tools')
+RETURNING *
+​```
+
+​```python
+# expanded: INSERT INTO products (name, price, category) VALUES ('Widget', 9.99, 'tools') RETURNING id::INTEGER, name::TEXT, price::FLOAT, category::TEXT, metadata::JSONB
+# inferred: tuple[int, str, float, str, dict]
+​```
+
+## RETURNING * after UPDATE
+
+​```sql
+UPDATE users SET active = false WHERE last_login < NOW() - INTERVAL '1 year'
+RETURNING *
+​```
+
+​```python
+# expanded: UPDATE users SET active = false WHERE last_login < NOW() - INTERVAL '1 year' RETURNING id::INTEGER, name::TEXT, email::VARCHAR, created_at::TIMESTAMP, active::BOOLEAN
+# inferred: tuple[int, str, str, datetime.datetime, bool]
+​```
+
+## RETURNING * after DELETE
+
+​```sql
+DELETE FROM orders WHERE status = 'cancelled'
+RETURNING *
+​```
+
+​```python
+# expanded: DELETE FROM orders WHERE status = 'cancelled' RETURNING id::INTEGER, user_id::INTEGER, total::FLOAT, status::TEXT, created_at::TIMESTAMP
+# inferred: tuple[int, int, float, str, datetime.datetime]
+​```
+
+## Mixed star and explicit columns
+
+​```sql
+SELECT *, COUNT(*) OVER () as total_count::INTEGER FROM products WHERE category = 'tools'
+​```
+
+​```python
+# expanded: SELECT id::INTEGER, name::TEXT, price::FLOAT, category::TEXT, metadata::JSONB, COUNT(*) OVER () as total_count::INTEGER FROM products WHERE category = 'tools'
+# inferred: tuple[int, str, float, str, dict, int]
+​```
+```
+
+---
+
 ## Current Architecture Analysis
 
 ### What works well
@@ -2344,11 +2918,18 @@ class TupleCodec:
 
 **mdtests:** `tests/mdtest/type_codec/tuple_codec.md`, `tests/mdtest/type_codec/custom_codec.md`
 
-### Phase 2: Unified rewriter with strip support
+### Phase 2: Unified rewriter with strip and star expansion
 
-**Create `src/sqlty/_rewriter.py`** (~150 lines)
+**Create `src/sqlty/_rewriter.py`** (~200 lines):
+- `SQLRewriter.rewrite(source)` — `"--sql ..."` → `SQL[T](...)`
+- `SQLRewriter.strip(source)` — reverse
+- `SQLRewriter.expand_stars(sql, schema)` — `SELECT *` → explicit column list with casts
 
 **Simplify `src/sqlty/_decode.py`** — thin wrapper over `SQLRewriter.rewrite()`
+
+**Modify `src/sqlty/_sql_analyzer.py`:**
+- `expand_star(sql)` — given a SQL string and loaded schema, replace `*` with column list
+- Handle `SELECT *`, `table.*`, and `RETURNING *`
 
 **mdtests:**
 - `tests/mdtest/rewrite/basic_rewrite.md`
@@ -2360,18 +2941,34 @@ class TupleCodec:
 - `tests/mdtest/strip/import_removal.md`
 - `tests/mdtest/strip/idempotency.md`
 - `tests/mdtest/strip/round_trip.md`
+- `tests/mdtest/check/star_expansion.md`
+- `tests/mdtest/postgres/star_expansion.md`
 
 New assertion types:
 - `# rewritten: <source>` — calls `SQLRewriter.rewrite()`
 - `# stripped: <source>` — calls `SQLRewriter.strip()`
 - `# roundtrip: strip(rewrite(source)) == source`
 - `# imports: <added>` / `# imports: -<removed>`
+- `# expanded: <sql>` — asserts star expansion output
+- `# check: <rule>` — asserts a lint rule fires (or `ok` for no error)
 
-### Phase 3: ruff-style CLI restructure
+### Phase 3: ruff-style CLI with check/lint
 
-**Rewrite `src/sqlty/_cli.py`** as subcommand router.
+**Rewrite `src/sqlty/_cli.py`** as subcommand router with `rewrite`, `strip`, `check`, `registries`.
+
+**Create `src/sqlty/_checker.py`** (~200 lines):
+- Type annotation resolver — AST-based, finds TypedDict/NamedTuple/dataclass definitions
+- Field extractor — extracts (name, type) pairs from resolved types
+- Column matcher — compares SQL columns against type fields
+- Lint rule runner — SQT001-SQT021
+
+**Create `src/sqlty/_lint.py`** (~100 lines):
+- Lint rule registry and configuration loading from `[tool.sqlty.lint]`
+- `--select` / `--ignore` / `per-file-ignores` support
 
 **mdtests:**
+- `tests/mdtest/check/type_annotation.md` — SQL[User](...) validation
+- `tests/mdtest/check/lint_rules.md` — rule configuration
 - `tests/mdtest/codec/basic_codec.md` (replaces `test_magic_codec_e2e.py`)
 
 **Note:** CI updates happen incrementally. Phase 0 adds the mdtest runner to CI. Phase 3 updates the test workflow to split unit/mdtest/e2e runs. See the **Project Setup and CI** section below for full details.
@@ -2412,13 +3009,17 @@ New assertion types:
 | File | Phase | Purpose |
 |------|-------|---------|
 | `src/sqlty/_type_codec.py` | 1 | TypeCodec Protocol + TupleCodec |
-| `src/sqlty/_sql_analyzer.py` | 1 | Accept TypeCodec parameter |
-| `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip engine |
+| `src/sqlty/_sql_analyzer.py` | 1+2 | Accept TypeCodec parameter; star expansion |
+| `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip + star expansion |
 | `src/sqlty/_decode.py` | 2 | Simplify to thin wrapper |
+| `src/sqlty/_checker.py` | 3 | Type annotation resolver + column matcher |
+| `src/sqlty/_lint.py` | 3 | Lint rule registry (SQT001-SQT021) |
 | `src/sqlty/_cli.py` | 3 | ruff-style subcommand router |
 | `tests/mdtest/type_codec/*.md` | 1 | TypeCodec tests |
 | `tests/mdtest/rewrite/*.md` | 2 | Rewrite tests |
 | `tests/mdtest/strip/*.md` | 2 | Strip tests |
+| `tests/mdtest/check/*.md` | 3 | Type annotation + star expansion + lint tests |
+| `tests/mdtest/postgres/star_expansion.md` | 2 | PG-specific star expansion cases |
 | `tests/mdtest/codec/*.md` | 3 | Magic codec tests |
 
 ### Future (multi-platform wheel building — when Rust is added)
@@ -2642,8 +3243,10 @@ jobs:
 1. **mdtest-first development** — write the markdown test before writing the code. Tests double as specification and documentation.
 2. **ruff-style subcommands** — `rewrite`, `strip`, `check`, `registries` (stub generation deferred).
 3. **`strip` as first-class command** — `sqlty strip .` undoes all `SQL[T]` wrappers in one command.
-4. **TypeCodec is a Protocol** — duck typing, extensible, no inheritance.
-5. **Comprehensive PostgreSQL test suite** — 100% type coverage, RETURNING, CTEs, JSON builder functions.
-6. **Gradual migration** — old pytest files coexist with mdtests during transition, no big-bang rewrite.
-7. **Wheels only, no crates** — Rust (when added) is compiled into Python wheels, not published to crates.io.
-8. **Multi-platform CI** — build wheels for Linux, macOS, Windows on x86_64 and aarch64.
+4. **`check` validates user annotations** — `SQL[User](...)` is checked against the resolved type's fields. Never overwrite user-provided types.
+5. **Star expansion** — `SELECT *` expands to explicit column list from schema. `SQT010` lint rule to disallow `*`.
+6. **Lint rules follow ruff conventions** — `SQT001`-`SQT021`, configurable via `--select`/`--ignore` and `[tool.sqlty.lint]`.
+7. **TypeCodec is a Protocol** — duck typing, extensible, no inheritance.
+8. **Comprehensive PostgreSQL test suite** — 100% type coverage, RETURNING, CTEs, JSON builder functions.
+9. **Gradual migration** — old pytest files coexist with mdtests during transition, no big-bang rewrite.
+10. **Wheels only, no crates** — Rust (when added) is compiled into Python wheels, not published to crates.io.
