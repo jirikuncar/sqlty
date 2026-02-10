@@ -1,15 +1,20 @@
-# Plan: Simplify Snapshot Codec — ruff-style CLI + Markdown Tests + Rust Core
+# Plan: Simplify Snapshot Codec — ruff-style CLI + Markdown Tests
+
+> **Deferred items** (stub generation, protocol support, Rust core) are in `PLAN-FUTURE.md`.
 
 ## Problem Statement
 
-The codebase currently has two largely independent systems for type-safe SQL transformation:
+The magic codec (`_decode.py` + `magic.py`) performs token-level transformation at Python import time, intercepting UTF-8 decoding to rewrite `"--sql ..."` strings into `SQL[tuple[...]]()` calls. This is fragile, hard to test, and has no reverse operation.
 
-1. **Magic codec** (`_decode.py` + `magic.py`): Token-level transformation at Python import time, intercepting UTF-8 decoding to rewrite `"--sql ..."` strings into `SQL[tuple[...]]()` calls.
-2. **Stub generation** (`_generator.py` + `_collector.py` + IR system): AST-level analysis that generates separate `.pyi` stub files with `@overload` signatures.
+Key issues:
+- `_decode.py` operates at the **token level** while the rest of the codebase uses **AST** — fundamental mismatch
+- `_decode.py:_infer_sql_type()` duplicates `SQLAnalyzer.generate_return_type()`
+- **No strip/reverse operation** — once rewritten, you can't undo
+- **Flat CLI** — everything crammed into one argparse with flags instead of subcommands
+- **No extension point** for custom type codecs (protocols, TypedDict, etc.)
+- **30+ scattered test files** — no unified specification of behavior
 
-These share `SQLAnalyzer` for type inference but diverge everywhere else. There is no way to **strip** `SQL[T]` wrappers, no unified CLI structure, no extension point for protocols, and the test suite is fragmented across 30+ pytest files with no shared specification of expected behavior.
-
-The goal: restructure sqlty as a **ruff/uv-style multi-command tool** with a **ty-style markdown test suite** and a clear separation between the fast core (candidate for Rust) and the Python surface.
+The goal: restructure sqlty as a **ruff/uv-style multi-command tool** with a **ty-style markdown test suite**, proper CI with wheel building, and a clear separation between the core type inference engine and the CLI surface.
 
 ---
 
@@ -19,11 +24,9 @@ The goal: restructure sqlty as a **ruff/uv-style multi-command tool** with a **t
 sqlty <COMMAND> [OPTIONS] [PATH...]
 
 Commands:
-  generate    Generate .pyi stub files with @overload signatures (current default)
   rewrite     Rewrite source files in-place: "--sql ..." → SQL[T]("--sql ...")
   strip       Strip all SQL[T](...) wrappers back to plain strings
-  check       Check if files are up-to-date (stubs or rewrites) without modifying
-  clean       Remove all generated .pyi stub files
+  check       Check if rewritten files are up-to-date without modifying
   registries  Discover and list registered @sqlty functions
   version     Print version
 
@@ -38,20 +41,15 @@ Global options:
 
 | Command | What it does | Analogy |
 |---------|-------------|---------|
-| `sqlty generate .` | Analyze source, emit `.pyi` stubs (current `sqlty .`) | `ruff check --fix` |
-| `sqlty generate --check .` | Exit 1 if stubs are out of date | `ruff check` |
 | `sqlty rewrite .` | Transform `"--sql ..."` → `SQL[T](...)` in source files | `ruff format` |
 | `sqlty rewrite --check .` | Exit 1 if source files need rewriting | `ruff format --check` |
 | `sqlty rewrite --diff .` | Show diff without applying | `ruff format --diff` |
 | `sqlty strip .` | Reverse of rewrite: `SQL[T]("--sql ...")` → `"--sql ..."` | (no ruff analogy — unique to sqlty) |
 | `sqlty strip --check .` | Exit 1 if files contain SQL[T] wrappers | — |
-| `sqlty check .` | Shorthand: runs both `generate --check` and `rewrite --check` | `ruff check` |
-| `sqlty clean .` | Delete generated `.pyi` files | `ruff clean` |
+| `sqlty check .` | Shorthand for `rewrite --check` | `ruff check` |
 | `sqlty registries .` | List discovered registries (current `python -m sqlty.registries`) | `ruff rule` |
 
-### Migration from current CLI
-
-The current `sqlty <path>` (no subcommand) maps to `sqlty generate <path>`. For backward compatibility, keep the bare form working but emit a deprecation warning pointing to `sqlty generate`.
+> **Note:** `generate` (stub generation) and `clean` commands are deferred — see `PLAN-FUTURE.md`.
 
 ---
 
@@ -112,31 +110,6 @@ q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ​```
 ```
 
-**`# stub:`** — asserts generated stub content (multiline, delimited by blank line or next assertion):
-
-```markdown
-## Generate stub for single query
-
-​```python
-from queries import sql
-query = sql("SELECT id::INTEGER FROM users")
-​```
-
-​```pyi
-# stub:
-from typing import Literal, overload
-from sqlty import SQL
-
-@overload
-def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
-    ...
-
-@overload
-def sql(query: str) -> str:
-    ...
-​```
-```
-
 **`# error: <message>`** — asserts an error is raised:
 
 ```markdown
@@ -189,52 +162,31 @@ SELECT CAST(id AS SIGNED) FROM users
 Explicit file paths declared before code blocks (same as ty's mdtest):
 
 ```markdown
-## Multi-registry stub generation
+## Rewrite with schema-based inference
 
-`queries.py`:
-​```python
-from sqlty import sqlty
-from typing import Any
-
-@sqlty
-def sql(query: str) -> Any:
-    return query
-​```
-
-`app.py`:
-​```python
-from queries import sql
-q1 = sql("SELECT id::INTEGER FROM users")
-q2 = sql("SELECT name::TEXT FROM users")
+`schema.sql`:
+​```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email VARCHAR(255)
+);
 ​```
 
 `pyproject.toml`:
 ​```toml
 [tool.sqlty]
 dialect = "postgres"
-
-[[tool.sqlty.functions]]
-import_path = "queries.sql"
-query_param = "query"
+schema = "schema.sql"
 ​```
 
-`queries.pyi`:
-​```pyi
-# stub:
-from typing import Literal, overload
-from sqlty import SQL
+`app.py`:
+​```python
+q1 = "--sql SELECT id, name FROM users"
+# rewritten: q1 = SQL[tuple[int, str]]("--sql SELECT id, name FROM users")
 
-@overload
-def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
-    ...
-
-@overload
-def sql(query: Literal['SELECT name::TEXT FROM users']) -> SQL[tuple[str]]:
-    ...
-
-@overload
-def sql(query: str) -> str:
-    ...
+q2 = "--sql SELECT email FROM users"
+# rewritten: q2 = SQL[tuple[str]]("--sql SELECT email FROM users")
 ​```
 ```
 
@@ -295,6 +247,14 @@ tests/mdtest/
 │   ├── aggregate_functions.md          # COUNT, SUM, AVG
 │   ├── schema_inference.md             # Schema-based type inference
 │   └── dialects.md                     # postgres, mysql, sqlite differences
+├── postgres/                           # Comprehensive PostgreSQL documentation queries
+│   ├── select.md                       # SELECT: all type casts, joins, subqueries, window fns
+│   ├── returning.md                    # INSERT/UPDATE/DELETE/MERGE RETURNING
+│   ├── cte.md                          # WITH / WITH RECURSIVE
+│   ├── json_typing.md                  # JSON/JSONB typing with json_build_object
+│   ├── type_coverage.md                # 100% SQL→Python type mapping matrix
+│   ├── aggregates.md                   # Aggregate functions with schema-aware SUM
+│   └── advanced.md                     # LATERAL, window functions, set operations
 ├── rewrite/
 │   ├── basic_rewrite.md                # "--sql ..." → SQL[T](...)
 │   ├── multiline_queries.md            # Triple-quoted strings
@@ -306,13 +266,6 @@ tests/mdtest/
 │   ├── import_removal.md               # Remove unused imports
 │   ├── idempotency.md                  # strip(strip(x)) == strip(x)
 │   └── round_trip.md                   # strip(rewrite(x)) == x
-├── generate/
-│   ├── basic_stubs.md                  # Single query → .pyi
-│   ├── incremental_merge.md            # Add queries to existing stubs
-│   ├── prune.md                        # Remove stale queries
-│   ├── multi_registry.md               # Multiple registries
-│   ├── function_config.md              # Configured functions (no decorator)
-│   └── multiline_queries.md            # Multiline SQL in stubs
 ├── codec/
 │   ├── basic_codec.md                  # # coding: sqlty transformation
 │   ├── auto_imports.md                 # Import injection via codec
@@ -384,10 +337,6 @@ class MDTestCase:
                     actual = rewriter.strip(source)
                     assert normalize(actual) == normalize(expected)
 
-                case StubContent(source_files=files, expected_stub=stub):
-                    # Write files to tmp, run generator, compare
-                    ...
-
                 case RoundTrip(source=source):
                     rewriter = SQLRewriter(**self._rewriter_kwargs())
                     assert rewriter.strip(rewriter.rewrite(source)) == source
@@ -429,18 +378,19 @@ The key mappings from existing tests:
 
 | Existing file | → mdtest file |
 |--------------|---------------|
-| `tests/sql_analyzer/test_analyzer.py` | `tests/mdtest/type_inference/basic_types.md` |
-| `tests/sql_analyzer/test_functions.py` | `tests/mdtest/type_inference/aggregate_functions.md` |
-| `tests/sql_analyzer/test_returning_clause.py` | `tests/mdtest/type_inference/basic_types.md` (RETURNING section) |
-| `tests/sql_analyzer/test_sum_schema.py` | `tests/mdtest/type_inference/schema_inference.md` |
+| `tests/sql_analyzer/test_analyzer.py` | `tests/mdtest/type_inference/basic_types.md` + `postgres/type_coverage.md` |
+| `tests/sql_analyzer/test_functions.py` | `tests/mdtest/postgres/aggregates.md` |
+| `tests/sql_analyzer/test_returning_clause.py` | `tests/mdtest/postgres/returning.md` |
+| `tests/sql_analyzer/test_sum_schema.py` | `tests/mdtest/postgres/aggregates.md` (schema sections) |
+| `tests/sql_analyzer/test_queries_comprehensive.py` | `tests/mdtest/postgres/select.md` + `cte.md` + `json_typing.md` + `advanced.md` |
 | `tests/test_magic.py` | `tests/mdtest/rewrite/basic_rewrite.md` |
 | `tests/test_magic_integration.py` | `tests/mdtest/codec/basic_codec.md` |
 | `tests/e2e/test_magic_codec_e2e.py` | `tests/mdtest/codec/basic_codec.md` |
-| `tests/e2e/test_basic_workflow.py` | `tests/mdtest/generate/basic_stubs.md` |
-| `tests/e2e/test_multi_registry.py` | `tests/mdtest/generate/multi_registry.md` |
 | `tests/e2e/test_dialects_and_schema.py` | `tests/mdtest/type_inference/dialects.md` |
-| `tests/e2e/test_cli_modes.py` | `tests/mdtest/generate/incremental_merge.md` + `prune.md` |
-| `tests/e2e/test_function_config.py` | `tests/mdtest/generate/function_config.md` |
+| `tests/e2e/test_basic_workflow.py` | (stays as pytest — depends on stub generation) |
+| `tests/e2e/test_multi_registry.py` | (stays as pytest — depends on stub generation) |
+| `tests/e2e/test_cli_modes.py` | (stays as pytest — depends on stub generation) |
+| `tests/e2e/test_function_config.py` | (stays as pytest — depends on stub generation) |
 | `tests/ir/test_stub_ir.py` | (stays as pytest — IR internals, not user-facing) |
 
 ### Example: `tests/mdtest/type_inference/basic_types.md`
@@ -721,6 +671,1545 @@ q = "--sql SELECT 1::INTEGER"
 
 ---
 
+## Comprehensive PostgreSQL Test Suite
+
+The `tests/mdtest/postgres/` directory is the authoritative specification for PostgreSQL query type inference. It covers every SQL type, every DML statement with RETURNING, CTEs (including recursive), and JSON typing for known structures. Together these files exercise **100% of the SQL→Python type mapping**.
+
+### `tests/mdtest/postgres/type_coverage.md` — Full type mapping matrix
+
+Every SQL type in `SQL_TO_PYTHON_TYPE` must have at least one test case here. This is the single document that proves 100% coverage.
+
+```markdown
+# PostgreSQL Type Coverage
+
+All 27 SQL types mapped to Python types. Every type must appear at least once.
+
+## Integer family
+
+​```sql
+SELECT
+    a::INT,
+    b::INTEGER,
+    c::BIGINT,
+    d::SMALLINT,
+    e::TINYINT
+FROM t
+​```
+
+​```python
+# inferred: tuple[int, int, int, int, int]
+​```
+
+## Float family
+
+​```sql
+SELECT
+    a::FLOAT,
+    b::DOUBLE,
+    c::REAL,
+    d::DECIMAL,
+    e::NUMERIC
+FROM t
+​```
+
+​```python
+# inferred: tuple[float, float, float, float, float]
+​```
+
+## String family
+
+​```sql
+SELECT
+    a::TEXT,
+    b::VARCHAR,
+    c::CHAR,
+    d::STRING
+FROM t
+​```
+
+​```python
+# inferred: tuple[str, str, str, str]
+​```
+
+## Parameterized string types
+
+VARCHAR(N) and CHAR(N) strip the parameter:
+
+​```sql
+SELECT name::VARCHAR(255), code::CHAR(10) FROM t
+​```
+
+​```python
+# inferred: tuple[str, str]
+​```
+
+## Boolean family
+
+​```sql
+SELECT a::BOOLEAN, b::BOOL FROM t
+​```
+
+​```python
+# inferred: tuple[bool, bool]
+​```
+
+## Date and time family
+
+​```sql
+SELECT
+    a::DATE,
+    b::TIMESTAMP,
+    c::TIMESTAMPTZ,
+    d::DATETIME,
+    e::TIME,
+    f::TIMETZ,
+    g::INTERVAL
+FROM t
+​```
+
+​```python
+# inferred: tuple[datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta]
+​```
+
+## UUID type
+
+​```sql
+SELECT id::UUID FROM t
+​```
+
+​```python
+# inferred: tuple[uuid.UUID]
+​```
+
+## Collection types
+
+​```sql
+SELECT tags::ARRAY, metadata::JSON, extra::JSONB FROM t
+​```
+
+​```python
+# inferred: tuple[list, dict, dict]
+​```
+
+## All 27 types in one query
+
+Proves every mapped type is exercised:
+
+​```sql
+SELECT
+    c01::INT, c02::INTEGER, c03::BIGINT, c04::SMALLINT, c05::TINYINT,
+    c06::FLOAT, c07::DOUBLE, c08::REAL, c09::DECIMAL, c10::NUMERIC,
+    c11::TEXT, c12::VARCHAR, c13::CHAR, c14::STRING,
+    c15::BOOLEAN, c16::BOOL,
+    c17::DATE, c18::TIMESTAMP, c19::TIMESTAMPTZ, c20::DATETIME,
+    c21::TIME, c22::TIMETZ, c23::INTERVAL,
+    c24::ARRAY, c25::JSON, c26::JSONB,
+    c27::UUID
+FROM t
+​```
+
+​```python
+# inferred: tuple[int, int, int, int, int, float, float, float, float, float, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list, dict, dict, uuid.UUID]
+​```
+
+## Unknown type defaults to str
+
+​```sql
+SELECT value::CUSTOM_TYPE FROM t
+​```
+
+​```python
+# inferred: tuple[str]
+​```
+```
+
+### `tests/mdtest/postgres/select.md` — SELECT queries
+
+```markdown
+# PostgreSQL SELECT Queries
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+## Simple SELECT with type casts
+
+​```sql
+SELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+​```
+
+## SELECT without casts defaults to str
+
+​```sql
+SELECT id, name, email FROM users
+​```
+
+​```python
+# inferred: tuple[str, str, str]
+​```
+
+## SELECT with WHERE clause
+
+​```sql
+SELECT id::INTEGER, name::TEXT FROM users WHERE active = true
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## SELECT with INNER JOIN
+
+​```sql
+SELECT u.id::INTEGER, u.name::TEXT, o.total::FLOAT
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+​```
+
+​```python
+# inferred: tuple[int, str, float]
+​```
+
+## SELECT with LEFT JOIN and COALESCE
+
+​```sql
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    COALESCE(COUNT(o.id), 0)::INTEGER
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id, u.name
+​```
+
+​```python
+# inferred: tuple[int, str, int]
+​```
+
+## SELECT with multiple JOINs
+
+​```sql
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    o.total::FLOAT,
+    p.name::TEXT
+FROM users u
+JOIN orders o ON u.id = o.user_id
+JOIN products p ON o.product_id = p.id
+​```
+
+​```python
+# inferred: tuple[int, str, float, str]
+​```
+
+## Subquery in SELECT
+
+​```sql
+SELECT
+    id::INTEGER,
+    name::TEXT,
+    (SELECT COUNT(*) FROM orders WHERE user_id = users.id)::INTEGER
+FROM users
+​```
+
+​```python
+# inferred: tuple[int, str, int]
+​```
+
+## SELECT DISTINCT
+
+​```sql
+SELECT DISTINCT category::TEXT, COUNT(*)::INTEGER
+FROM products
+GROUP BY category
+​```
+
+​```python
+# inferred: tuple[str, int]
+​```
+
+## SELECT with LIMIT and OFFSET
+
+​```sql
+SELECT id::INTEGER, name::TEXT FROM users LIMIT 10 OFFSET 20
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## SELECT with ORDER BY
+
+​```sql
+SELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP
+FROM users
+ORDER BY created_at DESC
+​```
+
+​```python
+# inferred: tuple[int, str, datetime.datetime]
+​```
+
+## SELECT with CASE expression
+
+​```sql
+SELECT
+    id::INTEGER,
+    CASE WHEN active THEN 'active'::TEXT ELSE 'inactive'::TEXT END
+FROM users
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## SELECT with EXISTS subquery
+
+​```sql
+SELECT id::INTEGER, name::TEXT
+FROM users u
+WHERE EXISTS (SELECT 1 FROM orders WHERE user_id = u.id)
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## SELECT with IN subquery
+
+​```sql
+SELECT id::INTEGER, name::TEXT
+FROM users
+WHERE id IN (SELECT user_id FROM active_sessions)
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## Named parameters (PostgreSQL :param style)
+
+​```sql
+SELECT id::INTEGER, name::TEXT FROM users WHERE id = :user_id AND active = :active
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+```
+
+### `tests/mdtest/postgres/returning.md` — INSERT/UPDATE/DELETE/MERGE RETURNING
+
+```markdown
+# PostgreSQL RETURNING Clause
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+## INSERT RETURNING single column
+
+​```sql
+INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')
+RETURNING id::INTEGER
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## INSERT RETURNING multiple columns
+
+​```sql
+INSERT INTO users (name, email)
+VALUES ('Alice', 'alice@example.com')
+RETURNING id::INTEGER, name::TEXT, created_at::TIMESTAMP
+​```
+
+​```python
+# inferred: tuple[int, str, datetime.datetime]
+​```
+
+## INSERT RETURNING all mapped types
+
+​```sql
+INSERT INTO events (name, data)
+VALUES ('test', '{}')
+RETURNING
+    id::INTEGER,
+    name::TEXT,
+    score::FLOAT,
+    active::BOOLEAN,
+    created_at::DATE,
+    updated_at::TIMESTAMP,
+    scheduled::TIMESTAMPTZ,
+    event_time::TIME,
+    duration::INTERVAL,
+    external_id::UUID,
+    metadata::JSONB
+​```
+
+​```python
+# inferred: tuple[int, str, float, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.time, datetime.timedelta, uuid.UUID, dict]
+​```
+
+## INSERT with multiple VALUES rows
+
+​```sql
+INSERT INTO users (name, email)
+VALUES ('Alice', 'alice@example.com'), ('Bob', 'bob@example.com')
+RETURNING id::INTEGER, name::TEXT
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## INSERT...SELECT with RETURNING
+
+​```sql
+INSERT INTO archive (user_id, name)
+SELECT id, name FROM users WHERE active = false
+RETURNING id::INTEGER, user_id::INTEGER, name::TEXT
+​```
+
+​```python
+# inferred: tuple[int, int, str]
+​```
+
+## INSERT...ON CONFLICT DO UPDATE RETURNING
+
+​```sql
+INSERT INTO users (email, name)
+VALUES ('alice@example.com', 'Alice')
+ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+RETURNING id::INTEGER, name::TEXT, email::TEXT
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+​```
+
+## INSERT...ON CONFLICT DO NOTHING RETURNING
+
+​```sql
+INSERT INTO users (email, name)
+VALUES ('alice@example.com', 'Alice')
+ON CONFLICT (email) DO NOTHING
+RETURNING id::INTEGER
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## UPDATE RETURNING single column
+
+​```sql
+UPDATE users SET name = 'Bob' WHERE id = 1
+RETURNING id::INTEGER
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## UPDATE RETURNING multiple columns
+
+​```sql
+UPDATE users SET name = 'Bob', email = 'bob@new.com' WHERE id = 1
+RETURNING id::INTEGER, name::TEXT, email::TEXT, updated_at::TIMESTAMP
+​```
+
+​```python
+# inferred: tuple[int, str, str, datetime.datetime]
+​```
+
+## UPDATE with FROM clause RETURNING
+
+​```sql
+UPDATE orders o
+SET status = 'shipped'
+FROM shipments s
+WHERE o.id = s.order_id
+RETURNING o.id::INTEGER, o.status::TEXT, s.tracking_number::TEXT
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+​```
+
+## UPDATE with expression in RETURNING
+
+​```sql
+UPDATE products SET price = price * 1.1
+RETURNING id::INTEGER, (price * 1.1)::FLOAT
+​```
+
+​```python
+# inferred: tuple[int, float]
+​```
+
+## DELETE RETURNING single column
+
+​```sql
+DELETE FROM users WHERE active = false
+RETURNING id::INTEGER
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## DELETE RETURNING multiple columns
+
+​```sql
+DELETE FROM users WHERE last_login < NOW() - INTERVAL '1 year'
+RETURNING id::INTEGER, name::TEXT, email::TEXT, last_login::TIMESTAMP
+​```
+
+​```python
+# inferred: tuple[int, str, str, datetime.datetime]
+​```
+
+## DELETE with USING clause RETURNING
+
+​```sql
+DELETE FROM order_items oi
+USING orders o
+WHERE oi.order_id = o.id AND o.status = 'cancelled'
+RETURNING oi.id::INTEGER, oi.product_id::INTEGER, oi.quantity::INTEGER
+​```
+
+​```python
+# inferred: tuple[int, int, int]
+​```
+
+## MERGE with RETURNING
+
+​```sql
+MERGE INTO inventory t
+USING new_stock s ON t.product_id = s.product_id
+WHEN MATCHED THEN UPDATE SET quantity = t.quantity + s.quantity
+WHEN NOT MATCHED THEN INSERT (product_id, quantity) VALUES (s.product_id, s.quantity)
+RETURNING t.product_id::INTEGER, t.quantity::INTEGER
+​```
+
+​```python
+# inferred: tuple[int, int]
+​```
+
+## DML without RETURNING returns None
+
+​```sql
+INSERT INTO users (name) VALUES ('test')
+​```
+
+​```python
+# inferred: None
+​```
+
+## UPDATE without RETURNING returns None
+
+​```sql
+UPDATE users SET name = 'test' WHERE id = 1
+​```
+
+​```python
+# inferred: None
+​```
+
+## DELETE without RETURNING returns None
+
+​```sql
+DELETE FROM users WHERE id = 1
+​```
+
+​```python
+# inferred: None
+​```
+```
+
+### `tests/mdtest/postgres/cte.md` — WITH / WITH RECURSIVE
+
+```markdown
+# PostgreSQL Common Table Expressions (CTEs)
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+## Simple CTE
+
+​```sql
+WITH active_users AS (
+    SELECT id, name FROM users WHERE active = true
+)
+SELECT id::INTEGER, name::TEXT FROM active_users
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## Multiple CTEs
+
+​```sql
+WITH
+    active_users AS (
+        SELECT id, name FROM users WHERE active = true
+    ),
+    user_orders AS (
+        SELECT user_id, COUNT(*) as order_count
+        FROM orders
+        GROUP BY user_id
+    )
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    COALESCE(o.order_count, 0)::INTEGER
+FROM active_users u
+LEFT JOIN user_orders o ON u.id = o.user_id
+​```
+
+​```python
+# inferred: tuple[int, str, int]
+​```
+
+## CTE with aggregation
+
+​```sql
+WITH monthly_sales AS (
+    SELECT
+        product_id,
+        DATE_TRUNC('month', created_at) as month,
+        SUM(amount)::FLOAT as total
+    FROM sales
+    GROUP BY product_id, month
+)
+SELECT
+    p.name::TEXT,
+    ms.month::TIMESTAMP,
+    ms.total::FLOAT
+FROM monthly_sales ms
+JOIN products p ON ms.product_id = p.id
+​```
+
+​```python
+# inferred: tuple[str, datetime.datetime, float]
+​```
+
+## WITH RECURSIVE — tree traversal
+
+​```sql
+WITH RECURSIVE category_tree AS (
+    -- Base case: root categories
+    SELECT id, name, parent_id, 0 as depth
+    FROM categories
+    WHERE parent_id IS NULL
+
+    UNION ALL
+
+    -- Recursive case: children
+    SELECT c.id, c.name, c.parent_id, ct.depth + 1
+    FROM categories c
+    JOIN category_tree ct ON c.parent_id = ct.id
+)
+SELECT id::INTEGER, name::TEXT, depth::INTEGER
+FROM category_tree
+ORDER BY depth, name
+​```
+
+​```python
+# inferred: tuple[int, str, int]
+​```
+
+## WITH RECURSIVE — graph path finding
+
+​```sql
+WITH RECURSIVE path AS (
+    SELECT
+        id,
+        name,
+        ARRAY[id] as visited,
+        name::TEXT as path_string,
+        1 as hops
+    FROM nodes
+    WHERE id = 1
+
+    UNION ALL
+
+    SELECT
+        e.target_id,
+        n.name,
+        p.visited || e.target_id,
+        (p.path_string || ' -> ' || n.name)::TEXT,
+        p.hops + 1
+    FROM path p
+    JOIN edges e ON p.id = e.source_id
+    JOIN nodes n ON e.target_id = n.id
+    WHERE NOT e.target_id = ANY(p.visited)
+)
+SELECT id::INTEGER, path_string::TEXT, hops::INTEGER
+FROM path
+WHERE id = 10
+​```
+
+​```python
+# inferred: tuple[int, str, int]
+​```
+
+## WITH RECURSIVE — generate series equivalent
+
+​```sql
+WITH RECURSIVE counter AS (
+    SELECT 1::INTEGER as n
+    UNION ALL
+    SELECT (n + 1)::INTEGER FROM counter WHERE n < 100
+)
+SELECT n::INTEGER FROM counter
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## WITH RECURSIVE — organizational hierarchy
+
+​```sql
+WITH RECURSIVE org_chart AS (
+    SELECT
+        id, name, manager_id, title,
+        1 as level
+    FROM employees
+    WHERE manager_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        e.id, e.name, e.manager_id, e.title,
+        oc.level + 1
+    FROM employees e
+    JOIN org_chart oc ON e.manager_id = oc.id
+)
+SELECT
+    id::INTEGER,
+    name::TEXT,
+    title::TEXT,
+    level::INTEGER
+FROM org_chart
+ORDER BY level, name
+​```
+
+​```python
+# inferred: tuple[int, str, str, int]
+​```
+
+## CTE with INSERT...RETURNING (writable CTE)
+
+​```sql
+WITH new_user AS (
+    INSERT INTO users (name, email)
+    VALUES ('Alice', 'alice@example.com')
+    RETURNING id, name, email
+)
+SELECT id::INTEGER, name::TEXT, email::TEXT FROM new_user
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+​```
+
+## CTE with DELETE...RETURNING (writable CTE)
+
+​```sql
+WITH deleted_users AS (
+    DELETE FROM users
+    WHERE last_login < NOW() - INTERVAL '2 years'
+    RETURNING id, name, email
+)
+SELECT id::INTEGER, name::TEXT, email::TEXT FROM deleted_users
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+​```
+
+## CTE with UPDATE...RETURNING (writable CTE)
+
+​```sql
+WITH updated_orders AS (
+    UPDATE orders SET status = 'archived'
+    WHERE created_at < NOW() - INTERVAL '5 years'
+    RETURNING id, user_id, total, status
+)
+SELECT
+    id::INTEGER,
+    user_id::INTEGER,
+    total::FLOAT,
+    status::TEXT
+FROM updated_orders
+​```
+
+​```python
+# inferred: tuple[int, int, float, str]
+​```
+
+## Multiple writable CTEs
+
+​```sql
+WITH
+    deactivated AS (
+        UPDATE users SET active = false
+        WHERE last_login < NOW() - INTERVAL '1 year'
+        RETURNING id, name
+    ),
+    archived_orders AS (
+        UPDATE orders SET status = 'archived'
+        WHERE user_id IN (SELECT id FROM deactivated)
+        RETURNING id, user_id, total
+    )
+SELECT
+    d.id::INTEGER,
+    d.name::TEXT,
+    COUNT(a.id)::INTEGER,
+    COALESCE(SUM(a.total), 0)::FLOAT
+FROM deactivated d
+LEFT JOIN archived_orders a ON d.id = a.user_id
+GROUP BY d.id, d.name
+​```
+
+​```python
+# inferred: tuple[int, str, int, float]
+​```
+```
+
+### `tests/mdtest/postgres/json_typing.md` — JSON/JSONB with known-structure typing
+
+```markdown
+# PostgreSQL JSON Typing
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+This file tests JSON/JSONB type inference. Currently JSON/JSONB maps to `dict`.
+Future work: `json_build_object` with known keys could produce `TypedDict`.
+
+## JSON column cast
+
+​```sql
+SELECT metadata::JSON FROM users
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## JSONB column cast
+
+​```sql
+SELECT metadata::JSONB FROM users
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## JSON field extraction with ->> (returns text)
+
+​```sql
+SELECT id::INTEGER, (data->>'name')::TEXT FROM users
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## Nested JSON extraction
+
+​```sql
+SELECT id::INTEGER, (data->'address'->>'city')::TEXT FROM users
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## JSON extraction with cast to non-text type
+
+​```sql
+SELECT id::INTEGER, (data->>'age')::INTEGER FROM users
+​```
+
+​```python
+# inferred: tuple[int, int]
+​```
+
+## json_build_object — basic
+
+​```sql
+SELECT json_build_object(
+    'id', id,
+    'name', name
+)::JSON FROM users
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## json_build_object — with typed fields (cast on outer)
+
+​```sql
+SELECT json_build_object(
+    'id', id::INTEGER,
+    'name', name::TEXT,
+    'email', email::TEXT
+)::JSON FROM users
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## jsonb_build_object — basic
+
+​```sql
+SELECT jsonb_build_object(
+    'user_id', u.id,
+    'username', u.name,
+    'order_count', COUNT(o.id)
+)::JSONB
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id, u.name
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## json_build_object — nested objects
+
+​```sql
+SELECT json_build_object(
+    'user', json_build_object(
+        'id', u.id,
+        'name', u.name
+    ),
+    'address', json_build_object(
+        'street', a.street,
+        'city', a.city,
+        'zip', a.zip_code
+    )
+)::JSON
+FROM users u
+JOIN addresses a ON u.id = a.user_id
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## jsonb_agg — aggregating rows as JSON array
+
+​```sql
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    jsonb_agg(
+        jsonb_build_object('id', o.id, 'total', o.total)
+    )::JSONB
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id, u.name
+​```
+
+​```python
+# inferred: tuple[int, str, dict]
+​```
+
+## jsonb_agg with ORDER BY inside
+
+​```sql
+SELECT
+    category::TEXT,
+    jsonb_agg(name ORDER BY name)::JSONB
+FROM products
+GROUP BY category
+​```
+
+​```python
+# inferred: tuple[str, dict]
+​```
+
+## COALESCE with JSON default
+
+​```sql
+SELECT
+    u.id::INTEGER,
+    COALESCE(jsonb_agg(p.title), '[]'::jsonb)::JSONB
+FROM users u
+LEFT JOIN posts p ON u.id = p.user_id
+GROUP BY u.id
+​```
+
+​```python
+# inferred: tuple[int, dict]
+​```
+
+## json_agg — non-binary JSON aggregation
+
+​```sql
+SELECT
+    department::TEXT,
+    json_agg(json_build_object(
+        'name', name,
+        'salary', salary
+    ))::JSON
+FROM employees
+GROUP BY department
+​```
+
+​```python
+# inferred: tuple[str, dict]
+​```
+
+## jsonb_object_agg — key-value aggregation
+
+​```sql
+SELECT jsonb_object_agg(key, value)::JSONB
+FROM settings
+WHERE scope = 'global'
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## json_build_object with subquery
+
+​```sql
+SELECT json_build_object(
+    'user', json_build_object('id', u.id, 'name', u.name),
+    'recent_orders', (
+        SELECT json_agg(json_build_object('id', o.id, 'total', o.total))
+        FROM orders o
+        WHERE o.user_id = u.id
+        ORDER BY o.created_at DESC
+        LIMIT 5
+    )
+)::JSON
+FROM users u
+​```
+
+​```python
+# inferred: tuple[dict]
+​```
+
+## JSON with mixed non-JSON columns
+
+​```sql
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    u.created_at::TIMESTAMP,
+    u.external_id::UUID,
+    json_build_object(
+        'preferences', u.preferences,
+        'last_ip', u.last_ip
+    )::JSON,
+    u.active::BOOLEAN
+FROM users u
+​```
+
+​```python
+# inferred: tuple[int, str, datetime.datetime, uuid.UUID, dict, bool]
+​```
+
+## to_json / to_jsonb cast functions
+
+​```sql
+SELECT
+    to_json(ROW(id, name))::JSON,
+    to_jsonb(ROW(id, name, email))::JSONB
+FROM users
+​```
+
+​```python
+# inferred: tuple[dict, dict]
+​```
+
+## JSON path extraction (PG12+)
+
+​```sql
+SELECT
+    id::INTEGER,
+    (jsonb_path_query_first(metadata, '$.theme'))::TEXT
+FROM user_settings
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+### Future: Typed JSON with json_build_object
+
+> **Design note:** When `json_build_object` has literal string keys and typed value
+> expressions, sqlty could infer a `TypedDict` instead of plain `dict`. This requires:
+>
+> 1. Recognizing `json_build_object('key1', expr1::T1, 'key2', expr2::T2, ...)`
+> 2. Extracting key names from string literals
+> 3. Mapping value types through the standard SQL→Python mapper
+> 4. Generating `TypedDict('Result', key1=T1, key2=T2)` or `dict[str, T1 | T2]`
+>
+> Example (future behavior):
+> ```sql
+> SELECT json_build_object('id', id::INTEGER, 'name', name::TEXT)
+> ```
+> ```python
+> # inferred: tuple[UserJson]
+> # where UserJson = TypedDict('UserJson', id=int, name=str)
+> ```
+>
+> This is Phase 4+ work and depends on the TypeCodec abstraction supporting
+> complex return types. For now, all JSON builder functions return `dict`.
+```
+
+### `tests/mdtest/postgres/aggregates.md` — Aggregate functions with schema
+
+```markdown
+# PostgreSQL Aggregate Functions
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+## COUNT(*) returns int
+
+​```sql
+SELECT COUNT(*) FROM users
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## COUNT(column) returns int
+
+​```sql
+SELECT COUNT(DISTINCT email)::INTEGER FROM users
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## SUM without cast or schema defaults to float
+
+​```sql
+SELECT SUM(amount) FROM orders
+​```
+
+​```python
+# inferred: tuple[float]
+​```
+
+## AVG returns float
+
+​```sql
+SELECT AVG(score) FROM tests
+​```
+
+​```python
+# inferred: tuple[float]
+​```
+
+## SUM with explicit cast
+
+​```sql
+SELECT SUM(quantity)::INTEGER FROM order_items
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## SUM with schema-based integer inference
+
+​```sql
+SELECT SUM(quantity) FROM products
+​```
+
+`schema.sql`:
+​```sql
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    quantity INTEGER NOT NULL,
+    price FLOAT NOT NULL
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## SUM with schema-based float inference
+
+​```sql
+SELECT SUM(price) FROM products
+​```
+
+`schema.sql`:
+​```sql
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    quantity INTEGER NOT NULL,
+    price FLOAT NOT NULL
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+​```python
+# inferred: tuple[float]
+​```
+
+## Explicit cast overrides schema
+
+​```sql
+SELECT SUM(quantity)::FLOAT FROM products
+​```
+
+`schema.sql`:
+​```sql
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    quantity INTEGER NOT NULL
+);
+​```
+
+​```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+​```
+
+​```python
+# inferred: tuple[float]
+​```
+
+## Mixed aggregates
+
+​```sql
+SELECT
+    COUNT(*)::INTEGER,
+    SUM(total)::FLOAT,
+    AVG(total)::FLOAT,
+    MIN(created_at)::TIMESTAMP,
+    MAX(created_at)::TIMESTAMP
+FROM orders
+​```
+
+​```python
+# inferred: tuple[int, float, float, datetime.datetime, datetime.datetime]
+​```
+
+## String aggregation
+
+​```sql
+SELECT STRING_AGG(name, ', ')::TEXT FROM users WHERE active = true
+​```
+
+​```python
+# inferred: tuple[str]
+​```
+
+## GROUP BY with multiple aggregates
+
+​```sql
+SELECT
+    department::TEXT,
+    COUNT(*)::INTEGER,
+    AVG(salary)::FLOAT,
+    MIN(hire_date)::DATE,
+    MAX(salary)::FLOAT
+FROM employees
+GROUP BY department
+HAVING COUNT(*) > 5
+​```
+
+​```python
+# inferred: tuple[str, int, float, datetime.date, float]
+​```
+
+## Aggregate with FILTER clause
+
+​```sql
+SELECT
+    COUNT(*) FILTER (WHERE active)::INTEGER,
+    COUNT(*) FILTER (WHERE NOT active)::INTEGER,
+    SUM(total) FILTER (WHERE status = 'completed')::FLOAT
+FROM orders
+​```
+
+​```python
+# inferred: tuple[int, int, float]
+​```
+```
+
+### `tests/mdtest/postgres/advanced.md` — LATERAL, window functions, set ops
+
+```markdown
+# PostgreSQL Advanced Queries
+
+​```toml
+[sqlty]
+dialect = "postgres"
+​```
+
+## Window function — ROW_NUMBER
+
+​```sql
+SELECT
+    id::INTEGER,
+    name::TEXT,
+    ROW_NUMBER() OVER (ORDER BY created_at)::INTEGER
+FROM users
+​```
+
+​```python
+# inferred: tuple[int, str, int]
+​```
+
+## Window function — RANK and DENSE_RANK
+
+​```sql
+SELECT
+    id::INTEGER,
+    name::TEXT,
+    salary::FLOAT,
+    RANK() OVER (PARTITION BY department ORDER BY salary DESC)::INTEGER,
+    DENSE_RANK() OVER (PARTITION BY department ORDER BY salary DESC)::INTEGER
+FROM employees
+​```
+
+​```python
+# inferred: tuple[int, str, float, int, int]
+​```
+
+## Window function — running total
+
+​```sql
+SELECT
+    id::INTEGER,
+    amount::FLOAT,
+    SUM(amount) OVER (ORDER BY created_at)::FLOAT
+FROM transactions
+​```
+
+​```python
+# inferred: tuple[int, float, float]
+​```
+
+## LATERAL join
+
+​```sql
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    recent.total::FLOAT,
+    recent.created_at::TIMESTAMP
+FROM users u
+CROSS JOIN LATERAL (
+    SELECT total, created_at
+    FROM orders
+    WHERE user_id = u.id
+    ORDER BY created_at DESC
+    LIMIT 1
+) recent
+​```
+
+​```python
+# inferred: tuple[int, str, float, datetime.datetime]
+​```
+
+## UNION
+
+​```sql
+SELECT id::INTEGER, name::TEXT, 'user'::TEXT as type FROM users
+UNION
+SELECT id::INTEGER, name::TEXT, 'admin'::TEXT as type FROM admins
+​```
+
+​```python
+# inferred: tuple[int, str, str]
+​```
+
+## UNION ALL
+
+​```sql
+SELECT id::INTEGER, email::TEXT FROM users
+UNION ALL
+SELECT id::INTEGER, email::TEXT FROM archived_users
+​```
+
+​```python
+# inferred: tuple[int, str]
+​```
+
+## INTERSECT
+
+​```sql
+SELECT user_id::INTEGER FROM orders WHERE total > 100
+INTERSECT
+SELECT user_id::INTEGER FROM premium_users
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## EXCEPT
+
+​```sql
+SELECT id::INTEGER FROM users
+EXCEPT
+SELECT user_id::INTEGER FROM banned_users
+​```
+
+​```python
+# inferred: tuple[int]
+​```
+
+## String functions
+
+​```sql
+SELECT
+    UPPER(name)::TEXT,
+    LOWER(email)::TEXT,
+    CONCAT(first_name, ' ', last_name)::TEXT,
+    TRIM(username)::TEXT,
+    LENGTH(bio)::INTEGER
+FROM users
+​```
+
+​```python
+# inferred: tuple[str, str, str, str, int]
+​```
+
+## Date/time functions
+
+​```sql
+SELECT
+    NOW()::TIMESTAMP,
+    CURRENT_DATE::DATE,
+    CURRENT_TIMESTAMP::TIMESTAMP,
+    created_at::TIMESTAMP,
+    (created_at + INTERVAL '30 days')::TIMESTAMP,
+    AGE(created_at)::INTERVAL
+FROM users
+​```
+
+​```python
+# inferred: tuple[datetime.datetime, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.timedelta]
+​```
+
+## Complex real-world query — user dashboard
+
+​```sql
+WITH user_stats AS (
+    SELECT
+        user_id,
+        COUNT(*)::INTEGER as order_count,
+        SUM(total)::FLOAT as total_spent,
+        MAX(created_at)::TIMESTAMP as last_order
+    FROM orders
+    GROUP BY user_id
+)
+SELECT
+    u.id::INTEGER,
+    u.name::TEXT,
+    u.email::TEXT,
+    u.created_at::TIMESTAMP,
+    COALESCE(s.order_count, 0)::INTEGER,
+    COALESCE(s.total_spent, 0.0)::FLOAT,
+    s.last_order::TIMESTAMP,
+    u.active::BOOLEAN
+FROM users u
+LEFT JOIN user_stats s ON u.id = s.user_id
+ORDER BY s.total_spent DESC NULLS LAST
+​```
+
+​```python
+# inferred: tuple[int, str, str, datetime.datetime, int, float, datetime.datetime, bool]
+​```
+
+## Complex real-world query — reporting with JSON
+
+​```sql
+WITH
+    daily_totals AS (
+        SELECT
+            DATE_TRUNC('day', created_at)::DATE as day,
+            COUNT(*)::INTEGER as num_orders,
+            SUM(total)::FLOAT as revenue
+        FROM orders
+        WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+        GROUP BY 1
+    ),
+    top_products AS (
+        SELECT
+            p.id,
+            p.name,
+            SUM(oi.quantity)::INTEGER as units_sold
+        FROM order_items oi
+        JOIN products p ON oi.product_id = p.id
+        GROUP BY p.id, p.name
+        ORDER BY units_sold DESC
+        LIMIT 10
+    )
+SELECT
+    dt.day::DATE,
+    dt.num_orders::INTEGER,
+    dt.revenue::FLOAT,
+    jsonb_agg(
+        jsonb_build_object('name', tp.name, 'units', tp.units_sold)
+    )::JSONB
+FROM daily_totals dt
+CROSS JOIN top_products tp
+GROUP BY dt.day, dt.num_orders, dt.revenue
+ORDER BY dt.day
+​```
+
+​```python
+# inferred: tuple[datetime.date, int, float, dict]
+​```
+```
+
+---
+
 ## Current Architecture Analysis
 
 ### What works well
@@ -734,26 +2223,25 @@ q = "--sql SELECT 1::INTEGER"
 - `_decode.py:_infer_sql_type()` duplicates `SQLAnalyzer.generate_return_type()`
 - `_decode.py:_transform_sql_string()` does manual quote parsing (lines 93-99) instead of AST — fragile
 - The codec intercepts **all UTF-8 decoding** via `.pth` — invasive, conflicts with other tools
-- Import injection in `_decode.py` (lines 170-207) is entirely separate from `StubFile.compute_required_imports()`
 - `_transform_sql_string()` hardcodes `SQL[tuple[int]]("--sql ...")` at line 110 — no extension point
 - **No strip/reverse operation** — once you rewrite, you can't undo
 - **Flat CLI** — everything crammed into one argparse with flags (`--check`, `--mode`) instead of subcommands
 - **30+ scattered test files** — no unified specification of behavior
 
 ### Key insight
-All operations (generate, rewrite, strip, check) answer variants of the same question: "Given a SQL string, what is its typed representation?" The pipeline is always:
-1. **Find** SQL strings in source (`_collector.py` for AST, `_decode.py` for tokens — should be one)
+All operations (rewrite, strip, check) answer variants of the same question: "Given a SQL string, what is its typed representation?" The pipeline is always:
+1. **Find** SQL strings in source (`_decode.py` for tokens — should use AST)
 2. **Infer** types via `SQLAnalyzer` (already unified)
 3. **Format** the type expression (hardcoded as `tuple[...]` — needs a codec abstraction)
-4. **Emit** into target (stub file, rewritten source, or stripped source — needs the subcommand split)
+4. **Emit** into target (rewritten source or stripped source — needs the subcommand split)
 
 ---
 
 ## Proposed Architecture
 
-### Layer 1: Core (Rust-candidate)
+### Layer 1: Core
 
-Pure functions with no I/O, no Python imports, no side effects. The hotpath and natural Rust boundary:
+Pure functions with no I/O, no Python imports, no side effects:
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -773,9 +2261,7 @@ Pure functions with no I/O, no Python imports, no side effects. The hotpath and 
 
 **Current files:** `_sql_analyzer.py`, `_type_codec.py` (new)
 
-**Rust migration:** `sqlparser-rs` replaces sqlglot, `TypeCodec` becomes a Rust trait, exposed via PyO3.
-
-### Layer 2: Rewriter (Rust-candidate)
+### Layer 2: Rewriter
 
 AST-level source transformation — finds SQL strings, calls Layer 1, produces transformed source:
 
@@ -797,15 +2283,9 @@ AST-level source transformation — finds SQL strings, calls Layer 1, produces t
 └───────────────────────────────────────────────────────┘
 ```
 
-**Rust migration:** `ruff_python_parser` + `ruff_python_ast` for Python AST — biggest perf win.
+### Layer 3: CLI (Python, thin)
 
-### Layer 3: IR + Stub Generation (Python)
-
-Existing IR system — stays in Python, I/O-heavy, not the bottleneck.
-
-### Layer 4: CLI (Python, thin)
-
-ruff-style subcommand router: `generate`, `rewrite`, `strip`, `check`, `clean`, `registries`.
+ruff-style subcommand router: `rewrite`, `strip`, `check`, `registries`.
 
 ---
 
@@ -828,6 +2308,13 @@ Build the mdtest runner first. All subsequent phases write mdtests before writin
 | `tests/mdtest/type_inference/aggregate_functions.md` | Replace `test_functions.py` |
 | `tests/mdtest/type_inference/schema_inference.md` | Replace `test_sum_schema.py` |
 | `tests/mdtest/type_inference/dialects.md` | Replace `test_dialects_and_schema.py` |
+| `tests/mdtest/postgres/type_coverage.md` | 100% SQL→Python type mapping (all 27 types) |
+| `tests/mdtest/postgres/select.md` | SELECT: joins, subqueries, window functions, CASE |
+| `tests/mdtest/postgres/returning.md` | INSERT/UPDATE/DELETE/MERGE RETURNING (~20 cases) |
+| `tests/mdtest/postgres/cte.md` | WITH / WITH RECURSIVE (~12 cases incl. writable CTEs) |
+| `tests/mdtest/postgres/json_typing.md` | JSON/JSONB: json_build_object, jsonb_agg, extraction (~18 cases) |
+| `tests/mdtest/postgres/aggregates.md` | COUNT, SUM, AVG with schema-aware inference |
+| `tests/mdtest/postgres/advanced.md` | LATERAL, window functions, UNION/INTERSECT/EXCEPT |
 
 **Assertion types in Phase 0:**
 - `# inferred: <type>` — calls `SQLAnalyzer.generate_return_type()` on preceding `sql` block
@@ -885,74 +2372,20 @@ New assertion types:
 **Rewrite `src/sqlty/_cli.py`** as subcommand router.
 
 **mdtests:**
-- `tests/mdtest/generate/basic_stubs.md` (replaces `test_basic_workflow.py`)
-- `tests/mdtest/generate/incremental_merge.md` (replaces `test_cli_modes.py`)
-- `tests/mdtest/generate/prune.md`
-- `tests/mdtest/generate/multi_registry.md` (replaces `test_multi_registry.py`)
-- `tests/mdtest/generate/function_config.md` (replaces `test_function_config.py`)
 - `tests/mdtest/codec/basic_codec.md` (replaces `test_magic_codec_e2e.py`)
 
-New assertion type:
-- `# stub:` with `.pyi` code block — writes files to temp dir, runs `sqlty generate`, compares output
-
-### Phase 4: Protocol support (design only)
-
-**Create `docs/type-codecs.md`** — architecture document for future protocol support.
-
-### Phase 5: Rust core (optional, high-impact)
-
-**Goal:** Replace Python hotpath with Rust via PyO3 + maturin.
-
-The key benefit of mdtests: the **same `.md` files** test both implementations. The Rust test runner reads the same markdown, calls Rust functions instead of Python ones, and checks the same assertions.
-
-```rust
-// Rust mdtest runner (in integration tests)
-#[test]
-fn test_basic_types() {
-    let suite = parse_mdtest("tests/mdtest/type_inference/basic_types.md");
-    for case in suite.cases {
-        for assertion in case.assertions {
-            match assertion {
-                Assertion::InferredType { sql, expected } => {
-                    let actual = infer_type(&sql, "postgres", "tuple");
-                    assert_eq!(actual, expected);
-                }
-                // ...
-            }
-        }
-    }
-}
-```
-
-**Rust crate dependencies:**
-
-```toml
-[dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"] }
-sqlparser = "0.51"
-ruff_python_parser = { git = "https://github.com/astral-sh/ruff" }
-ruff_python_ast = { git = "https://github.com/astral-sh/ruff" }
-```
-
-**Fallback strategy:**
-
-```python
-try:
-    from sqlty._core import rewrite, strip  # Rust (fast)
-except ImportError:
-    from sqlty._rewriter_py import rewrite, strip  # Pure Python fallback
-```
+**Note:** CI updates happen incrementally. Phase 0 adds the mdtest runner to CI. Phase 3 updates the test workflow to split unit/mdtest/e2e runs. See the **Project Setup and CI** section below for full details.
 
 ---
 
 ## File Change Summary
 
-### Phase 0 (mdtest framework)
+### Phase 0 (mdtest framework + postgres test suite)
 
 | File | Purpose |
 |------|---------|
-| `tests/mdtest_runner.py` | Markdown parser + assertion engine |
-| `tests/conftest.py` | Add `.md` collection hook |
+| `tests/mdtest_runner.py` | Markdown parser + assertion engine (~300 lines) |
+| `tests/conftest.py` (modify) | Add `pytest_collect_file` hook for `.md` discovery |
 | `tests/mdtest/README.md` | Framework specification |
 | `tests/mdtest/type_inference/basic_types.md` | ~40 test cases |
 | `tests/mdtest/type_inference/datetime_types.md` | ~15 test cases |
@@ -960,41 +2393,257 @@ except ImportError:
 | `tests/mdtest/type_inference/aggregate_functions.md` | ~10 test cases |
 | `tests/mdtest/type_inference/schema_inference.md` | ~10 test cases |
 | `tests/mdtest/type_inference/dialects.md` | ~5 test cases |
+| `tests/mdtest/postgres/type_coverage.md` | 100% type mapping (all 27 types) |
+| `tests/mdtest/postgres/select.md` | SELECT: joins, subqueries, CASE, window fns |
+| `tests/mdtest/postgres/returning.md` | INSERT/UPDATE/DELETE/MERGE RETURNING (~20 cases) |
+| `tests/mdtest/postgres/cte.md` | WITH / WITH RECURSIVE (~12 cases) |
+| `tests/mdtest/postgres/json_typing.md` | JSON/JSONB: json_build_object, jsonb_agg (~18 cases) |
+| `tests/mdtest/postgres/aggregates.md` | COUNT, SUM, AVG with schema-aware inference |
+| `tests/mdtest/postgres/advanced.md` | LATERAL, window functions, set operations |
+
+### Phase 0 (CI updates — alongside mdtest)
+
+| File | Purpose |
+|------|---------|
+| `.github/workflows/tests.yml` | Add mdtest runner, expand Python version matrix |
 
 ### Phase 1-3 (Python changes)
 
 | File | Phase | Purpose |
 |------|-------|---------|
 | `src/sqlty/_type_codec.py` | 1 | TypeCodec Protocol + TupleCodec |
-| `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip engine |
 | `src/sqlty/_sql_analyzer.py` | 1 | Accept TypeCodec parameter |
+| `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip engine |
 | `src/sqlty/_decode.py` | 2 | Simplify to thin wrapper |
 | `src/sqlty/_cli.py` | 3 | ruff-style subcommand router |
 | `tests/mdtest/type_codec/*.md` | 1 | TypeCodec tests |
 | `tests/mdtest/rewrite/*.md` | 2 | Rewrite tests |
 | `tests/mdtest/strip/*.md` | 2 | Strip tests |
-| `tests/mdtest/generate/*.md` | 3 | Stub generation tests |
 | `tests/mdtest/codec/*.md` | 3 | Magic codec tests |
 
-### Phase 5 (Rust core)
+### Future (multi-platform wheel building — when Rust is added)
 
 | File | Purpose |
 |------|---------|
-| `Cargo.toml` | Rust workspace config |
-| `src/lib.rs` | PyO3 module entry |
-| `src/analyzer.rs` | SQL type inference |
-| `src/rewriter.rs` | AST rewrite + strip |
-| `python/sqlty/_core.pyi` | Type stubs for Rust extension |
+| `pyproject.toml` | Switch build backend to maturin |
+| `.github/workflows/wheels.yml` | New: multi-platform wheel building |
+| `.github/workflows/pypi.yml` | Update for wheel artifact collection |
+
+---
+
+## Project Setup and CI
+
+### Build system
+
+The current build system uses **hatchling** with `uv-dynamic-versioning`. This remains the build backend for the pure-Python package. When a Rust extension is added later (see `PLAN-FUTURE.md`), the build backend switches to **maturin**.
+
+#### Current (pure Python — no changes needed for Phase 0-3)
+
+```toml
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+```
+
+#### Future (with Rust extension — deferred)
+
+```toml
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "src"
+module-name = "sqlty._core"
+features = ["pyo3/extension-module"]
+```
+
+### No crate publishing needed
+
+Rust is used **only** as a compiled extension inside the Python wheel. There is no need to publish crates to crates.io. The Rust code lives in the same repo and is compiled during wheel building.
+
+### CI: Updated test workflow
+
+Update `.github/workflows/tests.yml` to run mdtests alongside existing pytest:
+
+```yaml
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+          - "3.14"
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the project
+        run: uv sync --all-groups
+
+      - name: Run unit tests
+        run: uv run pytest tests/ -v --ignore=tests/e2e
+
+      - name: Run mdtests
+        run: uv run pytest tests/mdtest/ -v
+
+      - name: Run e2e tests
+        run: uv run pytest tests/e2e/ -v
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run pre-commit
+        run: uvx pre-commit run --all-files
+
+      - name: Show git diff
+        if: failure()
+        run: git --no-pager diff || true
+```
+
+### CI: Multi-platform wheel building (future, when Rust is added)
+
+When the Rust extension is introduced, add `.github/workflows/wheels.yml`:
+
+```yaml
+name: Build wheels
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-wheels:
+    name: Build wheel for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          # Linux aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          # macOS x86_64
+          - os: macos-13
+            target: x86_64-apple-darwin
+          # macOS aarch64 (Apple Silicon)
+          - os: macos-14
+            target: aarch64-apple-darwin
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+
+  # Also build pure-Python sdist
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist
+        run: uv build --sdist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    if: github.event_name == 'release'
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sqlty
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+```
+
+**Key points:**
+- **No crate publishing** — only Python wheels are published to PyPI
+- **5 platform targets** — Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), Windows (x86_64)
+- **`maturin-action`** handles cross-compilation with `manylinux: auto`
+- **Pure Python sdist** always available as fallback (installs without Rust)
+- **Trusted publishing** via PyPI OIDC (no API tokens needed)
 
 ---
 
 ## Key Design Decisions
 
 1. **mdtest-first development** — write the markdown test before writing the code. Tests double as specification and documentation.
-2. **ruff-style subcommands** — `generate`, `rewrite`, `strip`, `check`, `clean`, `registries`.
+2. **ruff-style subcommands** — `rewrite`, `strip`, `check`, `registries` (stub generation deferred).
 3. **`strip` as first-class command** — `sqlty strip .` undoes all `SQL[T]` wrappers in one command.
 4. **TypeCodec is a Protocol** — duck typing, extensible, no inheritance.
-5. **Same `.md` files test Python and Rust** — the markdown tests are the contract both implementations must satisfy.
-6. **Rust core is optional** — pure Python fallback always works.
-7. **Gradual migration** — old pytest files coexist with mdtests during transition, no big-bang rewrite.
-8. **Backward compat** — bare `sqlty <path>` still works as `sqlty generate <path>`.
+5. **Comprehensive PostgreSQL test suite** — 100% type coverage, RETURNING, CTEs, JSON builder functions.
+6. **Gradual migration** — old pytest files coexist with mdtests during transition, no big-bang rewrite.
+7. **Wheels only, no crates** — Rust (when added) is compiled into Python wheels, not published to crates.io.
+8. **Multi-platform CI** — build wheels for Linux, macOS, Windows on x86_64 and aarch64.
