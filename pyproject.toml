@@ -71,6 +71,8 @@ dev = [
     "pytest-randomly>=3.16.0",
     "ruff>=0.8.4",
     "ty",
+    # only for py > 3.13
+    "ty-extensions; python_version >= '3.13'",
 ]
 cli = ["rich>=13.0.0"]
 magic = ["isort>=7.0.0"]

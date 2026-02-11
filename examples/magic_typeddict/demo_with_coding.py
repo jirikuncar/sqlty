@@ -4,43 +4,55 @@ Example demonstrating return format specification in coding declaration.
 
 This shows how to specify the return format directly in the coding declaration
 using query parameters, overriding any pyproject.toml configuration.
+
+The codec generates Protocol definitions that any user-defined type with the
+same structure can satisfy, enabling structural typing.
 """
 
 import datetime
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from sqlty import SQL
-
-
-# Define the expected TypedDict types as prototypes
-class QueryRow_724392cb(TypedDict):
-    """Prototype for query1 result type."""
-    id: int
-    name: str
-
-
-class QueryRow_ae593e70(TypedDict):
-    """Prototype for query2 result type."""
-    created_at: datetime.datetime
-    email: str
-    id: int
-    is_active: bool
-
 
 # The coding declaration above specifies return-format=typeddict
 # This overrides any pyproject.toml configuration in this directory
 
-query1: SQL[QueryRow_724392cb] = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# The codec will auto-generate Protocol definitions like QueryRow_xxx
+# These Protocols define the structure that return types must have
 
-query2: SQL[QueryRow_ae593e70] = """--sql
-SELECT 
+# User defines their own TypedDict types with friendly names
+
+
+class User(TypedDict):
+    """TypedDict for basic user query."""
+
+    id: int
+    name: str
+
+
+class UserDetailed(TypedDict):
+    """TypedDict for detailed user query."""
+
+    id: int
+    email: str
+    created_at: datetime.datetime
+    is_active: bool
+
+
+# The codec transforms the query string to SQL[QueryRow_xxx](...)
+# Since User/UserDetailed satisfy QueryRow_xxx Protocol (structurally),
+# and SQL is covariant, we can use cast to get the user's type
+query1 = cast(SQL[User], "--sql SELECT id::INTEGER, name::TEXT FROM users")
+
+query2 = cast(SQL[UserDetailed], """--sql
+SELECT
     id::INTEGER,
     email::TEXT,
     created_at::TIMESTAMP,
     is_active::BOOLEAN
 FROM users
 WHERE id = 1
-"""
+""")
 
 
 def main() -> None:

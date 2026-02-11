@@ -42,7 +42,9 @@ import token
 import tokenize
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
+from sqlty._config import ReturnFormat
 from sqlty._sql_analyzer import SQLAnalyzer
 
 __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
@@ -147,7 +149,7 @@ def _infer_sql_type(sql_query: str, return_format: str = "tuple") -> str:
         return "Any"
 
 
-def _transform_sql_string(string_literal: str, return_format: str = "tuple") -> str:
+def _transform_sql_string(string_literal: str, return_format: str = "tuple") -> tuple[str, str | None, str]:
     """Transform a --sql prefixed string into SQL[T](...) call.
 
     Args:
@@ -155,7 +157,9 @@ def _transform_sql_string(string_literal: str, return_format: str = "tuple") -> 
         return_format: Format for the return type - "tuple", "typeddict", "namedtuple", or "pydantic"
 
     Returns:
-        The transformed string as a SQL[T](...) call
+        A tuple of (transformed string, SQL query content or None, class name used)
+        The SQL query content is returned for class definition generation
+        The class name is what was actually used in the transformation
     """
     # Parse the string literal to extract the actual content
     # Handle both single and double quotes, and triple quotes
@@ -166,18 +170,21 @@ def _transform_sql_string(string_literal: str, return_format: str = "tuple") -> 
         content = string_literal[1:-1]
     else:
         # Not a valid string literal
-        return string_literal
+        return string_literal, None, ""
 
     # Check if content starts with --sql
     stripped_content = content.strip()
     if not stripped_content.startswith("--sql"):
-        return string_literal
+        return string_literal, None, ""
 
-    # Infer the type from the SQL query (use stripped content for inference)
+    # Infer the type from the SQL query (generates QueryRow_xxx for non-tuple formats)
     inferred_type = _infer_sql_type(stripped_content, return_format=return_format)
 
     # Construct the SQL[T](...) call
-    return f"SQL[{inferred_type}]({string_literal})"
+    transformed = f"SQL[{inferred_type}]({string_literal})"
+
+    # Return the transformed string, query content, and the class name used
+    return transformed, stripped_content, inferred_type
 
 
 def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
@@ -211,11 +218,12 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         uuid: bool = False
         sql: bool = False
         has_sql_import: bool = False
-        typeddict: bool = False
-        namedtuple: bool = False
-        pydantic: bool = False
+        protocol: bool = False  # Protocol is needed for all non-tuple formats
 
     flags = ImportFlags()
+
+    # Track SQL queries for class definition generation
+    sql_queries: list[str] = []
 
     try:
         # Tokenize the source
@@ -224,7 +232,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         # Track which tokens need transformation
         new_tokens = []
 
-        for tok in tokens:
+        for i, tok in enumerate(tokens):
             # Check if SQL is already imported
             if tok.type == token.NAME and tok.string == "SQL":
                 # Look ahead to see if this is part of an import statement
@@ -233,17 +241,19 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
             if tok.type == token.STRING:
                 # Check if this is a --sql string
                 if "--sql" in tok.string:
-                    # Transform the token
-                    new_string = _transform_sql_string(tok.string, return_format=return_format)
+                    # Transform the token - the type name will be inferred from the query
+                    new_string, query_content, class_name = _transform_sql_string(
+                        tok.string, return_format=return_format
+                    )
 
-                    # Check if the transformation needs imports using match
+                    # Collect SQL query and its class name for class definition generation
+                    if query_content and return_format != "tuple":
+                        sql_queries.append((query_content, class_name))
+
+                    # Check if the transformation needs Protocol import
                     match return_format:
-                        case "typeddict":
-                            flags.typeddict = True
-                        case "namedtuple":
-                            flags.namedtuple = True
-                        case "pydantic":
-                            flags.pydantic = True
+                        case "typeddict" | "namedtuple" | "pydantic":
+                            flags.protocol = True  # All non-tuple formats need Protocol
                         case "tuple":
                             pass  # No additional imports needed
                     
@@ -264,16 +274,56 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                 new_tokens.append(tok)
 
         # Reconstruct the source from tokens
-        result = tokenize.untokenize(new_tokens)
+        result_bytes = tokenize.untokenize(new_tokens)
+        # Decode bytes to string for further processing
+        if isinstance(result_bytes, bytes):
+            result: str = result_bytes.decode("utf-8")
+        else:
+            result = str(result_bytes)
+
+        # Generate class definitions for types
+        # First, check which types are already defined in the source
+        existing_types: set[str] = set()
+        for i, tok in enumerate(tokens):
+            if tok.type == token.NAME and i + 1 < len(tokens):
+                # Check if this name is being defined (followed by '=')
+                next_tok = tokens[i + 1]
+                if next_tok.type == token.OP and next_tok.string == '=':
+                    existing_types.add(tok.string)
+
+        class_definitions: list[str] = []
+        if sql_queries and return_format != "tuple":
+            analyzer = SQLAnalyzer()
+            seen_classes: set[str] = set()
+
+            for query_content, class_name in sql_queries:
+                # Skip if already processed
+                if class_name in seen_classes:
+                    continue
+                seen_classes.add(class_name)
+
+                # Extract the query without --sql prefix
+                clean_query = query_content
+                if clean_query.startswith("--sql "):
+                    clean_query = clean_query[6:].strip()
+                elif clean_query.startswith("--sql"):
+                    clean_query = clean_query[5:].strip()
+
+                # Only generate if not already defined in source
+                if class_name not in existing_types:
+                    # Generate class definition
+                    class_def = analyzer.generate_class_definition(
+                        clean_query, return_format=cast(ReturnFormat, return_format), class_name=class_name
+                    )
+                    if class_def:
+                        class_definitions.append(class_def)
 
         # Add necessary imports using isort for proper placement
         if (
             flags.datetime
             or flags.uuid
             or (flags.sql and not flags.has_sql_import)
-            or flags.typeddict
-            or flags.namedtuple
-            or flags.pydantic
+            or flags.protocol
         ):
             try:
                 from isort import code as isort_code  # type: ignore[import-not-found]
@@ -299,17 +349,31 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                     result = "from sqlty import SQL\n" + result
                     # Run through isort again to properly position it
                     result = isort_code(result, force_single_line=False, line_length=100)
-                
-                # Add format-specific imports
-                if flags.typeddict:
-                    result = "from typing import TypedDict\n" + result
+
+                # Add Protocol and runtime_checkable imports for non-tuple formats
+                if flags.protocol:
+                    result = "from typing import Protocol, runtime_checkable\n" + result
                     result = isort_code(result, force_single_line=False, line_length=100)
-                if flags.namedtuple:
-                    result = "from collections import namedtuple\n" + result
-                    result = isort_code(result, force_single_line=False, line_length=100)
-                if flags.pydantic:
-                    result = "from pydantic import BaseModel\n" + result
-                    result = isort_code(result, force_single_line=False, line_length=100)
+
+                # Add class definitions after imports
+                if class_definitions:
+                    # Find where to insert class definitions (after imports, before first non-import line)
+                    # For simplicity, add them after all imports with a blank line
+                    class_defs_str = "\n\n" + "\n\n".join(class_definitions) + "\n"
+                    # Find the end of imports by looking for the first line that's not an import or blank
+                    lines = result.split("\n")
+                    insert_pos = 0
+                    for i, line in enumerate(lines):
+                        stripped = line.strip()
+                        if stripped and not stripped.startswith(("import ", "from ", "#")):
+                            insert_pos = i
+                            break
+                    else:
+                        insert_pos = len(lines)
+
+                    # Insert class definitions
+                    lines.insert(insert_pos, class_defs_str)
+                    result = "\n".join(lines)
             except ImportError:
                 # Fallback to simple prepending if isort is not available
                 imports = []
@@ -319,15 +383,29 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                     imports.append("import uuid")
                 if flags.sql and not flags.has_sql_import:
                     imports.append("from sqlty import SQL")
-                if flags.typeddict:
-                    imports.append("from typing import TypedDict")
-                if flags.namedtuple:
-                    imports.append("from collections import namedtuple")
-                if flags.pydantic:
-                    imports.append("from pydantic import BaseModel")
+                if flags.protocol:
+                    imports.append("from typing import Protocol, runtime_checkable")
                 if imports:
                     import_lines = "\n".join(imports) + "\n"
                     result = import_lines + result
+
+                # Add class definitions after imports (fallback case)
+                if class_definitions:
+                    class_defs_str = "\n\n" + "\n\n".join(class_definitions) + "\n"
+                    # Find the end of imports
+                    lines = result.split("\n")
+                    insert_pos = 0
+                    for i, line in enumerate(lines):
+                        stripped = line.strip()
+                        if stripped and not stripped.startswith(("import ", "from ", "#")):
+                            insert_pos = i
+                            break
+                    else:
+                        insert_pos = len(lines)
+
+                    # Insert class definitions
+                    lines.insert(insert_pos, class_defs_str)
+                    result = "\n".join(lines)
 
         return result, length
 

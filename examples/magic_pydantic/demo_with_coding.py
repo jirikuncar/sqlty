@@ -4,42 +4,55 @@ Example demonstrating return format specification in coding declaration.
 
 This shows how to specify the return format directly in the coding declaration
 using query parameters, overriding any pyproject.toml configuration.
+
+The codec generates Protocol definitions that any user-defined type with the
+same structure can satisfy, enabling structural typing.
 """
 
 import datetime
+from typing import cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore[import-not-found]
 from sqlty import SQL
-
-
-# Define the expected Pydantic model types as prototypes
-class QueryRow_a7c5f825(BaseModel):
-    """Prototype for query1 result type."""
-    email: str
-    id: int
-    name: str
-
-
-class QueryRow_e09be8a4(BaseModel):
-    """Prototype for query2 result type."""
-    created_at: datetime.datetime
-    id: int
-    updated_at: datetime.datetime
-
 
 # The coding declaration above specifies return-format=pydantic
 # This overrides any pyproject.toml configuration in this directory
 
-query1: SQL[QueryRow_a7c5f825] = "--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users"
+# The codec will auto-generate Protocol definitions like QueryRow_xxx
+# These Protocols define the structure that return types must have
 
-query2: SQL[QueryRow_e09be8a4] = """--sql
-SELECT 
+# User defines their own Pydantic model types with friendly names
+
+
+class User(BaseModel):  # type: ignore[misc]
+    """Pydantic model for user query."""
+
+    id: int
+    name: str
+    email: str
+
+
+class Post(BaseModel):  # type: ignore[misc]
+    """Pydantic model for posts query."""
+
+    id: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+# The codec transforms the query string to SQL[QueryRow_xxx](...)
+# Since User/Post satisfy QueryRow_xxx Protocol (structurally),
+# and SQL is covariant, we can use cast to get the user's type
+query1 = cast(SQL[User], "--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+
+query2 = cast(SQL[Post], """--sql
+SELECT
     id::INTEGER,
     created_at::TIMESTAMP,
     updated_at::TIMESTAMP
 FROM posts
 WHERE user_id = 1
-"""
+""")
 
 
 def main() -> None:

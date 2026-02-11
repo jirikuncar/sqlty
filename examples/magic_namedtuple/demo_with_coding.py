@@ -4,29 +4,37 @@ Example demonstrating return format specification in coding declaration.
 
 This shows how to specify the return format directly in the coding declaration
 using query parameters, overriding any pyproject.toml configuration.
+
+The codec generates Protocol definitions that any user-defined type with the
+same structure can satisfy, enabling structural typing.
 """
 
 from collections import namedtuple
+from typing import cast
 
 from sqlty import SQL
-
-
-# Define the expected namedtuple types as prototypes
-QueryRow_724392cb = namedtuple('QueryRow_724392cb', ['id', 'name'])
-QueryRow_bf01c4aa = namedtuple('QueryRow_bf01c4aa', ['avg_age', 'total'])
-
 
 # The coding declaration above specifies return-format=namedtuple
 # This overrides any pyproject.toml configuration in this directory
 
-query1: SQL[QueryRow_724392cb] = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# The codec will auto-generate Protocol definitions like QueryRow_xxx
+# These Protocols define the structure that return types must have
 
-query2: SQL[QueryRow_bf01c4aa] = """--sql
-SELECT 
+# User defines their own namedtuple types with friendly names
+User = namedtuple("User", ["id", "name"])
+Stats = namedtuple("Stats", ["total", "avg_age"])
+
+# The codec transforms the query string to SQL[QueryRow_xxx](...)
+# Since User satisfies QueryRow_xxx Protocol (structurally),
+# and SQL is covariant, we can use cast to get the user's type
+query1: SQL[User] = cast(SQL[User], "--sql SELECT id::INTEGER, name::TEXT FROM users")
+
+query2 = cast(SQL[Stats], """--sql
+SELECT
     COUNT(*)::INTEGER as total,
     AVG(age::FLOAT)::FLOAT as avg_age
 FROM users
-"""
+""")
 
 
 def main() -> None:

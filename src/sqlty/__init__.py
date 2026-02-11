@@ -3,7 +3,7 @@
 import importlib.metadata
 import os
 from collections.abc import Callable
-from typing import overload
+from typing import Generic, TypeVar, overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
@@ -16,8 +16,18 @@ __all__ = ["SQL", "sqlty"]
 # Determine if auto-generation is enabled via environment variable
 _auto_generate = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in {"1", "true", "yes"}
 
+# Define covariant type variable for SQL return types
+# Covariance allows SQL[Subtype] to be used where SQL[Supertype] is expected
+T_co = TypeVar("T_co", covariant=True)
 
-class SQL[T](str):
+
+class SQL(str, Generic[T_co]):
+    """Type-safe SQL query string with generic return type.
+
+    The type parameter is covariant, meaning SQL[A] is compatible with SQL[B]
+    when A is compatible with B. This enables structural typing with Protocols.
+    """
+
     pass
 
 

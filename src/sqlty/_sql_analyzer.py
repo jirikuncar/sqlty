@@ -367,27 +367,22 @@ class SQLAnalyzer:
         self, sql: str, return_format: ReturnFormat = "tuple", class_name: str = "QueryRow"
     ) -> str | None:
         """
-        Generate a class definition for non-tuple return formats.
+        Generate a Protocol definition for non-tuple return formats.
+
+        Generates a Protocol that any user-defined type with matching structure can satisfy.
+        This enables structural typing instead of nominal typing.
 
         Args:
             sql: SQL query string to analyze
-            return_format: Format for the return type - "typeddict", "namedtuple", or "pydantic"
-            class_name: Name for the generated class
+            return_format: Format for the return type - determines Protocol structure
+            class_name: Name for the generated Protocol class
 
         Returns:
-            Class definition string or None if columns can't be analyzed or format is "tuple"
+            Protocol definition string or None if columns can't be analyzed or format is "tuple"
 
         Examples:
-            TypedDict:
-                class UserQueryRow(TypedDict):
-                    id: int
-                    name: str
-
-            namedtuple:
-                UserQueryRow = namedtuple('UserQueryRow', ['id', 'name'])
-
-            Pydantic:
-                class UserQueryRow(BaseModel):
+            For namedtuple/typeddict/pydantic:
+                class QueryRow_xxx(Protocol):
                     id: int
                     name: str
         """
@@ -398,25 +393,15 @@ class SQLAnalyzer:
         if not columns:
             return None
 
-        if return_format == "typeddict":
-            # Generate TypedDict definition
-            lines = [f"class {class_name}(TypedDict):"]
-            for col in columns:
-                col_type = col.python_type if col.python_type else "str"
-                lines.append(f"    {col.name}: {col_type}")
-            return "\n".join(lines)
+        # Generate Protocol definition for all non-tuple formats
+        # Protocols provide structural typing compatibility
+        # @runtime_checkable allows isinstance() checks at runtime
+        lines = [
+            "@runtime_checkable",
+            f"class {class_name}(Protocol):"
+        ]
+        for col in columns:
+            col_type = col.python_type if col.python_type else "str"
+            lines.append(f"    {col.name}: {col_type}")
 
-        elif return_format == "namedtuple":
-            # Generate namedtuple definition
-            field_names = [col.name for col in columns]
-            return f"{class_name} = namedtuple('{class_name}', {field_names!r})"
-
-        elif return_format == "pydantic":
-            # Generate Pydantic model definition
-            lines = [f"class {class_name}(BaseModel):"]
-            for col in columns:
-                col_type = col.python_type if col.python_type else "str"
-                lines.append(f"    {col.name}: {col_type}")
-            return "\n".join(lines)
-
-        return None
+        return "\n".join(lines)
