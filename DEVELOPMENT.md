@@ -78,6 +78,7 @@ make test-mdtest    # Mdtest suite only
 make test-e2e       # End-to-end tests only
 make test-coverage  # All tests with coverage report
 make update-mdtest  # Update mdtest assertions with actual values
+make bench          # Python vs Rust backend benchmarks
 ```
 
 ### Using pytest directly

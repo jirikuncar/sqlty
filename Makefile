@@ -23,6 +23,7 @@ help:
 	@echo "  test-e2e          - Run end-to-end tests only"
 	@echo "  test-coverage     - Run pytest with coverage report"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
+	@echo "  bench             - Run Python vs Rust benchmarks"
 	@echo ""
 	@echo "Examples:"
 	@echo "  check-examples    - Run sqlty check on all examples"
@@ -90,6 +91,12 @@ test-coverage:
 .PHONY: update-mdtest
 update-mdtest:
 	uv run pytest tests/mdtest/ --update-mdtest -v
+
+# --- Benchmarks ---
+
+.PHONY: bench
+bench:
+	uv run python benchmarks/bench_core.py
 
 # --- Examples ---
 

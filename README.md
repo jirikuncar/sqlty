@@ -133,6 +133,34 @@ q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
 
 See [magic codec documentation](docs/magic-codec.md) for setup and details.
 
+## Benchmarks
+
+SQLTy ships an optional Rust extension (compiled via PyO3/maturin) that accelerates all core operations. When not available, a pure-Python fallback is used automatically.
+
+| Benchmark | Python | Rust | Speedup |
+|-----------|-------:|-----:|--------:|
+| `infer_type`: 1 column | 120 us | 5 us | **24x** |
+| `infer_type`: 4 columns | 340 us | 12 us | **28x** |
+| `infer_type`: 10 cols + JOINs | 1,340 us | 54 us | **25x** |
+| `infer_type`: schema-aware | 1,770 us | 53 us | **33x** |
+| `expand_star`: with schema | 1,700 us | 51 us | **33x** |
+| `rewrite_source`: 1 query | 245 us | 10 us | **25x** |
+| `rewrite_source`: 3 queries | 600 us | 25 us | **24x** |
+| `rewrite_source`: 20 queries | 5,930 us | 230 us | **26x** |
+| `strip_source`: 1 query | 4 us | 3 us | 1.5x |
+| `strip_source`: 20 queries | 40 us | 45 us | 0.9x |
+| `check_source`: 4 queries | 415 us | 24 us | **17x** |
+
+**Geometric mean speedup: ~15x** (median of two runs on Linux x86_64).
+
+`strip_source` is regex-only (no SQL parsing), so both backends perform similarly. All other operations — which involve SQL parsing and type inference — see 17-33x speedups.
+
+Run benchmarks yourself:
+
+```bash
+uv run python benchmarks/bench_core.py
+```
+
 ## Testing
 
 SQLTy uses a markdown-based test framework (mdtest) inspired by [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md). Tests are snapshot-based `.md` files in `tests/mdtest/`:
