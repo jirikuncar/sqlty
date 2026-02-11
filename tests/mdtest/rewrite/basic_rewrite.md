@@ -4,14 +4,14 @@
 
 ```python
 q = "--sql SELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Multiple columns
 
 ```python
 q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-# rewritten: q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Non-SQL string is not rewritten

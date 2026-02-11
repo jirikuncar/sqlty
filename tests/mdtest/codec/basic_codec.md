@@ -4,14 +4,14 @@
 
 ```python
 q = "--sql SELECT 1::INTEGER"
-# decoded: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+# decoded: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Multiple columns
 
 ```python
 q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-# decoded: q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# decoded: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## String without --sql prefix is unchanged
@@ -32,12 +32,12 @@ q = "just a normal string"
 
 ```python
 q = "--sql SELECT created_at::TIMESTAMP"
-# decoded: q = SQL[tuple[datetime.datetime]]("--sql SELECT created_at::TIMESTAMP")
+# decoded: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP")
 ```
 
 ## UUID type triggers import
 
 ```python
 q = "--sql SELECT user_id::UUID"
-# decoded: q = SQL[tuple[uuid.UUID]]("--sql SELECT user_id::UUID")
+# decoded: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID")
 ```

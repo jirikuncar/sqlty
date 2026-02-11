@@ -9,7 +9,7 @@ Direct Usage (No Side Effects):
 
     code = b'q = "--sql SELECT 1::INTEGER"'
     transformed, _ = decode(code)
-    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
 The decode function automatically:
     - Transforms strings prefixed with '--sql' into SQL[T](...) calls
@@ -20,11 +20,11 @@ The decode function automatically:
 Examples:
     Simple query:
         b'q = "--sql SELECT 1::INTEGER"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
     Multiple columns:
         b'q = "--sql SELECT id::INTEGER, name::TEXT"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT")'
+        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql\\nSELECT id::INTEGER, name::TEXT")'
 
     With datetime/uuid:
         b'q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"'
@@ -82,14 +82,15 @@ def _transform_sql_string(string_literal: str) -> str:
     Returns:
         The transformed string as a SQL[T](...) call
     """
-    from sqlty._rewriter import _extract_string_content
+    from sqlty._rewriter import _extract_string_content, _normalize_sql_prefix
 
     content = _extract_string_content(string_literal)
     if content is None or not content.strip().startswith("--sql"):
         return string_literal
 
     inferred_type = _infer_sql_type(content.strip())
-    return f"SQL[{inferred_type}]({string_literal})"
+    normalized = _normalize_sql_prefix(string_literal)
+    return f"SQL[{inferred_type}]({normalized})"
 
 
 def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:

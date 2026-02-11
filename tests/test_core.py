@@ -74,20 +74,25 @@ def test_strip_source_basic():
     """strip_source removes SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
-    source = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")'
+    source = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")'
     result = strip_source(source)
     assert "SQL[" not in result
-    assert '"--sql SELECT id::INTEGER FROM users"' in result
+    assert '"--sql\\nSELECT id::INTEGER FROM users"' in result
 
 
 def test_round_trip():
-    """rewrite_source -> strip_source recovers the original."""
+    """rewrite -> strip -> rewrite -> strip is idempotent."""
     from sqlty.core import rewrite_source, strip_source
 
     original = 'q = "--sql SELECT id::INTEGER, name::TEXT FROM users"'
     rewritten = rewrite_source(original)
+    # Rewrite normalizes --sql<space> to --sql\n
+    assert '"--sql\\nSELECT' in rewritten
     stripped = strip_source(rewritten)
-    assert stripped.strip() == original.strip()
+    # Second cycle is stable (idempotent)
+    re_rewritten = rewrite_source(stripped)
+    re_stripped = strip_source(re_rewritten)
+    assert re_stripped.strip() == stripped.strip()
 
 
 def test_expand_star_with_schema():
@@ -121,14 +126,14 @@ def test_strip_preserves_manual_annotations():
     assert result == source  # unchanged — no --sql prefix
 
 
-def test_strip_single_line_triple_quoted():
-    """strip_source strips single-line triple-quoted --sql strings."""
+def test_strip_newline_format():
+    """strip_source strips --sql\\n format strings."""
     from sqlty.core import strip_source
 
-    source = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+    source = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
     result = strip_source(source)
     assert "SQL[" not in result
-    assert '"--sql SELECT 1::INTEGER"' in result
+    assert '"--sql\\nSELECT 1::INTEGER"' in result
 
 
 def test_check_source_stale_rewrite():
@@ -145,7 +150,7 @@ def test_check_source_clean():
     """check_source returns empty for clean wrapped source."""
     from sqlty.core import check_source
 
-    source = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")'
+    source = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")'
     diagnostics = check_source(source)
     # No stale-rewrite (it's wrapped), no stale-type (type is correct)
     stale_rewrites = [d for d in diagnostics if d["rule"] == "stale-rewrite"]
@@ -157,7 +162,7 @@ def test_check_source_stale_type():
     from sqlty.core import check_source
 
     # The annotation says tuple[str] but the query infers tuple[int]
-    source = 'q = SQL[tuple[str]]("--sql SELECT id::INTEGER FROM users")'
+    source = 'q = SQL[tuple[str]]("--sql\\nSELECT id::INTEGER FROM users")'
     diagnostics = check_source(source)
     stale_types = [d for d in diagnostics if d["rule"] == "stale-type"]
     assert len(stale_types) == 1

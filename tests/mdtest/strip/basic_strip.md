@@ -3,15 +3,15 @@
 ## Simple strip
 
 ```python
-q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
-# stripped: q = "--sql SELECT 1::INTEGER"
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# stripped: q = "--sql\nSELECT 1::INTEGER"
 ```
 
 ## Strip with multiple columns
 
 ```python
-q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# stripped: q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# stripped: q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
 
 ## Strip is idempotent
@@ -19,8 +19,8 @@ q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
 A plain --sql string without SQL[T] wrapper is unchanged:
 
 ```python
-q = "--sql SELECT 1::INTEGER"
-# stripped: q = "--sql SELECT 1::INTEGER"
+q = "--sql\nSELECT 1::INTEGER"
+# stripped: q = "--sql\nSELECT 1::INTEGER"
 ```
 
 ## Non-SQL code is unchanged
