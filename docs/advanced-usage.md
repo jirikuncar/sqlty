@@ -55,7 +55,7 @@ CREATE TABLE users (
 
 ```python
 # No casts needed — types inferred from schema
-q = "--sql SELECT id, name, email FROM users"
+q = "--sql\nSELECT id, name, email FROM users"
 
 # After rewrite:
 q = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")

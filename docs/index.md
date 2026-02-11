@@ -52,11 +52,11 @@ uv sync
 
 ## Quick Start
 
-1. **Write SQL queries with `--sql` prefix:**
+1. **Write SQL queries with `--sql\n` prefix (newline separates prefix from query):**
 
 ```python
 # queries.py
-q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
 
 2. **Rewrite to add type annotations:**
@@ -93,10 +93,10 @@ sqlty strip queries.py
 Write SQL queries as plain strings with the `--sql` prefix. Use PostgreSQL-style type casts (`::TYPE`) to declare column types:
 
 ```python
-# Simple query with explicit casts
-query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# Simple query with explicit casts (--sql\n prefix)
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
-# Multi-line queries
+# Multi-line queries (triple-quoted — newline is natural)
 query = """--sql
 SELECT id::INTEGER, name::TEXT, email::TEXT
 FROM users
@@ -173,7 +173,7 @@ CREATE TABLE users (
 
 ```python
 # Before: no casts needed with schema
-q = "--sql SELECT id, name, email FROM users"
+q = "--sql\nSELECT id, name, email FROM users"
 
 # After rewrite: types inferred from schema
 q = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
@@ -185,7 +185,7 @@ q = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 sqlty <COMMAND> [OPTIONS] [PATH...]
 
 Commands:
-  rewrite     Rewrite source files: "--sql ..." -> SQL[T]("--sql\n...")
+  rewrite     Rewrite source files: "--sql\n..." -> SQL[T]("--sql\n...")
   strip       Strip SQL[T](...) wrappers back to plain strings
   check       Lint: validate type annotations, detect issues
   version     Print version
@@ -193,7 +193,7 @@ Commands:
 
 ### Rewrite
 
-Transform `"--sql ..."` strings into `SQL[T]("--sql\n...")` calls with inferred types:
+Transform `"--sql\n..."` strings into `SQL[T]("--sql\n...")` calls with inferred types:
 
 ```bash
 # Rewrite all Python files in current directory
@@ -211,7 +211,7 @@ sqlty rewrite --schema schema.sql .
 
 ### Strip
 
-Reverse of rewrite — remove `SQL[T](...)` wrappers back to plain `"--sql ..."` strings:
+Reverse of rewrite — remove `SQL[T](...)` wrappers back to plain `"--sql\n..."` strings:
 
 ```bash
 # Strip all wrappers
@@ -282,7 +282,7 @@ SQLTy includes an optional codec that transforms `--sql` strings at import time:
 # coding: sqlty
 
 # Strings with --sql prefix are automatically transformed at import
-q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # Becomes: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 

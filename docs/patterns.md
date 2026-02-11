@@ -10,7 +10,7 @@ The primary pattern — write `--sql` prefixed strings, use `sqlty rewrite` to a
 
 ```python
 # 1. Write queries with --sql prefix and type casts
-query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
 
 ```bash
@@ -80,7 +80,7 @@ Import-time transformation — no explicit `sqlty rewrite` step needed.
 # coding: sqlty
 
 # --sql strings are automatically transformed at import time
-query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # At runtime: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
@@ -119,7 +119,7 @@ CREATE TABLE users (
 
 ```python
 # No explicit casts needed — types inferred from schema
-query = "--sql SELECT id, name, email FROM users"
+query = "--sql\nSELECT id, name, email FROM users"
 
 # After rewrite:
 query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")

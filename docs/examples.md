@@ -18,8 +18,8 @@ The simplest approach — write `--sql` queries, run `sqlty rewrite .` to add ty
 
 ```python
 # queries.py — write SQL with --sql prefix and type casts
-user_query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-count_query = "--sql SELECT COUNT(*)::INTEGER FROM users"
+user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
 ```
 
 ```bash
@@ -74,7 +74,7 @@ CREATE TABLE users (
 
 ```python
 # queries.py — no explicit casts needed
-user_query = "--sql SELECT id, name, email FROM users"
+user_query = "--sql\nSELECT id, name, email FROM users"
 ```
 
 ```bash
@@ -104,10 +104,10 @@ Import-time transformation — `--sql` strings are automatically rewritten when 
 # coding: sqlty
 
 # --sql strings transformed at import time
-user_query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
-count_query = "--sql SELECT COUNT(*)::INTEGER FROM users"
+count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
 # At runtime: SQL[tuple[int]]("--sql\nSELECT COUNT(*)::INTEGER FROM users")
 ```
 

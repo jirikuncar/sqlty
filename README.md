@@ -14,8 +14,8 @@ Type-safe SQL queries for Python with automatic type inference, source rewriting
 SQLTy infers Python types from SQL queries and provides tools to rewrite, strip, and check your codebase for type safety. Write SQL queries with explicit type casts, and let SQLTy handle the rest.
 
 ```python
-# Before: plain --sql strings
-query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# Before: plain --sql strings (newline separates prefix from query)
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 # After: sqlty rewrite .
 from sqlty import SQL
@@ -26,7 +26,7 @@ query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 | Command | What it does | Analogy |
 |---------|-------------|---------|
-| `sqlty rewrite .` | `"--sql ..."` -> `SQL[T]("--sql\n...")` in source files | `ruff format` |
+| `sqlty rewrite .` | `"--sql\n..."` -> `SQL[T]("--sql\n...")` in source files | `ruff format` |
 | `sqlty strip .` | Reverse: `SQL[T]("--sql\n...")` -> `"--sql\n..."` | (unique to sqlty) |
 | `sqlty check .` | Lint: type mismatches, SELECT *, stale rewrites | `ruff check` |
 
@@ -50,11 +50,11 @@ pip install sqlty
 uv add sqlty
 ```
 
-**Write queries with `--sql` prefix:**
+**Write queries with `--sql\n` prefix:**
 
 ```python
 # queries.py
-q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
 
 **Rewrite to add type annotations:**
@@ -86,7 +86,7 @@ sqlty check .
 ## Features
 
 - **Type Inference**: Infers Python types from SQL casts (`::INTEGER` -> `int`, `::TEXT` -> `str`)
-- **Rewrite/Strip**: Bidirectional source transformation between `"--sql ..."` and `SQL[T]("--sql\n...")`
+- **Rewrite/Strip**: Bidirectional source transformation between `"--sql\n..."` and `SQL[T]("--sql\n...")`
 - **Lint Rules**: 8 built-in rules with configurable severity (ty-style `error`/`warn`/`ignore`)
 - **Star Expansion**: `SELECT *` -> explicit column list using schema
 - **Pluggable Codecs**: Custom type formatting via `TypeCodec` protocol
@@ -121,11 +121,11 @@ SQLTy includes an optional codec that transforms `--sql` strings at import time:
 
 ```python
 # Strings with --sql prefix are automatically transformed
-q = "--sql SELECT 1::INTEGER"
+q = "--sql\nSELECT 1::INTEGER"
 # Becomes: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 
 # Automatically adds imports for datetime/uuid types
-q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
+q = "--sql\nSELECT created_at::TIMESTAMP, user_id::UUID"
 # Becomes:
 # import datetime
 # import uuid
