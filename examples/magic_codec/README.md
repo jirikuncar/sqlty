@@ -10,7 +10,7 @@ The magic codec allows you to write SQL queries as simple strings without explic
 from sqlty import magic
 
 q = "--sql SELECT 1::INTEGER"
-# Automatically becomes: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+# Automatically becomes: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## How It Works
@@ -35,7 +35,7 @@ The codec infers types based on explicit SQL type casts:
 - `--sql SELECT id::INTEGER, name::TEXT` → `SQL[tuple[int, str]](...)`
 - `--sql SELECT email::TEXT, created_at::TIMESTAMP` → `SQL[tuple[str, datetime.datetime]](...)`
 
-If type inference fails, the codec defaults to `SQL[Any](...)`.
+If type inference fails (invalid SQL, DML without RETURNING, DDL), the string is left unchanged.
 
 ## Running the Example
 
