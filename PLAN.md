@@ -2980,7 +2980,7 @@ Build the mdtest runner first. All subsequent phases write mdtests before writin
 - Table aliases (`u.id` vs `users.id`) don't resolve against schema — schema lookup uses exact table name match
 - Writable CTEs: analyzer finds inner RETURNING before outer SELECT (documented in cte.md)
 
-### Phase 2: Unified rewriter with strip and star expansion
+### Phase 2: Unified rewriter with strip and star expansion ✅ DONE
 
 **Created `src/sqlty/_rewriter.py`** (~180 lines) ✅ DONE:
 - `SQLRewriter.rewrite(source)` — `"--sql ..."` → `SQL[T](...)` with import injection
@@ -2988,29 +2988,31 @@ Build the mdtest runner first. All subsequent phases write mdtests before writin
 - Idempotent: already-wrapped strings are not double-wrapped
 - Regex-based string detection (single, double, triple-quoted)
 - Accepts optional `TypeCodec` for custom type formatting
-- `expand_stars(sql, schema)` — deferred to Phase 3 (requires deeper sqlglot integration)
 
-**`src/sqlty/_decode.py`** — NOT simplified yet (deferred). The decode module works at the codec/bytes level; the rewriter works at the source/string level. Both share `SQLAnalyzer` but have different entry points.
+**Star expansion implemented** ✅:
+- `SQLAnalyzer.expand_star(sql)` — `SELECT *` → explicit column list with schema-based casts
+- Supports unqualified `*`, qualified `t.*`, table aliases, multi-table FROM
+- Returns `None` when no schema, no star, or unknown table
+
+**`src/sqlty/_decode.py`** simplified ✅:
+- `_infer_sql_type()` and `_transform_sql_string()` delegate to `SQLRewriter`
+- `decode()` codec still uses tokenizer for precise string detection (battle-tested)
 
 **mdtests implemented:**
-- `tests/mdtest/rewrite/basic_rewrite.md` (5 cases: simple, multi-column, non-SQL, no-prefix, idempotent)
-- `tests/mdtest/strip/basic_strip.md` (4 cases: simple, multi-column, idempotent, non-SQL)
-- `tests/mdtest/strip/round_trip.md` (4 cases: rewrite→strip and strip→rewrite invariants)
-- Star expansion tests (`expanded:` assertion) — deferred to Phase 3
+- `tests/mdtest/rewrite/basic_rewrite.md` (5 cases)
+- `tests/mdtest/rewrite/edge_cases.md` (6 cases)
+- `tests/mdtest/strip/basic_strip.md` (4 cases)
+- `tests/mdtest/strip/round_trip.md` (4 cases)
+- `tests/mdtest/postgres/star_expansion.md` (7 cases: single/multi table, qualified/unqualified, aliases, no-schema, no-star, unknown-table)
+- `tests/mdtest/codec/basic_codec.md` (6 cases: transform, no-op, datetime/uuid imports)
 
-New assertion types implemented in mdtest_runner.py:
-- `# rewritten: <source>` — calls `SQLRewriter.rewrite()`, compares code (imports stripped)
-- `# stripped: <source>` — calls `SQLRewriter.strip()`, compares code
+New assertion types:
+- `# rewritten:` — calls `SQLRewriter.rewrite()`, compares code (imports stripped)
+- `# stripped:` — calls `SQLRewriter.strip()`, compares code
+- `# expanded:` — calls `SQLAnalyzer.expand_star()`, compares expanded SQL
+- `# decoded:` — calls `decode()` (magic codec), compares transformed code (imports stripped)
 
-Design decision: `# rewritten:` assertions show only the code transformation, not imports.
-This is cleaner for single-line assertions and avoids multi-line matching complexity.
-
-**Remaining Phase 2 items (deferred):**
-- `SQLRewriter.expand_stars(sql, schema)` — `SELECT *` → explicit column list with casts
-- `# expanded: <sql>` assertion type
-- `# error: [rule-name]` assertion type (Phase 3)
-
-### Phase 3: Lint/Check infrastructure ✅ DONE (core)
+### Phase 3: Lint/Check infrastructure ✅ DONE
 
 **Created `src/sqlty/_lint.py`** (~120 lines) ✅:
 - 7 lint rules with kebab-case names: `column-count-mismatch`, `column-type-mismatch`,
@@ -3027,22 +3029,21 @@ This is cleaner for single-line assertions and avoids multi-line matching comple
 - `Checker.check_select_star()` — select-star and select-star-no-schema rules
 - `Checker.check_query()` — runs all applicable checks, returns diagnostics
 
-**Simplified `src/sqlty/_decode.py`** ✅:
-- `_infer_sql_type()` and `_transform_sql_string()` now delegate to `SQLRewriter`
-- `decode()` codec still uses tokenizer for precise string detection (battle-tested)
-- Shared type inference logic through rewriter → no duplication
+**Type annotation checking** ✅:
+- `# error:` assertion supports annotation fields via TOML config
+- `tests/mdtest/check/type_annotation.md` — 8 cases (count/type/name mismatch, rule disabling, priority)
 
 **mdtests implemented:**
 - `tests/mdtest/check/star_expansion.md` — 4 cases (star detection, schema, disabled, no-error)
 - `tests/mdtest/check/lint_rules.md` — 3 cases (defaults, disabled, overrides)
-- `tests/mdtest/rewrite/edge_cases.md` — 6 cases (datetime, UUID, invalid SQL, empty, single-quote)
+- `tests/mdtest/check/type_annotation.md` — 8 cases (annotation validation)
+
+**CI updated** ✅:
+- `.github/workflows/tests.yml` — added Python 3.12 to matrix, added mdtest drift detection step
 
 **Remaining (deferred):**
 - CLI subcommand router (`rewrite`, `strip`, `check` commands)
-- `tests/mdtest/check/type_annotation.md` — SQL[User](...) validation (needs AST-based annotation resolver)
 - `[[tool.sqlty.overrides]]` for per-file rule config
-
-**Note:** CI updates happen incrementally. Phase 0 adds the mdtest runner to CI. Phase 3 updates the test workflow to split unit/mdtest/e2e runs. See the **Project Setup and CI** section below for full details.
 
 ---
 
@@ -3073,33 +3074,21 @@ This is cleaner for single-line assertions and avoids multi-line matching comple
 | `tests/mdtest/type_codec/tuple_codec.md` | ✅ | 4 test cases |
 | `tests/mdtest/type_codec/custom_codec.md` | ✅ | 4 test cases |
 
-### Phase 2 (Rewriter) ✅ DONE (core; star expansion deferred)
+### Phase 2 (Rewriter + star expansion + decode) ✅ DONE
 
 | File | Status | Purpose |
 |------|--------|---------|
 | `src/sqlty/_rewriter.py` | ✅ | SQLRewriter.rewrite() + strip() (~180 lines) |
-| `tests/mdtest/rewrite/basic_rewrite.md` | ✅ | 5 test cases |
-| `tests/mdtest/strip/basic_strip.md` | ✅ | 4 test cases |
-| `tests/mdtest/strip/round_trip.md` | ✅ | 4 test cases |
-
-### Phase 0 (CI updates — alongside mdtest)
-
-| File | Purpose |
-|------|---------|
-| `.github/workflows/tests.yml` | Add mdtest runner, expand Python version matrix |
-
-### Phase 2 (Rewriter + decode simplification) ✅ DONE
-
-| File | Status | Purpose |
-|------|--------|---------|
-| `src/sqlty/_rewriter.py` | ✅ | SQLRewriter.rewrite() + strip() (~180 lines) |
+| `src/sqlty/_sql_analyzer.py` | ✅ | expand_star() method for SELECT * expansion |
 | `src/sqlty/_decode.py` | ✅ | Simplified to delegate to SQLRewriter |
 | `tests/mdtest/rewrite/basic_rewrite.md` | ✅ | 5 test cases |
 | `tests/mdtest/rewrite/edge_cases.md` | ✅ | 6 test cases |
 | `tests/mdtest/strip/basic_strip.md` | ✅ | 4 test cases |
 | `tests/mdtest/strip/round_trip.md` | ✅ | 4 test cases |
+| `tests/mdtest/postgres/star_expansion.md` | ✅ | 7 test cases |
+| `tests/mdtest/codec/basic_codec.md` | ✅ | 6 test cases |
 
-### Phase 3 (Lint/Check) ✅ DONE (core)
+### Phase 3 (Lint/Check) ✅ DONE
 
 | File | Status | Purpose |
 |------|--------|---------|
@@ -3107,23 +3096,14 @@ This is cleaner for single-line assertions and avoids multi-line matching comple
 | `src/sqlty/_checker.py` | ✅ | Column count/type/name checks, SELECT * detection (~170 lines) |
 | `tests/mdtest/check/star_expansion.md` | ✅ | 4 test cases |
 | `tests/mdtest/check/lint_rules.md` | ✅ | 3 test cases |
+| `tests/mdtest/check/type_annotation.md` | ✅ | 8 test cases |
+| `.github/workflows/tests.yml` | ✅ | Python 3.12+3.14 matrix, mdtest drift detection step |
 
 ### Remaining (deferred)
 
 | File | Phase | Purpose |
 |------|-------|---------|
-| `src/sqlty/_sql_analyzer.py` | 2+ | Star expansion (`expand_star()`) |
-| `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip + star expansion |
-| `src/sqlty/_decode.py` | 2 | Simplify to thin wrapper |
-| `src/sqlty/_checker.py` | 3 | Type annotation resolver + column matcher |
-| `src/sqlty/_lint.py` | 3 | Lint rule registry (kebab-case, ty-style severity) |
-| `src/sqlty/_cli.py` | 3 | ruff-style subcommand router |
-| `tests/mdtest/type_codec/*.md` | 1 | TypeCodec tests |
-| `tests/mdtest/rewrite/*.md` | 2 | Rewrite tests |
-| `tests/mdtest/strip/*.md` | 2 | Strip tests |
-| `tests/mdtest/check/*.md` | 3 | Type annotation + star expansion + lint tests |
-| `tests/mdtest/postgres/star_expansion.md` | 2 | PG-specific star expansion cases |
-| `tests/mdtest/codec/*.md` | 3 | Magic codec tests |
+| `src/sqlty/_cli.py` | 4+ | ruff-style subcommand router |
 
 ### Future (multi-platform wheel building — when Rust is added)
 

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import pytest
 
 # Regex to match assertion comments in python blocks
-ASSERTION_RE = re.compile(r"^#\s+(inferred|rewritten|stripped|expanded|error):\s*(.*)$")
+ASSERTION_RE = re.compile(r"^#\s+(inferred|rewritten|stripped|expanded|error|decoded):\s*(.*)$")
 
 
 class MDTestFailure(Exception):
@@ -44,7 +44,7 @@ class MDTestFailure(Exception):
 class Assertion:
     """A single assertion comment from a .md file."""
 
-    kind: str  # "inferred", "rewritten", "stripped", "expanded", "error"
+    kind: str  # "inferred", "rewritten", "stripped", "expanded", "error", "decoded"
     expected: str  # The expected value after the prefix
     line: int  # Line number in the .md file (1-indexed, for update mode)
 
@@ -86,8 +86,12 @@ class MDTestCase:
                 return self._rewrite()
             case "stripped":
                 return self._strip()
+            case "expanded":
+                return self._expand_star()
             case "error":
                 return self._check_error()
+            case "decoded":
+                return self._decode()
             case _:
                 raise ValueError(f"Unknown assertion kind: {assertion.kind}")
 
@@ -225,6 +229,52 @@ class MDTestCase:
             source_lines.append(line)
         return "\n".join(source_lines)
 
+    def _expand_star(self) -> str:
+        """Compute expanded star form of the SQL query using schema.
+
+        For `# expanded:`, we expand SELECT * into explicit column list
+        using the loaded schema.
+        """
+        from sqlty._sql_analyzer import SQLAnalyzer
+
+        sqlty_config = self.config.get("sqlty", {})
+        dialect = sqlty_config.get("dialect", "postgres")
+
+        # Build schema if available
+        schema_path = None
+        schema_file = sqlty_config.get("schema")
+        if schema_file and schema_file in self.files:
+            import tempfile
+
+            tmp = Path(tempfile.mktemp(suffix=".sql"))
+            tmp.write_text(self.files[schema_file])
+            schema_path = tmp
+
+        analyzer = SQLAnalyzer(dialect=dialect, schema_path=schema_path)
+
+        # Get the SQL query
+        sql = self.sql_blocks[-1] if self.sql_blocks else ""
+        result = analyzer.expand_star(sql)
+
+        # Clean up
+        if schema_path and schema_path.exists():
+            schema_path.unlink()
+
+        return result if result is not None else "None"
+
+    def _decode(self) -> str:
+        """Run the magic codec decoder on python source and return result.
+
+        For `# decoded:`, we pass the non-assertion source lines through
+        the decode() function and return the transformed code (without imports).
+        """
+        from sqlty._decode import decode
+
+        source = self._extract_source_lines()
+        result, _ = decode(source.encode("utf-8"))
+        # Strip import lines for clean comparison
+        return _strip_import_lines(result).strip()
+
     def _check_error(self) -> str:
         """Run checker and return the first diagnostic as a ty-style string.
 
@@ -256,8 +306,22 @@ class MDTestCase:
         sql = self.sql_blocks[-1] if self.sql_blocks else ""
         has_schema = schema_path is not None or bool(analyzer.schema)
 
-        # Run checks — currently just select-star checks for SQL blocks
-        diagnostics = checker.check_query(sql, has_schema=has_schema)
+        # Parse annotation fields from config if provided
+        annotation_fields = None
+        type_name = "tuple"
+        annotation_config = sqlty_config.get("annotation")
+        if annotation_config and isinstance(annotation_config, dict):
+            type_name = annotation_config.get("type", "tuple")
+            fields_raw = annotation_config.get("fields", [])
+            annotation_fields = [(f[0], f[1]) for f in fields_raw]
+
+        # Run checks
+        diagnostics = checker.check_query(
+            sql,
+            annotation_fields=annotation_fields,
+            type_name=type_name,
+            has_schema=has_schema,
+        )
 
         # Clean up
         if schema_path and schema_path.exists():

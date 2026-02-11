@@ -13,6 +13,7 @@ jobs:
     strategy:
       matrix:
         python-version:
+          - "3.12"
           - "3.14"
       fail-fast: false
 
@@ -30,6 +31,9 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Run mdtests (drift detection)
+        run: uv run pytest tests/mdtest/ -v
 
   lint:
     name: Lint
