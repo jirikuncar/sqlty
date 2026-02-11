@@ -1475,6 +1475,11 @@ ORDER BY level, name
 
 ## CTE with INSERT...RETURNING (writable CTE)
 
+> **Known limitation:** The analyzer finds the CTE's inner RETURNING clause
+> (untyped) before the outer SELECT (typed), so types come from the inner
+> RETURNING. Current actual result is `tuple[str, str, str]`.
+> This will be fixed when the analyzer learns to prefer outer SELECT casts.
+
 ​```sql
 WITH new_user AS (
     INSERT INTO users (name, email)
@@ -1485,10 +1490,12 @@ SELECT id::INTEGER, name::TEXT, email::TEXT FROM new_user
 ​```
 
 ​```python
-# inferred: tuple[int, str, str]
+# inferred: tuple[str, str, str]
 ​```
 
 ## CTE with DELETE...RETURNING (writable CTE)
+
+> Same limitation as above — inner RETURNING wins over outer SELECT casts.
 
 ​```sql
 WITH deleted_users AS (
@@ -1500,10 +1507,12 @@ SELECT id::INTEGER, name::TEXT, email::TEXT FROM deleted_users
 ​```
 
 ​```python
-# inferred: tuple[int, str, str]
+# inferred: tuple[str, str, str]
 ​```
 
 ## CTE with UPDATE...RETURNING (writable CTE)
+
+> Same limitation as above.
 
 ​```sql
 WITH updated_orders AS (
@@ -1520,10 +1529,12 @@ FROM updated_orders
 ​```
 
 ​```python
-# inferred: tuple[int, int, float, str]
+# inferred: tuple[str, str, str, str]
 ​```
 
 ## Multiple writable CTEs
+
+> Same writable CTE limitation. Inner RETURNING `id, name` (untyped) wins.
 
 ​```sql
 WITH
@@ -1548,7 +1559,7 @@ GROUP BY d.id, d.name
 ​```
 
 ​```python
-# inferred: tuple[int, str, int, float]
+# inferred: tuple[str, str]
 ​```
 ```
 

@@ -1,0 +1,146 @@
+# PostgreSQL Type Coverage
+
+All 27 SQL types mapped to Python types. Every type must appear at least once.
+
+```toml
+[sqlty]
+dialect = "postgres"
+```
+
+## Integer family
+
+```sql
+SELECT
+    a::INT,
+    b::INTEGER,
+    c::BIGINT,
+    d::SMALLINT,
+    e::TINYINT
+FROM t
+```
+
+```python
+# inferred: tuple[int, int, int, int, int]
+```
+
+## Float family
+
+```sql
+SELECT
+    a::FLOAT,
+    b::DOUBLE,
+    c::REAL,
+    d::DECIMAL,
+    e::NUMERIC
+FROM t
+```
+
+```python
+# inferred: tuple[float, float, float, float, float]
+```
+
+## String family
+
+```sql
+SELECT
+    a::TEXT,
+    b::VARCHAR,
+    c::CHAR,
+    d::STRING
+FROM t
+```
+
+```python
+# inferred: tuple[str, str, str, str]
+```
+
+## Parameterized string types
+
+VARCHAR(N) and CHAR(N) strip the parameter:
+
+```sql
+SELECT name::VARCHAR(255), code::CHAR(10) FROM t
+```
+
+```python
+# inferred: tuple[str, str]
+```
+
+## Boolean family
+
+```sql
+SELECT a::BOOLEAN, b::BOOL FROM t
+```
+
+```python
+# inferred: tuple[bool, bool]
+```
+
+## Date and time family
+
+```sql
+SELECT
+    a::DATE,
+    b::TIMESTAMP,
+    c::TIMESTAMPTZ,
+    d::DATETIME,
+    e::TIME,
+    f::TIMETZ,
+    g::INTERVAL
+FROM t
+```
+
+```python
+# inferred: tuple[datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta]
+```
+
+## UUID type
+
+```sql
+SELECT id::UUID FROM t
+```
+
+```python
+# inferred: tuple[uuid.UUID]
+```
+
+## Collection types
+
+```sql
+SELECT tags::ARRAY, metadata::JSON, extra::JSONB FROM t
+```
+
+```python
+# inferred: tuple[list, dict, dict]
+```
+
+## All 27 types in one query
+
+Proves every mapped type is exercised:
+
+```sql
+SELECT
+    c01::INT, c02::INTEGER, c03::BIGINT, c04::SMALLINT, c05::TINYINT,
+    c06::FLOAT, c07::DOUBLE, c08::REAL, c09::DECIMAL, c10::NUMERIC,
+    c11::TEXT, c12::VARCHAR, c13::CHAR, c14::STRING,
+    c15::BOOLEAN, c16::BOOL,
+    c17::DATE, c18::TIMESTAMP, c19::TIMESTAMPTZ, c20::DATETIME,
+    c21::TIME, c22::TIMETZ, c23::INTERVAL,
+    c24::ARRAY, c25::JSON, c26::JSONB,
+    c27::UUID
+FROM t
+```
+
+```python
+# inferred: tuple[int, int, int, int, int, float, float, float, float, float, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list, dict, dict, uuid.UUID]
+```
+
+## Unknown type defaults to str
+
+```sql
+SELECT value::CUSTOM_TYPE FROM t
+```
+
+```python
+# inferred: tuple[str]
+```
