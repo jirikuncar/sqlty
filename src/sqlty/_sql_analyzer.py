@@ -7,6 +7,11 @@ from typing import NamedTuple
 
 from sqlglot import exp, parse_one
 
+from sqlty._type_codec import TupleCodec, TypeCodec
+
+# Module-level default to avoid re-creating per call
+_default_codec = TupleCodec()
+
 
 class ColumnInfo(NamedTuple):
     """Information about a column in a SQL SELECT statement."""
@@ -313,19 +318,31 @@ class SQLAnalyzer:
             case _:
                 return None
 
-    def generate_return_type(self, sql: str) -> str | None:
+    def generate_return_type(
+        self,
+        sql: str,
+        codec: TypeCodec | None = None,
+    ) -> str | None:
         """
         Generate a Python return type annotation for a SQL query.
+
+        Args:
+            sql: SQL query string to analyze
+            codec: Optional TypeCodec for formatting the result.
+                   Defaults to TupleCodec() which produces "tuple[int, str]".
 
         For example:
         - "SELECT id, name FROM users" -> "tuple[int, str]" (if types can be inferred)
         - "SELECT id, name FROM users" -> "tuple[str, str]" (if types can't be inferred)
         """
+        if codec is None:
+            codec = _default_codec
+
         columns = self.analyze_select(sql)
         if not columns:
             return None
 
-        # Build tuple type
+        # Build type list
         types: list[str] = []
         for col in columns:
             if col.python_type:
@@ -334,7 +351,4 @@ class SQLAnalyzer:
                 # Default to str if type can't be inferred
                 types.append("str")
 
-        if len(types) == 1:
-            return f"tuple[{types[0]}]"
-        else:
-            return f"tuple[{', '.join(types)}]"
+        return codec.format_type(types)

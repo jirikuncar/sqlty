@@ -82,12 +82,17 @@ class MDTestCase:
         match assertion.kind:
             case "inferred":
                 return self._infer_type()
+            case "rewritten":
+                return self._rewrite()
+            case "stripped":
+                return self._strip()
             case _:
                 raise ValueError(f"Unknown assertion kind: {assertion.kind}")
 
     def _infer_type(self) -> str:
         """Compute inferred type from the SQL block(s) in this test case."""
         from sqlty._sql_analyzer import SQLAnalyzer
+        from sqlty._type_codec import TypeCodec
 
         sqlty_config = self.config.get("sqlty", {})
         dialect = sqlty_config.get("dialect", "postgres")
@@ -105,18 +110,136 @@ class MDTestCase:
 
         analyzer = SQLAnalyzer(dialect=dialect, schema_path=schema_path)
 
+        # Build codec from config if specified
+        codec: TypeCodec | None = None
+        codec_config = sqlty_config.get("codec")
+        if codec_config:
+            codec = self._build_codec(codec_config)
+
         # Use the last SQL block as the query
         if not self.sql_blocks:
             return "None"
 
         sql = self.sql_blocks[-1]
-        result = analyzer.generate_return_type(sql)
+        result = analyzer.generate_return_type(sql, codec=codec)
 
         # Clean up temp schema file
         if schema_path and schema_path.exists():
             schema_path.unlink()
 
         return str(result) if result is not None else "None"
+
+    @staticmethod
+    def _build_codec(codec_config: dict | str) -> TypeCodec | None:
+        """Build a TypeCodec from TOML config.
+
+        Supports:
+            codec = "tuple"                    → TupleCodec (default)
+            codec = {template = "list[{types}]"}  → TemplateCodec
+        """
+        from sqlty._type_codec import TupleCodec
+
+        if isinstance(codec_config, str):
+            if codec_config == "tuple":
+                return TupleCodec()
+            return None
+
+        if isinstance(codec_config, dict):
+            template = codec_config.get("template")
+            if template:
+                # Inline template codec for testing custom formats
+                class _TemplateCodec:
+                    def __init__(self, tmpl: str) -> None:
+                        self._template = tmpl
+
+                    def format_type(self, column_types: list[str]) -> str:
+                        return self._template.replace("{types}", ", ".join(column_types))
+
+                return _TemplateCodec(template)
+
+        return None
+
+    def _build_rewriter(self):
+        """Build an SQLRewriter from test case config."""
+        from sqlty._rewriter import SQLRewriter
+
+        sqlty_config = self.config.get("sqlty", {})
+        dialect = sqlty_config.get("dialect", "postgres")
+
+        # Handle schema file from file blocks
+        schema_path_str = None
+        schema_file = sqlty_config.get("schema")
+        if schema_file and schema_file in self.files:
+            import tempfile
+
+            tmp = Path(tempfile.mktemp(suffix=".sql"))
+            tmp.write_text(self.files[schema_file])
+            schema_path_str = str(tmp)
+
+        codec = None
+        codec_config = sqlty_config.get("codec")
+        if codec_config:
+            codec = self._build_codec(codec_config)
+
+        return SQLRewriter(dialect=dialect, schema_path=schema_path_str, codec=codec)
+
+    def _rewrite(self) -> str:
+        """Compute rewritten form of source lines above the assertion.
+
+        For `# rewritten:`, we rewrite just the non-assertion code lines
+        in the python block and return the rewritten code (without imports).
+        """
+        if not self.python_blocks:
+            return ""
+
+        rewriter = self._build_rewriter()
+        source = self._extract_source_lines()
+        result = rewriter.rewrite(source)
+        # Strip import lines — assertions check only the code transformation
+        return _strip_import_lines(result).strip()
+
+    def _strip(self) -> str:
+        """Compute stripped form of source lines above the assertion.
+
+        For `# stripped:`, we strip SQL[T](...) wrappers from code lines
+        and return the result (without removed imports).
+        """
+        if not self.python_blocks:
+            return ""
+
+        rewriter = self._build_rewriter()
+        source = self._extract_source_lines()
+        result = rewriter.strip(source)
+        return result.strip()
+
+    def _extract_source_lines(self) -> str:
+        """Extract non-assertion source lines from the last python block."""
+        source = self.python_blocks[-1]
+        source_lines = []
+        for line in source.splitlines():
+            stripped = line.strip()
+            if ASSERTION_RE.match(stripped):
+                continue
+            source_lines.append(line)
+        return "\n".join(source_lines)
+
+
+def _strip_import_lines(source: str) -> str:
+    """Remove import lines from rewriter output.
+
+    The `# rewritten:` assertion checks only the code transformation,
+    not import injection. Import lines are:
+    - import datetime
+    - import uuid
+    - from sqlty import SQL
+    """
+    lines = []
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped in ("import datetime", "import uuid", "from sqlty import SQL"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _rewrite_line_in_md(md_path: Path, line_num: int, kind: str, actual: str) -> None:
