@@ -3247,13 +3247,12 @@ This is already implemented in `src/sqlty/core.py`.
 | `pyproject.toml` | ✅ | Updated: maturin build backend |
 | `tests/test_core_conformance.py` | ✅ | 51 conformance tests (validates both implementations) |
 
-### Future (multi-platform wheel building)
+### CI & Release ✅ DONE
 
-| File | Purpose |
-|------|---------|
-| `pyproject.toml` | Switch build backend to maturin |
-| `.github/workflows/wheels.yml` | New: multi-platform wheel building |
-| `.github/workflows/pypi.yml` | Update for wheel artifact collection |
+| File | Status | Purpose |
+|------|--------|---------|
+| `.github/workflows/tests.yml` | ✅ | Tests (Python 3.12+3.14, Rust, pure-Python fallback, lint) |
+| `.github/workflows/pypi.yml` | ✅ | Multi-platform wheel building (5 targets) + PyPI publish |
 
 ---
 
@@ -3286,9 +3285,9 @@ Rust is used **only** as a compiled extension inside the Python wheel. There is 
 `.github/workflows/tests.yml` runs `uv run pytest` (all tests including mdtests) + a dedicated
 mdtest drift detection step on Python 3.12 and 3.14. Lint job runs pre-commit on all files.
 
-### CI: Multi-platform wheel building (future, when Rust is added)
+### CI: Multi-platform wheel building ✅ DONE
 
-When the Rust extension is introduced, add `.github/workflows/wheels.yml`:
+`.github/workflows/pypi.yml` builds wheels for 5 platforms using `maturin-action`:
 
 ```yaml
 name: Build wheels

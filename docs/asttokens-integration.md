@@ -1,5 +1,8 @@
 # AST Node References Integration
 
+> **Status:** This document describes the asttokens integration for the stub generation pipeline, which is deferred.
+> See [PLAN-FUTURE.md](../PLAN-FUTURE.md) for the stub generation roadmap.
+
 This document describes the integration of `asttokens` for tracking exact source ranges in SQLTy.
 
 ## Overview

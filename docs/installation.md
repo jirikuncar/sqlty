@@ -76,6 +76,9 @@ Check that sqlty is installed correctly:
 
 ```bash
 # Check the CLI tool is available
+sqlty version
+
+# See available commands
 sqlty --help
 ```
 
