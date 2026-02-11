@@ -41,13 +41,24 @@ import io
 import token
 import tokenize
 
-from sqlty._sql_analyzer import SQLAnalyzer
-
 __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
 
 # Get the standard UTF-8 codec
 utf_8_codec = encodings.search_function("utf8")
 assert utf_8_codec is not None, "UTF-8 codec not found"
+
+# Lazy-initialized rewriter (avoid import cycle at module level)
+_rewriter = None
+
+
+def _get_rewriter():
+    """Get or create the module-level SQLRewriter instance."""
+    global _rewriter
+    if _rewriter is None:
+        from sqlty._rewriter import SQLRewriter
+
+        _rewriter = SQLRewriter()
+    return _rewriter
 
 
 def _infer_sql_type(sql_query: str) -> str:
@@ -59,23 +70,7 @@ def _infer_sql_type(sql_query: str) -> str:
     Returns:
         A string representation of the inferred type
     """
-    # Remove the --sql prefix if present
-    query = sql_query
-    if query.startswith("--sql "):
-        query = query[6:].strip()
-    elif query.startswith("--sql"):
-        query = query[5:].strip()
-
-    try:
-        # Use the existing SQL analyzer to infer types
-        analyzer = SQLAnalyzer()
-        inferred_type = analyzer.generate_return_type(query)
-        if inferred_type:
-            return inferred_type
-        return "Any"
-    except Exception:
-        # If type inference fails, default to Any
-        return "Any"
+    return _get_rewriter()._infer_type(sql_query)
 
 
 def _transform_sql_string(string_literal: str) -> str:
@@ -87,33 +82,21 @@ def _transform_sql_string(string_literal: str) -> str:
     Returns:
         The transformed string as a SQL[T](...) call
     """
-    # Parse the string literal to extract the actual content
-    # Handle both single and double quotes, and triple quotes
+    from sqlty._rewriter import _extract_string_content
 
-    if string_literal.startswith('"""') or string_literal.startswith("'''"):
-        content = string_literal[3:-3]
-    elif string_literal.startswith('"') or string_literal.startswith("'"):
-        content = string_literal[1:-1]
-    else:
-        # Not a valid string literal
+    content = _extract_string_content(string_literal)
+    if content is None or not content.strip().startswith("--sql"):
         return string_literal
 
-    # Check if content starts with --sql
-    stripped_content = content.strip()
-    if not stripped_content.startswith("--sql"):
-        return string_literal
-
-    # Infer the type from the SQL query (use stripped content for inference)
-    inferred_type = _infer_sql_type(stripped_content)
-
-    # Construct the SQL[T](...) call
+    inferred_type = _infer_sql_type(content.strip())
     return f"SQL[{inferred_type}]({string_literal})"
 
 
 def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
     """Decode bytes into a string, transforming --sql prefixed strings.
 
-    This is the main entry point for the custom codec.
+    This is the main entry point for the custom codec. Uses the tokenizer
+    for precise string detection, then delegates type inference to SQLRewriter.
 
     Args:
         b: The bytes to decode
@@ -139,7 +122,6 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         for tok in tokens:
             # Check if SQL is already imported
             if tok.type == token.NAME and tok.string == "SQL":
-                # Look ahead to see if this is part of an import statement
                 has_sql_import = True
 
             if tok.type == token.STRING:

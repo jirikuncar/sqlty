@@ -86,6 +86,8 @@ class MDTestCase:
                 return self._rewrite()
             case "stripped":
                 return self._strip()
+            case "error":
+                return self._check_error()
             case _:
                 raise ValueError(f"Unknown assertion kind: {assertion.kind}")
 
@@ -222,6 +224,49 @@ class MDTestCase:
                 continue
             source_lines.append(line)
         return "\n".join(source_lines)
+
+    def _check_error(self) -> str:
+        """Run checker and return the first diagnostic as a ty-style string.
+
+        Expected format: [rule-name] "message"
+        If no diagnostics are emitted, returns empty string.
+        """
+        from sqlty._checker import Checker
+        from sqlty._lint import RuleConfig
+        from sqlty._sql_analyzer import SQLAnalyzer
+
+        sqlty_config = self.config.get("sqlty", {})
+        dialect = sqlty_config.get("dialect", "postgres")
+
+        # Build schema if available
+        schema_path = None
+        schema_file = sqlty_config.get("schema")
+        if schema_file and schema_file in self.files:
+            import tempfile
+
+            tmp = Path(tempfile.mktemp(suffix=".sql"))
+            tmp.write_text(self.files[schema_file])
+            schema_path = tmp
+
+        analyzer = SQLAnalyzer(dialect=dialect, schema_path=schema_path)
+        rule_config = RuleConfig.from_config(sqlty_config)
+        checker = Checker(analyzer=analyzer, rule_config=rule_config)
+
+        # Get the SQL query
+        sql = self.sql_blocks[-1] if self.sql_blocks else ""
+        has_schema = schema_path is not None or bool(analyzer.schema)
+
+        # Run checks — currently just select-star checks for SQL blocks
+        diagnostics = checker.check_query(sql, has_schema=has_schema)
+
+        # Clean up
+        if schema_path and schema_path.exists():
+            schema_path.unlink()
+
+        if diagnostics:
+            d = diagnostics[0]
+            return f'[{d.rule}] "{d.message}"'
+        return ""
 
 
 def _strip_import_lines(source: str) -> str:

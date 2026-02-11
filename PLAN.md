@@ -3010,25 +3010,37 @@ This is cleaner for single-line assertions and avoids multi-line matching comple
 - `# expanded: <sql>` assertion type
 - `# error: [rule-name]` assertion type (Phase 3)
 
-### Phase 3: ruff-style CLI with check/lint
+### Phase 3: Lint/Check infrastructure ✅ DONE (core)
 
-**Rewrite `src/sqlty/_cli.py`** as subcommand router with `rewrite`, `strip`, `check`.
+**Created `src/sqlty/_lint.py`** (~120 lines) ✅:
+- 7 lint rules with kebab-case names: `column-count-mismatch`, `column-type-mismatch`,
+  `column-name-mismatch`, `select-star`, `select-star-no-schema`, `stale-rewrite`, `stale-type`
+- `Severity` enum: `error` / `warn` / `ignore`
+- `LintRule` dataclass: name, default severity, fixable flag, description
+- `RuleConfig`: resolves effective severity from defaults + `[tool.sqlty.rules]` overrides
+- `Diagnostic`: formatted output as `[rule-name] "message"` (ty-style)
 
-**Create `src/sqlty/_checker.py`** (~200 lines):
-- Type annotation resolver — AST-based, finds TypedDict/NamedTuple/dataclass definitions
-- Field extractor — extracts (name, type) pairs from resolved types
-- Column matcher — compares SQL columns against type fields
-- Lint rule runner — kebab-case rules with ty-style per-rule severity
+**Created `src/sqlty/_checker.py`** (~170 lines) ✅:
+- `Checker.check_column_count()` — column-count-mismatch rule
+- `Checker.check_column_types()` — column-type-mismatch rule
+- `Checker.check_column_names()` — column-name-mismatch rule
+- `Checker.check_select_star()` — select-star and select-star-no-schema rules
+- `Checker.check_query()` — runs all applicable checks, returns diagnostics
 
-**Create `src/sqlty/_lint.py`** (~100 lines):
-- Lint rule registry and configuration loading from `[tool.sqlty.rules]`
-- Per-rule severity: `error` / `warn` / `ignore`
+**Simplified `src/sqlty/_decode.py`** ✅:
+- `_infer_sql_type()` and `_transform_sql_string()` now delegate to `SQLRewriter`
+- `decode()` codec still uses tokenizer for precise string detection (battle-tested)
+- Shared type inference logic through rewriter → no duplication
+
+**mdtests implemented:**
+- `tests/mdtest/check/star_expansion.md` — 4 cases (star detection, schema, disabled, no-error)
+- `tests/mdtest/check/lint_rules.md` — 3 cases (defaults, disabled, overrides)
+- `tests/mdtest/rewrite/edge_cases.md` — 6 cases (datetime, UUID, invalid SQL, empty, single-quote)
+
+**Remaining (deferred):**
+- CLI subcommand router (`rewrite`, `strip`, `check` commands)
+- `tests/mdtest/check/type_annotation.md` — SQL[User](...) validation (needs AST-based annotation resolver)
 - `[[tool.sqlty.overrides]]` for per-file rule config
-
-**mdtests:**
-- `tests/mdtest/check/type_annotation.md` — SQL[User](...) validation
-- `tests/mdtest/check/lint_rules.md` — rule configuration
-- `tests/mdtest/codec/basic_codec.md` (replaces `test_magic_codec_e2e.py`)
 
 **Note:** CI updates happen incrementally. Phase 0 adds the mdtest runner to CI. Phase 3 updates the test workflow to split unit/mdtest/e2e runs. See the **Project Setup and CI** section below for full details.
 
@@ -3076,11 +3088,31 @@ This is cleaner for single-line assertions and avoids multi-line matching comple
 |------|---------|
 | `.github/workflows/tests.yml` | Add mdtest runner, expand Python version matrix |
 
-### Phase 2-3 (remaining Python changes)
+### Phase 2 (Rewriter + decode simplification) ✅ DONE
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `src/sqlty/_rewriter.py` | ✅ | SQLRewriter.rewrite() + strip() (~180 lines) |
+| `src/sqlty/_decode.py` | ✅ | Simplified to delegate to SQLRewriter |
+| `tests/mdtest/rewrite/basic_rewrite.md` | ✅ | 5 test cases |
+| `tests/mdtest/rewrite/edge_cases.md` | ✅ | 6 test cases |
+| `tests/mdtest/strip/basic_strip.md` | ✅ | 4 test cases |
+| `tests/mdtest/strip/round_trip.md` | ✅ | 4 test cases |
+
+### Phase 3 (Lint/Check) ✅ DONE (core)
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `src/sqlty/_lint.py` | ✅ | Rule registry (7 rules, ty-style severity) (~120 lines) |
+| `src/sqlty/_checker.py` | ✅ | Column count/type/name checks, SELECT * detection (~170 lines) |
+| `tests/mdtest/check/star_expansion.md` | ✅ | 4 test cases |
+| `tests/mdtest/check/lint_rules.md` | ✅ | 3 test cases |
+
+### Remaining (deferred)
 
 | File | Phase | Purpose |
 |------|-------|---------|
-| `src/sqlty/_sql_analyzer.py` | 2 | Star expansion (`expand_star()`) |
+| `src/sqlty/_sql_analyzer.py` | 2+ | Star expansion (`expand_star()`) |
 | `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip + star expansion |
 | `src/sqlty/_decode.py` | 2 | Simplify to thin wrapper |
 | `src/sqlty/_checker.py` | 3 | Type annotation resolver + column matcher |
