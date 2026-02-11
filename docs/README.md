@@ -1,13 +1,14 @@
-# SQLType Documentation
+# SQLTy Documentation
 
-Welcome to the SQLType documentation!
+Welcome to the SQLTy documentation!
 
 ## Quick Links
 
 - **[Motivation](motivation.md)** - Why use SQLTy and when it's the right choice
-- **[Main Documentation](index.md)** - Complete guide to SQLType
+- **[Main Documentation](index.md)** - Complete guide to SQLTy
 - **[Installation Guide](installation.md)** - Setup and installation instructions
 - **[API Reference](api.md)** - Detailed API documentation
+- **[Magic Codec](magic-codec.md)** - Automatic string transformation
 
 ## Documentation Structure
 
@@ -17,19 +18,17 @@ Welcome to the SQLType documentation!
    - When to use SQLTy
    - Why SQLTy exists
    - Trade-offs and comparisons
-   - Real-world benefits
 
 2. **[Installation](installation.md)**
-   - Requirements
+   - Requirements (Python 3.12+)
    - Installation methods (pip, uv, poetry, from source)
    - Optional dependencies
    - IDE integration
-   - Verifying installation
 
 3. **[Quick Start](index.md#quick-start)**
    - Basic setup
    - Writing queries
-   - Generating stubs
+   - Rewrite and strip commands
    - Type checking
 
 ### User Guide
@@ -39,14 +38,12 @@ Welcome to the SQLType documentation!
    - Writing SQL queries
    - Type annotations in SQL
    - Generating stub files
-   - Using the generated stubs
 
-5. **[Advanced Usage](index.md#advanced-usage)**
+5. **[Advanced Usage](advanced-usage.md)**
    - Multi-registry pattern
    - Custom SQL dialects
-   - Incremental mode
-   - Custom class and export names
-   - Specifying output paths
+   - Schema-based inference
+   - Rule configuration
 
 ### Reference
 
@@ -55,29 +52,17 @@ Welcome to the SQLType documentation!
    - SQL type
    - Generator CLI
    - Type mappings
-   - Generated stub structure
-   - Type checking integration
-   - Error handling
-   - Performance considerations
+   - Lint rules
 
-### Understanding SQLType
+### Architecture
 
-7. **[Internals](index.md#internals)**
-   - Architecture overview
-   - Type inference engine
-   - AST analysis
-   - Stub generation process
+7. **[IR Architecture](ir-architecture.md)** - Internal representation details
+8. **[asttokens Integration](asttokens-integration.md)** - Source transformation internals
+9. **[Patterns](patterns.md)** - Usage patterns and best practices
 
-### Examples
+## Development
 
-8. **[Examples](index.md#examples)**
-   - Simple query registry
-   - Multi-registry application
-   - Real-world usage patterns
-
-## Contributing
-
-See the [Contributing section](index.md#contributing) in the main documentation.
+See **[DEVELOPMENT.md](../DEVELOPMENT.md)** for development setup, testing, and contribution guidelines.
 
 ## External Resources
 
@@ -86,14 +71,6 @@ See the [Contributing section](index.md#contributing) in the main documentation.
 - **[sqlglot Documentation](https://sqlglot.com/)** - SQL parsing and analysis
 - **[PEP 484](https://peps.python.org/pep-0484/)** - Type hints specification
 
-## Support
-
-For questions, issues, or contributions:
-
-- Open an issue on [GitHub](https://github.com/jirikuncar/sqlty/issues)
-- Check existing [documentation](index.md)
-- Review the [examples](index.md#examples)
-
 ## License
 
-SQLType is licensed under the MIT License. See the LICENSE file for details.
+SQLTy is licensed under the MIT License. See the LICENSE file for details.

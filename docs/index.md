@@ -1,4 +1,4 @@
-# SQLType Documentation
+# SQLTy Documentation
 
 Type-safe SQL queries for Python with automatic stub generation and runtime validation.
 
@@ -30,7 +30,7 @@ Type-safe SQL queries for Python with automatic stub generation and runtime vali
 ### Using pip
 
 ```bash
-pip install sqltype
+pip install sqlty
 ```
 
 ### Using uv (recommended for development)
@@ -49,7 +49,7 @@ uv pip install -e .
 
 ### Requirements
 
-- Python 3.14+
+- Python 3.12+
 - mypy (for type checking)
 - sqlglot (for SQL parsing and type inference)
 
@@ -155,7 +155,7 @@ count_result = execute(conn, count_query, {})
 
 ### Type Annotations in SQL
 
-SQLType uses PostgreSQL-style type casts to infer Python types:
+SQLTy uses PostgreSQL-style type casts to infer Python types:
 
 | SQL Type Cast | Python Type |
 |--------------|-------------|
@@ -399,7 +399,7 @@ def sql[T](query: T) -> T: ...
 
 ### Custom SQL Dialects
 
-SQLType supports multiple SQL dialects via sqlglot:
+SQLTy supports multiple SQL dialects via sqlglot:
 
 ```bash
 # PostgreSQL (default)
@@ -520,7 +520,7 @@ Without `--output`, the generator auto-detects output paths based on registry im
 
 ### Architecture Overview
 
-SQLType consists of three main components:
+SQLTy consists of three main components:
 
 1. **@sqlty Decorator**: Marks functions for type-safe SQL query execution
 2. **TypeStubGenerator**: AST-based analyzer that collects SQL calls and generates stubs

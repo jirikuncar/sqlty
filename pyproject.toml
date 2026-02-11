@@ -78,6 +78,11 @@ psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]
 addopts = ["--cov-report=term-missing", "--cov-report=html", "-v"]
+testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end tests (subprocess + inline-snapshot)",
+    "slow: slow tests that can be skipped with -m 'not slow'",
+]
 
 [tool.coverage.run]
 concurrency = ["multiprocessing"]

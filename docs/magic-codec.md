@@ -125,10 +125,12 @@ python -m sqlty.magic input.py > output.py
 
 ### Files
 
-- **src/sqlty/_decode.py**: Core decode logic without codec registration
+- **src/sqlty/_decode.py**: Core decode logic (delegates to `SQLRewriter` for type inference)
+- **src/sqlty/_rewriter.py**: Source-level rewrite/strip engine
 - **src/sqlty/magic.py**: Codec registration and setup
 - **sqlty_magic.pth**: Auto-installed file that enables codec on Python startup
-- **tests/test_magic*.py**: Comprehensive test suite (30 tests)
+- **tests/mdtest/codec/basic_codec.md**: Snapshot-based mdtest suite
+- **tests/test_magic*.py**: Integration tests
 - **examples/magic_codec/**: Example code and documentation
 
 ### How It Works

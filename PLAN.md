@@ -2928,37 +2928,13 @@ ruff-style subcommand router: `rewrite`, `strip`, `check`.
 
 ## Implementation Plan
 
-### Phase 0: Markdown test framework
+### Phase 0: Markdown test framework ✅ DONE
 
-Build the mdtest runner first. All subsequent phases write mdtests before writing code.
+Built the mdtest runner + postgres test suite. See File Change Summary below for implemented files.
 
-**New files:**
+**Assertion types:** `# inferred:`, `# rewritten:`, `# stripped:`, `# expanded:`, `# error:`, `# decoded:`
 
-| File | Purpose |
-|------|---------|
-| `tests/mdtest_runner.py` | Markdown parser + assertion engine (~300 lines) |
-| `tests/conftest.py` (modify) | Add `pytest_collect_file` hook for `.md` discovery |
-| `tests/mdtest/README.md` | Framework specification |
-| `tests/mdtest/type_inference/basic_types.md` | Replace `test_analyzer.py` |
-| `tests/mdtest/type_inference/datetime_types.md` | Replace datetime tests from `test_analyzer.py` |
-| `tests/mdtest/type_inference/uuid_types.md` | Replace uuid tests from `test_analyzer.py` |
-| `tests/mdtest/type_inference/aggregate_functions.md` | Replace `test_functions.py` |
-| `tests/mdtest/type_inference/schema_inference.md` | Replace `test_sum_schema.py` |
-| `tests/mdtest/type_inference/dialects.md` | Replace `test_dialects_and_schema.py` |
-| `tests/mdtest/postgres/type_coverage.md` | 100% SQL→Python type mapping (all 27 types) |
-| `tests/mdtest/postgres/select.md` | SELECT: joins, subqueries, window functions, CASE |
-| `tests/mdtest/postgres/returning.md` | INSERT/UPDATE/DELETE/MERGE RETURNING (~20 cases) |
-| `tests/mdtest/postgres/cte.md` | WITH / WITH RECURSIVE (~12 cases incl. writable CTEs) |
-| `tests/mdtest/postgres/json_typing.md` | JSON/JSONB: json_build_object, jsonb_agg, extraction (~18 cases) |
-| `tests/mdtest/postgres/aggregates.md` | COUNT, SUM, AVG with schema-aware inference |
-| `tests/mdtest/postgres/advanced.md` | LATERAL, window functions, UNION/INTERSECT/EXCEPT |
-
-**Assertion types in Phase 0:**
-- `# inferred: <type>` — calls `SQLAnalyzer.generate_return_type()` on preceding `sql` block
-- `# inferred: None` — asserts `generate_return_type()` returns `None`
-- TOML config blocks for dialect/schema
-
-**Validation:** Run both old pytest files and new mdtests, assert identical behavior.
+All assertions follow the compare-or-update pattern: CI fails on drift, `--update-mdtest` rewrites `.md` files.
 
 ### Phase 1: TypeCodec abstraction ✅ DONE
 
@@ -3146,71 +3122,10 @@ features = ["pyo3/extension-module"]
 
 Rust is used **only** as a compiled extension inside the Python wheel. There is no need to publish crates to crates.io. The Rust code lives in the same repo and is compiled during wheel building.
 
-### CI: Updated test workflow
+### CI: Test workflow ✅ DONE
 
-Update `.github/workflows/tests.yml` to run mdtests alongside existing pytest:
-
-```yaml
-name: Tests
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-jobs:
-  test:
-    name: Test Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version:
-          - "3.12"
-          - "3.13"
-          - "3.14"
-      fail-fast: false
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install the project
-        run: uv sync --all-groups
-
-      - name: Run unit tests
-        run: uv run pytest tests/ -v --ignore=tests/e2e
-
-      - name: Run mdtests
-        run: uv run pytest tests/mdtest/ -v
-
-      - name: Run e2e tests
-        run: uv run pytest tests/e2e/ -v
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Run pre-commit
-        run: uvx pre-commit run --all-files
-
-      - name: Show git diff
-        if: failure()
-        run: git --no-pager diff || true
-```
+`.github/workflows/tests.yml` runs `uv run pytest` (all tests including mdtests) + a dedicated
+mdtest drift detection step on Python 3.12 and 3.14. Lint job runs pre-commit on all files.
 
 ### CI: Multi-platform wheel building (future, when Rust is added)
 

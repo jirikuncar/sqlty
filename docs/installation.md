@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.14 or higher
+- Python 3.12 or higher
 - pip or uv for package management
 
 ## Installation Methods
@@ -10,7 +10,7 @@
 ### Using pip (Standard)
 
 ```bash
-pip install sqltype
+pip install sqlty
 ```
 
 ### Using uv (Recommended for Development)
@@ -21,14 +21,14 @@ pip install sqltype
 # Install uv if you haven't already
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install sqltype
-uv pip install sqltype
+# Install sqlty
+uv pip install sqlty
 ```
 
 ### Using poetry
 
 ```bash
-poetry add sqltype
+poetry add sqlty
 ```
 
 ### From Source
@@ -40,8 +40,8 @@ For development or to get the latest features:
 git clone https://github.com/jirikuncar/sqlty.git
 cd sqlty
 
-# Install in development mode
-uv pip install -e .
+# Install in development mode with uv
+uv sync --all-groups
 
 # Or with pip
 pip install -e .
@@ -54,7 +54,7 @@ pip install -e .
 For contributing or running tests:
 
 ```bash
-uv pip install -e ".[dev]"
+uv sync --all-groups
 ```
 
 This includes:
@@ -64,7 +64,7 @@ This includes:
 
 ### Type Checking Tools
 
-SQLType requires mypy for type checking:
+SQLTy works with mypy for type checking:
 
 ```bash
 pip install mypy
@@ -72,12 +72,9 @@ pip install mypy
 
 ## Verifying Installation
 
-Check that sqltype is installed correctly:
+Check that sqlty is installed correctly:
 
 ```bash
-# Check the package is installed
-python -c "import sqltype; print(sqlty.__version__)"
-
 # Check the CLI tool is available
 sqlty --help
 ```
@@ -102,11 +99,11 @@ Install the Python and Pylance extensions for the best experience:
 
 PyCharm has built-in support for type checking:
 
-1. Enable type checking: Settings → Editor → Inspections → Python → Type Checker
-2. Configure mypy: Settings → Tools → Python Integrated Tools → Type Checker → mypy
+1. Enable type checking: Settings -> Editor -> Inspections -> Python -> Type Checker
+2. Configure mypy: Settings -> Tools -> Python Integrated Tools -> Type Checker -> mypy
 
 ## Next Steps
 
 - Read the [Quick Start Guide](index.md#quick-start)
 - Explore [Basic Usage](index.md#basic-usage)
-- Check out the [Examples](index.md#examples)
+- Check out the [Examples](../examples/)

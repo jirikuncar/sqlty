@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for SQLType.
+Complete API documentation for SQLTy.
 
 ## Core Classes
 
@@ -358,7 +358,7 @@ Generated `.pyi` files have this structure:
 
 ```python
 from typing import overload, Literal
-from sqltype import SQL
+from sqlty import SQL
 
 @overload
 def sql(

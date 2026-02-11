@@ -4,7 +4,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 
 ## Prerequisites
 
-- Python 3.14+
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 
 ## Setup
@@ -12,7 +12,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 ### Install Dependencies
 
 ```bash
-uv sync
+uv sync --all-groups
 ```
 
 This will install all dependencies and development tools defined in `pyproject.toml`.
@@ -27,17 +27,11 @@ This ensures code is formatted and checked before each commit.
 
 #### Pre-commit Hooks Configured
 
-The repository uses several pre-commit hooks:
-
-- **Standard checks**: AST validation, YAML/TOML/JSON syntax, merge conflicts, trailing whitespace, etc.
+- **Standard checks**: AST validation, YAML/TOML/JSON syntax, merge conflicts, trailing whitespace
 - **Ruff**: Code formatting and linting with automatic fixes
 - **uv-lock**: Keeps the lockfile up to date
 - **mypy**: Type checking for the src directory
 - **sqlty-examples**: Automatic stub generation for example files
-  - Runs when any Python file in `examples/` changes
-  - Uses `--mode=full` to regenerate all stubs from scratch
-  - Formats generated stubs with ruff formatter
-  - Ensures example stubs stay synchronized with code changes
 
 To manually run all pre-commit hooks:
 
@@ -45,11 +39,88 @@ To manually run all pre-commit hooks:
 uv run pre-commit run --all-files
 ```
 
+## Running Tests
+
+SQLTy has three test layers:
+
+| Layer | Location | What it tests | Runner |
+|-------|----------|--------------|--------|
+| **Unit** | `tests/sql_analyzer/`, `tests/generator/`, etc. | Internal modules | `pytest` |
+| **mdtest** | `tests/mdtest/*.md` | Type inference, rewrite, strip, lint | Markdown snapshot engine |
+| **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
+
+### Make targets
+
+```bash
+make test           # Run all tests (unit + mdtest + e2e)
+make test-unit      # Unit tests only (no e2e, no mdtest)
+make test-mdtest    # Mdtest suite only
+make test-e2e       # End-to-end tests only
+make test-coverage  # All tests with coverage report
+make update-mdtest  # Update mdtest assertions with actual values
+```
+
+### Using pytest directly
+
+```bash
+# All tests
+uv run pytest
+
+# Specific test layer
+uv run pytest tests/mdtest/ -v
+uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest
+uv run pytest tests/e2e/ -v
+
+# Filter by test name
+uv run pytest -k "integer cast"
+uv run pytest tests/mdtest/type_inference/basic_types.md -v
+```
+
+### Markdown Tests (mdtest)
+
+SQLTy uses a snapshot-based markdown test framework inspired by [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md). Each `.md` file in `tests/mdtest/` is a test suite; each heading is a test case.
+
+**Assertion types:**
+
+| Prefix | What it tests |
+|--------|-------------|
+| `# inferred:` | Type inference via `SQLAnalyzer.generate_return_type()` |
+| `# rewritten:` | Source rewriting via `SQLRewriter.rewrite()` |
+| `# stripped:` | Source stripping via `SQLRewriter.strip()` |
+| `# expanded:` | Star expansion via `SQLAnalyzer.expand_star()` |
+| `# error:` | Lint diagnostics via `Checker.check_query()` |
+| `# decoded:` | Magic codec via `decode()` |
+
+**Writing a new test:** Add a heading + code blocks to the appropriate `.md` file. Use `make update-mdtest` to fill in expected values automatically.
+
+**Test directory layout:**
+
+```
+tests/mdtest/
+  type_inference/   # Type inference: basic types, schema, datetime, uuid
+  postgres/         # PostgreSQL-specific: SELECT, RETURNING, CTE, JSON, aggregates, star expansion
+  type_codec/       # TypeCodec protocol: tuple codec, custom codecs
+  rewrite/          # Source rewriting: basic, edge cases
+  strip/            # Source stripping: basic, round-trip invariants
+  check/            # Lint checks: star expansion, type annotation, rule config
+  codec/            # Magic codec: decode transformation
+```
+
+### E2E Tests
+
+E2e tests in `tests/e2e/` use subprocess to run the sqlty CLI (no internal imports). They use `inline-snapshot` for result verification and include mypy validation.
+
+```bash
+# Run e2e tests
+uv run pytest tests/e2e/ -v
+
+# Update e2e snapshots when output changes intentionally
+uv run pytest tests/e2e/ --inline-snapshot=update
+```
+
 ## Development Workflow
 
 ### Type Checking
-
-Run mypy type checking on the source code and examples:
 
 ```bash
 make typecheck
@@ -58,139 +129,100 @@ make typecheck
 Or directly:
 
 ```bash
-uv run mypy src/sqlty examples
-```
-
-### Running Tests
-
-```bash
-uv run pytest
-```
-
-With coverage:
-
-```bash
-uv run pytest --cov=src/sqlty --cov-report=html
+uv run mypy src/sqlty
+uv run ty check src/sqlty
 ```
 
 ### Code Formatting
 
-Format code with Ruff:
-
 ```bash
 uv run ruff format .
-```
-
-Lint code:
-
-```bash
-uv run ruff check .
-```
-
-Fix linting issues automatically:
-
-```bash
 uv run ruff check --fix .
 ```
 
+## Architecture
+
+### Core modules
+
+| Module | Purpose |
+|--------|---------|
+| `_sql_analyzer.py` | SQL parsing, type inference, star expansion (sqlglot-based) |
+| `_type_codec.py` | TypeCodec protocol + TupleCodec default |
+| `_rewriter.py` | Source-level rewrite/strip (`"--sql ..."` <-> `SQL[T](...)`) |
+| `_lint.py` | 7 lint rules with ty-style severity (error/warn/ignore) |
+| `_checker.py` | Column count/type/name validation, SELECT * detection |
+| `_decode.py` | Magic codec decoder (bytes -> string transformation) |
+| `magic.py` | Codec registration for Python import system |
+
+### Test modules
+
+| Module | Purpose |
+|--------|---------|
+| `tests/conftest.py` | pytest plugin: `.md` discovery, `--update-mdtest` flag |
+| `tests/mdtest_runner.py` | Markdown parser + snapshot assertion engine |
+| `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
+
 ## Generating Type Stubs
 
-The `sqlty` tool analyzes your Python code to automatically generate `.pyi` stub files with `@overload` declarations. It infers return types from:
-
-1. **SQL Analysis**: Uses [sqlglot](https://sqlglot.com) to parse SQL queries and extract column types from explicit type casts (e.g., `column::INTEGER`)
-2. **Schema Files**: Optionally load database schema (via `--schema` option) for enhanced type inference
-
-### Generate Stubs
-
 ```bash
-make generate-stubs
-```
+# Single file
+uv run sqlty queries.py
 
-Or directly:
+# Directory (incremental + prune + create)
+uv run sqlty .
 
-```bash
-uv run sqlty <source_file_or_directory> [options]
+# With schema for enhanced inference
+uv run sqlty . --schema schema.sql
+
+# Check stubs are up-to-date (CI)
+uv run sqlty . --check
 ```
 
 ### CLI Options
 
-- `-o, --output`: Output .pyi file path (auto-detected based on imports by default)
-- `--dialect`: SQL dialect for analysis (default: postgres). Supports: postgres, mysql, sqlite, bigquery, snowflake, and [more](https://sqlglot.com/sqlglot.html#supported-dialects)
-- `--mode=incremental`: Add new overloads to existing stub instead of replacing
-- `--mode=full`: Remove overloads for queries that no longer exist (auto-enabled for directory mode)
-- `--schema PATH` or `--schema registry:PATH`: Provide schema files to improve type inference. Repeat `--schema` for multiple registry mappings. Precedence: registry-specific > global > `__schema_path__` on the registry class.
-
-### Examples
-
-```bash
-# Single file mode - generates stub alongside source
-uv run sqlty examples/query/query.py
-
-# Directory mode - scans all files and generates central stub
-uv run sqlty examples/query/ --mode=full
-
-# Incremental mode - add new queries without regenerating everything
-uv run sqlty examples/query/new_queries.py --mode=incremental
-```
+- `-o, --output`: Output .pyi file path
+- `--dialect`: SQL dialect (default: postgres)
+- `--mode`: Generation mode (incremental, prune, create, fresh)
+- `--schema PATH`: Schema files for type inference
+- `--check`: Verify stubs without modifying files
 
 ## Running Examples
 
-Run any example directly:
-
 ```bash
-uv run examples/query/query.py
+# Generate stubs for all examples
+make generate-examples
+
+# Verify examples with mypy and stubtest
+make verify-examples
+
+# List registered functions in all examples
+make example-registries
 ```
-
-Or use the Makefile:
-
-```bash
-make run-example
-```
-
 
 ## Contributing
 
 ### Development Process
 
-1. **Fork and clone** the repository
-2. **Create a branch** for your feature/fix
-3. **Make changes** with tests
-4. **Run tests** and type checking
-5. **Commit** with a clear message
-6. **Push** and create a pull request
+1. Fork and clone the repository
+2. Create a branch for your feature/fix
+3. Make changes with tests
+4. Run `make test` and `make typecheck`
+5. Commit with a clear message
+6. Push and create a pull request
 
 ### Code Style
 
 - Follow PEP 8 and PEP 484 (type hints)
 - Use Ruff for formatting and linting
 - Add type hints to all functions
-- Write docstrings for public APIs
 
-### Testing
+### Testing Guidelines
 
-- Add tests for new features
-- Ensure all tests pass
-- Maintain or improve code coverage
-
-**For new functionality, prefer adding end-to-end tests in `tests/e2e/` that:**
-- Use subprocess to run the sqlty CLI (no internal imports)
-- Use inline-snapshot for result verification
-- Include mypy validation of generated stubs
-- Test the complete workflow from source to type checking
-
-See [tests/README.md](tests/README.md) and [tests/e2e/README.md](tests/e2e/README.md) for details.
-
-Run end-to-end tests:
-
-```bash
-pytest tests/e2e/ -v
-```
-
-Update snapshots when output changes intentionally:
-
-```bash
-pytest tests/e2e/ --inline-snapshot=update
-```
+- **New type inference behavior**: Add mdtest cases in `tests/mdtest/`
+- **New lint rules**: Add mdtest cases in `tests/mdtest/check/`
+- **CLI changes**: Add e2e tests in `tests/e2e/`
+- **Internal changes**: Add unit tests alongside existing test files
+- Use `make update-mdtest` to bootstrap expected values
 
 ### Pull Request Guidelines
 
@@ -199,68 +231,10 @@ pytest tests/e2e/ --inline-snapshot=update
 - Ensure CI passes
 - Request review from maintainers
 
-## Roadmap
-
-### Priority Tasks
-
-Based on user value and implementation effort:
-
-1. **Schema-based examples** (High Value, Low Effort)
-   - Many users want to avoid explicit casts
-   - Schema files are common in real projects
-   - Demonstrates --schema flag
-
-2. **Auto-generate examples** (High Value, Low Effort)
-   - Improves developer experience
-   - Already implemented, just needs example
-   - Shows SQLTY_AUTO_GENERATE env var
-
-3. **Incremental mode examples** (Medium Value, Low Effort)
-   - Important for large codebases
-   - Shows --mode=incremental workflow
-   - Relatively simple to demonstrate
-
-4. **Migration examples** (High Value, Medium Effort)
-   - Real-world use case
-   - Helps adoption
-   - Requires more setup/explanation
-
-5. **Dialect-specific examples** (Low Value, Medium Effort)
-   - Niche use case
-   - Already documented in CLI
-   - Can be added later
-
-### TODO List
-
-- [ ] Automatically add new @overload entries on `sql(...)` calls when SQLTY_AUTO_GENERATE=1 is set. Ensure minimal overhead and file locking to prevent race conditions.
-- [ ] Support more psycopg query types (Composed, Nested, etc.)
-- [ ] Support UUID type mapping
-- [ ] Support datetime and interval type mappings
-- [ ] Ensure locking is in place for concurrent stub generation in multi-threaded environments or multiple processes (file locks)
-- [x] Allow composable flags --mode=incremental,prune or --mode=full
-  - [x] Implemented --mode flag with incremental, full, and prune options
-  - [x] Removed legacy --mode=incremental and --mode=full flags (breaking change)
-  - [x] Updated API: generate_stub_file now uses mode parameter instead of boolean flags
-  - [x] Configure it to run on changed files in examples
-  - [ ] Prune implementation (remove overloads for queries that no longer exist)
-  - [ ] Support multiple modes in a single run: incremental,prune,create would run incremental generation, prune stale overloads, and create new ones if missing. Create alone should not override existing stubs but only create missing ones. Prune would only remove stale overloads if they are no longer in use - you can run prune only with whole directory otherwise it might lead to removing used stubs.
-- [ ] Make sure everything works with both `ty` and `mypy`.
-- [ ] Make sub-commands or parameters to check pyi files for missing or outdated stubs.
-- [ ] Add bootstrap sub-command to generate registry skeleton, detect schema if available in repo, and suggests configuration for pyproject.toml and pre-commit if present.
-- [ ] Add caching of parsed schema files to improve performance on repeated runs.
-- [ ] Cache generated stubs to avoid regenerating unchanged files.
-
-### Ideas
-
-- [ ] Support more psycopg query types (e.g. Composed, Nested, ...)
-- [ ] Migration tool for existing codebases
-- [ ] Support queries defined in files (hashes).
-
 ## Getting Help
 
-- **Documentation**: See [docs/](https://github.com/jirikuncar/sqlty/tree/main/docs)
+- **Documentation**: See [docs/](docs/)
 - **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/jirikuncar/sqlty/issues)
-- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/jirikuncar/sqlty/discussions)
 
 ## License
 
