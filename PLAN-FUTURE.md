@@ -1,29 +1,7 @@
-# Future: Stub Generation, Protocol Support, Rust Core
+# Future: Stub Generation, Structured Types
 
 > **Status:** Deferred. These features are not part of the current implementation plan.
-> See `PLAN.md` for the active work (mdtest framework, TypeCodec, rewriter/strip, check/lint CLI, CI).
-
----
-
-## Registries Command
-
-### What it does
-
-Discover and list all `@sqlty`-decorated functions (registries) across the project. Equivalent to the current `python -m sqlty.registries`.
-
-### CLI command (deferred)
-
-```
-sqlty registries .      # List discovered registries
-```
-
-| Command | What it does | Analogy |
-|---------|-------------|---------|
-| `sqlty registries .` | List discovered registries | `ruff rule` |
-
-### Dependencies
-
-Depends on the `_collector.py` module (`LiteralCallCollector`) which is part of the stub generation pipeline.
+> See `PLAN.md` for the active work (mdtest framework, TypeCodec, rewriter/strip, check/lint CLI, Rust core, CI).
 
 ---
 
@@ -31,7 +9,7 @@ Depends on the `_collector.py` module (`LiteralCallCollector`) which is part of 
 
 ### What it does
 
-Analyze Python source files to find calls to `@sqlty`-decorated functions with SQL string literals, infer return types via `SQLAnalyzer`, and generate `.pyi` stub files with `@overload` signatures for each unique query.
+Analyze Python source files to find calls to configured functions with SQL string literals, infer return types via `SQLAnalyzer`, and generate `.pyi` stub files with `@overload` signatures for each unique query. Functions are registered via `[[tool.sqlty.functions]]` in `pyproject.toml` — no decorator needed.
 
 ### CLI commands (deferred)
 
@@ -39,6 +17,20 @@ Analyze Python source files to find calls to `@sqlty`-decorated functions with S
 sqlty generate .           # Analyze source, emit .pyi stubs
 sqlty generate --check .   # Exit 1 if stubs are out of date
 sqlty clean .              # Delete generated .pyi files
+```
+
+### Configuration
+
+Functions are registered in `pyproject.toml` using the standard `[tool.sqlty]` convention:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.query"
+query_param = "sql"
+return_type_param = "return_tp"
+schema = "db/schema.sql"
+return_type_template = "list[{sqlty}]"
+imports = ["from typing import Any"]
 ```
 
 ### Current implementation
@@ -68,8 +60,7 @@ tests/mdtest/generate/
 ├── basic_stubs.md           # Single query → .pyi
 ├── incremental_merge.md     # Add queries to existing stubs
 ├── prune.md                 # Remove stale queries
-├── multi_registry.md        # Multiple registries
-├── function_config.md       # Configured functions (no decorator)
+├── function_config.md       # Configured functions
 └── multiline_queries.md     # Multiline SQL in stubs
 ```
 
@@ -77,32 +68,40 @@ tests/mdtest/generate/
 
 `# stub:` with `.pyi` code block — writes files to temp dir, runs `sqlty generate`, compares output.
 
-### Migration from current CLI
-
-The current `sqlty <path>` (no subcommand) maps to `sqlty generate <path>`. For backward compatibility, keep the bare form working but emit a deprecation warning pointing to `sqlty generate`.
-
 ---
 
-## Protocol Support
+## Structured Return Types (Protocol-based)
 
 ### Design
 
-**Create `docs/type-codecs.md`** — architecture document for future protocol support.
+Building on the `return-format` configuration (see `PLAN.md`), the structured types system generates Protocol classes that define the structural contract for query results. Users define their own concrete types (TypedDict, namedtuple, Pydantic models) with human-friendly names that satisfy the generated Protocol.
 
-The `TypeCodec` abstraction (in `PLAN.md` Phase 1) is the foundation. Protocol support means:
+### How it works
 
-1. Custom `TypeCodec` implementations that format types as Protocol classes instead of tuples
-2. Generated Protocol stubs with named attributes (not just positional tuple elements)
-3. Integration with dataclass/attrs/pydantic models
+1. **Query analysis**: `SELECT id::INTEGER, name::TEXT FROM users` produces column names + types
+2. **Protocol generation**: A `@runtime_checkable Protocol` class is generated with property-style field definitions
+3. **User types**: Users define concrete types (TypedDict, dataclass, etc.) that structurally match the Protocol
+4. **Type checking**: `SQL[UserType]` is validated against the Protocol — static type checkers verify structural compatibility
 
-### Example (future)
+### Example
 
 ```python
-class UserCodec:
-    def format_type(self, column_types: list[str], column_names: list[str]) -> str:
-        # Generate a TypedDict or Protocol instead of tuple
-        fields = ", ".join(f"{name}={typ}" for name, typ in zip(column_names, column_types))
-        return f"TypedDict('Result', {fields})"
+from typing import TypedDict
+
+# User-defined type with a friendly name
+class User(TypedDict):
+    id: int
+    name: str
+
+# sqlty validates that User's fields match the query columns
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+The `SQL` class uses a covariant type parameter (`T_co`) so that `SQL[Protocol]` is compatible with `SQL[ConcreteType]` when the concrete type satisfies the protocol:
+
+```python
+class SQL(str, Generic[T_co]):
+    ...
 ```
 
 ### Typed JSON with json_build_object (future)
@@ -123,70 +122,4 @@ This depends on TypeCodec supporting complex return types.
 
 ## Rust Core (MOVED to PLAN.md Phase 5)
 
-> **Status:** Moved to active implementation. See `PLAN.md` Phase 5.
-
-### Goal
-
-Replace Python hotpath with Rust via PyO3 + maturin.
-
-### Architecture
-
-**Layer 1: Core** — Pure functions, no I/O. `sqlparser-rs` replaces sqlglot, `TypeCodec` becomes a Rust trait, exposed via PyO3.
-
-**Layer 2: Rewriter** — `ruff_python_parser` + `ruff_python_ast` for Python AST. Biggest perf win.
-
-### Rust mdtest runner
-
-The key benefit of mdtests: the **same `.md` files** test both implementations.
-
-```rust
-// Rust mdtest runner (in integration tests)
-#[test]
-fn test_basic_types() {
-    let suite = parse_mdtest("tests/mdtest/type_inference/basic_types.md");
-    for case in suite.cases {
-        for assertion in case.assertions {
-            match assertion {
-                Assertion::InferredType { sql, expected } => {
-                    let actual = infer_type(&sql, "postgres", "tuple");
-                    assert_eq!(actual, expected);
-                }
-                // ...
-            }
-        }
-    }
-}
-```
-
-### Crate dependencies
-
-```toml
-[dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"] }
-sqlparser = "0.51"
-ruff_python_parser = { git = "https://github.com/astral-sh/ruff" }
-ruff_python_ast = { git = "https://github.com/astral-sh/ruff" }
-```
-
-### Fallback strategy
-
-```python
-try:
-    from sqlty._core import rewrite, strip  # Rust (fast)
-except ImportError:
-    from sqlty._rewriter_py import rewrite, strip  # Pure Python fallback
-```
-
-### Rust file structure
-
-| File | Purpose |
-|------|---------|
-| `Cargo.toml` | Rust workspace config |
-| `rust/src/lib.rs` | PyO3 module entry |
-| `rust/src/analyzer.rs` | SQL type inference |
-| `rust/src/rewriter.rs` | AST rewrite + strip |
-| `python/sqlty/_core.pyi` | Type stubs for Rust extension |
-
-### CI for wheels
-
-See `PLAN.md` — the CI section covers building wheels with maturin for multiple platforms. No crate publishing is needed; Rust is only used as a compiled extension inside the Python wheel.
+> **Status:** Implemented. See `PLAN.md` Phase 5 for the current Rust extension architecture.

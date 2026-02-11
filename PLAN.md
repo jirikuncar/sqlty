@@ -1,6 +1,6 @@
 # Plan: Simplify Snapshot Codec — ruff-style CLI + Markdown Tests
 
-> **Deferred items** (stub generation, protocol support) are in `PLAN-FUTURE.md`.
+> **Deferred items** (stub generation, structured return types) are in `PLAN-FUTURE.md`.
 
 ## Problem Statement
 
@@ -48,13 +48,13 @@ Global options:
 | `sqlty check .` | Run all lint rules (type match, star expansion, rewrite freshness) | `ruff check` |
 | `sqlty check --fix .` | Auto-fix what's fixable (expand stars, update type annotations) | `ruff check --fix` |
 
-> **Note:** `generate` (stub generation), `clean`, and `registries` commands are deferred — see `PLAN-FUTURE.md`.
+> **Note:** `generate` (stub generation) and `clean` commands are deferred — see `PLAN-FUTURE.md`.
 
 ---
 
 ## Configuration: `[tool.sqlty]` in pyproject.toml
 
-SQLTy follows the standard Python `[tool.*]` convention for pyproject.toml configuration, used by pytest (`[tool.pytest]`), ruff (`[tool.ruff]`), mypy (`[tool.mypy]`), and other tools.
+SQLTy follows the standard Python `[tool.*]` convention for pyproject.toml configuration, used by pytest (`[tool.pytest]`), ruff (`[tool.ruff]`), mypy (`[tool.mypy]`), and other tools. All configuration lives under `[tool.sqlty]` with sub-tables like `[tool.sqlty.rules]` and `[tool.sqlty.schemas]`.
 
 ### Full configuration reference
 
@@ -62,6 +62,7 @@ SQLTy follows the standard Python `[tool.*]` convention for pyproject.toml confi
 [tool.sqlty]
 dialect = "postgres"           # SQL dialect: "postgres", "sqlite", "mysql"
 schema = "schema.sql"          # Path to schema .sql file for type inference
+return-format = "tuple"        # Return type format: "tuple", "typeddict", "namedtuple", "pydantic"
 format-command = "ruff format --stdin-filename {filename} -"  # Formatter for rewritten files
 
 [tool.sqlty.schemas]           # Named schema registry (alternative to single schema)
@@ -76,21 +77,40 @@ select-star = "warn"
 select-star-no-schema = "error"
 stale-rewrite = "warn"
 stale-type = "warn"
-
-[[tool.sqlty.functions]]       # Custom function tracking
-import_path = "db.query"
-query_param = "sql"
-return_type_param = "return_tp"
-schema = "db/schema.sql"
-return_type_template = "list[{sqlty}]"
-imports = ["from typing import Any"]
 ```
+
+### Return formats
+
+The `return-format` option controls how sqlty represents the inferred Python type for SQL queries:
+
+| Format | Result for `SELECT id::INTEGER, name::TEXT` |
+|--------|---------------------------------------------|
+| `tuple` (default) | `tuple[int, str]` |
+| `typeddict` | `QueryRow_{hash}` — a generated `TypedDict` with `id: int`, `name: str` |
+| `namedtuple` | `QueryRow_{hash}` — a `namedtuple` with fields `['id', 'name']` |
+| `pydantic` | `QueryRow_{hash}` — a `BaseModel` with `id: int`, `name: str` |
+
+Non-tuple formats generate deterministic class names using an MD5 hash of the SQL query (e.g., `QueryRow_724392cb`), which are stable across runs for the same query. The generated class definitions are inserted after imports in the rewritten source.
+
+Each format triggers the appropriate imports:
+- `typeddict` adds `from typing import TypedDict`
+- `namedtuple` adds `from collections import namedtuple`
+- `pydantic` adds `from pydantic import BaseModel`
+
+**Per-file override via coding declaration:**
+
+```python
+# coding: sqlty?return-format=typeddict
+```
+
+This overrides the project-level `return-format` for individual files. Precedence: coding declaration > CLI flag > pyproject.toml > default (`"tuple"`).
 
 ### Configuration resolution
 
 1. **Search**: Walk up from the target path to find `pyproject.toml`
 2. **Parse**: Extract the `[tool.sqlty]` section
-3. **Merge**: CLI flags override config file values (e.g., `--dialect sqlite` overrides `dialect = "postgres"` in config)
+3. **Merge**: CLI flags override config file values (e.g., `--dialect sqlite` overrides `dialect = "postgres"`)
+4. **Per-file**: Coding declaration (`# coding: sqlty?return-format=...`) overrides everything
 
 ### Implementation
 
@@ -3378,7 +3398,7 @@ jobs:
 ## Key Design Decisions
 
 1. **mdtest-first development** — write the markdown test before writing the code. Tests double as specification and documentation.
-2. **ruff-style subcommands** — `rewrite`, `strip`, `check` (stub generation, registries deferred).
+2. **ruff-style subcommands** — `rewrite`, `strip`, `check` (stub generation deferred).
 3. **`strip` as first-class command** — `sqlty strip .` undoes all `SQL[T]` wrappers in one command.
 4. **`check` validates user annotations** — `SQL[User](...)` is checked against the resolved type's fields. Never overwrite user-provided types.
 5. **Star expansion** — `SELECT *` expands to explicit column list from schema. `select-star` lint rule to disallow `*`.
@@ -3389,4 +3409,5 @@ jobs:
 10. **Wheels only, no crates** — Rust extension is compiled into Python wheels, not published to crates.io.
 11. **Rust core follows maturin mixed layout** — `rust/` directory with `Cargo.toml`, `src/lib.rs`; `pyproject.toml` uses `manifest-path = "rust/Cargo.toml"` per [maturin project layout](https://www.maturin.rs/project_layout.html).
 12. **Conformance tests validate both backends** — `test_core_conformance.py` imports from `sqlty.core` facade, automatically testing whichever implementation is active.
-13. **`[tool.sqlty]` configuration in pyproject.toml** — follows the standard Python `[tool.*]` convention used by pytest, ruff, mypy, and other tools. All configuration lives under `[tool.sqlty]` with sub-tables like `[tool.sqlty.rules]` and `[[tool.sqlty.functions]]`. CLI flags override config file values.
+13. **`[tool.sqlty]` configuration in pyproject.toml** — follows the standard Python `[tool.*]` convention used by pytest, ruff, mypy, and other tools. All configuration lives under `[tool.sqlty]` with sub-tables like `[tool.sqlty.rules]` and `[tool.sqlty.schemas]`. CLI flags override config file values; per-file coding declarations override everything.
+14. **Return format support** — `return-format` config option controls type representation: `tuple` (default), `typeddict`, `namedtuple`, `pydantic`. Non-tuple formats generate deterministic class definitions from SQL column names. Configurable at project level (`pyproject.toml`), CLI (`--return-format`), or per-file (`# coding: sqlty?return-format=...`).
