@@ -15,6 +15,7 @@ Configuration via pyproject.toml:
     select-star-no-schema = "error"     # default
     stale-rewrite = "warn"              # default
     stale-type = "warn"                 # default
+    inline-sql-comment = "warn"         # default
 """
 
 from __future__ import annotations
@@ -86,6 +87,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=True,
         description="SQL[tuple[...]] type doesn't match current schema (drift)",
+    ),
+    "inline-sql-comment": LintRule(
+        name="inline-sql-comment",
+        default_severity=Severity.WARN,
+        fixable=True,
+        description='--sql followed by space makes entire query a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
     ),
 }
 

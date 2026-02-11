@@ -307,6 +307,35 @@ class TestCheckSource:
     def test_non_sql_source_returns_empty(self):
         assert check_source("x = 1\ny = 2") == []
 
+    def test_inline_sql_comment_unwrapped(self):
+        """Detects --sql followed by space (query becomes SQL comment)."""
+        source = 'q = "--sql SELECT 1::INTEGER"'
+        diags = check_source(source)
+        inline = [d for d in diags if d["rule"] == "inline-sql-comment"]
+        assert len(inline) == 1
+        assert "SQL comment" in inline[0]["message"]
+
+    def test_inline_sql_comment_wrapped(self):
+        """Detects --sql<space> even inside SQL[T](...)."""
+        source = 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+        diags = check_source(source)
+        inline = [d for d in diags if d["rule"] == "inline-sql-comment"]
+        assert len(inline) == 1
+
+    def test_no_inline_sql_comment_with_newline_escape(self):
+        """No warning when --sql is followed by \\n (correct format)."""
+        source = 'q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
+        diags = check_source(source)
+        inline = [d for d in diags if d["rule"] == "inline-sql-comment"]
+        assert len(inline) == 0
+
+    def test_inline_sql_comment_disabled(self):
+        """Rule can be disabled via overrides."""
+        source = 'q = "--sql SELECT 1::INTEGER"'
+        diags = check_source(source, rules={"inline-sql-comment": "ignore"})
+        inline = [d for d in diags if d["rule"] == "inline-sql-comment"]
+        assert len(inline) == 0
+
 
 # ---------------------------------------------------------------------------
 # Performance baselines (lightweight, no external deps)

@@ -144,19 +144,37 @@ def check_source(
         line_stripped = line.strip()
 
         # Check for unwrapped --sql strings (stale-rewrite)
-        if _is_unwrapped_sql_string(line_stripped) and rule_config.is_enabled("stale-rewrite"):
-            diagnostics.append({
-                "rule": "stale-rewrite",
-                "message": "Source has --sql strings that aren't wrapped in SQL[T]",
-                "severity": rule_config.severity("stale-rewrite").value,
-                "line": i,
-            })
+        if _is_unwrapped_sql_string(line_stripped):
+            if rule_config.is_enabled("stale-rewrite"):
+                diagnostics.append({
+                    "rule": "stale-rewrite",
+                    "message": "Source has --sql strings that aren't wrapped in SQL[T]",
+                    "severity": rule_config.severity("stale-rewrite").value,
+                    "line": i,
+                })
+            # Also check for inline-sql-comment on unwrapped strings
+            if rule_config.is_enabled("inline-sql-comment") and _has_inline_sql_comment(line_stripped):
+                diagnostics.append({
+                    "rule": "inline-sql-comment",
+                    "message": '"--sql SELECT ..." treats the query as a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
+                    "severity": rule_config.severity("inline-sql-comment").value,
+                    "line": i,
+                })
             continue
 
         # Check for SQL[T](...) wrappers
         sql_content = _extract_sql_from_wrapper(line_stripped)
         if sql_content is None:
             continue
+
+        # Check inline-sql-comment on wrapped strings
+        if rule_config.is_enabled("inline-sql-comment") and sql_content.startswith("--sql "):
+            diagnostics.append({
+                "rule": "inline-sql-comment",
+                "message": '"--sql SELECT ..." treats the query as a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
+                "severity": rule_config.severity("inline-sql-comment").value,
+                "line": i,
+            })
 
         # Check SELECT *
         star_diag = checker.check_select_star(sql_content, has_schema=has_schema)
@@ -210,6 +228,16 @@ def _make_rewriter(dialect: str, schema_sql: str | None) -> SQLRewriter:
             f.write(schema_sql)
         return SQLRewriter(dialect=dialect, schema_path=tmp_path)
     return SQLRewriter(dialect=dialect)
+
+
+def _has_inline_sql_comment(line: str) -> bool:
+    """Check if a line has --sql followed by space (not \\n).
+
+    ``"--sql SELECT ..."`` is problematic because ``--sql SELECT ...`` is a
+    SQL line comment, making the entire query empty.  The correct format is
+    ``"--sql\\nSELECT ..."`` where the actual SQL starts on the next line.
+    """
+    return bool(re.search(r'''["']--sql [^\\]''', line))
 
 
 def _is_unwrapped_sql_string(line: str) -> bool:

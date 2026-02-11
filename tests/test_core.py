@@ -178,3 +178,44 @@ def test_check_source_rule_override():
     diagnostics = check_source(source, rules={"stale-rewrite": "ignore"})
     stale_rewrites = [d for d in diagnostics if d["rule"] == "stale-rewrite"]
     assert len(stale_rewrites) == 0
+
+
+def test_check_source_inline_sql_comment_unwrapped():
+    """check_source warns when --sql is followed by space (query is a SQL comment)."""
+    from sqlty.core import check_source
+
+    source = 'q = "--sql SELECT id::INTEGER FROM users"'
+    diagnostics = check_source(source)
+    inline = [d for d in diagnostics if d["rule"] == "inline-sql-comment"]
+    assert len(inline) == 1
+    assert "SQL comment" in inline[0]["message"]
+
+
+def test_check_source_inline_sql_comment_wrapped():
+    """check_source warns on wrapped strings with --sql<space>."""
+    from sqlty.core import check_source
+
+    source = 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+    diagnostics = check_source(source)
+    inline = [d for d in diagnostics if d["rule"] == "inline-sql-comment"]
+    assert len(inline) == 1
+
+
+def test_check_source_no_inline_sql_comment_with_newline():
+    """check_source does not warn when --sql is followed by \\n."""
+    from sqlty.core import check_source
+
+    source = 'q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
+    diagnostics = check_source(source)
+    inline = [d for d in diagnostics if d["rule"] == "inline-sql-comment"]
+    assert len(inline) == 0
+
+
+def test_check_source_inline_sql_comment_disabled():
+    """check_source respects inline-sql-comment = ignore."""
+    from sqlty.core import check_source
+
+    source = 'q = "--sql SELECT id::INTEGER FROM users"'
+    diagnostics = check_source(source, rules={"inline-sql-comment": "ignore"})
+    inline = [d for d in diagnostics if d["rule"] == "inline-sql-comment"]
+    assert len(inline) == 0

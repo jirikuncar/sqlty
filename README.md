@@ -87,7 +87,7 @@ sqlty check .
 
 - **Type Inference**: Infers Python types from SQL casts (`::INTEGER` -> `int`, `::TEXT` -> `str`)
 - **Rewrite/Strip**: Bidirectional source transformation between `"--sql ..."` and `SQL[T]("--sql\n...")`
-- **Lint Rules**: 7 built-in rules with configurable severity (ty-style `error`/`warn`/`ignore`)
+- **Lint Rules**: 8 built-in rules with configurable severity (ty-style `error`/`warn`/`ignore`)
 - **Star Expansion**: `SELECT *` -> explicit column list using schema
 - **Pluggable Codecs**: Custom type formatting via `TypeCodec` protocol
 - **Multiple SQL Dialects**: PostgreSQL, MySQL, SQLite, and more via sqlglot
@@ -105,6 +105,7 @@ sqlty check .
 | `select-star-no-schema` | error | `SELECT *` used but no schema available |
 | `stale-rewrite` | warn | `SQL[T](...)` annotation is outdated |
 | `stale-type` | warn | Type annotation doesn't match current inference |
+| `inline-sql-comment` | warn | `"--sql SELECT ..."` makes query a SQL comment (fixable) |
 
 Configure in `pyproject.toml`:
 
