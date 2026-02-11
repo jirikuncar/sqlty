@@ -32,8 +32,6 @@ Commands:
 Global options:
   --config <PATH>         Path to pyproject.toml or sqlty.toml
   --dialect <DIALECT>     SQL dialect (postgres, sqlite, mysql)
-  --select <RULES>        Comma-separated lint rules to enable
-  --ignore <RULES>        Comma-separated lint rules to disable
   -v, --verbose           Increase verbosity
   -q, --quiet             Suppress output
 ```
@@ -75,6 +73,28 @@ A markdown test file is a suite of tests. Each heading creates a named test case
 
 #### Assertion types
 
+Every assertion is a **snapshot**: the expected value lives in the `.md` file as a comment. The runner computes the actual value, compares strings, and either fails with a diff (normal mode) or rewrites the `.md` file (update mode via `pytest --update-mdtest`). This follows the same pattern as `inline-snapshot` (already a dev dependency) and ty's `snapshot-diagnostics`.
+
+| Prefix | Compute function | Phase |
+|--------|-----------------|-------|
+| `# inferred:` | `analyzer.generate_return_type(sql)` | 0 |
+| `# rewritten:` | `rewriter.rewrite(source)` | 2 |
+| `# stripped:` | `rewriter.strip(source)` | 2 |
+| `# expanded:` | `analyzer.expand_star(sql, schema)` | 2 |
+| `# error:` | `checker.check(source)` — ty-style: `[rule-name] "message"` | 3 |
+
+All assertion types share the same compare-or-update pipeline:
+
+```python
+def check_assertion(assertion, actual: str, *, update: bool, md_path: Path):
+    if actual == assertion.expected:
+        return  # pass
+    if update:
+        rewrite_line_in_md(md_path, assertion.line, actual)
+    else:
+        raise MDTestFailure(expected=assertion.expected, actual=actual)
+```
+
 **`# inferred: <type>`** — asserts the inferred Python type for a SQL query:
 
 ```markdown
@@ -111,31 +131,54 @@ q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ​```
 ```
 
-**`# error: <message>`** — asserts an error is raised:
+**`# error: [rule-name] "message"`** — asserts a diagnostic (ty-style syntax):
 
 ```markdown
-## Invalid SQL produces Any
+## TypedDict field count mismatch
+
+​```python
+q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-count-mismatch] "User has 3 fields but query returns 2 columns"
+​```
+```
+
+**`# expanded: <sql>`** — asserts star expansion output:
+
+```markdown
+## Star expands to schema columns
 
 ​```sql
-NOT VALID SQL QUERY
+SELECT * FROM users
 ​```
 
 ​```python
-# inferred: Any
+# expanded: SELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users
+# inferred: tuple[int, str, str]
 ​```
 ```
 
-**`# imports:`** — asserts which imports are added:
+**Removed assertion types** (not needed as separate types):
+- ~~`# roundtrip:`~~ — test by chaining `# rewritten:` then `# stripped:` in the same test
+- ~~`# imports:`~~ — visible in the full `# rewritten:` output (imports are part of the rewritten source)
+- ~~`# check: ok`~~ — absence of `# error:` means no diagnostic (same as ty)
 
-```markdown
-## Datetime imports
+#### Update mode (`--update-mdtest`)
 
-​```python
-q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
-# imports: datetime, uuid
-# rewritten: q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
-​```
+Like `inline-snapshot --inline-snapshot=update`, running with `--update-mdtest` rewrites assertion comments in `.md` files with actual computed values:
+
+```bash
+# Normal CI run — fails on drift
+pytest tests/mdtest/ -v
+
+# After changing the analyzer — update all expected values, review the diff
+pytest tests/mdtest/ --update-mdtest
+git diff tests/mdtest/  # review what changed
+
+# Write new test — write the SQL, leave expected empty, run update
+pytest tests/mdtest/postgres/new_test.md --update-mdtest
 ```
+
+This is the same drift-detection pattern sqlty itself uses: `sqlty check` detects that `SQL[tuple[int, str]]` has drifted from the schema. The mdtest runner detects that `# inferred: tuple[int, str]` has drifted from the analyzer.
 
 #### Configuration blocks
 
@@ -228,11 +271,13 @@ SELECT id, name, created_at FROM users
 
 ​```python
 original = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# rewritten: original = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
 ​```
 
 ​```python
-# rewritten: original = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# roundtrip: strip(rewrite(source)) == source
+from sqlty import SQL
+original = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# stripped: original = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 ​```
 ```
 
@@ -260,7 +305,7 @@ tests/mdtest/
 ├── check/
 │   ├── type_annotation.md             # SQL[User](...) validation against project types
 │   ├── star_expansion.md              # SELECT * expansion with schema
-│   └── lint_rules.md                  # Rule configuration (SQT001-SQT021)
+│   └── lint_rules.md                  # Rule configuration (kebab-case rules, ty-style severity)
 ├── rewrite/
 │   ├── basic_rewrite.md                # "--sql ..." → SQL[T](...)
 │   ├── multiline_queries.md            # Triple-quoted strings
@@ -283,13 +328,18 @@ tests/mdtest/
 
 ### Test runner implementation
 
-**`tests/conftest.py`** — pytest plugin that discovers and runs `.md` files:
+The runner is a **snapshot system**: parse `.md` → compute actual → compare-or-update. Same pattern as `inline-snapshot` (already a dev dep) but for markdown files.
+
+**`tests/conftest.py`** — pytest plugin: `.md` discovery + `--update-mdtest` flag:
 
 ```python
-# tests/conftest.py additions
+# tests/conftest.py
 import pytest
-from pathlib import Path
 from tests.mdtest_runner import collect_mdtest_file
+
+def pytest_addoption(parser):
+    parser.addoption("--update-mdtest", action="store_true", default=False,
+                     help="Update assertion comments in .md files with actual values")
 
 def pytest_collect_file(parent, file_path):
     if file_path.suffix == ".md" and "mdtest" in str(file_path):
@@ -297,7 +347,8 @@ def pytest_collect_file(parent, file_path):
 
 class MDTestFile(pytest.File):
     def collect(self):
-        yield from collect_mdtest_file(self.path)
+        update = self.config.getoption("--update-mdtest", default=False)
+        yield from collect_mdtest_file(self.path, update=update)
 
 class MDTestItem(pytest.Item):
     def __init__(self, name, parent, test_case):
@@ -314,46 +365,66 @@ class MDTestItem(pytest.Item):
         return self.path, None, f"mdtest: {self.test_case.name}"
 ```
 
-**`tests/mdtest_runner.py`** — the core markdown parser and assertion engine (~300 lines):
+**`tests/mdtest_runner.py`** — markdown parser + snapshot engine (~150 lines):
+
+The core is simple because all assertion types share the same pipeline:
 
 ```python
+@dataclass
+class Assertion:
+    """A single assertion comment from a .md file."""
+    kind: str          # "inferred", "rewritten", "stripped", "expanded", "error"
+    expected: str      # The expected value after the prefix
+    line: int          # Line number in the .md file (for update mode)
+
+@dataclass
 class MDTestCase:
     """A single test case extracted from a markdown heading."""
     name: str
-    config: dict          # From ```toml blocks
-    files: dict[str, str] # path → content from named code blocks
+    md_path: Path
+    config: dict               # From ```toml blocks (inherited from parent sections)
+    sql_blocks: list[str]      # SQL code blocks
+    python_blocks: list[str]   # Python code blocks
+    files: dict[str, str]      # Named file path → content
     assertions: list[Assertion]
+    update: bool               # --update-mdtest mode
 
     def run(self):
-        """Execute all assertions in this test case."""
         for assertion in self.assertions:
-            match assertion:
-                case InferredType(sql=sql, expected=expected):
-                    analyzer = SQLAnalyzer(**self._analyzer_kwargs())
-                    actual = analyzer.generate_return_type(sql)
-                    assert actual == expected, f"Expected {expected}, got {actual}"
+            actual = self._compute(assertion)
+            if actual == assertion.expected:
+                continue
+            if self.update:
+                rewrite_line_in_md(self.md_path, assertion.line, assertion.kind, actual)
+            else:
+                raise MDTestFailure(
+                    test=self.name, kind=assertion.kind,
+                    expected=assertion.expected, actual=actual,
+                )
 
-                case Rewritten(source=source, expected=expected):
-                    rewriter = SQLRewriter(**self._rewriter_kwargs())
-                    actual = rewriter.rewrite(source)
-                    assert normalize(actual) == normalize(expected)
-
-                case Stripped(source=source, expected=expected):
-                    rewriter = SQLRewriter(**self._rewriter_kwargs())
-                    actual = rewriter.strip(source)
-                    assert normalize(actual) == normalize(expected)
-
-                case RoundTrip(source=source):
-                    rewriter = SQLRewriter(**self._rewriter_kwargs())
-                    assert rewriter.strip(rewriter.rewrite(source)) == source
+    def _compute(self, assertion: Assertion) -> str:
+        match assertion.kind:
+            case "inferred":
+                return self._infer_type()
+            case "rewritten":
+                return self._rewrite()
+            case "stripped":
+                return self._strip()
+            case "expanded":
+                return self._expand_star()
+            case "error":
+                return self._check_diagnostics()
+            case _:
+                raise ValueError(f"Unknown assertion kind: {assertion.kind}")
 ```
 
 **Key design properties:**
-- Zero boilerplate: no fixtures, no tmp_path, no subprocess calls
-- Each assertion type maps directly to one sqlty operation
-- Config blocks propagate to all assertions in the same section
-- Multi-file tests use an in-memory filesystem (no disk I/O for unit tests)
-- The same `.md` files work for both Python and Rust test runners
+- **Snapshot-based**: same compare-or-update pattern as `inline-snapshot`
+- **`--update-mdtest`**: rewrites `.md` files with actual values (write tests by writing SQL, run update)
+- **Zero boilerplate**: no fixtures, no tmp_path, no subprocess calls
+- **Config inheritance**: TOML blocks propagate to all assertions in nested sections
+- **Multi-file tests**: named code blocks create an in-memory filesystem per test case
+- **Same `.md` files** work for both Python and future Rust test runners
 
 ### Running mdtests
 
@@ -621,50 +692,33 @@ q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
 
 ### Example: `tests/mdtest/strip/round_trip.md`
 
-This is the key new test category that doesn't exist yet:
+Round-trip tests use `# rewritten:` + `# stripped:` in sequence — no special `# roundtrip:` assertion needed:
 
 ```markdown
 # Strip: Round-Trip Invariants
 
 ## Simple round-trip
 
+Rewrite then strip produces the original source:
+
 ​```python
 q = "--sql SELECT id::INTEGER FROM users"
-# roundtrip: strip(rewrite(source)) == source
+# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ​```
-
-## Multiple queries round-trip
-
-​```python
-q1 = "--sql SELECT id::INTEGER FROM users"
-q2 = "--sql SELECT name::TEXT FROM users"
-# roundtrip: strip(rewrite(source)) == source
-​```
-
-## Datetime imports round-trip
-
-​```python
-q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
-# roundtrip: strip(rewrite(source)) == source
-​```
-
-## Strip removes SQL import
 
 ​```python
 from sqlty import SQL
-q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
-# stripped: q = "--sql SELECT 1::INTEGER"
-# imports: -SQL
+q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# stripped: q = "--sql SELECT id::INTEGER FROM users"
 ​```
 
-## Strip removes datetime import
+## Strip removes SQL and datetime imports
 
 ​```python
 import datetime
 from sqlty import SQL
 q = SQL[tuple[datetime.datetime]]("--sql SELECT created_at::TIMESTAMP")
 # stripped: q = "--sql SELECT created_at::TIMESTAMP"
-# imports: -datetime, -SQL
 ​```
 
 ## Strip is idempotent
@@ -2262,13 +2316,13 @@ class User(TypedDict):
 # VALID: query columns match User fields (count + types with schema)
 q1 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 
-# ERROR: SQT001 — column count mismatch (3 fields in User, 2 columns in query)
+# error: [column-count-mismatch] — 3 fields in User, 2 columns in query
 q2 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
 
-# ERROR: SQT002 — column type mismatch (User.id is int, but FLOAT inferred)
+# error: [column-type-mismatch] — User.id is int, but FLOAT inferred
 q3 = SQL[User]("--sql SELECT id::FLOAT, name::TEXT, email::TEXT FROM users")
 
-# ERROR: SQT003 — column name mismatch (User has 'email', query has 'mail')
+# error: [column-name-mismatch] — User has 'email', query has 'mail'
 q4 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT, mail::TEXT FROM users")
 ```
 
@@ -2333,43 +2387,49 @@ FROM users u JOIN orders o ON u.id = o.user_id
 
 ### Lint rules
 
-Configurable rules following ruff's `--select` / `--ignore` pattern:
+Configurable rules following **ty's per-rule severity model** (not ruff's `select`/`ignore` — that pattern exists for 60+ plugin prefixes, overkill for sqlty's ~10 rules). Each rule has a kebab-case name and a severity: `error`, `warn`, or `ignore`.
 
 ```toml
 [tool.sqlty]
 dialect = "postgres"
 
-[tool.sqlty.lint]
-select = ["SQT"]          # Enable all sqlty rules (default)
-ignore = []               # None ignored by default
+[tool.sqlty.rules]
+# defaults shown — override per-rule
+column-count-mismatch = "error"     # Annotated type has different field count than query
+column-type-mismatch = "error"      # Annotated type field has incompatible type
+column-name-mismatch = "warn"       # Annotated type field name doesn't match column alias
+select-star = "warn"                # SELECT * used — expand to explicit column list
+select-star-no-schema = "error"     # SELECT * used but no schema available
+stale-rewrite = "warn"              # Source has --sql strings not wrapped in SQL[T]
+stale-type = "warn"                 # SQL[tuple[...]] type doesn't match current schema
 ```
 
-| Rule | Name | Default | Fixable | Description |
-|------|------|---------|---------|-------------|
-| `SQT001` | column-count-mismatch | error | no | Annotated type has different number of fields than query columns |
-| `SQT002` | column-type-mismatch | error | no | Annotated type field has incompatible type with query column |
-| `SQT003` | column-name-mismatch | warn | no | Annotated type field name doesn't match query column alias |
-| `SQT010` | select-star | warn | yes | `SELECT *` used — expand to explicit column list |
-| `SQT011` | select-star-no-schema | error | no | `SELECT *` used but no schema available to expand |
-| `SQT020` | stale-rewrite | warn | yes | Source has `--sql` strings that aren't wrapped in `SQL[T]` |
-| `SQT021` | stale-type | warn | yes | `SQL[tuple[...]]` type doesn't match current schema (drift) |
+| Rule | Default | Fixable | Description |
+|------|---------|---------|-------------|
+| `column-count-mismatch` | error | no | Annotated type has different number of fields than query columns |
+| `column-type-mismatch` | error | no | Annotated type field has incompatible type with query column |
+| `column-name-mismatch` | warn | no | Annotated type field name doesn't match query column alias |
+| `select-star` | warn | yes | `SELECT *` used — expand to explicit column list |
+| `select-star-no-schema` | error | no | `SELECT *` used but no schema available to expand |
+| `stale-rewrite` | warn | yes | Source has `--sql` strings that aren't wrapped in `SQL[T]` |
+| `stale-type` | warn | yes | `SQL[tuple[...]]` type doesn't match current schema (drift) |
 
 ### Configuration examples
 
 ```toml
-# Strict mode: no stars allowed, all type checks enforced
-[tool.sqlty.lint]
-select = ["SQT"]
+# Strict mode: no stars allowed, all type checks enforced (defaults)
+[tool.sqlty.rules]
 
 # Lenient: allow stars, only check explicit annotations
-[tool.sqlty.lint]
-select = ["SQT001", "SQT002", "SQT020"]
-ignore = ["SQT010"]
+[tool.sqlty.rules]
+select-star = "ignore"
 
-# Per-file overrides (like ruff)
-[[tool.sqlty.lint.per-file-ignores]]
-pattern = "tests/**"
-ignore = ["SQT010", "SQT011"]
+# Per-file overrides (like ty)
+[[tool.sqlty.overrides]]
+include = ["tests/**"]
+[tool.sqlty.overrides.rules]
+select-star = "ignore"
+select-star-no-schema = "ignore"
 ```
 
 ### mdtest files for these features
@@ -2404,7 +2464,6 @@ class User(TypedDict):
     name: str
 
 q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# check: ok
 ​```
 
 ## TypedDict field count mismatch
@@ -2418,7 +2477,7 @@ class User(TypedDict):
     email: str
 
 q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# check: SQT001 — User has 3 fields but query returns 2 columns
+# error: [column-count-mismatch] "User has 3 fields but query returns 2 columns"
 ​```
 
 ## TypedDict field type mismatch
@@ -2431,7 +2490,7 @@ class User(TypedDict):
     name: str
 
 q = SQL[User]("--sql SELECT id::FLOAT, name::TEXT FROM users")
-# check: SQT002 — User.id is int but query column 'id' infers float
+# error: [column-type-mismatch] "User.id is int but query column 'id' infers float"
 ​```
 
 ## TypedDict field name mismatch
@@ -2444,7 +2503,7 @@ class User(TypedDict):
     username: str
 
 q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# check: SQT003 — User.username doesn't match query column 'name'
+# error: [column-name-mismatch] "User.username doesn't match query column 'name'"
 ​```
 
 ## NamedTuple matches query
@@ -2458,7 +2517,6 @@ class UserRow(NamedTuple):
     email: str
 
 q = SQL[UserRow]("--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
-# check: ok
 ​```
 
 ## dataclass matches query
@@ -2473,21 +2531,19 @@ class UserRow:
     created_at: datetime.datetime
 
 q = SQL[UserRow]("--sql SELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
-# check: ok
 ​```
 
 ## tuple annotation is not name-checked
 
 ​```python
 q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# check: ok  (tuple has no field names — only count and types checked)
 ​```
 
 ## tuple annotation count mismatch
 
 ​```python
 q = SQL[tuple[int, str, float]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-# check: SQT001 — tuple has 3 elements but query returns 2 columns
+# error: [column-count-mismatch] "tuple has 3 elements but query returns 2 columns"
 ​```
 
 ## Annotation imported from another module
@@ -2507,7 +2563,6 @@ class Product(TypedDict):
 from models import Product
 
 q = SQL[Product]("--sql SELECT id::INTEGER, name::TEXT, price::FLOAT FROM products")
-# check: ok
 ​```
 ```
 
@@ -2549,7 +2604,7 @@ SELECT * FROM users
 ​```
 
 ​```python
-# check: SQT011 — SELECT * used but no schema available
+# error: [select-star-no-schema] "SELECT * used but no schema available"
 ​```
 
 ## Table-qualified star
@@ -2615,8 +2670,8 @@ INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com') RETURNING 
 dialect = "postgres"
 schema = "schema.sql"
 
-[sqlty.lint]
-ignore = ["SQT010"]
+[sqlty.rules]
+select-star = "ignore"
 ​```
 
 ​```sql
@@ -2624,7 +2679,6 @@ SELECT * FROM users
 ​```
 
 ​```python
-# check: ok  (SQT010 disabled — star allowed, still infers types from schema)
 # inferred: tuple[int, str, str]
 ​```
 ```
@@ -2945,10 +2999,8 @@ class TupleCodec:
 New assertion types:
 - `# rewritten: <source>` — calls `SQLRewriter.rewrite()`
 - `# stripped: <source>` — calls `SQLRewriter.strip()`
-- `# roundtrip: strip(rewrite(source)) == source`
-- `# imports: <added>` / `# imports: -<removed>`
 - `# expanded: <sql>` — asserts star expansion output
-- `# check: <rule>` — asserts a lint rule fires (or `ok` for no error)
+- `# error: [rule-name] "message"` — asserts a diagnostic (ty-style syntax)
 
 ### Phase 3: ruff-style CLI with check/lint
 
@@ -2958,11 +3010,12 @@ New assertion types:
 - Type annotation resolver — AST-based, finds TypedDict/NamedTuple/dataclass definitions
 - Field extractor — extracts (name, type) pairs from resolved types
 - Column matcher — compares SQL columns against type fields
-- Lint rule runner — SQT001-SQT021
+- Lint rule runner — kebab-case rules with ty-style per-rule severity
 
 **Create `src/sqlty/_lint.py`** (~100 lines):
-- Lint rule registry and configuration loading from `[tool.sqlty.lint]`
-- `--select` / `--ignore` / `per-file-ignores` support
+- Lint rule registry and configuration loading from `[tool.sqlty.rules]`
+- Per-rule severity: `error` / `warn` / `ignore`
+- `[[tool.sqlty.overrides]]` for per-file rule config
 
 **mdtests:**
 - `tests/mdtest/check/type_annotation.md` — SQL[User](...) validation
@@ -3011,7 +3064,7 @@ New assertion types:
 | `src/sqlty/_rewriter.py` | 2 | AST-based rewrite + strip + star expansion |
 | `src/sqlty/_decode.py` | 2 | Simplify to thin wrapper |
 | `src/sqlty/_checker.py` | 3 | Type annotation resolver + column matcher |
-| `src/sqlty/_lint.py` | 3 | Lint rule registry (SQT001-SQT021) |
+| `src/sqlty/_lint.py` | 3 | Lint rule registry (kebab-case, ty-style severity) |
 | `src/sqlty/_cli.py` | 3 | ruff-style subcommand router |
 | `tests/mdtest/type_codec/*.md` | 1 | TypeCodec tests |
 | `tests/mdtest/rewrite/*.md` | 2 | Rewrite tests |
@@ -3242,8 +3295,8 @@ jobs:
 2. **ruff-style subcommands** — `rewrite`, `strip`, `check` (stub generation, registries deferred).
 3. **`strip` as first-class command** — `sqlty strip .` undoes all `SQL[T]` wrappers in one command.
 4. **`check` validates user annotations** — `SQL[User](...)` is checked against the resolved type's fields. Never overwrite user-provided types.
-5. **Star expansion** — `SELECT *` expands to explicit column list from schema. `SQT010` lint rule to disallow `*`.
-6. **Lint rules follow ruff conventions** — `SQT001`-`SQT021`, configurable via `--select`/`--ignore` and `[tool.sqlty.lint]`.
+5. **Star expansion** — `SELECT *` expands to explicit column list from schema. `select-star` lint rule to disallow `*`.
+6. **Lint rules follow ty conventions** — kebab-case names (`column-count-mismatch`), per-rule severity (`error`/`warn`/`ignore`) via `[tool.sqlty.rules]`.
 7. **TypeCodec is a Protocol** — duck typing, extensible, no inheritance.
 8. **Comprehensive PostgreSQL test suite** — 100% type coverage, RETURNING, CTEs, JSON builder functions.
 9. **Gradual migration** — old pytest files coexist with mdtests during transition, no big-bang rewrite.
