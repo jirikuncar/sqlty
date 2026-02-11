@@ -30,6 +30,7 @@ from sqlty._lint import Diagnostic, RuleConfig, Severity
 from sqlty._rewriter import SQLRewriter
 from sqlty._sql_analyzer import SQLAnalyzer
 from sqlty._type_codec import TupleCodec
+from sqlty._type_extractor import extract_type_definitions
 
 
 def infer_type(
@@ -122,6 +123,13 @@ def check_source(
     - SELECT * usage (select-star, select-star-no-schema)
     - Stale rewrites (stale-rewrite) — --sql strings not yet wrapped
     - Stale types (stale-type) — SQL[T] doesn't match current inference
+    - User-defined types (column-count-mismatch, column-type-mismatch,
+      column-name-mismatch) — SQL[UserType] fields vs query columns
+
+    When the annotated type is a user-defined type (TypedDict, NamedTuple,
+    dataclass, Pydantic BaseModel) found in the same source file, the checker
+    validates the type's fields against the SQL query columns structurally
+    instead of comparing against the inferred tuple type string.
 
     Args:
         source: Python source code
@@ -137,6 +145,9 @@ def check_source(
     checker = Checker(analyzer=analyzer, rule_config=rule_config)
     rewriter = _make_rewriter(dialect, schema_sql)
     has_schema = schema_sql is not None
+
+    # Pre-parse source to extract user-defined type definitions
+    type_defs = extract_type_definitions(source)
 
     diagnostics: list[dict[str, str | int | None]] = []
 
@@ -186,22 +197,83 @@ def check_source(
                 "line": i,
             })
 
-        # Check stale types
-        if rule_config.is_enabled("stale-type"):
-            current_type = rewriter._infer_type(sql_content)
-            annotated_type = _extract_type_from_wrapper(line_stripped)
-            if annotated_type and current_type != annotated_type:
-                diagnostics.append({
-                    "rule": "stale-type",
-                    "message": f"SQL[{annotated_type}] should be SQL[{current_type}]",
-                    "severity": rule_config.severity("stale-type").value,
-                    "line": i,
-                })
+        # Check type annotations
+        annotated_type = _extract_type_from_wrapper(line_stripped)
+        if annotated_type:
+            if annotated_type in type_defs:
+                # User-defined type: structural check against SQL columns
+                _check_user_defined_type(
+                    annotated_type,
+                    type_defs[annotated_type],
+                    sql_content,
+                    checker,
+                    has_schema,
+                    rule_config,
+                    diagnostics,
+                    i,
+                )
+            elif annotated_type.startswith("tuple["):
+                # Tuple annotation: compare against inferred type (stale-type)
+                if rule_config.is_enabled("stale-type"):
+                    current_type = rewriter._infer_type(sql_content)
+                    if current_type != annotated_type:
+                        diagnostics.append({
+                            "rule": "stale-type",
+                            "message": f"SQL[{annotated_type}] should be SQL[{current_type}]",
+                            "severity": rule_config.severity("stale-type").value,
+                            "line": i,
+                        })
+            # else: unknown type (not in source, not tuple) — skip silently
 
     return diagnostics
 
 
 # --- Internal helpers ---
+
+def _check_user_defined_type(
+    type_name: str,
+    type_info: object,  # TypeInfo from _type_extractor
+    sql_content: str,
+    checker: Checker,
+    has_schema: bool,
+    rule_config: RuleConfig,
+    diagnostics: list[dict[str, str | int | None]],
+    line_num: int,
+) -> None:
+    """Check a user-defined type annotation against SQL query columns.
+
+    Validates that the type's fields (names and types) match the columns
+    returned by the SQL query, emitting column-count-mismatch,
+    column-type-mismatch, and column-name-mismatch diagnostics.
+    """
+    sql_query = _strip_sql_prefix(sql_content)
+    query_diags = checker.check_query(
+        sql=sql_query,
+        annotation_fields=type_info.fields,  # type: ignore[attr-defined]
+        type_name=type_name,
+        has_schema=has_schema,
+    )
+    for d in query_diags:
+        diagnostics.append({
+            "rule": d.rule,
+            "message": d.message,
+            "severity": d.severity.value,
+            "line": line_num,
+        })
+
+
+def _strip_sql_prefix(sql_content: str) -> str:
+    """Strip --sql prefix from SQL content to get the actual SQL query."""
+    if sql_content.startswith("--sql\\n"):
+        return sql_content[7:].strip()
+    if sql_content.startswith("--sql "):
+        return sql_content[6:].strip()
+    if sql_content.startswith("--sql\n"):
+        return sql_content[6:].strip()
+    if sql_content.startswith("--sql"):
+        return sql_content[5:].strip()
+    return sql_content
+
 
 def _make_analyzer(dialect: str, schema_sql: str | None) -> SQLAnalyzer:
     """Create an SQLAnalyzer, optionally loading schema from SQL string."""

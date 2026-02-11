@@ -387,6 +387,266 @@ class TestCheckSource:
 
 
 # ---------------------------------------------------------------------------
+# check_source — user-defined type validation
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSourceUserTypes:
+    """Contract: SQL[UserType] validated structurally against SQL columns."""
+
+    def test_typeddict_matching(self):
+        """TypedDict with matching fields produces no diagnostics."""
+        source = '''
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str
+
+q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_typeddict_count_mismatch(self):
+        """TypedDict with wrong field count is detected."""
+        source = '''
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str
+    email: str
+
+q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        count = [d for d in diags if d["rule"] == "column-count-mismatch"]
+        assert len(count) == 1
+        assert "3 fields" in count[0]["message"]
+        assert "2 columns" in count[0]["message"]
+
+    def test_typeddict_type_mismatch(self):
+        """TypedDict with wrong field type is detected."""
+        source = '''
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: str
+    name: str
+
+q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"] == "column-type-mismatch"]
+        assert len(type_diags) == 1
+        assert "User.id is str" in type_diags[0]["message"]
+        assert "infers int" in type_diags[0]["message"]
+
+    def test_typeddict_name_mismatch(self):
+        """TypedDict with wrong field name is detected."""
+        source = '''
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    user_id: int
+    username: str
+
+q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        name_diags = [d for d in diags if d["rule"] == "column-name-mismatch"]
+        assert len(name_diags) >= 1
+        assert "User.user_id" in name_diags[0]["message"]
+        assert "'id'" in name_diags[0]["message"]
+
+    def test_namedtuple_matching(self):
+        """NamedTuple with matching fields produces no diagnostics."""
+        source = '''
+from typing import NamedTuple
+from sqlty import SQL
+
+class UserRow(NamedTuple):
+    id: int
+    name: str
+
+q = SQL[UserRow]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_namedtuple_type_mismatch(self):
+        """NamedTuple field type mismatch is detected."""
+        source = '''
+from typing import NamedTuple
+from sqlty import SQL
+
+class Row(NamedTuple):
+    id: int
+    name: int
+
+q = SQL[Row]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"] == "column-type-mismatch"]
+        assert len(type_diags) == 1
+        assert "Row.name is int" in type_diags[0]["message"]
+
+    def test_dataclass_matching(self):
+        """Dataclass with matching fields produces no diagnostics."""
+        source = '''
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class Product:
+    id: int
+    name: str
+    price: float
+
+q = SQL[Product]("--sql\\nSELECT id::INTEGER, name::TEXT, price::NUMERIC FROM products")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_dataclass_count_mismatch(self):
+        """Dataclass field count mismatch is detected."""
+        source = '''
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class Product:
+    id: int
+
+q = SQL[Product]("--sql\\nSELECT id::INTEGER, name::TEXT FROM products")
+'''
+        diags = check_source(source)
+        count = [d for d in diags if d["rule"] == "column-count-mismatch"]
+        assert len(count) == 1
+
+    def test_basemodel_matching(self):
+        """Pydantic BaseModel with matching fields produces no diagnostics."""
+        source = '''
+from pydantic import BaseModel
+from sqlty import SQL
+
+class UserModel(BaseModel):
+    id: int
+    name: str
+
+q = SQL[UserModel]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_basemodel_type_mismatch(self):
+        """Pydantic BaseModel field type mismatch is detected."""
+        source = '''
+from pydantic import BaseModel
+from sqlty import SQL
+
+class UserModel(BaseModel):
+    id: int
+    name: int
+
+q = SQL[UserModel]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"] == "column-type-mismatch"]
+        assert len(type_diags) == 1
+
+    def test_user_type_no_stale_type(self):
+        """SQL[UserType] should NOT trigger stale-type (it's structural now)."""
+        source = '''
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str
+
+q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        stale = [d for d in diags if d["rule"] == "stale-type"]
+        assert len(stale) == 0, f"stale-type should not fire for user types: {stale}"
+
+    def test_unknown_type_no_stale_type(self):
+        """SQL[UnknownType] should NOT trigger stale-type (can't validate)."""
+        source = 'q = SQL[SomeExternalType]("--sql\\nSELECT id::INTEGER FROM t")'
+        diags = check_source(source)
+        stale = [d for d in diags if d["rule"] == "stale-type"]
+        assert len(stale) == 0
+
+    def test_tuple_still_checks_stale_type(self):
+        """tuple[...] annotations still use stale-type checking."""
+        source = 'q = SQL[tuple[str]]("--sql\\nSELECT id::INTEGER FROM t")'
+        diags = check_source(source)
+        stale = [d for d in diags if d["rule"] == "stale-type"]
+        assert len(stale) == 1
+        assert "tuple[int]" in stale[0]["message"]
+
+    def test_optional_fields_normalized(self):
+        """Optional[int] / int | None should match int."""
+        source = '''
+from typing import TypedDict
+
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int | None
+    name: str
+
+q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_datetime_field_matching(self):
+        """datetime.datetime field matches TIMESTAMP column."""
+        source = '''
+import datetime
+from typing import TypedDict
+from sqlty import SQL
+
+class Event(TypedDict):
+    id: int
+    created_at: datetime.datetime
+
+q = SQL[Event]("--sql\\nSELECT id::INTEGER, created_at::TIMESTAMP FROM events")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_uuid_field_matching(self):
+        """uuid.UUID field matches UUID column."""
+        source = '''
+import uuid
+from typing import TypedDict
+from sqlty import SQL
+
+class Token(TypedDict):
+    token_id: uuid.UUID
+
+q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+
+# ---------------------------------------------------------------------------
 # Performance baselines (lightweight, no external deps)
 # ---------------------------------------------------------------------------
 
