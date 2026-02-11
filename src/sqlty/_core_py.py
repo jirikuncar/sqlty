@@ -23,6 +23,8 @@ Design constraints for Rust portability:
 
 from __future__ import annotations
 
+import re
+
 from sqlty._checker import Checker
 from sqlty._lint import Diagnostic, RuleConfig, Severity
 from sqlty._rewriter import SQLRewriter
@@ -212,17 +214,16 @@ def _make_rewriter(dialect: str, schema_sql: str | None) -> SQLRewriter:
 
 def _is_unwrapped_sql_string(line: str) -> bool:
     """Check if a line contains an unwrapped --sql string."""
-    import re
     # Match: variable = "--sql ..." or variable = '--sql ...'
+    # Handles both --sql<space> and --sql\n (source-text escape) formats.
     # But NOT already wrapped in SQL[...]
     if "SQL[" in line:
         return False
-    return bool(re.search(r'''["']--sql\s''', line))
+    return bool(re.search(r'''["']--sql(\s|\\n)''', line))
 
 
 def _extract_sql_from_wrapper(line: str) -> str | None:
     """Extract SQL content from SQL[T]("--sql ...") pattern."""
-    import re
     match = re.search(r'SQL\[.*?\]\(\s*["\'](.+?)["\']\s*\)', line, re.DOTALL)
     if match:
         content = match.group(1)
@@ -233,7 +234,6 @@ def _extract_sql_from_wrapper(line: str) -> str | None:
 
 def _extract_type_from_wrapper(line: str) -> str | None:
     """Extract the type annotation from SQL[T](...) pattern."""
-    import re
     match = re.search(r'SQL\[(.+?)\]\(', line)
     if match:
         return match.group(1)

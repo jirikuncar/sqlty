@@ -1,10 +1,12 @@
-"""Public core API — try Rust extension, fall back to Python.
+"""Public core API — import-switching facade.
 
 Usage:
     from sqlty.core import infer_type, rewrite_source, strip_source, check_source
 
-When a Rust extension is compiled (via maturin), it's installed as `sqlty._core`.
-This module tries that first, then falls back to the pure-Python `sqlty._core_py`.
+Currently uses ``sqlty._core_py`` (pure Python). When a Rust extension is
+compiled via maturin/pyo3, it will be installed as ``sqlty._core`` and
+this module will import from it instead. Both implementations must satisfy
+the same API contract (see ``tests/test_core_conformance.py``).
 """
 
 try:
