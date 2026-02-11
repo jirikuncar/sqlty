@@ -1,0 +1,30 @@
+# Import Injection
+
+## SQL import is added
+
+```python
+q = "--sql SELECT 1::INTEGER"
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+```
+
+## Datetime import is added
+
+```python
+q = "--sql SELECT created_at::TIMESTAMP FROM events"
+# rewritten: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM events")
+```
+
+## UUID import is added
+
+```python
+q = "--sql SELECT user_id::UUID FROM users"
+# rewritten: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID FROM users")
+```
+
+## Existing import is not duplicated
+
+```python
+from sqlty import SQL
+q = "--sql SELECT 1::INTEGER"
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+```

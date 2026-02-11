@@ -116,7 +116,7 @@ SELECT id::INTEGER FROM users
 
 ​```python
 q = "--sql SELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ​```
 ```
 
@@ -126,7 +126,7 @@ q = "--sql SELECT id::INTEGER FROM users"
 ## Strip SQL wrapper
 
 ​```python
-q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # stripped: q = "--sql SELECT id::INTEGER FROM users"
 ​```
 ```
@@ -137,7 +137,7 @@ q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ## TypedDict field count mismatch
 
 ​```python
-q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-count-mismatch] "User has 3 fields but query returns 2 columns"
 ​```
 ```
@@ -227,10 +227,10 @@ schema = "schema.sql"
 `app.py`:
 ​```python
 q1 = "--sql SELECT id, name FROM users"
-# rewritten: q1 = SQL[tuple[int, str]]("--sql SELECT id, name FROM users")
+# rewritten: q1 = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
 
 q2 = "--sql SELECT email FROM users"
-# rewritten: q2 = SQL[tuple[str]]("--sql SELECT email FROM users")
+# rewritten: q2 = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ​```
 ```
 
@@ -271,12 +271,12 @@ SELECT id, name, created_at FROM users
 
 ​```python
 original = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-# rewritten: original = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: original = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ​```
 
 ​```python
 from sqlty import SQL
-original = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+original = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # stripped: original = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 ​```
 ```
@@ -637,14 +637,14 @@ This replaces `tests/test_magic.py` and parts of `tests/e2e/test_magic_codec_e2e
 
 ​```python
 q = "--sql SELECT 1::INTEGER"
-# rewritten: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ​```
 
 ## Multiple columns
 
 ​```python
 q = "--sql SELECT id::INTEGER, name::TEXT"
-# rewritten: q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT")
+# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT")
 ​```
 
 ## Triple-quoted string
@@ -685,8 +685,8 @@ SELECT 1::INTEGER
 Rewriting already-rewritten source produces no changes:
 
 ​```python
-q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
-# rewritten: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ​```
 ```
 
@@ -703,12 +703,12 @@ Rewrite then strip produces the original source:
 
 ​```python
 q = "--sql SELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ​```
 
 ​```python
 from sqlty import SQL
-q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # stripped: q = "--sql SELECT id::INTEGER FROM users"
 ​```
 
@@ -717,7 +717,7 @@ q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ​```python
 import datetime
 from sqlty import SQL
-q = SQL[tuple[datetime.datetime]]("--sql SELECT created_at::TIMESTAMP")
+q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP")
 # stripped: q = "--sql SELECT created_at::TIMESTAMP"
 ​```
 
@@ -2291,7 +2291,7 @@ When a user manually annotates an SQL string with a project-defined type, sqlty 
 from myapp.models import User
 
 # User manually writes this — but does User match the query?
-q = SQL[User]("--sql SELECT id, name, email FROM users")
+q = SQL[User]("--sql\nSELECT id, name, email FROM users")
 ```
 
 If `User` is a `TypedDict`, `NamedTuple`, dataclass, or Protocol defined in the project, sqlty should verify that the SQL columns match the type's fields — both in count and in types (when schema is available).
@@ -2325,16 +2325,16 @@ class User(TypedDict):
     email: str
 
 # VALID: query columns match User fields (count + types with schema)
-q1 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+q1 = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 
 # error: [column-count-mismatch] — 3 fields in User, 2 columns in query
-q2 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q2 = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 # error: [column-type-mismatch] — User.id is int, but FLOAT inferred
-q3 = SQL[User]("--sql SELECT id::FLOAT, name::TEXT, email::TEXT FROM users")
+q3 = SQL[User]("--sql\nSELECT id::FLOAT, name::TEXT, email::TEXT FROM users")
 
 # error: [column-name-mismatch] — User has 'email', query has 'mail'
-q4 = SQL[User]("--sql SELECT id::INTEGER, name::TEXT, mail::TEXT FROM users")
+q4 = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, mail::TEXT FROM users")
 ```
 
 ### Type resolution strategy
@@ -2369,7 +2369,7 @@ When the user writes a plain `--sql` string, `sqlty rewrite` infers `tuple[T1, T
 q = "--sql SELECT * FROM users"
 
 # After `sqlty rewrite .` (or `sqlty check --fix .`)
-q = SQL[tuple[int, str, str]]("--sql SELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
+q = SQL[tuple[int, str, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
 ```
 
 The expansion:
@@ -2474,7 +2474,7 @@ class User(TypedDict):
     id: int
     name: str
 
-q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ​```
 
 ## TypedDict field count mismatch
@@ -2487,7 +2487,7 @@ class User(TypedDict):
     name: str
     email: str
 
-q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-count-mismatch] "User has 3 fields but query returns 2 columns"
 ​```
 
@@ -2500,7 +2500,7 @@ class User(TypedDict):
     id: int
     name: str
 
-q = SQL[User]("--sql SELECT id::FLOAT, name::TEXT FROM users")
+q = SQL[User]("--sql\nSELECT id::FLOAT, name::TEXT FROM users")
 # error: [column-type-mismatch] "User.id is int but query column 'id' infers float"
 ​```
 
@@ -2513,7 +2513,7 @@ class User(TypedDict):
     id: int
     username: str
 
-q = SQL[User]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-name-mismatch] "User.username doesn't match query column 'name'"
 ​```
 
@@ -2527,7 +2527,7 @@ class UserRow(NamedTuple):
     name: str
     email: str
 
-q = SQL[UserRow]("--sql SELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+q = SQL[UserRow]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 ​```
 
 ## dataclass matches query
@@ -2541,19 +2541,19 @@ class UserRow:
     name: str
     created_at: datetime.datetime
 
-q = SQL[UserRow]("--sql SELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
+q = SQL[UserRow]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
 ​```
 
 ## tuple annotation is not name-checked
 
 ​```python
-q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ​```
 
 ## tuple annotation count mismatch
 
 ​```python
-q = SQL[tuple[int, str, float]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[tuple[int, str, float]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-count-mismatch] "tuple has 3 elements but query returns 2 columns"
 ​```
 
@@ -2573,7 +2573,7 @@ class Product(TypedDict):
 ​```python
 from models import Product
 
-q = SQL[Product]("--sql SELECT id::INTEGER, name::TEXT, price::FLOAT FROM products")
+q = SQL[Product]("--sql\nSELECT id::INTEGER, name::TEXT, price::FLOAT FROM products")
 ​```
 ```
 

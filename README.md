@@ -19,15 +19,15 @@ query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 
 # After: sqlty rewrite .
 from sqlty import SQL
-query = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ### Key operations
 
 | Command | What it does | Analogy |
 |---------|-------------|---------|
-| `sqlty rewrite .` | `"--sql ..."` -> `SQL[T](...)` in source files | `ruff format` |
-| `sqlty strip .` | Reverse: `SQL[T](...)` -> `"--sql ..."` | (unique to sqlty) |
+| `sqlty rewrite .` | `"--sql ..."` -> `SQL[T]("--sql\n...")` in source files | `ruff format` |
+| `sqlty strip .` | Reverse: `SQL[T]("--sql\n...")` -> `"--sql\n..."` | (unique to sqlty) |
 | `sqlty check .` | Lint: type mismatches, SELECT *, stale rewrites | `ruff check` |
 
 ## Why SQLTy?
@@ -68,7 +68,7 @@ This transforms the file to:
 ```python
 # queries.py
 from sqlty import SQL
-q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 **Strip annotations (reverse):**
@@ -86,7 +86,7 @@ sqlty check .
 ## Features
 
 - **Type Inference**: Infers Python types from SQL casts (`::INTEGER` -> `int`, `::TEXT` -> `str`)
-- **Rewrite/Strip**: Bidirectional source transformation between `"--sql ..."` and `SQL[T](...)`
+- **Rewrite/Strip**: Bidirectional source transformation between `"--sql ..."` and `SQL[T]("--sql\n...")`
 - **Lint Rules**: 7 built-in rules with configurable severity (ty-style `error`/`warn`/`ignore`)
 - **Star Expansion**: `SELECT *` -> explicit column list using schema
 - **Pluggable Codecs**: Custom type formatting via `TypeCodec` protocol
@@ -120,14 +120,14 @@ SQLTy includes an optional codec that transforms `--sql` strings at import time:
 ```python
 # Strings with --sql prefix are automatically transformed
 q = "--sql SELECT 1::INTEGER"
-# Becomes: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+# Becomes: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 
 # Automatically adds imports for datetime/uuid types
 q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
 # Becomes:
 # import datetime
 # import uuid
-# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
+# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, user_id::UUID")
 ```
 
 See [magic codec documentation](docs/magic-codec.md) for setup and details.
