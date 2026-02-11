@@ -16,6 +16,8 @@ The decode function automatically:
     - Infers return types from SQL type casts (::INTEGER, ::TEXT, etc.)
     - Adds necessary imports (datetime, uuid, SQL) when needed
     - Uses isort for proper import ordering
+    - Leaves strings unchanged when inference fails (invalid SQL, DML
+      without RETURNING, DDL, empty queries)
 
 Examples:
     Simple query:
@@ -26,9 +28,9 @@ Examples:
         b'q = "--sql SELECT id::INTEGER, name::TEXT"'
         → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql\\nSELECT id::INTEGER, name::TEXT")'
 
-    With datetime/uuid:
-        b'q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"'
-        → 'import datetime\\nimport uuid\\nfrom sqlty import SQL\\n...'
+    Invalid/non-result queries are left unchanged:
+        b'q = "--sql UPDATE users SET name = 1"'
+        → unchanged (no type to infer)
 
 Note: This module does NOT register any codecs. For automatic transformation
       via Python's codec system, use 'sqlty.magic' instead.
@@ -76,11 +78,16 @@ def _infer_sql_type(sql_query: str) -> str:
 def _transform_sql_string(string_literal: str) -> str:
     """Transform a --sql prefixed string into SQL[T](...) call.
 
+    Only wraps when type inference succeeds with a concrete type.
+    Returns the original string unchanged for empty queries, invalid SQL,
+    DML without RETURNING, DDL, and other non-result-set statements.
+
     Args:
         string_literal: The complete string literal including quotes
 
     Returns:
-        The transformed string as a SQL[T](...) call
+        The transformed string as a SQL[T](...) call, or the original if
+        inference fails
     """
     from sqlty._rewriter import _extract_string_content, _normalize_sql_prefix
 
@@ -89,6 +96,9 @@ def _transform_sql_string(string_literal: str) -> str:
         return string_literal
 
     inferred_type = _infer_sql_type(content.strip())
+    # Don't wrap when inference fails — SQL[Any] is never useful.
+    if inferred_type == "Any":
+        return string_literal
     normalized = _normalize_sql_prefix(string_literal)
     return f"SQL[{inferred_type}]({normalized})"
 

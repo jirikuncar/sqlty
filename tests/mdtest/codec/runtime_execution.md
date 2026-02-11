@@ -20,3 +20,17 @@ q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 q = "hello world"
 # decoded: q = "hello world"
 ```
+
+## Invalid SQL is not transformed
+
+```python
+q = "--sql NOT VALID SQL"
+# decoded: q = "--sql NOT VALID SQL"
+```
+
+## DML without RETURNING is not transformed
+
+```python
+q = "--sql UPDATE users SET name = 'x'"
+# decoded: q = "--sql UPDATE users SET name = 'x'"
+```

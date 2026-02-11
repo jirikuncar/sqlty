@@ -121,6 +121,11 @@ class SQLRewriter:
                 content = _extract_string_content(string_literal)
                 if content is not None and content.strip().startswith("--sql"):
                     inferred = self._infer_type(content.strip())
+                    # Don't wrap when inference fails — SQL[Any] is never useful.
+                    # This covers: empty queries, invalid SQL, DML without RETURNING,
+                    # DDL (CREATE/DROP), TCL (BEGIN/COMMIT), etc.
+                    if inferred == "Any":
+                        return line
                     # Normalize: --sql<space> -> --sql\n in the string literal
                     normalized = _normalize_sql_prefix(string_literal)
                     replacement = f"SQL[{inferred}]({normalized})"

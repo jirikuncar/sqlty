@@ -147,6 +147,55 @@ class TestRewriteSource:
     def test_returns_str(self):
         assert isinstance(rewrite_source("x = 1"), str)
 
+    # --- Corner cases: queries that should NOT be wrapped ---
+
+    def test_invalid_sql_not_wrapped(self):
+        source = 'q = "--sql NOT VALID SQL"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_empty_query_not_wrapped(self):
+        source = 'q = "--sql"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_whitespace_only_not_wrapped(self):
+        source = 'q = "--sql   "'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_update_without_returning_not_wrapped(self):
+        source = 'q = "--sql UPDATE users SET name = \'x\'"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_insert_without_returning_not_wrapped(self):
+        source = """q = "--sql INSERT INTO users (name) VALUES ('x')" """
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_delete_without_returning_not_wrapped(self):
+        source = 'q = "--sql DELETE FROM users"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_create_table_not_wrapped(self):
+        source = 'q = "--sql CREATE TABLE t (id INT)"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_drop_table_not_wrapped(self):
+        source = 'q = "--sql DROP TABLE users"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_begin_not_wrapped(self):
+        source = 'q = "--sql BEGIN"'
+        assert "SQL[" not in rewrite_source(source)
+
+    def test_dml_with_returning_is_wrapped(self):
+        source = 'q = "--sql UPDATE users SET x=1 RETURNING id::INTEGER"'
+        result = rewrite_source(source)
+        assert "SQL[tuple[int]]" in result
+
+    def test_select_without_casts_is_wrapped(self):
+        """SELECT without casts still wraps — type defaults to tuple[str, ...]."""
+        source = 'q = "--sql SELECT id, name FROM users"'
+        result = rewrite_source(source)
+        assert "SQL[tuple[str, str]]" in result
+
 
 # ---------------------------------------------------------------------------
 # strip_source
