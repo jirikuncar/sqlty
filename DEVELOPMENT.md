@@ -97,13 +97,13 @@ SQLTy uses a snapshot-based markdown test framework inspired by [ty's mdtest](ht
 
 ```
 tests/mdtest/
-  type_inference/   # Type inference: basic types, schema, datetime, uuid
-  postgres/         # PostgreSQL-specific: SELECT, RETURNING, CTE, JSON, aggregates, star expansion
+  type_inference/   # basic types, datetime, uuid, dialects, schema inference
+  postgres/         # SELECT, RETURNING, CTE, JSON, aggregates, star expansion, advanced
   type_codec/       # TypeCodec protocol: tuple codec, custom codecs
-  rewrite/          # Source rewriting: basic, edge cases
-  strip/            # Source stripping: basic, round-trip invariants
-  check/            # Lint checks: star expansion, type annotation, rule config
-  codec/            # Magic codec: decode transformation
+  rewrite/          # basic, edge cases, import injection, idempotency, multiline
+  strip/            # basic, round-trip, idempotency, import removal
+  check/            # star expansion, type annotation, lint rule config
+  codec/            # basic decode, auto imports, runtime execution
 ```
 
 ### E2E Tests

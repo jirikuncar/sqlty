@@ -3035,8 +3035,14 @@ New assertion types:
 - Design constraints: no Path objects, no file I/O, no external package imports in signatures
 - Schema passed as SQL string (not file path) — portable across FFI boundary
 
+**`--sql\n` normalization** ✅:
+- Rewriter normalizes `--sql ` (space) to `--sql\n` (newline escape) in output
+- Canonical format: `SQL[T]("--sql\nSELECT ...")`
+- Both space and `\n` formats accepted as input everywhere
+- Strip, check, and codec all handle both formats
+
 **Strip safety** ✅:
-- Strip only removes auto-generated `SQL[T](...)` where the inner string starts with `--sql` + whitespace
+- Strip only removes auto-generated `SQL[T](...)` where the inner string starts with `--sql` + whitespace/`\n`
 - Manually written `SQL[int]("SELECT 1")` is preserved — never stripped
 - `_is_sqlty_managed()` helper detects auto-generated vs manual annotations
 
@@ -3058,6 +3064,9 @@ New assertion types:
 | `tests/mdtest_runner.py` | ✅ | Markdown parser + assertion engine (~280 lines) |
 | `tests/conftest.py` | ✅ | pytest plugin for `.md` discovery + `--update-mdtest` flag |
 | `tests/mdtest/type_inference/basic_types.md` | ✅ | 16 test cases |
+| `tests/mdtest/type_inference/datetime_types.md` | ✅ | 5 test cases |
+| `tests/mdtest/type_inference/uuid_types.md` | ✅ | 2 test cases |
+| `tests/mdtest/type_inference/dialects.md` | ✅ | 3 test cases (postgres, mysql, sqlite) |
 | `tests/mdtest/type_inference/schema_inference.md` | ✅ | 8 test cases |
 | `tests/mdtest/postgres/type_coverage.md` | ✅ | 10 test cases (all 27 types) |
 | `tests/mdtest/postgres/select.md` | ✅ | 11 test cases |
@@ -3080,15 +3089,22 @@ New assertion types:
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `src/sqlty/_rewriter.py` | ✅ | SQLRewriter.rewrite() + strip() (~180 lines) |
+| `src/sqlty/_rewriter.py` | ✅ | SQLRewriter.rewrite() + strip() (~250 lines) |
 | `src/sqlty/_sql_analyzer.py` | ✅ | expand_star() method for SELECT * expansion |
 | `src/sqlty/_decode.py` | ✅ | Simplified to delegate to SQLRewriter |
 | `tests/mdtest/rewrite/basic_rewrite.md` | ✅ | 5 test cases |
 | `tests/mdtest/rewrite/edge_cases.md` | ✅ | 6 test cases |
-| `tests/mdtest/strip/basic_strip.md` | ✅ | 4 test cases |
+| `tests/mdtest/rewrite/import_injection.md` | ✅ | 4 test cases |
+| `tests/mdtest/rewrite/idempotency.md` | ✅ | 3 test cases |
+| `tests/mdtest/rewrite/multiline_queries.md` | ✅ | 2 test cases |
+| `tests/mdtest/strip/basic_strip.md` | ✅ | 6 test cases |
 | `tests/mdtest/strip/round_trip.md` | ✅ | 4 test cases |
+| `tests/mdtest/strip/idempotency.md` | ✅ | 3 test cases |
+| `tests/mdtest/strip/import_removal.md` | ✅ | 3 test cases |
 | `tests/mdtest/postgres/star_expansion.md` | ✅ | 7 test cases |
 | `tests/mdtest/codec/basic_codec.md` | ✅ | 6 test cases |
+| `tests/mdtest/codec/auto_imports.md` | ✅ | 2 test cases |
+| `tests/mdtest/codec/runtime_execution.md` | ✅ | 3 test cases |
 
 ### Phase 3 (Lint/Check) ✅ DONE
 
