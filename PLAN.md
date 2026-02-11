@@ -52,6 +52,53 @@ Global options:
 
 ---
 
+## Configuration: `[tool.sqlty]` in pyproject.toml
+
+SQLTy follows the standard Python `[tool.*]` convention for pyproject.toml configuration, used by pytest (`[tool.pytest]`), ruff (`[tool.ruff]`), mypy (`[tool.mypy]`), and other tools.
+
+### Full configuration reference
+
+```toml
+[tool.sqlty]
+dialect = "postgres"           # SQL dialect: "postgres", "sqlite", "mysql"
+schema = "schema.sql"          # Path to schema .sql file for type inference
+format-command = "ruff format --stdin-filename {filename} -"  # Formatter for rewritten files
+
+[tool.sqlty.schemas]           # Named schema registry (alternative to single schema)
+main = "db/schema.sql"
+analytics = "db/analytics.sql"
+
+[tool.sqlty.rules]             # Per-rule severity: "error", "warn", "ignore"
+column-count-mismatch = "error"
+column-type-mismatch = "error"
+column-name-mismatch = "warn"
+select-star = "warn"
+select-star-no-schema = "error"
+stale-rewrite = "warn"
+stale-type = "warn"
+
+[[tool.sqlty.functions]]       # Custom function tracking
+import_path = "db.query"
+query_param = "sql"
+return_type_param = "return_tp"
+schema = "db/schema.sql"
+return_type_template = "list[{sqlty}]"
+imports = ["from typing import Any"]
+```
+
+### Configuration resolution
+
+1. **Search**: Walk up from the target path to find `pyproject.toml`
+2. **Parse**: Extract the `[tool.sqlty]` section
+3. **Merge**: CLI flags override config file values (e.g., `--dialect sqlite` overrides `dialect = "postgres"` in config)
+
+### Implementation
+
+- `_config.py`: `load_config()` searches for pyproject.toml, `_parse_pyproject()` extracts `[tool.sqlty]`
+- `_cli.py`: `_resolve_config()` merges pyproject.toml config with CLI args; `_load_rules()` returns `[tool.sqlty.rules]`
+
+---
+
 ## Markdown Test Framework (mdtest)
 
 Inspired by [ty's mdtest framework](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md) ([original PR](https://github.com/astral-sh/ruff/pull/13636)), sqlty's test suite will be written as markdown files with embedded code blocks and assertion comments. Each `.md` file is a test suite; each `##` header is a test case.
@@ -3342,3 +3389,4 @@ jobs:
 10. **Wheels only, no crates** — Rust extension is compiled into Python wheels, not published to crates.io.
 11. **Rust core follows maturin mixed layout** — `rust/` directory with `Cargo.toml`, `src/lib.rs`; `pyproject.toml` uses `manifest-path = "rust/Cargo.toml"` per [maturin project layout](https://www.maturin.rs/project_layout.html).
 12. **Conformance tests validate both backends** — `test_core_conformance.py` imports from `sqlty.core` facade, automatically testing whichever implementation is active.
+13. **`[tool.sqlty]` configuration in pyproject.toml** — follows the standard Python `[tool.*]` convention used by pytest, ruff, mypy, and other tools. All configuration lives under `[tool.sqlty]` with sub-tables like `[tool.sqlty.rules]` and `[[tool.sqlty.functions]]`. CLI flags override config file values.
