@@ -1,6 +1,6 @@
 # Plan: Simplify Snapshot Codec — ruff-style CLI + Markdown Tests
 
-> **Deferred items** (stub generation, protocol support, Rust core) are in `PLAN-FUTURE.md`.
+> **Deferred items** (stub generation, protocol support) are in `PLAN-FUTURE.md`.
 
 ## Problem Statement
 
@@ -3051,7 +3051,47 @@ New assertion types:
 **Remaining (deferred):**
 - `check --fix` auto-fix implementation
 - `[[tool.sqlty.overrides]]` for per-file rule config
-- Rust implementation of `_core` module (pyo3/maturin)
+
+### Phase 5: Rust Core Extension (pyo3/maturin)
+
+**Goal:** Replace the Python hotpath with a compiled Rust extension via PyO3 + maturin.
+The same conformance tests (`tests/test_core_conformance.py`) validate 1:1 behavior between
+the Python fallback and the Rust implementation.
+
+**Architecture:**
+- `rust/Cargo.toml` — Rust workspace config with pyo3 + sqlparser-rs + regex
+- `rust/src/lib.rs` — PyO3 module entry, exposes 5 functions as `sqlty._core`
+- `rust/src/analyzer.rs` — SQL type inference using `sqlparser-rs` (replaces sqlglot)
+- `rust/src/rewriter.rs` — Python source rewrite/strip using regex
+- `rust/src/checker.rs` — Check/lint logic (stale-rewrite, stale-type, SELECT *)
+- `src/sqlty/_core.pyi` — Type stubs for the Rust extension
+
+**Functions (same signatures as `_core_py.py`):**
+1. `infer_type(sql, *, dialect, schema_sql) -> str | None`
+2. `rewrite_source(source, *, dialect, schema_sql) -> str`
+3. `strip_source(source) -> str`
+4. `expand_star(sql, *, dialect, schema_sql) -> str | None`
+5. `check_source(source, *, dialect, schema_sql, rules) -> list[dict]`
+
+**Build system:**
+- `pyproject.toml` updated: maturin as build backend
+- `maturin develop` for local development
+- CI wheel building via `maturin-action` (5 platforms)
+
+**Fallback strategy:**
+```python
+try:
+    from sqlty._core import infer_type, ...  # Rust (fast)
+except ImportError:
+    from sqlty._core_py import infer_type, ...  # Python fallback
+```
+
+This is already implemented in `src/sqlty/core.py`.
+
+**Conformance testing:**
+- `tests/test_core_conformance.py` (51 tests) imports from `sqlty.core` (the facade)
+- When Rust `_core` is compiled, the same tests automatically validate it
+- Performance baselines in the conformance suite provide comparison data
 
 ---
 
@@ -3127,7 +3167,20 @@ New assertion types:
 | `tests/test_core.py` | ✅ | 16 tests for core API (import, infer, rewrite, strip, check) |
 | `tests/mdtest/strip/basic_strip.md` | ✅ | Updated: 6 cases (added manual annotation preservation) |
 
-### Future (multi-platform wheel building — when Rust is added)
+### Phase 5 (Rust Core Extension)
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `rust/Cargo.toml` | ✅ | Rust crate config (pyo3, sqlparser, regex) |
+| `rust/src/lib.rs` | ✅ | PyO3 module entry — 5 exported functions |
+| `rust/src/analyzer.rs` | ✅ | SQL type inference via sqlparser-rs |
+| `rust/src/rewriter.rs` | ✅ | Python source rewrite/strip via regex |
+| `rust/src/checker.rs` | ✅ | Lint checks (stale-rewrite, stale-type, SELECT *) |
+| `src/sqlty/_core.pyi` | ✅ | Type stubs for Rust extension |
+| `pyproject.toml` | ✅ | Updated: maturin build backend |
+| `tests/test_core_conformance.py` | ✅ | 51 conformance tests (validates both implementations) |
+
+### Future (multi-platform wheel building)
 
 | File | Purpose |
 |------|---------|
@@ -3141,17 +3194,9 @@ New assertion types:
 
 ### Build system
 
-The current build system uses **hatchling** with `uv-dynamic-versioning`. This remains the build backend for the pure-Python package. When a Rust extension is added later (see `PLAN-FUTURE.md`), the build backend switches to **maturin**.
+The build system uses **maturin** with PyO3. The Rust extension is compiled as `sqlty._core` and falls back to `sqlty._core_py` (pure Python) when not available.
 
-#### Current (pure Python — no changes needed for Phase 0-3)
-
-```toml
-[build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
-build-backend = "hatchling.build"
-```
-
-#### Future (with Rust extension — deferred)
+#### Build system (Phase 5)
 
 ```toml
 [build-system]
@@ -3162,6 +3207,7 @@ build-backend = "maturin"
 python-source = "src"
 module-name = "sqlty._core"
 features = ["pyo3/extension-module"]
+manifest-path = "rust/Cargo.toml"
 ```
 
 ### No crate publishing needed
@@ -3293,4 +3339,6 @@ jobs:
 7. **TypeCodec is a Protocol** — duck typing, extensible, no inheritance.
 8. **Comprehensive PostgreSQL test suite** — 100% type coverage, RETURNING, CTEs, JSON builder functions.
 9. **Gradual migration** — old pytest files coexist with mdtests during transition, no big-bang rewrite.
-10. **Wheels only, no crates** — Rust (when added) is compiled into Python wheels, not published to crates.io.
+10. **Wheels only, no crates** — Rust extension is compiled into Python wheels, not published to crates.io.
+11. **Rust core follows maturin mixed layout** — `rust/` directory with `Cargo.toml`, `src/lib.rs`; `pyproject.toml` uses `manifest-path = "rust/Cargo.toml"` per [maturin project layout](https://www.maturin.rs/project_layout.html).
+12. **Conformance tests validate both backends** — `test_core_conformance.py` imports from `sqlty.core` facade, automatically testing whichever implementation is active.

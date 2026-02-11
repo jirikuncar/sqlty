@@ -6,6 +6,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
+- [Rust toolchain](https://rustup.rs/) (optional — for compiling the native extension)
 
 ## Setup
 
@@ -16,6 +17,25 @@ uv sync --all-groups
 ```
 
 This will install all dependencies and development tools defined in `pyproject.toml`.
+
+### Build the Rust Extension (optional)
+
+SQLTy includes an optional Rust extension (`sqlty._core`) for faster type inference.
+When not compiled, the pure-Python fallback (`sqlty._core_py`) is used automatically.
+
+```bash
+# Install maturin
+pip install maturin
+
+# Build and install the Rust extension into your venv
+maturin develop
+```
+
+To verify the Rust extension is loaded:
+
+```bash
+python -c "from sqlty._core import infer_type; print('Rust backend active')"
+```
 
 ### Install Pre-commit Hooks
 
@@ -146,8 +166,9 @@ uv run ruff check --fix .
 
 | Module | Purpose |
 |--------|---------|
-| `core.py` | Public API: try Rust extension, fall back to Python |
-| `_core_py.py` | Pure-computation functions (Rust boundary, Python fallback) |
+| `core.py` | Public API: try Rust `_core`, fall back to Python `_core_py` |
+| `_core_py.py` | Pure-Python computation functions (FFI boundary fallback) |
+| `_core.pyi` | Type stubs for the Rust extension module |
 | `_cli.py` | ruff-style CLI: `rewrite`, `strip`, `check`, `version` |
 | `_sql_analyzer.py` | SQL parsing, type inference, star expansion (sqlglot-based) |
 | `_type_codec.py` | TypeCodec protocol + TupleCodec default |
@@ -156,6 +177,28 @@ uv run ruff check --fix .
 | `_checker.py` | Column count/type/name validation, SELECT * detection |
 | `_decode.py` | Magic codec decoder (bytes -> string transformation) |
 | `magic.py` | Codec registration for Python import system |
+
+### Rust extension (`rust/`)
+
+The Rust extension reimplements the core computation functions using
+[sqlparser-rs](https://github.com/sqlparser-rs/sqlparser-rs) and PyO3.
+It follows [maturin's recommended mixed Python/Rust project layout](https://www.maturin.rs/project_layout.html).
+
+```
+rust/
+├── Cargo.toml        # Crate config (pyo3, sqlparser, regex)
+└── src/
+    ├── lib.rs        # PyO3 module entry — exposes 5 functions as sqlty._core
+    ├── analyzer.rs   # SQL type inference via sqlparser-rs
+    ├── rewriter.rs   # Python source rewrite/strip via regex
+    └── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *)
+```
+
+Run Rust unit tests independently:
+
+```bash
+cargo test --manifest-path rust/Cargo.toml
+```
 
 ### Test modules
 

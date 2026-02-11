@@ -18,3 +18,11 @@ htmlcov/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+# Rust / maturin build artifacts
+rust/target/
+*.so
+*.pyd
+*.dylib
+src/sqlty/_core.cpython-*.so
+src/sqlty/_core.*.pyd

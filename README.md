@@ -92,6 +92,7 @@ sqlty check .
 - **Pluggable Codecs**: Custom type formatting via `TypeCodec` protocol
 - **Multiple SQL Dialects**: PostgreSQL, MySQL, SQLite, and more via sqlglot
 - **Schema-aware**: Load `CREATE TABLE` schemas for enhanced inference
+- **Optional Rust core**: Compiled via PyO3/maturin for faster type inference (falls back to pure Python)
 
 ### Lint rules
 

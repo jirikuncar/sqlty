@@ -121,7 +121,9 @@ This depends on TypeCodec supporting complex return types.
 
 ---
 
-## Rust Core (optional, high-impact)
+## Rust Core (MOVED to PLAN.md Phase 5)
+
+> **Status:** Moved to active implementation. See `PLAN.md` Phase 5.
 
 ### Goal
 

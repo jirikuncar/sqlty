@@ -43,23 +43,14 @@ sqlty = "sqlty._cli:main"
 psycopg = ["psycopg>=3.2.12"]
 
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/sqlty"]
-
-[tool.hatch.build.targets.sdist]
-only-include = ["/src", "/README.md", "/LICENSE", "/pyproject.toml"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"sqlty_magic.pth" = "sqlty_magic.pth"
-
-[tool.uv-dynamic-versioning]
-fallback-version = "0.0.0"
+[tool.maturin]
+python-source = "src"
+module-name = "sqlty._core"
+features = ["pyo3/extension-module"]
+manifest-path = "rust/Cargo.toml"
 
 [dependency-groups]
 dev = [
