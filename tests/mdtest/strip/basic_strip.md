@@ -29,3 +29,19 @@ q = "--sql SELECT 1::INTEGER"
 x = 42
 # stripped: x = 42
 ```
+
+## Manual SQL[T] wrapper is not stripped
+
+A manually written `SQL[T]()` without `--sql` prefix is left untouched:
+
+```python
+q = SQL[int]("SELECT 1")
+# stripped: q = SQL[int]("SELECT 1")
+```
+
+## Manual SQL[T] with custom query is not stripped
+
+```python
+q = SQL[tuple[int, str]]("SELECT id, name FROM users WHERE active")
+# stripped: q = SQL[tuple[int, str]]("SELECT id, name FROM users WHERE active")
+```

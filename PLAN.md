@@ -3018,8 +3018,34 @@ New assertion types:
 - `.github/workflows/tests.yml` — added Python 3.12 to matrix, added mdtest drift detection step
 
 **Remaining (deferred):**
-- CLI subcommand router (`rewrite`, `strip`, `check` commands)
 - `[[tool.sqlty.overrides]]` for per-file rule config
+
+### Phase 4: CLI subcommand router + Rust preparation ✅ DONE
+
+**CLI rewrite** (`src/sqlty/_cli.py`) ✅:
+- ruff-style subcommands: `rewrite`, `strip`, `check`, `generate` (legacy), `version`
+- Backward compatible: `sqlty . --check` still works (routes to legacy generate)
+- `rewrite --check` / `rewrite --diff`: dry-run modes
+- `check`: scans files for stale-rewrite and stale-type diagnostics
+
+**Rust-ready boundary** ✅:
+- `src/sqlty/_core_py.py`: Pure-computation functions (all primitive types: str, dict, list)
+- `src/sqlty/core.py`: Public API — `try: from ._core import` (Rust) `except: from ._core_py import` (Python fallback)
+- Functions: `infer_type()`, `rewrite_source()`, `strip_source()`, `expand_star()`, `check_source()`
+- Design constraints: no Path objects, no file I/O, no external package imports in signatures
+- Schema passed as SQL string (not file path) — portable across FFI boundary
+
+**Strip safety** ✅:
+- Strip only removes auto-generated `SQL[T](...)` where the inner string starts with `--sql` + whitespace
+- Manually written `SQL[int]("SELECT 1")` is preserved — never stripped
+- `_is_sqlty_managed()` helper detects auto-generated vs manual annotations
+
+**Tests:** `tests/test_core.py` — 16 tests for the core API surface
+
+**Remaining (deferred):**
+- `check --fix` auto-fix implementation
+- `[[tool.sqlty.overrides]]` for per-file rule config
+- Rust implementation of `_core` module (pyo3/maturin)
 
 ---
 
@@ -3075,11 +3101,15 @@ New assertion types:
 | `tests/mdtest/check/type_annotation.md` | ✅ | 8 test cases |
 | `.github/workflows/tests.yml` | ✅ | Python 3.12+3.14 matrix, mdtest drift detection step |
 
-### Remaining (deferred)
+### Phase 4 (CLI + Rust preparation) ✅ DONE
 
-| File | Phase | Purpose |
-|------|-------|---------|
-| `src/sqlty/_cli.py` | 4+ | ruff-style subcommand router |
+| File | Status | Purpose |
+|------|--------|---------|
+| `src/sqlty/_cli.py` | ✅ | ruff-style subcommand router (rewrite/strip/check/generate/version) |
+| `src/sqlty/_core_py.py` | ✅ | Pure-computation functions (Rust boundary, Python fallback) |
+| `src/sqlty/core.py` | ✅ | Public API: try Rust extension, fall back to Python |
+| `tests/test_core.py` | ✅ | 16 tests for core API (import, infer, rewrite, strip, check) |
+| `tests/mdtest/strip/basic_strip.md` | ✅ | Updated: 6 cases (added manual annotation preservation) |
 
 ### Future (multi-platform wheel building — when Rust is added)
 
