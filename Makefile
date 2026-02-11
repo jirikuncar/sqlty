@@ -26,8 +26,6 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
-	@echo "  generate-examples - Generate stubs for all examples"
-	@echo "  verify-examples   - Generate stubs and verify with mypy, ty, and stubtest"
 	@echo "  example-registries- List registered functions in all examples"
 	@echo ""
 	@echo "Example directories found: $(EXAMPLE_DIRS)"
@@ -99,44 +97,6 @@ clean-examples:
 	@echo "Removing generated .pyi files in examples/"
 	@find examples -name "*.pyi" -type f -delete || true
 	@echo "Done"
-
-.PHONY: generate-examples
-generate-examples: clean-examples
-	@echo "Generating stubs for all examples..."
-	@for dir in $(EXAMPLE_DIRS); do \
-		echo "  -> $$dir"; \
-		uv run sqlty $$dir/ --format-command "uv run ruff format --stdin-filename {filename}" || exit 1; \
-	done
-	@echo "All stubs generated"
-
-.PHONY: verify-examples
-verify-examples: generate-examples
-	@echo "Verifying examples with mypy..."
-	@for dir in $(EXAMPLE_DIRS); do \
-		echo "  -> $$dir"; \
-		uv run mypy $$dir/; \
-	done
-	@echo "mypy verification passed"
-	@echo ""
-	@echo "Verifying examples with stubtest..."
-	@for pyi in $$(find examples -name "*.pyi" -type f); do \
-		dir=$$(dirname $$pyi); \
-		modname=$$(basename $${pyi%.pyi}); \
-		echo "  -> $$pyi"; \
-		(cd $$dir && PYTHONPATH=.:$(ROOT_DIR)/src $(ROOT_DIR)/.venv/bin/python -m mypy.stubtest $$modname \
-			--allowlist $(ROOT_DIR)/.stubtest-allowlist \
-			--ignore-unused-allowlist \
-			--concise \
-			--mypy-config-file $(ROOT_DIR)/pyproject.toml) || exit 1; \
-	done
-	@echo "stubtest verification passed"
-	@echo ""
-	@echo "Verifying magic codec example..."
-	@if [ -d examples/magic_codec ]; then \
-		echo "  -> examples/magic_codec/demo.py"; \
-		(cd examples/magic_codec && PYTHONPATH=$(ROOT_DIR)/src uv run mypy demo.py) || exit 1; \
-	fi
-	@echo "magic codec verification passed"
 
 .PHONY: example-registries
 example-registries:

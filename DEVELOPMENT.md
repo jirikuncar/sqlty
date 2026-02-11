@@ -31,7 +31,7 @@ This ensures code is formatted and checked before each commit.
 - **Ruff**: Code formatting and linting with automatic fixes
 - **uv-lock**: Keeps the lockfile up to date
 - **mypy**: Type checking for the src directory
-- **sqlty-examples**: Automatic stub generation for example files
+- **sqlty-examples**: Verify example files
 
 To manually run all pre-commit hooks:
 
@@ -146,6 +146,9 @@ uv run ruff check --fix .
 
 | Module | Purpose |
 |--------|---------|
+| `core.py` | Public API: try Rust extension, fall back to Python |
+| `_core_py.py` | Pure-computation functions (Rust boundary, Python fallback) |
+| `_cli.py` | ruff-style CLI: `rewrite`, `strip`, `check`, `version` |
 | `_sql_analyzer.py` | SQL parsing, type inference, star expansion (sqlglot-based) |
 | `_type_codec.py` | TypeCodec protocol + TupleCodec default |
 | `_rewriter.py` | Source-level rewrite/strip (`"--sql ..."` <-> `SQL[T](...)`) |
@@ -161,43 +164,6 @@ uv run ruff check --fix .
 | `tests/conftest.py` | pytest plugin: `.md` discovery, `--update-mdtest` flag |
 | `tests/mdtest_runner.py` | Markdown parser + snapshot assertion engine |
 | `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
-
-## Generating Type Stubs
-
-```bash
-# Single file
-uv run sqlty queries.py
-
-# Directory (incremental + prune + create)
-uv run sqlty .
-
-# With schema for enhanced inference
-uv run sqlty . --schema schema.sql
-
-# Check stubs are up-to-date (CI)
-uv run sqlty . --check
-```
-
-### CLI Options
-
-- `-o, --output`: Output .pyi file path
-- `--dialect`: SQL dialect (default: postgres)
-- `--mode`: Generation mode (incremental, prune, create, fresh)
-- `--schema PATH`: Schema files for type inference
-- `--check`: Verify stubs without modifying files
-
-## Running Examples
-
-```bash
-# Generate stubs for all examples
-make generate-examples
-
-# Verify examples with mypy and stubtest
-make verify-examples
-
-# List registered functions in all examples
-make example-registries
-```
 
 ## Contributing
 

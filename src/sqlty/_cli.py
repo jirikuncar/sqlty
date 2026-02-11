@@ -4,12 +4,7 @@ Commands:
     sqlty rewrite [OPTIONS] [PATH...]   Rewrite source files
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
-    sqlty generate [OPTIONS] <SOURCE>   Generate .pyi stubs (legacy)
     sqlty version                       Print version
-
-Backward compatibility:
-    sqlty <source> [--check] [--schema ...]
-    routes to `generate` when the first positional arg is a path (not a command).
 """
 
 import logging
@@ -25,13 +20,6 @@ def main(argv: list[str] | None = None) -> None:
 
     if argv is None:
         argv = sys.argv[1:]
-
-    # Backward compatibility: if first arg is a path (not a known command),
-    # route to legacy generate. This handles `sqlty . --check`, `sqlty queries.py`, etc.
-    _known_commands = {"rewrite", "strip", "check", "generate", "version"}
-    if argv and argv[0] not in _known_commands and not argv[0].startswith("-"):
-        _cmd_generate_legacy(argv)
-        return
 
     parser = argparse.ArgumentParser(
         prog="sqlty",
@@ -89,28 +77,9 @@ def main(argv: list[str] | None = None) -> None:
         help="Auto-fix fixable issues (expand SELECT *, update stale types)",
     )
 
-    # --- generate (legacy stub generation) ---
-    generate_parser = subparsers.add_parser(
-        "generate",
-        help="Generate .pyi stub files (legacy command)",
-    )
-    generate_parser.add_argument("source", type=Path, help="Source file or directory")
-    generate_parser.add_argument("-o", "--output", type=Path, help="Output stub file path")
-    generate_parser.add_argument(
-        "--dialect", default="postgres", choices=["postgres", "sqlite", "mysql"]
-    )
-    generate_parser.add_argument("--schema", action="append", type=str)
-    generate_parser.add_argument("--mode", type=str)
-    generate_parser.add_argument("--format-command", type=str)
-    generate_parser.add_argument(
-        "--check", action="store_true", help="Check stubs without modifying"
-    )
-    generate_parser.add_argument("-v", "--verbose", action="count", default=0)
-
     # --- version ---
     subparsers.add_parser("version", help="Print version and exit")
 
-    # Parse - handle backward compatibility
     args = parser.parse_args(argv)
 
     if args.version:
@@ -128,8 +97,6 @@ def main(argv: list[str] | None = None) -> None:
             _cmd_strip(args)
         case "check":
             _cmd_check(args)
-        case "generate":
-            _cmd_generate(args)
         case "version":
             _cmd_version()
         case _:
@@ -298,154 +265,6 @@ def _cmd_version() -> None:
     from sqlty import __version__
 
     print(f"sqlty {__version__}")
-
-
-def _cmd_generate(args: "argparse.Namespace") -> None:
-    """Legacy generate command."""
-    _run_generate(
-        source=args.source,
-        output=args.output,
-        dialect=args.dialect,
-        schema=args.schema,
-        mode=args.mode,
-        format_command=args.format_command,
-        check=args.check,
-        verbose=args.verbose,
-    )
-
-
-def _cmd_generate_legacy(argv: list[str]) -> None:
-    """Backward-compatible legacy invocation: sqlty <source> [options]."""
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="sqlty",
-        description="Generate .pyi stub files with overloads from SQL function calls.",
-    )
-    parser.add_argument("source", type=Path)
-    parser.add_argument("-o", "--output", type=Path)
-    parser.add_argument(
-        "--dialect", default="postgres", choices=["postgres", "sqlite", "mysql"]
-    )
-    parser.add_argument("--schema", action="append", type=str)
-    parser.add_argument("--mode", type=str)
-    parser.add_argument("--format-command", type=str)
-    parser.add_argument("--check", action="store_true")
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-
-    args = parser.parse_args(argv)
-    _run_generate(
-        source=args.source,
-        output=args.output,
-        dialect=args.dialect,
-        schema=args.schema,
-        mode=args.mode,
-        format_command=args.format_command,
-        check=args.check,
-        verbose=args.verbose,
-    )
-
-
-def _run_generate(
-    *,
-    source: Path,
-    output: Path | None,
-    dialect: str,
-    schema: list[str] | None,
-    mode: str | None,
-    format_command: str | None,
-    check: bool,
-    verbose: int,
-) -> None:
-    """Shared logic for generate command and legacy invocation."""
-    from sqlty._config import load_config, merge_config
-    from sqlty._generator import TypeStubGenerator
-
-    config, config_dir = load_config(source.parent if source.is_file() else source)
-
-    cli_config: dict[str, object] = {}
-    if dialect != "postgres":
-        cli_config["dialect"] = dialect
-    if format_command:
-        cli_config["format_command"] = format_command
-
-    merged_config = merge_config(config, cli_config)
-    sql_dialect = merged_config.get("dialect", dialect)
-    fmt_command = merged_config.get("format_command", format_command)
-
-    if check and fmt_command:
-        logger.error("--check and --format-command are mutually exclusive")
-        sys.exit(1)
-
-    if mode is None:
-        mode = "incremental,prune,create" if source.is_dir() else "incremental,create"
-
-    valid_actions = {"incremental", "prune", "create"}
-    mode_actions = {m.strip() for m in mode.split(",")}
-    invalid_actions = mode_actions - valid_actions
-    if invalid_actions:
-        logger.error("Invalid mode action(s): %s", ", ".join(invalid_actions))
-        sys.exit(1)
-
-    schema_mappings: dict[str | None, Path] = {}
-    base_schema: Path | None = None
-
-    if "schemas" in merged_config:
-        for registry_name, schema_path_str in merged_config["schemas"].items():
-            try:
-                resolved = (
-                    config_dir / schema_path_str if config_dir else Path(schema_path_str)
-                )
-                if registry_name == "":
-                    base_schema = resolved
-                else:
-                    schema_mappings[registry_name] = resolved
-            except Exception:
-                logger.warning("Invalid schema path in config: %s", schema_path_str)
-
-    if schema:
-        for entry in schema:
-            if ":" in entry:
-                registry_name, schema_path_str = entry.split(":", 1)
-                registry_name = registry_name.strip()
-                schema_path_str = schema_path_str.strip()
-                if not registry_name or not schema_path_str:
-                    logger.error("Invalid --schema mapping: %s", entry)
-                    sys.exit(1)
-                if "." not in registry_name:
-                    logger.error(
-                        "Invalid --schema mapping: '%s' is not fully qualified", entry
-                    )
-                    sys.exit(1)
-                schema_mappings[registry_name] = Path(schema_path_str)
-            else:
-                base_schema = Path(entry)
-
-    if base_schema is not None:
-        schema_mappings = dict(schema_mappings)
-        schema_mappings[None] = base_schema
-
-    function_configs = merged_config.get("functions", [])
-
-    generator = TypeStubGenerator(
-        sql_dialect=sql_dialect,
-        schema_mappings=schema_mappings,
-        format_command=fmt_command,
-        verbose=verbose,
-        function_configs=function_configs,
-    )
-
-    try:
-        if check:
-            exit_code = generator.check(source_path=source, output_path=output)
-            sys.exit(exit_code)
-        else:
-            generator.generate_stub_file(
-                source_path=source, output_path=output, mode=mode
-            )
-    except Exception as e:
-        logger.error("%s", e)
-        sys.exit(1)
 
 
 # --- File helpers ---

@@ -12,22 +12,9 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
-      - id: sqlty-examples
-        name: sqlty stub generation for examples
-        entry: uv run sqlty examples --format-command "uv run ruff format --stdin-filename {filename}"
-        language: system
-        pass_filenames: false
-        require_serial: true
-        types: [python]
-        files: ^examples/
-      - id: sqlty-check-examples
-        name: sqlty check for examples
-        entry: uv run sqlty examples --check --verbose
-        language: system
-        pass_filenames: false
-        require_serial: true
-        types: [python]
-        files: ^examples/
+      # Legacy stub generation hooks (deferred to PLAN-FUTURE.md):
+      # - id: sqlty-examples
+      # - id: sqlty-check-examples
 
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

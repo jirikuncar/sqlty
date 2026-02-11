@@ -8,7 +8,10 @@ from collections.abc import Callable
 from pathlib import Path
 from subprocess import CompletedProcess
 
+import pytest
 from inline_snapshot import snapshot
+
+pytestmark = pytest.mark.skip(reason="Legacy generate CLI deferred to PLAN-FUTURE.md")
 
 
 def test_psycopg_driver_pattern(

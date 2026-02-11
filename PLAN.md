@@ -3023,8 +3023,8 @@ New assertion types:
 ### Phase 4: CLI subcommand router + Rust preparation ✅ DONE
 
 **CLI rewrite** (`src/sqlty/_cli.py`) ✅:
-- ruff-style subcommands: `rewrite`, `strip`, `check`, `generate` (legacy), `version`
-- Backward compatible: `sqlty . --check` still works (routes to legacy generate)
+- ruff-style subcommands: `rewrite`, `strip`, `check`, `version`
+- Legacy `generate` command and backward-compat routing removed — deferred to `PLAN-FUTURE.md`
 - `rewrite --check` / `rewrite --diff`: dry-run modes
 - `check`: scans files for stale-rewrite and stale-type diagnostics
 
@@ -3105,7 +3105,7 @@ New assertion types:
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `src/sqlty/_cli.py` | ✅ | ruff-style subcommand router (rewrite/strip/check/generate/version) |
+| `src/sqlty/_cli.py` | ✅ | ruff-style subcommand router (rewrite/strip/check/version) |
 | `src/sqlty/_core_py.py` | ✅ | Pure-computation functions (Rust boundary, Python fallback) |
 | `src/sqlty/core.py` | ✅ | Public API: try Rust extension, fall back to Python |
 | `tests/test_core.py` | ✅ | 16 tests for core API (import, infer, rewrite, strip, check) |

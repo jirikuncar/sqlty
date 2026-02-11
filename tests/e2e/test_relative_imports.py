@@ -9,7 +9,10 @@ Tests comprehensive relative import scenarios:
 
 from pathlib import Path
 
+import pytest
 from inline_snapshot import snapshot
+
+pytestmark = pytest.mark.skip(reason="Legacy generate CLI deferred to PLAN-FUTURE.md")
 
 
 def test_child_imports_from_parent_package(tmp_path: Path, cli, mypy) -> None:

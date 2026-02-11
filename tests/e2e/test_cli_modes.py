@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.skip(reason="Legacy generate CLI deferred to PLAN-FUTURE.md")
+
 
 def test_cli_help_command(
     tmp_path: Path,

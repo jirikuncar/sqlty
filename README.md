@@ -92,7 +92,6 @@ sqlty check .
 - **Pluggable Codecs**: Custom type formatting via `TypeCodec` protocol
 - **Multiple SQL Dialects**: PostgreSQL, MySQL, SQLite, and more via sqlglot
 - **Schema-aware**: Load `CREATE TABLE` schemas for enhanced inference
-- **Stub Generation**: Generate `.pyi` files with `@overload` declarations for mypy
 
 ### Lint rules
 
@@ -113,35 +112,6 @@ Configure in `pyproject.toml`:
 select-star = "ignore"
 column-name-mismatch = "error"
 ```
-
-## Stub Generation
-
-SQLTy also supports automatic `.pyi` stub generation for the `@sqlty` decorator pattern:
-
-```python
-from typing import Any
-from sqlty import sqlty
-
-@sqlty
-def sql(query: str) -> Any:
-    return query
-
-query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-# Type: SQL[tuple[int, str]]
-```
-
-```bash
-# Generate stubs
-sqlty queries.py
-
-# Directory mode (incremental + prune + create)
-sqlty .
-
-# Check stubs are up-to-date (CI)
-sqlty . --check
-```
-
-See [advanced usage documentation](docs/advanced-usage.md) for multi-registry support, schema configuration, and mode options.
 
 ## Magic Codec
 
