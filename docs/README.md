@@ -7,7 +7,7 @@ Welcome to the SQLTy documentation!
 - **[Motivation](motivation.md)** - Why use SQLTy and when it's the right choice
 - **[Main Documentation](index.md)** - Complete guide to SQLTy
 - **[Installation Guide](installation.md)** - Setup and installation instructions
-- **[API Reference](api.md)** - Detailed API documentation
+- **[API Reference](api.md)** - CLI commands, types, and configuration
 - **[Magic Codec](magic-codec.md)** - Automatic string transformation
 
 ## Documentation Structure
@@ -21,44 +21,44 @@ Welcome to the SQLTy documentation!
 
 2. **[Installation](installation.md)**
    - Requirements (Python 3.12+)
-   - Installation methods (pip, uv, poetry, from source)
+   - Installation methods (pip, uv, from source)
    - Optional dependencies
-   - IDE integration
 
 3. **[Quick Start](index.md#quick-start)**
-   - Basic setup
-   - Writing queries
-   - Rewrite and strip commands
-   - Type checking
+   - Writing `--sql` queries
+   - Rewrite, strip, and check commands
 
 ### User Guide
 
 4. **[Basic Usage](index.md#basic-usage)**
-   - Creating a SQL registry
-   - Writing SQL queries
-   - Type annotations in SQL
-   - Generating stub files
-
-5. **[Advanced Usage](advanced-usage.md)**
-   - Multi-registry pattern
-   - Custom SQL dialects
+   - Writing SQL queries with `--sql` prefix
+   - Type annotations via SQL casts
    - Schema-based inference
-   - Rule configuration
+
+5. **[Usage Patterns](patterns.md)**
+   - Rewrite/Strip (recommended)
+   - Magic codec
+   - Schema-based inference
+
+6. **[Advanced Usage](advanced-usage.md)**
+   - Custom SQL dialects
+   - Multiple schemas
+   - Return formats
+   - Lint rule configuration
+   - Pre-commit integration
 
 ### Reference
 
-6. **[API Reference](api.md)**
-   - `@sqlty` decorator
+7. **[API Reference](api.md)**
+   - CLI commands (rewrite, strip, check)
    - SQL type
-   - Generator CLI
+   - Configuration reference
    - Type mappings
    - Lint rules
 
-### Architecture
+### Architecture (Internal)
 
-7. **[IR Architecture](ir-architecture.md)** - Internal representation details
-8. **[asttokens Integration](asttokens-integration.md)** - Source transformation internals
-9. **[Patterns](patterns.md)** - Usage patterns and best practices
+8. **[IR Architecture](ir-architecture.md)** - Stub generation IR (deferred)
 
 ## Development
 
@@ -67,9 +67,7 @@ See **[DEVELOPMENT.md](../DEVELOPMENT.md)** for development setup, testing, and 
 ## External Resources
 
 - **[GitHub Repository](https://github.com/jirikuncar/sqlty)** - Source code and issues
-- **[mypy Documentation](https://mypy.readthedocs.io/)** - Python type checking
 - **[sqlglot Documentation](https://sqlglot.com/)** - SQL parsing and analysis
-- **[PEP 484](https://peps.python.org/pep-0484/)** - Type hints specification
 
 ## License
 

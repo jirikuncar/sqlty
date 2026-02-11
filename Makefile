@@ -25,8 +25,9 @@ help:
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
 	@echo ""
 	@echo "Examples:"
-	@echo "  clean-examples    - Remove all generated .pyi files in examples/"
-	@echo "  example-registries- List registered functions in all examples"
+	@echo "  check-examples    - Run sqlty check on all examples"
+	@echo "  rewrite-examples  - Run sqlty rewrite on all examples"
+	@echo "  strip-examples    - Run sqlty strip on all examples"
 	@echo ""
 	@echo "Example directories found: $(EXAMPLE_DIRS)"
 
@@ -92,19 +93,29 @@ update-mdtest:
 
 # --- Examples ---
 
-.PHONY: clean-examples
-clean-examples:
-	@echo "Removing generated .pyi files in examples/"
-	@find examples -name "*.pyi" -type f -delete || true
+.PHONY: check-examples
+check-examples:
+	@echo "Running sqlty check on examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  -> $$dir"; \
+		uv run sqlty check $$dir/ || true; \
+	done
 	@echo "Done"
 
-.PHONY: example-registries
-example-registries:
-	@echo "Listing registered functions in all examples..."
+.PHONY: rewrite-examples
+rewrite-examples:
+	@echo "Running sqlty rewrite on examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
-		echo ""; \
-		echo "$$dir"; \
-		uv run python -m sqlty.registries $$dir/; \
+		echo "  -> $$dir"; \
+		uv run sqlty rewrite $$dir/ || true; \
 	done
-	@echo ""
+	@echo "Done"
+
+.PHONY: strip-examples
+strip-examples:
+	@echo "Running sqlty strip on examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  -> $$dir"; \
+		uv run sqlty strip $$dir/ || true; \
+	done
 	@echo "Done"

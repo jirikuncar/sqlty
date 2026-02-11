@@ -12,9 +12,22 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
-      # Legacy stub generation hooks (deferred to PLAN-FUTURE.md):
-      # - id: sqlty-examples
-      # - id: sqlty-check-examples
+      - id: sqlty-check
+        name: sqlty check examples
+        entry: uv run sqlty check examples/
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [python]
+        files: ^examples/
+      - id: sqlty-rewrite
+        name: sqlty rewrite examples
+        entry: uv run sqlty rewrite examples/
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [python]
+        files: ^examples/
 
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

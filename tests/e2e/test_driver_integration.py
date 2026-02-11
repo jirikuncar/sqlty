@@ -11,7 +11,7 @@ from subprocess import CompletedProcess
 import pytest
 from inline_snapshot import snapshot
 
-pytestmark = pytest.mark.skip(reason="Legacy generate CLI deferred to PLAN-FUTURE.md")
+pytestmark = pytest.mark.skip(reason="Stub generation CLI (sqlty generate) deferred — see PLAN-FUTURE.md")
 
 
 def test_psycopg_driver_pattern(

@@ -9,7 +9,7 @@ from subprocess import CompletedProcess
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy generate CLI deferred to PLAN-FUTURE.md")
+pytestmark = pytest.mark.skip(reason="Stub generation CLI (sqlty generate) deferred — see PLAN-FUTURE.md")
 
 
 def test_empty_project(tmp_path: Path, cli: Callable[..., CompletedProcess[str]]) -> None:

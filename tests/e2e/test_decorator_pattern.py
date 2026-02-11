@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy generate CLI deferred to PLAN-FUTURE.md")
+pytestmark = pytest.mark.skip(reason="Stub generation CLI (sqlty generate) deferred — see PLAN-FUTURE.md")
 
 
 def test_simple_decorator_pattern(

@@ -1,5 +1,8 @@
 # Intermediate Representation (IR) Architecture
 
+> **Status:** This document describes the stub generation IR pipeline, which is deferred.
+> See [PLAN-FUTURE.md](../PLAN-FUTURE.md) for the stub generation roadmap.
+
 ## Overview
 
 The SQLTy code generation system has been refactored to use an intermediate representation (IR) for stub file content. This provides a clean separation of concerns and makes the code more maintainable and extensible.
