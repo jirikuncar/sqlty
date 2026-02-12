@@ -1,12 +1,10 @@
 # Usage Patterns
 
-This guide shows the main patterns for using SQLTy in your projects.
+Three ways to use SQLTy, from simplest to most automated.
 
 ## Pattern 1: Rewrite/Strip (Recommended)
 
-The primary pattern — write `--sql` prefixed strings, use `sqlty rewrite` to add type annotations.
-
-### Workflow
+Write `--sql\n` strings, use `sqlty rewrite` to add type annotations, `sqlty strip` to remove them.
 
 ```python
 # 1. Write queries with --sql prefix and type casts
@@ -19,126 +17,93 @@ sqlty rewrite .
 ```
 
 ```python
-# 3. Result: type-safe SQL strings
+# 3. Result
 from sqlty import SQL
 query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ```bash
-# 4. Check for issues
-sqlty check .
-
-# 5. Strip when you need to edit SQL
-sqlty strip .
+# 4. Check and strip
+sqlty check .     # lint for issues
+sqlty strip .     # revert to plain strings
 ```
 
-### Benefits
+**Best for:** Production codebases, CI/CD, team workflows.
 
-- No decorators or wrappers needed in your code
-- Bidirectional: `rewrite` adds types, `strip` removes them
-- Works with any codebase — just add `--sql` prefix to your SQL strings
-- `check` validates annotations stay in sync
-
-### Configuration
-
-```toml
-# pyproject.toml
-[tool.sqlty]
-dialect = "postgres"
-schema = "schema.sql"
-
-[tool.sqlty.rules]
-select-star = "warn"
-```
-
-### Pre-commit Integration
+### Pre-commit integration
 
 ```yaml
-# .pre-commit-config.yaml
 repos:
   - repo: local
     hooks:
       - id: sqlty-check
         name: sqlty check
-        entry: uv run sqlty check
-        language: system
-        pass_filenames: false
-        types: [python]
-      - id: sqlty-rewrite
-        name: sqlty rewrite
-        entry: uv run sqlty rewrite
+        entry: uv run sqlty check .
         language: system
         pass_filenames: false
         types: [python]
 ```
 
-## Pattern 2: Magic Codec
+## Pattern 2: User-Defined Types
 
-Import-time transformation — no explicit `sqlty rewrite` step needed.
+Use `TypedDict`, `NamedTuple`, `dataclass`, or Pydantic `BaseModel` instead of `tuple[...]`:
 
 ```python
-# coding: sqlty
+from typing import TypedDict
+from sqlty import SQL
 
-# --sql strings are automatically transformed at import time
-query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# At runtime: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+class User(TypedDict):
+    id: int
+    name: str
+
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-### Benefits
+`sqlty check` validates field count, types, and names against the query.
 
-- Zero manual steps — transformation happens at import
-- Great for development and prototyping
-- Types are available at runtime without pre-processing
-
-### Trade-offs
-
-- Import-time overhead (parsing and type inference)
-- Types are not visible in source code (only at runtime)
-- Requires codec registration via `sqlty_magic.pth`
-
-See [magic codec documentation](magic-codec.md) for setup.
+**Best for:** Readable code, named fields, complex queries with many columns.
 
 ## Pattern 3: Schema-Based Inference
 
-Use a database schema file to infer types without explicit casts:
+Use a `CREATE TABLE` schema file to infer types without explicit casts:
 
 ```toml
-# pyproject.toml
 [tool.sqlty]
 schema = "schema.sql"
 ```
 
-```sql
--- schema.sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email VARCHAR(255)
-);
-```
-
 ```python
-# No explicit casts needed — types inferred from schema
+# No ::TYPE casts needed
 query = "--sql\nSELECT id, name, email FROM users"
 
 # After rewrite:
 query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
-### Multiple Schemas
+**Best for:** Projects with existing schema files.
 
-```toml
-[tool.sqlty.schemas]
-users = "db/users.sql"
-orders = "db/orders.sql"
+## Pattern 4: Magic Codec
+
+Import-time transformation — no `sqlty rewrite` step needed:
+
+```python
+# coding: sqlty
+
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-## Which Pattern Should I Use?
+**Best for:** Development, prototyping, rapid iteration.
+
+See [magic codec documentation](magic-codec.md).
+
+## Which Pattern?
 
 | Pattern | Best for |
 |---------|----------|
-| **Rewrite/Strip** | Production codebases, CI/CD, team workflows |
-| **Magic Codec** | Development, prototyping, quick iteration |
-| **Schema-Based** | Projects with existing CREATE TABLE schemas |
+| **Rewrite/Strip** | Production, CI/CD, teams |
+| **User-Defined Types** | Readable code, named fields |
+| **Schema-Based** | Projects with CREATE TABLE schemas |
+| **Magic Codec** | Development, prototyping |
 
-All patterns can be combined. For example, use the magic codec during development and `sqlty rewrite` before committing.
+All patterns combine freely. Use magic codec during development, rewrite before committing, user-defined types for important domain objects.

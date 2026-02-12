@@ -1,102 +1,62 @@
-# SQLTy Documentation
+# SQLTy User Guide
 
 Type-safe SQL queries for Python with automatic type inference, source rewriting, and lint checks.
 
-## Table of Contents
-
-- [Motivation](motivation.md)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Basic Usage](#basic-usage)
-  - [Writing SQL Queries](#writing-sql-queries)
-  - [Type Annotations in SQL](#type-annotations-in-sql)
-  - [Schema-Based Inference](#schema-based-inference)
-- [CLI Commands](#cli-commands)
-  - [Rewrite](#rewrite)
-  - [Strip](#strip)
-  - [Check](#check)
-- [Configuration](#configuration)
-- [Magic Codec](#magic-codec)
-- [API Reference](#api-reference)
-  - [SQL Type](#sql-type)
-  - [Type Mappings](#type-mappings)
-- [Examples](#examples)
-- [Contributing](#contributing)
-
 ## Installation
-
-### Using pip
 
 ```bash
 pip install sqlty
-```
-
-### Using uv (recommended for development)
-
-```bash
+# or
 uv add sqlty
 ```
 
-### From source
-
-```bash
-git clone https://github.com/jirikuncar/sqlty.git
-cd sqlty
-uv sync
-```
-
-### Requirements
-
-- Python 3.12+
-- sqlglot (for SQL parsing and type inference)
+Requires Python 3.12+. See [installation guide](installation.md) for details.
 
 ## Quick Start
 
-1. **Write SQL queries with `--sql\n` prefix (newline separates prefix from query):**
+**1. Write SQL with `--sql\n` prefix and type casts:**
 
 ```python
 # queries.py
-q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
 
-2. **Rewrite to add type annotations:**
+**2. Rewrite to add type annotations:**
 
 ```bash
 sqlty rewrite queries.py
 ```
 
-This transforms the file to:
+Result:
 
 ```python
 # queries.py
 from sqlty import SQL
 
-q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-3. **Check for issues:**
+**3. Check for issues:**
 
 ```bash
-sqlty check .
+sqlty check queries.py
 ```
 
-4. **Strip annotations (reverse):**
+**4. Strip annotations (reverse):**
 
 ```bash
 sqlty strip queries.py
 ```
 
-## Basic Usage
+## Writing SQL Queries
 
-### Writing SQL Queries
-
-Write SQL queries as plain strings with the `--sql` prefix. Use PostgreSQL-style type casts (`::TYPE`) to declare column types:
+Use the `--sql\n` prefix to mark SQL strings. The `\n` separates the marker from the actual SQL (so the marker is a SQL comment, not part of the query):
 
 ```python
-# Simple query with explicit casts (--sql\n prefix)
+# Single-line (escaped newline)
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
-# Multi-line queries (triple-quoted — newline is natural)
+# Multi-line (natural newline)
 query = """--sql
 SELECT id::INTEGER, name::TEXT, email::TEXT
 FROM users
@@ -104,56 +64,27 @@ WHERE active = true
 """
 ```
 
-Run `sqlty rewrite .` to add type annotations:
+### Type Casts
 
-```python
-from sqlty import SQL
+Use PostgreSQL-style `::TYPE` casts to declare column types:
 
-query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
-### Type Annotations in SQL
-
-SQLTy uses PostgreSQL-style type casts to infer Python types:
-
-| SQL Type Cast | Python Type |
-|--------------|-------------|
-| `::INTEGER` | `int` |
-| `::TEXT` | `str` |
-| `::BOOLEAN` | `bool` |
-| `::FLOAT` | `float` |
-| `::DOUBLE` | `float` |
-| `::DECIMAL` | `Decimal` |
-| `::DATE` | `datetime.date` |
-| `::TIMESTAMP` | `datetime.datetime` |
-| `::TIMESTAMPTZ` | `datetime.datetime` |
-| `::TIME` | `datetime.time` |
-| `::INTERVAL` | `datetime.timedelta` |
-| `::BYTEA` | `bytes` |
-| `::UUID` | `uuid.UUID` |
-| `::JSON` / `::JSONB` | `Any` |
-
-Example:
-
-```python
-q = """--sql
-SELECT
-    id::INTEGER,
-    name::TEXT,
-    is_active::BOOLEAN,
-    created_at::TIMESTAMP,
-    birth_date::DATE,
-    duration::INTERVAL
-FROM users
-"""
-
-# After rewrite:
-# q = SQL[tuple[int, str, bool, datetime.datetime, datetime.date, datetime.timedelta]](...)
-```
+| SQL Cast | Python Type | Import |
+|----------|-------------|--------|
+| `::INTEGER` | `int` | Built-in |
+| `::TEXT`, `::VARCHAR` | `str` | Built-in |
+| `::BOOLEAN` | `bool` | Built-in |
+| `::FLOAT`, `::DOUBLE` | `float` | Built-in |
+| `::DATE` | `datetime.date` | `import datetime` |
+| `::TIMESTAMP` | `datetime.datetime` | `import datetime` |
+| `::TIME` | `datetime.time` | `import datetime` |
+| `::INTERVAL` | `datetime.timedelta` | `import datetime` |
+| `::UUID` | `uuid.UUID` | `import uuid` |
+| `::JSON`, `::JSONB` | `Any` | `from typing import Any` |
+| `::BYTEA` | `bytes` | Built-in |
 
 ### Schema-Based Inference
 
-Provide a schema file for type inference without explicit casts:
+Skip explicit casts by providing a schema file:
 
 ```toml
 # pyproject.toml
@@ -172,12 +103,67 @@ CREATE TABLE users (
 ```
 
 ```python
-# Before: no casts needed with schema
-q = "--sql\nSELECT id, name, email FROM users"
+# No casts needed — types inferred from schema
+query = "--sql\nSELECT id, name, email FROM users"
 
-# After rewrite: types inferred from schema
-q = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+# After rewrite:
+query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
+
+## User-Defined Types
+
+Beyond `tuple[...]`, sqlty validates `TypedDict`, `NamedTuple`, `dataclass`, and Pydantic `BaseModel` annotations against query columns.
+
+### Basic example
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str
+
+# sqlty check validates field count, types, and names
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+### Supported type forms
+
+| Type Form | Example |
+|-----------|---------|
+| `TypedDict` | `class User(TypedDict): id: int; name: str` |
+| `NamedTuple` | `class User(NamedTuple): id: int; name: str` |
+| `@dataclass` | `@dataclass class User: id: int; name: str` |
+| `BaseModel` | `class User(BaseModel): id: int; name: str` |
+
+### What gets checked
+
+- **Field count**: `User` has 3 fields but query returns 2 columns
+- **Field types**: `User.id` is `str` but query infers `int`
+- **Field names**: `User.user_id` doesn't match column `id`
+
+### Import resolution
+
+SQLTy uses Python's runtime typing machinery to resolve types. This means `from datetime import datetime` correctly matches `TIMESTAMP` columns — no false positives from import style differences:
+
+```python
+from datetime import datetime  # not datetime.datetime — sqlty handles both
+from typing import TypedDict
+from sqlty import SQL
+
+class Event(TypedDict):
+    id: int
+    created_at: datetime  # resolves to datetime.datetime at runtime
+
+query = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP FROM events")
+# No type mismatch — runtime resolution handles it correctly
+```
+
+### Limitations
+
+- Type must be defined in the **same file** as the `SQL[T](...)` usage
+- Cross-module imports are silently skipped
 
 ## CLI Commands
 
@@ -185,58 +171,37 @@ q = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 sqlty <COMMAND> [OPTIONS] [PATH...]
 
 Commands:
-  rewrite     Rewrite source files: "--sql\n..." -> SQL[T]("--sql\n...")
-  strip       Strip SQL[T](...) wrappers back to plain strings
-  check       Lint: validate type annotations, detect issues
+  rewrite     "--sql\n..." → SQL[T]("--sql\n...")
+  strip       SQL[T]("--sql\n...") → "--sql\n..."
+  check       Lint type annotations, detect issues
   version     Print version
 ```
 
-### Rewrite
-
-Transform `"--sql\n..."` strings into `SQL[T]("--sql\n...")` calls with inferred types:
+### `sqlty rewrite`
 
 ```bash
-# Rewrite all Python files in current directory
-sqlty rewrite .
-
-# Check what would be rewritten (dry run)
-sqlty rewrite --check .
-
-# Show diff without applying
-sqlty rewrite --diff .
-
-# With schema for enhanced inference
-sqlty rewrite --schema schema.sql .
+sqlty rewrite .                    # rewrite all Python files
+sqlty rewrite --check .            # dry run — exit 1 if changes needed
+sqlty rewrite --diff .             # show diff without applying
+sqlty rewrite --schema schema.sql  # with schema for enhanced inference
 ```
 
-### Strip
-
-Reverse of rewrite — remove `SQL[T](...)` wrappers back to plain `"--sql\n..."` strings:
+### `sqlty strip`
 
 ```bash
-# Strip all wrappers
-sqlty strip .
-
-# Check if any files contain wrappers
-sqlty strip --check .
-
-# Show diff
-sqlty strip --diff .
+sqlty strip .                      # strip all wrappers
+sqlty strip --check .              # exit 1 if wrappers found
+sqlty strip --diff .               # show diff
 ```
 
-### Check
-
-Lint SQL type annotations and detect issues:
+### `sqlty check`
 
 ```bash
-# Run all lint checks
-sqlty check .
-
-# With schema for column validation
-sqlty check --schema schema.sql .
+sqlty check .                      # run all lint checks
+sqlty check --schema schema.sql .  # with schema for column validation
 ```
 
-### Common Options
+### Common options
 
 ```bash
 --dialect <DIALECT>     SQL dialect: postgres (default), sqlite, mysql
@@ -253,110 +218,29 @@ Configure via `[tool.sqlty]` in `pyproject.toml`:
 [tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
-return-format = "tuple"     # tuple, typeddict, namedtuple, pydantic
 
 [tool.sqlty.rules]
 select-star = "ignore"
 column-name-mismatch = "error"
 ```
 
-CLI flags override config file values. See [PLAN.md](../PLAN.md) for the full configuration reference.
-
-### Lint Rules
-
-| Rule | Default | Description |
-|------|---------|-------------|
-| `column-count-mismatch` | error | Annotation has different field count than query |
-| `column-type-mismatch` | error | Annotation field type differs from inferred type |
-| `column-name-mismatch` | warn | Annotation field name differs from column name |
-| `select-star` | warn | `SELECT *` used (fixable: expand to explicit columns) |
-| `select-star-no-schema` | error | `SELECT *` used but no schema available |
-| `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |
-| `stale-type` | warn | Type annotation doesn't match current inference |
+CLI flags override config values. See [API reference](api.md) for full configuration.
 
 ## Magic Codec
 
-SQLTy includes an optional codec that transforms `--sql` strings at import time:
+Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
 
-# Strings with --sql prefix are automatically transformed at import
-q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# Becomes: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-See [magic codec documentation](magic-codec.md) for setup and details.
+See [magic codec documentation](magic-codec.md) for setup.
 
-## API Reference
+## Next Steps
 
-### SQL Type
-
-```python
-from sqlty import SQL
-```
-
-Generic type representing typed SQL query strings:
-
-```python
-class SQL[T](str):
-    pass
-```
-
-Used as return type annotation from `sqlty rewrite`:
-
-```python
-from sqlty import SQL
-
-q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
-### Type Mappings
-
-See [Type Annotations in SQL](#type-annotations-in-sql) for the complete SQL-to-Python type mapping table.
-
-## Examples
-
-- **Quick Start**: Write `--sql` queries, run `sqlty rewrite .`
-- **Schema inference**: Configure `schema = "schema.sql"` in `[tool.sqlty]`
-- **Magic codec**: Use `# coding: sqlty` for import-time transformation
-
-See [Examples Guide](examples.md) for detailed working examples.
-
-## Contributing
-
-### Development Setup
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/jirikuncar/sqlty.git
-   cd sqlty
-   ```
-
-2. Install dependencies:
-   ```bash
-   uv sync --all-groups
-   ```
-
-3. Run tests:
-   ```bash
-   make test
-   ```
-
-4. Run pre-commit:
-   ```bash
-   make pre-commit
-   ```
-
-### Code Style
-
-This project uses:
-- `ruff` for linting and formatting
-- `mypy` for type checking
-- `pytest` for testing (including markdown-based mdtests)
-
-See [DEVELOPMENT.md](../DEVELOPMENT.md) for full development guide.
-
-## License
-
-MIT License - see LICENSE file for details.
+- **[Usage Patterns](patterns.md)** — Which workflow is right for you
+- **[API Reference](api.md)** — Full CLI and configuration reference
+- **[Advanced Usage](advanced-usage.md)** — Dialects, schemas, pre-commit

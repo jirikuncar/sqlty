@@ -1,21 +1,16 @@
 # Advanced Usage
 
-## Custom SQL Dialects
+## SQL Dialects
 
 SQLTy supports multiple SQL dialects via sqlglot:
 
 ```bash
-# PostgreSQL (default)
-sqlty rewrite . --dialect postgres
-
-# MySQL
+sqlty rewrite . --dialect postgres   # default
 sqlty rewrite . --dialect mysql
-
-# SQLite
 sqlty rewrite . --dialect sqlite
 ```
 
-Configure the dialect in `pyproject.toml`:
+Or configure in `pyproject.toml`:
 
 ```toml
 [tool.sqlty]
@@ -24,74 +19,26 @@ dialect = "sqlite"
 
 ## Multiple Schemas
 
-For projects with multiple databases, use named schema registries:
-
-```toml
-# pyproject.toml
-[tool.sqlty.schemas]
-users = "db/users.sql"
-orders = "db/orders.sql"
-```
-
-Or provide a single schema via CLI:
+Provide a single schema via CLI:
 
 ```bash
 sqlty rewrite --schema schema.sql .
 sqlty check --schema schema.sql .
 ```
 
-## Schema-Based Type Inference
+Or configure named schemas:
 
-When a schema is available, SQLTy can infer types without explicit `::TYPE` casts:
-
-```sql
--- schema.sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email VARCHAR(255)
-);
-```
-
-```python
-# No casts needed — types inferred from schema
-q = "--sql\nSELECT id, name, email FROM users"
-
-# After rewrite:
-q = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+```toml
+[tool.sqlty.schemas]
+users = "db/users.sql"
+orders = "db/orders.sql"
 ```
 
 ### Schema Precedence
 
-When resolving schemas:
-
 1. `--schema <PATH>` CLI flag (highest priority)
 2. `[tool.sqlty] schema = "..."` in `pyproject.toml`
 3. `[tool.sqlty.schemas]` named registries
-
-CLI flags always override config file values.
-
-## Return Formats
-
-The `return-format` option controls how types are represented:
-
-```toml
-[tool.sqlty]
-return-format = "typeddict"  # or "tuple", "namedtuple", "pydantic"
-```
-
-| Format | Result for `SELECT id::INTEGER, name::TEXT` |
-|--------|---------------------------------------------|
-| `tuple` (default) | `tuple[int, str]` |
-| `typeddict` | `QueryRow_{hash}` (TypedDict) |
-| `namedtuple` | `QueryRow_{hash}` (namedtuple) |
-| `pydantic` | `QueryRow_{hash}` (BaseModel) |
-
-Per-file override via coding declaration:
-
-```python
-# coding: sqlty?return-format=typeddict
-```
 
 ## Formatting Rewritten Files
 
@@ -104,20 +51,16 @@ format-command = "ruff format --stdin-filename {filename} -"
 
 ## Lint Rule Configuration
 
-Configure rule severity in `pyproject.toml`:
-
 ```toml
 [tool.sqlty.rules]
-select-star = "ignore"           # Suppress SELECT * warnings
-column-name-mismatch = "error"   # Treat name mismatches as errors
-stale-rewrite = "warn"           # Warn on unwrapped --sql strings
+select-star = "ignore"           # suppress SELECT * warnings
+column-name-mismatch = "error"   # treat name mismatches as errors
+stale-rewrite = "warn"           # warn on unwrapped --sql strings
 ```
 
 Valid severities: `"error"`, `"warn"`, `"ignore"`.
 
 ## Pre-commit Integration
-
-Use `sqlty check` and `sqlty rewrite` as pre-commit hooks:
 
 ```yaml
 # .pre-commit-config.yaml
@@ -138,12 +81,23 @@ repos:
         types: [python]
 ```
 
-## Deferred Features
+## User-Defined Type Validation
 
-The following features are planned but not yet implemented:
+`sqlty check` validates `SQL[UserType]` annotations structurally:
 
-- **Stub generation** (`sqlty generate`) — Generate `.pyi` overload stubs from configured functions
-- **Structured return types** — Protocol-based typing for TypedDict/namedtuple/Pydantic
-- **Function configuration** — `[[tool.sqlty.functions]]` for analyzing existing functions without code changes
+```python
+from typing import TypedDict
+from sqlty import SQL
 
-See [PLAN-FUTURE.md](../PLAN-FUTURE.md) for details.
+class User(TypedDict):
+    id: int
+    name: str
+
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+Checks field count, types, and names. Uses Python's runtime typing machinery for correct resolution of `from datetime import datetime` and similar import patterns.
+
+Supported: `TypedDict`, `NamedTuple`, `@dataclass`, Pydantic `BaseModel`.
+
+**Limitation:** type must be defined in the same file as the `SQL[T](...)` usage.

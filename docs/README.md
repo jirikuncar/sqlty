@@ -1,74 +1,24 @@
 # SQLTy Documentation
 
-Welcome to the SQLTy documentation!
-
 ## Quick Links
 
-- **[Motivation](motivation.md)** - Why use SQLTy and when it's the right choice
-- **[Main Documentation](index.md)** - Complete guide to SQLTy
-- **[Installation Guide](installation.md)** - Setup and installation instructions
-- **[API Reference](api.md)** - CLI commands, types, and configuration
-- **[Magic Codec](magic-codec.md)** - Automatic string transformation
+- **[Motivation](motivation.md)** — Why SQLTy, when to use it
+- **[Installation](installation.md)** — Setup (Python 3.12+)
+- **[User Guide](index.md)** — Complete guide: queries, rewrite, check, strip
+- **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
+- **[Usage Patterns](patterns.md)** — Rewrite/strip, magic codec, schema inference
+- **[Advanced Usage](advanced-usage.md)** — Dialects, multiple schemas, pre-commit
+- **[Magic Codec](magic-codec.md)** — Import-time transformation
 
-## Documentation Structure
+## Learning Path
 
-### Getting Started
-
-1. **[Motivation](motivation.md)**
-   - When to use SQLTy
-   - Why SQLTy exists
-   - Trade-offs and comparisons
-
-2. **[Installation](installation.md)**
-   - Requirements (Python 3.12+)
-   - Installation methods (pip, uv, from source)
-   - Optional dependencies
-
-3. **[Quick Start](index.md#quick-start)**
-   - Writing `--sql` queries
-   - Rewrite, strip, and check commands
-
-### User Guide
-
-4. **[Basic Usage](index.md#basic-usage)**
-   - Writing SQL queries with `--sql` prefix
-   - Type annotations via SQL casts
-   - Schema-based inference
-
-5. **[Usage Patterns](patterns.md)**
-   - Rewrite/Strip (recommended)
-   - Magic codec
-   - Schema-based inference
-
-6. **[Advanced Usage](advanced-usage.md)**
-   - Custom SQL dialects
-   - Multiple schemas
-   - Return formats
-   - Lint rule configuration
-   - Pre-commit integration
-
-### Reference
-
-7. **[API Reference](api.md)**
-   - CLI commands (rewrite, strip, check)
-   - SQL type
-   - Configuration reference
-   - Type mappings
-   - Lint rules
-
-### Architecture (Internal)
-
-8. **[IR Architecture](ir-architecture.md)** - Stub generation IR (deferred)
+1. **[Motivation](motivation.md)** — Understand the problem and when SQLTy helps
+2. **[Installation](installation.md)** — Get set up
+3. **[Quick Start](index.md#quick-start)** — First rewrite in 2 minutes
+4. **[User-Defined Types](index.md#user-defined-types)** — TypedDict, dataclass, etc.
+5. **[Usage Patterns](patterns.md)** — Pick the right workflow
+6. **[Advanced Usage](advanced-usage.md)** — Schemas, dialects, pre-commit
 
 ## Development
 
-See **[DEVELOPMENT.md](../DEVELOPMENT.md)** for development setup, testing, and contribution guidelines.
-
-## External Resources
-
-- **[GitHub Repository](https://github.com/jirikuncar/sqlty)** - Source code and issues
-- **[sqlglot Documentation](https://sqlglot.com/)** - SQL parsing and analysis
-
-## License
-
-SQLTy is licensed under the MIT License. See the LICENSE file for details.
+See **[DEVELOPMENT.md](../DEVELOPMENT.md)** for contributing, testing, and architecture.

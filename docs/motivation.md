@@ -2,74 +2,85 @@
 
 ## When to Use SQLTy
 
-**SQLTy is designed for teams working directly with SQL in large Python codebases.**
+**You write raw SQL in Python and want type safety.**
 
-If you're using an ORM (SQLAlchemy, Django ORM, etc.), you should use its built-in type system instead. ORMs provide comprehensive typing support that's tightly integrated with their query builders and model definitions.
+If you use an ORM (SQLAlchemy, Django ORM), use its type system instead. SQLTy is for projects that use raw SQL strings — whether by choice, for performance, or because of legacy code.
 
-SQLTy targets a specific use case: projects that write raw SQL queries but need static type checking without runtime overhead.
+## The Problem
 
-## Why SQLTy Exists
+Raw SQL queries in Python are untyped:
 
-### Large Codebases
+```python
+row = db.fetchone("SELECT id, name, created_at FROM users WHERE id = %s", (user_id,))
+# row is tuple[Any, ...] — no type information
+print(row[0])  # int? str? datetime? No way to know without reading the SQL
+```
 
-In large applications with hundreds or thousands of SQL queries, maintaining type safety becomes critical. Manual type annotations are error-prone and drift from actual query structure. SQLTy automatically generates accurate type stubs by analyzing your SQL queries, ensuring types stay synchronized with your code.
+Bugs hide in plain sight:
 
-### Fast Import Times
+```python
+# Renamed 'name' to 'display_name' in the table, but forgot this query
+row = db.fetchone("SELECT id, name FROM users")
+# Runtime error — no static analysis caught it
+```
 
-Traditional approaches to SQL typing often involve runtime introspection or dynamic type generation, which slows down module imports. This becomes painful in large codebases where import time directly impacts developer productivity and CI/CD performance.
+## How SQLTy Helps
 
-SQLTy uses stub files (`.pyi`) for type information, which are read by type checkers like mypy but never imported at runtime. Your application imports remain fast regardless of how many queries you have.
+### 1. Type inference from SQL
 
-### Minimal Runtime Overhead
+SQLTy parses your SQL and infers the Python types:
 
-Type checking happens during static analysis, not at runtime. SQLTy generates stub files that mypy uses for type checking, but your actual application code has no runtime dependencies on these stubs. The runtime overhead is minimal—just a simple passthrough method and an optional environment variable check during class definition.
+```python
+# Before
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
-## How It Works
+# After: sqlty rewrite .
+query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
 
-1. **Write SQL queries** with explicit type casts (`::INTEGER`, `::TEXT`, etc.) or provide path to SQL schema dump
-2. **Run `sqlty` command** to analyze your code and generate `.pyi` stub files
-3. **Type check with mypy** - stubs provide precise types for query results
-4. **Runtime execution** uses your queries as-is, no overhead from type checking
+### 2. Structural validation of user types
 
-The type checking layer is completely separated from runtime execution.
+Define your own types and sqlty validates them against the query:
+
+```python
+class User(TypedDict):
+    id: int
+    name: str
+
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# sqlty check validates field count, types, and names
+```
+
+### 3. Lint checks catch drift
+
+When queries change but annotations don't, `sqlty check` catches it:
+
+```
+error[stale-type]: SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
+error[column-type-mismatch]: User.id is str but query column 'id' infers int
+```
 
 ## Trade-offs
 
-### When SQLTy is a Good Fit
+### Good fit
 
-- You write raw SQL queries (not using an ORM)
-- You have a large codebase with many queries
-- You need static type checking for SQL results
-- You want fast import times and minimal runtime overhead
-- You can annotate your SQL with type casts or provide a schema dump
+- Raw SQL queries (not ORM)
+- Codebase with many queries that drift over time
+- Team that values static analysis
+- Can add `::TYPE` casts to SQL or provide a schema dump
 
-### When to Use Something Else
+### Use something else
 
-- **Using an ORM**: Use its native type system (e.g., SQLAlchemy 2.0+ with mypy plugin)
-- **Small projects**: Manual type annotations may be simpler
-- **Cannot modify SQL or provide schema**: SQLTy requires type casts in queries or a schema dump for inference
-- **Need runtime validation**: SQLTy focuses on static analysis, not runtime checks
+- **ORM users**: Use SQLAlchemy/Django type plugins
+- **Small projects**: Manual annotations may be simpler
+- **No SQL control**: SQLTy needs type casts or a schema file for inference
+- **Runtime validation needed**: SQLTy is static analysis, not runtime checks (use Pydantic for that)
 
-## Comparison with Other Approaches
+## How It Compares
 
-### vs. ORM Type Systems
-
-ORMs provide tight integration between models, queries, and types. Use them if you're building on an ORM. SQLTy is for teams that choose raw SQL for performance, flexibility, or legacy reasons.
-
-### vs. Runtime Type Validation
-
-Libraries like Pydantic focus on runtime validation. SQLTy focuses on static type checking at analysis time. You can use both together if needed.
-
-### vs. Manual Type Annotations
-
-Manual annotations work for small codebases but become unmaintainable at scale. SQLTy automates the process while keeping types accurate and synchronized with your queries.
-
-## Real-World Benefits
-
-- **Catch errors before runtime**: Type checker finds mismatches between expected and actual query results
-- **Refactoring confidence**: Change query structure and mypy tells you everywhere that needs updating
-- **IDE support**: Get autocomplete and inline documentation for query results
-- **Minimal performance impact**: Type checking overhead is negligible at runtime
-- **Fast development cycles**: Quick imports mean fast test runs and CI builds
-
-SQLTy brings static typing to SQL without compromising on performance or development speed.
+| Approach | When | Trade-off |
+|----------|------|-----------|
+| **ORM type plugins** | Using SQLAlchemy/Django | Tied to ORM |
+| **Pydantic validation** | Need runtime checks | Runtime overhead |
+| **Manual annotations** | Small codebase | Drifts from reality |
+| **SQLTy** | Raw SQL at scale | Needs type casts or schema |

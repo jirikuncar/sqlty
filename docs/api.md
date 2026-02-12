@@ -1,69 +1,44 @@
 # API Reference
 
-Complete API documentation for SQLTy.
-
 ## CLI
-
-### Command Line Interface
 
 ```
 sqlty <COMMAND> [OPTIONS] [PATH...]
 ```
 
-### Commands
+### `sqlty rewrite`
 
-#### `sqlty rewrite`
-
-Rewrite `"--sql ..."` strings into `SQL[T]("--sql\n...")` calls with inferred types.
+Rewrite `"--sql\n..."` strings into `SQL[T]("--sql\n...")` calls with inferred types.
 
 ```bash
 sqlty rewrite [OPTIONS] [PATH...]
 ```
 
-**Options:**
-- `--check` — Exit 1 if files need rewriting (don't modify files)
-- `--diff` — Show diff without applying changes
-- `--dialect <DIALECT>` — SQL dialect: `postgres` (default), `sqlite`, `mysql`
-- `--schema <PATH>` — Path to schema `.sql` file for enhanced inference
-- `-v, --verbose` — Increase verbosity
-- `-q, --quiet` — Suppress non-error output
+| Option | Description |
+|--------|-------------|
+| `--check` | Exit 1 if files need rewriting (don't modify) |
+| `--diff` | Show diff without applying |
+| `--dialect <DIALECT>` | SQL dialect: `postgres` (default), `sqlite`, `mysql` |
+| `--schema <PATH>` | Schema `.sql` file for enhanced inference |
+| `-v, --verbose` | Increase verbosity |
+| `-q, --quiet` | Suppress non-error output |
 
-**Examples:**
-```bash
-# Rewrite all Python files
-sqlty rewrite .
+### `sqlty strip`
 
-# Dry run
-sqlty rewrite --check .
-
-# With schema
-sqlty rewrite --schema schema.sql src/
-```
-
-#### `sqlty strip`
-
-Strip `SQL[T](...)` wrappers back to plain `"--sql ..."` strings.
+Strip `SQL[T](...)` wrappers back to plain `"--sql\n..."` strings.
 
 ```bash
 sqlty strip [OPTIONS] [PATH...]
 ```
 
-**Options:**
-- `--check` — Exit 1 if files contain `SQL[T](...)` wrappers
-- `--diff` — Show diff without applying changes
-- `-v, --verbose` — Increase verbosity
-- `-q, --quiet` — Suppress non-error output
+| Option | Description |
+|--------|-------------|
+| `--check` | Exit 1 if files contain wrappers |
+| `--diff` | Show diff without applying |
+| `-v, --verbose` | Increase verbosity |
+| `-q, --quiet` | Suppress non-error output |
 
-**Examples:**
-```bash
-# Strip all wrappers
-sqlty strip .
-
-# Check if any files need stripping
-sqlty strip --check .
-```
-
-#### `sqlty check`
+### `sqlty check`
 
 Lint SQL type annotations and detect issues.
 
@@ -71,26 +46,16 @@ Lint SQL type annotations and detect issues.
 sqlty check [OPTIONS] [PATH...]
 ```
 
-**Options:**
-- `--dialect <DIALECT>` — SQL dialect: `postgres` (default), `sqlite`, `mysql`
-- `--schema <PATH>` — Path to schema `.sql` file
-- `-v, --verbose` — Increase verbosity
-- `-q, --quiet` — Suppress non-error output
+| Option | Description |
+|--------|-------------|
+| `--dialect <DIALECT>` | SQL dialect: `postgres` (default), `sqlite`, `mysql` |
+| `--schema <PATH>` | Schema `.sql` file |
+| `-v, --verbose` | Increase verbosity |
+| `-q, --quiet` | Suppress non-error output |
 
-**Examples:**
-```bash
-# Check all files
-sqlty check .
+**Exit codes:** `0` = no errors, `1` = errors found.
 
-# With schema for column validation
-sqlty check --schema schema.sql .
-```
-
-**Exit codes:**
-- `0` — No errors found
-- `1` — One or more errors detected
-
-#### `sqlty version`
+### `sqlty version`
 
 Print version and exit.
 
@@ -104,20 +69,17 @@ Print version and exit.
 from sqlty import SQL
 ```
 
-Generic type representing typed SQL query strings. `SQL` is a `str` subclass parameterized by the inferred return type:
+Generic `str` subclass parameterized by the inferred return type:
 
 ```python
 class SQL[T](str):
     pass
 ```
 
-**Usage:**
+Works everywhere a string works. Created by `sqlty rewrite`:
 
 ```python
-from sqlty import SQL
-
-# Created by `sqlty rewrite`
-q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ---
@@ -126,18 +88,11 @@ q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 ### `pyproject.toml`
 
-SQLTy is configured via `[tool.sqlty]` in `pyproject.toml`:
-
 ```toml
 [tool.sqlty]
-dialect = "postgres"           # SQL dialect
+dialect = "postgres"           # SQL dialect (postgres, mysql, sqlite)
 schema = "schema.sql"          # Path to schema file
-return-format = "tuple"        # Return type format
 format-command = "ruff format --stdin-filename {filename} -"
-
-[tool.sqlty.schemas]           # Named schema registry
-main = "db/schema.sql"
-analytics = "db/analytics.sql"
 
 [tool.sqlty.rules]             # Per-rule severity
 column-count-mismatch = "error"
@@ -147,6 +102,7 @@ select-star = "warn"
 select-star-no-schema = "error"
 stale-rewrite = "warn"
 stale-type = "warn"
+inline-sql-comment = "warn"
 ```
 
 CLI flags override config file values.
@@ -154,8 +110,6 @@ CLI flags override config file values.
 ---
 
 ## Type Mappings
-
-### SQL to Python Type Mapping
 
 | SQL Type | Python Type | Import |
 |----------|-------------|--------|
@@ -172,55 +126,19 @@ CLI flags override config file values.
 | `JSON`, `JSONB` | `Any` | `from typing import Any` |
 | `UUID` | `uuid.UUID` | `import uuid` |
 
-### Using Type Casts
-
-**Basic types:**
-```sql
-SELECT
-    id::INTEGER,           -- int
-    name::TEXT,            -- str
-    is_active::BOOLEAN,    -- bool
-    price::FLOAT          -- float
-FROM products
-```
-
-**Date/time types:**
-```sql
-SELECT
-    created_date::DATE,              -- datetime.date
-    created_at::TIMESTAMP,           -- datetime.datetime
-    scheduled_time::TIME,            -- datetime.time
-    duration::INTERVAL               -- datetime.timedelta
-FROM events
-```
-
 ---
 
 ## Lint Rules
 
 | Rule | Default | Fixable | Description |
 |------|---------|---------|-------------|
-| `column-count-mismatch` | error | no | Annotation has different field count than query columns |
+| `column-count-mismatch` | error | no | Annotation field count differs from query columns |
 | `column-type-mismatch` | error | no | Annotation field type differs from inferred type |
 | `column-name-mismatch` | warn | no | Annotation field name differs from column name |
-| `select-star` | warn | yes | `SELECT *` used — expand to explicit column list |
-| `select-star-no-schema` | error | no | `SELECT *` used but no schema available |
+| `select-star` | warn | yes | `SELECT *` — expand to explicit columns |
+| `select-star-no-schema` | error | no | `SELECT *` with no schema available |
 | `stale-rewrite` | warn | yes | `--sql` strings not wrapped in `SQL[T](...)` |
 | `stale-type` | warn | yes | Type annotation doesn't match current inference |
+| `inline-sql-comment` | warn | no | `"--sql SELECT ..."` makes query a SQL comment |
 
-Configure severity in `pyproject.toml`:
-
-```toml
-[tool.sqlty.rules]
-select-star = "ignore"
-column-name-mismatch = "error"
-```
-
----
-
-## Deferred Features
-
-The following features are documented in [PLAN-FUTURE.md](../PLAN-FUTURE.md):
-
-- **Stub generation** (`sqlty generate`) — Generate `.pyi` overload stubs from configured functions
-- **Structured return types** — Protocol-based typing with TypedDict/namedtuple/Pydantic models
+Severity values: `"error"`, `"warn"`, `"ignore"`.
