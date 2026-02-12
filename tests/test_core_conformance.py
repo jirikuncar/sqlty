@@ -645,6 +645,61 @@ q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
+    def test_from_datetime_import_matches(self):
+        """'from datetime import datetime' matches TIMESTAMP column.
+
+        This is a key advantage of runtime type checking over string
+        comparison: AST would see 'datetime' (bare name) which doesn't
+        match sqlty's 'datetime.datetime', but runtime resolution gives
+        us the actual datetime.datetime class.
+        """
+        source = '''
+from datetime import datetime
+from typing import TypedDict
+from sqlty import SQL
+
+class Event(TypedDict):
+    id: int
+    created_at: datetime
+
+q = SQL[Event]("--sql\\nSELECT id::INTEGER, created_at::TIMESTAMP FROM events")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0, f"Expected no type errors: {type_diags}"
+
+    def test_from_datetime_import_date(self):
+        """'from datetime import date' matches DATE column."""
+        source = '''
+from datetime import date
+from typing import TypedDict
+from sqlty import SQL
+
+class Record(TypedDict):
+    event_date: date
+
+q = SQL[Record]("--sql\\nSELECT event_date::DATE FROM records")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
+    def test_from_uuid_import_matches(self):
+        """'from uuid import UUID' matches UUID column."""
+        source = '''
+from uuid import UUID
+from typing import TypedDict
+from sqlty import SQL
+
+class Token(TypedDict):
+    token_id: UUID
+
+q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
+'''
+        diags = check_source(source)
+        type_diags = [d for d in diags if d["rule"].startswith("column-")]
+        assert len(type_diags) == 0
+
 
 # ---------------------------------------------------------------------------
 # Performance baselines (lightweight, no external deps)

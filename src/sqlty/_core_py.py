@@ -30,7 +30,6 @@ from sqlty._lint import Diagnostic, RuleConfig, Severity
 from sqlty._rewriter import SQLRewriter
 from sqlty._sql_analyzer import SQLAnalyzer
 from sqlty._type_codec import TupleCodec
-from sqlty._type_extractor import extract_type_definitions
 
 
 def infer_type(
@@ -146,9 +145,6 @@ def check_source(
     rewriter = _make_rewriter(dialect, schema_sql)
     has_schema = schema_sql is not None
 
-    # Pre-parse source to extract user-defined type definitions
-    type_defs = extract_type_definitions(source)
-
     diagnostics: list[dict[str, str | int | None]] = []
 
     for i, line in enumerate(source.splitlines(), 1):
@@ -197,69 +193,25 @@ def check_source(
                 "line": i,
             })
 
-        # Check type annotations
+        # Check tuple type annotations (stale-type)
+        # User-defined types (TypedDict, NamedTuple, etc.) are handled by
+        # core.py's wrapper using runtime type resolution.
         annotated_type = _extract_type_from_wrapper(line_stripped)
-        if annotated_type:
-            if annotated_type in type_defs:
-                # User-defined type: structural check against SQL columns
-                _check_user_defined_type(
-                    annotated_type,
-                    type_defs[annotated_type],
-                    sql_content,
-                    checker,
-                    has_schema,
-                    rule_config,
-                    diagnostics,
-                    i,
-                )
-            elif annotated_type.startswith("tuple["):
-                # Tuple annotation: compare against inferred type (stale-type)
-                if rule_config.is_enabled("stale-type"):
-                    current_type = rewriter._infer_type(sql_content)
-                    if current_type != annotated_type:
-                        diagnostics.append({
-                            "rule": "stale-type",
-                            "message": f"SQL[{annotated_type}] should be SQL[{current_type}]",
-                            "severity": rule_config.severity("stale-type").value,
-                            "line": i,
-                        })
-            # else: unknown type (not in source, not tuple) — skip silently
+        if annotated_type and annotated_type.startswith("tuple["):
+            if rule_config.is_enabled("stale-type"):
+                current_type = rewriter._infer_type(sql_content)
+                if current_type != annotated_type:
+                    diagnostics.append({
+                        "rule": "stale-type",
+                        "message": f"SQL[{annotated_type}] should be SQL[{current_type}]",
+                        "severity": rule_config.severity("stale-type").value,
+                        "line": i,
+                    })
 
     return diagnostics
 
 
 # --- Internal helpers ---
-
-def _check_user_defined_type(
-    type_name: str,
-    type_info: object,  # TypeInfo from _type_extractor
-    sql_content: str,
-    checker: Checker,
-    has_schema: bool,
-    rule_config: RuleConfig,
-    diagnostics: list[dict[str, str | int | None]],
-    line_num: int,
-) -> None:
-    """Check a user-defined type annotation against SQL query columns.
-
-    Validates that the type's fields (names and types) match the columns
-    returned by the SQL query, emitting column-count-mismatch,
-    column-type-mismatch, and column-name-mismatch diagnostics.
-    """
-    sql_query = _strip_sql_prefix(sql_content)
-    query_diags = checker.check_query(
-        sql=sql_query,
-        annotation_fields=type_info.fields,  # type: ignore[attr-defined]
-        type_name=type_name,
-        has_schema=has_schema,
-    )
-    for d in query_diags:
-        diagnostics.append({
-            "rule": d.rule,
-            "message": d.message,
-            "severity": d.severity.value,
-            "line": line_num,
-        })
 
 
 def _strip_sql_prefix(sql_content: str) -> str:
