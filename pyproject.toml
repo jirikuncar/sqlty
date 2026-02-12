@@ -55,6 +55,7 @@ manifest-path = "rust/Cargo.toml"
 [dependency-groups]
 dev = [
     "inline-snapshot>=0.15.0",
+    "maturin>=1.7,<2.0",
     "mypy>=1.18.2",
     "pre-commit>=4.0.1",
     "pyright>=1.1.400",

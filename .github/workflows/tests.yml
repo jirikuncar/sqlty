@@ -69,11 +69,14 @@ jobs:
           enable-cache: true
           python-version: "3.12"
 
-      - name: Install without Rust
-        run: uv sync --all-groups --no-build-isolation
-        env:
-          # Skip maturin build — test pure-Python fallback
-          MATURIN_PEP517_ARGS: "--skip-auditwheel"
+      - name: Install Rust toolchain (needed by maturin build backend)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the project
+        run: uv sync --all-groups
+
+      - name: Remove Rust extension to test pure-Python fallback
+        run: find "$(uv run python -c 'import sqlty; print(sqlty.__path__[0])')" -name '_core*.so' -delete
 
       - name: Run tests (pure-Python backend)
         run: uv run pytest tests/ --ignore=tests/e2e -q
@@ -90,14 +93,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install the project
         run: uv sync --all-groups
-
-      - name: Build Rust extension (needed for sqlty hooks)
-        run: |
-          rustup default stable
-          uv run maturin develop --manifest-path rust/Cargo.toml
-        continue-on-error: true
 
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
