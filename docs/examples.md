@@ -1,12 +1,14 @@
 # Examples
 
-Working examples, from simplest to most advanced.
+Working examples, from simplest to most advanced. Each example is a self-contained directory in [`examples/`](https://github.com/jirikuncar/sqlty/tree/main/examples).
 
 ---
 
-## 1. Simple Tuple Types (Rewrite/Strip)
+## 1. Quick Start — Rewrite/Strip/Check
 
-The simplest approach — write `--sql` queries, run `sqlty rewrite .` to add types.
+**Directory:** [`examples/01_quick_start/`](https://github.com/jirikuncar/sqlty/tree/main/examples/01_quick_start)
+
+Write `--sql` queries with explicit type casts, run `sqlty rewrite` to add annotations.
 
 ```python
 # queries.py
@@ -15,7 +17,7 @@ count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
 ```
 
 ```bash
-sqlty rewrite queries.py
+sqlty rewrite examples/01_quick_start/
 ```
 
 ```python
@@ -27,18 +29,82 @@ count_query = SQL[tuple[int]]("--sql\nSELECT COUNT(*)::INTEGER FROM users")
 ```
 
 ```bash
-sqlty check queries.py    # verify annotations
-sqlty strip queries.py    # revert to plain strings
+sqlty check examples/01_quick_start/    # verify annotations
+sqlty strip examples/01_quick_start/    # revert to plain strings
 ```
 
 ---
 
-## 2. User-Defined Types (TypedDict, dataclass, etc.)
+## 2. Schema-Based Inference
 
-Use your own types instead of `tuple[...]` for readable, named fields:
+**Directory:** [`examples/02_schema_inference/`](https://github.com/jirikuncar/sqlty/tree/main/examples/02_schema_inference)
+
+Use a `CREATE TABLE` schema file so SQLTy infers types without explicit `::TYPE` casts.
+
+```sql
+-- schema.sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
 
 ```python
-# queries.py
+# queries.py — no casts needed
+user_query = "--sql\nSELECT id, name, email FROM users"
+```
+
+```bash
+sqlty rewrite --schema schema.sql examples/02_schema_inference/
+```
+
+```python
+# queries.py — types inferred from schema
+from sqlty import SQL
+
+user_query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+```
+
+---
+
+## 3. pyproject.toml Configuration
+
+**Directory:** [`examples/03_pyproject_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/03_pyproject_config)
+
+Configure dialect, schema, and lint rules in `pyproject.toml`:
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+column-count-mismatch = "error"
+column-type-mismatch = "error"
+column-name-mismatch = "warn"
+select-star = "warn"
+stale-rewrite = "warn"
+```
+
+CLI flags override config values:
+
+```bash
+sqlty check .                          # uses pyproject.toml config
+sqlty check --dialect sqlite .         # overrides dialect
+sqlty rewrite --schema other.sql .     # overrides schema
+```
+
+---
+
+## 4. Check and User-Defined Types
+
+**Directory:** [`examples/04_check_and_types/`](https://github.com/jirikuncar/sqlty/tree/main/examples/04_check_and_types)
+
+Use `TypedDict`, `NamedTuple`, `dataclass`, or Pydantic `BaseModel` instead of `tuple[...]`:
+
+```python
 from typing import TypedDict
 from sqlty import SQL
 
@@ -50,7 +116,7 @@ class User(TypedDict):
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
 ```
 
-`sqlty check` validates that `User` fields match the query columns — count, types, and names.
+`sqlty check` validates field count, types, and names against the query.
 
 ### All supported forms
 
@@ -86,64 +152,24 @@ All four forms work the same way with `SQL[T]` and `sqlty check`.
 
 ---
 
-## 3. Schema-Based Inference
+## 5. Magic Codec
 
-Use a database schema for type inference — no explicit `::TYPE` casts needed.
-
-```toml
-# pyproject.toml
-[tool.sqlty]
-dialect = "postgres"
-schema = "schema.sql"
-```
-
-```sql
--- schema.sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
-
-```python
-# queries.py — no casts needed
-user_query = "--sql\nSELECT id, name, email FROM users"
-```
-
-```bash
-sqlty rewrite --schema schema.sql queries.py
-```
-
-```python
-# queries.py — types inferred from schema
-from sqlty import SQL
-
-user_query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
-```
-
----
-
-## 4. Magic Codec
+**Directory:** [`examples/magic_codec/`](https://github.com/jirikuncar/sqlty/tree/main/examples/magic_codec)
 
 Import-time transformation — `--sql` strings are automatically rewritten when imported.
-
-**Location:** [`examples/magic_codec/`](https://github.com/jirikuncar/sqlty/tree/main/examples/magic_codec)
 
 ```python
 # coding: sqlty
 
-# --sql strings transformed at import time (no sqlty rewrite needed)
 user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-The codec is registered automatically when sqlty is installed. See [magic codec docs](magic-codec.md).
+No `sqlty rewrite` step needed. Best for development and prototyping.
 
 ---
 
-## 5. Datetime and UUID Handling
+## 6. Datetime and UUID Handling
 
 Types like `datetime` and `uuid` are resolved at runtime, so import style doesn't matter:
 
@@ -173,10 +199,16 @@ query = SQL[Event](
 git clone https://github.com/jirikuncar/sqlty.git
 cd sqlty && uv sync
 
-# Rewrite, check, strip
-sqlty rewrite examples/magic_codec/
-sqlty check examples/magic_codec/
-sqlty strip examples/magic_codec/
+# Quick start
+sqlty rewrite examples/01_quick_start/
+sqlty check examples/01_quick_start/
+sqlty strip examples/01_quick_start/
+
+# Schema inference
+sqlty rewrite --schema examples/02_schema_inference/schema.sql examples/02_schema_inference/
+
+# Magic codec
+python examples/magic_codec/demo.py
 ```
 
 ## Pre-commit Integration

@@ -57,6 +57,7 @@ dev = [
     "inline-snapshot>=0.15.0",
     "mypy>=1.18.2",
     "pre-commit>=4.0.1",
+    "pyright>=1.1.400",
     "pytest>=8.4.2",
     "pytest-cov>=6.0.0",
     "pytest-randomly>=3.16.0",
@@ -114,6 +115,7 @@ include = ["src", "examples"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+extend-exclude = ["tests/typechecks"]
 
 [tool.ruff.lint]
 select = [

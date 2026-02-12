@@ -1,53 +1,43 @@
-# Magic Codec Example
+# Magic Codec
 
-This example demonstrates the SQLTy magic codec that automatically transforms strings prefixed with `--sql` into `SQL[T](...)` calls with type inference.
+Import-time transformation: `--sql` strings are automatically rewritten when the module is imported.
 
 ## Usage
 
-The magic codec allows you to write SQL queries as simple strings without explicitly calling a function:
+Add `# coding: sqlty` at the top of your file:
 
 ```python
-from sqlty import magic
+# coding: sqlty
 
-q = "--sql SELECT 1::INTEGER"
-# Automatically becomes: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-## How It Works
+No `sqlty rewrite` step needed. The codec transforms strings at import time.
 
-1. **Codec Registration**: The `magic` module registers a custom Python codec that overrides UTF-8
-2. **Source Transformation**: When Python decodes a file, it uses our codec to transform the source
-3. **String Detection**: The codec detects string literals that start with `--sql`
-4. **Type Inference**: It analyzes the SQL query using sqlglot to infer the return type
-5. **Transformation**: It wraps the string in `SQL[T](...)` where `T` is the inferred type
+## How it works
 
-## Requirements
+1. The `# coding: sqlty` declaration tells Python to use SQLTy's custom codec
+2. When Python decodes the source file, the codec detects `--sql` string literals
+3. It analyzes the SQL query and infers return types
+4. The string is wrapped in `SQL[T](...)` before Python parses the code
 
-- Import the magic module: `from sqlty import magic`
-- Use `--sql` prefix at the start of your SQL query strings
-- No encoding declaration change needed (the codec overrides UTF-8)
+## Type inference
 
-## Type Inference
+The codec infers types from explicit `::TYPE` casts:
 
-The codec infers types based on explicit SQL type casts:
+- `"--sql\nSELECT 1::INTEGER"` -> `SQL[tuple[int]](...)`
+- `"--sql\nSELECT id::INTEGER, name::TEXT"` -> `SQL[tuple[int, str]](...)`
+- `"--sql\nSELECT created_at::TIMESTAMP"` -> `SQL[tuple[datetime.datetime]](...)`
 
-- `--sql SELECT 1::INTEGER` → `SQL[tuple[int]](...)`
-- `--sql SELECT id::INTEGER, name::TEXT` → `SQL[tuple[int, str]](...)`
-- `--sql SELECT email::TEXT, created_at::TIMESTAMP` → `SQL[tuple[str, datetime.datetime]](...)`
+If type inference fails (invalid SQL, DML without RETURNING), the string is left unchanged.
 
-If type inference fails (invalid SQL, DML without RETURNING, DDL), the string is left unchanged.
-
-## Running the Example
+## Running the example
 
 ```bash
-# The example file demonstrates the transformation
 python examples/magic_codec/demo.py
 ```
 
-## Notes
+## Best for
 
-- The codec overrides UTF-8, so no encoding declaration change is needed
-- The codec only transforms strings at the source level, before Python parses the code
-- The `--sql` prefix remains in the string value
-- This is similar to how f-strings work in older Python versions using the `future-fstrings` package
-- The transformation happens during the decoding phase, so it works transparently with the Python import system
+Development and prototyping. Use `sqlty rewrite` for production code.
