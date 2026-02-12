@@ -193,9 +193,12 @@ print("Type checking!")
 
     assert transform_result.returncode == 0, f"Transform failed:\nstderr: {transform_result.stderr}"
 
-    # Write the transformed code to a new file
+    # Write the transformed code to a new file, stripping the custom codec
+    # declaration so mypy can read it (mypy doesn't know about the sqlty codec)
+    transformed = transform_result.stdout
+    transformed = transformed.replace("# coding: sqlty\n", "")
     transformed_file = tmp_project_dir / "test_mypy_transformed.py"
-    transformed_file.write_text(transform_result.stdout)
+    transformed_file.write_text(transformed)
 
     # Run mypy on the transformed file
     mypy_result = subprocess.run(

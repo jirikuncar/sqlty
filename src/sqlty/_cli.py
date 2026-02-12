@@ -7,9 +7,15 @@ Commands:
     sqlty version                       Print version
 """
 
+from __future__ import annotations
+
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import argparse
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +31,7 @@ def main(argv: list[str] | None = None) -> None:
         prog="sqlty",
         description="Type-safe SQL queries for Python.",
     )
-    parser.add_argument(
-        "--version", action="store_true", help="Print version and exit"
-    )
+    parser.add_argument("--version", action="store_true", help="Print version and exit")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -103,7 +107,7 @@ def main(argv: list[str] | None = None) -> None:
             parser.print_help()
 
 
-def _add_common_args(parser: "argparse.ArgumentParser") -> None:
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared across rewrite/strip/check."""
     parser.add_argument(
         "paths",
@@ -123,18 +127,14 @@ def _add_common_args(parser: "argparse.ArgumentParser") -> None:
         type=Path,
         help="Path to schema .sql file for enhanced inference",
     )
-    parser.add_argument(
-        "-v", "--verbose", action="count", default=0, help="Increase verbosity"
-    )
-    parser.add_argument(
-        "-q", "--quiet", action="store_true", help="Suppress non-error output"
-    )
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
 
 
 # --- Command implementations ---
 
 
-def _cmd_rewrite(args: "argparse.Namespace") -> None:
+def _cmd_rewrite(args: argparse.Namespace) -> None:
     """Rewrite command: transform --sql strings into SQL[T](...) calls."""
     from sqlty.core import rewrite_source
 
@@ -173,7 +173,7 @@ def _cmd_rewrite(args: "argparse.Namespace") -> None:
             print("All files up to date")
 
 
-def _cmd_strip(args: "argparse.Namespace") -> None:
+def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
@@ -211,7 +211,7 @@ def _cmd_strip(args: "argparse.Namespace") -> None:
             print("All files up to date")
 
 
-def _cmd_check(args: "argparse.Namespace") -> None:
+def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
     from sqlty.core import check_source
 
@@ -230,9 +230,7 @@ def _cmd_check(args: "argparse.Namespace") -> None:
 
     for path in files:
         source = path.read_text(encoding="utf-8")
-        diagnostics = check_source(
-            source, dialect=dialect, schema_sql=schema_sql, rules=rules
-        )
+        diagnostics = check_source(source, dialect=dialect, schema_sql=schema_sql, rules=rules)
 
         for diag in diagnostics:
             severity = diag["severity"]
@@ -281,7 +279,7 @@ def _collect_python_files(paths: list[Path]) -> list[Path]:
     return files
 
 
-def _resolve_config(args: "argparse.Namespace") -> tuple[str, str | None]:
+def _resolve_config(args: argparse.Namespace) -> tuple[str, str | None]:
     """Resolve dialect and schema from pyproject.toml [tool.sqlty] merged with CLI args.
 
     CLI flags (--dialect, --schema) override pyproject.toml values.

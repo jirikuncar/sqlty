@@ -26,10 +26,9 @@ from __future__ import annotations
 import re
 
 from sqlty._checker import Checker
-from sqlty._lint import Diagnostic, RuleConfig, Severity
+from sqlty._lint import RuleConfig
 from sqlty._rewriter import SQLRewriter
 from sqlty._sql_analyzer import SQLAnalyzer
-from sqlty._type_codec import TupleCodec
 
 
 def infer_type(
@@ -153,20 +152,26 @@ def check_source(
         # Check for unwrapped --sql strings (stale-rewrite)
         if _is_unwrapped_sql_string(line_stripped):
             if rule_config.is_enabled("stale-rewrite"):
-                diagnostics.append({
-                    "rule": "stale-rewrite",
-                    "message": "Source has --sql strings that aren't wrapped in SQL[T]",
-                    "severity": rule_config.severity("stale-rewrite").value,
-                    "line": i,
-                })
+                diagnostics.append(
+                    {
+                        "rule": "stale-rewrite",
+                        "message": "Source has --sql strings that aren't wrapped in SQL[T]",
+                        "severity": rule_config.severity("stale-rewrite").value,
+                        "line": i,
+                    }
+                )
             # Also check for inline-sql-comment on unwrapped strings
-            if rule_config.is_enabled("inline-sql-comment") and _has_inline_sql_comment(line_stripped):
-                diagnostics.append({
-                    "rule": "inline-sql-comment",
-                    "message": '"--sql SELECT ..." treats the query as a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
-                    "severity": rule_config.severity("inline-sql-comment").value,
-                    "line": i,
-                })
+            if rule_config.is_enabled("inline-sql-comment") and _has_inline_sql_comment(
+                line_stripped
+            ):
+                diagnostics.append(
+                    {
+                        "rule": "inline-sql-comment",
+                        "message": '"--sql SELECT ..." treats the query as a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
+                        "severity": rule_config.severity("inline-sql-comment").value,
+                        "line": i,
+                    }
+                )
             continue
 
         # Check for SQL[T](...) wrappers
@@ -176,22 +181,26 @@ def check_source(
 
         # Check inline-sql-comment on wrapped strings
         if rule_config.is_enabled("inline-sql-comment") and sql_content.startswith("--sql "):
-            diagnostics.append({
-                "rule": "inline-sql-comment",
-                "message": '"--sql SELECT ..." treats the query as a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
-                "severity": rule_config.severity("inline-sql-comment").value,
-                "line": i,
-            })
+            diagnostics.append(
+                {
+                    "rule": "inline-sql-comment",
+                    "message": '"--sql SELECT ..." treats the query as a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
+                    "severity": rule_config.severity("inline-sql-comment").value,
+                    "line": i,
+                }
+            )
 
         # Check SELECT *
         star_diag = checker.check_select_star(sql_content, has_schema=has_schema)
         if star_diag:
-            diagnostics.append({
-                "rule": star_diag.rule,
-                "message": star_diag.message,
-                "severity": star_diag.severity.value,
-                "line": i,
-            })
+            diagnostics.append(
+                {
+                    "rule": star_diag.rule,
+                    "message": star_diag.message,
+                    "severity": star_diag.severity.value,
+                    "line": i,
+                }
+            )
 
         # Check tuple type annotations (stale-type)
         # User-defined types (TypedDict, NamedTuple, etc.) are handled by
@@ -201,12 +210,14 @@ def check_source(
             if rule_config.is_enabled("stale-type"):
                 current_type = rewriter._infer_type(sql_content)
                 if current_type != annotated_type:
-                    diagnostics.append({
-                        "rule": "stale-type",
-                        "message": f"SQL[{annotated_type}] should be SQL[{current_type}]",
-                        "severity": rule_config.severity("stale-type").value,
-                        "line": i,
-                    })
+                    diagnostics.append(
+                        {
+                            "rule": "stale-type",
+                            "message": f"SQL[{annotated_type}] should be SQL[{current_type}]",
+                            "severity": rule_config.severity("stale-type").value,
+                            "line": i,
+                        }
+                    )
 
     return diagnostics
 
@@ -261,7 +272,7 @@ def _has_inline_sql_comment(line: str) -> bool:
     SQL line comment, making the entire query empty.  The correct format is
     ``"--sql\\nSELECT ..."`` where the actual SQL starts on the next line.
     """
-    return bool(re.search(r'''["']--sql [^\\]''', line))
+    return bool(re.search(r"""["']--sql [^\\]""", line))
 
 
 def _is_unwrapped_sql_string(line: str) -> bool:
@@ -271,7 +282,7 @@ def _is_unwrapped_sql_string(line: str) -> bool:
     # But NOT already wrapped in SQL[...]
     if "SQL[" in line:
         return False
-    return bool(re.search(r'''["']--sql(\s|\\n)''', line))
+    return bool(re.search(r"""["']--sql(\s|\\n)""", line))
 
 
 def _extract_sql_from_wrapper(line: str) -> str | None:
@@ -286,7 +297,7 @@ def _extract_sql_from_wrapper(line: str) -> str | None:
 
 def _extract_type_from_wrapper(line: str) -> str | None:
     """Extract the type annotation from SQL[T](...) pattern."""
-    match = re.search(r'SQL\[(.+?)\]\(', line)
+    match = re.search(r"SQL\[(.+?)\]\(", line)
     if match:
         return match.group(1)
     return None

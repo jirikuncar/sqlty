@@ -34,11 +34,7 @@ def test_mypy(path: Path) -> None:
         text=True,
     )
     # Filter out "note:" lines (reveal_type output)
-    errors = [
-        line
-        for line in result.stdout.splitlines()
-        if ": error:" in line
-    ]
+    errors = [line for line in result.stdout.splitlines() if ": error:" in line]
     assert not errors, "mypy errors:\n" + "\n".join(errors)
 
 
@@ -72,9 +68,5 @@ def test_ty(path: Path) -> None:
         text=True,
     )
     # ty uses "error" prefix for errors; "warning" and "info" are fine
-    errors = [
-        line
-        for line in result.stdout.splitlines()
-        if line.startswith("error")
-    ]
+    errors = [line for line in result.stdout.splitlines() if line.startswith("error")]
     assert not errors, "ty errors:\n" + "\n".join(errors)

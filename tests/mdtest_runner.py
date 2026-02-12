@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import pytest
+    from sqlty._type_codec import TypeCodec
 
 # Regex to match assertion comments in python blocks
 ASSERTION_RE = re.compile(r"^#\s+(inferred|rewritten|stripped|expanded|error|decoded):\s*(.*)$")
@@ -98,7 +98,6 @@ class MDTestCase:
     def _infer_type(self) -> str:
         """Compute inferred type from the SQL block(s) in this test case."""
         from sqlty._sql_analyzer import SQLAnalyzer
-        from sqlty._type_codec import TypeCodec
 
         sqlty_config = self.config.get("sqlty", {})
         dialect = sqlty_config.get("dialect", "postgres")
@@ -425,9 +424,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                             expected = match.group(2).strip()
                             # The assertion's line in the .md file
                             # code_block started at some line, py_line_idx into it
-                            assertion_md_line = (
-                                line_num - len(code_block_lines) + py_line_idx
-                            )
+                            assertion_md_line = line_num - len(code_block_lines) + py_line_idx
                             assertions.append(
                                 Assertion(
                                     kind=kind,
@@ -522,15 +519,10 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
     return test_cases
 
 
-def collect_mdtest_file(
-    md_path: Path, *, update: bool = False
-) -> list[MDTestItem]:
+def collect_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestItem]:
     """Collect test items from a markdown file for pytest."""
     test_cases = parse_mdtest_file(md_path, update=update)
-    return [
-        MDTestItem(tc.name, tc)
-        for tc in test_cases
-    ]
+    return [MDTestItem(tc.name, tc) for tc in test_cases]
 
 
 def _merge_config(base: dict, override: dict) -> dict:

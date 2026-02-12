@@ -10,23 +10,19 @@ def infer_type(
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> str | None: ...
-
 def rewrite_source(
     source: str,
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> str: ...
-
 def strip_source(source: str) -> str: ...
-
 def expand_star(
     sql: str,
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> str | None: ...
-
 def check_source(
     source: str,
     *,

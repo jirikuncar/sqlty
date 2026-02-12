@@ -18,6 +18,8 @@ from __future__ import annotations
 try:
     from sqlty._core import (  # type: ignore[import-not-found]
         check_source as _backend_check_source,
+    )
+    from sqlty._core import (
         expand_star,
         infer_type,
         rewrite_source,
@@ -26,6 +28,8 @@ try:
 except ImportError:
     from sqlty._core_py import (
         check_source as _backend_check_source,
+    )
+    from sqlty._core_py import (
         expand_star,
         infer_type,
         rewrite_source,
@@ -62,9 +66,7 @@ def check_source(
     from sqlty._type_extractor import extract_type_definitions
 
     # Run the backend check_source (Rust or Python)
-    diagnostics = _backend_check_source(
-        source, dialect=dialect, schema_sql=schema_sql, rules=rules
-    )
+    diagnostics = _backend_check_source(source, dialect=dialect, schema_sql=schema_sql, rules=rules)
 
     # Extract user-defined type definitions from source
     type_defs = extract_type_definitions(source)
@@ -73,7 +75,7 @@ def check_source(
     # because stale-type always fires for non-tuple types ("User" != "tuple[int, str]")
     non_tuple_lines: set[int] = set()
     for i, line in enumerate(source.splitlines(), 1):
-        type_match = re.search(r'SQL\[(.+?)\]\(', line.strip())
+        type_match = re.search(r"SQL\[(.+?)\]\(", line.strip())
         if type_match:
             annotated_type = type_match.group(1)
             if not annotated_type.startswith("tuple["):
@@ -85,7 +87,8 @@ def check_source(
     # Filter out stale-type for all non-tuple annotations (they're either
     # user-defined types with structural checks, or external types we can't validate)
     filtered = [
-        d for d in diagnostics
+        d
+        for d in diagnostics
         if not (d["rule"] == "stale-type" and d.get("line") in non_tuple_lines)
     ]
 
@@ -115,7 +118,7 @@ def _enhance_with_user_type_checks(
     """
     import re
 
-    from sqlty._lint import RuleConfig, Severity
+    from sqlty._lint import RuleConfig
     from sqlty._sql_analyzer import SQLAnalyzer
     from sqlty._type_extractor import check_type_compatibility
 
@@ -124,7 +127,7 @@ def _enhance_with_user_type_checks(
     for i, line in enumerate(source.splitlines(), 1):
         if i not in non_tuple_lines:
             continue
-        type_match = re.search(r'SQL\[(.+?)\]\(', line.strip())
+        type_match = re.search(r"SQL\[(.+?)\]\(", line.strip())
         if type_match:
             annotated_type = type_match.group(1)
             if annotated_type in type_defs:
@@ -156,9 +159,7 @@ def _enhance_with_user_type_checks(
             stripped = line.strip()
 
             # Extract SQL content from wrapper
-            sql_match = re.search(
-                r'SQL\[.*?\]\(\s*["\'](.+?)["\']\s*\)', stripped, re.DOTALL
-            )
+            sql_match = re.search(r'SQL\[.*?\]\(\s*["\'](.+?)["\']\s*\)', stripped, re.DOTALL)
             if not sql_match:
                 continue
 
@@ -177,49 +178,53 @@ def _enhance_with_user_type_checks(
             # Check column count
             if rule_config.is_enabled("column-count-mismatch"):
                 if len(fields) != len(columns):
-                    diagnostics.append({
-                        "rule": "column-count-mismatch",
-                        "message": (
-                            f"{type_name} has {len(fields)} fields "
-                            f"but query returns {len(columns)} columns"
-                        ),
-                        "severity": rule_config.severity("column-count-mismatch").value,
-                        "line": i,
-                    })
+                    diagnostics.append(
+                        {
+                            "rule": "column-count-mismatch",
+                            "message": (
+                                f"{type_name} has {len(fields)} fields "
+                                f"but query returns {len(columns)} columns"
+                            ),
+                            "severity": rule_config.severity("column-count-mismatch").value,
+                            "line": i,
+                        }
+                    )
                     continue  # Skip type/name checks when counts differ
 
             # Check column types — using runtime type checking
             if rule_config.is_enabled("column-type-mismatch"):
-                for (field_name, _field_type_str), col in zip(
-                    fields, columns, strict=False
-                ):
+                for (field_name, _field_type_str), col in zip(fields, columns, strict=False):
                     if col.python_type and not check_type_compatibility(
                         type_info, field_name, col.python_type
                     ):
-                        diagnostics.append({
-                            "rule": "column-type-mismatch",
-                            "message": (
-                                f"{type_name}.{field_name} is "
-                                f"{_field_type_str} but query column "
-                                f"'{col.name}' infers {col.python_type}"
-                            ),
-                            "severity": rule_config.severity("column-type-mismatch").value,
-                            "line": i,
-                        })
+                        diagnostics.append(
+                            {
+                                "rule": "column-type-mismatch",
+                                "message": (
+                                    f"{type_name}.{field_name} is "
+                                    f"{_field_type_str} but query column "
+                                    f"'{col.name}' infers {col.python_type}"
+                                ),
+                                "severity": rule_config.severity("column-type-mismatch").value,
+                                "line": i,
+                            }
+                        )
 
             # Check column names
             if rule_config.is_enabled("column-name-mismatch"):
                 for (field_name, _), col in zip(fields, columns, strict=False):
                     if field_name != col.name:
-                        diagnostics.append({
-                            "rule": "column-name-mismatch",
-                            "message": (
-                                f"{type_name}.{field_name} doesn't match "
-                                f"query column '{col.name}'"
-                            ),
-                            "severity": rule_config.severity("column-name-mismatch").value,
-                            "line": i,
-                        })
+                        diagnostics.append(
+                            {
+                                "rule": "column-name-mismatch",
+                                "message": (
+                                    f"{type_name}.{field_name} doesn't match "
+                                    f"query column '{col.name}'"
+                                ),
+                                "severity": rule_config.severity("column-name-mismatch").value,
+                                "line": i,
+                            }
+                        )
     finally:
         if schema_path and schema_path.exists():
             schema_path.unlink(missing_ok=True)

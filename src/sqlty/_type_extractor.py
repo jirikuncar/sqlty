@@ -190,6 +190,7 @@ def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
 # Runtime type resolution
 # ---------------------------------------------------------------------------
 
+
 def _resolve_type_hints(
     node: ast.ClassDef,
     kind: str,
@@ -285,6 +286,7 @@ def _unwrap_optional(tp: type) -> type:
 # AST helpers
 # ---------------------------------------------------------------------------
 
+
 def _collect_imports(tree: ast.Module) -> list[str]:
     """Collect import statements from an AST as source strings."""
     imports: list[str] = []
@@ -297,8 +299,7 @@ def _collect_imports(tree: ast.Module) -> list[str]:
 def _has_annotations(node: ast.ClassDef) -> bool:
     """Check if a class has at least one annotated field."""
     return any(
-        isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
-        for item in node.body
+        isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) for item in node.body
     )
 
 

@@ -100,9 +100,7 @@ def test_expand_star_with_schema():
     from sqlty.core import expand_star
 
     schema_sql = "CREATE TABLE users (id INTEGER, name TEXT);"
-    result = expand_star(
-        "SELECT * FROM users", dialect="postgres", schema_sql=schema_sql
-    )
+    result = expand_star("SELECT * FROM users", dialect="postgres", schema_sql=schema_sql)
     assert result is not None
     assert "id" in result
     assert "name" in result

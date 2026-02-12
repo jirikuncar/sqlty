@@ -18,9 +18,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-def pytest_collect_file(
-    parent: pytest.Collector, file_path: Path
-) -> MDTestFile | None:
+def pytest_collect_file(parent: pytest.Collector, file_path: Path) -> MDTestFile | None:
     if file_path.suffix == ".md" and "mdtest" in file_path.parts:
         return MDTestFile.from_parent(parent, path=file_path)
     return None

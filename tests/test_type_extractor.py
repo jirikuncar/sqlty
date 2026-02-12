@@ -333,6 +333,7 @@ class Event(TypedDict):
         assert event.resolved_hints is not None
         # Runtime resolution gives us the actual datetime class
         import datetime as dt
+
         assert event.resolved_hints["created_at"] is dt.datetime
 
     def test_dataclass_resolved(self):

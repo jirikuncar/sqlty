@@ -7,9 +7,8 @@ kebab-case rule names with ty-style severity.
 
 from __future__ import annotations
 
-from sqlty._lint import Diagnostic, RuleConfig, Severity
+from sqlty._lint import Diagnostic, RuleConfig
 from sqlty._sql_analyzer import ColumnInfo, SQLAnalyzer
-from sqlty._type_codec import TypeCodec
 
 
 class Checker:
@@ -69,9 +68,7 @@ class Checker:
             return []
 
         diagnostics: list[Diagnostic] = []
-        for i, ((field_name, field_type), col) in enumerate(
-            zip(annotation_fields, columns, strict=False)
-        ):
+        for (field_name, field_type), col in zip(annotation_fields, columns, strict=False):
             if col.python_type and field_type != col.python_type:
                 diagnostics.append(
                     Diagnostic(
@@ -102,9 +99,7 @@ class Checker:
             return []
 
         diagnostics: list[Diagnostic] = []
-        for i, ((field_name, _), col) in enumerate(
-            zip(annotation_fields, columns, strict=False)
-        ):
+        for (field_name, _), col in zip(annotation_fields, columns, strict=False):
             if field_name != col.name:
                 diagnostics.append(
                     Diagnostic(
@@ -177,22 +172,16 @@ class Checker:
             columns = self._analyzer.analyze_select(sql)
             if columns:
                 # Check count
-                count_diag = self.check_column_count(
-                    annotation_fields, columns, type_name
-                )
+                count_diag = self.check_column_count(annotation_fields, columns, type_name)
                 if count_diag:
                     diagnostics.append(count_diag)
                 else:
                     # Only check types/names if counts match
                     diagnostics.extend(
-                        self.check_column_types(
-                            annotation_fields, columns, type_name
-                        )
+                        self.check_column_types(annotation_fields, columns, type_name)
                     )
                     diagnostics.extend(
-                        self.check_column_names(
-                            annotation_fields, columns, type_name
-                        )
+                        self.check_column_names(annotation_fields, columns, type_name)
                     )
 
         return diagnostics

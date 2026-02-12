@@ -8,7 +8,6 @@ Usage:
 from __future__ import annotations
 
 import statistics
-import sys
 import time
 
 # ---------------------------------------------------------------------------
@@ -59,26 +58,25 @@ CREATE TABLE orders (
 
 STAR_QUERY = "SELECT * FROM users"
 
-REWRITE_SOURCE_SMALL = '''\
+REWRITE_SOURCE_SMALL = """\
 q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-'''
+"""
 
-REWRITE_SOURCE_MEDIUM = '''\
+REWRITE_SOURCE_MEDIUM = """\
 q1 = "--sql SELECT id::INTEGER FROM users"
 q2 = "--sql SELECT name::TEXT, email::TEXT FROM users"
 q3 = "--sql SELECT created_at::TIMESTAMP FROM users"
-'''
+"""
 
 REWRITE_SOURCE_LARGE = "\n".join(
-    f'q{i} = "--sql SELECT id::INTEGER, name::TEXT, val::FLOAT FROM t{i}"'
-    for i in range(20)
+    f'q{i} = "--sql SELECT id::INTEGER, name::TEXT, val::FLOAT FROM t{i}"' for i in range(20)
 )
 
 # Pre-rewritten source for strip benchmarks
-STRIP_SOURCE_SMALL = '''\
+STRIP_SOURCE_SMALL = """\
 from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
 
 STRIP_SOURCE_LARGE = "from sqlty import SQL\n" + "\n".join(
     f'q{i} = SQL[tuple[int, str, float]]("--sql\\nSELECT id::INTEGER, name::TEXT, val::FLOAT FROM t{i}")'
@@ -86,17 +84,18 @@ STRIP_SOURCE_LARGE = "from sqlty import SQL\n" + "\n".join(
 )
 
 # Pre-rewritten source for check benchmarks
-CHECK_SOURCE = '''\
+CHECK_SOURCE = """\
 from sqlty import SQL
 q1 = SQL[tuple[int, str]]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
 q2 = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM orders")
 q3 = "--sql SELECT name::TEXT FROM users"
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
 # Benchmark harness
 # ---------------------------------------------------------------------------
+
 
 def bench(fn, *, warmup: int = 50, iterations: int = 500, label: str = "") -> dict:
     """Run fn() `iterations` times (after warmup) and return timing stats."""
@@ -135,6 +134,7 @@ def format_result(py: dict, rs: dict | None) -> str:
 # Import both backends
 # ---------------------------------------------------------------------------
 
+
 def load_backends():
     """Import both Python and Rust backends."""
     import sqlty._core_py as py_mod
@@ -150,6 +150,7 @@ def load_backends():
 # ---------------------------------------------------------------------------
 # Benchmark definitions
 # ---------------------------------------------------------------------------
+
 
 def run_benchmarks():
     py, rs = load_backends()
@@ -167,53 +168,77 @@ def run_benchmarks():
         results.append((py_result, rs_result))
 
     # --- infer_type ---
-    add("infer_type: simple (1 col)",
+    add(
+        "infer_type: simple (1 col)",
         lambda: py.infer_type(SIMPLE_QUERY),
-        (lambda: rs.infer_type(SIMPLE_QUERY)) if rs else None)
+        (lambda: rs.infer_type(SIMPLE_QUERY)) if rs else None,
+    )
 
-    add("infer_type: medium (4 cols)",
+    add(
+        "infer_type: medium (4 cols)",
         lambda: py.infer_type(MEDIUM_QUERY),
-        (lambda: rs.infer_type(MEDIUM_QUERY)) if rs else None)
+        (lambda: rs.infer_type(MEDIUM_QUERY)) if rs else None,
+    )
 
-    add("infer_type: complex (10 cols, JOINs)",
+    add(
+        "infer_type: complex (10 cols, JOINs)",
         lambda: py.infer_type(COMPLEX_QUERY),
-        (lambda: rs.infer_type(COMPLEX_QUERY)) if rs else None)
+        (lambda: rs.infer_type(COMPLEX_QUERY)) if rs else None,
+    )
 
-    add("infer_type: schema-aware",
+    add(
+        "infer_type: schema-aware",
         lambda: py.infer_type("SELECT id, name FROM users", schema_sql=SCHEMA_SQL),
-        (lambda: rs.infer_type("SELECT id, name FROM users", schema_sql=SCHEMA_SQL)) if rs else None)
+        (lambda: rs.infer_type("SELECT id, name FROM users", schema_sql=SCHEMA_SQL))
+        if rs
+        else None,
+    )
 
     # --- expand_star ---
-    add("expand_star: with schema",
+    add(
+        "expand_star: with schema",
         lambda: py.expand_star(STAR_QUERY, schema_sql=SCHEMA_SQL),
-        (lambda: rs.expand_star(STAR_QUERY, schema_sql=SCHEMA_SQL)) if rs else None)
+        (lambda: rs.expand_star(STAR_QUERY, schema_sql=SCHEMA_SQL)) if rs else None,
+    )
 
     # --- rewrite_source ---
-    add("rewrite_source: 1 query",
+    add(
+        "rewrite_source: 1 query",
         lambda: py.rewrite_source(REWRITE_SOURCE_SMALL),
-        (lambda: rs.rewrite_source(REWRITE_SOURCE_SMALL)) if rs else None)
+        (lambda: rs.rewrite_source(REWRITE_SOURCE_SMALL)) if rs else None,
+    )
 
-    add("rewrite_source: 3 queries",
+    add(
+        "rewrite_source: 3 queries",
         lambda: py.rewrite_source(REWRITE_SOURCE_MEDIUM),
-        (lambda: rs.rewrite_source(REWRITE_SOURCE_MEDIUM)) if rs else None)
+        (lambda: rs.rewrite_source(REWRITE_SOURCE_MEDIUM)) if rs else None,
+    )
 
-    add("rewrite_source: 20 queries",
+    add(
+        "rewrite_source: 20 queries",
         lambda: py.rewrite_source(REWRITE_SOURCE_LARGE),
-        (lambda: rs.rewrite_source(REWRITE_SOURCE_LARGE)) if rs else None)
+        (lambda: rs.rewrite_source(REWRITE_SOURCE_LARGE)) if rs else None,
+    )
 
     # --- strip_source ---
-    add("strip_source: 1 query",
+    add(
+        "strip_source: 1 query",
         lambda: py.strip_source(STRIP_SOURCE_SMALL),
-        (lambda: rs.strip_source(STRIP_SOURCE_SMALL)) if rs else None)
+        (lambda: rs.strip_source(STRIP_SOURCE_SMALL)) if rs else None,
+    )
 
-    add("strip_source: 20 queries",
+    add(
+        "strip_source: 20 queries",
         lambda: py.strip_source(STRIP_SOURCE_LARGE),
-        (lambda: rs.strip_source(STRIP_SOURCE_LARGE)) if rs else None)
+        (lambda: rs.strip_source(STRIP_SOURCE_LARGE)) if rs else None,
+    )
 
     # --- check_source ---
-    add("check_source: 4 queries",
+    add(
+        "check_source: 4 queries",
         lambda: py.check_source(CHECK_SOURCE),
-        (lambda: rs.check_source(CHECK_SOURCE)) if rs else None)
+        (lambda: rs.check_source(CHECK_SOURCE)) if rs else None,
+    )
 
     # --- Print results ---
     print(f"  {'Benchmark':<42s}  {'Python':>10s}     {'Rust':>10s}  {'Speedup':>7s}")
@@ -238,6 +263,7 @@ def run_benchmarks():
 # pytest integration — lets `pytest benchmarks/` discover and run this
 # ---------------------------------------------------------------------------
 
+
 def test_benchmark_python_backend():
     """Smoke test: all Python backend calls succeed."""
     py, _ = load_backends()
@@ -252,6 +278,7 @@ def test_benchmark_rust_backend():
     _, rs = load_backends()
     if rs is None:
         import pytest
+
         pytest.skip("Rust backend not compiled")
     assert rs.infer_type(SIMPLE_QUERY) is not None
     assert rs.rewrite_source(REWRITE_SOURCE_SMALL) != REWRITE_SOURCE_SMALL

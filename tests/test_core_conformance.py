@@ -136,10 +136,7 @@ class TestRewriteSource:
         assert "y = 2" in result
 
     def test_multiple_queries(self):
-        source = (
-            'a = "--sql SELECT 1::INTEGER"\n'
-            'b = "--sql SELECT id::TEXT FROM t"\n'
-        )
+        source = 'a = "--sql SELECT 1::INTEGER"\nb = "--sql SELECT id::TEXT FROM t"\n'
         result = rewrite_source(source)
         assert "SQL[tuple[int]]" in result
         assert "SQL[tuple[str]]" in result
@@ -162,7 +159,7 @@ class TestRewriteSource:
         assert "SQL[" not in rewrite_source(source)
 
     def test_update_without_returning_not_wrapped(self):
-        source = 'q = "--sql UPDATE users SET name = \'x\'"'
+        source = "q = \"--sql UPDATE users SET name = 'x'\""
         assert "SQL[" not in rewrite_source(source)
 
     def test_insert_without_returning_not_wrapped(self):
@@ -396,7 +393,7 @@ class TestCheckSourceUserTypes:
 
     def test_typeddict_matching(self):
         """TypedDict with matching fields produces no diagnostics."""
-        source = '''
+        source = """
 from typing import TypedDict
 from sqlty import SQL
 
@@ -405,14 +402,14 @@ class User(TypedDict):
     name: str
 
 q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_typeddict_count_mismatch(self):
         """TypedDict with wrong field count is detected."""
-        source = '''
+        source = """
 from typing import TypedDict
 from sqlty import SQL
 
@@ -422,7 +419,7 @@ class User(TypedDict):
     email: str
 
 q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         count = [d for d in diags if d["rule"] == "column-count-mismatch"]
         assert len(count) == 1
@@ -431,7 +428,7 @@ q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
 
     def test_typeddict_type_mismatch(self):
         """TypedDict with wrong field type is detected."""
-        source = '''
+        source = """
 from typing import TypedDict
 from sqlty import SQL
 
@@ -440,7 +437,7 @@ class User(TypedDict):
     name: str
 
 q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"] == "column-type-mismatch"]
         assert len(type_diags) == 1
@@ -449,7 +446,7 @@ q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
 
     def test_typeddict_name_mismatch(self):
         """TypedDict with wrong field name is detected."""
-        source = '''
+        source = """
 from typing import TypedDict
 from sqlty import SQL
 
@@ -458,7 +455,7 @@ class User(TypedDict):
     username: str
 
 q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         name_diags = [d for d in diags if d["rule"] == "column-name-mismatch"]
         assert len(name_diags) >= 1
@@ -467,7 +464,7 @@ q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
 
     def test_namedtuple_matching(self):
         """NamedTuple with matching fields produces no diagnostics."""
-        source = '''
+        source = """
 from typing import NamedTuple
 from sqlty import SQL
 
@@ -476,14 +473,14 @@ class UserRow(NamedTuple):
     name: str
 
 q = SQL[UserRow]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_namedtuple_type_mismatch(self):
         """NamedTuple field type mismatch is detected."""
-        source = '''
+        source = """
 from typing import NamedTuple
 from sqlty import SQL
 
@@ -492,7 +489,7 @@ class Row(NamedTuple):
     name: int
 
 q = SQL[Row]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"] == "column-type-mismatch"]
         assert len(type_diags) == 1
@@ -500,7 +497,7 @@ q = SQL[Row]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
 
     def test_dataclass_matching(self):
         """Dataclass with matching fields produces no diagnostics."""
-        source = '''
+        source = """
 from dataclasses import dataclass
 from sqlty import SQL
 
@@ -511,14 +508,14 @@ class Product:
     price: float
 
 q = SQL[Product]("--sql\\nSELECT id::INTEGER, name::TEXT, price::NUMERIC FROM products")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_dataclass_count_mismatch(self):
         """Dataclass field count mismatch is detected."""
-        source = '''
+        source = """
 from dataclasses import dataclass
 from sqlty import SQL
 
@@ -527,14 +524,14 @@ class Product:
     id: int
 
 q = SQL[Product]("--sql\\nSELECT id::INTEGER, name::TEXT FROM products")
-'''
+"""
         diags = check_source(source)
         count = [d for d in diags if d["rule"] == "column-count-mismatch"]
         assert len(count) == 1
 
     def test_basemodel_matching(self):
         """Pydantic BaseModel with matching fields produces no diagnostics."""
-        source = '''
+        source = """
 from pydantic import BaseModel
 from sqlty import SQL
 
@@ -543,14 +540,14 @@ class UserModel(BaseModel):
     name: str
 
 q = SQL[UserModel]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_basemodel_type_mismatch(self):
         """Pydantic BaseModel field type mismatch is detected."""
-        source = '''
+        source = """
 from pydantic import BaseModel
 from sqlty import SQL
 
@@ -559,14 +556,14 @@ class UserModel(BaseModel):
     name: int
 
 q = SQL[UserModel]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"] == "column-type-mismatch"]
         assert len(type_diags) == 1
 
     def test_user_type_no_stale_type(self):
         """SQL[UserType] should NOT trigger stale-type (it's structural now)."""
-        source = '''
+        source = """
 from typing import TypedDict
 from sqlty import SQL
 
@@ -575,7 +572,7 @@ class User(TypedDict):
     name: str
 
 q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         stale = [d for d in diags if d["rule"] == "stale-type"]
         assert len(stale) == 0, f"stale-type should not fire for user types: {stale}"
@@ -597,7 +594,7 @@ q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
 
     def test_optional_fields_normalized(self):
         """Optional[int] / int | None should match int."""
-        source = '''
+        source = """
 from typing import TypedDict
 
 from sqlty import SQL
@@ -607,14 +604,14 @@ class User(TypedDict):
     name: str
 
 q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_datetime_field_matching(self):
         """datetime.datetime field matches TIMESTAMP column."""
-        source = '''
+        source = """
 import datetime
 from typing import TypedDict
 from sqlty import SQL
@@ -624,14 +621,14 @@ class Event(TypedDict):
     created_at: datetime.datetime
 
 q = SQL[Event]("--sql\\nSELECT id::INTEGER, created_at::TIMESTAMP FROM events")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_uuid_field_matching(self):
         """uuid.UUID field matches UUID column."""
-        source = '''
+        source = """
 import uuid
 from typing import TypedDict
 from sqlty import SQL
@@ -640,7 +637,7 @@ class Token(TypedDict):
     token_id: uuid.UUID
 
 q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
@@ -653,7 +650,7 @@ q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
         match sqlty's 'datetime.datetime', but runtime resolution gives
         us the actual datetime.datetime class.
         """
-        source = '''
+        source = """
 from datetime import datetime
 from typing import TypedDict
 from sqlty import SQL
@@ -663,14 +660,14 @@ class Event(TypedDict):
     created_at: datetime
 
 q = SQL[Event]("--sql\\nSELECT id::INTEGER, created_at::TIMESTAMP FROM events")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0, f"Expected no type errors: {type_diags}"
 
     def test_from_datetime_import_date(self):
         """'from datetime import date' matches DATE column."""
-        source = '''
+        source = """
 from datetime import date
 from typing import TypedDict
 from sqlty import SQL
@@ -679,14 +676,14 @@ class Record(TypedDict):
     event_date: date
 
 q = SQL[Record]("--sql\\nSELECT event_date::DATE FROM records")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
     def test_from_uuid_import_matches(self):
         """'from uuid import UUID' matches UUID column."""
-        source = '''
+        source = """
 from uuid import UUID
 from typing import TypedDict
 from sqlty import SQL
@@ -695,7 +692,7 @@ class Token(TypedDict):
     token_id: UUID
 
 q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
-'''
+"""
         diags = check_source(source)
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0

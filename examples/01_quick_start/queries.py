@@ -5,4 +5,6 @@ user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
 
-email_query = "--sql\nSELECT id::INTEGER, email::TEXT, active::BOOLEAN FROM users WHERE active = true"
+email_query = (
+    "--sql\nSELECT id::INTEGER, email::TEXT, active::BOOLEAN FROM users WHERE active = true"
+)
