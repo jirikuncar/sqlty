@@ -70,7 +70,7 @@ def rewrite_source(
         Rewritten source code
     """
     rewriter = _make_rewriter(dialect, schema_sql)
-    return rewriter.rewrite(source)
+    return rewriter.rewrite(source).source
 
 
 def strip_source(source: str) -> str:

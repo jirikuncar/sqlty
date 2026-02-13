@@ -36,10 +36,7 @@ sqlty rewrite .
 # 3. Result: type-safe SQL string
 import datetime
 from sqlty import SQL
-
-query = SQL[tuple[int, str, datetime.datetime]](
-    "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
-)
+query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
 ```
 
 `SQL[T]` is a `str` subclass — it works everywhere a string works, but now your types are visible to editors, type checkers, and linters.
@@ -156,6 +153,7 @@ The codec is registered automatically when sqlty is installed. See [magic codec 
 | `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |
 | `stale-type` | warn | Type annotation doesn't match current inference |
 | `inline-sql-comment` | warn | `"--sql SELECT ..."` makes query a SQL comment |
+| `fstring-skipped` | warn | f-string with `--sql` skipped (cannot be statically rewritten) |
 
 Configure in `pyproject.toml`:
 

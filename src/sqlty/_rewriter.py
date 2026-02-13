@@ -14,9 +14,18 @@ is used by the CLI and mdtest runner; the codec is used by magic.py.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 from sqlty._sql_analyzer import SQLAnalyzer
 from sqlty._type_codec import TypeCodec
+
+
+@dataclass
+class RewriteResult:
+    """Result of a rewrite operation, including any warnings."""
+
+    source: str
+    warnings: list[str] = field(default_factory=list)
 
 
 class SQLRewriter:
@@ -62,16 +71,20 @@ class SQLRewriter:
         except Exception:
             return "Any"
 
-    def rewrite(self, source: str) -> str:
+    def rewrite(self, source: str) -> RewriteResult:
         """Transform --sql prefixed strings into SQL[T](...) calls.
+
+        Returns a RewriteResult containing the rewritten source and any
+        warnings (e.g. skipped f-strings).
 
         Example:
             >>> r = SQLRewriter()
-            >>> r.rewrite('q = "--sql SELECT id::INTEGER FROM users"')
+            >>> r.rewrite('q = "--sql SELECT id::INTEGER FROM users"').source
             'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")'
         """
         lines = source.splitlines(keepends=True)
         result_lines: list[str] = []
+        warnings: list[str] = []
         needs_sql_import = False
         needs_datetime = False
         needs_uuid = False
@@ -79,7 +92,16 @@ class SQLRewriter:
         has_datetime_import = _has_import(source, "import datetime")
         has_uuid_import = _has_import(source, "import uuid")
 
-        for line in lines:
+        for line_num, line in enumerate(lines, start=1):
+            # Check for f-strings containing --sql (these are skipped)
+            if _FSTRING_SQL_PATTERN.search(line):
+                warnings.append(
+                    f"line {line_num}: f-string with --sql prefix skipped "
+                    f"(f-strings cannot be statically rewritten) [fstring-skipped]"
+                )
+                result_lines.append(line)
+                continue
+
             new_line = self._rewrite_line(line)
             if new_line != line:
                 if "SQL[" in new_line:
@@ -104,7 +126,7 @@ class SQLRewriter:
         if imports_to_add:
             result = "\n".join(imports_to_add) + "\n" + result
 
-        return result
+        return RewriteResult(source=result, warnings=warnings)
 
     def _rewrite_line(self, line: str) -> str:
         """Rewrite a single line, replacing --sql strings with SQL[T](...)."""
@@ -205,14 +227,21 @@ class SQLRewriter:
 
 # Match string literals that might contain --sql
 # Handles: "...", '...', """...""", '''...'''
+# Negative lookbehind ensures we skip prefixed strings (f"...", r"...", b"...", etc.)
 _SQL_STRING_PATTERNS = [
     # Triple-quoted strings first (greedy)
-    re.compile(r'(?P<str>""".*?""")', re.DOTALL),
-    re.compile(r"(?P<str>'''.*?''')", re.DOTALL),
+    re.compile(r'(?<![a-zA-Z])(?P<str>""".*?""")', re.DOTALL),
+    re.compile(r"(?<![a-zA-Z])(?P<str>'''.*?''')", re.DOTALL),
     # Single-line strings
-    re.compile(r'(?P<str>"[^"]*")'),
-    re.compile(r"(?P<str>'[^']*')"),
+    re.compile(r'(?<![a-zA-Z])(?P<str>"[^"]*")'),
+    re.compile(r"(?<![a-zA-Z])(?P<str>'[^']*')"),
 ]
+
+# Match f-strings that contain --sql (for emitting warnings)
+_FSTRING_SQL_PATTERN = re.compile(
+    r"""[fF][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b"""
+    r"""|[rRbBuU]*[fF](?:"{3}|'{3}|"|')--sql\b"""
+)
 
 # Match SQL[T]("...") or SQL[T]('...') or SQL[T]("""...""")
 _SQL_WRAPPER_PATTERN = re.compile(

@@ -14,6 +14,14 @@ q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
 # rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
+Whole file after rewrite:
+
+```python
+q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
 ## Non-SQL string is not rewritten
 
 ```python

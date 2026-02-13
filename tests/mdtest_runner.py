@@ -20,7 +20,9 @@ if TYPE_CHECKING:
     from sqlty._type_codec import TypeCodec
 
 # Regex to match assertion comments in python blocks
-ASSERTION_RE = re.compile(r"^#\s+(inferred|rewritten|stripped|expanded|error|decoded):\s*(.*)$")
+ASSERTION_RE = re.compile(
+    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|decoded|warning):\s*(.*)$"
+)
 
 
 class MDTestFailure(Exception):
@@ -44,7 +46,7 @@ class MDTestFailure(Exception):
 class Assertion:
     """A single assertion comment from a .md file."""
 
-    kind: str  # "inferred", "rewritten", "stripped", "expanded", "error", "decoded"
+    kind: str  # "inferred", "rewritten", "rewritten-file", "stripped", "expanded", "error", "decoded", "warning"
     expected: str  # The expected value after the prefix
     line: int  # Line number in the .md file (1-indexed, for update mode)
 
@@ -84,6 +86,8 @@ class MDTestCase:
                 return self._infer_type()
             case "rewritten":
                 return self._rewrite()
+            case "rewritten-file":
+                return self._rewrite_file()
             case "stripped":
                 return self._strip()
             case "expanded":
@@ -92,6 +96,8 @@ class MDTestCase:
                 return self._check_error()
             case "decoded":
                 return self._decode()
+            case "warning":
+                return self._rewrite_warning()
             case _:
                 raise ValueError(f"Unknown assertion kind: {assertion.kind}")
 
@@ -201,7 +207,39 @@ class MDTestCase:
         source = self._extract_source_lines()
         result = rewriter.rewrite(source)
         # Strip import lines — assertions check only the code transformation
-        return _strip_import_lines(result).strip()
+        return _strip_import_lines(result.source).strip()
+
+    def _rewrite_file(self) -> str:
+        """Compute rewritten form including imports (whole-file output).
+
+        For `# rewritten-file:`, we rewrite the non-assertion code lines
+        and return the complete result including injected imports.
+        Consecutive `# rewritten-file:` lines are merged by the parser
+        into a single multi-line expected value.
+        """
+        if not self.python_blocks:
+            return ""
+
+        rewriter = self._build_rewriter()
+        source = self._extract_source_lines()
+        result = rewriter.rewrite(source)
+        return result.source.strip()
+
+    def _rewrite_warning(self) -> str:
+        """Return the first warning from the rewriter.
+
+        For `# warning:`, we rewrite the source and return the first
+        warning message (e.g. f-string skipped).
+        """
+        if not self.python_blocks:
+            return ""
+
+        rewriter = self._build_rewriter()
+        source = self._extract_source_lines()
+        result = rewriter.rewrite(source)
+        if result.warnings:
+            return result.warnings[0]
+        return ""
 
     def _strip(self) -> str:
         """Compute stripped form of source lines above the assertion.
@@ -417,6 +455,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                         sql_blocks.append(block_content)
                 elif code_block_lang in ("python", "py"):
                     # Extract assertions from python block
+                    raw_assertions: list[Assertion] = []
                     for py_line_idx, py_line in enumerate(code_block_lines):
                         match = ASSERTION_RE.match(py_line.strip())
                         if match:
@@ -425,13 +464,19 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                             # The assertion's line in the .md file
                             # code_block started at some line, py_line_idx into it
                             assertion_md_line = line_num - len(code_block_lines) + py_line_idx
-                            assertions.append(
+                            raw_assertions.append(
                                 Assertion(
                                     kind=kind,
                                     expected=expected,
                                     line=assertion_md_line,
                                 )
                             )
+                    # Merge consecutive same-kind assertions into multi-line expected values.
+                    # This allows whole-file assertions like:
+                    #   # rewritten-file: from sqlty import SQL
+                    #   # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+                    merged = _merge_consecutive_assertions(raw_assertions)
+                    assertions.extend(merged)
                     if pending_file_label:
                         files[pending_file_label] = block_content
                         pending_file_label = None
@@ -523,6 +568,30 @@ def collect_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestIt
     """Collect test items from a markdown file for pytest."""
     test_cases = parse_mdtest_file(md_path, update=update)
     return [MDTestItem(tc.name, tc) for tc in test_cases]
+
+
+def _merge_consecutive_assertions(assertions: list[Assertion]) -> list[Assertion]:
+    """Merge consecutive same-kind assertions into multi-line expected values.
+
+    When multiple ``# rewritten-file:`` (or any same-kind) lines appear in
+    sequence, they represent a single multi-line expected value.  The lines
+    are joined with ``\\n`` so the comparison works against multi-line output.
+    """
+    if not assertions:
+        return []
+
+    merged: list[Assertion] = []
+    for assertion in assertions:
+        if merged and merged[-1].kind == assertion.kind:
+            prev = merged[-1]
+            merged[-1] = Assertion(
+                kind=prev.kind,
+                expected=prev.expected + "\n" + assertion.expected,
+                line=prev.line,  # keep first line number for update mode
+            )
+        else:
+            merged.append(assertion)
+    return merged
 
 
 def _merge_config(base: dict, override: dict) -> dict:
