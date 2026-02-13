@@ -64,6 +64,17 @@ class MDTestCase:
     assertions: list[Assertion] = field(default_factory=list)
     update: bool = False
 
+    def _get_sqlty_config(self) -> dict:
+        """Get the sqlty config, supporting both [sqlty] and [tool.sqlty] formats.
+
+        Dedicated mdtest files use ``[sqlty]``, but README.md uses
+        ``[tool.sqlty]`` (the pyproject.toml format). Both are supported.
+        """
+        cfg = self.config.get("sqlty")
+        if cfg:
+            return cfg
+        return self.config.get("tool", {}).get("sqlty", {})
+
     def run(self) -> None:
         """Execute all assertions in this test case."""
         for assertion in self.assertions:
@@ -105,7 +116,7 @@ class MDTestCase:
         """Compute inferred type from the SQL block(s) in this test case."""
         from sqlty._sql_analyzer import SQLAnalyzer
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Check for schema file in config
@@ -174,7 +185,7 @@ class MDTestCase:
         """Build an SQLRewriter from test case config."""
         from sqlty._rewriter import SQLRewriter
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Handle schema file from file blocks
@@ -274,7 +285,7 @@ class MDTestCase:
         """
         from sqlty._sql_analyzer import SQLAnalyzer
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Build schema if available
@@ -322,7 +333,7 @@ class MDTestCase:
         from sqlty._lint import RuleConfig
         from sqlty._sql_analyzer import SQLAnalyzer
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Build schema if available

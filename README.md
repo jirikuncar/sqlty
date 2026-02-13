@@ -20,23 +20,13 @@ query = "SELECT id, name, created_at FROM users"
 
 ## The Solution
 
-Mark your SQL strings with `--sql\n`, add type casts, and let sqlty handle the rest:
+Mark your SQL strings with `--sql\n`, add type casts, and run `sqlty rewrite .`:
 
 ```python
-# 1. Write SQL with --sql prefix and type casts
 query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
-```
-
-```bash
-# 2. Run sqlty rewrite
-sqlty rewrite .
-```
-
-```python
-# 3. Result: type-safe SQL string
-import datetime
-from sqlty import SQL
-query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
+# rewritten-file: import datetime
+# rewritten-file: from sqlty import SQL
+# rewritten-file: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
 ```
 
 `SQL[T]` is a `str` subclass — it works everywhere a string works, but now your types are visible to editors, type checkers, and linters.
@@ -111,8 +101,9 @@ Skip explicit `::TYPE` casts by providing a schema file:
 schema = "schema.sql"
 ```
 
+`schema.sql`:
+
 ```sql
--- schema.sql
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -120,12 +111,11 @@ CREATE TABLE users (
 );
 ```
 
-```python
-# No casts needed — types inferred from schema
-query = "--sql\nSELECT id, name, email FROM users"
+No casts needed — types inferred from schema:
 
-# After rewrite:
-query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+```python
+query = "--sql\nSELECT id, name, email FROM users"
+# rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
 ## Magic Codec
@@ -134,9 +124,9 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
-
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: # coding: sqlty
+# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/magic-codec.md).
