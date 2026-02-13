@@ -9,26 +9,28 @@ Direct Usage (No Side Effects):
 
     code = b'q = "--sql SELECT 1::INTEGER"'
     transformed, _ = decode(code)
-    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
 The decode function automatically:
     - Transforms strings prefixed with '--sql' into SQL[T](...) calls
     - Infers return types from SQL type casts (::INTEGER, ::TEXT, etc.)
     - Adds necessary imports (datetime, uuid, SQL) when needed
     - Uses isort for proper import ordering
+    - Leaves strings unchanged when inference fails (invalid SQL, DML
+      without RETURNING, DDL, empty queries)
 
 Examples:
     Simple query:
         b'q = "--sql SELECT 1::INTEGER"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
     Multiple columns:
         b'q = "--sql SELECT id::INTEGER, name::TEXT"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT")'
+        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql\\nSELECT id::INTEGER, name::TEXT")'
 
-    With datetime/uuid:
-        b'q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"'
-        → 'import datetime\\nimport uuid\\nfrom sqlty import SQL\\n...'
+    Invalid/non-result queries are left unchanged:
+        b'q = "--sql UPDATE users SET name = 1"'
+        → unchanged (no type to infer)
 
 Note: This module does NOT register any codecs. For automatic transformation
       via Python's codec system, use 'sqlty.magic' instead.
@@ -40,14 +42,29 @@ import encodings
 import io
 import token
 import tokenize
+from typing import TYPE_CHECKING
 
-from sqlty._sql_analyzer import SQLAnalyzer
+if TYPE_CHECKING:
+    from sqlty._rewriter import SQLRewriter
 
 __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
 
 # Get the standard UTF-8 codec
 utf_8_codec = encodings.search_function("utf8")
 assert utf_8_codec is not None, "UTF-8 codec not found"
+
+# Lazy-initialized rewriter (avoid import cycle at module level)
+_rewriter = None
+
+
+def _get_rewriter() -> SQLRewriter:
+    """Get or create the module-level SQLRewriter instance."""
+    global _rewriter
+    if _rewriter is None:
+        from sqlty._rewriter import SQLRewriter
+
+        _rewriter = SQLRewriter()
+    return _rewriter
 
 
 def _infer_sql_type(sql_query: str) -> str:
@@ -59,61 +76,42 @@ def _infer_sql_type(sql_query: str) -> str:
     Returns:
         A string representation of the inferred type
     """
-    # Remove the --sql prefix if present
-    query = sql_query
-    if query.startswith("--sql "):
-        query = query[6:].strip()
-    elif query.startswith("--sql"):
-        query = query[5:].strip()
-
-    try:
-        # Use the existing SQL analyzer to infer types
-        analyzer = SQLAnalyzer()
-        inferred_type = analyzer.generate_return_type(query)
-        if inferred_type:
-            return inferred_type
-        return "Any"
-    except Exception:
-        # If type inference fails, default to Any
-        return "Any"
+    return _get_rewriter()._infer_type(sql_query)
 
 
 def _transform_sql_string(string_literal: str) -> str:
     """Transform a --sql prefixed string into SQL[T](...) call.
 
+    Only wraps when type inference succeeds with a concrete type.
+    Returns the original string unchanged for empty queries, invalid SQL,
+    DML without RETURNING, DDL, and other non-result-set statements.
+
     Args:
         string_literal: The complete string literal including quotes
 
     Returns:
-        The transformed string as a SQL[T](...) call
+        The transformed string as a SQL[T](...) call, or the original if
+        inference fails
     """
-    # Parse the string literal to extract the actual content
-    # Handle both single and double quotes, and triple quotes
+    from sqlty._rewriter import _extract_string_content, _normalize_sql_prefix
 
-    if string_literal.startswith('"""') or string_literal.startswith("'''"):
-        content = string_literal[3:-3]
-    elif string_literal.startswith('"') or string_literal.startswith("'"):
-        content = string_literal[1:-1]
-    else:
-        # Not a valid string literal
+    content = _extract_string_content(string_literal)
+    if content is None or not content.strip().startswith("--sql"):
         return string_literal
 
-    # Check if content starts with --sql
-    stripped_content = content.strip()
-    if not stripped_content.startswith("--sql"):
+    inferred_type = _infer_sql_type(content.strip())
+    # Don't wrap when inference fails — SQL[Any] is never useful.
+    if inferred_type == "Any":
         return string_literal
-
-    # Infer the type from the SQL query (use stripped content for inference)
-    inferred_type = _infer_sql_type(stripped_content)
-
-    # Construct the SQL[T](...) call
-    return f"SQL[{inferred_type}]({string_literal})"
+    normalized = _normalize_sql_prefix(string_literal)
+    return f"SQL[{inferred_type}]({normalized})"
 
 
 def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
     """Decode bytes into a string, transforming --sql prefixed strings.
 
-    This is the main entry point for the custom codec.
+    This is the main entry point for the custom codec. Uses the tokenizer
+    for precise string detection, then delegates type inference to SQLRewriter.
 
     Args:
         b: The bytes to decode
@@ -139,7 +137,6 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         for tok in tokens:
             # Check if SQL is already imported
             if tok.type == token.NAME and tok.string == "SQL":
-                # Look ahead to see if this is part of an import statement
                 has_sql_import = True
 
             if tok.type == token.STRING:
@@ -170,7 +167,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         # Add necessary imports using isort for proper placement
         if needs_datetime or needs_uuid or (needs_sql and not has_sql_import):
             try:
-                from isort import code as isort_code  # type: ignore[import-not-found]
+                from isort import code as isort_code
 
                 # Build the list of imports to add
                 add_imports = []

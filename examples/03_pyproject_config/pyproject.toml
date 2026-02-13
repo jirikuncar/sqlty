@@ -1,0 +1,17 @@
+[tool.sqlty]
+# SQL dialect: postgres (default), mysql, sqlite
+dialect = "postgres"
+
+# Schema file for type inference without explicit casts
+schema = "schema.sql"
+
+# Run a formatter after rewriting
+# format-command = "ruff format --stdin-filename {filename} -"
+
+[tool.sqlty.rules]
+# Per-rule severity: "error", "warn", "ignore"
+column-count-mismatch = "error"
+column-type-mismatch = "error"
+column-name-mismatch = "warn"
+select-star = "warn"
+stale-rewrite = "warn"

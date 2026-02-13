@@ -1,4 +1,4 @@
-name: pypi
+name: Release
 
 on:
   release:
@@ -9,8 +9,44 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build distribution
+  build-wheels:
+    name: Build wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --manifest-path rust/Cargo.toml
+          manylinux: auto
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+
+  build-sdist:
+    name: Build sdist
     runs-on: ubuntu-latest
 
     steps:
@@ -20,28 +56,23 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
         with:
-          enable-cache: true
+          command: sdist
+          args: --out dist --manifest-path rust/Cargo.toml
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Build package
-        run: uv build
-
-      - name: Store the distribution packages
+      - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
+          name: sdist
+          path: dist/*.tar.gz
 
   publish-to-pypi:
     name: Publish to PyPI
     if: github.event_name == 'release' && github.event.action == 'published'
-    needs:
-      - build
+    needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -50,20 +81,17 @@ jobs:
       id-token: write
 
     steps:
-      - name: Download all the dists
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
           path: dist/
+          merge-multiple: true
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-to-testpypi:
     name: Publish to TestPyPI
     if: github.event_name == 'workflow_dispatch'
-    needs:
-      - build
+    needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -72,13 +100,11 @@ jobs:
       id-token: write
 
     steps:
-      - name: Download all the dists
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
           path: dist/
+          merge-multiple: true
 
-      - name: Publish distribution to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/

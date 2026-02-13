@@ -54,10 +54,29 @@ class FunctionConfigComplete(_FunctionConfigRequired, total=False):
 
 
 class SQLTyConfig(TypedDict, total=False):
-    """Configuration for SQLTy from pyproject.toml."""
+    """Configuration for SQLTy from pyproject.toml.
+
+    Corresponds to the ``[tool.sqlty]`` section:
+
+    .. code-block:: toml
+
+        [tool.sqlty]
+        dialect = "postgres"
+        schema = "schema.sql"
+
+        [tool.sqlty.rules]
+        select-star = "ignore"
+        stale-type = "error"
+
+        [[tool.sqlty.functions]]
+        import_path = "db.query"
+        query_param = "sql"
+    """
 
     dialect: str
+    schema: str  # Path to schema .sql file
     schemas: dict[str, str]  # registry_name -> schema_path
+    rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
@@ -127,6 +146,14 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
     if "schemas" in tool_config and isinstance(tool_config["schemas"], dict):
         # Convert all values to strings
         config["schemas"] = {k: str(v) for k, v in tool_config["schemas"].items()}
+
+    # Single schema path (top-level convenience key)
+    if "schema" in tool_config:
+        config["schema"] = str(tool_config["schema"])
+
+    # Rule severity overrides: [tool.sqlty.rules]
+    if "rules" in tool_config and isinstance(tool_config["rules"], dict):
+        config["rules"] = {str(k): str(v) for k, v in tool_config["rules"].items()}
 
     # Allow hyphenated key in pyproject: format-command
     if "format-command" in tool_config:

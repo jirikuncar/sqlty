@@ -5,19 +5,19 @@ The magic codec allows automatic transformation of strings prefixed with `--sql`
 ## Overview
 
 ```python
-q = "--sql SELECT id::INTEGER, name::TEXT FROM users"
+q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # Automatically transforms to:
-# q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+# q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 The codec automatically adds necessary imports when types require them:
 
 ```python
-q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
+q = "--sql\nSELECT created_at::TIMESTAMP, user_id::UUID"
 # Transforms to:
 # import datetime
 # import uuid
-# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
+# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, user_id::UUID")
 ```
 
 ## Installation for Global Use
@@ -64,8 +64,8 @@ Once set up, use `--sql` strings in your code:
 
 ```python
 # No encoding declaration or imports needed in individual files
-query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-# Transforms to: SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# Transforms to: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ### Automatic Import Injection
@@ -80,12 +80,12 @@ The codec automatically adds imports for types that require them:
 
 The codec infers types based on explicit SQL type casts:
 
-- `--sql SELECT 1::INTEGER` → `SQL[tuple[int]](...)`
-- `--sql SELECT id::INTEGER, name::TEXT` → `SQL[tuple[int, str]](...)`
-- `--sql SELECT email::TEXT, created_at::TIMESTAMP` → `SQL[tuple[str, datetime.datetime]](...)` (+ `import datetime`)
-- `--sql SELECT user_id::UUID` → `SQL[tuple[uuid.UUID]](...)` (+ `import uuid`)
+- `--sql\nSELECT 1::INTEGER` → `SQL[tuple[int]](...)`
+- `--sql\nSELECT id::INTEGER, name::TEXT` → `SQL[tuple[int, str]](...)`
+- `--sql\nSELECT email::TEXT, created_at::TIMESTAMP` → `SQL[tuple[str, datetime.datetime]](...)` (+ `import datetime`)
+- `--sql\nSELECT user_id::UUID` → `SQL[tuple[uuid.UUID]](...)` (+ `import uuid`)
 
-Without casts, defaults to `SQL[Any](...)`.
+Without casts or for non-result-set queries (DML without RETURNING, DDL), the string is left unchanged.
 
 ## Testing with the "sqlty" Codec
 
@@ -96,9 +96,9 @@ For explicit testing, the codec is also registered as "sqlty":
 import codecs
 
 codec = codecs.lookup("sqlty")
-code = b'q = "--sql SELECT 1::INTEGER"'
+code = b'q = "--sql\nSELECT 1::INTEGER"'
 result, _ = codec.decode(code)
-# result: 'q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+# result: 'q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")'
 ```
 
 This allows testing the codec transformation without affecting UTF-8 globally.
@@ -110,9 +110,9 @@ For programmatic transformation without codec registration, import from `sqlty._
 ```python
 from sqlty._decode import decode  # No codec registration!
 
-code = b'q = "--sql SELECT 1::INTEGER"'
+code = b'q = "--sql\nSELECT 1::INTEGER"'
 transformed, _ = decode(code)
-# transformed: 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+# transformed: 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")'
 ```
 
 Or use the CLI tool:
@@ -125,10 +125,12 @@ python -m sqlty.magic input.py > output.py
 
 ### Files
 
-- **src/sqlty/_decode.py**: Core decode logic without codec registration
+- **src/sqlty/_decode.py**: Core decode logic (delegates to `SQLRewriter` for type inference)
+- **src/sqlty/_rewriter.py**: Source-level rewrite/strip engine
 - **src/sqlty/magic.py**: Codec registration and setup
 - **sqlty_magic.pth**: Auto-installed file that enables codec on Python startup
-- **tests/test_magic*.py**: Comprehensive test suite (30 tests)
+- **tests/mdtest/codec/basic_codec.md**: Snapshot-based mdtest suite
+- **tests/test_magic*.py**: Integration tests
 - **examples/magic_codec/**: Example code and documentation
 
 ### How It Works

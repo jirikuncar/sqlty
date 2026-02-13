@@ -43,29 +43,22 @@ sqlty = "sqlty._cli:main"
 psycopg = ["psycopg>=3.2.12"]
 
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/sqlty"]
-
-[tool.hatch.build.targets.sdist]
-only-include = ["/src", "/README.md", "/LICENSE", "/pyproject.toml"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"sqlty_magic.pth" = "sqlty_magic.pth"
-
-[tool.uv-dynamic-versioning]
-fallback-version = "0.0.0"
+[tool.maturin]
+python-source = "src"
+module-name = "sqlty._core"
+features = ["pyo3/extension-module"]
+manifest-path = "rust/Cargo.toml"
 
 [dependency-groups]
 dev = [
     "inline-snapshot>=0.15.0",
+    "maturin>=1.7,<2.0",
     "mypy>=1.18.2",
     "pre-commit>=4.0.1",
+    "pyright>=1.1.400",
     "pytest>=8.4.2",
     "pytest-cov>=6.0.0",
     "pytest-randomly>=3.16.0",
@@ -78,6 +71,11 @@ psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]
 addopts = ["--cov-report=term-missing", "--cov-report=html", "-v"]
+testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end tests (subprocess + inline-snapshot)",
+    "slow: slow tests that can be skipped with -m 'not slow'",
+]
 
 [tool.coverage.run]
 concurrency = ["multiprocessing"]
@@ -118,6 +116,7 @@ include = ["src", "examples"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+extend-exclude = ["tests/typechecks"]
 
 [tool.ruff.lint]
 select = [

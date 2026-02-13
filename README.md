@@ -1,97 +1,50 @@
 # SQLTy
 
-> ⚠️ **Experimental Package**: This is an experimental project under active development. APIs may change without notice. Feedback and contributions are welcome!
+> **Experimental** — APIs may change. Feedback welcome!
 
-Type-safe SQL queries for Python with automatic stub generation and runtime validation.
+Type-safe SQL queries for Python. Infer types from SQL, rewrite source, lint annotations.
 
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Powered by [sqlglot](https://sqlglot.com)** - SQL parsing and analysis engine that makes type inference possible across multiple SQL dialects.
+**Powered by [sqlglot](https://sqlglot.com)** for SQL parsing across PostgreSQL, MySQL, and SQLite.
 
-## Overview
+## The Problem
 
-SQLTy provides type-safe SQL query execution with automatic type inference and stub generation. Write SQL queries with explicit type casts, and let SQLTy generate precise type stubs for full mypy integration.
-
-```python
-from typing import Any
-from sqlty import sqlty
-
-@sqlty
-def sql(query: str) -> Any:
-    return query
-
-# Type-safe query with automatic inference
-query = sql("SELECT id::INTEGER, name::TEXT FROM users")
-# Type: SQL[tuple[int, str]]
-
-# Execute with full type safety
-from sqlty.drivers.psycopg import execute
-result = execute(conn, query, {})
-# Type: Iterator[tuple[int, str]]
-
-# Full mypy support
-for user_id, name in result:
-    print(f"User {user_id}: {name}")
-```
-
-## Why SQLTy?
-
-**For teams working with raw SQL in large codebases.** If you're using an ORM, stick with its type system.
-
-SQLTy provides:
-- **Minimal runtime overhead** - Type checking happens at analysis time, not runtime
-- **Fast imports** - Stub-based typing avoids expensive runtime introspection
-- **Scale** - Designed for large codebases with thousands of queries
-
-See [motivation documentation](https://github.com/jirikuncar/sqlty/blob/main/docs/motivation.md) for details.
-
-## Features
-
-- 🔒 **Type Safety**: Full mypy integration with precise type inference
-- 🚀 **Automatic Stub Generation**: Analyze code and generate `.pyi` files automatically
-- 🎯 **SQL Type Casts**: Use PostgreSQL-style `::TYPE` casts for explicit typing
-- 📦 **Multi-Registry Support**: Organize queries into multiple registries
-- ⚙️ **Function Configuration**: Analyze existing functions without code changes via `pyproject.toml`
-- 🔍 **Source Tracking**: Generated stubs include source location comments
-- 🌐 **Multiple SQL Dialects**: Support for PostgreSQL, MySQL, SQLite, and more via sqlglot
-- ✨ **Magic Codec**: Optional codec for automatic string transformation with `--sql` prefix
-
-## Magic Codec (Experimental)
-
-SQLTy includes an experimental codec that allows you to write SQL queries as simple strings:
+You write raw SQL in Python. The query returns columns, but Python has no idea what types they are:
 
 ```python
-from sqlty import magic
-
-# Strings with --sql prefix are automatically transformed
-q = "--sql SELECT 1::INTEGER"
-# Becomes: q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
-
-# Works with multiple columns and complex queries
-query = "--sql SELECT id::INTEGER, name::TEXT FROM users"
-# Becomes: query = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT FROM users")
-
-# Automatically adds imports for datetime/uuid types
-q = "--sql SELECT created_at::TIMESTAMP, user_id::UUID"
-# Becomes:
-# import datetime
-# import uuid
-# q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql SELECT created_at::TIMESTAMP, user_id::UUID")
+query = "SELECT id, name, created_at FROM users"
+# What does this return? tuple[int, str, datetime]? Who knows.
 ```
 
-The codec:
-- Overrides UTF-8 codec (no encoding declaration change needed)
-- Detects strings starting with `--sql`
-- Analyzes the SQL to infer return types
-- Transforms them into `SQL[T](...)` calls automatically
-- Adds necessary imports (datetime, uuid) when needed
+## The Solution
 
-**Note:** This is an experimental feature inspired by [future-fstrings](https://github.com/asottile-archive/future-fstrings). See [examples/magic_codec](examples/magic_codec) for more details.
+Mark your SQL strings with `--sql\n`, add type casts, and let sqlty handle the rest:
 
-## Quick Start
+```python
+# 1. Write SQL with --sql prefix and type casts
+query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
+```
 
-**Install:**
+```bash
+# 2. Run sqlty rewrite
+sqlty rewrite .
+```
+
+```python
+# 3. Result: type-safe SQL string
+import datetime
+from sqlty import SQL
+
+query = SQL[tuple[int, str, datetime.datetime]](
+    "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
+)
+```
+
+`SQL[T]` is a `str` subclass — it works everywhere a string works, but now your types are visible to editors, type checkers, and linters.
+
+## Install
 
 ```bash
 pip install sqlty
@@ -99,185 +52,159 @@ pip install sqlty
 uv add sqlty
 ```
 
-**Write queries:**
+## Quick Start
 
-See [advanced usage documentation](https://github.com/jirikuncar/sqlty/blob/main/docs/advanced-usage.md) for:
+### 1. Rewrite — add type annotations
 
-- Multi-registry and multiple schema support
-- Configuration via pyproject.toml
-- Full package example with stub generation and usage
+```bash
+sqlty rewrite .          # "--sql\n..." → SQL[T]("--sql\n...")
+```
+
+### 2. Check — lint for type issues
+
+```bash
+sqlty check .            # catch mismatches, SELECT *, stale types
+```
+
+### 3. Strip — remove annotations (to edit SQL)
+
+```bash
+sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
+```
+
+| Command | What it does | Analogy |
+|---------|-------------|---------|
+| `sqlty rewrite .` | Add type annotations to `--sql` strings | `ruff format` |
+| `sqlty strip .` | Remove annotations back to plain strings | undo rewrite |
+| `sqlty check .` | Lint: type mismatches, SELECT *, stale types | `ruff check` |
+
+## User-Defined Types
+
+Beyond `tuple[...]`, sqlty validates `TypedDict`, `NamedTuple`, `dataclass`, and Pydantic `BaseModel` types against query columns:
 
 ```python
-# queries.py
-from sqlty import sqlty
+from typing import TypedDict
+from sqlty import SQL
 
-@sqlty
-def sql(query: str) -> Any:
-    return query
+class User(TypedDict):
+    id: int
+    name: str
+
+# sqlty check validates: field count, types, and names match the query
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+Mismatches produce clear diagnostics:
+
+```
+error[column-type-mismatch]: User.id is str but query column 'id' infers int
+error[column-count-mismatch]: User has 3 fields but query returns 2 columns
+warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
+```
+
+Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.
+
+## Schema-Based Inference
+
+Skip explicit `::TYPE` casts by providing a schema file:
+
+```toml
+# pyproject.toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```sql
+-- schema.sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email VARCHAR(255)
+);
 ```
 
 ```python
-# app.py
-from queries import sql
-from sqlty.drivers.psycopg import execute
+# No casts needed — types inferred from schema
+query = "--sql\nSELECT id, name, email FROM users"
 
-query = sql("SELECT id::INTEGER, name::TEXT FROM users WHERE id = :id")
-# Type: SQL[tuple[int, str]]
-
-result = execute(conn, query, {"id": 123})
-# Type: Iterator[tuple[int, str]]
+# After rewrite:
+query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
-**Generate stubs:**
+## Magic Codec
+
+Import-time transformation — no `sqlty rewrite` step needed:
+
+```python
+# coding: sqlty
+
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/magic-codec.md).
+
+## Lint Rules
+
+| Rule | Default | Description |
+|------|---------|-------------|
+| `column-count-mismatch` | error | Annotation has different field count than query |
+| `column-type-mismatch` | error | Annotation field type differs from inferred type |
+| `column-name-mismatch` | warn | Annotation field name differs from column name |
+| `select-star` | warn | `SELECT *` used (fixable: expand to explicit columns) |
+| `select-star-no-schema` | error | `SELECT *` used but no schema available |
+| `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |
+| `stale-type` | warn | Type annotation doesn't match current inference |
+| `inline-sql-comment` | warn | `"--sql SELECT ..."` makes query a SQL comment |
+
+Configure in `pyproject.toml`:
+
+```toml
+[tool.sqlty.rules]
+select-star = "ignore"
+column-name-mismatch = "error"
+```
+
+## Benchmarks
+
+Optional Rust extension (PyO3/maturin) accelerates all core operations. Pure-Python fallback used automatically when not available.
+
+| Benchmark | Python | Rust | Speedup |
+|-----------|-------:|-----:|--------:|
+| `infer_type`: 1 column | 120 us | 5 us | **24x** |
+| `infer_type`: 4 columns | 340 us | 12 us | **28x** |
+| `rewrite_source`: 3 queries | 600 us | 25 us | **24x** |
+| `check_source`: 4 queries | 415 us | 24 us | **17x** |
+
+**Geometric mean: ~15x** (Linux x86_64). `strip_source` is regex-only, so both backends perform similarly.
 
 ```bash
-# Single file (incremental updates)
-sqlty queries.py
-
-# Directory (incremental + prune stale queries + create missing stubs)
-sqlty .
-
-# Only create missing stubs (skip existing)
-sqlty . --mode=create
-
-# Custom mode combinations
-sqlty . --mode=incremental,prune
+uv run python benchmarks/bench_core.py
 ```
 
-**Check stubs are up-to-date:**
+## Testing
+
+Markdown-based test framework (mdtest) inspired by [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md):
 
 ```bash
-# Check without modifying files
-sqlty . --check
-
-# Check with detailed diff output
-sqlty . --check --verbose
-
-# Check with colored diff (requires rich library)
-sqlty . --check -vv
+make test            # all tests
+make test-mdtest     # mdtests only
+make test-unit       # unit tests only
 ```
 
-**Type check:**
-
-```bash
-mypy .
-# Success: no issues found
-```
-
-## Stub Generation Modes
-
-SQLTy supports flexible stub generation with comma-separated mode actions:
-
-- **`incremental`**: Add new query overloads to existing stubs
-- **`prune`**: Remove overloads for queries that no longer exist
-- **`create`**: Only create missing stub files (skip existing ones)
-
-**Default behavior:**
-- Single file: `incremental,create`
-- Directory: `incremental,prune,create`
-
-**Examples:**
-```bash
-# Update existing stubs and remove stale queries
-sqlty . --mode=incremental,prune
-
-# Create new stubs but skip existing ones
-sqlty . --mode=create
-
-# Full regeneration (replace all overloads)
-sqlty queries.py --mode=fresh
-```
-
-**Safety:** Prune mode prompts for confirmation when used on single files to prevent accidentally removing stubs for queries defined elsewhere.
-
-## Check Mode
-
-The `--check` flag verifies that stub files are up-to-date without modifying them. This is useful for CI/CD pipelines and pre-commit hooks to ensure type stubs match the current code.
-
-**Note:** `--check` and `--format-command` are mutually exclusive. Check mode compares the intermediate representations (IR) of registries - specifically the query literals and return types of each overload - rather than text output. This provides semantic comparison that ignores formatting, whitespace, and comment differences, ensuring only meaningful changes trigger failures.
-
-```bash
-# Basic check (exit code 0 if up-to-date, 1 if differences found)
-sqlty . --check
-
-# Show unified diff of changes
-sqlty . --check --verbose
-
-# Show colored diff with syntax highlighting (requires rich library)
-sqlty . --check -vv
-```
-
-### Pre-commit Hook
-
-Automatically generate or check stubs on commit by adding to your `.pre-commit-config.yaml`:
-
-**Generate stubs automatically:**
-```yaml
-repos:
-  - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.1.0  # Use the latest version
-    hooks:
-      - id: sqlty
-        # Optional: customize with args
-        # Default mode for directories: incremental,prune,create
-        # args: [".", "--schema=schema.sql"]
-```
-
-**Check stubs are up-to-date (recommended for CI):**
-```yaml
-repos:
-  - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.1.0  # Use the latest version
-    hooks:
-      - id: sqlty-check
-        # Shows verbose diff output when stubs are outdated
-        # args: [".", "--check", "--verbose"]
-```
-
-For more targeted stub generation (e.g., only for specific directories), you can use a local hook:
-
-```yaml
-repos:
-  - repo: local
-    hooks:
-      - id: sqlty-src
-        name: sqlty stub generation
-        entry: sqlty . --format-command "ruff format --stdin-filename {filename}"
-        language: system
-        pass_filenames: false
-        require_serial: true
-        types: [python]
-        files: ^src/  # Only run on files in src/
-```
-
-This approach allows you to:
-- Automatic mode selection based on directory vs file
-- Use `--format-command` to format generated stubs with your preferred formatter
-- Target specific directories with the `files` pattern
-- Customize behavior per directory or project area
+Browse `tests/mdtest/` to see behavior specified as readable markdown test suites.
 
 ## Documentation
 
-📚 **[Complete Documentation](https://github.com/jirikuncar/sqlty/blob/main/docs/README.md)**
-
-### Quick Links
-
-- **[Installation Guide](https://github.com/jirikuncar/sqlty/blob/main/docs/installation.md)** - Setup instructions for pip, uv, poetry, and more
-- **[User Guide](https://github.com/jirikuncar/sqlty/blob/main/docs/index.md)** - Complete guide with basic and advanced usage
-- **[API Reference](https://github.com/jirikuncar/sqlty/blob/main/docs/api.md)** - Detailed API documentation for all classes and methods
-- **[Examples Guide](https://github.com/jirikuncar/sqlty/blob/main/docs/examples.md)** - Step-by-step tutorials from basic to advanced
-
-### Key Topics
-
-- [Basic Usage](https://github.com/jirikuncar/sqlty/blob/main/docs/index.md#basic-usage) - Creating registries, writing queries, generating stubs
-- [Multi-Registry Pattern](https://github.com/jirikuncar/sqlty/blob/main/docs/index.md#multi-registry-pattern) - Organizing queries for large applications
-- [Type Inference](https://github.com/jirikuncar/sqlty/blob/main/docs/index.md#type-inference) - How SQLTy infers Python types from SQL
-- [Internals](https://github.com/jirikuncar/sqlty/blob/main/docs/index.md#internals) - Architecture and implementation details
+- **[User Guide](docs/index.md)** — complete guide with examples
+- **[API Reference](docs/api.md)** — CLI, types, configuration, lint rules
+- **[Usage Patterns](docs/patterns.md)** — rewrite/strip, magic codec, schema inference
+- **[Advanced Usage](docs/advanced-usage.md)** — dialects, multiple schemas, pre-commit
 
 ## Contributing
 
-See **[DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/docs/DEVELOPMENT.md)** for development setup, workflows, and contribution guidelines.
+See **[DEVELOPMENT.md](DEVELOPMENT.md)** for setup, testing, and contribution guidelines.
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/jirikuncar/sqlty/blob/main/LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).

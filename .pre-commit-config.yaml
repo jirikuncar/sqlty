@@ -12,17 +12,17 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
-      - id: sqlty-examples
-        name: sqlty stub generation for examples
-        entry: uv run sqlty examples --format-command "uv run ruff format --stdin-filename {filename}"
+      - id: sqlty-check
+        name: sqlty check examples
+        entry: uv run sqlty check examples/
         language: system
         pass_filenames: false
         require_serial: true
         types: [python]
         files: ^examples/
-      - id: sqlty-check-examples
-        name: sqlty check for examples
-        entry: uv run sqlty examples --check --verbose
+      - id: sqlty-rewrite
+        name: sqlty rewrite examples
+        entry: uv run sqlty rewrite examples/
         language: system
         pass_filenames: false
         require_serial: true

@@ -9,6 +9,9 @@ from typing import Any
 
 import pytest
 
+# Automatically mark all tests in tests/e2e/ as e2e
+pytestmark = pytest.mark.e2e
+
 
 def _create_cli_runner(
     module_name: str, path_env_var: str = "PYTHONPATH"

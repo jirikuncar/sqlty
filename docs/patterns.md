@@ -1,86 +1,109 @@
-# @sqlty Decorator Pattern
+# Usage Patterns
 
-This example demonstrates the recommended pattern for using `sqlty` with the `@sqlty` decorator.
+Three ways to use SQLTy, from simplest to most automated.
 
-## Overview
+## Pattern 1: Rewrite/Strip (Recommended)
 
-Instead of generating stubs for individual files, we create a central `sql` function decorated with `@sqlty`. This function serves as the registry for all SQL queries in your application.
+Write `--sql\n` strings, use `sqlty rewrite` to add type annotations, `sqlty strip` to remove them.
 
-## Files
-
-- `queries.py`: Defines the `sql` function decorated with `@sqlty`
-- `queries.pyi`: Generated stub file with type-safe overloads for all queries
-- `query.py`: Example usage of the `sql` function
-
-## How It Works
-
-1. **Define the SQL function** (`queries.py`):
 ```python
-from typing import Any
-from sqlty import sqlty
-
-@sqlty
-def sql(query: str) -> Any:
-    """Execute SQL queries."""
-    return query
+# 1. Write queries with --sql prefix and type casts
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
-
-2. **Generate the stub** with overloads:
-```bash
-uv run sqlty query.py --check
-```
-
-This generates `queries.pyi` with type-safe overloads:
-```python
-@overload
-def sql(
-    query: Literal["""SELECT id, name FROM users WHERE id = :id"""],
-) -> SQL[tuple[int, str]]: ...
-
-# ... more overloads ...
-
-@overload
-def sql[T](query: T) -> T: ...
-```
-
-3. **Use in your code**:
-```python
-from queries import sql
-from sqlty.drivers.psycopg import execute
-
-query = sql("""
-    SELECT id, name FROM users WHERE id = :id
-    """)
-
-rows: Iterator[tuple[int, str]] = execute(conn, query, params)
-```
-
-## Benefits
-
-- ✅ **Simple and direct**: Just decorate a function with `@sqlty`
-- ✅ **Stubs stay with your application code**, not scattered across the codebase
-- ✅ **mypy correctly picks up the stubs** when checking files that import from `queries`
-- ✅ **Type-safe**: Unknown queries fall back to returning `str`, which causes type errors
-- ✅ **Centralized**: All query types in one place
-- ✅ **Scalable**: Works for any number of queries across multiple files
-
-## Regenerating Stubs
-
-When you add new queries, regenerate the stub:
 
 ```bash
-# Analyze all .py files in the current directory
-uv run sqlty . --check
-
-# Or analyze specific files
-uv run sqlty query.py other_file.py --check
+# 2. Rewrite to add types
+sqlty rewrite .
 ```
 
-## Why This Works
+```python
+# 3. Result
+from sqlty import SQL
+query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
 
-Per the [mypy stubs documentation](https://mypy.readthedocs.io/en/stable/stubs.html):
+```bash
+# 4. Check and strip
+sqlty check .     # lint for issues
+sqlty strip .     # revert to plain strings
+```
 
-- Stub files (`.pyi`) are used when mypy checks code that **imports** from that module
-- When you run `mypy query.py`, it checks `query.py` which imports `sql` from `queries`
-- mypy uses `queries.pyi` to type-check the `sql()` calls in `query.py`
-- This is the standard pattern for type stubs in Python (PEP 561)
+**Best for:** Production codebases, CI/CD, team workflows.
+
+### Pre-commit integration
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: sqlty-check
+        name: sqlty check
+        entry: uv run sqlty check .
+        language: system
+        pass_filenames: false
+        types: [python]
+```
+
+## Pattern 2: User-Defined Types
+
+Use `TypedDict`, `NamedTuple`, `dataclass`, or Pydantic `BaseModel` instead of `tuple[...]`:
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str
+
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+`sqlty check` validates field count, types, and names against the query.
+
+**Best for:** Readable code, named fields, complex queries with many columns.
+
+## Pattern 3: Schema-Based Inference
+
+Use a `CREATE TABLE` schema file to infer types without explicit casts:
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```python
+# No ::TYPE casts needed
+query = "--sql\nSELECT id, name, email FROM users"
+
+# After rewrite:
+query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+```
+
+**Best for:** Projects with existing schema files.
+
+## Pattern 4: Magic Codec
+
+Import-time transformation — no `sqlty rewrite` step needed:
+
+```python
+# coding: sqlty
+
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+**Best for:** Development, prototyping, rapid iteration.
+
+See [magic codec documentation](magic-codec.md).
+
+## Which Pattern?
+
+| Pattern | Best for |
+|---------|----------|
+| **Rewrite/Strip** | Production, CI/CD, teams |
+| **User-Defined Types** | Readable code, named fields |
+| **Schema-Based** | Projects with CREATE TABLE schemas |
+| **Magic Codec** | Development, prototyping |
+
+All patterns combine freely. Use magic codec during development, rewrite before committing, user-defined types for important domain objects.

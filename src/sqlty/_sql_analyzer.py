@@ -7,6 +7,11 @@ from typing import NamedTuple
 
 from sqlglot import exp, parse_one
 
+from sqlty._type_codec import TupleCodec, TypeCodec
+
+# Module-level default to avoid re-creating per call
+_default_codec = TupleCodec()
+
 
 class ColumnInfo(NamedTuple):
     """Information about a column in a SQL SELECT statement."""
@@ -313,19 +318,158 @@ class SQLAnalyzer:
             case _:
                 return None
 
-    def generate_return_type(self, sql: str) -> str | None:
+    def expand_star(self, sql: str) -> str | None:
+        """Expand SELECT * into explicit column list using loaded schema.
+
+        Replaces `SELECT *` or `SELECT t.*` with `SELECT col1::TYPE, col2::TYPE, ...`
+        using column definitions from the loaded schema.
+
+        Args:
+            sql: SQL query string containing SELECT *
+
+        Returns:
+            The rewritten SQL with explicit columns, or None if:
+            - No schema is loaded
+            - Query doesn't contain SELECT *
+            - Referenced table is not in schema
+            - SQL cannot be parsed
+        """
+        if not self.schema:
+            return None
+
+        try:
+            ast = parse_one(sql, dialect=self.dialect)
+        except Exception:
+            return None
+
+        select_expr = ast.find(exp.Select)
+        if not select_expr:
+            return None
+
+        # Check if any projection is a Star or Column(name='*')
+        has_star = False
+        for proj in select_expr.expressions:
+            if isinstance(proj, exp.Star):
+                has_star = True
+                break
+            if isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star):
+                has_star = True
+                break
+
+        if not has_star:
+            return None
+
+        # Determine target table from FROM clause
+        from_expr = select_expr.find(exp.From)
+        if not from_expr:
+            return None
+
+        # Build alias-to-table mapping
+        alias_map: dict[str, str] = {}
+        tables_in_from: list[str] = []
+        for table_expr in from_expr.find_all(exp.Table):
+            table_name = table_expr.name.lower()
+            tables_in_from.append(table_name)
+            if table_expr.alias:
+                alias_map[table_expr.alias.lower()] = table_name
+            else:
+                alias_map[table_name] = table_name
+
+        # Also check JOINs
+        for join_expr in select_expr.find_all(exp.Join):
+            for table_expr in join_expr.find_all(exp.Table):
+                table_name = table_expr.name.lower()
+                tables_in_from.append(table_name)
+                if table_expr.alias:
+                    alias_map[table_expr.alias.lower()] = table_name
+                else:
+                    alias_map[table_name] = table_name
+
+        # Build new projections
+        new_projections: list[str] = []
+        for proj in select_expr.expressions:
+            if isinstance(proj, exp.Star):
+                # Unqualified star — expand all tables in FROM order
+                expanded = self._expand_unqualified_star(tables_in_from)
+                if expanded is None:
+                    return None
+                new_projections.extend(expanded)
+            elif isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star):
+                # Qualified star (t.*) — expand specific table
+                table_ref = proj.table.lower() if proj.table else None
+                if table_ref and table_ref in alias_map:
+                    real_table = alias_map[table_ref]
+                    expanded = self._expand_table_columns(real_table)
+                    if expanded is None:
+                        return None
+                    new_projections.extend(expanded)
+                else:
+                    return None
+            else:
+                # Non-star projection — keep as-is
+                new_projections.append(proj.sql(dialect=self.dialect))
+
+        # Reconstruct the SQL with expanded columns
+        columns_sql = ", ".join(new_projections)
+
+        # Replace the SELECT ... FROM with expanded columns
+        # Use string reconstruction for reliability
+        sql_upper = sql.upper()
+        select_idx = sql_upper.find("SELECT")
+        from_idx = sql_upper.find("FROM")
+        if select_idx == -1 or from_idx == -1:
+            return None
+
+        prefix = sql[:select_idx] + "SELECT "
+        suffix = sql[from_idx:]
+        return prefix + columns_sql + " " + suffix
+
+    def _expand_unqualified_star(self, tables: list[str]) -> list[str] | None:
+        """Expand unqualified * for all tables in FROM clause."""
+        all_columns: list[str] = []
+        for table_name in tables:
+            cols = self._expand_table_columns(table_name)
+            if cols is None:
+                return None
+            all_columns.extend(cols)
+        return all_columns
+
+    def _expand_table_columns(self, table_name: str) -> list[str] | None:
+        """Expand a single table into col::TYPE pairs."""
+        table_lower = table_name.lower()
+        if table_lower not in self.schema:
+            return None
+
+        columns = []
+        for col_name, sql_type in self.schema[table_lower].items():
+            columns.append(f"{col_name}::{sql_type}")
+        return columns
+
+    def generate_return_type(
+        self,
+        sql: str,
+        codec: TypeCodec | None = None,
+    ) -> str | None:
         """
         Generate a Python return type annotation for a SQL query.
+
+        Args:
+            sql: SQL query string to analyze
+            codec: Optional TypeCodec for formatting the result.
+                   Defaults to TupleCodec() which produces "tuple[int, str]".
 
         For example:
         - "SELECT id, name FROM users" -> "tuple[int, str]" (if types can be inferred)
         - "SELECT id, name FROM users" -> "tuple[str, str]" (if types can't be inferred)
         """
+        if codec is None:
+            codec = _default_codec
+
         columns = self.analyze_select(sql)
         if not columns:
             return None
 
-        # Build tuple type
+        # Build type list
         types: list[str] = []
         for col in columns:
             if col.python_type:
@@ -334,7 +478,4 @@ class SQLAnalyzer:
                 # Default to str if type can't be inferred
                 types.append("str")
 
-        if len(types) == 1:
-            return f"tuple[{types[0]}]"
-        else:
-            return f"tuple[{', '.join(types)}]"
+        return codec.format_type(types)

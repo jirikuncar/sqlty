@@ -1,99 +1,24 @@
-# SQLType Documentation
-
-Welcome to the SQLType documentation!
+# SQLTy Documentation
 
 ## Quick Links
 
-- **[Motivation](motivation.md)** - Why use SQLTy and when it's the right choice
-- **[Main Documentation](index.md)** - Complete guide to SQLType
-- **[Installation Guide](installation.md)** - Setup and installation instructions
-- **[API Reference](api.md)** - Detailed API documentation
+- **[Motivation](motivation.md)** — Why SQLTy, when to use it
+- **[Installation](installation.md)** — Setup (Python 3.12+)
+- **[User Guide](index.md)** — Complete guide: queries, rewrite, check, strip
+- **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
+- **[Usage Patterns](patterns.md)** — Rewrite/strip, magic codec, schema inference
+- **[Advanced Usage](advanced-usage.md)** — Dialects, multiple schemas, pre-commit
+- **[Magic Codec](magic-codec.md)** — Import-time transformation
 
-## Documentation Structure
+## Learning Path
 
-### Getting Started
+1. **[Motivation](motivation.md)** — Understand the problem and when SQLTy helps
+2. **[Installation](installation.md)** — Get set up
+3. **[Quick Start](index.md#quick-start)** — First rewrite in 2 minutes
+4. **[User-Defined Types](index.md#user-defined-types)** — TypedDict, dataclass, etc.
+5. **[Usage Patterns](patterns.md)** — Pick the right workflow
+6. **[Advanced Usage](advanced-usage.md)** — Schemas, dialects, pre-commit
 
-1. **[Motivation](motivation.md)**
-   - When to use SQLTy
-   - Why SQLTy exists
-   - Trade-offs and comparisons
-   - Real-world benefits
+## Development
 
-2. **[Installation](installation.md)**
-   - Requirements
-   - Installation methods (pip, uv, poetry, from source)
-   - Optional dependencies
-   - IDE integration
-   - Verifying installation
-
-3. **[Quick Start](index.md#quick-start)**
-   - Basic setup
-   - Writing queries
-   - Generating stubs
-   - Type checking
-
-### User Guide
-
-4. **[Basic Usage](index.md#basic-usage)**
-   - Creating a SQL registry
-   - Writing SQL queries
-   - Type annotations in SQL
-   - Generating stub files
-   - Using the generated stubs
-
-5. **[Advanced Usage](index.md#advanced-usage)**
-   - Multi-registry pattern
-   - Custom SQL dialects
-   - Incremental mode
-   - Custom class and export names
-   - Specifying output paths
-
-### Reference
-
-6. **[API Reference](api.md)**
-   - `@sqlty` decorator
-   - SQL type
-   - Generator CLI
-   - Type mappings
-   - Generated stub structure
-   - Type checking integration
-   - Error handling
-   - Performance considerations
-
-### Understanding SQLType
-
-7. **[Internals](index.md#internals)**
-   - Architecture overview
-   - Type inference engine
-   - AST analysis
-   - Stub generation process
-
-### Examples
-
-8. **[Examples](index.md#examples)**
-   - Simple query registry
-   - Multi-registry application
-   - Real-world usage patterns
-
-## Contributing
-
-See the [Contributing section](index.md#contributing) in the main documentation.
-
-## External Resources
-
-- **[GitHub Repository](https://github.com/jirikuncar/sqlty)** - Source code and issues
-- **[mypy Documentation](https://mypy.readthedocs.io/)** - Python type checking
-- **[sqlglot Documentation](https://sqlglot.com/)** - SQL parsing and analysis
-- **[PEP 484](https://peps.python.org/pep-0484/)** - Type hints specification
-
-## Support
-
-For questions, issues, or contributions:
-
-- Open an issue on [GitHub](https://github.com/jirikuncar/sqlty/issues)
-- Check existing [documentation](index.md)
-- Review the [examples](index.md#examples)
-
-## License
-
-SQLType is licensed under the MIT License. See the LICENSE file for details.
+See **[DEVELOPMENT.md](../DEVELOPMENT.md)** for contributing, testing, and architecture.

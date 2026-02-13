@@ -13,7 +13,7 @@ Automatic Registration (Default):
     # Now use # coding: sqlty in files
     # coding: sqlty
     q = "--sql SELECT 1::INTEGER"
-    # Python automatically transforms to: SQL[tuple[int]]("--sql SELECT 1::INTEGER")
+    # Python automatically transforms to: SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 
 Disable Auto-Registration:
     import os
