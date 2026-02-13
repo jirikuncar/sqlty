@@ -42,6 +42,10 @@ import encodings
 import io
 import token
 import tokenize
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlty._rewriter import SQLRewriter
 
 __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
 
@@ -53,7 +57,7 @@ assert utf_8_codec is not None, "UTF-8 codec not found"
 _rewriter = None
 
 
-def _get_rewriter():
+def _get_rewriter() -> SQLRewriter:
     """Get or create the module-level SQLRewriter instance."""
     global _rewriter
     if _rewriter is None:
@@ -163,7 +167,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         # Add necessary imports using isort for proper placement
         if needs_datetime or needs_uuid or (needs_sql and not has_sql_import):
             try:
-                from isort import code as isort_code  # type: ignore[import-not-found]
+                from isort import code as isort_code
 
                 # Build the list of imports to add
                 add_imports = []

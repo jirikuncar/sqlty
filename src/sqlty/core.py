@@ -15,8 +15,13 @@ is active, since type extraction requires Python's ``ast`` module.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlty._type_extractor import TypeInfo
+
 try:
-    from sqlty._core import (  # type: ignore[import-not-found]
+    from sqlty._core import (
         check_source as _backend_check_source,
     )
     from sqlty._core import (
@@ -104,7 +109,7 @@ def check_source(
 def _enhance_with_user_type_checks(
     diagnostics: list[dict[str, str | int | None]],
     source: str,
-    type_defs: dict,
+    type_defs: dict[str, TypeInfo],
     non_tuple_lines: set[int],
     dialect: str,
     schema_sql: str | None,
@@ -123,7 +128,7 @@ def _enhance_with_user_type_checks(
     from sqlty._type_extractor import check_type_compatibility
 
     # Build map of lines with user-type annotations found in source
-    user_type_lines: dict[int, tuple[str, object]] = {}
+    user_type_lines: dict[int, tuple[str, TypeInfo]] = {}
     for i, line in enumerate(source.splitlines(), 1):
         if i not in non_tuple_lines:
             continue

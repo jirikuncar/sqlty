@@ -277,7 +277,7 @@ def _unwrap_optional(tp: type) -> type:
         args = typing.get_args(tp)
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
-            return non_none[0]
+            return non_none[0]  # type: ignore[no-any-return]
 
     return tp
 
