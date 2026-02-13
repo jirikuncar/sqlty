@@ -93,11 +93,12 @@ class SQLRewriter:
         has_uuid_import = _has_import(source, "import uuid")
 
         for line_num, line in enumerate(lines, start=1):
-            # Check for f-strings containing --sql (these are skipped)
+            # Check for f/t-strings containing --sql (these are skipped)
             if _FSTRING_SQL_PATTERN.search(line):
+                kind = "t-string" if re.search(r"""[tT]\s*["']""", line) else "f-string"
                 warnings.append(
-                    f"line {line_num}: f-string with --sql prefix skipped "
-                    f"(f-strings cannot be statically rewritten) [fstring-skipped]"
+                    f"line {line_num}: {kind} with --sql prefix skipped "
+                    f"({kind}s cannot be statically rewritten) [fstring-skipped]"
                 )
                 result_lines.append(line)
                 continue
@@ -237,10 +238,11 @@ _SQL_STRING_PATTERNS = [
     re.compile(r"(?<![a-zA-Z])(?P<str>'[^']*')"),
 ]
 
-# Match f-strings that contain --sql (for emitting warnings)
+# Match f-strings and t-strings (PEP 750, Python 3.14+) that contain --sql
+# (for emitting warnings). Both use interpolation so cannot be statically rewritten.
 _FSTRING_SQL_PATTERN = re.compile(
-    r"""[fF][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b"""
-    r"""|[rRbBuU]*[fF](?:"{3}|'{3}|"|')--sql\b"""
+    r"""[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b"""
+    r"""|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"""
 )
 
 # Match SQL[T]("...") or SQL[T]('...') or SQL[T]("""...""")

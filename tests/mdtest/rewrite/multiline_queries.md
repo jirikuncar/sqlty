@@ -18,3 +18,13 @@ q = f"--sql SELECT {column}::INTEGER FROM users"
 # rewritten: q = f"--sql SELECT {column}::INTEGER FROM users"
 # warning: line 1: f-string with --sql prefix skipped (f-strings cannot be statically rewritten) [fstring-skipped]
 ```
+
+## T-strings (PEP 750) are not rewritten
+
+Template strings (Python 3.14+) also use interpolation and are skipped:
+
+```python
+q = t"--sql SELECT {column}::INTEGER FROM users"
+# rewritten: q = t"--sql SELECT {column}::INTEGER FROM users"
+# warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [fstring-skipped]
+```

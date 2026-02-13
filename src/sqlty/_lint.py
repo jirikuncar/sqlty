@@ -99,7 +99,7 @@ RULES: dict[str, LintRule] = {
         name="fstring-skipped",
         default_severity=Severity.WARN,
         fixable=False,
-        description="f-string with --sql prefix skipped (f-strings cannot be statically rewritten)",
+        description="f/t-string with --sql prefix skipped (cannot be statically rewritten)",
     ),
 }
 
