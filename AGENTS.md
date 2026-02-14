@@ -24,6 +24,12 @@ make update-mdtest   # auto-update assertion comments in .md files
 make typecheck       # mypy + ty
 ```
 
+## Git safety
+
+**Never force-push.** Do not use `git push --force`, `git push --force-with-lease`,
+or any other force-push variant. If a push is rejected, investigate and resolve
+the conflict without rewriting remote history. No exceptions.
+
 ## Pre-commit checks
 
 **Always run pre-commit before every commit:**

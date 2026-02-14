@@ -23,6 +23,76 @@ from sqlty._sql_analyzer import SQLAnalyzer
 from sqlty._type_codec import TypeCodec
 
 
+@dataclass(frozen=True)
+class ImportStyle:
+    """Parsed import-style configuration.
+
+    Determines the import line added to source and the wrapper prefix
+    used around SQL type annotations.
+
+    Supported styles::
+
+        from sqlty import SQL          → SQL[T](...)
+        from sqlty import SQL as Q     → Q[T](...)
+        import sqlty                   → sqlty.SQL[T](...)
+        import sqlty as sy             → sy.SQL[T](...)
+
+    Configure via ``[tool.sqlty]`` in pyproject.toml::
+
+        [tool.sqlty]
+        import-style = "from sqlty import SQL as Q"
+    """
+
+    import_line: str
+    """The import statement to inject (e.g. ``"from sqlty import SQL as Q"``)."""
+
+    wrapper_name: str
+    """The prefix for ``[T](...)``, e.g. ``"Q"`` or ``"sqlty.SQL"``."""
+
+    @classmethod
+    def parse(cls, style: str) -> ImportStyle:
+        """Parse an import-style string into an ImportStyle.
+
+        Args:
+            style: One of the four supported forms.
+
+        Raises:
+            ValueError: If the style string is not recognised.
+        """
+        style = style.strip()
+        if style.startswith("from sqlty import SQL as "):
+            alias = style[len("from sqlty import SQL as ") :].strip()
+            return cls(import_line=style, wrapper_name=alias)
+        if style == "from sqlty import SQL":
+            return cls(import_line=style, wrapper_name="SQL")
+        if style.startswith("import sqlty as "):
+            alias = style[len("import sqlty as ") :].strip()
+            return cls(import_line=style, wrapper_name=f"{alias}.SQL")
+        if style == "import sqlty":
+            return cls(import_line=style, wrapper_name="sqlty.SQL")
+        msg = f"Unsupported import-style: {style!r}"
+        raise ValueError(msg)
+
+    @classmethod
+    def default(cls) -> ImportStyle:
+        """Return the default import style: ``from sqlty import SQL``."""
+        return cls(import_line="from sqlty import SQL", wrapper_name="SQL")
+
+    def make_wrapper_pattern(self) -> re.Pattern[str]:
+        """Build a regex that matches ``{wrapper_name}[T]("...")``."""
+        escaped = re.escape(self.wrapper_name)
+        return re.compile(
+            rf"(?P<wrapper>{escaped}\[.*?\]\("
+            r"(?P<inner>"
+            r'""".*?"""'
+            r"|'''.*?'''"
+            r'|"[^"]*"'
+            r"|'[^']*'"
+            r")\))",
+            re.DOTALL,
+        )
+
+
 @dataclass
 class RewriteResult:
     """Result of a rewrite operation, including any warnings."""
@@ -38,6 +108,9 @@ class SQLRewriter:
         dialect: SQL dialect for type inference (default: "postgres")
         schema_path: Optional path to schema file for schema-aware inference
         codec: Optional TypeCodec for custom type formatting
+        import_style: Import style string (e.g. ``"from sqlty import SQL as Q"``).
+            Controls the import line injected and the wrapper prefix.
+            See :class:`ImportStyle` for supported forms.
     """
 
     def __init__(
@@ -45,6 +118,7 @@ class SQLRewriter:
         dialect: str = "postgres",
         schema_path: str | None = None,
         codec: TypeCodec | None = None,
+        import_style: str | None = None,
     ) -> None:
         from pathlib import Path
 
@@ -53,6 +127,10 @@ class SQLRewriter:
             schema_path=Path(schema_path) if schema_path else None,
         )
         self._codec = codec
+        self._import_style = (
+            ImportStyle.parse(import_style) if import_style else ImportStyle.default()
+        )
+        self._wrapper_pattern = self._import_style.make_wrapper_pattern()
 
     def _infer_type(self, sql_content: str) -> str:
         """Infer the Python return type from a SQL query string.
@@ -90,6 +168,8 @@ class SQLRewriter:
             'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")'
         """
         warnings: list[str] = []
+        wrapper_name = self._import_style.wrapper_name
+        import_line = self._import_style.import_line
 
         # --- Pass 1: detect f/t-strings (line-by-line, for warnings) ---
         fstring_lines: set[int] = set()
@@ -105,22 +185,22 @@ class SQLRewriter:
                 )
 
         # --- Pass 2: whole-source rewrite ---
-        has_sql_import = _has_import(source, "from sqlty import SQL")
+        has_sql_import = _has_import(source, import_line)
         has_datetime_import = _has_import(source, "import datetime")
         has_uuid_import = _has_import(source, "import uuid")
         needs_sql_import = False
         needs_datetime = False
         needs_uuid = False
 
-        # Pre-compute existing SQL[T](...) wrapper spans to skip
-        wrapper_spans = [(m.start(), m.end()) for m in _SQL_WRAPPER_PATTERN.finditer(source)]
+        # Pre-compute existing wrapper spans to skip
+        wrapper_spans = [(m.start(), m.end()) for m in self._wrapper_pattern.finditer(source)]
 
         # Collect all replacements, then apply right-to-left
         replacements: list[tuple[int, int, str]] = []
         for match in _SQL_STRING_PATTERN.finditer(source):
             start, end = match.start(), match.end()
 
-            # Skip matches inside existing SQL[T](...) wrappers
+            # Skip matches inside existing wrappers
             if any(ws <= start and end <= we for ws, we in wrapper_spans):
                 continue
 
@@ -138,7 +218,7 @@ class SQLRewriter:
             if inferred == "Any":
                 continue
 
-            replacement = f"SQL[{inferred}]({string_literal})"
+            replacement = f"{wrapper_name}[{inferred}]({string_literal})"
             replacements.append((match.start("str"), match.end("str"), replacement))
 
             needs_sql_import = True
@@ -159,7 +239,7 @@ class SQLRewriter:
         if needs_uuid and not has_uuid_import:
             imports_to_add.append("import uuid")
         if needs_sql_import and not has_sql_import:
-            imports_to_add.append("from sqlty import SQL")
+            imports_to_add.append(import_line)
 
         if imports_to_add:
             result = "\n".join(imports_to_add) + "\n" + result
@@ -180,7 +260,7 @@ class SQLRewriter:
         sql_wrapper_removed = False
         replacements: list[tuple[int, int, str]] = []
 
-        for match in _SQL_WRAPPER_PATTERN.finditer(source):
+        for match in self._wrapper_pattern.finditer(source):
             inner_string = match.group("inner")
             content = _extract_string_content(inner_string)
             # Only strip auto-generated wrappers (--sql + whitespace)
@@ -197,18 +277,19 @@ class SQLRewriter:
 
         return result
 
-    @staticmethod
-    def _remove_unused_imports(source: str) -> str:
+    def _remove_unused_imports(self, source: str) -> str:
         """Remove sqlty/datetime/uuid imports if no longer referenced in source."""
         lines = source.splitlines(keepends=True)
         result: list[str] = []
+        import_line = self._import_style.import_line
+        wrapper_name = self._import_style.wrapper_name
         body = source  # full source for reference checking
 
         for line in lines:
             stripped = line.strip()
 
-            # Remove "from sqlty import SQL" if SQL[ no longer appears
-            if stripped == "from sqlty import SQL" and "SQL[" not in body:
+            # Remove sqlty import if wrapper no longer appears
+            if stripped == import_line and f"{wrapper_name}[" not in body:
                 continue
 
             # Remove "import datetime" if datetime. no longer appears

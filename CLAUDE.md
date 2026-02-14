@@ -15,6 +15,7 @@ uv run pre-commit run --all-files  # lint + format (run before every commit)
 
 ## Key conventions
 
+- **Never force-push.** No `--force`, no `--force-with-lease`, no exceptions.
 - **Always run `uv run pre-commit run --all-files` before committing.**
   This runs mypy, ruff (lint + format), and other checks. Fix all errors
   before creating a commit.

@@ -56,6 +56,7 @@ def rewrite_source(
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
+    import_style: str | None = None,
 ) -> str:
     """Rewrite Python source: "--sql ..." -> SQL[T]("--sql ...").
 
@@ -65,26 +66,28 @@ def rewrite_source(
         source: Python source code
         dialect: SQL dialect
         schema_sql: Optional CREATE TABLE statements
+        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
 
     Returns:
         Rewritten source code
     """
-    rewriter = _make_rewriter(dialect, schema_sql)
+    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style)
     return rewriter.rewrite(source).source
 
 
-def strip_source(source: str) -> str:
+def strip_source(source: str, *, import_style: str | None = None) -> str:
     """Strip Python source: SQL[T]("--sql ...") -> "--sql ...".
 
     Removes unused imports added by rewrite.
 
     Args:
         source: Python source code with SQL[T](...) wrappers
+        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
 
     Returns:
         Stripped source code
     """
-    rewriter = SQLRewriter()
+    rewriter = SQLRewriter(import_style=import_style)
     return rewriter.strip(source)
 
 
@@ -114,6 +117,7 @@ def check_source(
     dialect: str = "postgres",
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
+    import_style: str | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
@@ -134,15 +138,21 @@ def check_source(
         dialect: SQL dialect
         schema_sql: Optional CREATE TABLE statements
         rules: Rule severity overrides (e.g., {"select-star": "ignore"})
+        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
 
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
     """
+    from sqlty._rewriter import ImportStyle
+
     analyzer = _make_analyzer(dialect, schema_sql)
     rule_config = RuleConfig(overrides=rules)
     checker = Checker(analyzer=analyzer, rule_config=rule_config)
-    rewriter = _make_rewriter(dialect, schema_sql)
+    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style)
     has_schema = schema_sql is not None
+
+    istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
+    wrapper_name = istyle.wrapper_name
 
     diagnostics: list[dict[str, str | int | None]] = []
 
@@ -150,7 +160,7 @@ def check_source(
         line_stripped = line.strip()
 
         # Check for unwrapped --sql strings (stale-rewrite)
-        if _is_unwrapped_sql_string(line_stripped):
+        if _is_unwrapped_sql_string(line_stripped, wrapper_name):
             if rule_config.is_enabled("stale-rewrite"):
                 diagnostics.append(
                     {
@@ -174,8 +184,8 @@ def check_source(
                 )
             continue
 
-        # Check for SQL[T](...) wrappers
-        sql_content = _extract_sql_from_wrapper(line_stripped)
+        # Check for wrapper patterns
+        sql_content = _extract_sql_from_wrapper(line_stripped, wrapper_name)
         if sql_content is None:
             continue
 
@@ -205,7 +215,7 @@ def check_source(
         # Check tuple type annotations (stale-type)
         # User-defined types (TypedDict, NamedTuple, etc.) are handled by
         # core.py's wrapper using runtime type resolution.
-        annotated_type = _extract_type_from_wrapper(line_stripped)
+        annotated_type = _extract_type_from_wrapper(line_stripped, wrapper_name)
         if annotated_type and annotated_type.startswith("tuple["):
             if rule_config.is_enabled("stale-type"):
                 current_type = rewriter._infer_type(sql_content)
@@ -253,7 +263,9 @@ def _make_analyzer(dialect: str, schema_sql: str | None) -> SQLAnalyzer:
     return SQLAnalyzer(dialect=dialect)
 
 
-def _make_rewriter(dialect: str, schema_sql: str | None) -> SQLRewriter:
+def _make_rewriter(
+    dialect: str, schema_sql: str | None, *, import_style: str | None = None
+) -> SQLRewriter:
     """Create an SQLRewriter, optionally with schema."""
     import tempfile
 
@@ -261,8 +273,8 @@ def _make_rewriter(dialect: str, schema_sql: str | None) -> SQLRewriter:
         tmp_path = tempfile.mktemp(suffix=".sql")
         with open(tmp_path, "w") as f:
             f.write(schema_sql)
-        return SQLRewriter(dialect=dialect, schema_path=tmp_path)
-    return SQLRewriter(dialect=dialect)
+        return SQLRewriter(dialect=dialect, schema_path=tmp_path, import_style=import_style)
+    return SQLRewriter(dialect=dialect, import_style=import_style)
 
 
 def _has_inline_sql_comment(line: str) -> bool:
@@ -275,19 +287,20 @@ def _has_inline_sql_comment(line: str) -> bool:
     return bool(re.search(r"""["']--sql [^\\]""", line))
 
 
-def _is_unwrapped_sql_string(line: str) -> bool:
+def _is_unwrapped_sql_string(line: str, wrapper_name: str = "SQL") -> bool:
     """Check if a line contains an unwrapped --sql string."""
     # Match: variable = "--sql ..." or variable = '--sql ...'
     # Handles both --sql<space> and --sql\n (source-text escape) formats.
-    # But NOT already wrapped in SQL[...]
-    if "SQL[" in line:
+    # But NOT already wrapped in {wrapper_name}[...]
+    if f"{wrapper_name}[" in line:
         return False
     return bool(re.search(r"""["']--sql(\s|\\n)""", line))
 
 
-def _extract_sql_from_wrapper(line: str) -> str | None:
-    """Extract SQL content from SQL[T]("--sql ...") pattern."""
-    match = re.search(r'SQL\[.*?\]\(\s*["\'](.+?)["\']\s*\)', line, re.DOTALL)
+def _extract_sql_from_wrapper(line: str, wrapper_name: str = "SQL") -> str | None:
+    """Extract SQL content from {wrapper_name}[T]("--sql ...") pattern."""
+    escaped = re.escape(wrapper_name)
+    match = re.search(rf'{escaped}\[.*?\]\(\s*["\'](.+?)["\']\s*\)', line, re.DOTALL)
     if match:
         content = match.group(1)
         if content.startswith("--sql"):
@@ -295,9 +308,10 @@ def _extract_sql_from_wrapper(line: str) -> str | None:
     return None
 
 
-def _extract_type_from_wrapper(line: str) -> str | None:
-    """Extract the type annotation from SQL[T](...) pattern."""
-    match = re.search(r"SQL\[(.+?)\]\(", line)
+def _extract_type_from_wrapper(line: str, wrapper_name: str = "SQL") -> str | None:
+    """Extract the type annotation from {wrapper_name}[T](...) pattern."""
+    escaped = re.escape(wrapper_name)
+    match = re.search(rf"{escaped}\[(.+?)\]\(", line)
     if match:
         return match.group(1)
     return None

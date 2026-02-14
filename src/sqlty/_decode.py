@@ -46,7 +46,7 @@ import tokenize
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sqlty._rewriter import SQLRewriter
+    from sqlty._rewriter import ImportStyle, SQLRewriter
 
 __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
 
@@ -56,16 +56,38 @@ assert utf_8_codec is not None, "UTF-8 codec not found"
 
 # Lazy-initialized rewriter (avoid import cycle at module level)
 _rewriter = None
+_import_style_str: str | None = None
 
 
 def _get_rewriter() -> SQLRewriter:
-    """Get or create the module-level SQLRewriter instance."""
-    global _rewriter
+    """Get or create the module-level SQLRewriter instance.
+
+    Loads ``import-style`` from pyproject.toml so the codec emits the
+    same wrapper prefix and import line as the CLI commands.
+    """
+    global _rewriter, _import_style_str
     if _rewriter is None:
         from sqlty._rewriter import SQLRewriter
 
-        _rewriter = SQLRewriter()
+        # Load import-style from pyproject.toml
+        try:
+            from sqlty._config import load_config
+
+            config, _ = load_config()
+            _import_style_str = config.get("import_style")
+        except Exception:
+            _import_style_str = None
+
+        _rewriter = SQLRewriter(import_style=_import_style_str)
     return _rewriter
+
+
+def _get_import_style() -> ImportStyle:
+    """Return the parsed ImportStyle for import injection."""
+    from sqlty._rewriter import ImportStyle
+
+    _get_rewriter()  # ensure config loaded
+    return ImportStyle.parse(_import_style_str) if _import_style_str else ImportStyle.default()
 
 
 def _infer_sql_type(sql_query: str) -> str:
@@ -104,7 +126,8 @@ def _transform_sql_string(string_literal: str) -> str:
     # Don't wrap when inference fails — SQL[Any] is never useful.
     if inferred_type == "Any":
         return string_literal
-    return f"SQL[{inferred_type}]({string_literal})"
+    istyle = _get_import_style()
+    return f"{istyle.wrapper_name}[{inferred_type}]({string_literal})"
 
 
 def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
@@ -134,6 +157,8 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         needs_sql = False
         has_sql_import = False
 
+        istyle = _get_import_style()
+
         for tok in tokens:
             # Check if SQL is already imported
             if tok.type == token.NAME and tok.string == "SQL":
@@ -150,7 +175,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                         needs_datetime = True
                     if "uuid." in new_string:
                         needs_uuid = True
-                    if "SQL[" in new_string:
+                    if f"{istyle.wrapper_name}[" in new_string:
                         needs_sql = True
 
                     # Create a new token with the transformed string
@@ -187,7 +212,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                 # Add SQL import separately since it's a from import
                 if needs_sql and not has_sql_import:
                     # Add the SQL import at the beginning (isort will position it correctly)
-                    result = "from sqlty import SQL\n" + result
+                    result = istyle.import_line + "\n" + result
                     # Run through isort again to properly position it
                     result = isort_code(result, force_single_line=False, line_length=100)
             except ImportError:
@@ -198,7 +223,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
                 if needs_uuid:
                     imports.append("import uuid")
                 if needs_sql and not has_sql_import:
-                    imports.append("from sqlty import SQL")
+                    imports.append(istyle.import_line)
                 if imports:
                     import_lines = "\n".join(imports) + "\n"
                     result = import_lines + result
