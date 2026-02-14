@@ -45,3 +45,12 @@ q = SQL[int]("SELECT 1")
 q = SQL[tuple[int, str]]("SELECT id, name FROM users WHERE active")
 # stripped: q = SQL[tuple[int, str]]("SELECT id, name FROM users WHERE active")
 ```
+
+## Triple-quoted multiline wrapper is stripped
+
+```python
+q = SQL[tuple[int, str]]("""--sql
+SELECT id::INTEGER, name::TEXT FROM users""")
+# stripped: q = """--sql
+# stripped: SELECT id::INTEGER, name::TEXT FROM users"""
+```

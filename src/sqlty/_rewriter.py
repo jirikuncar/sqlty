@@ -74,27 +74,22 @@ class SQLRewriter:
     def rewrite(self, source: str) -> RewriteResult:
         """Transform --sql prefixed strings into SQL[T](...) calls.
 
-        Returns a RewriteResult containing the rewritten source and any
-        warnings (e.g. skipped f-strings).
+        Uses whole-source matching so triple-quoted multiline strings are
+        handled correctly.  Returns a RewriteResult containing the rewritten
+        source and any warnings (e.g. skipped f/t-strings).
 
         Example:
             >>> r = SQLRewriter()
             >>> r.rewrite('q = "--sql SELECT id::INTEGER FROM users"').source
             'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")'
         """
-        lines = source.splitlines(keepends=True)
-        result_lines: list[str] = []
         warnings: list[str] = []
-        needs_sql_import = False
-        needs_datetime = False
-        needs_uuid = False
-        has_sql_import = _has_import(source, "from sqlty import SQL")
-        has_datetime_import = _has_import(source, "import datetime")
-        has_uuid_import = _has_import(source, "import uuid")
 
-        for line_num, line in enumerate(lines, start=1):
-            # Check for f/t-strings containing --sql (these are skipped)
+        # --- Pass 1: detect f/t-strings (line-by-line, for warnings) ---
+        fstring_lines: set[int] = set()
+        for line_num, line in enumerate(source.splitlines(), start=1):
             if _FSTRING_SQL_PATTERN.search(line):
+                fstring_lines.add(line_num)
                 is_tstring = bool(re.search(r"""[tT]\s*["']""", line))
                 kind = "t-string" if is_tstring else "f-string"
                 rule = "tstring-skipped" if is_tstring else "fstring-skipped"
@@ -102,20 +97,57 @@ class SQLRewriter:
                     f"line {line_num}: {kind} with --sql prefix skipped "
                     f"({kind}s cannot be statically rewritten) [{rule}]"
                 )
-                result_lines.append(line)
+
+        # --- Pass 2: whole-source rewrite ---
+        has_sql_import = _has_import(source, "from sqlty import SQL")
+        has_datetime_import = _has_import(source, "import datetime")
+        has_uuid_import = _has_import(source, "import uuid")
+        needs_sql_import = False
+        needs_datetime = False
+        needs_uuid = False
+
+        # Pre-compute existing SQL[T](...) wrapper spans to skip
+        wrapper_spans = [
+            (m.start(), m.end()) for m in _SQL_WRAPPER_PATTERN.finditer(source)
+        ]
+
+        # Collect all replacements, then apply right-to-left
+        replacements: list[tuple[int, int, str]] = []
+        for match in _SQL_STRING_PATTERN.finditer(source):
+            start, end = match.start(), match.end()
+
+            # Skip matches inside existing SQL[T](...) wrappers
+            if any(ws <= start and end <= we for ws, we in wrapper_spans):
                 continue
 
-            new_line = self._rewrite_line(line)
-            if new_line != line:
-                if "SQL[" in new_line:
-                    needs_sql_import = True
-                if "datetime." in new_line:
-                    needs_datetime = True
-                if "uuid." in new_line:
-                    needs_uuid = True
-            result_lines.append(new_line)
+            # Skip matches on lines that contain f/t-strings
+            if fstring_lines and _line_at(source, start) in fstring_lines:
+                continue
 
-        result = "".join(result_lines)
+            string_literal = match.group("str")
+            content = _extract_string_content(string_literal)
+            if content is None or not content.strip().startswith("--sql"):
+                continue
+
+            inferred = self._infer_type(content.strip())
+            # Don't wrap when inference fails — SQL[Any] is never useful.
+            if inferred == "Any":
+                continue
+
+            normalized = _normalize_sql_prefix(string_literal)
+            replacement = f"SQL[{inferred}]({normalized})"
+            replacements.append((match.start("str"), match.end("str"), replacement))
+
+            needs_sql_import = True
+            if "datetime." in replacement:
+                needs_datetime = True
+            if "uuid." in replacement:
+                needs_uuid = True
+
+        # Apply right-to-left to preserve earlier positions
+        result = source
+        for start, end, replacement in reversed(replacements):
+            result = result[:start] + replacement + result[end:]
 
         # Add needed imports
         imports_to_add: list[str] = []
@@ -131,72 +163,38 @@ class SQLRewriter:
 
         return RewriteResult(source=result, warnings=warnings)
 
-    def _rewrite_line(self, line: str) -> str:
-        """Rewrite a single line, replacing --sql strings with SQL[T](...)."""
-        # Skip lines that already have SQL[...](...) wrappers
-        if _SQL_WRAPPER_PATTERN.search(line):
-            return line
-
-        # Match: variable = "..." or variable = '...' or variable = """..."""
-        # where the string contains --sql
-        match = _SQL_STRING_PATTERN.search(line)
-        if match:
-            string_literal = match.group("str")
-            content = _extract_string_content(string_literal)
-            if content is not None and content.strip().startswith("--sql"):
-                inferred = self._infer_type(content.strip())
-                # Don't wrap when inference fails — SQL[Any] is never useful.
-                # This covers: empty queries, invalid SQL, DML without RETURNING,
-                # DDL (CREATE/DROP), TCL (BEGIN/COMMIT), etc.
-                if inferred == "Any":
-                    return line
-                # Normalize: --sql<space> -> --sql\n in the string literal
-                normalized = _normalize_sql_prefix(string_literal)
-                replacement = f"SQL[{inferred}]({normalized})"
-                return line[: match.start("str")] + replacement + line[match.end("str") :]
-        return line
-
     def strip(self, source: str) -> str:
         """Remove SQL[T](...) wrappers, restoring plain --sql strings.
+
+        Uses whole-source matching so multiline triple-quoted wrappers are
+        handled correctly.
 
         Example:
             >>> r = SQLRewriter()
             >>> r.strip('from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT 1::INTEGER")')
             'q = "--sql\\\\nSELECT 1::INTEGER"'
         """
-        lines = source.splitlines(keepends=True)
-        result_lines: list[str] = []
         sql_wrapper_removed = False
+        replacements: list[tuple[int, int, str]] = []
 
-        for line in lines:
-            new_line = self._strip_line(line)
-            if new_line != line:
+        for match in _SQL_WRAPPER_PATTERN.finditer(source):
+            inner_string = match.group("inner")
+            content = _extract_string_content(inner_string)
+            # Only strip auto-generated wrappers (--sql + whitespace)
+            if content is not None and _is_sqlty_managed(content):
+                replacements.append(
+                    (match.start("wrapper"), match.end("wrapper"), inner_string)
+                )
                 sql_wrapper_removed = True
-            result_lines.append(new_line)
 
-        result = "".join(result_lines)
+        result = source
+        for start, end, replacement in reversed(replacements):
+            result = result[:start] + replacement + result[end:]
 
-        # Remove imports that are no longer needed
         if sql_wrapper_removed:
             result = self._remove_unused_imports(result)
 
         return result
-
-    def _strip_line(self, line: str) -> str:
-        """Strip SQL[T](...) from a single line, returning the inner string.
-
-        Only strips auto-generated wrappers where the inner string starts
-        with ``--sql`` followed by whitespace (space or newline). Manually
-        written ``SQL[T]("my custom query")`` is left untouched.
-        """
-        match = _SQL_WRAPPER_PATTERN.search(line)
-        if match:
-            inner_string = match.group("inner")
-            content = _extract_string_content(inner_string)
-            # Only strip if the inner content starts with --sql + whitespace
-            if content is not None and _is_sqlty_managed(content):
-                return line[: match.start("wrapper")] + inner_string + line[match.end("wrapper") :]
-        return line
 
     @staticmethod
     def _remove_unused_imports(source: str) -> str:
@@ -301,3 +299,8 @@ def _normalize_sql_prefix(string_literal: str) -> str:
 def _has_import(source: str, import_line: str) -> bool:
     """Check if source already contains a specific import."""
     return any(line.strip() == import_line for line in source.splitlines())
+
+
+def _line_at(source: str, pos: int) -> int:
+    """Return the 1-indexed line number for a character position in *source*."""
+    return source[:pos].count("\n") + 1

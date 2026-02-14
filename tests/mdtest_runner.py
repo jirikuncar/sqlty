@@ -14,12 +14,23 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from sqlty._type_codec import TypeCodec
 
-# Regex to match assertion comments in python blocks
+AssertionKind = Literal[
+    "inferred",
+    "rewritten",
+    "rewritten-file",
+    "stripped",
+    "expanded",
+    "error",
+    "decoded",
+    "warning",
+]
+
+# Regex to match assertion comments in python blocks — alternatives must match AssertionKind.
 ASSERTION_RE = re.compile(
     r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|decoded|warning):\s*(.*)$"
 )
@@ -28,7 +39,7 @@ ASSERTION_RE = re.compile(
 class MDTestFailure(Exception):
     """Raised when an mdtest assertion fails."""
 
-    def __init__(self, *, test: str, kind: str, expected: str, actual: str) -> None:
+    def __init__(self, *, test: str, kind: AssertionKind, expected: str, actual: str) -> None:
         self.test = test
         self.kind = kind
         self.expected = expected
@@ -46,7 +57,7 @@ class MDTestFailure(Exception):
 class Assertion:
     """A single assertion comment from a .md file."""
 
-    kind: str  # "inferred", "rewritten", "rewritten-file", "stripped", "expanded", "error", "decoded", "warning"
+    kind: AssertionKind
     expected: str  # The expected value after the prefix
     line: int  # Line number in the .md file (1-indexed, for update mode)
 
@@ -399,7 +410,7 @@ def _strip_import_lines(source: str) -> str:
     return "\n".join(lines)
 
 
-def _rewrite_line_in_md(md_path: Path, line_num: int, kind: str, actual: str) -> None:
+def _rewrite_line_in_md(md_path: Path, line_num: int, kind: AssertionKind, actual: str) -> None:
     """Rewrite an assertion comment in a .md file with the actual value."""
     lines = md_path.read_text().splitlines(keepends=True)
     # line_num is 1-indexed

@@ -7,6 +7,45 @@ q = "--sql SELECT id::INTEGER, name::TEXT FROM users WHERE active = true"
 # rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE active = true")
 ```
 
+## Triple-quoted single-line string is rewritten
+
+```python
+q = """--sql SELECT id::INTEGER, name::TEXT FROM users"""
+# rewritten: q = SQL[tuple[int, str]]("""--sql\nSELECT id::INTEGER, name::TEXT FROM users""")
+```
+
+## Triple-quoted multiline string is rewritten
+
+```python
+q = """--sql
+SELECT id::INTEGER, name::TEXT FROM users"""
+# rewritten: q = SQL[tuple[int, str]]("""--sql
+# rewritten: SELECT id::INTEGER, name::TEXT FROM users""")
+```
+
+## Triple-quoted multiline with trailing newline is rewritten
+
+```python
+q = """--sql
+SELECT id::INTEGER, name::TEXT
+FROM users
+WHERE active = true"""
+# rewritten: q = SQL[tuple[int, str]]("""--sql
+# rewritten: SELECT id::INTEGER, name::TEXT
+# rewritten: FROM users
+# rewritten: WHERE active = true""")
+```
+
+## Triple-quoted multiline whole-file includes imports
+
+```python
+q = """--sql
+SELECT id::INTEGER FROM users"""
+# rewritten-file: from sqlty import SQL
+# rewritten-file: q = SQL[tuple[int]]("""--sql
+# rewritten-file: SELECT id::INTEGER FROM users""")
+```
+
 ## F-strings are not rewritten
 
 F-strings cannot be statically analyzed, so they are left unchanged
