@@ -97,6 +97,76 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 See [magic codec documentation](magic-codec.md).
 
+## Pattern 5: psycopg3 Row Factories
+
+`SQL[T]` is a `str` subclass, so it passes directly to psycopg3's `execute()`. Combine with `class_row` for end-to-end type safety:
+
+```python
+import psycopg
+from psycopg.rows import class_row
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class User:
+    id: int
+    name: str
+    email: str
+
+# sqlty validates the SQL ↔ Python type mapping at dev time
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
+
+with psycopg.connect("dbname=mydb") as conn:
+    cur = conn.cursor(row_factory=class_row(User))
+    cur.execute(query)
+    users: list[User] = cur.fetchall()
+```
+
+**How the pieces fit together:**
+
+| Layer | Responsibility | When |
+|-------|---------------|------|
+| `sqlty check` | SQL ↔ Python type match | dev time |
+| `SQL[T]` | Carries type parameter | type checking |
+| `class_row(T)` | Maps DB rows → Python objects | runtime |
+
+Without sqlty, a mismatch between SQL columns and `User` fields surfaces only at runtime. With sqlty, `sqlty check` catches it before the code runs.
+
+### Multiple queries with schema inference
+
+With a schema file, you skip explicit `::TYPE` casts:
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```python
+import psycopg
+from psycopg.rows import class_row, dict_row
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class User:
+    id: int
+    name: str
+    email: str
+
+# Types inferred from schema — no casts needed
+get_users = SQL[User]("--sql\nSELECT id, name, email FROM users")
+get_stats = SQL[tuple[int]]("--sql\nSELECT COUNT(*) FROM users")
+
+with psycopg.connect("dbname=mydb") as conn:
+    # Typed rows via class_row
+    users = conn.cursor(row_factory=class_row(User)).execute(get_users).fetchall()
+
+    # Tuple rows for simple aggregates
+    (count,) = conn.execute(get_stats).fetchone()
+```
+
+**Best for:** Production codebases using psycopg3 that want compile-time SQL validation.
+
 ## Which Pattern?
 
 | Pattern | Best for |
@@ -105,5 +175,6 @@ See [magic codec documentation](magic-codec.md).
 | **User-Defined Types** | Readable code, named fields |
 | **Schema-Based** | Projects with CREATE TABLE schemas |
 | **Magic Codec** | Development, prototyping |
+| **psycopg3 Row Factories** | psycopg3 codebases, end-to-end type safety |
 
 All patterns combine freely. Use magic codec during development, rewrite before committing, user-defined types for important domain objects.

@@ -193,6 +193,69 @@ query = SQL[Event](
 
 ---
 
+## 7. psycopg3 Row Factory Integration
+
+Use `SQL[T]` with psycopg3's row factories for end-to-end type safety — sqlty validates at dev time, psycopg3 maps rows at runtime.
+
+### Before: psycopg3 only (runtime errors on mismatch)
+
+```python
+from psycopg.rows import class_row
+from dataclasses import dataclass
+
+@dataclass
+class User:
+    id: int
+    name: str
+    email: str
+
+# If SQL drifts from User (column added, type changed), you find out at runtime
+with psycopg.connect("dbname=mydb") as conn:
+    cur = conn.cursor(row_factory=class_row(User))
+    cur.execute("SELECT id, name, email FROM users")
+    users = cur.fetchall()  # Runtime error if columns don't match User
+```
+
+### After: sqlty + psycopg3 (dev-time validation)
+
+```python
+import psycopg
+from psycopg.rows import class_row
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class User:
+    id: int
+    name: str
+    email: str
+
+# sqlty check: validates SQL return type matches User at dev time
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
+
+with psycopg.connect("dbname=mydb") as conn:
+    cur = conn.cursor(row_factory=class_row(User))
+    cur.execute(query)  # SQL[T] is a str — works directly
+    users: list[User] = cur.fetchall()
+```
+
+### With dict_row for ad-hoc queries
+
+```python
+from psycopg.rows import dict_row
+from sqlty import SQL
+
+query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+
+with psycopg.connect("dbname=mydb") as conn:
+    cur = conn.cursor(row_factory=dict_row)
+    cur.execute(query)
+    rows = cur.fetchall()  # list[dict[str, Any]] at runtime
+    # sqlty still validates the SQL types match tuple[int, str]
+```
+
+---
+
 ## Running Examples
 
 ```bash

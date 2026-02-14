@@ -139,22 +139,21 @@ class SQLRewriter:
 
         # Match: variable = "..." or variable = '...' or variable = """..."""
         # where the string contains --sql
-        for pattern in _SQL_STRING_PATTERNS:
-            match = pattern.search(line)
-            if match:
-                string_literal = match.group("str")
-                content = _extract_string_content(string_literal)
-                if content is not None and content.strip().startswith("--sql"):
-                    inferred = self._infer_type(content.strip())
-                    # Don't wrap when inference fails — SQL[Any] is never useful.
-                    # This covers: empty queries, invalid SQL, DML without RETURNING,
-                    # DDL (CREATE/DROP), TCL (BEGIN/COMMIT), etc.
-                    if inferred == "Any":
-                        return line
-                    # Normalize: --sql<space> -> --sql\n in the string literal
-                    normalized = _normalize_sql_prefix(string_literal)
-                    replacement = f"SQL[{inferred}]({normalized})"
-                    return line[: match.start("str")] + replacement + line[match.end("str") :]
+        match = _SQL_STRING_PATTERN.search(line)
+        if match:
+            string_literal = match.group("str")
+            content = _extract_string_content(string_literal)
+            if content is not None and content.strip().startswith("--sql"):
+                inferred = self._infer_type(content.strip())
+                # Don't wrap when inference fails — SQL[Any] is never useful.
+                # This covers: empty queries, invalid SQL, DML without RETURNING,
+                # DDL (CREATE/DROP), TCL (BEGIN/COMMIT), etc.
+                if inferred == "Any":
+                    return line
+                # Normalize: --sql<space> -> --sql\n in the string literal
+                normalized = _normalize_sql_prefix(string_literal)
+                replacement = f"SQL[{inferred}]({normalized})"
+                return line[: match.start("str")] + replacement + line[match.end("str") :]
         return line
 
     def strip(self, source: str) -> str:
@@ -228,17 +227,19 @@ class SQLRewriter:
 
 # --- Regex patterns ---
 
-# Match string literals that might contain --sql
-# Handles: "...", '...', """...""", '''...'''
+# Match string literals that might contain --sql.
+# Handles: """...""", '''...''', "...", '...'
+# Triple-quoted alternatives come first so they match before single-quoted.
 # Negative lookbehind ensures we skip prefixed strings (f"...", r"...", b"...", etc.)
-_SQL_STRING_PATTERNS = [
-    # Triple-quoted strings first (greedy)
-    re.compile(r'(?<![a-zA-Z])(?P<str>""".*?""")', re.DOTALL),
-    re.compile(r"(?<![a-zA-Z])(?P<str>'''.*?''')", re.DOTALL),
-    # Single-line strings
-    re.compile(r'(?<![a-zA-Z])(?P<str>"[^"]*")'),
-    re.compile(r"(?<![a-zA-Z])(?P<str>'[^']*')"),
-]
+_SQL_STRING_PATTERN = re.compile(
+    r'(?<![a-zA-Z])(?P<str>'
+    r'""".*?"""'        # triple-double-quoted
+    r"|'''.*?'''"       # triple-single-quoted
+    r'|"[^"]*"'         # double-quoted
+    r"|'[^']*'"         # single-quoted
+    r')',
+    re.DOTALL,
+)
 
 # Match f-strings and t-strings (PEP 750, Python 3.14+) that contain --sql
 # (for emitting warnings). Both use interpolation so cannot be statically rewritten.

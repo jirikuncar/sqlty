@@ -91,6 +91,33 @@ warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
 
 Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.
 
+## psycopg3 Integration
+
+`SQL[T]` is a `str` subclass — it works directly with psycopg3's `execute()` and row factories:
+
+```python
+import psycopg
+from psycopg.rows import class_row
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class User:
+    id: int
+    name: str
+    email: str
+
+# sqlty check: validates (int, str, str) matches User fields at dev time
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
+
+with psycopg.connect("dbname=mydb") as conn:
+    cur = conn.cursor(row_factory=class_row(User))
+    cur.execute(query)              # query is just a str — psycopg3 accepts it directly
+    users: list[User] = cur.fetchall()  # row_factory maps rows to User at runtime
+```
+
+**Without sqlty**, if the SQL drifts from the Python type (column added, type changed, name mismatch), you get a runtime error. **With sqlty**, `sqlty check` catches the mismatch before the code runs.
+
 ## Schema-Based Inference
 
 Skip explicit `::TYPE` casts by providing a schema file:
