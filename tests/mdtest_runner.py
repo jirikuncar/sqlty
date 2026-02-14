@@ -14,19 +14,32 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, assert_never
 
 if TYPE_CHECKING:
     from sqlty._type_codec import TypeCodec
 
-# Regex to match assertion comments in python blocks
-ASSERTION_RE = re.compile(r"^#\s+(inferred|rewritten|stripped|expanded|error|decoded):\s*(.*)$")
+AssertionKind = Literal[
+    "inferred",
+    "rewritten",
+    "rewritten-file",
+    "stripped",
+    "expanded",
+    "error",
+    "decoded",
+    "warning",
+]
+
+# Regex to match assertion comments in python blocks — alternatives must match AssertionKind.
+ASSERTION_RE = re.compile(
+    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|decoded|warning):\s*(.*)$"
+)
 
 
 class MDTestFailure(Exception):
     """Raised when an mdtest assertion fails."""
 
-    def __init__(self, *, test: str, kind: str, expected: str, actual: str) -> None:
+    def __init__(self, *, test: str, kind: AssertionKind, expected: str, actual: str) -> None:
         self.test = test
         self.kind = kind
         self.expected = expected
@@ -44,7 +57,7 @@ class MDTestFailure(Exception):
 class Assertion:
     """A single assertion comment from a .md file."""
 
-    kind: str  # "inferred", "rewritten", "stripped", "expanded", "error", "decoded"
+    kind: AssertionKind
     expected: str  # The expected value after the prefix
     line: int  # Line number in the .md file (1-indexed, for update mode)
 
@@ -61,6 +74,17 @@ class MDTestCase:
     files: dict[str, str] = field(default_factory=dict)
     assertions: list[Assertion] = field(default_factory=list)
     update: bool = False
+
+    def _get_sqlty_config(self) -> dict:
+        """Get the sqlty config, supporting both [sqlty] and [tool.sqlty] formats.
+
+        Dedicated mdtest files use ``[sqlty]``, but README.md uses
+        ``[tool.sqlty]`` (the pyproject.toml format). Both are supported.
+        """
+        cfg = self.config.get("sqlty")
+        if cfg:
+            return cfg
+        return self.config.get("tool", {}).get("sqlty", {})
 
     def run(self) -> None:
         """Execute all assertions in this test case."""
@@ -84,6 +108,8 @@ class MDTestCase:
                 return self._infer_type()
             case "rewritten":
                 return self._rewrite()
+            case "rewritten-file":
+                return self._rewrite_file()
             case "stripped":
                 return self._strip()
             case "expanded":
@@ -92,14 +118,16 @@ class MDTestCase:
                 return self._check_error()
             case "decoded":
                 return self._decode()
-            case _:
-                raise ValueError(f"Unknown assertion kind: {assertion.kind}")
+            case "warning":
+                return self._rewrite_warning()
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def _infer_type(self) -> str:
         """Compute inferred type from the SQL block(s) in this test case."""
         from sqlty._sql_analyzer import SQLAnalyzer
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Check for schema file in config
@@ -168,7 +196,7 @@ class MDTestCase:
         """Build an SQLRewriter from test case config."""
         from sqlty._rewriter import SQLRewriter
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Handle schema file from file blocks
@@ -201,7 +229,39 @@ class MDTestCase:
         source = self._extract_source_lines()
         result = rewriter.rewrite(source)
         # Strip import lines — assertions check only the code transformation
-        return _strip_import_lines(result).strip()
+        return _strip_import_lines(result.source).strip()
+
+    def _rewrite_file(self) -> str:
+        """Compute rewritten form including imports (whole-file output).
+
+        For `# rewritten-file:`, we rewrite the non-assertion code lines
+        and return the complete result including injected imports.
+        Consecutive `# rewritten-file:` lines are merged by the parser
+        into a single multi-line expected value.
+        """
+        if not self.python_blocks:
+            return ""
+
+        rewriter = self._build_rewriter()
+        source = self._extract_source_lines()
+        result = rewriter.rewrite(source)
+        return result.source.strip()
+
+    def _rewrite_warning(self) -> str:
+        """Return the first warning from the rewriter.
+
+        For `# warning:`, we rewrite the source and return the first
+        warning message (e.g. f-string skipped).
+        """
+        if not self.python_blocks:
+            return ""
+
+        rewriter = self._build_rewriter()
+        source = self._extract_source_lines()
+        result = rewriter.rewrite(source)
+        if result.warnings:
+            return result.warnings[0]
+        return ""
 
     def _strip(self) -> str:
         """Compute stripped form of source lines above the assertion.
@@ -236,7 +296,7 @@ class MDTestCase:
         """
         from sqlty._sql_analyzer import SQLAnalyzer
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Build schema if available
@@ -284,7 +344,7 @@ class MDTestCase:
         from sqlty._lint import RuleConfig
         from sqlty._sql_analyzer import SQLAnalyzer
 
-        sqlty_config = self.config.get("sqlty", {})
+        sqlty_config = self._get_sqlty_config()
         dialect = sqlty_config.get("dialect", "postgres")
 
         # Build schema if available
@@ -350,17 +410,33 @@ def _strip_import_lines(source: str) -> str:
     return "\n".join(lines)
 
 
-def _rewrite_line_in_md(md_path: Path, line_num: int, kind: str, actual: str) -> None:
-    """Rewrite an assertion comment in a .md file with the actual value."""
+def _rewrite_line_in_md(md_path: Path, line_num: int, kind: AssertionKind, actual: str) -> None:
+    """Rewrite assertion comment(s) in a .md file with the actual value.
+
+    Handles multi-line assertions: scans forward from *line_num* to find
+    all consecutive ``# {kind}:`` lines, then replaces them with the
+    (possibly different number of) lines from *actual*.
+    """
     lines = md_path.read_text().splitlines(keepends=True)
-    # line_num is 1-indexed
     idx = line_num - 1
-    if 0 <= idx < len(lines):
-        # Preserve leading whitespace
-        stripped = lines[idx].lstrip()
-        indent = lines[idx][: len(lines[idx]) - len(stripped)]
-        lines[idx] = f"{indent}# {kind}: {actual}\n"
-        md_path.write_text("".join(lines))
+    if not (0 <= idx < len(lines)):
+        return
+
+    # Preserve leading whitespace from the first assertion line
+    stripped = lines[idx].lstrip()
+    indent = lines[idx][: len(lines[idx]) - len(stripped)]
+
+    # Find the extent of consecutive same-kind assertion lines
+    prefix = f"# {kind}:"
+    end_idx = idx + 1
+    while end_idx < len(lines) and lines[end_idx].strip().startswith(prefix):
+        end_idx += 1
+
+    # Build replacement lines from actual value
+    new_lines = [f"{indent}# {kind}: {part}\n" for part in actual.split("\n")]
+
+    lines[idx:end_idx] = new_lines
+    md_path.write_text("".join(lines))
 
 
 def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase]:
@@ -417,6 +493,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                         sql_blocks.append(block_content)
                 elif code_block_lang in ("python", "py"):
                     # Extract assertions from python block
+                    raw_assertions: list[Assertion] = []
                     for py_line_idx, py_line in enumerate(code_block_lines):
                         match = ASSERTION_RE.match(py_line.strip())
                         if match:
@@ -425,13 +502,19 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                             # The assertion's line in the .md file
                             # code_block started at some line, py_line_idx into it
                             assertion_md_line = line_num - len(code_block_lines) + py_line_idx
-                            assertions.append(
+                            raw_assertions.append(
                                 Assertion(
                                     kind=kind,
                                     expected=expected,
                                     line=assertion_md_line,
                                 )
                             )
+                    # Merge consecutive same-kind assertions into multi-line expected values.
+                    # This allows whole-file assertions like:
+                    #   # rewritten-file: from sqlty import SQL
+                    #   # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+                    merged = _merge_consecutive_assertions(raw_assertions)
+                    assertions.extend(merged)
                     if pending_file_label:
                         files[pending_file_label] = block_content
                         pending_file_label = None
@@ -523,6 +606,30 @@ def collect_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestIt
     """Collect test items from a markdown file for pytest."""
     test_cases = parse_mdtest_file(md_path, update=update)
     return [MDTestItem(tc.name, tc) for tc in test_cases]
+
+
+def _merge_consecutive_assertions(assertions: list[Assertion]) -> list[Assertion]:
+    """Merge consecutive same-kind assertions into multi-line expected values.
+
+    When multiple ``# rewritten-file:`` (or any same-kind) lines appear in
+    sequence, they represent a single multi-line expected value.  The lines
+    are joined with ``\\n`` so the comparison works against multi-line output.
+    """
+    if not assertions:
+        return []
+
+    merged: list[Assertion] = []
+    for assertion in assertions:
+        if merged and merged[-1].kind == assertion.kind:
+            prev = merged[-1]
+            merged[-1] = Assertion(
+                kind=prev.kind,
+                expected=prev.expected + "\n" + assertion.expected,
+                line=prev.line,  # keep first line number for update mode
+            )
+        else:
+            merged.append(assertion)
+    return merged
 
 
 def _merge_config(base: dict, override: dict) -> dict:

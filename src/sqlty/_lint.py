@@ -16,6 +16,8 @@ Configuration via pyproject.toml:
     stale-rewrite = "warn"              # default
     stale-type = "warn"                 # default
     inline-sql-comment = "warn"         # default
+    fstring-skipped = "warn"            # default
+    tstring-skipped = "warn"            # default
 """
 
 from __future__ import annotations
@@ -93,6 +95,18 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=True,
         description='--sql followed by space makes entire query a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
+    ),
+    "fstring-skipped": LintRule(
+        name="fstring-skipped",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="f-string with --sql prefix skipped (cannot be statically rewritten)",
+    ),
+    "tstring-skipped": LintRule(
+        name="tstring-skipped",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="t-string with --sql prefix skipped (cannot be statically rewritten)",
     ),
 }
 

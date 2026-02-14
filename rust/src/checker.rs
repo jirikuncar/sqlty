@@ -202,21 +202,21 @@ fn extract_type_from_wrapper(line: &str) -> Option<String> {
     Some(cap.get(1)?.as_str().to_string())
 }
 
-/// Infer type from SQL content (after removing `--sql` prefix).
+/// Infer type from SQL content by letting the SQL parser handle `--sql` as a comment.
+///
+/// - `--sql\nSELECT ...` → `\\n` becomes real newline; parser sees `--sql`
+///   as a comment and `SELECT ...` as the query.
+/// - `--sql SELECT ...` → entire line is a SQL comment → empty query → None.
 fn infer_from_sql_content(sql_content: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let query = if sql_content.starts_with("--sql ") {
-        sql_content[6..].trim()
-    } else if sql_content.starts_with("--sql\\n") {
-        sql_content[7..].trim()
-    } else if sql_content.starts_with("--sql\n") {
-        sql_content[6..].trim()
-    } else if sql_content.starts_with("--sql") {
-        sql_content[5..].trim()
-    } else {
-        return None;
-    };
+    let mut query = sql_content.to_string();
 
-    infer_type(query, dialect, schema)
+    // Convert source-text \\n escape to real newline so the parser
+    // sees --sql as a comment and the query on the next line.
+    if query.starts_with("--sql\\n") {
+        query = query.replacen("\\n", "\n", 1);
+    }
+
+    infer_type(&query, dialect, schema)
 }
 
 #[cfg(test)]

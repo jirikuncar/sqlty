@@ -3,10 +3,14 @@
 Usage:
     from sqlty.core import infer_type, rewrite_source, strip_source, check_source
 
-Currently uses ``sqlty._core_py`` (pure Python). When a Rust extension is
-compiled via maturin/pyo3, it will be installed as ``sqlty._core`` and
-this module will import from it instead. Both implementations must satisfy
-the same API contract (see ``tests/test_core_conformance.py``).
+Backend selection via ``SQLTY_LIB`` environment variable:
+
+- ``SQLTY_LIB=py``  — force the pure-Python backend (``_core_py``)
+- ``SQLTY_LIB=rs``  — force the Rust backend (``_core``); fails if not compiled
+- unset (default)   — auto: use Rust if available, otherwise Python
+
+Both implementations must satisfy the same API contract
+(see ``tests/test_core_conformance.py``).
 
 ``check_source`` is wrapped to add Python-side user-defined type checking
 (TypedDict, NamedTuple, dataclass, Pydantic) on top of whichever backend
@@ -15,22 +19,15 @@ is active, since type extraction requires Python's ``ast`` module.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sqlty._type_extractor import TypeInfo
 
-try:
-    from sqlty._core import (
-        check_source as _backend_check_source,
-    )
-    from sqlty._core import (
-        expand_star,
-        infer_type,
-        rewrite_source,
-        strip_source,
-    )
-except ImportError:
+_SQLTY_LIB = os.environ.get("SQLTY_LIB")
+
+if _SQLTY_LIB == "py":
     from sqlty._core_py import (
         check_source as _backend_check_source,
     )
@@ -40,6 +37,37 @@ except ImportError:
         rewrite_source,
         strip_source,
     )
+elif _SQLTY_LIB == "rs":
+    from sqlty._core import (
+        check_source as _backend_check_source,
+    )
+    from sqlty._core import (
+        expand_star,
+        infer_type,
+        rewrite_source,
+        strip_source,
+    )
+else:
+    try:
+        from sqlty._core import (
+            check_source as _backend_check_source,
+        )
+        from sqlty._core import (
+            expand_star,
+            infer_type,
+            rewrite_source,
+            strip_source,
+        )
+    except ImportError:
+        from sqlty._core_py import (
+            check_source as _backend_check_source,
+        )
+        from sqlty._core_py import (
+            expand_star,
+            infer_type,
+            rewrite_source,
+            strip_source,
+        )
 
 
 def check_source(
