@@ -1,12 +1,19 @@
-"""Root conftest.py — pytest plugin for mdtest .md file discovery."""
+"""Root conftest.py — pytest plugin for mdtest discovery and backend parametrisation."""
 
 from __future__ import annotations
 
+import os
+import types
 from pathlib import Path
 
 import pytest
 
 from tests.mdtest_runner import MDTestFailure, parse_mdtest_file
+
+
+# ---------------------------------------------------------------------------
+# CLI options
+# ---------------------------------------------------------------------------
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -16,6 +23,71 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Update assertion comments in .md files with actual computed values",
     )
+    parser.addoption(
+        "--sqlty-lib",
+        choices=("py", "rs", "both"),
+        default=os.environ.get("SQLTY_LIB", "both"),
+        help="Backend to test: py (Python), rs (Rust), both (default)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Backend parametrisation: ``core`` fixture
+# ---------------------------------------------------------------------------
+
+
+def _load_backend(name: str) -> types.ModuleType:
+    """Import the named backend module."""
+    if name == "rs":
+        import sqlty._core as mod
+
+        return mod  # type: ignore[return-value]
+    import sqlty._core_py as mod
+
+    return mod  # type: ignore[return-value]
+
+
+def _available_backends(config: pytest.Config) -> list[str]:
+    """Determine which backends to exercise based on --sqlty-lib / SQLTY_LIB."""
+    choice = config.getoption("--sqlty-lib", default="both")
+    if choice in ("py", "rs"):
+        return [choice]
+    # "both" — include Rust only if compiled
+    backends = ["py"]
+    try:
+        import sqlty._core  # noqa: F401
+
+        backends.append("rs")
+    except ImportError:
+        pass
+    return backends
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Store available backends for fixture parametrisation
+    config._sqlty_backends = _available_backends(config)  # type: ignore[attr-defined]
+
+
+@pytest.fixture()
+def core(request: pytest.FixtureRequest) -> types.ModuleType:
+    """Provides the sqlty core backend module (``_core_py`` or ``_core``).
+
+    Parametrised with ``["py"]``, ``["rs"]``, or both, depending on
+    ``--sqlty-lib`` / ``SQLTY_LIB``.  Each value exposes the 5 core
+    functions: ``infer_type``, ``rewrite_source``, ``strip_source``,
+    ``expand_star``, ``check_source``.
+    """
+    name: str = request.param
+    if name == "rs":
+        pytest.importorskip("sqlty._core", reason="Rust backend not compiled")
+    return _load_backend(name)
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Dynamically parametrise the ``core`` fixture with available backends."""
+    if "core" in metafunc.fixturenames:
+        backends = metafunc.config._sqlty_backends  # type: ignore[attr-defined]
+        metafunc.parametrize("core", backends, indirect=True)
 
 
 def pytest_collect_file(parent: pytest.Collector, file_path: Path) -> MDTestFile | None:
