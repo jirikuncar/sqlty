@@ -14,7 +14,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, assert_never
 
 if TYPE_CHECKING:
     from sqlty._type_codec import TypeCodec
@@ -120,8 +120,8 @@ class MDTestCase:
                 return self._decode()
             case "warning":
                 return self._rewrite_warning()
-            case _:
-                raise ValueError(f"Unknown assertion kind: {assertion.kind}")
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def _infer_type(self) -> str:
         """Compute inferred type from the SQL block(s) in this test case."""
@@ -411,16 +411,32 @@ def _strip_import_lines(source: str) -> str:
 
 
 def _rewrite_line_in_md(md_path: Path, line_num: int, kind: AssertionKind, actual: str) -> None:
-    """Rewrite an assertion comment in a .md file with the actual value."""
+    """Rewrite assertion comment(s) in a .md file with the actual value.
+
+    Handles multi-line assertions: scans forward from *line_num* to find
+    all consecutive ``# {kind}:`` lines, then replaces them with the
+    (possibly different number of) lines from *actual*.
+    """
     lines = md_path.read_text().splitlines(keepends=True)
-    # line_num is 1-indexed
     idx = line_num - 1
-    if 0 <= idx < len(lines):
-        # Preserve leading whitespace
-        stripped = lines[idx].lstrip()
-        indent = lines[idx][: len(lines[idx]) - len(stripped)]
-        lines[idx] = f"{indent}# {kind}: {actual}\n"
-        md_path.write_text("".join(lines))
+    if not (0 <= idx < len(lines)):
+        return
+
+    # Preserve leading whitespace from the first assertion line
+    stripped = lines[idx].lstrip()
+    indent = lines[idx][: len(lines[idx]) - len(stripped)]
+
+    # Find the extent of consecutive same-kind assertion lines
+    prefix = f"# {kind}:"
+    end_idx = idx + 1
+    while end_idx < len(lines) and lines[end_idx].strip().startswith(prefix):
+        end_idx += 1
+
+    # Build replacement lines from actual value
+    new_lines = [f"{indent}# {kind}: {part}\n" for part in actual.split("\n")]
+
+    lines[idx:end_idx] = new_lines
+    md_path.write_text("".join(lines))
 
 
 def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase]:
