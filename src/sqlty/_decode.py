@@ -9,7 +9,7 @@ Direct Usage (No Side Effects):
 
     code = b'q = "--sql SELECT 1::INTEGER"'
     transformed, _ = decode(code)
-    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
+    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
 
 The decode function automatically:
     - Transforms strings prefixed with '--sql' into SQL[T](...) calls
@@ -18,15 +18,16 @@ The decode function automatically:
     - Uses isort for proper import ordering
     - Leaves strings unchanged when inference fails (invalid SQL, DML
       without RETURNING, DDL, empty queries)
+    - Never modifies string content — only adds/removes the SQL[T]() wrapper
 
 Examples:
     Simple query:
         b'q = "--sql SELECT 1::INTEGER"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
+        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
 
     Multiple columns:
         b'q = "--sql SELECT id::INTEGER, name::TEXT"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql\\nSELECT id::INTEGER, name::TEXT")'
+        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT")'
 
     Invalid/non-result queries are left unchanged:
         b'q = "--sql UPDATE users SET name = 1"'
@@ -93,7 +94,7 @@ def _transform_sql_string(string_literal: str) -> str:
         The transformed string as a SQL[T](...) call, or the original if
         inference fails
     """
-    from sqlty._rewriter import _extract_string_content, _normalize_sql_prefix
+    from sqlty._rewriter import _extract_string_content
 
     content = _extract_string_content(string_literal)
     if content is None or not content.strip().startswith("--sql"):
@@ -103,8 +104,7 @@ def _transform_sql_string(string_literal: str) -> str:
     # Don't wrap when inference fails — SQL[Any] is never useful.
     if inferred_type == "Any":
         return string_literal
-    normalized = _normalize_sql_prefix(string_literal)
-    return f"SQL[{inferred_type}]({normalized})"
+    return f"SQL[{inferred_type}]({string_literal})"
 
 
 def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:

@@ -1,8 +1,11 @@
 """SQL string rewriter — transforms between --sql strings and SQL[T](...) calls.
 
 Provides two complementary operations:
-- rewrite(): "--sql SELECT ..." → SQL[tuple[int]]("--sql\\nSELECT ...")
-- strip():   SQL[tuple[int]]("--sql\\nSELECT ...") → "--sql\\nSELECT ..."
+- rewrite(): "--sql SELECT ..." → SQL[tuple[int]]("--sql SELECT ...")
+- strip():   SQL[tuple[int]]("--sql SELECT ...") → "--sql SELECT ..."
+
+The rewriter never modifies the string content — only adds/removes the
+SQL[T]() wrapper.  This guarantees strip(rewrite(source)) == source.
 
 Both operations handle import injection/removal (datetime, uuid, SQL).
 
@@ -134,8 +137,7 @@ class SQLRewriter:
             if inferred == "Any":
                 continue
 
-            normalized = _normalize_sql_prefix(string_literal)
-            replacement = f"SQL[{inferred}]({normalized})"
+            replacement = f"SQL[{inferred}]({string_literal})"
             replacements.append((match.start("str"), match.end("str"), replacement))
 
             needs_sql_import = True
@@ -286,14 +288,6 @@ def _is_sqlty_managed(content: str) -> bool:
     # Whitespace: space, real newline, tab
     return rest[0] in (" ", "\n", "\r", "\t")
 
-
-def _normalize_sql_prefix(string_literal: str) -> str:
-    """Normalize --sql<space> to --sql\\n in a string literal.
-
-    Ensures the canonical format has --sql followed by a newline escape,
-    not a space. Already-normalized strings (with \\n) are unchanged.
-    """
-    return string_literal.replace("--sql ", "--sql\\n", 1)
 
 
 def _has_import(source: str, import_line: str) -> bool:

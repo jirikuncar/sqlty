@@ -51,6 +51,18 @@ q = SQL[User]("SELECT id, name FROM users")
 # stripped: q = SQL[User]("SELECT id, name FROM users")
 ```
 
+## Space form round-trip: rewrite preserves space
+
+```python
+q = "--sql SELECT id::INTEGER FROM users"
+# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+```
+
+```python
+q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# stripped: q = "--sql SELECT id::INTEGER FROM users"
+```
+
 ## Triple-quoted multiline round-trip: rewrite then strip
 
 ```python

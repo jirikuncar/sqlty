@@ -84,11 +84,11 @@ q = '--sql\nSELECT id::INTEGER FROM users'
 # rewritten: q = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
 ```
 
-## Space after --sql is normalized to newline
+## Space after --sql is preserved
 
-This test uses `--sql ` (space) intentionally to verify normalization:
+The rewriter never modifies string content — space is kept as-is:
 
 ```python
 q = "--sql SELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ```
