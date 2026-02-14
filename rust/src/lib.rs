@@ -37,9 +37,10 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Stri
     analyzer::infer_type(sql, dialect, &schema)
 }
 
-/// Rewrite Python source: "--sql ..." -> SQL[T]("--sql\n...").
+/// Rewrite Python source: "--sql\n..." -> SQL[T]("--sql\n...").
 ///
 /// Adds necessary imports (SQL, datetime, uuid) at the top.
+/// Never modifies string content — only adds the SQL[T]() wrapper.
 ///
 /// Args:
 ///     source: Python source code

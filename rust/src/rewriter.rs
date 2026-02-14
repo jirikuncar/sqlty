@@ -1,8 +1,11 @@
 //! Python source rewriter — rewrite/strip `--sql` strings.
 //!
 //! Handles:
-//! - `rewrite_source()`: `"--sql ..." → SQL[T]("--sql\n...")`
+//! - `rewrite_source()`: `"--sql\n..." → SQL[T]("--sql\n...")`
 //! - `strip_source()`: `SQL[T]("--sql\n...") → "--sql\n..."`
+//!
+//! The rewriter never modifies string content — it only adds/removes
+//! the `SQL[T]()` wrapper.  This guarantees `strip(rewrite(x)) == x`.
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -43,9 +46,10 @@ static WRAPPER_EXTRACT_PATTERN: Lazy<Regex> = Lazy::new(|| {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Rewrite Python source: `"--sql ..."` → `SQL[T]("--sql\n...")`.
+/// Rewrite Python source: `"--sql\n..."` → `SQL[T]("--sql\n...")`.
 ///
 /// Adds necessary imports (SQL, datetime, uuid) at the top.
+/// Never modifies string content — only adds the `SQL[T]()` wrapper.
 pub fn rewrite_source(source: &str, dialect: &str, schema: &Option<Schema>) -> String {
     let mut result_lines: Vec<String> = Vec::new();
     let mut any_rewritten = false;
@@ -105,7 +109,9 @@ pub fn strip_source(source: &str) -> String {
 // Line-level processing
 // ---------------------------------------------------------------------------
 
-/// Rewrite a single line: detect `"--sql ..."` and wrap with `SQL[T](...)`.
+/// Rewrite a single line: detect `"--sql\n..."` and wrap with `SQL[T](...)`.
+///
+/// Never modifies string content — only adds the `SQL[T]()` wrapper.
 fn rewrite_line(line: &str, dialect: &str, schema: &Option<Schema>) -> String {
     // Skip lines that already have SQL[...](...) wrappers
     if SQL_WRAPPER_PATTERN.is_match(line) {
@@ -131,9 +137,7 @@ fn rewrite_line(line: &str, dialect: &str, schema: &Option<Schema>) -> String {
                     let inferred = infer_from_sql_content(sql_content, dialect, schema);
 
                     if let Some(type_str) = inferred {
-                        // Normalize: --sql<space> → --sql\n
-                        let normalized = normalize_sql_prefix(string_literal);
-                        let replacement = format!("SQL[{}]({})", type_str, normalized);
+                        let replacement = format!("SQL[{}]({})", type_str, string_literal);
                         return line.replace(string_literal, &replacement);
                     }
                 }
@@ -195,26 +199,21 @@ fn is_sqlty_managed(content: &str) -> bool {
     matches!(first, b' ' | b'\n' | b'\r' | b'\t')
 }
 
-/// Normalize `--sql<space>` to `--sql\n` in a string literal.
-fn normalize_sql_prefix(literal: &str) -> String {
-    literal.replacen("--sql ", "--sql\\n", 1)
-}
-
-/// Infer type from SQL content (after removing `--sql` prefix).
+/// Infer type from SQL content by letting the SQL parser handle `--sql` as a comment.
+///
+/// - `--sql\nSELECT ...` → `\\n` becomes real newline; parser sees `--sql`
+///   as a comment and `SELECT ...` as the query.
+/// - `--sql SELECT ...` → entire line is a SQL comment → empty query → None.
 fn infer_from_sql_content(sql_content: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let query = if sql_content.starts_with("--sql ") {
-        sql_content[6..].trim()
-    } else if sql_content.starts_with("--sql\\n") {
-        sql_content[7..].trim()
-    } else if sql_content.starts_with("--sql\n") {
-        sql_content[6..].trim()
-    } else if sql_content.starts_with("--sql") {
-        sql_content[5..].trim()
-    } else {
-        return None;
-    };
+    let mut query = sql_content.to_string();
 
-    infer_type(query, dialect, schema)
+    // Convert source-text \\n escape to real newline so the parser
+    // sees --sql as a comment and the query on the next line.
+    if query.starts_with("--sql\\n") {
+        query = query.replacen("\\n", "\n", 1);
+    }
+
+    infer_type(&query, dialect, schema)
 }
 
 /// Inject necessary imports at the top of the source.
@@ -288,7 +287,7 @@ mod tests {
     #[test]
     fn test_rewrite_basic() {
         let result = rewrite_source(
-            r#"q = "--sql SELECT 1::INTEGER""#,
+            r#"q = "--sql\nSELECT 1::INTEGER""#,
             "postgres",
             &None,
         );
@@ -297,13 +296,25 @@ mod tests {
     }
 
     #[test]
-    fn test_rewrite_normalizes_newline() {
+    fn test_rewrite_preserves_string_content() {
+        // Rewriter never modifies string content — only adds SQL[T]() wrapper
+        let result = rewrite_source(
+            r#"q = "--sql\nSELECT 1::INTEGER""#,
+            "postgres",
+            &None,
+        );
+        assert!(result.contains(r#""--sql\nSELECT 1::INTEGER""#));
+    }
+
+    #[test]
+    fn test_space_form_is_sql_comment_not_wrapped() {
+        // --sql SELECT ... with space is a SQL comment — parser sees empty query
         let result = rewrite_source(
             r#"q = "--sql SELECT 1::INTEGER""#,
             "postgres",
             &None,
         );
-        assert!(result.contains(r#""--sql\nSELECT 1::INTEGER""#));
+        assert!(!result.contains("SQL["));
     }
 
     #[test]
@@ -317,10 +328,19 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_rewrite_idempotent() {
-        let source = r#"q = "--sql SELECT 1::INTEGER""#;
+        let source = r#"q = "--sql\nSELECT 1::INTEGER""#;
         let once = rewrite_source(source, "postgres", &None);
         let twice = rewrite_source(&once, "postgres", &None);
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_strip_rewrite_roundtrip() {
+        // strip(rewrite(source)) == source (ignoring imports)
+        let original = r#"q = "--sql\nSELECT 1::INTEGER""#;
+        let rewritten = rewrite_source(original, "postgres", &None);
+        let stripped = strip_source(&rewritten);
+        assert_eq!(stripped.trim(), original.trim());
     }
 
     #[test]

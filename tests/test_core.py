@@ -55,7 +55,7 @@ def test_rewrite_source_basic():
     """rewrite_source wraps --sql strings in SQL[T](...)."""
     from sqlty.core import rewrite_source
 
-    source = 'q = "--sql SELECT id::INTEGER FROM users"'
+    source = 'q = "--sql\\nSELECT id::INTEGER FROM users"'
     result = rewrite_source(source)
     assert "SQL[tuple[int]]" in result
     assert "from sqlty import SQL" in result
@@ -84,11 +84,12 @@ def test_round_trip():
     """rewrite -> strip -> rewrite -> strip is idempotent."""
     from sqlty.core import rewrite_source, strip_source
 
-    original = 'q = "--sql SELECT id::INTEGER, name::TEXT FROM users"'
+    original = 'q = "--sql\\nSELECT id::INTEGER, name::TEXT FROM users"'
     rewritten = rewrite_source(original)
-    # Rewrite normalizes --sql<space> to --sql\n
-    assert '"--sql\\nSELECT' in rewritten
+    assert "SQL[" in rewritten
     stripped = strip_source(rewritten)
+    # strip(rewrite(source)) == source
+    assert stripped.strip() == original.strip()
     # Second cycle is stable (idempotent)
     re_rewritten = rewrite_source(stripped)
     re_stripped = strip_source(re_rewritten)

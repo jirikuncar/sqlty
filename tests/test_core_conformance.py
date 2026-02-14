@@ -198,8 +198,6 @@ class TestRewriteSource:
 
     def test_space_form_is_sql_comment_not_wrapped(self, core: types.ModuleType):
         """--sql SELECT ... with space is a SQL comment — parser sees empty query."""
-        if core.__name__ == "sqlty._core":
-            pytest.xfail("Rust backend still normalizes --sql<space> → --sql\\n")
         source = 'q = "--sql SELECT 1::INTEGER"'
         assert "SQL[" not in core.rewrite_source(source)
 
