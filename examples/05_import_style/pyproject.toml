@@ -1,0 +1,11 @@
+[tool.sqlty]
+dialect = "postgres"
+
+# import-style controls the import line and how SQL[T](...) is written.
+#
+# Supported styles:
+#   "from sqlty import SQL"          (default) -> SQL[T](...)
+#   "from sqlty import SQL as Q"               -> Q[T](...)
+#   "import sqlty"                             -> sqlty.SQL[T](...)
+#   "import sqlty as sy"                       -> sy.SQL[T](...)
+import-style = "from sqlty import SQL as Q"

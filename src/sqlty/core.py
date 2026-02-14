@@ -34,29 +34,41 @@ if _SQLTY_LIB == "py":
     from sqlty._core_py import (
         expand_star,
         infer_type,
-        rewrite_source,
-        strip_source,
+    )
+    from sqlty._core_py import (
+        rewrite_source as _backend_rewrite_source,
+    )
+    from sqlty._core_py import (
+        strip_source as _backend_strip_source,
     )
 elif _SQLTY_LIB == "rs":
-    from sqlty._core import (
+    from sqlty._core import (  # type: ignore[assignment]
         check_source as _backend_check_source,
     )
     from sqlty._core import (
         expand_star,
         infer_type,
-        rewrite_source,
-        strip_source,
+    )
+    from sqlty._core import (  # type: ignore[assignment]
+        rewrite_source as _backend_rewrite_source,
+    )
+    from sqlty._core import (  # type: ignore[assignment]
+        strip_source as _backend_strip_source,
     )
 else:
     try:
-        from sqlty._core import (
+        from sqlty._core import (  # type: ignore[assignment]
             check_source as _backend_check_source,
         )
         from sqlty._core import (
             expand_star,
             infer_type,
-            rewrite_source,
-            strip_source,
+        )
+        from sqlty._core import (  # type: ignore[assignment]
+            rewrite_source as _backend_rewrite_source,
+        )
+        from sqlty._core import (  # type: ignore[assignment]
+            strip_source as _backend_strip_source,
         )
     except ImportError:
         from sqlty._core_py import (
@@ -65,9 +77,53 @@ else:
         from sqlty._core_py import (
             expand_star,
             infer_type,
-            rewrite_source,
-            strip_source,
         )
+        from sqlty._core_py import (
+            rewrite_source as _backend_rewrite_source,
+        )
+        from sqlty._core_py import (
+            strip_source as _backend_strip_source,
+        )
+
+
+def rewrite_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    import_style: str | None = None,
+) -> str:
+    """Rewrite Python source: "--sql ..." -> SQL[T]("--sql ...").
+
+    Delegates to the active backend (Rust or Python).
+
+    Args:
+        source: Python source code
+        dialect: SQL dialect
+        schema_sql: Optional CREATE TABLE statements
+        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+
+    Returns:
+        Rewritten source code
+    """
+    return _backend_rewrite_source(
+        source, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+    )
+
+
+def strip_source(source: str, *, import_style: str | None = None) -> str:
+    """Strip Python source: SQL[T]("--sql ...") -> "--sql ...".
+
+    Delegates to the active backend (Rust or Python).
+
+    Args:
+        source: Python source code with SQL[T](...) wrappers
+        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+
+    Returns:
+        Stripped source code
+    """
+    return _backend_strip_source(source, import_style=import_style)
 
 
 def check_source(
@@ -76,6 +132,7 @@ def check_source(
     dialect: str = "postgres",
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
+    import_style: str | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
@@ -90,25 +147,33 @@ def check_source(
         dialect: SQL dialect
         schema_sql: Optional CREATE TABLE statements
         rules: Rule severity overrides
+        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
 
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
     """
     import re
 
+    from sqlty._rewriter import ImportStyle
     from sqlty._type_extractor import extract_type_definitions
 
+    istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
+    wrapper_name = istyle.wrapper_name
+    escaped_wrapper = re.escape(wrapper_name)
+
     # Run the backend check_source (Rust or Python)
-    diagnostics = _backend_check_source(source, dialect=dialect, schema_sql=schema_sql, rules=rules)
+    diagnostics = _backend_check_source(
+        source, dialect=dialect, schema_sql=schema_sql, rules=rules, import_style=import_style
+    )
 
     # Extract user-defined type definitions from source
     type_defs = extract_type_definitions(source)
 
-    # Find all non-tuple SQL[T](...) annotations — these need special handling
+    # Find all non-tuple {wrapper_name}[T](...) annotations — these need special handling
     # because stale-type always fires for non-tuple types ("User" != "tuple[int, str]")
     non_tuple_lines: set[int] = set()
     for i, line in enumerate(source.splitlines(), 1):
-        type_match = re.search(r"SQL\[(.+?)\]\(", line.strip())
+        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line.strip())
         if type_match:
             annotated_type = type_match.group(1)
             if not annotated_type.startswith("tuple["):
@@ -128,7 +193,14 @@ def check_source(
     # Add structural checks for user-defined types found in source
     if type_defs:
         filtered = _enhance_with_user_type_checks(
-            filtered, source, type_defs, non_tuple_lines, dialect, schema_sql, rules
+            filtered,
+            source,
+            type_defs,
+            non_tuple_lines,
+            dialect,
+            schema_sql,
+            rules,
+            wrapper_name=wrapper_name,
         )
 
     return filtered
@@ -142,6 +214,8 @@ def _enhance_with_user_type_checks(
     dialect: str,
     schema_sql: str | None,
     rules: dict[str, str] | None,
+    *,
+    wrapper_name: str = "SQL",
 ) -> list[dict[str, str | int | None]]:
     """Add structural type checks for user-defined types.
 
@@ -155,12 +229,14 @@ def _enhance_with_user_type_checks(
     from sqlty._sql_analyzer import SQLAnalyzer
     from sqlty._type_extractor import check_type_compatibility
 
+    escaped_wrapper = re.escape(wrapper_name)
+
     # Build map of lines with user-type annotations found in source
     user_type_lines: dict[int, tuple[str, TypeInfo]] = {}
     for i, line in enumerate(source.splitlines(), 1):
         if i not in non_tuple_lines:
             continue
-        type_match = re.search(r"SQL\[(.+?)\]\(", line.strip())
+        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line.strip())
         if type_match:
             annotated_type = type_match.group(1)
             if annotated_type in type_defs:
@@ -192,7 +268,9 @@ def _enhance_with_user_type_checks(
             stripped = line.strip()
 
             # Extract SQL content from wrapper
-            sql_match = re.search(r'SQL\[.*?\]\(\s*["\'](.+?)["\']\s*\)', stripped, re.DOTALL)
+            sql_match = re.search(
+                rf'{escaped_wrapper}\[.*?\]\(\s*["\'](.+?)["\']\s*\)', stripped, re.DOTALL
+            )
             if not sql_match:
                 continue
 

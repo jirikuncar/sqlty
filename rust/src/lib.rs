@@ -46,14 +46,15 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Stri
 ///     source: Python source code
 ///     dialect: SQL dialect
 ///     schema_sql: Optional CREATE TABLE statements
+///     import_style: Import style (e.g. "from sqlty import SQL as Q")
 ///
 /// Returns:
 ///     Rewritten source code
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None))]
-fn rewrite_source(source: &str, dialect: &str, schema_sql: Option<&str>) -> String {
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None))]
+fn rewrite_source(source: &str, dialect: &str, schema_sql: Option<&str>, import_style: Option<&str>) -> String {
     let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    rewriter::rewrite_source(source, dialect, &schema)
+    rewriter::rewrite_source(source, dialect, &schema, import_style)
 }
 
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
@@ -62,13 +63,14 @@ fn rewrite_source(source: &str, dialect: &str, schema_sql: Option<&str>) -> Stri
 ///
 /// Args:
 ///     source: Python source code with SQL[T](...) wrappers
+///     import_style: Import style (e.g. "from sqlty import SQL as Q")
 ///
 /// Returns:
 ///     Stripped source code
 #[pyfunction]
-#[pyo3(signature = (source,))]
-fn strip_source(source: &str) -> String {
-    rewriter::strip_source(source)
+#[pyo3(signature = (source, *, import_style = None))]
+fn strip_source(source: &str, import_style: Option<&str>) -> String {
+    rewriter::strip_source(source, import_style)
 }
 
 /// Expand SELECT * into explicit column list.
@@ -94,20 +96,22 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 ///     dialect: SQL dialect
 ///     schema_sql: Optional CREATE TABLE statements
 ///     rules: Rule severity overrides (e.g., {"select-star": "ignore"})
+///     import_style: Import style (e.g. "from sqlty import SQL as Q")
 ///
 /// Returns:
 ///     List of diagnostic dicts with keys: rule, message, severity, line
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None))]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
     dialect: &str,
     schema_sql: Option<&str>,
     rules: Option<HashMap<String, String>>,
+    import_style: Option<&str>,
 ) -> Bound<'py, PyList> {
     let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    let diagnostics = checker::check_source(source, dialect, &schema, rules);
+    let diagnostics = checker::check_source(source, dialect, &schema, rules, import_style);
 
     let list = PyList::empty(py);
     for diag in diagnostics {

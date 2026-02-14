@@ -214,7 +214,12 @@ class MDTestCase:
         if codec_config:
             codec = self._build_codec(codec_config)
 
-        return SQLRewriter(dialect=dialect, schema_path=schema_path_str, codec=codec)
+        # Handle import-style config
+        import_style = sqlty_config.get("import-style")
+
+        return SQLRewriter(
+            dialect=dialect, schema_path=schema_path_str, codec=codec, import_style=import_style
+        )
 
     def _rewrite(self) -> str:
         """Compute rewritten form of source lines above the assertion.
@@ -229,7 +234,7 @@ class MDTestCase:
         source = self._extract_source_lines()
         result = rewriter.rewrite(source)
         # Strip import lines — assertions check only the code transformation
-        return _strip_import_lines(result.source).strip()
+        return _strip_import_lines(result.source, rewriter._import_style.import_line).strip()
 
     def _rewrite_file(self) -> str:
         """Compute rewritten form including imports (whole-file output).
@@ -334,6 +339,16 @@ class MDTestCase:
         # Strip import lines for clean comparison
         return _strip_import_lines(result).strip()
 
+    def _get_import_line(self) -> str:
+        """Get the import line from the test's sqlty config."""
+        from sqlty._rewriter import ImportStyle
+
+        sqlty_config = self._get_sqlty_config()
+        style_str = sqlty_config.get("import-style")
+        if style_str:
+            return ImportStyle.parse(style_str).import_line
+        return "from sqlty import SQL"
+
     def _check_error(self) -> str:
         """Run checker and return the first diagnostic as a ty-style string.
 
@@ -392,19 +407,20 @@ class MDTestCase:
         return ""
 
 
-def _strip_import_lines(source: str) -> str:
+def _strip_import_lines(source: str, import_line: str = "from sqlty import SQL") -> str:
     """Remove import lines from rewriter output.
 
     The `# rewritten:` assertion checks only the code transformation,
     not import injection. Import lines are:
     - import datetime
     - import uuid
-    - from sqlty import SQL
+    - The configured import line (default: ``from sqlty import SQL``)
     """
+    skip = {"import datetime", "import uuid", import_line}
     lines = []
     for line in source.splitlines():
         stripped = line.strip()
-        if stripped in ("import datetime", "import uuid", "from sqlty import SQL"):
+        if stripped in skip:
             continue
         lines.append(line)
     return "\n".join(lines)

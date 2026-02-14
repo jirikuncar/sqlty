@@ -138,7 +138,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     """Rewrite command: transform --sql strings into SQL[T](...) calls."""
     from sqlty.core import rewrite_source
 
-    dialect, schema_sql = _resolve_config(args)
+    dialect, schema_sql, import_style = _resolve_config(args)
     files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
@@ -148,7 +148,9 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     changed = 0
     for path in files:
         original = path.read_text(encoding="utf-8")
-        rewritten = rewrite_source(original, dialect=dialect, schema_sql=schema_sql)
+        rewritten = rewrite_source(
+            original, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+        )
 
         if rewritten == original:
             continue
@@ -177,6 +179,7 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
+    _, _, import_style = _resolve_config(args)
     files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
@@ -186,7 +189,7 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     changed = 0
     for path in files:
         original = path.read_text(encoding="utf-8")
-        stripped = strip_source(original)
+        stripped = strip_source(original, import_style=import_style)
 
         if stripped == original:
             continue
@@ -215,7 +218,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
     from sqlty.core import check_source
 
-    dialect, schema_sql = _resolve_config(args)
+    dialect, schema_sql, import_style = _resolve_config(args)
     files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
@@ -230,7 +233,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     for path in files:
         source = path.read_text(encoding="utf-8")
-        diagnostics = check_source(source, dialect=dialect, schema_sql=schema_sql, rules=rules)
+        diagnostics = check_source(
+            source, dialect=dialect, schema_sql=schema_sql, rules=rules, import_style=import_style
+        )
 
         for diag in diagnostics:
             severity = diag["severity"]
@@ -279,13 +284,13 @@ def _collect_python_files(paths: list[Path]) -> list[Path]:
     return files
 
 
-def _resolve_config(args: argparse.Namespace) -> tuple[str, str | None]:
-    """Resolve dialect and schema from pyproject.toml [tool.sqlty] merged with CLI args.
+def _resolve_config(args: argparse.Namespace) -> tuple[str, str | None, str | None]:
+    """Resolve dialect, schema, and import-style from pyproject.toml [tool.sqlty] merged with CLI args.
 
     CLI flags (--dialect, --schema) override pyproject.toml values.
 
     Returns:
-        Tuple of (dialect, schema_sql content or None)
+        Tuple of (dialect, schema_sql content or None, import_style or None)
     """
     from sqlty._config import load_config
 
@@ -306,7 +311,10 @@ def _resolve_config(args: argparse.Namespace) -> tuple[str, str | None]:
         schema_path = config_dir / config["schema"]
         schema_sql = _load_schema(schema_path)
 
-    return dialect, schema_sql
+    # Import style from config
+    import_style: str | None = config.get("import_style")
+
+    return dialect, schema_sql, import_style
 
 
 def _load_schema(schema_path: Path) -> str | None:
