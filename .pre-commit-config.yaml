@@ -19,6 +19,22 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
+      - id: mdtest
+        name: mdtest
+        entry: uv run pytest tests/mdtest/ -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types_or: [markdown, python]
+        files: ^(tests/mdtest/|src/sqlty/)
+      - id: readme-test
+        name: readme test
+        entry: uv run pytest tests/test_readme.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types_or: [markdown, python]
+        files: ^(README\.md|src/sqlty/)
       - id: sqlty-check
         name: sqlty check examples
         entry: uv run sqlty check examples/
