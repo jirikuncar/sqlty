@@ -24,6 +24,18 @@ make update-mdtest   # auto-update assertion comments in .md files
 make typecheck       # mypy + ty
 ```
 
+## Pre-commit checks
+
+**Always run pre-commit before every commit:**
+
+```bash
+uv run pre-commit run --all-files
+```
+
+This runs mypy, ruff (lint + format), trailing whitespace fixes, and other
+checks defined in `.pre-commit-config.yaml`. Fix all errors before creating
+a commit.
+
 ## The `--sql\n` convention
 
 **Always use `--sql\n` (newline escape) after the `--sql` prefix, not a space.**

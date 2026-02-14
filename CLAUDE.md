@@ -10,10 +10,14 @@ uv run pytest                 # all tests
 make test-mdtest              # mdtest only
 make update-mdtest            # update mdtest assertions
 make typecheck                # mypy + ty
+uv run pre-commit run --all-files  # lint + format (run before every commit)
 ```
 
 ## Key conventions
 
+- **Always run `uv run pre-commit run --all-files` before committing.**
+  This runs mypy, ruff (lint + format), and other checks. Fix all errors
+  before creating a commit.
 - **Use `--sql\n`** (newline escape), not `--sql ` (space).
   `--sql SELECT ...` with a space is a SQL comment — the parser sees an
   empty query and the string is not wrapped. The rewriter never modifies

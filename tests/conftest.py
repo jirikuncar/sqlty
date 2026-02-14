@@ -10,7 +10,6 @@ import pytest
 
 from tests.mdtest_runner import MDTestFailure, parse_mdtest_file
 
-
 # ---------------------------------------------------------------------------
 # CLI options
 # ---------------------------------------------------------------------------

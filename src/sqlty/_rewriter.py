@@ -113,9 +113,7 @@ class SQLRewriter:
         needs_uuid = False
 
         # Pre-compute existing SQL[T](...) wrapper spans to skip
-        wrapper_spans = [
-            (m.start(), m.end()) for m in _SQL_WRAPPER_PATTERN.finditer(source)
-        ]
+        wrapper_spans = [(m.start(), m.end()) for m in _SQL_WRAPPER_PATTERN.finditer(source)]
 
         # Collect all replacements, then apply right-to-left
         replacements: list[tuple[int, int, str]] = []
@@ -187,9 +185,7 @@ class SQLRewriter:
             content = _extract_string_content(inner_string)
             # Only strip auto-generated wrappers (--sql + whitespace)
             if content is not None and _is_sqlty_managed(content):
-                replacements.append(
-                    (match.start("wrapper"), match.end("wrapper"), inner_string)
-                )
+                replacements.append((match.start("wrapper"), match.end("wrapper"), inner_string))
                 sql_wrapper_removed = True
 
         result = source
@@ -235,12 +231,12 @@ class SQLRewriter:
 # Triple-quoted alternatives come first so they match before single-quoted.
 # Negative lookbehind ensures we skip prefixed strings (f"...", r"...", b"...", etc.)
 _SQL_STRING_PATTERN = re.compile(
-    r'(?<![a-zA-Z])(?P<str>'
-    r'""".*?"""'        # triple-double-quoted
-    r"|'''.*?'''"       # triple-single-quoted
-    r'|"[^"]*"'         # double-quoted
-    r"|'[^']*'"         # single-quoted
-    r')',
+    r"(?<![a-zA-Z])(?P<str>"
+    r'""".*?"""'  # triple-double-quoted
+    r"|'''.*?'''"  # triple-single-quoted
+    r'|"[^"]*"'  # double-quoted
+    r"|'[^']*'"  # single-quoted
+    r")",
     re.DOTALL,
 )
 
@@ -290,7 +286,6 @@ def _is_sqlty_managed(content: str) -> bool:
         return True
     # Whitespace: space, real newline, tab
     return rest[0] in (" ", "\n", "\r", "\t")
-
 
 
 def _has_import(source: str, import_line: str) -> bool:

@@ -38,10 +38,10 @@ if _SQLTY_LIB == "py":
         strip_source,
     )
 elif _SQLTY_LIB == "rs":
-    from sqlty._core import (  # type: ignore[no-redef]
+    from sqlty._core import (
         check_source as _backend_check_source,
     )
-    from sqlty._core import (  # type: ignore[no-redef]
+    from sqlty._core import (
         expand_star,
         infer_type,
         rewrite_source,
