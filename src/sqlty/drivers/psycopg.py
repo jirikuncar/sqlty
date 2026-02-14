@@ -1,8 +1,8 @@
 from collections.abc import Iterator
 from typing import cast
 
-from psycopg import Connection
-from psycopg.abc import Params
+from psycopg import Connection  # ty: ignore[unresolved-import]
+from psycopg.abc import Params  # ty: ignore[unresolved-import]
 
 from sqlty import SQL
 

@@ -42,32 +42,32 @@ if _SQLTY_LIB == "py":
         strip_source as _backend_strip_source,
     )
 elif _SQLTY_LIB == "rs":
-    from sqlty._core import (  # type: ignore[assignment]
+    from sqlty._core import (
         check_source as _backend_check_source,
     )
     from sqlty._core import (
         expand_star,
         infer_type,
     )
-    from sqlty._core import (  # type: ignore[assignment]
+    from sqlty._core import (
         rewrite_source as _backend_rewrite_source,
     )
-    from sqlty._core import (  # type: ignore[assignment]
+    from sqlty._core import (
         strip_source as _backend_strip_source,
     )
 else:
     try:
-        from sqlty._core import (  # type: ignore[assignment]
+        from sqlty._core import (
             check_source as _backend_check_source,
         )
         from sqlty._core import (
             expand_star,
             infer_type,
         )
-        from sqlty._core import (  # type: ignore[assignment]
+        from sqlty._core import (
             rewrite_source as _backend_rewrite_source,
         )
-        from sqlty._core import (  # type: ignore[assignment]
+        from sqlty._core import (
             strip_source as _backend_strip_source,
         )
     except ImportError:

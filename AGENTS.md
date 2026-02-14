@@ -168,6 +168,45 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 - Focus on **motivated examples** — show the problem first, then the solution.
 - Always show complete working code, not snippets.
 
+## Type checker support
+
+Both **mypy** and **ty** (plus pyright) are tested against `src/sqlty/` and
+all examples. Run `make typecheck` to execute both.
+
+### Running type checks
+
+```bash
+make typecheck                 # mypy + ty on src and examples
+uv run mypy src/sqlty          # mypy only
+uv run ty check src/sqlty      # ty only
+uv run pytest tests/test_typecheckers.py -v  # all three checkers on test files
+```
+
+### Type checker–specific quirks
+
+| Issue | mypy | ty | Fix |
+|-------|------|----|-----|
+| Optional deps (`psycopg`, `isort`) | `[[tool.mypy.overrides]]` with `ignore_missing_imports` | `# ty: ignore[unresolved-import]` inline | Both configured |
+| `codecs.CodecInfo` `streamreader` arg | Accepts class directly | Expects `_StreamReader` callable type | `# ty: ignore[invalid-argument-type]` in `magic.py` |
+| Rust stub signatures (`_core.pyi`) | Must match Python backend | Union of both backends checked strictly | Keep `_core.pyi` and `_core_py.py` signatures aligned |
+| `Callable` `__name__` attribute | Allowed on `Callable` | Not part of `Callable` protocol | Use `getattr(fn, "__name__", "unknown")` |
+
+### Suppression comments
+
+- **mypy**: `# type: ignore[error-code]` — suppress a specific mypy error
+- **ty**: `# ty: ignore[rule-name]` — suppress a specific ty diagnostic
+- Never use bare `# type: ignore` without an error code
+
+### Adding type check test files
+
+Type checker validation files live in `tests/typechecks/sql_*.py`. Each file
+is tested against mypy, pyright, and ty via `tests/test_typecheckers.py`.
+To add a new test file:
+
+1. Create `tests/typechecks/sql_<name>.py`
+2. Use `reveal_type()` to verify inferred types
+3. Run `uv run pytest tests/test_typecheckers.py -v` to check all three
+
 ## Architecture overview
 
 ```

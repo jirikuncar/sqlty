@@ -192,7 +192,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         # Add necessary imports using isort for proper placement
         if needs_datetime or needs_uuid or (needs_sql and not has_sql_import):
             try:
-                from isort import code as isort_code
+                from isort import code as isort_code  # ty: ignore[unresolved-import]
 
                 # Build the list of imports to add
                 add_imports = []

@@ -81,6 +81,49 @@ jobs:
       - name: Run tests (pure-Python backend)
         run: uv run pytest tests/ --ignore=tests/e2e -q
 
+  typecheck:
+    name: Type check (mypy + ty)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the project
+        run: uv sync --all-groups
+
+      - name: Run mypy on src
+        run: uv run mypy src/sqlty
+
+      - name: Run mypy on examples
+        run: |
+          for dir in examples/*/; do
+            [ -f "$dir/queries.py" ] || continue
+            echo "mypy -> $dir"
+            uv run mypy "$dir"
+          done
+
+      - name: Run ty on src
+        run: uv run ty check src/sqlty
+
+      - name: Run ty on examples
+        run: |
+          for dir in examples/*/; do
+            [ -f "$dir/queries.py" ] || continue
+            echo "ty -> $dir"
+            uv run ty check "$dir"
+          done
+
+      - name: Run type checker tests (mypy, pyright, ty)
+        run: uv run pytest tests/test_typecheckers.py -v
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

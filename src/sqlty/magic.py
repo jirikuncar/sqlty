@@ -113,7 +113,7 @@ _custom_codec_info = codecs.CodecInfo(
     decode=decode,  # type: ignore[arg-type]
     incrementalencoder=utf_8_codec.incrementalencoder,
     incrementaldecoder=IncrementalDecoder,
-    streamreader=StreamReader,
+    streamreader=StreamReader,  # ty: ignore[invalid-argument-type]
     streamwriter=utf_8_codec.streamwriter,
 )
 
@@ -124,7 +124,7 @@ _sqlty_codec_info = codecs.CodecInfo(
     decode=decode,  # type: ignore[arg-type]
     incrementalencoder=utf_8_codec.incrementalencoder,
     incrementaldecoder=IncrementalDecoder,
-    streamreader=StreamReader,
+    streamreader=StreamReader,  # ty: ignore[invalid-argument-type]
     streamwriter=utf_8_codec.streamwriter,
 )
 

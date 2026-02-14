@@ -12,6 +12,13 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
+      - id: ty
+        name: ty
+        entry: uv run ty check src/sqlty
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [file, python]
       - id: sqlty-check
         name: sqlty check examples
         entry: uv run sqlty check examples/

@@ -1,5 +1,6 @@
-# Discover all example directories automatically (excluding hidden directories)
-EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*")
+# Discover all example directories automatically (excluding hidden and magic_codec directories)
+# magic_codec uses "# coding: sqlty" which type checkers cannot decode
+EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*" ! -name "magic_codec")
 
 # Get the absolute path to the repository root
 ROOT_DIR := $(shell pwd)
@@ -65,6 +66,12 @@ typecheck:
 	@echo ""
 	@echo "Running ty on src/sqlty..."
 	uv run ty check src/sqlty
+	@echo "Running ty on examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  -> $$dir"; \
+		uv run ty check $$dir; \
+	done
+	@echo "ty checks passed"
 
 # --- Testing targets ---
 

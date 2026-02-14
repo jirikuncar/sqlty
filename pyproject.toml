@@ -106,12 +106,20 @@ warn_no_return = true
 module = "psycopg.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "isort.*"
+ignore_missing_imports = true
+
 [tool.ty.environment]
 # Python version will be inferred from requires-python
 root = ["./src", "./examples"]
 
 [tool.ty.src]
 include = ["src", "examples"]
+
+[tool.ty.rules]
+# mktemp is deprecated but used in existing code for temp schema files
+deprecated = "warn"
 
 [tool.ruff]
 target-version = "py313"
