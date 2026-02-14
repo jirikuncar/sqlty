@@ -144,6 +144,7 @@ The codec is registered automatically when sqlty is installed. See [magic codec 
 | `stale-type` | warn | Type annotation doesn't match current inference |
 | `inline-sql-comment` | warn | `"--sql SELECT ..."` makes query a SQL comment |
 | `fstring-skipped` | warn | f-string with `--sql` skipped (cannot be statically rewritten) |
+| `tstring-skipped` | warn | t-string with `--sql` skipped (cannot be statically rewritten) |
 
 Configure in `pyproject.toml`:
 

@@ -17,6 +17,7 @@ Configuration via pyproject.toml:
     stale-type = "warn"                 # default
     inline-sql-comment = "warn"         # default
     fstring-skipped = "warn"            # default
+    tstring-skipped = "warn"            # default
 """
 
 from __future__ import annotations
@@ -99,7 +100,13 @@ RULES: dict[str, LintRule] = {
         name="fstring-skipped",
         default_severity=Severity.WARN,
         fixable=False,
-        description="f/t-string with --sql prefix skipped (cannot be statically rewritten)",
+        description="f-string with --sql prefix skipped (cannot be statically rewritten)",
+    ),
+    "tstring-skipped": LintRule(
+        name="tstring-skipped",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="t-string with --sql prefix skipped (cannot be statically rewritten)",
     ),
 }
 

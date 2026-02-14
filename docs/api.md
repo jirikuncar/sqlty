@@ -104,6 +104,7 @@ stale-rewrite = "warn"
 stale-type = "warn"
 inline-sql-comment = "warn"
 fstring-skipped = "warn"
+tstring-skipped = "warn"
 ```
 
 CLI flags override config file values.
@@ -142,5 +143,6 @@ CLI flags override config file values.
 | `stale-type` | warn | yes | Type annotation doesn't match current inference |
 | `inline-sql-comment` | warn | no | `"--sql SELECT ..."` makes query a SQL comment |
 | `fstring-skipped` | warn | no | f-string with `--sql` skipped (cannot be statically rewritten) |
+| `tstring-skipped` | warn | no | t-string with `--sql` skipped (cannot be statically rewritten) |
 
 Severity values: `"error"`, `"warn"`, `"ignore"`.

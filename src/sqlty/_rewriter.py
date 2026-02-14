@@ -95,10 +95,12 @@ class SQLRewriter:
         for line_num, line in enumerate(lines, start=1):
             # Check for f/t-strings containing --sql (these are skipped)
             if _FSTRING_SQL_PATTERN.search(line):
-                kind = "t-string" if re.search(r"""[tT]\s*["']""", line) else "f-string"
+                is_tstring = bool(re.search(r"""[tT]\s*["']""", line))
+                kind = "t-string" if is_tstring else "f-string"
+                rule = "tstring-skipped" if is_tstring else "fstring-skipped"
                 warnings.append(
                     f"line {line_num}: {kind} with --sql prefix skipped "
-                    f"({kind}s cannot be statically rewritten) [fstring-skipped]"
+                    f"({kind}s cannot be statically rewritten) [{rule}]"
                 )
                 result_lines.append(line)
                 continue

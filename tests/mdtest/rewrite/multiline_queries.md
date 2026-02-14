@@ -11,7 +11,7 @@ q = "--sql SELECT id::INTEGER, name::TEXT FROM users WHERE active = true"
 
 F-strings cannot be statically analyzed, so they are left unchanged
 and a warning is emitted. Set `fstring-skipped = "ignore"` in
-`[tool.sqlty.rules]` to silence.
+`[tool.sqlty.rules]` to silence. For t-strings, use `tstring-skipped`.
 
 ```python
 q = f"--sql SELECT {column}::INTEGER FROM users"
@@ -26,5 +26,5 @@ Template strings (Python 3.14+) also use interpolation and are skipped:
 ```python
 q = t"--sql SELECT {column}::INTEGER FROM users"
 # rewritten: q = t"--sql SELECT {column}::INTEGER FROM users"
-# warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [fstring-skipped]
+# warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [tstring-skipped]
 ```
