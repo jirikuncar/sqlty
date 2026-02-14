@@ -254,11 +254,15 @@ def _make_analyzer(dialect: str, schema_sql: str | None) -> SQLAnalyzer:
     from pathlib import Path
 
     if schema_sql:
-        tmp = Path(tempfile.mktemp(suffix=".sql"))
-        tmp.write_text(schema_sql)
+        fd, tmp_name = tempfile.mkstemp(suffix=".sql")
+        tmp = Path(tmp_name)
         try:
+            tmp.write_text(schema_sql)
             return SQLAnalyzer(dialect=dialect, schema_path=tmp)
         finally:
+            import os
+
+            os.close(fd)
             tmp.unlink(missing_ok=True)
     return SQLAnalyzer(dialect=dialect)
 
@@ -270,8 +274,8 @@ def _make_rewriter(
     import tempfile
 
     if schema_sql:
-        tmp_path = tempfile.mktemp(suffix=".sql")
-        with open(tmp_path, "w") as f:
+        fd, tmp_path = tempfile.mkstemp(suffix=".sql")
+        with open(fd, "w") as f:
             f.write(schema_sql)
         return SQLRewriter(dialect=dialect, schema_path=tmp_path, import_style=import_style)
     return SQLRewriter(dialect=dialect, import_style=import_style)

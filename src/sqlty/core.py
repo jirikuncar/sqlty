@@ -248,13 +248,17 @@ def _enhance_with_user_type_checks(
     rule_config = RuleConfig(overrides=rules)
 
     # Create analyzer with schema if available
+    import os
     import tempfile
     from pathlib import Path
 
     schema_path = None
+    fd = None
     if schema_sql:
-        tmp = Path(tempfile.mktemp(suffix=".sql"))
+        fd, tmp_name = tempfile.mkstemp(suffix=".sql")
+        tmp = Path(tmp_name)
         tmp.write_text(schema_sql)
+        os.close(fd)
         schema_path = tmp
 
     try:

@@ -117,10 +117,6 @@ root = ["./src", "./examples"]
 [tool.ty.src]
 include = ["src", "examples"]
 
-[tool.ty.rules]
-# mktemp is deprecated but used in existing code for temp schema files
-deprecated = "warn"
-
 [tool.ruff]
 target-version = "py313"
 line-length = 100
