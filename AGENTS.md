@@ -26,20 +26,23 @@ make typecheck       # mypy + ty
 
 ## The `--sql\n` convention
 
-**Prefer `--sql\n` (newline escape) after the `--sql` prefix.**
+**Always use `--sql\n` (newline escape) after the `--sql` prefix, not a space.**
+
+`--sql SELECT ...` with a space is a SQL comment — the parser sees an
+empty query and the string is **not** wrapped.  The newline makes the
+parser treat `--sql` as a comment line and the query starts on the next line.
 
 ```python
-# Canonical form
+# Correct — parser sees --sql as comment, SELECT as the query
 q = "--sql\nSELECT id::INTEGER FROM users"
 
-# Also valid — the rewriter preserves whatever separator you use
+# Wrong — entire line is a SQL comment, parser sees empty query
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 
 The rewriter never modifies string content — it only adds/removes the
 `SQL[T]()` wrapper.  This guarantees `strip(rewrite(source)) == source`.
-Both `--sql\n` and `--sql ` (space) are accepted; prefer `\n` in new code
-and tests.  For triple-quoted multiline strings, use a real newline:
+For triple-quoted multiline strings, use a real newline:
 
 ```python
 q = """--sql
@@ -108,7 +111,7 @@ SELECT id::INTEGER FROM users"""
 
 - Run `make update-mdtest` after any change to rewriter, type inference, or lint logic.
 - README.md is also tested via `tests/test_readme.py` — keep assertion comments there current.
-- Tests should primarily use canonical `--sql\n` form; `--sql ` (space) is accepted but `\n` is preferred.
+- Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
 
 ## Documentation philosophy
 

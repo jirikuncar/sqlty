@@ -51,12 +51,17 @@ q = SQL[User]("SELECT id, name FROM users")
 # stripped: q = SQL[User]("SELECT id, name FROM users")
 ```
 
-## Space form round-trip: rewrite preserves space
+## Space form is a SQL comment — rewrite leaves it unchanged
+
+`--sql SELECT ...` with a space is a SQL comment — the parser sees an
+empty query, so the string is not wrapped:
 
 ```python
 q = "--sql SELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# rewritten: q = "--sql SELECT id::INTEGER FROM users"
 ```
+
+## Space form strip still works on manually wrapped strings
 
 ```python
 q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")

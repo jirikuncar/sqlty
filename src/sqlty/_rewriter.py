@@ -55,18 +55,21 @@ class SQLRewriter:
         self._codec = codec
 
     def _infer_type(self, sql_content: str) -> str:
-        """Infer the Python return type from a SQL query string."""
+        """Infer the Python return type from a SQL query string.
+
+        Passes the content directly to the SQL parser, letting SQL comment
+        semantics handle the ``--sql`` prefix naturally:
+
+        - ``--sql\\nSELECT ...`` → ``\\n`` becomes real newline; parser sees
+          ``--sql`` as comment and ``SELECT ...`` as the query.
+        - ``--sql<newline>SELECT ...`` → triple-quoted; parser sees comment + query.
+        - ``--sql SELECT ...``  → entire line is a SQL comment → empty query.
+        """
         query = sql_content
-        if query.startswith("--sql "):
-            query = query[6:].strip()
-        elif query.startswith("--sql\\n"):
-            # Source-text escape: \n (backslash + n) as it appears in source code
-            query = query[7:].strip()
-        elif query.startswith("--sql\n"):
-            # Real newline (from triple-quoted strings)
-            query = query[6:].strip()
-        elif query.startswith("--sql"):
-            query = query[5:].strip()
+        # Convert source-text \\n escape to real newline so the parser
+        # sees --sql as a comment and the query on the next line.
+        if query.startswith("--sql\\n"):
+            query = query.replace("\\n", "\n", 1)
 
         try:
             result = self._analyzer.generate_return_type(query, codec=self._codec)

@@ -14,9 +14,11 @@ make typecheck                # mypy + ty
 
 ## Key conventions
 
-- **Prefer `--sql\n`** (newline escape) over `--sql ` (space) in new code.
-  Both are accepted. The rewriter never modifies string content — it only
-  adds/removes the `SQL[T]()` wrapper, guaranteeing `strip(rewrite(x)) == x`.
+- **Use `--sql\n`** (newline escape), not `--sql ` (space).
+  `--sql SELECT ...` with a space is a SQL comment — the parser sees an
+  empty query and the string is not wrapped. The rewriter never modifies
+  string content — it only adds/removes the `SQL[T]()` wrapper,
+  guaranteeing `strip(rewrite(x)) == x`.
 - **Every new feature gets an mdtest** in `tests/mdtest/`. Use `make update-mdtest`
   to fill expected values.
 - **README.md is tested** — code blocks with assertion comments are executed

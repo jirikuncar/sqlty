@@ -84,11 +84,12 @@ q = '--sql\nSELECT id::INTEGER FROM users'
 # rewritten: q = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
 ```
 
-## Space after --sql is preserved
+## Space after --sql makes entire line a SQL comment
 
-The rewriter never modifies string content — space is kept as-is:
+`--sql SELECT ...` with a space is a SQL comment — the parser sees an
+empty query, so the string is not wrapped:
 
 ```python
 q = "--sql SELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# rewritten: q = "--sql SELECT id::INTEGER FROM users"
 ```
