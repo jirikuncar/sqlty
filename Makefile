@@ -16,6 +16,8 @@ help:
 	@echo "  lint              - Run ruff linter with auto-fix"
 	@echo "  format            - Run ruff formatter"
 	@echo "  typecheck         - Run mypy and ty type checks on src and examples"
+	@echo "  typecheck-src     - Run mypy and ty on src/sqlty"
+	@echo "  typecheck-examples- Run mypy and ty on examples (except magic_codec)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test              - Run all tests (unit + mdtest + e2e)"
@@ -54,18 +56,20 @@ format:
 	uv run ruff format .
 
 .PHONY: typecheck
-typecheck:
-	@echo "Running mypy on src/sqlty..."
+typecheck: typecheck-src typecheck-examples
+
+.PHONY: typecheck-src
+typecheck-src:
 	uv run mypy src/sqlty
-	@echo "Running mypy on examples..."
+	uv run ty check src/sqlty
+
+.PHONY: typecheck-examples
+typecheck-examples:
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  -> $$dir"; \
-		uv run mypy $$dir; \
+		uv run mypy $$dir || exit 1; \
+		uv run ty check $$dir || exit 1; \
 	done
-	@echo "mypy checks passed"
-	@echo ""
-	@echo "Running ty on src/sqlty..."
-	uv run ty check src/sqlty
 
 # --- Testing targets ---
 

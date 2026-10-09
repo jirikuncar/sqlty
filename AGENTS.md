@@ -21,7 +21,7 @@ make test-mdtest     # mdtest only
 make test-unit       # unit tests only
 make test-e2e        # e2e only
 make update-mdtest   # auto-update assertion comments in .md files
-make typecheck       # mypy + ty
+make typecheck       # mypy + ty on src and examples
 ```
 
 ## Git safety
@@ -38,7 +38,7 @@ the conflict without rewriting remote history. No exceptions.
 uv run pre-commit run --all-files
 ```
 
-This runs mypy, ruff (lint + format), trailing whitespace fixes, and other
+This runs mypy, ty, ruff (lint + format), trailing whitespace fixes, and other
 checks defined in `.pre-commit-config.yaml`. Fix all errors before creating
 a commit.
 
@@ -167,6 +167,46 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
   are tested automatically. Keep them accurate.
 - Focus on **motivated examples** — show the problem first, then the solution.
 - Always show complete working code, not snippets.
+
+## Type checker support
+
+`src/sqlty/` and the examples must pass both **mypy** (strict) and **ty**
+with zero errors. `SQL[T]` usage is additionally checked with mypy, pyright
+and ty by `tests/test_typecheckers.py`.
+
+```bash
+make typecheck                 # mypy + ty on src and examples
+make typecheck-src             # mypy + ty on src/sqlty (also a pre-commit hook)
+make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
+uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
+```
+
+`examples/magic_codec/` is excluded: its `# coding: sqlty` header is
+decoded at import time, which type checkers cannot do.
+
+### Checker differences
+
+| Case | mypy | ty | Convention |
+|------|------|----|------------|
+| Setting attributes on a function (`fn.__sqlty__ = True`) | `attr-defined` | `invalid-assignment` / `unresolved-attribute` | Suppress both on the same line |
+| `__name__` of a `Callable` | Allowed | Not part of `Callable` | `getattr(fn, "__name__", "unknown")` |
+| Backend imports in `core.py` (`_core.pyi` stub and `_core_py.py`) | Checks every branch | Checks every branch | Keep signatures identical |
+| Optional `psycopg` dependency | `ignore_missing_imports` override in `pyproject.toml` | Installed by `uv sync --all-groups` | No inline suppression |
+
+### Suppression comments
+
+- mypy: `# type: ignore[error-code]`; ty: `# ty: ignore[rule-name]`.
+- Always name the code or rule. When both checkers complain about one line,
+  put both comments on it: `# type: ignore[attr-defined]  # ty: ignore[invalid-assignment]`.
+- mypy runs with `warn_unused_ignores`, so drop suppressions that are no longer needed.
+
+### Adding type checker tests
+
+Each `tests/typechecks/sql_*.py` file is run through mypy, pyright and ty,
+which must all report zero errors. Use `reveal_type()` to document the
+inferred types, then run `uv run pytest tests/test_typecheckers.py -v`.
+Files that must produce errors (like `untyped_misuse.py`) need their own
+test with an explicit expected error count.
 
 ## Architecture overview
 
