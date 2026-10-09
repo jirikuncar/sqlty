@@ -32,7 +32,7 @@ AssertionKind = Literal[
 
 # Regex to match assertion comments in python blocks — alternatives must match AssertionKind.
 ASSERTION_RE = re.compile(
-    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|decoded|warning):\s*(.*)$"
+    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|decoded|warning): ?(.*)$"
 )
 
 
@@ -60,6 +60,7 @@ class Assertion:
     kind: AssertionKind
     expected: str  # The expected value after the prefix
     line: int  # Line number in the .md file (1-indexed, for update mode)
+    span: int = 1  # Number of consecutive comment lines holding the value
 
 
 @dataclass
@@ -74,6 +75,7 @@ class MDTestCase:
     files: dict[str, str] = field(default_factory=dict)
     assertions: list[Assertion] = field(default_factory=list)
     update: bool = False
+    updater: MDFileUpdater | None = None
 
     def _get_sqlty_config(self) -> dict:
         """Get the sqlty config, supporting both [sqlty] and [tool.sqlty] formats.
@@ -93,7 +95,9 @@ class MDTestCase:
             if actual == assertion.expected:
                 continue
             if self.update:
-                _rewrite_line_in_md(self.md_path, assertion.line, assertion.kind, actual)
+                if self.updater is None:
+                    self.updater = MDFileUpdater(self.md_path)
+                self.updater.replace(assertion, actual)
             else:
                 raise MDTestFailure(
                     test=self.name,
@@ -455,33 +459,41 @@ def _strip_import_lines(
     return "\n".join(lines)
 
 
-def _rewrite_line_in_md(md_path: Path, line_num: int, kind: AssertionKind, actual: str) -> None:
-    """Rewrite assertion comment(s) in a .md file with the actual value.
+class MDFileUpdater:
+    """Rewrites assertion comments in one .md file during ``--update-mdtest``.
 
-    Handles multi-line assertions: scans forward from *line_num* to find
-    all consecutive ``# {kind}:`` lines, then replaces them with the
-    (possibly different number of) lines from *actual*.
+    Assertion line numbers are recorded at parse time.  Replacing a value
+    with one of a different length shifts every later line, so the updater
+    remembers each edit and maps original line numbers to current ones.
+    Test cases of a file share one updater, so updates may run in any order.
     """
-    lines = md_path.read_text().splitlines(keepends=True)
-    idx = line_num - 1
-    if not (0 <= idx < len(lines)):
-        return
 
-    # Preserve leading whitespace from the first assertion line
-    stripped = lines[idx].lstrip()
-    indent = lines[idx][: len(lines[idx]) - len(stripped)]
+    def __init__(self, md_path: Path) -> None:
+        self.md_path = md_path
+        self._shifts: list[tuple[int, int]] = []  # (original line, line delta)
 
-    # Find the extent of consecutive same-kind assertion lines
-    prefix = f"# {kind}:"
-    end_idx = idx + 1
-    while end_idx < len(lines) and lines[end_idx].strip().startswith(prefix):
-        end_idx += 1
-
-    # Build replacement lines from actual value
-    new_lines = [f"{indent}# {kind}: {part}\n" for part in actual.split("\n")]
-
-    lines[idx:end_idx] = new_lines
-    md_path.write_text("".join(lines))
+    def replace(self, assertion: Assertion, actual: str) -> None:
+        lines = self.md_path.read_text().splitlines(keepends=True)
+        offset = sum(delta for line, delta in self._shifts if line < assertion.line)
+        idx = assertion.line - 1 + offset
+        end = idx + assertion.span
+        if not (idx >= 0 and end <= len(lines)):
+            raise ValueError(f"{self.md_path}:{assertion.line}: assertion out of range")
+        first = lines[idx]
+        match = ASSERTION_RE.match(first.strip())
+        if match is None or match.group(1) != assertion.kind:
+            raise ValueError(
+                f"{self.md_path}:{assertion.line}: expected `# {assertion.kind}:`, "
+                f"found {first.strip()!r}"
+            )
+        indent = first[: len(first) - len(first.lstrip())]
+        new_lines = [
+            f"{indent}# {assertion.kind}:{f' {part}' if part else ''}\n"
+            for part in actual.split("\n")
+        ]
+        lines[idx:end] = new_lines
+        self.md_path.write_text("".join(lines))
+        self._shifts.append((assertion.line, len(new_lines) - assertion.span))
 
 
 def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase]:
@@ -497,6 +509,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
     lines = content.splitlines()
 
     test_cases: list[MDTestCase] = []
+    updater = MDFileUpdater(md_path) if update else None
 
     # State machine for parsing
     current_heading: str | None = None
@@ -543,7 +556,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                         match = ASSERTION_RE.match(py_line.strip())
                         if match:
                             kind = match.group(1)
-                            expected = match.group(2).strip()
+                            expected = match.group(2).rstrip()
                             # The assertion's line in the .md file
                             # code_block started at some line, py_line_idx into it
                             assertion_md_line = line_num - len(code_block_lines) + py_line_idx
@@ -602,6 +615,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                         files=dict(files),
                         assertions=list(assertions),
                         update=update,
+                        updater=updater,
                     )
                 )
 
@@ -641,6 +655,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                 files=dict(files),
                 assertions=list(assertions),
                 update=update,
+                updater=updater,
             )
         )
 
@@ -656,21 +671,23 @@ def collect_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestIt
 def _merge_consecutive_assertions(assertions: list[Assertion]) -> list[Assertion]:
     """Merge consecutive same-kind assertions into multi-line expected values.
 
-    When multiple ``# rewritten-file:`` (or any same-kind) lines appear in
-    sequence, they represent a single multi-line expected value.  The lines
-    are joined with ``\\n`` so the comparison works against multi-line output.
+    When multiple ``# rewritten-file:`` (or any same-kind) lines appear on
+    adjacent lines, they represent a single multi-line expected value.  The
+    lines are joined with ``\\n`` so the comparison works against multi-line
+    output.  Same-kind assertions separated by other lines stay separate.
     """
     if not assertions:
         return []
 
     merged: list[Assertion] = []
     for assertion in assertions:
-        if merged and merged[-1].kind == assertion.kind:
-            prev = merged[-1]
+        prev = merged[-1] if merged else None
+        if prev and prev.kind == assertion.kind and prev.line + prev.span == assertion.line:
             merged[-1] = Assertion(
                 kind=prev.kind,
                 expected=prev.expected + "\n" + assertion.expected,
-                line=prev.line,  # keep first line number for update mode
+                line=prev.line,
+                span=prev.span + 1,
             )
         else:
             merged.append(assertion)

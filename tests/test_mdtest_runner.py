@@ -1,0 +1,127 @@
+"""Tests for the ``--update-mdtest`` rewriting in tests/mdtest_runner.py."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tests.mdtest_runner import parse_mdtest_file
+
+SOURCE = '''\
+# Updater
+
+## Grows to several lines
+
+```python
+q = """--sql
+SELECT id::INTEGER FROM users"""
+# rewritten-file:
+```
+
+## Shrinks to one line
+
+```python
+q = "--sql\\nSELECT name::TEXT FROM users"
+# rewritten: stale line one
+# rewritten: stale line two
+# rewritten: stale line three
+```
+
+## Keeps indentation
+
+```python
+def f():
+    q = "--sql\\nSELECT 1::INTEGER"
+    return q
+# rewritten:
+# stripped: stale
+```
+
+## Unchanged
+
+```python
+q = "--sql\\nSELECT 1::INTEGER"
+# rewritten: q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
+```
+'''
+
+EXPECTED = '''\
+# Updater
+
+## Grows to several lines
+
+```python
+q = """--sql
+SELECT id::INTEGER FROM users"""
+# rewritten-file: from sqlty import SQL
+# rewritten-file: q = SQL[tuple[int]]("""--sql
+# rewritten-file: SELECT id::INTEGER FROM users""")
+```
+
+## Shrinks to one line
+
+```python
+q = "--sql\\nSELECT name::TEXT FROM users"
+# rewritten: q = SQL[tuple[str]]("--sql\\nSELECT name::TEXT FROM users")
+```
+
+## Keeps indentation
+
+```python
+def f():
+    q = "--sql\\nSELECT 1::INTEGER"
+    return q
+# rewritten: def f():
+# rewritten:     q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
+# rewritten:     return q
+# stripped: def f():
+# stripped:     q = "--sql\\nSELECT 1::INTEGER"
+# stripped:     return q
+```
+
+## Unchanged
+
+```python
+q = "--sql\\nSELECT 1::INTEGER"
+# rewritten: q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
+```
+'''
+
+
+def _update(path: Path, *, reverse: bool = False) -> None:
+    cases = parse_mdtest_file(path, update=True)
+    for case in reversed(cases) if reverse else cases:
+        case.run()
+
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["in-order", "reversed"])
+def test_update_rewrites_multiline_values(tmp_path: Path, reverse: bool) -> None:
+    path = tmp_path / "sample.md"
+    path.write_text(SOURCE)
+    _update(path, reverse=reverse)
+    assert path.read_text() == EXPECTED
+
+
+def test_update_is_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "sample.md"
+    path.write_text(SOURCE)
+    _update(path)
+    _update(path)
+    assert path.read_text() == EXPECTED
+    for case in parse_mdtest_file(path):
+        case.run()
+
+
+def test_non_adjacent_assertions_stay_separate(tmp_path: Path) -> None:
+    path = tmp_path / "sample.md"
+    path.write_text(
+        "## Two queries\n\n```python\n"
+        'a = "--sql\\nSELECT 1::INTEGER"\n'
+        "# inferred: tuple[int]\n"
+        'b = "--sql\\nSELECT 2::INTEGER"\n'
+        "# inferred: tuple[int]\n"
+        "```\n"
+    )
+    (case,) = parse_mdtest_file(path)
+    assert [(a.line, a.span) for a in case.assertions] == [(5, 1), (7, 1)]
