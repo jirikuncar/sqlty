@@ -51,6 +51,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Show diff without applying changes",
     )
+    rewrite_parser.add_argument(
+        "--untyped",
+        choices=["skip", "sentinel"],
+        help="Queries without an inferable row type: leave unwrapped (skip, default) "
+        "or wrap as SQL[UNTYPED](...) (sentinel). Config: untyped in [tool.sqlty]",
+    )
 
     # --- strip ---
     strip_parser = subparsers.add_parser(
@@ -136,9 +142,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
     """Rewrite command: transform --sql strings into SQL[T](...) calls."""
+    from sqlty._config import load_config
     from sqlty.core import rewrite_source
 
     dialect, schema_sql, import_style = _resolve_config(args)
+    untyped = args.untyped or load_config(args.paths[0])[0].get("untyped", "skip")
     files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
@@ -149,7 +157,11 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     for path in files:
         original = path.read_text(encoding="utf-8")
         rewritten = rewrite_source(
-            original, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+            original,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+            untyped=untyped == "sentinel",
         )
 
         if rewritten == original:

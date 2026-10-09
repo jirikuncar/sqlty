@@ -6,6 +6,7 @@
 //! - `select-star`: `SELECT *` usage
 //! - `select-star-no-schema`: `SELECT *` with no schema available
 //! - `inline-sql-comment`: `"--sql SELECT ..."` (space) makes query a SQL comment
+//! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
 
 use std::collections::HashMap;
 
@@ -74,6 +75,7 @@ impl RuleConfig {
             "column-type-mismatch" => "error",
             "column-name-mismatch" => "warn",
             "inline-sql-comment" => "warn",
+            "untyped-query" => "warn",
             _ => "warn",
         }
     }
@@ -114,6 +116,10 @@ pub fn check_source(
 
     let wrapper_name = parse_wrapper_name(import_style);
     let wrapper_marker = format!("{}[", wrapper_name);
+    let untyped_name = match wrapper_name.rsplit_once('.') {
+        Some((module, _)) => format!("{}.UNTYPED", module),
+        None => "UNTYPED".to_string(),
+    };
     let sql_content_pat = build_sql_content_pattern(&wrapper_name);
     let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
     let unwrapped_pat = unwrapped_sql_pattern();
@@ -176,9 +182,33 @@ pub fn check_source(
                 }
             }
 
+            let annotated = extract_type_from_wrapper(trimmed, &type_annotation_pat);
+            if annotated.as_deref() == Some(untyped_name.as_str()) {
+                if rule_config.is_enabled("untyped-query") {
+                    let untyped = format!("{}[{}]", wrapper_name, untyped_name);
+                    let message = match infer_from_sql_content(&sql_content, dialect, schema) {
+                        Some(current) => format!(
+                            "{} can now be {}[{}]; strip and rewrite to update",
+                            untyped, wrapper_name, current
+                        ),
+                        None => format!(
+                            "{} has no inferable row type; add casts (e.g. id::INTEGER) or a schema",
+                            untyped
+                        ),
+                    };
+                    diagnostics.push(Diagnostic {
+                        rule: "untyped-query".to_string(),
+                        message,
+                        severity: rule_config.severity("untyped-query").to_string(),
+                        line: line_num,
+                    });
+                }
+                continue;
+            }
+
             // Check stale types
             if rule_config.is_enabled("stale-type") {
-                if let Some(annotated_type) = extract_type_from_wrapper(trimmed, &type_annotation_pat) {
+                if let Some(annotated_type) = annotated {
                     let current_type = infer_from_sql_content(&sql_content, dialect, schema);
                     if let Some(ref current) = current_type {
                         if *current != annotated_type {
@@ -336,5 +366,25 @@ mod tests {
         let diags = check_source(source, "postgres", &None, None, Some("import sqlty"));
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
+    }
+
+    #[test]
+    fn test_untyped_query() {
+        let source = r#"q = SQL[UNTYPED]("--sql\nDELETE FROM users")"#;
+        let diags = check_source(source, "postgres", &None, None, None);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].rule, "untyped-query");
+        assert!(diags[0].message.contains("add casts"));
+    }
+
+    #[test]
+    fn test_untyped_query_now_inferable() {
+        let source = r#"q = sqlty.SQL[sqlty.UNTYPED]("--sql\nSELECT 1::INTEGER")"#;
+        let diags = check_source(source, "postgres", &None, None, Some("import sqlty"));
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].message,
+            "sqlty.SQL[sqlty.UNTYPED] can now be sqlty.SQL[tuple[int]]; strip and rewrite to update"
+        );
     }
 }

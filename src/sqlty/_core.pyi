@@ -16,6 +16,7 @@ def rewrite_source(
     dialect: str = "postgres",
     schema_sql: str | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def expand_star(

@@ -20,6 +20,7 @@ sqlty rewrite [OPTIONS] [PATH...]
 | `--diff` | Show diff without applying |
 | `--dialect <DIALECT>` | SQL dialect: `postgres` (default), `sqlite`, `mysql` |
 | `--schema <PATH>` | Schema `.sql` file for enhanced inference |
+| `--untyped <MODE>` | Uninferable queries: `skip` (default, leave unwrapped) or `sentinel` (`SQL[UNTYPED](...)`) |
 | `-v, --verbose` | Increase verbosity |
 | `-q, --quiet` | Suppress non-error output |
 
@@ -144,6 +145,7 @@ n = scalar(conn, "--sql\nSELECT max(id)::INTEGER FROM users", int | None)
 dialect = "postgres"           # SQL dialect (postgres, mysql, sqlite)
 schema = "schema.sql"          # Path to schema file
 format-command = "ruff format --stdin-filename {filename} -"
+untyped = "skip"               # "sentinel": wrap uninferable queries as SQL[UNTYPED]
 
 [tool.sqlty.rules]             # Per-rule severity
 column-count-mismatch = "error"
@@ -156,6 +158,7 @@ stale-type = "warn"
 inline-sql-comment = "warn"
 fstring-skipped = "warn"
 tstring-skipped = "warn"
+untyped-query = "warn"
 ```
 
 CLI flags override config file values.
@@ -195,5 +198,6 @@ CLI flags override config file values.
 | `inline-sql-comment` | warn | no | `"--sql SELECT ..."` makes query a SQL comment |
 | `fstring-skipped` | warn | no | f-string with `--sql` skipped (cannot be statically rewritten) |
 | `tstring-skipped` | warn | no | t-string with `--sql` skipped (cannot be statically rewritten) |
+| `untyped-query` | warn | no | `SQL[UNTYPED]` query has no inferable row type |
 
 Severity values: `"error"`, `"warn"`, `"ignore"`.

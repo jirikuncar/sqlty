@@ -64,6 +64,7 @@ class SQLTyConfig(TypedDict, total=False):
         dialect = "postgres"
         schema = "schema.sql"
         import-style = "from sqlty import SQL"
+        untyped = "sentinel"
 
         [tool.sqlty.rules]
         select-star = "ignore"
@@ -80,6 +81,7 @@ class SQLTyConfig(TypedDict, total=False):
     rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
+    untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
 
@@ -154,6 +156,9 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
     # Allow hyphenated key in pyproject: import-style
     if "import-style" in tool_config:
         config["import_style"] = str(tool_config["import-style"])
+
+    if "untyped" in tool_config:
+        config["untyped"] = str(tool_config["untyped"])
 
     # Parse function configurations
     if "functions" in tool_config and isinstance(tool_config["functions"], list):

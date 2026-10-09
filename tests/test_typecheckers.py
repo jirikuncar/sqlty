@@ -70,3 +70,26 @@ def test_ty(path: Path) -> None:
     # ty uses "error" prefix for errors; "warning" and "info" are fine
     errors = [line for line in result.stdout.splitlines() if line.startswith("error")]
     assert not errors, "ty errors:\n" + "\n".join(errors)
+
+
+# --- SQL[UNTYPED] is not Any ---
+
+MISUSE = TYPECHECKS_DIR / "untyped_misuse.py"
+
+
+@pytest.mark.parametrize(
+    ("checker", "command", "marker"),
+    [
+        ("mypy", ["mypy", "--no-error-summary"], ": error:"),
+        ("pyright", ["pyright"], "- error:"),
+        ("ty", ["ty", "check", "--project", str(TYPECHECKS_DIR.parent.parent)], "error["),
+    ],
+    ids=["mypy", "pyright", "ty"],
+)
+def test_untyped_row_rejected(checker: str, command: list[str], marker: str) -> None:
+    """Every checker rejects an SQL[UNTYPED] row used as tuple[int]."""
+    if not shutil.which(checker):
+        pytest.skip(f"{checker} not installed")
+    result = subprocess.run([*command, str(MISUSE)], capture_output=True, text=True)
+    errors = [line for line in result.stdout.splitlines() if marker in line]
+    assert len(errors) == 1 and "UNTYPED" in errors[0], result.stdout

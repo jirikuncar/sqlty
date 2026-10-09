@@ -399,6 +399,85 @@ class TestCheckSource:
 
 
 # ---------------------------------------------------------------------------
+# UNTYPED sentinel
+# ---------------------------------------------------------------------------
+
+UNTYPED_SOURCE = 'q = "--sql\\nDELETE FROM users"'
+
+
+class TestUntyped:
+    """Contract: ``untyped=True`` wraps uninferable queries as ``SQL[UNTYPED](...)``."""
+
+    def test_skipped_by_default(self, core: types.ModuleType):
+        assert core.rewrite_source(UNTYPED_SOURCE) == UNTYPED_SOURCE
+
+    @pytest.mark.parametrize(
+        ("style", "expected"),
+        [
+            (
+                None,
+                "from sqlty import SQL\nfrom sqlty import UNTYPED\n"
+                'q = SQL[UNTYPED]("--sql\\nDELETE FROM users")',
+            ),
+            (
+                "from sqlty import SQL as Q",
+                "from sqlty import SQL as Q\nfrom sqlty import UNTYPED\n"
+                'q = Q[UNTYPED]("--sql\\nDELETE FROM users")',
+            ),
+            (
+                "import sqlty",
+                'import sqlty\nq = sqlty.SQL[sqlty.UNTYPED]("--sql\\nDELETE FROM users")',
+            ),
+            (
+                "import sqlty as sy",
+                'import sqlty as sy\nq = sy.SQL[sy.UNTYPED]("--sql\\nDELETE FROM users")',
+            ),
+        ],
+    )
+    def test_rewrite_strip_roundtrip(
+        self, core: types.ModuleType, style: str | None, expected: str
+    ):
+        rewritten = core.rewrite_source(UNTYPED_SOURCE, import_style=style, untyped=True)
+        assert rewritten == expected
+        assert core.rewrite_source(rewritten, import_style=style, untyped=True) == rewritten
+        assert core.strip_source(rewritten, import_style=style) == UNTYPED_SOURCE
+
+    def test_inferable_queries_unaffected(self, core: types.ModuleType):
+        source = 'q = "--sql\\nSELECT 1::INTEGER"'
+        assert core.rewrite_source(source, untyped=True) == core.rewrite_source(source)
+
+    def test_strip_keeps_import_still_in_use(self, core: types.ModuleType):
+        source = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nDELETE FROM t")\nUNTYPED\n'
+        expected = 'from sqlty import UNTYPED\nq = "--sql\\nDELETE FROM t"\nUNTYPED\n'
+        assert core.strip_source(source) == expected
+
+    def test_check_untyped_query(self, core: types.ModuleType):
+        diags = core.check_source('q = SQL[UNTYPED]("--sql\\nDELETE FROM users")')
+        assert diags == [
+            {
+                "rule": "untyped-query",
+                "message": "SQL[UNTYPED] has no inferable row type; "
+                "add casts (e.g. id::INTEGER) or a schema",
+                "severity": "warn",
+                "line": 1,
+            }
+        ]
+
+    def test_check_untyped_now_inferable(self, core: types.ModuleType):
+        diags = core.check_source(
+            'q = SQL[UNTYPED]("--sql\\nSELECT id FROM users")',
+            schema_sql="CREATE TABLE users (id INTEGER);",
+        )
+        assert [d["message"] for d in diags] == [
+            "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
+        ]
+
+    def test_check_untyped_ignored(self, core: types.ModuleType):
+        source = 'q = SQL[UNTYPED]("--sql\\nDELETE FROM users")'
+        assert core.check_source(source, rules={"untyped-query": "ignore"}) == []
+
+
+# ---------------------------------------------------------------------------
 # check_source — user-defined type validation
 # ---------------------------------------------------------------------------
 
