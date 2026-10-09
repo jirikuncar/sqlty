@@ -119,12 +119,16 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
 
     aliases = _typing_aliases(tree)
 
-    # Phase 1: AST scan — find recognized classes and extract import context
+    # Phase 1: AST scan — find recognized classes; TypedDict subclasses
+    # are recognized when their base is a TypedDict defined earlier
     recognized: list[tuple[ast.ClassDef, str]] = []  # (node, kind)
+    typeddict_nodes: dict[str, ast.ClassDef] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            kind = _classify_class(node, aliases)
-            if kind and _has_annotations(node):
+            kind = _classify_class(node, aliases, typeddict_nodes)
+            if kind == "TypedDict":
+                typeddict_nodes[node.name] = node
+            if kind:
                 recognized.append((node, kind))
 
     if not recognized:
@@ -135,31 +139,37 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
+    typeddicts: dict[str, TypeInfo] = {}
     for node, kind in recognized:
         keywords = {k.arg: k.value for k in node.keywords if k.arg}
         total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
-        ast_fields, required = _extract_fields_from_ast(node, aliases, total=total)
-        if not ast_fields:
+        own_fields, own_required = _extract_fields_from_ast(node, aliases, total=total)
+        parents = [typeddicts[n] for n in _base_names(node) if n in typeddicts]
+        inherited = {k: v for p in parents for k, v in p.fields}
+        fields = list((inherited | dict(own_fields)).items())
+        required = frozenset(
+            {k for p in parents for k in p.required} - dict(own_fields).keys() | own_required
+        )
+
+        info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
+        if kind == "TypedDict":
+            info.closed, info.extra_items = _closed_from_ast(keywords, aliases, parents)
+            typeddicts[node.name] = info
+        if not fields:
             continue
 
-        info = TypeInfo(name=node.name, fields=ast_fields, kind=kind, required=required)
-        if kind == "TypedDict":
-            closed_node = keywords.get("closed")
-            info.closed = isinstance(closed_node, ast.Constant) and closed_node.value is True
-            if (extra_node := keywords.get("extra_items")) is not None:
-                info.extra_items = _normalize_type_str(
-                    ast.unparse(_unwrap_qualifiers_ast(extra_node, aliases)[0])
-                )
-
-        if resolved := _resolve_class(node, import_stmts, source):
+        nodes = list(_lineage(node, typeddict_nodes).values()) if kind == "TypedDict" else [node]
+        if resolved := _resolve_class(nodes, import_stmts, source):
             cls, namespace = resolved
             info.resolved_hints = _resolve_type_hints(cls, namespace)
             if kind == "TypedDict" and info.resolved_hints is not None:
                 info.required = frozenset(getattr(cls, "__required_keys__", info.required))
-                info.closed = getattr(cls, "__closed__", None) is True
-                extra = getattr(cls, "__extra_items__", typing.NoExtraItems)
-                if extra is not typing.NoExtraItems:
-                    info.extra_items_hint = _unwrap_optional(_unwrap_qualifiers(extra))
+                info.closed, extra = _closed_from_runtime(cls)
+                if extra is None:
+                    info.extra_items = None
+                else:
+                    info.extra_items_hint = _unwrap_optional(extra)
+                    info.extra_items = info.extra_items or getattr(extra, "__name__", str(extra))
 
         result[node.name] = info
 
@@ -237,18 +247,19 @@ def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
 
 
 def _resolve_class(
-    node: ast.ClassDef,
+    nodes: list[ast.ClassDef],
     import_stmts: list[str],
     full_source: str,
 ) -> tuple[type, dict[str, object]] | None:
-    """Try to build a class at runtime, returning it with its namespace.
+    """Try to build the last of ``nodes`` at runtime, returning it with its namespace.
 
-    Executes just the necessary imports + the class definition in a
-    sandboxed namespace. Returns None if this fails for any reason.
+    Executes just the necessary imports + the class definitions (bases
+    first) in a sandboxed namespace. Returns None if this fails for any reason.
     """
-    # Build minimal source: imports + class definition
-    class_source = ast.get_source_segment(full_source, node)
-    if class_source is None:
+    class_sources = [
+        segment for node in nodes if (segment := ast.get_source_segment(full_source, node))
+    ]
+    if len(class_sources) != len(nodes):
         return None
 
     # Build a safe namespace with common types pre-loaded
@@ -259,8 +270,7 @@ def _resolve_class(
     }
 
     # Add typing imports based on kind
-    exec_lines = list(import_stmts)
-    exec_lines.append(class_source)
+    exec_lines = [*import_stmts, *class_sources]
     exec_source = "\n".join(exec_lines)
 
     try:
@@ -272,7 +282,7 @@ def _resolve_class(
     except Exception:
         return None
 
-    cls = namespace.get(node.name)
+    cls = namespace.get(nodes[-1].name)
     return (cls, namespace) if isinstance(cls, type) else None
 
 
@@ -293,6 +303,25 @@ def _unwrap_qualifiers(tp: typing.Any) -> typing.Any:
     while typing.get_origin(tp) in (typing.ReadOnly, typing.Required, typing.NotRequired):
         tp = typing.get_args(tp)[0]
     return tp
+
+
+def _closed_from_runtime(cls: type) -> tuple[bool, typing.Any]:
+    """Return ``(closed, extra_items)`` per PEP 728, following TypedDict bases.
+
+    ``__closed__`` / ``__extra_items__`` reflect only the class's own
+    arguments, so unset ones are inherited from the first keyed base.
+    ``extra_items=Never`` is ``closed=True``.
+    """
+    extra = getattr(cls, "__extra_items__", typing.NoExtraItems)
+    if extra is not typing.NoExtraItems:
+        extra = _unwrap_qualifiers(extra)
+        return (True, None) if extra in (typing.Never, typing.NoReturn) else (False, extra)
+    if (closed := getattr(cls, "__closed__", None)) is not None:
+        return closed, None
+    bases = (b for b in getattr(cls, "__orig_bases__", ()) if typing.is_typeddict(b))
+    return next(
+        (r for b in bases if (r := _closed_from_runtime(b)) != (False, None)), (False, None)
+    )
 
 
 def _types_compatible(field_type: type, expected_type: type) -> bool:
@@ -343,13 +372,6 @@ def _collect_imports(tree: ast.Module) -> list[str]:
     return imports
 
 
-def _has_annotations(node: ast.ClassDef) -> bool:
-    """Check if a class has at least one annotated field."""
-    return any(
-        isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) for item in node.body
-    )
-
-
 def _typing_aliases(tree: ast.Module) -> dict[str, str]:
     """Map local names imported from ``typing`` / ``typing_extensions`` to originals."""
     return {
@@ -361,13 +383,20 @@ def _typing_aliases(tree: ast.Module) -> dict[str, str]:
     }
 
 
-def _classify_class(node: ast.ClassDef, aliases: dict[str, str] | None = None) -> str | None:
-    """Classify a class as TypedDict, NamedTuple, dataclass, or BaseModel."""
+def _classify_class(
+    node: ast.ClassDef,
+    aliases: dict[str, str] | None = None,
+    typeddicts: typing.Container[str] = (),
+) -> str | None:
+    """Classify a class as TypedDict, NamedTuple, dataclass, or BaseModel.
+
+    Subclasses of the names in ``typeddicts`` are TypedDicts too.
+    """
     aliases = aliases or {}
     for base in node.bases:
         base_name = _get_name(base)
         base_name = aliases.get(base_name, base_name) if base_name else None
-        if base_name == "TypedDict":
+        if base_name == "TypedDict" or (isinstance(base, ast.Name) and base.id in typeddicts):
             return "TypedDict"
         if base_name == "NamedTuple":
             return "NamedTuple"
@@ -380,6 +409,39 @@ def _classify_class(node: ast.ClassDef, aliases: dict[str, str] | None = None) -
             return "dataclass"
 
     return None
+
+
+def _base_names(node: ast.ClassDef) -> list[str]:
+    """Names of bases spelled as bare names."""
+    return [base.id for base in node.bases if isinstance(base, ast.Name)]
+
+
+def _lineage(node: ast.ClassDef, classes: dict[str, ast.ClassDef]) -> dict[str, ast.ClassDef]:
+    """``node`` and its earlier-defined bases among ``classes``, bases first."""
+    lineage: dict[str, ast.ClassDef] = {}
+    for name in _base_names(node):
+        if (base := classes.get(name)) is not None and base.lineno < node.lineno:
+            lineage |= _lineage(base, classes)
+    return lineage | {node.name: node}
+
+
+def _closed_from_ast(
+    keywords: dict[str, ast.expr], aliases: dict[str, str], parents: list[TypeInfo]
+) -> tuple[bool, str | None]:
+    """Return ``(closed, extra_items)`` per PEP 728 from class keywords.
+
+    Without ``closed`` or ``extra_items`` the first keyed base's are inherited.
+    ``extra_items=Never`` (or ``NoReturn``) is ``closed=True``.
+    """
+    if (extra := keywords.get("extra_items")) is not None:
+        extra = _unwrap_qualifiers_ast(extra, aliases)[0]
+        if (name := _get_name(extra)) and aliases.get(name, name) in ("Never", "NoReturn"):
+            return True, None
+        return False, _normalize_type_str(ast.unparse(extra))
+    closed = keywords.get("closed")
+    if isinstance(closed, ast.Constant) and isinstance(closed.value, bool):
+        return closed.value, None
+    return next(((p.closed, p.extra_items) for p in parents if p.keyed), (False, None))
 
 
 def _get_name(node: ast.expr) -> str | None:

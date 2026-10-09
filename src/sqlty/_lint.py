@@ -11,6 +11,7 @@ Configuration via pyproject.toml:
     column-count-mismatch = "error"     # default
     column-type-mismatch = "error"      # default
     column-name-mismatch = "warn"       # default
+    typeddict-key-mismatch = "error"    # default
     select-star = "warn"                # default
     select-star-no-schema = "error"     # default
     stale-rewrite = "warn"              # default
@@ -66,6 +67,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=False,
         description="Annotated type field name doesn't match query column alias",
+    ),
+    "typeddict-key-mismatch": LintRule(
+        name="typeddict-key-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Query columns don't fit the keys of a closed or extra_items TypedDict",
     ),
     "select-star": LintRule(
         name="select-star",

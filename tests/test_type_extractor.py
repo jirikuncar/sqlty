@@ -466,7 +466,7 @@ class TestTypedDictQualifiers:
 
     SOURCE = """\
 {imports}
-from typing import NotRequired, ReadOnly, TypedDict
+from typing import Never, NotRequired, ReadOnly, TypedDict
 
 class Row(TypedDict, closed=True):
     id: ReadOnly[int]
@@ -474,6 +474,21 @@ class Row(TypedDict, closed=True):
 
 class Extra(TypedDict, extra_items=ReadOnly[int]):
     day: str
+
+class Sealed(TypedDict, extra_items=ReadOnly[Never]):
+    id: int
+
+class Child(Row):
+    note: ReadOnly[str]
+
+class GrandChild(Child):
+    pass
+
+class ExtraChild(Extra):
+    pass
+
+class Reopened(Extra, closed=False):
+    pass
 """
 
     def _extract(self, runtime: bool) -> dict[str, TypeInfo]:
@@ -491,3 +506,26 @@ class Extra(TypedDict, extra_items=ReadOnly[int]):
             assert extra.extra_items == "int" and not extra.closed
             assert check_type_compatibility(extra, "views", "int")
             assert not check_type_compatibility(extra, "ratio", "float")
+
+    def test_extra_items_never_is_closed(self):
+        for runtime in (True, False):
+            sealed = self._extract(runtime)["Sealed"]
+            assert sealed.closed and sealed.extra_items is None
+            assert sealed.extra_items_hint is None
+
+    def test_subclasses_inherit_keys_and_closedness(self):
+        for runtime in (True, False):
+            types = self._extract(runtime)
+            for name in ("Child", "GrandChild"):
+                child = types[name]
+                assert child.fields == [("id", "int"), ("note", "str")]
+                assert child.required == {"id", "note"}, name
+                assert child.closed and child.extra_items is None
+            extra_child = types["ExtraChild"]
+            assert extra_child.extra_items == "int" and not extra_child.closed
+            assert not check_type_compatibility(extra_child, "ratio", "float")
+
+    def test_explicit_closed_false_overrides_base(self):
+        for runtime in (True, False):
+            reopened = self._extract(runtime)["Reopened"]
+            assert not reopened.keyed
