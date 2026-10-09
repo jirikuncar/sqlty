@@ -82,6 +82,45 @@ Works everywhere a string works. Created by `sqlty rewrite`:
 query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
+### `row_form(query[, default])`
+
+```python
+from sqlty import row_form
+```
+
+Returns the row type `T` of a query built as `SQL[T](...)`, typed as `TypeForm[T]`:
+
+```python
+row_form(query)        # tuple[int, str]
+row_form(SQL("..."), None)  # None: no runtime type
+```
+
+Without `default`, a query with no runtime type raises `TypeError`. This covers plain strings, `SQL("...")`, annotation-only `q: SQL[T] = "..."` and stripped sources.
+
+## psycopg3 Driver
+
+```python
+from sqlty.drivers.psycopg import execute, row_factory
+```
+
+### `row_factory(T)`
+
+Returns the psycopg `BaseRowFactory[T]` for a row type:
+
+| `T` | Row factory |
+|-----|-------------|
+| `tuple[...]` | `tuple_row` |
+| `TypedDict`, `dict[...]` | `dict_row` |
+| any other class (dataclass, `NamedTuple`, Pydantic model) | `class_row(T)` |
+
+### `execute(conn, query, params=None)`
+
+Executes `query: SQL[T]` and returns a `Cursor[T]` whose row factory is `row_factory(row_form(query))`, or `tuple_row` when the query has no runtime type:
+
+```python
+users = execute(conn, SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")).fetchall()  # list[User]
+```
+
 ---
 
 ## Configuration

@@ -93,13 +93,13 @@ Runtime type resolution handles import variations correctly — `from datetime i
 
 ## psycopg3 Integration
 
-`SQL[T]` is a `str` subclass — it works directly with psycopg3's `execute()` and row factories:
+`SQL[T]` is a `str` subclass, so it works anywhere psycopg3 takes a query. `sqlty.drivers.psycopg.execute` goes further: it picks the row factory from `T`, so rows come back as `T` both at runtime and for the type checker:
 
 ```python
 import psycopg
-from psycopg.rows import class_row
 from dataclasses import dataclass
 from sqlty import SQL
+from sqlty.drivers.psycopg import execute
 
 @dataclass
 class User:
@@ -111,10 +111,16 @@ class User:
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
 
 with psycopg.connect("dbname=mydb") as conn:
-    cur = conn.cursor(row_factory=class_row(User))
-    cur.execute(query)              # query is just a str — psycopg3 accepts it directly
-    users: list[User] = cur.fetchall()  # row_factory maps rows to User at runtime
+    users = execute(conn, query).fetchall()  # list[User]
 ```
+
+| `T` | Row factory |
+|-----|-------------|
+| `tuple[...]` | `tuple_row` |
+| `TypedDict`, `dict[...]` | `dict_row` |
+| dataclass, `NamedTuple`, Pydantic model | `class_row(T)` |
+
+`sqlty.row_form(query)` returns `T` itself, and `row_factory(T)` the matching psycopg factory for use with your own cursors. Only queries built as `SQL[T](...)` carry `T` at runtime; `execute` falls back to tuples otherwise.
 
 **Without sqlty**, if the SQL drifts from the Python type (column added, type changed, name mismatch), you get a runtime error. **With sqlty**, `sqlty check` catches the mismatch before the code runs.
 
