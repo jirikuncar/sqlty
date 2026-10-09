@@ -220,9 +220,9 @@ with psycopg.connect("dbname=mydb") as conn:
 
 ```python
 import psycopg
-from psycopg.rows import class_row
 from dataclasses import dataclass
 from sqlty import SQL
+from sqlty.drivers.psycopg import execute
 
 @dataclass
 class User:
@@ -234,9 +234,7 @@ class User:
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
 
 with psycopg.connect("dbname=mydb") as conn:
-    cur = conn.cursor(row_factory=class_row(User))
-    cur.execute(query)  # SQL[T] is a str — works directly
-    users: list[User] = cur.fetchall()
+    users = execute(conn, query).fetchall()  # list[User], via class_row(User)
 ```
 
 ### With dict_row for ad-hoc queries

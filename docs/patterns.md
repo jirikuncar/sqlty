@@ -99,13 +99,13 @@ See [magic codec documentation](magic-codec.md).
 
 ## Pattern 5: psycopg3 Row Factories
 
-`SQL[T]` is a `str` subclass, so it passes directly to psycopg3's `execute()`. Combine with `class_row` for end-to-end type safety:
+`SQL[T]` is a `str` subclass, so it passes directly to psycopg3's `execute()`. `sqlty.drivers.psycopg.execute` picks the row factory from `T` for end-to-end type safety:
 
 ```python
 import psycopg
-from psycopg.rows import class_row
 from dataclasses import dataclass
 from sqlty import SQL
+from sqlty.drivers.psycopg import execute
 
 @dataclass
 class User:
@@ -117,9 +117,7 @@ class User:
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
 
 with psycopg.connect("dbname=mydb") as conn:
-    cur = conn.cursor(row_factory=class_row(User))
-    cur.execute(query)
-    users: list[User] = cur.fetchall()
+    users = execute(conn, query).fetchall()  # list[User]
 ```
 
 **How the pieces fit together:**
@@ -128,7 +126,7 @@ with psycopg.connect("dbname=mydb") as conn:
 |-------|---------------|------|
 | `sqlty check` | SQL ↔ Python type match | dev time |
 | `SQL[T]` | Carries type parameter | type checking |
-| `class_row(T)` | Maps DB rows → Python objects | runtime |
+| `row_factory(T)` | Maps DB rows → Python objects (`tuple_row`, `dict_row`, `class_row`) | runtime |
 
 Without sqlty, a mismatch between SQL columns and `User` fields surfaces only at runtime. With sqlty, `sqlty check` catches it before the code runs.
 
@@ -143,9 +141,9 @@ schema = "schema.sql"
 
 ```python
 import psycopg
-from psycopg.rows import class_row, dict_row
 from dataclasses import dataclass
 from sqlty import SQL
+from sqlty.drivers.psycopg import execute
 
 @dataclass
 class User:
@@ -158,11 +156,8 @@ get_users = SQL[User]("--sql\nSELECT id, name, email FROM users")
 get_stats = SQL[tuple[int]]("--sql\nSELECT COUNT(*) FROM users")
 
 with psycopg.connect("dbname=mydb") as conn:
-    # Typed rows via class_row
-    users = conn.cursor(row_factory=class_row(User)).execute(get_users).fetchall()
-
-    # Tuple rows for simple aggregates
-    (count,) = conn.execute(get_stats).fetchone()
+    users = execute(conn, get_users).fetchall()  # list[User]
+    row = execute(conn, get_stats).fetchone()    # tuple[int] | None
 ```
 
 **Best for:** Production codebases using psycopg3 that want compile-time SQL validation.

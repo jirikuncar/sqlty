@@ -3,14 +3,14 @@
 import importlib.metadata
 import os
 from collections.abc import Callable
-from typing import overload
+from typing import TypeForm, get_args, overload
 
 try:
     __version__ = importlib.metadata.version(__name__)
 except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
-__all__ = ["SQL", "sqlty"]
+__all__ = ["SQL", "row_form", "sqlty"]
 
 
 # Determine if auto-generation is enabled via environment variable
@@ -19,6 +19,39 @@ _auto_generate = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in {"1", "tru
 
 class SQL[T](str):
     pass
+
+
+_MISSING: object = object()
+
+
+@overload
+def row_form[T](query: SQL[T], /) -> TypeForm[T]: ...
+
+
+@overload
+def row_form[T, D](query: SQL[T], default: D, /) -> TypeForm[T] | D: ...
+
+
+def row_form(query: str, default: object = _MISSING, /) -> object:
+    """Return the row type ``T`` a ``SQL[T](...)`` instance was built with.
+
+    The type is read from ``__orig_class__``, so it exists only for queries
+    constructed as ``SQL[T](...)``. Plain strings, annotation-only
+    ``q: SQL[T] = "..."`` and stripped sources carry no runtime type: these
+    raise ``TypeError`` unless a ``default`` is given.
+
+    Example:
+        >>> row_form(SQL[tuple[int, str]]("--sql\\nSELECT 1, 'a'"))
+        tuple[int, str]
+        >>> row_form(SQL("--sql\\nSELECT 1"), None) is None
+        True
+    """
+    orig = getattr(query, "__orig_class__", None)
+    if orig is not None and (args := get_args(orig)):
+        return args[0]
+    if default is not _MISSING:
+        return default
+    raise TypeError(f"{type(query).__name__} has no runtime row type; construct it as SQL[T](...)")
 
 
 @overload
