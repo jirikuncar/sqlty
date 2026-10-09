@@ -27,9 +27,22 @@ import uuid
 
 
 class TypeInfo:
-    """Information about a user-defined type extracted from source."""
+    """Information about a user-defined type extracted from source.
 
-    __slots__ = ("name", "fields", "kind", "resolved_hints")
+    ``required``, ``closed`` and ``extra_items`` describe TypedDict keys
+    (PEP 655, PEP 728); other kinds have every field required and are open.
+    """
+
+    __slots__ = (
+        "name",
+        "fields",
+        "kind",
+        "resolved_hints",
+        "required",
+        "closed",
+        "extra_items",
+        "extra_items_hint",
+    )
 
     def __init__(
         self,
@@ -37,11 +50,25 @@ class TypeInfo:
         fields: list[tuple[str, str]],
         kind: str,
         resolved_hints: dict[str, type] | None = None,
+        *,
+        required: frozenset[str] | None = None,
+        closed: bool = False,
+        extra_items: str | None = None,
+        extra_items_hint: type | None = None,
     ) -> None:
         self.name = name
         self.fields = fields  # [(field_name, field_type_str), ...] — AST fallback
         self.kind = kind  # "TypedDict", "NamedTuple", "dataclass", "BaseModel"
         self.resolved_hints = resolved_hints  # {field_name: type_object} — runtime
+        self.required = frozenset(n for n, _ in fields) if required is None else required
+        self.closed = closed
+        self.extra_items = extra_items
+        self.extra_items_hint = extra_items_hint
+
+    @property
+    def keyed(self) -> bool:
+        """Whether columns match keys by name (closed or ``extra_items`` TypedDict)."""
+        return self.closed or self.extra_items is not None
 
     def __repr__(self) -> str:
         return f"TypeInfo({self.name!r}, fields={self.fields!r}, kind={self.kind!r})"
@@ -90,11 +117,13 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
     except SyntaxError:
         return {}
 
+    aliases = _typing_aliases(tree)
+
     # Phase 1: AST scan — find recognized classes and extract import context
     recognized: list[tuple[ast.ClassDef, str]] = []  # (node, kind)
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            kind = _classify_class(node)
+            kind = _classify_class(node, aliases)
             if kind and _has_annotations(node):
                 recognized.append((node, kind))
 
@@ -107,19 +136,32 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
     for node, kind in recognized:
-        ast_fields = _extract_fields_from_ast(node)
+        keywords = {k.arg: k.value for k in node.keywords if k.arg}
+        total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
+        ast_fields, required = _extract_fields_from_ast(node, aliases, total=total)
         if not ast_fields:
             continue
 
-        # Try runtime resolution
-        resolved = _resolve_type_hints(node, kind, import_stmts, source)
+        info = TypeInfo(name=node.name, fields=ast_fields, kind=kind, required=required)
+        if kind == "TypedDict":
+            closed_node = keywords.get("closed")
+            info.closed = isinstance(closed_node, ast.Constant) and closed_node.value is True
+            if (extra_node := keywords.get("extra_items")) is not None:
+                info.extra_items = _normalize_type_str(
+                    ast.unparse(_unwrap_qualifiers_ast(extra_node, aliases)[0])
+                )
 
-        result[node.name] = TypeInfo(
-            name=node.name,
-            fields=ast_fields,
-            kind=kind,
-            resolved_hints=resolved,
-        )
+        if resolved := _resolve_class(node, import_stmts, source):
+            cls, namespace = resolved
+            info.resolved_hints = _resolve_type_hints(cls, namespace)
+            if kind == "TypedDict" and info.resolved_hints is not None:
+                info.required = frozenset(getattr(cls, "__required_keys__", info.required))
+                info.closed = getattr(cls, "__closed__", None) is True
+                extra = getattr(cls, "__extra_items__", typing.NoExtraItems)
+                if extra is not typing.NoExtraItems:
+                    info.extra_items_hint = _unwrap_optional(_unwrap_qualifiers(extra))
+
+        result[node.name] = info
 
     return result
 
@@ -146,20 +188,23 @@ def check_type_compatibility(
     if column_python_type is None:
         return True  # Can't validate unknown SQL type
 
+    expected_type = PYTHON_TYPE_MAP.get(column_python_type)
+    declared = dict(user_type.fields)
+
+    if column_name not in declared:
+        if user_type.extra_items is None:
+            return False
+        if user_type.extra_items_hint is not None and expected_type is not None:
+            return _types_compatible(user_type.extra_items_hint, expected_type)
+        return user_type.extra_items == column_python_type
+
     # Runtime path: use resolved type hints
     if user_type.resolved_hints and column_name in user_type.resolved_hints:
-        field_type = user_type.resolved_hints[column_name]
-        expected_type = PYTHON_TYPE_MAP.get(column_python_type)
         if expected_type is not None:
-            return _types_compatible(field_type, expected_type)
+            return _types_compatible(user_type.resolved_hints[column_name], expected_type)
 
     # Fallback: string comparison (from AST fields)
-    for field_name, field_type_str in user_type.fields:
-        if field_name == column_name:
-            normalized = _normalize_type_str(field_type_str)
-            return normalized == column_python_type
-
-    return False  # field not found
+    return _normalize_type_str(declared[column_name]) == column_python_type
 
 
 def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
@@ -191,19 +236,15 @@ def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_type_hints(
+def _resolve_class(
     node: ast.ClassDef,
-    kind: str,
     import_stmts: list[str],
     full_source: str,
-) -> dict[str, type] | None:
-    """Try to resolve a class's field types at runtime.
+) -> tuple[type, dict[str, object]] | None:
+    """Try to build a class at runtime, returning it with its namespace.
 
     Executes just the necessary imports + the class definition in a
-    sandboxed namespace, then uses ``typing.get_type_hints()`` to get
-    actual type objects.
-
-    Returns None if resolution fails for any reason.
+    sandboxed namespace. Returns None if this fails for any reason.
     """
     # Build minimal source: imports + class definition
     class_source = ast.get_source_segment(full_source, node)
@@ -232,20 +273,26 @@ def _resolve_type_hints(
         return None
 
     cls = namespace.get(node.name)
-    if cls is None or not isinstance(cls, type):
-        return None
+    return (cls, namespace) if isinstance(cls, type) else None
 
+
+def _resolve_type_hints(cls: type, namespace: dict[str, object]) -> dict[str, type] | None:
+    """Resolve field types, dropping qualifiers (``ReadOnly`` etc.) and ``None``."""
     try:
         hints = typing.get_type_hints(cls, globalns=namespace)
     except Exception:
         return None
+    return {name: _unwrap_optional(tp) for name, tp in hints.items()}
 
-    # Unwrap Optional / Union with None for each field
-    resolved: dict[str, type] = {}
-    for field_name, field_type in hints.items():
-        resolved[field_name] = _unwrap_optional(field_type)
 
-    return resolved
+_QUALIFIERS = frozenset({"ReadOnly", "Required", "NotRequired"})
+
+
+def _unwrap_qualifiers(tp: typing.Any) -> typing.Any:
+    """Strip ``ReadOnly`` / ``Required`` / ``NotRequired`` wrappers."""
+    while typing.get_origin(tp) in (typing.ReadOnly, typing.Required, typing.NotRequired):
+        tp = typing.get_args(tp)[0]
+    return tp
 
 
 def _types_compatible(field_type: type, expected_type: type) -> bool:
@@ -303,10 +350,23 @@ def _has_annotations(node: ast.ClassDef) -> bool:
     )
 
 
-def _classify_class(node: ast.ClassDef) -> str | None:
+def _typing_aliases(tree: ast.Module) -> dict[str, str]:
+    """Map local names imported from ``typing`` / ``typing_extensions`` to originals."""
+    return {
+        alias.asname: alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module in ("typing", "typing_extensions")
+        for alias in node.names
+        if alias.asname
+    }
+
+
+def _classify_class(node: ast.ClassDef, aliases: dict[str, str] | None = None) -> str | None:
     """Classify a class as TypedDict, NamedTuple, dataclass, or BaseModel."""
+    aliases = aliases or {}
     for base in node.bases:
         base_name = _get_name(base)
+        base_name = aliases.get(base_name, base_name) if base_name else None
         if base_name == "TypedDict":
             return "TypedDict"
         if base_name == "NamedTuple":
@@ -333,18 +393,42 @@ def _get_name(node: ast.expr) -> str | None:
     return None
 
 
-def _extract_fields_from_ast(node: ast.ClassDef) -> list[tuple[str, str]]:
-    """Extract annotated fields from a class body as (name, type_str) pairs.
+def _extract_fields_from_ast(
+    node: ast.ClassDef,
+    aliases: dict[str, str] | None = None,
+    *,
+    total: bool = True,
+) -> tuple[list[tuple[str, str]], frozenset[str]]:
+    """Extract annotated fields as (name, type_str) pairs plus required names.
 
-    This is the fallback when runtime resolution is not available.
+    Qualifiers are stripped from the type strings. This is the fallback
+    when runtime resolution is not available.
     """
     fields: list[tuple[str, str]] = []
+    required: set[str] = set()
     for item in node.body:
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
-            field_name = item.target.id
-            field_type = ast.unparse(item.annotation)
-            fields.append((field_name, _normalize_type_str(field_type)))
-    return fields
+            annotation, is_required = _unwrap_qualifiers_ast(item.annotation, aliases or {})
+            fields.append((item.target.id, _normalize_type_str(ast.unparse(annotation))))
+            if total if is_required is None else is_required:
+                required.add(item.target.id)
+    return fields, frozenset(required)
+
+
+def _unwrap_qualifiers_ast(
+    annotation: ast.expr, aliases: dict[str, str]
+) -> tuple[ast.expr, bool | None]:
+    """Strip qualifier subscripts; report ``Required`` (True) / ``NotRequired`` (False)."""
+    required: bool | None = None
+    while isinstance(annotation, ast.Subscript):
+        name = _get_name(annotation.value)
+        name = aliases.get(name, name) if name else None
+        if name not in _QUALIFIERS:
+            break
+        if name != "ReadOnly":
+            required = name == "Required"
+        annotation = annotation.slice
+    return annotation, required
 
 
 def _split_type_args(s: str) -> list[str]:

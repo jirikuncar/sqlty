@@ -89,6 +89,20 @@ error[column-count-mismatch]: User has 3 fields but query returns 2 columns
 warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
 ```
 
+`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match:
+
+```python
+from typing import NotRequired, ReadOnly, TypedDict
+from sqlty import SQL
+
+class Metrics(TypedDict, extra_items=int):
+    day: ReadOnly[str]
+    note: NotRequired[str]
+
+query = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, ratio::FLOAT FROM stats")
+# error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
+```
+
 Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.
 
 ## psycopg3 Integration

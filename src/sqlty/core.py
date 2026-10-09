@@ -23,6 +23,8 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from sqlty._lint import RuleConfig
+    from sqlty._sql_analyzer import ColumnInfo
     from sqlty._type_extractor import TypeInfo
 
 _SQLTY_LIB = os.environ.get("SQLTY_LIB")
@@ -227,7 +229,6 @@ def _enhance_with_user_type_checks(
 
     from sqlty._lint import RuleConfig
     from sqlty._sql_analyzer import SQLAnalyzer
-    from sqlty._type_extractor import check_type_compatibility
 
     escaped_wrapper = re.escape(wrapper_name)
 
@@ -288,63 +289,89 @@ def _enhance_with_user_type_checks(
             if not columns:
                 continue
 
-            fields = type_info.fields  # [(name, type_str), ...]
-
-            # Check column count
-            if rule_config.is_enabled("column-count-mismatch"):
-                if len(fields) != len(columns):
+            for rule, message in _structural_diagnostics(
+                type_name, type_info, columns, rule_config
+            ):
+                if rule_config.is_enabled(rule):
                     diagnostics.append(
                         {
-                            "rule": "column-count-mismatch",
-                            "message": (
-                                f"{type_name} has {len(fields)} fields "
-                                f"but query returns {len(columns)} columns"
-                            ),
-                            "severity": rule_config.severity("column-count-mismatch").value,
+                            "rule": rule,
+                            "message": message,
+                            "severity": rule_config.severity(rule).value,
                             "line": i,
                         }
                     )
-                    continue  # Skip type/name checks when counts differ
-
-            # Check column types — using runtime type checking
-            if rule_config.is_enabled("column-type-mismatch"):
-                for (field_name, _field_type_str), col in zip(fields, columns, strict=False):
-                    if col.python_type and not check_type_compatibility(
-                        type_info, field_name, col.python_type
-                    ):
-                        diagnostics.append(
-                            {
-                                "rule": "column-type-mismatch",
-                                "message": (
-                                    f"{type_name}.{field_name} is "
-                                    f"{_field_type_str} but query column "
-                                    f"'{col.name}' infers {col.python_type}"
-                                ),
-                                "severity": rule_config.severity("column-type-mismatch").value,
-                                "line": i,
-                            }
-                        )
-
-            # Check column names
-            if rule_config.is_enabled("column-name-mismatch"):
-                for (field_name, _), col in zip(fields, columns, strict=False):
-                    if field_name != col.name:
-                        diagnostics.append(
-                            {
-                                "rule": "column-name-mismatch",
-                                "message": (
-                                    f"{type_name}.{field_name} doesn't match "
-                                    f"query column '{col.name}'"
-                                ),
-                                "severity": rule_config.severity("column-name-mismatch").value,
-                                "line": i,
-                            }
-                        )
     finally:
         if schema_path and schema_path.exists():
             schema_path.unlink(missing_ok=True)
 
     return diagnostics
+
+
+def _structural_diagnostics(
+    type_name: str, info: TypeInfo, columns: list[ColumnInfo], rules: RuleConfig
+) -> list[tuple[str, str]]:
+    """Compare a user type with query columns, returning ``(rule, message)`` pairs.
+
+    Fields match columns by position. Closed TypedDicts and those with
+    ``extra_items`` match by key instead: ``NotRequired`` keys may be absent,
+    and only ``extra_items`` admits undeclared columns (type-checked against it).
+    A reported count mismatch suppresses the per-column checks.
+    """
+    from sqlty._type_extractor import check_type_compatibility
+
+    fields = info.fields
+    declared = dict(fields)
+    lo = len(info.required) if info.keyed else len(fields)
+    hi = len(fields) if not info.extra_items else len(columns)
+    if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
+        expected = f"{len(fields)} fields"
+        if info.extra_items:
+            expected = f"{lo} required keys"
+        elif lo < hi:
+            expected = f"{lo} required and {hi} total keys"
+        return [
+            (
+                "column-count-mismatch",
+                f"{type_name} has {expected} but query returns {len(columns)} columns",
+            )
+        ]
+
+    def type_mismatch(field: str, col: ColumnInfo) -> list[tuple[str, str]]:
+        if not col.python_type or check_type_compatibility(info, field, col.python_type):
+            return []
+        declared_type = declared.get(field) or f"extra_items {info.extra_items}"
+        return [
+            (
+                "column-type-mismatch",
+                f"{type_name}.{field} is {declared_type} but query column "
+                f"'{col.name}' infers {col.python_type}",
+            )
+        ]
+
+    if not info.keyed:
+        pairs = list(zip(fields, columns, strict=False))
+        return [d for (field, _), col in pairs for d in type_mismatch(field, col)] + [
+            ("column-name-mismatch", f"{type_name}.{field} doesn't match query column '{col.name}'")
+            for (field, _), col in pairs
+            if field != col.name
+        ]
+
+    known = [col for col in columns if col.name in declared or info.extra_items]
+    unknown = [col for col in columns if col.name not in declared and not info.extra_items]
+    names = {col.name for col in columns}
+    missing = [key for key, _ in fields if key in info.required and key not in names]
+    return (
+        [d for col in known for d in type_mismatch(col.name, col)]
+        + [
+            ("column-name-mismatch", f"{type_name} has no key for query column '{col.name}'")
+            for col in unknown
+        ]
+        + [
+            ("column-name-mismatch", f"{type_name}.{key} is required but missing from query")
+            for key in missing
+        ]
+    )
 
 
 def _strip_sql_prefix(sql_content: str) -> str:
