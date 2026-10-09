@@ -4,7 +4,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 
 ## Prerequisites
 
-- Python 3.12+
+- Python 3.15+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 - [Rust toolchain](https://rustup.rs/) (optional — for compiling the native extension)
 

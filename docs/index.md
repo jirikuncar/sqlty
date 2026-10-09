@@ -10,7 +10,7 @@ pip install sqlty
 uv add sqlty
 ```
 
-Requires Python 3.12+. See [installation guide](installation.md) for details.
+Requires Python 3.15+. See [installation guide](installation.md) for details.
 
 ## Quick Start
 
