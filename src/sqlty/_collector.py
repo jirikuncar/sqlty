@@ -47,7 +47,7 @@ class LiteralCallCollector(ast.NodeVisitor):
     def __init__(
         self,
         atok: asttokens.ASTTokens | None = None,
-        function_configs: list["FunctionConfigComplete"] | None = None,
+        function_configs: list[FunctionConfigComplete] | None = None,
     ) -> None:
         self.function_name = "sql"  # Always look for .sql() method calls
         self.calls: list[CallInfo] = []
@@ -505,7 +505,7 @@ class LiteralCallCollector(ast.NodeVisitor):
         return None
 
     def _extract_param_value(
-        self, node: ast.Call, param_name: str, config: "FunctionConfigComplete"
+        self, node: ast.Call, param_name: str, config: FunctionConfigComplete
     ) -> tuple[str | None, bool]:
         """Extract the value of a parameter from a function call.
 

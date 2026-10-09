@@ -39,10 +39,12 @@ Note: This module does NOT register any codecs. For automatic transformation
 
 from __future__ import annotations
 
+import codecs
 import encodings
 import io
 import token
 import tokenize
+from collections.abc import Buffer
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,8 +53,9 @@ if TYPE_CHECKING:
 __all__ = ["decode", "_infer_sql_type", "_transform_sql_string"]
 
 # Get the standard UTF-8 codec
-utf_8_codec = encodings.search_function("utf8")
-assert utf_8_codec is not None, "UTF-8 codec not found"
+_utf_8_codec = encodings.search_function("utf8")
+assert _utf_8_codec is not None, "UTF-8 codec not found"
+utf_8_codec: codecs.CodecInfo = _utf_8_codec
 
 # Lazy-initialized rewriter (avoid import cycle at module level)
 _rewriter = None
@@ -130,7 +133,7 @@ def _transform_sql_string(string_literal: str) -> str:
     return f"{istyle.wrapper_name}[{inferred_type}]({string_literal})"
 
 
-def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
+def decode(b: Buffer, errors: str = "strict") -> tuple[str, int]:
     """Decode bytes into a string, transforming --sql prefixed strings.
 
     This is the main entry point for the custom codec. Uses the tokenizer
@@ -144,7 +147,7 @@ def decode(b: bytes, errors: str = "strict") -> tuple[str, int]:
         A tuple of (decoded_string, length)
     """
     # First decode as UTF-8
-    u, length = utf_8_codec.decode(b, errors)  # type: ignore[union-attr]
+    u, length = utf_8_codec.decode(b, errors)
 
     try:
         # Tokenize the source

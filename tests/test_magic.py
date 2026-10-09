@@ -78,3 +78,15 @@ class TestTransformSQLString:
         string_literal = '"""--sql\nSELECT id::INTEGER, name::TEXT\n"""'
         result = _transform_sql_string(string_literal)
         assert result.startswith("SQL[tuple[int, str]](")
+
+
+class TestDecodeBuffer:
+    """decode() accepts any bytes-like object, as the codec protocol requires."""
+
+    def test_decode_accepts_buffer_types(self):
+        from sqlty._decode import decode
+
+        src = b'q = "--sql\\nSELECT 1::INTEGER"'
+        expected = decode(src)
+        assert decode(bytearray(src)) == expected
+        assert decode(memoryview(src)) == expected

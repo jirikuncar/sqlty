@@ -3,7 +3,7 @@
 ## Quick Links
 
 - **[Motivation](motivation.md)** — Why SQLTy, when to use it
-- **[Installation](installation.md)** — Setup (Python 3.12+)
+- **[Installation](installation.md)** — Setup (Python 3.15+)
 - **[User Guide](index.md)** — Complete guide: queries, rewrite, check, strip
 - **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
 - **[Usage Patterns](patterns.md)** — Rewrite/strip, magic codec, schema inference

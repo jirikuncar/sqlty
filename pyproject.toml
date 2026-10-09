@@ -3,7 +3,7 @@ name = "sqlty"
 dynamic = ["version"]
 description = "Type-safe SQL queries for Python with automatic stub generation"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.15"
 license = { file = "LICENSE" }
 authors = [{ name = "Jiri Kuncar", email = "jiri.kuncar@gmail.com" }]
 keywords = [
@@ -20,7 +20,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: SQL",
     "Topic :: Software Development :: Code Generators",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -56,14 +57,14 @@ manifest-path = "rust/Cargo.toml"
 dev = [
     "inline-snapshot>=0.15.0",
     "maturin>=1.7,<2.0",
-    "mypy>=1.18.2",
+    "mypy>=2.4.0",
     "pre-commit>=4.0.1",
-    "pyright>=1.1.400",
+    "pyright>=1.1.414",
     "pytest>=8.4.2",
     "pytest-cov>=6.0.0",
     "pytest-randomly>=3.16.0",
-    "ruff>=0.8.4",
-    "ty",
+    "ruff>=0.16.10",
+    "ty>=0.0.85",
 ]
 cli = ["rich>=13.0.0"]
 magic = ["isort>=7.0.0"]
@@ -91,7 +92,7 @@ source = ["src/"]
 show_missing = true
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.15"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -114,9 +115,10 @@ root = ["./src", "./examples"]
 include = ["src", "examples"]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py315"
 line-length = 100
-extend-exclude = ["tests/typechecks"]
+# Markdown code blocks are test data (mdtest, README) and must not be reformatted.
+extend-exclude = ["tests/typechecks", "*.md"]
 
 [tool.ruff.lint]
 select = [

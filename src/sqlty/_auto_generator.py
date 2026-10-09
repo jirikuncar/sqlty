@@ -30,17 +30,18 @@ def auto_generate_stub(fn: Callable[[str], Any], query: str) -> None:
 
     try:
         registry_file = inspect.getfile(fn)
-    except (TypeError, OSError):  # pragma: no cover
+    except TypeError, OSError:  # pragma: no cover
         return None
 
     # Build fully qualified class name
-    fully_qualified_name = f"{registry_file}.{fn.__name__}"
+    fn_name: str = getattr(fn, "__name__", "unknown")
+    fully_qualified_name = f"{registry_file}.{fn_name}"
 
     # Register the call
     registry = get_runtime_registry()
     registry.register_call(
         query=query,
-        registry_class=fn.__name__,
+        registry_class=fn_name,
         fully_qualified_name=fully_qualified_name,
         registry_file=registry_file,
         module_name=module_name,
