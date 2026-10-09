@@ -20,7 +20,7 @@ sqlty rewrite [OPTIONS] [PATH...]
 | `--diff` | Show diff without applying |
 | `--dialect <DIALECT>` | SQL dialect: `postgres` (default), `sqlite`, `mysql` |
 | `--schema <PATH>` | Schema `.sql` file for enhanced inference |
-| `--untyped <MODE>` | Uninferable queries: `skip` (default, leave unwrapped) or `sentinel` (`SQL[UNTYPED](...)`) |
+| `--untyped <MODE>` | Row-returning queries of unknown row type: `skip` (default, leave unwrapped) or `sentinel` (`SQL[UNTYPED](...)`); statements without rows stay unwrapped |
 | `-v, --verbose` | Increase verbosity |
 | `-q, --quiet` | Suppress non-error output |
 
@@ -145,7 +145,7 @@ n = scalar(conn, "--sql\nSELECT max(id)::INTEGER FROM users", int | None)
 dialect = "postgres"           # SQL dialect (postgres, mysql, sqlite)
 schema = "schema.sql"          # Path to schema file
 format-command = "ruff format --stdin-filename {filename} -"
-untyped = "skip"               # "sentinel": wrap uninferable queries as SQL[UNTYPED]
+untyped = "skip"               # "sentinel": wrap row-returning queries of unknown type as SQL[UNTYPED]
 
 [tool.sqlty.rules]             # Per-rule severity
 column-count-mismatch = "error"

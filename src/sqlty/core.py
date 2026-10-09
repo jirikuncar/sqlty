@@ -105,11 +105,11 @@ def rewrite_source(
         dialect: SQL dialect
         schema_sql: Optional CREATE TABLE statements
         import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
-        untyped: Wrap queries without an inferable row type as ``SQL[UNTYPED](...)``
+        untyped: Wrap row-returning queries of unknown row type as ``SQL[UNTYPED](...)``
 
     Example:
-        >>> rewrite_source('q = "--sql\\nDELETE FROM users"', untyped=True)
-        'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nDELETE FROM users")'
+        >>> rewrite_source('q = "--sql\\\\nVALUES (1, 2)"', untyped=True)
+        'from sqlty import SQL\\nfrom sqlty import UNTYPED\\nq = SQL[UNTYPED]("--sql\\\\nVALUES (1, 2)")'
 
     Returns:
         Rewritten source code

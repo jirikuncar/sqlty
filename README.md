@@ -187,9 +187,9 @@ The codec is registered automatically when sqlty is installed. See [magic codec 
 
 ## Untyped Queries
 
-Statements without an inferable row type (`DELETE` without `RETURNING`,
-DDL, unparseable SQL) are left as plain strings by default. Opt in to mark
-them explicitly with the `UNTYPED` sentinel instead:
+Queries that return rows sqlty can't type (`VALUES`, unparseable SQL) are
+left as plain strings by default. Opt in to mark them explicitly with the
+`UNTYPED` sentinel instead:
 
 ```toml
 # pyproject.toml
@@ -198,14 +198,15 @@ untyped = "sentinel"  # or: sqlty rewrite --untyped sentinel
 ```
 
 ```python
-query = "--sql\nDELETE FROM users WHERE id = 1"
-# rewritten: query = SQL[UNTYPED]("--sql\nDELETE FROM users WHERE id = 1")
+query = "--sql\nVALUES (1, 2)"
+# rewritten: query = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ```
 
 `UNTYPED` is a [PEP 661](https://peps.python.org/pep-0661/) sentinel, not
 `Any`: mypy, pyright and ty reject using its rows as a concrete type, and
 `sqlty check` reports it as `untyped-query` until casts or a schema make the
-row type known.
+row type known. Statements that return no rows (DDL, DML without `RETURNING`)
+stay unwrapped.
 
 ## Lint Rules
 

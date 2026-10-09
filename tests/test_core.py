@@ -226,8 +226,8 @@ def test_cli_rewrite_untyped(tmp_path, monkeypatch):
 
     from sqlty._cli import main
 
-    source = 'q = "--sql\\nDELETE FROM users"\n'
-    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nDELETE FROM users")\n'
+    source = 'q = "--sql\\nVALUES (1, 2)"\n'
+    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nVALUES (1, 2)")\n'
     target = tmp_path / "q.py"
     monkeypatch.chdir(tmp_path)
 

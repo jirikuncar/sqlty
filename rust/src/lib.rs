@@ -47,7 +47,7 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Stri
 ///     dialect: SQL dialect
 ///     schema_sql: Optional CREATE TABLE statements
 ///     import_style: Import style (e.g. "from sqlty import SQL as Q")
-///     untyped: Wrap queries without an inferable row type as SQL[UNTYPED](...)
+///     untyped: Wrap row-returning queries of unknown row type as SQL[UNTYPED](...)
 ///
 /// Returns:
 ///     Rewritten source code

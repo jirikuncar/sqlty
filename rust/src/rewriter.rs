@@ -10,7 +10,7 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::analyzer::{infer_type, Schema};
+use crate::analyzer::{infer_type, returns_rows, Schema};
 
 // ---------------------------------------------------------------------------
 // Regex patterns
@@ -121,7 +121,7 @@ fn build_wrapper_extract_pattern(wrapper_name: &str) -> Regex {
 ///
 /// Adds necessary imports (SQL, datetime, uuid) at the top.
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
-/// With `untyped`, queries without an inferable row type become `SQL[UNTYPED](...)`.
+/// With `untyped`, row-returning queries of unknown row type become `SQL[UNTYPED](...)`.
 pub fn rewrite_source(
     source: &str,
     dialect: &str,
@@ -237,9 +237,10 @@ fn rewrite_line(
                 if content.trim_start().starts_with("--sql") {
                     let sql_content = content.trim_start();
                     let inferred = infer_from_sql_content(sql_content, dialect, schema);
-                    let is_untyped = inferred.is_none();
+                    let untyped = untyped_name.filter(|_| inferred.is_none() && is_untyped(sql_content, dialect));
+                    let is_untyped = untyped.is_some();
 
-                    if let Some(type_str) = inferred.as_deref().or(untyped_name) {
+                    if let Some(type_str) = inferred.as_deref().or(untyped) {
                         let replacement = format!("{}[{}]({})", wrapper_name, type_str, string_literal);
                         return (line.replace(string_literal, &replacement), is_untyped);
                     }
@@ -300,6 +301,19 @@ fn is_sqlty_managed(content: &str) -> bool {
     // Whitespace: space, real newline, tab
     let first = rest.as_bytes()[0];
     matches!(first, b' ' | b'\n' | b'\r' | b'\t')
+}
+
+/// Whether `SQL[UNTYPED]` fits: rows are expected but their type is unknown.
+///
+/// Requires the `--sql` prefix to end its line; the space form is a SQL comment.
+fn is_untyped(sql_content: &str, dialect: &str) -> bool {
+    let rest = sql_content.strip_prefix("--sql").unwrap_or_default();
+    let query = match rest.strip_prefix("\\n") {
+        Some(query) => query,
+        None if rest.starts_with('\n') || rest.starts_with("\r\n") => rest,
+        None => return false,
+    };
+    returns_rows(query, dialect)
 }
 
 /// Infer type from SQL content by letting the SQL parser handle `--sql` as a comment.
@@ -558,30 +572,51 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_untyped_skipped_by_default() {
-        let source = r#"q = "--sql\nDELETE FROM users""#;
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
         assert_eq!(rewrite_source(source, "postgres", &None, None, false), source);
     }
 
     #[test]
     fn test_untyped_sentinel() {
-        let source = r#"q = "--sql\nDELETE FROM users""#;
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
         let result = rewrite_source(source, "postgres", &None, None, true);
         assert_eq!(
             result,
-            "from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED](\"--sql\\nDELETE FROM users\")"
+            "from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED](\"--sql\\nVALUES (1, 2)\")"
         );
         assert_eq!(strip_source(&result, None), source);
     }
 
     #[test]
     fn test_untyped_sentinel_module_import() {
-        let source = r#"q = "--sql\nDELETE FROM users""#;
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
         let style = Some("import sqlty as sy");
         let result = rewrite_source(source, "postgres", &None, style, true);
         assert_eq!(
             result,
-            "import sqlty as sy\nq = sy.SQL[sy.UNTYPED](\"--sql\\nDELETE FROM users\")"
+            "import sqlty as sy\nq = sy.SQL[sy.UNTYPED](\"--sql\\nVALUES (1, 2)\")"
         );
         assert_eq!(strip_source(&result, style), source);
+    }
+
+    #[test]
+    fn test_untyped_skips_statements_without_rows() {
+        for source in [
+            r#"q = "--sql\nDELETE FROM users""#,
+            r#"q = "--sql\nINSERT INTO users (id) VALUES (1)""#,
+            r#"q = "--sql\nCREATE TABLE users (id INTEGER)""#,
+            r#"q = "--sql\nBEGIN""#,
+            r#"q = "--sql\n""#,
+            r#"q = "--sql VALUES (1, 2)""#,
+        ] {
+            assert_eq!(rewrite_source(source, "postgres", &None, None, true), source);
+        }
+    }
+
+    #[test]
+    fn test_untyped_wraps_unparseable() {
+        let source = r#"q = "--sql\nSELECT FROM users""#;
+        let result = rewrite_source(source, "postgres", &None, None, true);
+        assert!(result.ends_with(r#"q = SQL[UNTYPED]("--sql\nSELECT FROM users")"#));
     }
 }

@@ -7,4 +7,4 @@ def rows[T](query: SQL[T]) -> list[T]:
     return []
 
 
-row: tuple[int] = rows(SQL[UNTYPED]("--sql\nDELETE FROM users"))[0]
+row: tuple[int] = rows(SQL[UNTYPED]("--sql\nVALUES (1, 2)"))[0]

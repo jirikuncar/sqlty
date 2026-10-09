@@ -14,7 +14,7 @@ def rows[T](query: SQL[T]) -> list[T]:
     return []
 
 
-query = SQL[UNTYPED]("--sql\nDELETE FROM users")
+query = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 assert_type(query, SQL[UNTYPED])
 row = rows(query)[0]
 assert_type(row, UNTYPED)

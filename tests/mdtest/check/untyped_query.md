@@ -7,7 +7,7 @@ make the row type known.
 ## SQL[UNTYPED] is flagged
 
 ```python
-q = SQL[UNTYPED]("--sql\nDELETE FROM users")
+q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 ```
 
@@ -27,7 +27,7 @@ untyped-query = "ignore"
 ```
 
 ```python
-q = SQL[UNTYPED]("--sql\nDELETE FROM users")
+q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 # error:
 ```
 
@@ -41,6 +41,6 @@ untyped-query = "warn"
 ```
 
 ```python
-q = sqlty.SQL[sqlty.UNTYPED]("--sql\nDELETE FROM users")
+q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
 # error: [untyped-query] "sqlty.SQL[sqlty.UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 ```

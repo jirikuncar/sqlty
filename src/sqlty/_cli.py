@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> None:
     rewrite_parser.add_argument(
         "--untyped",
         choices=["skip", "sentinel"],
-        help="Queries without an inferable row type: leave unwrapped (skip, default) "
+        help="Row-returning queries of unknown row type: leave unwrapped (skip, default) "
         "or wrap as SQL[UNTYPED](...) (sentinel). Config: untyped in [tool.sqlty]",
     )
 

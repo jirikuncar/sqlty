@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_untyped_query() {
-        let source = r#"q = SQL[UNTYPED]("--sql\nDELETE FROM users")"#;
+        let source = r#"q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")"#;
         let diags = check_source(source, "postgres", &None, None, None);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].rule, "untyped-query");

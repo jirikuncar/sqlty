@@ -148,6 +148,31 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<S
     Some(format!("tuple[{}]", types.join(", ")))
 }
 
+/// Whether `sql` yields rows: a query, DML with RETURNING, or unparseable SQL.
+///
+/// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
+pub fn returns_rows(sql: &str, dialect: &str) -> bool {
+    let d = make_dialect(dialect);
+    match Parser::parse_sql(d.as_ref(), sql) {
+        Err(_) => true,
+        Ok(stmts) => stmts.first().is_some_and(statement_returns_rows),
+    }
+}
+
+fn statement_returns_rows(stmt: &Statement) -> bool {
+    let has_returning = |items: &Option<Vec<SelectItem>>| items.as_ref().is_some_and(|r| !r.is_empty());
+    match stmt {
+        Statement::Query(query) => match query.body.as_ref() {
+            SetExpr::Insert(inner) | SetExpr::Update(inner) => statement_returns_rows(inner),
+            _ => true,
+        },
+        Statement::Insert(insert) => has_returning(&insert.returning),
+        Statement::Update { returning, .. } => has_returning(returning),
+        Statement::Delete(delete) => has_returning(&delete.returning),
+        _ => false,
+    }
+}
+
 /// Analyze a SQL query and return column type information.
 fn analyze_select(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<Vec<ColumnInfo>> {
     let d = make_dialect(dialect);
