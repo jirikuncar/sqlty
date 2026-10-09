@@ -232,8 +232,8 @@ def _enhance_with_user_type_checks(
     """Add structural type checks for user-defined types.
 
     For each SQL[UserType](...) line where UserType is found in source,
-    runs column-count-mismatch, column-type-mismatch, column-name-mismatch
-    checks using runtime-resolved type hints when available.
+    runs the column-count, column-type, column-name and typeddict-key
+    mismatch checks using runtime-resolved type hints when available.
     """
     import re
 
@@ -325,7 +325,8 @@ def _structural_diagnostics(
 
     Fields match columns by position. Closed TypedDicts and those with
     ``extra_items`` match by key instead: ``NotRequired`` keys may be absent,
-    and only ``extra_items`` admits undeclared columns (type-checked against it).
+    and only ``extra_items`` admits undeclared columns (type-checked against it);
+    key-set violations are ``typeddict-key-mismatch``.
     A reported count mismatch suppresses the per-column checks.
     """
     from sqlty._type_extractor import check_type_compatibility
@@ -374,11 +375,11 @@ def _structural_diagnostics(
     return (
         [d for col in known for d in type_mismatch(col.name, col)]
         + [
-            ("column-name-mismatch", f"{type_name} has no key for query column '{col.name}'")
+            ("typeddict-key-mismatch", f"{type_name} has no key for query column '{col.name}'")
             for col in unknown
         ]
         + [
-            ("column-name-mismatch", f"{type_name}.{key} is required but missing from query")
+            ("typeddict-key-mismatch", f"{type_name}.{key} is required but missing from query")
             for key in missing
         ]
     )

@@ -151,6 +151,7 @@ untyped = "skip"               # "sentinel": wrap row-returning queries of unkno
 column-count-mismatch = "error"
 column-type-mismatch = "error"
 column-name-mismatch = "warn"
+typeddict-key-mismatch = "error"
 select-star = "warn"
 select-star-no-schema = "error"
 stale-rewrite = "warn"
@@ -191,6 +192,7 @@ CLI flags override config file values.
 | `column-count-mismatch` | error | no | Annotation field count differs from query columns |
 | `column-type-mismatch` | error | no | Annotation field type differs from inferred type |
 | `column-name-mismatch` | warn | no | Annotation field name differs from column name |
+| `typeddict-key-mismatch` | error | no | Query columns don't fit a closed / `extra_items` TypedDict's keys |
 | `select-star` | warn | yes | `SELECT *` — expand to explicit columns |
 | `select-star-no-schema` | error | no | `SELECT *` with no schema available |
 | `stale-rewrite` | warn | yes | `--sql` strings not wrapped in `SQL[T](...)` |

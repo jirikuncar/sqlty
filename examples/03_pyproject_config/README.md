@@ -42,6 +42,7 @@ Each rule can be set to `"error"`, `"warn"`, or `"ignore"`:
 | `column-count-mismatch` | error | Annotation field count differs from query columns |
 | `column-type-mismatch` | error | Annotation field type differs from inferred type |
 | `column-name-mismatch` | warn | Annotation field name differs from column name |
+| `typeddict-key-mismatch` | error | Query columns don't fit a closed / `extra_items` TypedDict's keys |
 | `select-star` | warn | `SELECT *` usage |
 | `select-star-no-schema` | error | `SELECT *` with no schema available |
 | `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |

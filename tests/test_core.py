@@ -179,6 +179,28 @@ def test_check_source_rule_override():
     assert len(stale_rewrites) == 0
 
 
+def test_check_source_typeddict_key_mismatch_severity():
+    """Closed TypedDict key-set violations are errors unless reconfigured."""
+    from sqlty.core import check_source
+
+    source = (
+        "from typing import TypedDict\n"
+        "from sqlty import SQL\n"
+        "class User(TypedDict, closed=True):\n"
+        "    id: int\n"
+        "    name: str\n"
+        'q = SQL[User]("--sql\\nSELECT id::INTEGER, email::TEXT FROM users")\n'
+    )
+
+    def severities(rules: dict[str, str] | None = None) -> list[str | int | None]:
+        diagnostics = check_source(source, dialect="postgres", rules=rules)
+        return [d["severity"] for d in diagnostics if d["rule"] == "typeddict-key-mismatch"]
+
+    assert severities() == ["error", "error"]
+    assert severities({"typeddict-key-mismatch": "warn"}) == ["warn", "warn"]
+    assert severities({"column-name-mismatch": "error"}) == ["error", "error"]
+
+
 def test_check_source_inline_sql_comment_unwrapped():
     """check_source warns when --sql is followed by space (query is a SQL comment)."""
     from sqlty.core import check_source
