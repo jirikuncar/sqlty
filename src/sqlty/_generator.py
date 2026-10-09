@@ -30,6 +30,7 @@ from ._collector import CallInfo, LiteralCallCollector
 from ._config import FunctionConfigComplete
 from ._registry import RegistryDetector
 from ._stub_merger import StubMerger
+from ._stub_parser import CallInfoToIRParser
 
 if TYPE_CHECKING:
     from ._stub_ir import StubFile
@@ -45,7 +46,14 @@ class TypeStubGenerator:
         format_command: str | None = None,
         verbose: int = 0,
         function_configs: list[FunctionConfigComplete] | None = None,
+        untyped: str = "skip",
     ) -> None:
+        """Configure stub generation.
+
+        ``untyped="sentinel"`` (``untyped`` in ``[tool.sqlty]``) types row-returning queries
+        of unknown row type, and the catch-all ``(query: str)`` overload, as ``SQL[UNTYPED]``
+        so a missing or stale overload is visible instead of ``Any``/``str``.
+        """
         self.function_name = "sql"  # Always use 'sql' as the method name
         self.sql_dialect = sql_dialect
         self.schema_mappings = (
@@ -60,8 +68,9 @@ class TypeStubGenerator:
         self._check_mode = False
         self._verbose = verbose
         self._function_configs = function_configs or []
+        self._untyped = untyped == "sentinel"
 
-        self._stub_merger = StubMerger(function_name=self.function_name)
+        self._stub_merger = StubMerger(function_name=self.function_name, untyped=self._untyped)
         self._registry_detector = RegistryDetector(function_configs=self._function_configs)
 
         # Track files that have differences (for check mode)
@@ -549,6 +558,8 @@ class TypeStubGenerator:
             sql_type = analyzer.generate_return_type(literal)
             if sql_type:
                 call["return_type"] = sql_type
+            elif self._untyped and analyzer.returns_rows(literal):
+                call["return_type"] = "UNTYPED"
             else:
                 # Warn about missing type information
                 file_info = f" in {call.get('file', 'unknown')}" if call.get("file") else ""
@@ -628,15 +639,15 @@ class TypeStubGenerator:
         Returns:
             StubFile IR representing the stub structure
         """
-        from ._stub_parser import CallInfoToIRParser
+        return self._call_parser().parse_calls(calls, class_name, export_name)
 
-        parser = CallInfoToIRParser(
+    def _call_parser(self) -> CallInfoToIRParser:
+        return CallInfoToIRParser(
             self.function_name,
             registry_detector=self._registry_detector,
             function_configs=self._function_configs,
+            untyped=self._untyped,
         )
-        stub_ir = parser.parse_calls(calls, class_name, export_name)
-        return stub_ir
 
     def generate_stub_file(
         self,
@@ -743,6 +754,7 @@ class TypeStubGenerator:
                         name=reg_class,
                         export_name=export_name,
                         overloads=set(),  # Empty set for minimal stub
+                        fallback_return_type=self._call_parser().untyped_fallback(reg_class),
                     )
                     minimal_stub_ir.add_registry(registry)
             else:
@@ -752,6 +764,7 @@ class TypeStubGenerator:
                     name=actual_class,
                     export_name=self.function_name,
                     overloads=set(),  # Empty set for minimal stub
+                    fallback_return_type=self._call_parser().untyped_fallback(actual_class),
                 )
                 minimal_stub_ir.add_registry(registry)
 
@@ -855,13 +868,8 @@ class TypeStubGenerator:
                     # Handle all modes using IR-based merge
                     # Parse all new registries first
                     from ._stub_ir import StubFile
-                    from ._stub_parser import CallInfoToIRParser
 
-                    call_parser = CallInfoToIRParser(
-                        self.function_name,
-                        registry_detector=self._registry_detector,
-                        function_configs=self._function_configs,
-                    )
+                    call_parser = self._call_parser()
 
                     # Create stub with all new registries
                     all_new_registries = StubFile(source_path=stub_path)

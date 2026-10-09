@@ -208,6 +208,12 @@ query = "--sql\nVALUES (1, 2)"
 row type known. Statements that return no rows (DDL, DML without `RETURNING`)
 stay unwrapped.
 
+The same setting applies to `.pyi` stubs generated for `@sqlty` functions
+(`SQLTY_AUTO_GENERATE=1`): uninferable queries get a `SQL[UNTYPED]` overload,
+and the catch-all `(query: str)` overload returns `SQL[UNTYPED]` (or the
+function's `return_type_template` applied to `UNTYPED`) instead of `str`, so
+a call missing from a stale stub is a type error rather than silently untyped.
+
 ## Lint Rules
 
 | Rule | Default | Description |

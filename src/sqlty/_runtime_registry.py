@@ -150,6 +150,7 @@ class RuntimeCallRegistry:
         generator = TypeStubGenerator(
             sql_dialect=sql_dialect,
             function_configs=function_configs,
+            untyped=config.get("untyped", "skip"),
         )
 
         with self._lock:

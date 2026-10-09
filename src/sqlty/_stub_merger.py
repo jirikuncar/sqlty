@@ -34,10 +34,10 @@ def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
 class StubMerger:
     """Merge new query overloads into existing stub files using IR-based approach."""
 
-    def __init__(self, function_name: str = "sql"):
+    def __init__(self, function_name: str = "sql", untyped: bool = False):
         self.function_name = function_name
         self._pyi_parser = PyiToIRParser(function_name)
-        self._call_parser = CallInfoToIRParser(function_name)
+        self._call_parser = CallInfoToIRParser(function_name, untyped=untyped)
         self._serializer = IRToTextSerializer(function_name)
 
     def merge_stub_incremental(
