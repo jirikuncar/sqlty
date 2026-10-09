@@ -42,32 +42,32 @@ if _SQLTY_LIB == "py":
         strip_source as _backend_strip_source,
     )
 elif _SQLTY_LIB == "rs":
-    from sqlty._core import (  # type: ignore[assignment]
+    from sqlty._core import (
         check_source as _backend_check_source,
     )
     from sqlty._core import (
         expand_star,
         infer_type,
     )
-    from sqlty._core import (  # type: ignore[assignment]
+    from sqlty._core import (
         rewrite_source as _backend_rewrite_source,
     )
-    from sqlty._core import (  # type: ignore[assignment]
+    from sqlty._core import (
         strip_source as _backend_strip_source,
     )
 else:
     try:
-        from sqlty._core import (  # type: ignore[assignment]
+        from sqlty._core import (
             check_source as _backend_check_source,
         )
         from sqlty._core import (
             expand_star,
             infer_type,
         )
-        from sqlty._core import (  # type: ignore[assignment]
+        from sqlty._core import (
             rewrite_source as _backend_rewrite_source,
         )
-        from sqlty._core import (  # type: ignore[assignment]
+        from sqlty._core import (
             strip_source as _backend_strip_source,
         )
     except ImportError:
@@ -248,13 +248,17 @@ def _enhance_with_user_type_checks(
     rule_config = RuleConfig(overrides=rules)
 
     # Create analyzer with schema if available
+    import os
     import tempfile
     from pathlib import Path
 
     schema_path = None
+    fd = None
     if schema_sql:
-        tmp = Path(tempfile.mktemp(suffix=".sql"))
+        fd, tmp_name = tempfile.mkstemp(suffix=".sql")
+        tmp = Path(tmp_name)
         tmp.write_text(schema_sql)
+        os.close(fd)
         schema_path = tmp
 
     try:

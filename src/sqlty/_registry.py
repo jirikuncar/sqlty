@@ -25,7 +25,7 @@ class RegistryDetector:
     This class now only works with explicitly registered functions.
     """
 
-    def __init__(self, function_configs: list["FunctionConfigComplete"] | None = None) -> None:
+    def __init__(self, function_configs: list[FunctionConfigComplete] | None = None) -> None:
         self.function_configs = function_configs or []
         # Build a mapping: import_path -> config for quick lookup
         self._config_by_path: dict[str, FunctionConfigComplete] = {}
@@ -346,7 +346,7 @@ class RegistryDetector:
                 class_names = self.get_registry_names(py_file)
                 for class_name in class_names:
                     registries.append((py_file, class_name))
-            except (SyntaxError, UnicodeDecodeError, OSError):
+            except SyntaxError, UnicodeDecodeError, OSError:
                 # Skip files that can't be parsed or read
                 continue
 

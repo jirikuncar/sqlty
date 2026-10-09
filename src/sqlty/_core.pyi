@@ -15,8 +15,9 @@ def rewrite_source(
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
+    import_style: str | None = None,
 ) -> str: ...
-def strip_source(source: str) -> str: ...
+def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def expand_star(
     sql: str,
     *,
@@ -29,4 +30,5 @@ def check_source(
     dialect: str = "postgres",
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
+    import_style: str | None = None,
 ) -> list[dict[str, str | int | None]]: ...

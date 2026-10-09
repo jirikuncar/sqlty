@@ -389,22 +389,20 @@ class CallInfoToIRParser:
         """
         # Extract source span if available
         source_span = None
+        start_offset = call.get("start_offset")
+        end_offset = call.get("end_offset")
+        start_line = call.get("lineno")
+        start_col = call.get("start_col")
+        end_line = call.get("end_line")
+        end_col = call.get("end_col")
         if (
-            call.get("start_offset") is not None
-            and call.get("end_offset") is not None
-            and call.get("lineno") is not None
-            and call.get("start_col") is not None
-            and call.get("end_line") is not None
-            and call.get("end_col") is not None
+            start_offset is not None
+            and end_offset is not None
+            and start_line is not None
+            and start_col is not None
+            and end_line is not None
+            and end_col is not None
         ):
-            # Extract with type assertions since we've checked for None
-            start_offset: int = call["start_offset"]  # type: ignore[assignment]
-            end_offset: int = call["end_offset"]  # type: ignore[assignment]
-            start_line: int = call["lineno"]
-            start_col: int = call["start_col"]  # type: ignore[assignment]
-            end_line: int = call["end_line"]  # type: ignore[assignment]
-            end_col: int = call["end_col"]  # type: ignore[assignment]
-
             source_span = SourceSpan(
                 start_offset=start_offset,
                 end_offset=end_offset,

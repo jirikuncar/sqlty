@@ -149,7 +149,7 @@ class TypeStubGenerator:
 
         return 1
 
-    def _write_stub_ir_if_changed(self, stub_path: Path, stub_ir: "StubFile") -> bool:
+    def _write_stub_ir_if_changed(self, stub_path: Path, stub_ir: StubFile) -> bool:
         """Write stub file from IR only if content has changed.
 
         In check mode, compares IRs instead of text to avoid false positives
@@ -622,7 +622,7 @@ class TypeStubGenerator:
         calls: list[CallInfo],
         class_name: str = "Query",
         export_name: str = "sql",
-    ) -> "StubFile":
+    ) -> StubFile:
         """Generate stub IR from collected calls.
 
         Returns:
@@ -684,7 +684,7 @@ class TypeStubGenerator:
                 if response != "y":
                     logging.getLogger(__name__).info("Aborting prune operation.")
                     sys.exit(0)
-            except (EOFError, KeyboardInterrupt):
+            except EOFError, KeyboardInterrupt:
                 logging.getLogger(__name__).info("\nAborting prune operation.")
                 sys.exit(0)
 

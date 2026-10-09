@@ -53,6 +53,8 @@ import encodings
 import io
 import os
 import sys
+from collections.abc import Buffer
+from encodings.utf_8 import StreamReader as _Utf8StreamReader
 from typing import TYPE_CHECKING, Any
 
 # Import decode from _decode module to avoid circular imports
@@ -72,8 +74,8 @@ assert utf_8_codec is not None, "UTF-8 codec not found"
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
     """Incremental decoder for the sqlty-magic codec."""
 
-    def _buffer_decode(  # type: ignore[override]
-        self, input: bytes, errors: str, final: bool
+    def _buffer_decode(
+        self, input: Buffer, errors: str, final: bool
     ) -> tuple[str, int]:  # pragma: no cover
         if final:
             return decode(input, errors)
@@ -81,7 +83,7 @@ class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
             return "", 0
 
 
-class StreamReader(utf_8_codec.streamreader):  # type: ignore[name-defined,misc]
+class StreamReader(_Utf8StreamReader):
     """Stream reader for the sqlty-magic codec.
 
     Decode is deferred to support better error messages.
@@ -110,7 +112,7 @@ class StreamReader(utf_8_codec.streamreader):  # type: ignore[name-defined,misc]
 _custom_codec_info = codecs.CodecInfo(
     name="utf-8",
     encode=utf_8_codec.encode,
-    decode=decode,  # type: ignore[arg-type]
+    decode=decode,
     incrementalencoder=utf_8_codec.incrementalencoder,
     incrementaldecoder=IncrementalDecoder,
     streamreader=StreamReader,
@@ -121,7 +123,7 @@ _custom_codec_info = codecs.CodecInfo(
 _sqlty_codec_info = codecs.CodecInfo(
     name="sqlty",
     encode=utf_8_codec.encode,
-    decode=decode,  # type: ignore[arg-type]
+    decode=decode,
     incrementalencoder=utf_8_codec.incrementalencoder,
     incrementaldecoder=IncrementalDecoder,
     streamreader=StreamReader,

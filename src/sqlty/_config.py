@@ -121,17 +121,7 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
     Returns:
         Configuration dictionary
     """
-    try:
-        import tomllib
-    except ImportError:
-        # Python < 3.11
-        try:
-            import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-        except ImportError:
-            logging.getLogger(__name__).warning(
-                "toml parsing not available. Install 'tomli' for Python < 3.11"
-            )
-            return {}
+    import tomllib
 
     with open(pyproject_path, "rb") as f:
         data: dict[str, Any] = tomllib.load(f)

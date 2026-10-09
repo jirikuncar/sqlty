@@ -69,10 +69,10 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
         if hasattr(fn, "__sqlty__"):
             raise TypeError("Function is already decorated with @sqlty")
 
-        fn.__sqlty__ = True  # type: ignore[attr-defined]
+        fn.__sqlty__ = True  # type: ignore[attr-defined]  # ty: ignore[invalid-assignment]
         # Store schema path if provided
         if schema is not None:
-            fn.__schema_path__ = schema  # type: ignore[attr-defined]
+            fn.__schema_path__ = schema  # type: ignore[attr-defined]  # ty: ignore[invalid-assignment]
 
         # When auto-generate is enabled, verify registration and enable runtime stub generation
         if _auto_generate:
@@ -145,9 +145,9 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                     return fn(query)  # type: ignore
 
                 # Copy over the attributes to the wrapper
-                wrapper.__sqlty__ = True  # type: ignore[attr-defined]
+                wrapper.__sqlty__ = True  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
                 if schema is not None:
-                    wrapper.__schema_path__ = schema  # type: ignore[attr-defined]
+                    wrapper.__schema_path__ = schema  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 
                 return wrapper  # type: ignore
 

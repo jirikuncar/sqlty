@@ -324,7 +324,7 @@ class StubFile:
 
         return None
 
-    def has_same_overloads(self, other: "StubFile") -> bool:
+    def has_same_overloads(self, other: StubFile) -> bool:
         """Check if two StubFiles have the same overloads per registry.
 
         Compares only the semantic content (overloads) per registry,
@@ -354,9 +354,7 @@ class StubFile:
 
         return True
 
-    def compute_overload_diff(
-        self, other: "StubFile"
-    ) -> dict[str, dict[str, list[tuple[str, str]]]]:
+    def compute_overload_diff(self, other: StubFile) -> dict[str, dict[str, list[tuple[str, str]]]]:
         """Compute differences in overloads between two StubFiles.
 
         Args:
