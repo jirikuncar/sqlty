@@ -90,3 +90,12 @@ WHERE active""")
 # stripped: FROM users
 # stripped: WHERE active""")
 ```
+
+## Wrapper split across lines by a formatter is stripped
+
+```python
+q = SQL[tuple[int]](
+    "--sql\nSELECT id::INTEGER FROM users"
+)
+# stripped: q = "--sql\nSELECT id::INTEGER FROM users"
+```

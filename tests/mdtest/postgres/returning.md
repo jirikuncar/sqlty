@@ -153,3 +153,83 @@ DELETE FROM users WHERE id = 1
 ```python
 # inferred: None
 ```
+
+## DELETE RETURNING without WHERE
+
+`RETURNING` directly after the table name is a clause, not a table alias.
+
+```sql
+DELETE FROM users RETURNING id::INTEGER
+```
+
+```python
+# inferred: tuple[int]
+```
+
+## WITH ... DELETE RETURNING
+
+```sql
+WITH stale AS (SELECT id FROM sessions WHERE expired)
+DELETE FROM users USING stale WHERE users.id = stale.id
+RETURNING users.id::INTEGER, users.name::TEXT
+```
+
+```python
+# inferred: tuple[int, str]
+```
+
+## WITH ... UPDATE RETURNING
+
+```sql
+WITH banned AS (SELECT user_id FROM reports)
+UPDATE users SET active = false FROM banned WHERE users.id = banned.user_id
+RETURNING id::INTEGER
+```
+
+```python
+# inferred: tuple[int]
+```
+
+## WITH ... INSERT RETURNING
+
+```sql
+WITH incoming AS (SELECT 'Alice' AS name)
+INSERT INTO users (name) SELECT name FROM incoming
+RETURNING id::INTEGER, name::TEXT
+```
+
+```python
+# inferred: tuple[int, str]
+```
+
+## INSERT ... SELECT without RETURNING returns None
+
+The inner SELECT feeds the insert; the statement itself returns no rows.
+
+```sql
+INSERT INTO archive SELECT id::INTEGER FROM users
+```
+
+```python
+# inferred: None
+```
+
+## RETURNING * expands the target table from the schema
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```toml
+[sqlty]
+schema = "schema.sql"
+```
+
+```sql
+DELETE FROM users WHERE id = 1 RETURNING *
+```
+
+```python
+# inferred: tuple[int, str]
+```

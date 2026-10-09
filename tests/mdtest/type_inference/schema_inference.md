@@ -205,3 +205,85 @@ SELECT id, name FROM users
 ```python
 # inferred: tuple[str, str]
 ```
+
+## SELECT * follows the schema's column order
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10, 2));
+```
+
+```toml
+[sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users
+```
+
+```python
+# inferred: tuple[int, str, float]
+```
+
+## Qualified star and aliased columns resolve through table aliases
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER, placed TIMESTAMP);
+```
+
+```toml
+[sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT u.*, o.placed FROM users u JOIN orders o ON o.user_id = u.id
+```
+
+```python
+# inferred: tuple[int, str, datetime.datetime]
+```
+
+## Unqualified columns search the joined tables in order
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER, placed TIMESTAMP);
+```
+
+```toml
+[sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT name, placed FROM users JOIN orders ON user_id = users.id
+```
+
+```python
+# inferred: tuple[str, datetime.datetime]
+```
+
+## Star over a table missing from the schema stays one column
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```toml
+[sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM audit_log
+```
+
+```python
+# inferred: tuple[str]
+```

@@ -111,12 +111,17 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Install the project
         run: uv sync --all-groups
 
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
+
+      - name: Run clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
 
       # Show diff ONLY if previous step failed
       - name: Show git diff

@@ -2,6 +2,7 @@
 SQL analysis utilities using sqlglot to extract column and type information.
 """
 
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -53,6 +54,10 @@ class SQLAnalyzer:
         "JSON": "dict",
         "JSONB": "dict",
         "UUID": "uuid.UUID",
+        # MySQL ``CAST(x AS SIGNED/UNSIGNED)``
+        "SIGNED": "int",
+        "UNSIGNED": "int",
+        "UBIGINT": "int",
     }
 
     def __init__(self, dialect: str = "postgres", schema_path: Path | None = None) -> None:
@@ -117,144 +122,7 @@ class SQLAnalyzer:
 
         Returns the SQL type if found, None otherwise.
         """
-        table_name_lower = table_name.lower()
-        column_name_lower = column_name.lower()
-
-        if table_name_lower in self.schema:
-            return self.schema[table_name_lower].get(column_name_lower)
-
-        return None
-
-    def _process_projections(
-        self,
-        projections: list[exp.Expression],
-        ast: exp.Expression,
-        select_expr: exp.Select | None = None,
-    ) -> list[ColumnInfo]:
-        """
-        Process a list of projection expressions and extract column information.
-
-        Args:
-            projections: List of projection expressions to process
-            ast: The full AST for schema lookups
-            select_expr: Optional SELECT expression for FROM clause lookups
-
-        Returns:
-            List of ColumnInfo objects with extracted type information
-        """
-        columns: list[ColumnInfo] = []
-
-        for projection in projections:
-            col_name = projection.alias_or_name
-            python_type: str | None = None
-            sql_type: str | None = None
-            table_name: str | None = None
-
-            # Try to extract type information using match statement
-            match projection:
-                case exp.Alias(this=exp.Cast(to=cast_to)):
-                    # Aliased cast: SELECT/RETURNING (expr)::TYPE AS alias
-                    sql_type = str(cast_to)
-                    python_type = self._sql_to_python_type(sql_type)
-                case exp.Cast(to=cast_to):
-                    # Explicit cast: SELECT/RETURNING id::INTEGER
-                    sql_type = str(cast_to)
-                    python_type = self._sql_to_python_type(sql_type)
-                case exp.Column(table=table_name) if self.schema and table_name:
-                    # Column with explicit table name and schema available
-                    sql_type = self._get_column_type_from_schema(table_name, col_name)
-                    if sql_type:
-                        python_type = self._sql_to_python_type(sql_type)
-                case exp.Column() if self.schema:
-                    # Column without table name - try to find table from AST
-                    # For RETURNING, find the first table in the statement
-                    table_expr = ast.find(exp.Table)
-                    if table_expr:
-                        table_name = table_expr.name
-                        sql_type = self._get_column_type_from_schema(table_name, col_name)
-                        if sql_type:
-                            python_type = self._sql_to_python_type(sql_type)
-                    # For SELECT, check FROM clause
-                    elif select_expr:
-                        from_expr = select_expr.find(exp.From)
-                        if from_expr:
-                            for table in from_expr.find_all(exp.Table):
-                                table_name = table.name
-                                sql_type = self._get_column_type_from_schema(table_name, col_name)
-                                if sql_type:
-                                    python_type = self._sql_to_python_type(sql_type)
-                                    break
-                case exp.Count():
-                    # COUNT(*) always returns integer
-                    python_type = "int"
-                    sql_type = "INTEGER"
-                case exp.Sum(this=exp.Cast(to=cast_to)):
-                    # SUM has an explicit cast: SUM(column::TYPE)
-                    sql_type = str(cast_to)
-                    python_type = self._sql_to_python_type(sql_type)
-                case exp.Sum(this=exp.Column(name=column_name, table=table_name)) if (
-                    self.schema and table_name
-                ):
-                    # SUM of column with explicit table name and schema available
-                    # First check if table exists in schema
-                    if table_name.lower() in self.schema:
-                        sql_type = self._get_column_type_from_schema(table_name, column_name)
-                        if sql_type:
-                            python_type = self._sql_to_python_type(sql_type)
-                        else:
-                            # Table in schema but column not found
-                            raise RuntimeError(
-                                f"Column '{column_name}' not found in table '{table_name}' in schema. "
-                                f"If you want to query columns not in the schema, use an explicit cast: "
-                                f"SUM({column_name}::TYPE)"
-                            )
-                    else:
-                        # Table not in schema, fall back to float
-                        python_type = "float"
-                        sql_type = "NUMERIC"
-                case exp.Sum(this=exp.Column(name=column_name)) if self.schema:
-                    # SUM of column without table name - try to find table from query
-                    table_name = None
-                    table_expr = ast.find(exp.Table)
-                    if table_expr:
-                        table_name = table_expr.name
-                    elif select_expr:
-                        from_expr = select_expr.find(exp.From)
-                        if from_expr:
-                            for table in from_expr.find_all(exp.Table):
-                                table_name = table.name
-                                break
-
-                    if table_name is not None:
-                        # Check if table exists in schema
-                        if table_name.lower() in self.schema:
-                            sql_type = self._get_column_type_from_schema(table_name, column_name)
-                            if sql_type:
-                                python_type = self._sql_to_python_type(sql_type)
-                            else:
-                                # Table in schema but column not found
-                                raise RuntimeError(
-                                    f"Column '{column_name}' not found in table '{table_name}' in schema. "
-                                    f"If you want to query columns not in the schema, use an explicit cast: "
-                                    f"SUM({column_name}::TYPE)"
-                                )
-                        # else: table not in schema, fall through to default
-
-                    if not python_type:
-                        # Table not found in query or not in schema, fall back to float
-                        python_type = "float"
-                        sql_type = "NUMERIC"
-                case exp.Sum():
-                    # Default to float for SUM without explicit cast or schema
-                    python_type = "float"
-                    sql_type = "NUMERIC"
-                case exp.Func() as func:
-                    # Other functions - try to infer from function name
-                    python_type = self._infer_from_function(func)
-
-            columns.append(ColumnInfo(col_name, python_type, sql_type))
-
-        return columns
+        return self.schema.get(table_name.lower(), {}).get(column_name.lower())
 
     def returns_rows(self, sql: str) -> bool:
         """Whether ``sql`` yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -272,80 +140,167 @@ class SQLAnalyzer:
         except Exception:
             return True
         statement = statements[0] if statements else None
-        if isinstance(statement, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
+        if isinstance(statement, _DML):
             return bool(statement.args.get("returning"))
         return isinstance(statement, (exp.Query, exp.Values))
 
     def analyze_select(self, sql: str) -> list[ColumnInfo] | None:
-        """
-        Analyze a SQL query and extract column information from result set.
+        """Analyze a SQL query and extract column information from its result set.
 
-        Supports:
-        - SELECT queries
-        - UPDATE/DELETE/INSERT/MERGE with RETURNING clause
+        Rows come from the leftmost ``SELECT`` of a query (``UNION`` and
+        ``WITH`` included) or from the top-level ``RETURNING`` of
+        INSERT/UPDATE/DELETE/MERGE. Anything else returns no rows.
 
-        Args:
-            sql: SQL query string to analyze
+        Example:
+            >>> [c.python_type for c in SQLAnalyzer().analyze_select("SELECT COUNT(*) AS n, 'x'")]
+            ['int', 'str']
+            >>> SQLAnalyzer().analyze_select("INSERT INTO t SELECT a::INT FROM u") is None
+            True
 
-        Returns:
-            List of ColumnInfo objects if the query returns results, None otherwise.
-            Returns None for DML statements (UPDATE/DELETE/INSERT/MERGE) without RETURNING.
+        Raises:
+            RuntimeError: ``SUM(column)`` names a column missing from a schema table.
         """
         try:
             ast = parse_one(sql, dialect=self.dialect)
         except Exception:
             return None
 
-        # Check for RETURNING clause in UPDATE/DELETE/INSERT/MERGE statements
-        returning_expr = ast.find(exp.Returning)
-        if returning_expr:
-            return self._process_projections(returning_expr.expressions, ast)
+        if isinstance(ast, _DML):
+            returning = ast.args.get("returning")
+            if not returning or not returning.expressions:
+                return None
+            target = ast.this.this if isinstance(ast.this, exp.Schema) else ast.this
+            scope = _scope([target])
+            return self._process_projections(returning.expressions, scope) or None
 
-        # Find the SELECT expression
-        select_expr = ast.find(exp.Select)
-        if not select_expr:
+        select = _leftmost_select(ast)
+        if select is None or not select.expressions:
             return None
+        return self._process_projections(select.expressions, _select_scope(select)) or None
 
-        return self._process_projections(select_expr.expressions, ast, select_expr)
+    def _process_projections(
+        self, projections: list[exp.Expression], scope: list[tuple[str, str]]
+    ) -> list[ColumnInfo]:
+        """Infer one ``ColumnInfo`` per result column; a star may yield several."""
+        columns: list[ColumnInfo] = []
+        for projection in projections:
+            expr = projection.this if isinstance(projection, exp.Alias) else projection
+            if isinstance(expr, exp.Star) or (
+                isinstance(expr, exp.Column) and isinstance(expr.this, exp.Star)
+            ):
+                expanded = self._star_columns(
+                    expr.table if isinstance(expr, exp.Column) else None, scope
+                )
+                columns.extend(expanded or [ColumnInfo("*", None, None)])
+                continue
+            sql_type, python_type = self._infer_expr(expr, scope)
+            columns.append(ColumnInfo(projection.alias_or_name, python_type, sql_type))
+        return columns
+
+    def _star_columns(
+        self, table_ref: str | None, scope: list[tuple[str, str]]
+    ) -> list[ColumnInfo] | None:
+        """Expand ``*`` (all scope tables) or ``t.*`` from the schema, or None if unknown."""
+        tables = [_resolve(table_ref, scope)] if table_ref else [table for _, table in scope]
+        if not tables or any(table not in self.schema for table in tables):
+            return None
+        return [
+            ColumnInfo(name, self._sql_to_python_type(sql_type), sql_type)
+            for table in tables
+            for name, sql_type in self.schema[table].items()
+        ]
+
+    def _column_type(self, column: exp.Column, scope: list[tuple[str, str]]) -> str | None:
+        """Schema type of a column: its qualifier's table, else the first scope table having it."""
+        if column.table:
+            return self._get_column_type_from_schema(_resolve(column.table, scope), column.name)
+        for _, table in scope:
+            if sql_type := self._get_column_type_from_schema(table, column.name):
+                return sql_type
+        return None
+
+    def _infer_expr(
+        self, expr: exp.Expression, scope: list[tuple[str, str]]
+    ) -> tuple[str | None, str | None]:
+        """Infer ``(sql_type, python_type)`` for one expression; None marks unknown."""
+        match expr:
+            case exp.Cast(to=to):
+                return str(to), self._sql_to_python_type(str(to))
+            case exp.Paren(this=inner) | exp.Window(this=inner) | exp.Coalesce(this=inner):
+                return self._infer_expr(inner, scope)
+            case exp.Column():
+                sql_type = self._column_type(expr, scope)
+                return sql_type, self._sql_to_python_type(sql_type) if sql_type else None
+            case exp.Literal():
+                if expr.is_string:
+                    return None, "str"
+                return None, "float" if any(c in expr.this for c in ".eE") else "int"
+            case exp.Not(this=exp.Exists() | exp.In() as inner):
+                return self._infer_expr(inner, scope)
+            case exp.Boolean() | exp.Exists():
+                return None, "bool"
+            case exp.In():
+                return None, "bool" if expr.args.get("query") else None
+            case exp.Subquery(this=query):
+                select = _leftmost_select(query)
+                if select is None or not select.expressions:
+                    return None, None
+                first = self._process_projections(select.expressions[:1], _select_scope(select))
+                return (first[0].sql_type, first[0].python_type) if first else (None, None)
+            case exp.Case():
+                ifs = expr.args.get("ifs") or []
+                branch = ifs[0].args.get("true") if ifs else expr.args.get("default")
+                return self._infer_expr(branch, scope) if branch is not None else (None, None)
+            case exp.Count():
+                return "INTEGER", "int"
+            case exp.Avg():
+                return None, "float"
+            case exp.Sum() | exp.Min() | exp.Max():
+                return self._infer_aggregate(expr, scope)
+            case exp.Func():
+                name = expr.name if isinstance(expr, exp.Anonymous) else expr.sql_name()  # type: ignore[no-untyped-call]
+                return None, _FUNCTION_TYPES.get(name.upper())
+        return None, None
+
+    def _infer_aggregate(
+        self, func: exp.Func, scope: list[tuple[str, str]]
+    ) -> tuple[str | None, str | None]:
+        """SUM/MIN/MAX take their argument's type; SUM falls back to float.
+
+        Raises:
+            RuntimeError: ``SUM(column)`` names a column missing from a schema table.
+        """
+        sql_type, python_type = self._infer_expr(func.this, scope)
+        if python_type is not None or not isinstance(func, exp.Sum):
+            return sql_type, python_type
+        if isinstance(column := func.this, exp.Column) and scope:
+            table = _resolve(column.table, scope) if column.table else scope[0][1]
+            if table in self.schema:
+                raise RuntimeError(
+                    f"Column '{column.name}' not found in table '{table}' in schema. "
+                    f"If you want to query columns not in the schema, use an explicit cast: "
+                    f"SUM({column.name}::TYPE)"
+                )
+        return "NUMERIC", "float"
 
     def _sql_to_python_type(self, sql_type: str) -> str:
         """Convert SQL type to Python type."""
-        # Normalize the type string
-        normalized = sql_type.upper().split("(")[0].strip()
+        normalized = re.split(r"[(<]", sql_type.upper(), maxsplit=1)[0].strip()
         return self.SQL_TO_PYTHON_TYPE.get(normalized, "str")
-
-    def _infer_from_function(self, func: exp.Func) -> str | None:
-        """Infer Python type from SQL function."""
-        func_name = type(func).__name__.upper()
-
-        match func_name:
-            case "COUNT" | "LENGTH" | "POSITION":
-                return "int"
-            case "AVG" | "SUM" | "STDDEV":
-                return "float"
-            case (
-                "UPPER"
-                | "LOWER"
-                | "TRIM"
-                | "CONCAT"
-                | "CURRENTTIMESTAMP"
-                | "CURRENTDATE"
-                | "NOW"
-                | "CURRENT_DATE"
-                | "CURRENT_TIMESTAMP"
-            ):
-                return "str"
-            case _:
-                return None
 
     def expand_star(self, sql: str) -> str | None:
         """Expand SELECT * into explicit column list using loaded schema.
 
         Replaces `SELECT *` or `SELECT t.*` with `SELECT col1::TYPE, col2::TYPE, ...`
-        using column definitions from the loaded schema.
+        using column definitions from the loaded schema, in declaration order.
+        Other projections are kept verbatim.
 
-        Args:
-            sql: SQL query string containing SELECT *
+        Example:
+            >>> import tempfile, pathlib
+            >>> schema = pathlib.Path(tempfile.mkdtemp()) / "schema.sql"
+            >>> _ = schema.write_text("CREATE TABLE users (id INTEGER, name TEXT);")
+            >>> SQLAnalyzer(schema_path=schema).expand_star("SELECT *, 1 AS one FROM users")
+            'SELECT id::INT, name::TEXT, 1 AS one FROM users'
 
         Returns:
             The rewritten SQL with explicit columns, or None if:
@@ -356,114 +311,35 @@ class SQLAnalyzer:
         """
         if not self.schema:
             return None
-
         try:
-            ast = parse_one(sql, dialect=self.dialect)
+            select = _leftmost_select(parse_one(sql, dialect=self.dialect))
         except Exception:
             return None
+        if select is None:
+            return None
+        scope = _select_scope(select)
 
-        select_expr = ast.find(exp.Select)
-        if not select_expr:
+        upper = sql.upper()
+        select_idx = _top_level(upper, "SELECT")
+        from_idx = _top_level(upper, "FROM", select_idx) if select_idx >= 0 else -1
+        if from_idx < 0:
             return None
 
-        # Check if any projection is a Star or Column(name='*')
+        items: list[str] = []
         has_star = False
-        for proj in select_expr.expressions:
-            if isinstance(proj, exp.Star):
-                has_star = True
-                break
-            if isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star):
-                has_star = True
-                break
-
+        for item in _split_top_level(sql[select_idx + len("SELECT") : from_idx]):
+            star = re.fullmatch(r"(?:(\w+)\s*\.\s*)?\*", item)
+            if star is None:
+                items.append(item)
+                continue
+            columns = self._star_columns(star.group(1), scope)
+            if columns is None:
+                return None
+            items.extend(f"{col.name}::{col.sql_type}" for col in columns)
+            has_star = True
         if not has_star:
             return None
-
-        # Determine target table from FROM clause
-        from_expr = select_expr.find(exp.From)
-        if not from_expr:
-            return None
-
-        # Build alias-to-table mapping
-        alias_map: dict[str, str] = {}
-        tables_in_from: list[str] = []
-        for table_expr in from_expr.find_all(exp.Table):
-            table_name = table_expr.name.lower()
-            tables_in_from.append(table_name)
-            if table_expr.alias:
-                alias_map[table_expr.alias.lower()] = table_name
-            else:
-                alias_map[table_name] = table_name
-
-        # Also check JOINs
-        for join_expr in select_expr.find_all(exp.Join):
-            for table_expr in join_expr.find_all(exp.Table):
-                table_name = table_expr.name.lower()
-                tables_in_from.append(table_name)
-                if table_expr.alias:
-                    alias_map[table_expr.alias.lower()] = table_name
-                else:
-                    alias_map[table_name] = table_name
-
-        # Build new projections
-        new_projections: list[str] = []
-        for proj in select_expr.expressions:
-            if isinstance(proj, exp.Star):
-                # Unqualified star — expand all tables in FROM order
-                expanded = self._expand_unqualified_star(tables_in_from)
-                if expanded is None:
-                    return None
-                new_projections.extend(expanded)
-            elif isinstance(proj, exp.Column) and isinstance(proj.this, exp.Star):
-                # Qualified star (t.*) — expand specific table
-                table_ref = proj.table.lower() if proj.table else None
-                if table_ref and table_ref in alias_map:
-                    real_table = alias_map[table_ref]
-                    expanded = self._expand_table_columns(real_table)
-                    if expanded is None:
-                        return None
-                    new_projections.extend(expanded)
-                else:
-                    return None
-            else:
-                # Non-star projection — keep as-is
-                new_projections.append(proj.sql(dialect=self.dialect))
-
-        # Reconstruct the SQL with expanded columns
-        columns_sql = ", ".join(new_projections)
-
-        # Replace the SELECT ... FROM with expanded columns
-        # Use string reconstruction for reliability
-        sql_upper = sql.upper()
-        select_idx = sql_upper.find("SELECT")
-        from_idx = sql_upper.find("FROM")
-        if select_idx == -1 or from_idx == -1:
-            return None
-
-        prefix = sql[:select_idx] + "SELECT "
-        suffix = sql[from_idx:]
-        return prefix + columns_sql + " " + suffix
-
-    def _expand_unqualified_star(self, tables: list[str]) -> list[str] | None:
-        """Expand unqualified * for all tables in FROM clause."""
-        all_columns: list[str] = []
-        for table_name in tables:
-            cols = self._expand_table_columns(table_name)
-            if cols is None:
-                return None
-            all_columns.extend(cols)
-        return all_columns
-
-    def _expand_table_columns(self, table_name: str) -> list[str] | None:
-        """Expand a single table into col::TYPE pairs."""
-        table_lower = table_name.lower()
-        if table_lower not in self.schema:
-            return None
-
-        columns = []
-        for col_name, sql_type in self.schema[table_lower].items():
-            columns.append(f"{col_name}::{sql_type}")
-        return columns
+        return f"{sql[:select_idx]}SELECT {', '.join(items)} {sql[from_idx:]}"
 
     def generate_return_type(
         self,
@@ -499,3 +375,101 @@ class SQLAnalyzer:
                 types.append("str")
 
         return codec.format_type(types)
+
+
+_DML = (exp.Insert, exp.Update, exp.Delete, exp.Merge)
+
+# Result types of functions by name; mirrors ``rust/src/analyzer.rs``.
+# sqlglot renames a few (STRING_AGG -> GROUP_CONCAT, JSON_AGG -> J_S_O_N_ARRAY_AGG, ...).
+_FUNCTION_TYPES = {
+    **dict.fromkeys(
+        ["LENGTH", "POSITION", "STR_POSITION", "CHAR_LENGTH", "BIT_LENGTH", "OCTET_LENGTH"]
+        + ["ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE"],
+        "int",
+    ),
+    **dict.fromkeys(
+        ["STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VAR_POP", "VAR_SAMP"]
+        + ["VARIANCE_POP"],
+        "float",
+    ),
+    **dict.fromkeys(
+        ["UPPER", "LOWER", "TRIM", "CONCAT", "SUBSTR", "SUBSTRING", "REPLACE", "STRING_AGG"]
+        + ["NOW", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME", "GROUP_CONCAT"],
+        "str",
+    ),
+    **dict.fromkeys(
+        ["JSON_BUILD_OBJECT", "JSONB_BUILD_OBJECT", "TO_JSON", "TO_JSONB", "JSON_AGG", "JSONB_AGG"]
+        + ["JSONB_OBJECT_AGG", "JSON_OBJECT_AGG", "J_S_O_N_ARRAY_AGG", "J_S_O_N_B_OBJECT_AGG"]
+        + ["J_S_O_N_OBJECT_AGG"],
+        "dict",
+    ),
+}
+
+
+def _leftmost_select(node: exp.Expression | None) -> exp.Select | None:
+    """The SELECT whose columns a query returns: the left arm of a UNION, unparenthesized."""
+    while not isinstance(node, exp.Select):
+        if isinstance(node, exp.SetOperation):
+            node = node.left
+        elif isinstance(node, exp.Subquery):
+            node = node.this
+        else:
+            return None
+    return node
+
+
+def _scope(relations: list[exp.Expression]) -> list[tuple[str, str]]:
+    """``(reference, table)`` pairs for plain tables, in query order."""
+    return [
+        ((table.alias or table.name).lower(), table.name.lower())
+        for table in relations
+        if isinstance(table, exp.Table)
+    ]
+
+
+def _select_scope(select: exp.Select) -> list[tuple[str, str]]:
+    """Scope of a SELECT: its FROM table, then joined tables."""
+    from_ = select.args.get("from")
+    relations = [from_.this] if from_ else []
+    return _scope(relations + [join.this for join in select.args.get("joins") or []])
+
+
+def _resolve(reference: str, scope: list[tuple[str, str]]) -> str:
+    """The table an alias (or table name) refers to."""
+    reference = reference.lower()
+    return next((table for ref, table in scope if ref == reference), reference)
+
+
+def _keyword_at(sql_upper: str, keyword: str, i: int) -> bool:
+    end = i + len(keyword)
+    return (
+        sql_upper.startswith(keyword, i)
+        and (i == 0 or not _is_word(sql_upper[i - 1]))
+        and (end == len(sql_upper) or not _is_word(sql_upper[end]))
+    )
+
+
+def _is_word(char: str) -> bool:
+    return char.isalnum() or char == "_"
+
+
+def _top_level(sql_upper: str, keyword: str, start: int = 0) -> int:
+    """Index of ``keyword`` outside parentheses at or after ``start``, or -1."""
+    depth = 0
+    for i in range(len(sql_upper)):
+        char = sql_upper[i]
+        depth += (char == "(") - (char == ")")
+        if i >= start and depth == 0 and _keyword_at(sql_upper, keyword, i):
+            return i
+    return -1
+
+
+def _split_top_level(text: str) -> list[str]:
+    """Split on commas outside parentheses."""
+    items, depth, start = [], 0, 0
+    for i, char in enumerate(text):
+        depth += (char == "(") - (char == ")")
+        if char == "," and depth == 0:
+            items.append(text[start:i].strip())
+            start = i + 1
+    return [*items, text[start:].strip()]

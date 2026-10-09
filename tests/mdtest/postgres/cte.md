@@ -95,7 +95,7 @@ SELECT id::INTEGER, name::TEXT, email::TEXT FROM new_user
 ```
 
 ```python
-# inferred: tuple[str, str, str]
+# inferred: tuple[int, str, str]
 ```
 
 ## CTE with DELETE RETURNING (writable CTE)
@@ -112,5 +112,5 @@ SELECT id::INTEGER, name::TEXT, email::TEXT FROM deleted_users
 ```
 
 ```python
-# inferred: tuple[str, str, str]
+# inferred: tuple[int, str, str]
 ```

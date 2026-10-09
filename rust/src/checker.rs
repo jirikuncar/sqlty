@@ -12,7 +12,8 @@ use std::collections::HashMap;
 
 use regex::Regex;
 
-use crate::analyzer::{infer_type, Schema};
+use crate::analyzer::Schema;
+use crate::rewriter::infer_sql_content as infer_from_sql_content;
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -27,11 +28,7 @@ fn inline_sql_comment_pattern() -> Regex {
 /// Build a regex to extract SQL content from `{wrapper_name}[T]("--sql ...")`.
 fn build_sql_content_pattern(wrapper_name: &str) -> Regex {
     let escaped = regex::escape(wrapper_name);
-    Regex::new(&format!(
-        r#"{}\[.*?\]\(\s*["'](.+?)["']\s*\)"#,
-        escaped
-    ))
-    .unwrap()
+    Regex::new(&format!(r#"{}\[.*?\]\(\s*["'](.+?)["']\s*\)"#, escaped)).unwrap()
 }
 
 /// Build a regex to extract the type annotation from `{wrapper_name}[T](...)`.
@@ -141,7 +138,9 @@ pub fn check_source(
                 });
             }
             // Also check for inline-sql-comment on unwrapped strings
-            if rule_config.is_enabled("inline-sql-comment") && has_inline_sql_comment(trimmed, &inline_pat) {
+            if rule_config.is_enabled("inline-sql-comment")
+                && has_inline_sql_comment(trimmed, &inline_pat)
+            {
                 diagnostics.push(Diagnostic {
                     rule: "inline-sql-comment".to_string(),
                     message: r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#.to_string(),
@@ -165,18 +164,19 @@ pub fn check_source(
             }
 
             // Check SELECT *
-            if sql_content.contains("SELECT *") || sql_content.contains("select *") {
+            let upper = sql_content.to_uppercase();
+            if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
                 if has_schema && rule_config.is_enabled("select-star") {
                     diagnostics.push(Diagnostic {
                         rule: "select-star".to_string(),
-                        message: "SELECT * used — consider explicit column list".to_string(),
+                        message: "SELECT * used — expand to explicit column list".to_string(),
                         severity: rule_config.severity("select-star").to_string(),
                         line: line_num,
                     });
                 } else if !has_schema && rule_config.is_enabled("select-star-no-schema") {
                     diagnostics.push(Diagnostic {
                         rule: "select-star-no-schema".to_string(),
-                        message: "SELECT * used but no schema available for expansion".to_string(),
+                        message: "SELECT * used but no schema available".to_string(),
                         severity: rule_config.severity("select-star-no-schema").to_string(),
                         line: line_num,
                     });
@@ -209,7 +209,7 @@ pub fn check_source(
 
             // Check stale types
             if rule_config.is_enabled("stale-type") {
-                if let Some(annotated_type) = annotated {
+                if let Some(annotated_type) = annotated.filter(|ty| ty.starts_with("tuple[")) {
                     let current_type = infer_from_sql_content(&sql_content, dialect, schema);
                     if let Some(ref current) = current_type {
                         if *current != annotated_type {
@@ -262,23 +262,6 @@ fn extract_type_from_wrapper(line: &str, pattern: &Regex) -> Option<String> {
     Some(cap.get(1)?.as_str().to_string())
 }
 
-/// Infer type from SQL content by letting the SQL parser handle `--sql` as a comment.
-///
-/// - `--sql\nSELECT ...` → `\\n` becomes real newline; parser sees `--sql`
-///   as a comment and `SELECT ...` as the query.
-/// - `--sql SELECT ...` → entire line is a SQL comment → empty query → None.
-fn infer_from_sql_content(sql_content: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let mut query = sql_content.to_string();
-
-    // Convert source-text \\n escape to real newline so the parser
-    // sees --sql as a comment and the query on the next line.
-    if query.starts_with("--sql\\n") {
-        query = query.replacen("\\n", "\n", 1);
-    }
-
-    infer_type(&query, dialect, schema)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,7 +305,10 @@ mod tests {
     fn test_detects_inline_sql_comment_unwrapped() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
         let diags = check_source(source, "postgres", &None, None, None);
-        let inline: Vec<_> = diags.iter().filter(|d| d.rule == "inline-sql-comment").collect();
+        let inline: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == "inline-sql-comment")
+            .collect();
         assert_eq!(inline.len(), 1);
         assert!(inline[0].message.contains("SQL comment"));
     }
@@ -331,7 +317,10 @@ mod tests {
     fn test_no_inline_sql_comment_with_newline() {
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
         let diags = check_source(source, "postgres", &None, None, None);
-        let inline: Vec<_> = diags.iter().filter(|d| d.rule == "inline-sql-comment").collect();
+        let inline: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == "inline-sql-comment")
+            .collect();
         assert!(inline.is_empty());
     }
 
@@ -339,7 +328,10 @@ mod tests {
     fn test_detects_inline_sql_comment_wrapped() {
         let source = r#"q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")"#;
         let diags = check_source(source, "postgres", &None, None, None);
-        let inline: Vec<_> = diags.iter().filter(|d| d.rule == "inline-sql-comment").collect();
+        let inline: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == "inline-sql-comment")
+            .collect();
         assert_eq!(inline.len(), 1);
     }
 
@@ -349,14 +341,23 @@ mod tests {
         let mut rules = HashMap::new();
         rules.insert("inline-sql-comment".to_string(), "ignore".to_string());
         let diags = check_source(source, "postgres", &None, Some(rules), None);
-        let inline: Vec<_> = diags.iter().filter(|d| d.rule == "inline-sql-comment").collect();
+        let inline: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == "inline-sql-comment")
+            .collect();
         assert!(inline.is_empty());
     }
 
     #[test]
     fn test_check_with_alias_import_style() {
         let source = r#"q = Q[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, Some("from sqlty import SQL as Q"));
+        let diags = check_source(
+            source,
+            "postgres",
+            &None,
+            None,
+            Some("from sqlty import SQL as Q"),
+        );
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
     }

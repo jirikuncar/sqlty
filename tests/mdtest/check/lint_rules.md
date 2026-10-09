@@ -51,3 +51,13 @@ SELECT * FROM users
 ```python
 # error: [select-star] "SELECT * used — expand to explicit column list"
 ```
+
+## Uninferable wrapped query is not stale
+
+A `--sql SELECT ...` space form is a SQL comment with no row type; only
+`inline-sql-comment` reports it.
+
+```python
+q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+```

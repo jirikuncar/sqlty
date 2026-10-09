@@ -1,59 +1,138 @@
-//! SQL type inference engine — replaces sqlglot-based Python implementation.
+//! SQL type inference, mirroring `sqlty._sql_analyzer` (the sqlglot-based Python backend).
 //!
-//! Maps SQL types to Python types and infers return types from SQL queries.
+//! Rows come from the leftmost `SELECT` of a query or from the top-level
+//! `RETURNING` of INSERT/UPDATE/DELETE. Types are spelled the way sqlglot
+//! spells them (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`)
+//! so that schema-driven output matches between backends.
 
 use std::collections::HashMap;
 
 use once_cell::sync::Lazy;
+use regex::Regex;
 use sqlparser::ast::{
-    self, DataType, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query,
-    Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value,
+    ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
+    ObjectName, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
+    TableFactor, TableObject, TableWithJoins, Value,
 };
-use sqlparser::dialect::{
-    GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect,
-};
+use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 
-/// Mapping from uppercase SQL type names to Python type strings.
+/// Mapping from canonical SQL type names to Python type strings.
 static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let mut m = HashMap::new();
-    m.insert("INT", "int");
-    m.insert("INTEGER", "int");
-    m.insert("BIGINT", "int");
-    m.insert("SMALLINT", "int");
-    m.insert("TINYINT", "int");
-    m.insert("FLOAT", "float");
-    m.insert("DOUBLE", "float");
-    m.insert("REAL", "float");
-    m.insert("DECIMAL", "float");
-    m.insert("NUMERIC", "float");
-    m.insert("TEXT", "str");
-    m.insert("VARCHAR", "str");
-    m.insert("CHAR", "str");
-    m.insert("STRING", "str");
-    m.insert("BOOLEAN", "bool");
-    m.insert("BOOL", "bool");
-    m.insert("DATE", "datetime.date");
-    m.insert("TIMESTAMP", "datetime.datetime");
-    m.insert("TIMESTAMPTZ", "datetime.datetime");
-    m.insert("DATETIME", "datetime.datetime");
-    m.insert("TIME", "datetime.time");
-    m.insert("TIMETZ", "datetime.time");
-    m.insert("INTERVAL", "datetime.timedelta");
-    m.insert("ARRAY", "list");
-    m.insert("JSON", "dict");
-    m.insert("JSONB", "dict");
-    m.insert("UUID", "uuid.UUID");
-    // MySQL-specific
-    m.insert("SIGNED", "int");
-    m.insert("UNSIGNED", "int");
-    m
+    HashMap::from([
+        ("INT", "int"),
+        ("INTEGER", "int"),
+        ("BIGINT", "int"),
+        ("SMALLINT", "int"),
+        ("TINYINT", "int"),
+        ("SIGNED", "int"),
+        ("UNSIGNED", "int"),
+        ("UBIGINT", "int"),
+        ("FLOAT", "float"),
+        ("DOUBLE", "float"),
+        ("REAL", "float"),
+        ("DECIMAL", "float"),
+        ("NUMERIC", "float"),
+        ("TEXT", "str"),
+        ("VARCHAR", "str"),
+        ("CHAR", "str"),
+        ("STRING", "str"),
+        ("BOOLEAN", "bool"),
+        ("BOOL", "bool"),
+        ("DATE", "datetime.date"),
+        ("TIMESTAMP", "datetime.datetime"),
+        ("TIMESTAMPTZ", "datetime.datetime"),
+        ("DATETIME", "datetime.datetime"),
+        ("TIME", "datetime.time"),
+        ("TIMETZ", "datetime.time"),
+        ("INTERVAL", "datetime.timedelta"),
+        ("ARRAY", "list"),
+        ("JSON", "dict"),
+        ("JSONB", "dict"),
+        ("UUID", "uuid.UUID"),
+    ])
 });
 
-/// Schema: table_name -> { column_name -> sql_type }
-pub type Schema = HashMap<String, HashMap<String, String>>;
+/// Result types of functions by name (COUNT, AVG, SUM, MIN, MAX and COALESCE are special-cased).
+static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    let groups: [(&[&str], &str); 4] = [
+        (
+            &[
+                "LENGTH",
+                "POSITION",
+                "CHAR_LENGTH",
+                "BIT_LENGTH",
+                "OCTET_LENGTH",
+                "ROW_NUMBER",
+                "RANK",
+                "DENSE_RANK",
+                "NTILE",
+            ],
+            "int",
+        ),
+        (
+            &[
+                "STDDEV",
+                "STDDEV_POP",
+                "STDDEV_SAMP",
+                "VARIANCE",
+                "VAR_POP",
+                "VAR_SAMP",
+            ],
+            "float",
+        ),
+        (
+            &[
+                "UPPER",
+                "LOWER",
+                "TRIM",
+                "CONCAT",
+                "SUBSTR",
+                "SUBSTRING",
+                "REPLACE",
+                "STRING_AGG",
+                "GROUP_CONCAT",
+                "NOW",
+                "CURRENT_TIMESTAMP",
+                "CURRENT_DATE",
+                "CURRENT_TIME",
+            ],
+            "str",
+        ),
+        (
+            &[
+                "JSON_BUILD_OBJECT",
+                "JSONB_BUILD_OBJECT",
+                "TO_JSON",
+                "TO_JSONB",
+                "JSON_AGG",
+                "JSONB_AGG",
+                "JSONB_OBJECT_AGG",
+                "JSON_OBJECT_AGG",
+            ],
+            "dict",
+        ),
+    ];
+    groups
+        .into_iter()
+        .flat_map(|(names, ty)| names.iter().map(move |name| (*name, ty)))
+        .collect()
+});
 
-/// Parse a SQL dialect string into a boxed dialect for sqlparser.
+static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
+
+/// Schema: table name -> columns as `(name, canonical SQL type)` in declaration order.
+pub type Schema = HashMap<String, Vec<(String, String)>>;
+
+/// `(reference, table)` pairs for the tables a statement reads, in query order.
+type Scope = Vec<(String, String)>;
+
+/// A column's Python type, `None` when unknown (rendered as `str`).
+type Ty = Option<String>;
+
+/// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
+type Inferred<T> = Result<T, String>;
+
 fn make_dialect(dialect: &str) -> Box<dyn sqlparser::dialect::Dialect> {
     match dialect.to_lowercase().as_str() {
         "postgres" | "postgresql" => Box::new(PostgreSqlDialect {}),
@@ -63,669 +142,544 @@ fn make_dialect(dialect: &str) -> Box<dyn sqlparser::dialect::Dialect> {
     }
 }
 
-/// Normalize a SQL type name for lookup in the type map.
-fn normalize_sql_type(dt: &DataType) -> String {
-    let s = dt.to_string().to_uppercase();
-    let base = s.split('(').next().unwrap_or(&s).trim().to_string();
-    if base.contains("WITH TIME ZONE") || base.contains("WITH_TIME_ZONE") {
-        if base.starts_with("TIMESTAMP") {
-            return "TIMESTAMPTZ".to_string();
-        }
-        if base.starts_with("TIME") {
-            return "TIMETZ".to_string();
-        }
+fn parse_first(sql: &str, dialect: &str) -> Option<Statement> {
+    Parser::parse_sql(make_dialect(dialect).as_ref(), sql)
+        .ok()?
+        .into_iter()
+        .next()
+}
+
+/// Spell a SQL type the way sqlglot does, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
+fn canonical_type(dt: &DataType, dialect: &str) -> String {
+    if let DataType::Array(elem) = dt {
+        return match elem {
+            ArrayElemTypeDef::None => "ARRAY".to_string(),
+            ArrayElemTypeDef::AngleBracket(inner)
+            | ArrayElemTypeDef::SquareBracket(inner, _)
+            | ArrayElemTypeDef::Parenthesis(inner)
+            | ArrayElemTypeDef::Qualified(inner, _) => {
+                format!("ARRAY<{}>", canonical_type(inner, dialect))
+            }
+        };
     }
-    base
+    let text = dt.to_string().to_uppercase();
+    let (name, args) = match (text.find('('), text.find(')')) {
+        (Some(open), Some(close)) if open < close => {
+            let args: Vec<&str> = text[open + 1..close].split(',').map(str::trim).collect();
+            (
+                format!("{} {}", &text[..open], &text[close + 1..]),
+                format!("({})", args.join(", ")),
+            )
+        }
+        _ => (text.clone(), String::new()),
+    };
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let postgres = matches!(dialect, "postgres" | "postgresql");
+    let base = match name.as_str() {
+        "TIMESTAMP WITH TIME ZONE" => "TIMESTAMPTZ",
+        "TIME WITH TIME ZONE" => "TIMETZ",
+        "TIMESTAMP WITHOUT TIME ZONE" => "TIMESTAMP",
+        "TIME WITHOUT TIME ZONE" => "TIME",
+        "INTEGER" | "INT4" => "INT",
+        "INT2" => "SMALLINT",
+        "INT8" => "BIGINT",
+        "FLOAT" if postgres => "DOUBLE",
+        "FLOAT8" | "DOUBLE PRECISION" => "DOUBLE",
+        "FLOAT4" | "REAL" => "FLOAT",
+        "NUMERIC" => "DECIMAL",
+        "CHARACTER VARYING" => "VARCHAR",
+        "CHARACTER" => "CHAR",
+        "STRING" => "TEXT",
+        "BOOL" => "BOOLEAN",
+        "BYTEA" | "BLOB" => "VARBINARY",
+        other => other,
+    };
+    let base = match (dialect, base) {
+        ("mysql", "TIMESTAMP") => "TIMESTAMPTZ",
+        ("mysql", "SIGNED") => "BIGINT",
+        ("mysql", "UNSIGNED") => "UBIGINT",
+        _ => base,
+    };
+    format!("{base}{args}")
 }
 
-/// Map a SQL DataType to a Python type string.
-fn sql_type_to_python(dt: &DataType) -> String {
-    let normalized = normalize_sql_type(dt);
-    SQL_TO_PYTHON_TYPE
-        .get(normalized.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "str".to_string())
+/// Map a canonical SQL type to a Python type string; unknown types are `str`.
+fn python_type(sql_type: &str) -> String {
+    let base = sql_type.split(['(', '<']).next().unwrap_or_default().trim();
+    SQL_TO_PYTHON_TYPE.get(base).unwrap_or(&"str").to_string()
 }
 
-/// Map a SQL type name string to a Python type.
-fn sql_type_name_to_python(name: &str) -> String {
-    let upper = name.to_uppercase();
-    let base = upper.split('(').next().unwrap_or(&upper).trim();
-    SQL_TO_PYTHON_TYPE
-        .get(base)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "str".to_string())
+/// Lowercased unqualified name: `public.users` -> `users`.
+fn object_name(name: &ObjectName) -> String {
+    name.0
+        .last()
+        .and_then(|part| part.as_ident())
+        .map(|ident| ident.value.to_lowercase())
+        .unwrap_or_default()
 }
 
 /// Load schema from CREATE TABLE SQL statements.
 pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
-    let mut schema = Schema::new();
-    let d = make_dialect(dialect);
-
-    for stmt_str in schema_sql.split(';') {
-        let trimmed = stmt_str.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let stmts = match Parser::parse_sql(d.as_ref(), trimmed) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        for stmt in stmts {
-            if let Statement::CreateTable(create_table) = stmt {
-                let table_name = create_table.name.to_string().to_lowercase();
-                let mut columns = HashMap::new();
-
-                for col_def in &create_table.columns {
-                    let col_name = col_def.name.value.to_lowercase();
-                    let col_type = normalize_sql_type(&col_def.data_type);
-                    columns.insert(col_name, col_type);
-                }
-
-                schema.insert(table_name, columns);
-            }
-        }
-    }
-
-    schema
+    let dialect = dialect.to_lowercase();
+    schema_sql
+        .split(';')
+        .filter_map(|stmt| parse_first(stmt.trim(), &dialect))
+        .filter_map(|stmt| match stmt {
+            Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
+            _ => None,
+        })
+        .map(|create| {
+            let columns = create
+                .columns
+                .iter()
+                .filter(|col| col.data_type != DataType::Unspecified)
+                .map(|col| {
+                    let sql_type = canonical_type(&col.data_type, &dialect);
+                    (col.name.value.to_lowercase(), sql_type)
+                })
+                .collect();
+            (object_name(&create.name), columns)
+        })
+        .collect()
 }
 
-/// Column info extracted from a SQL query.
-struct ColumnInfo {
-    python_type: String,
-}
-
-/// Infer the Python return type for a SQL query.
-pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let columns = analyze_select(sql, dialect, schema)?;
-    if columns.is_empty() {
-        return None;
-    }
-
-    let types: Vec<&str> = columns.iter().map(|c| c.python_type.as_str()).collect();
-    Some(format!("tuple[{}]", types.join(", ")))
+/// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
+pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
+    let empty = Schema::new();
+    let analyzer = Analyzer {
+        schema: schema.as_ref().unwrap_or(&empty),
+        dialect: dialect.to_lowercase(),
+    };
+    let Some(stmt) = parse_first(sql, dialect) else {
+        return Ok(None);
+    };
+    let types = analyzer.statement_columns(&stmt)?;
+    Ok(types.map(|types| {
+        let types: Vec<&str> = types
+            .iter()
+            .map(|ty| ty.as_deref().unwrap_or("str"))
+            .collect();
+        format!("tuple[{}]", types.join(", "))
+    }))
 }
 
 /// Whether `sql` yields rows: a query, DML with RETURNING, or unparseable SQL.
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 pub fn returns_rows(sql: &str, dialect: &str) -> bool {
-    let d = make_dialect(dialect);
-    match Parser::parse_sql(d.as_ref(), sql) {
+    match Parser::parse_sql(make_dialect(dialect).as_ref(), sql) {
         Err(_) => true,
         Ok(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
 }
 
 fn statement_returns_rows(stmt: &Statement) -> bool {
-    let has_returning = |items: &Option<Vec<SelectItem>>| items.as_ref().is_some_and(|r| !r.is_empty());
     match stmt {
         Statement::Query(query) => match query.body.as_ref() {
-            SetExpr::Insert(inner) | SetExpr::Update(inner) => statement_returns_rows(inner),
+            SetExpr::Insert(inner)
+            | SetExpr::Update(inner)
+            | SetExpr::Delete(inner)
+            | SetExpr::Merge(inner) => statement_returns_rows(inner),
             _ => true,
         },
-        Statement::Insert(insert) => has_returning(&insert.returning),
-        Statement::Update { returning, .. } => has_returning(returning),
-        Statement::Delete(delete) => has_returning(&delete.returning),
-        _ => false,
+        _ => returning(stmt).is_some(),
     }
 }
 
-/// Analyze a SQL query and return column type information.
-fn analyze_select(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<Vec<ColumnInfo>> {
-    let d = make_dialect(dialect);
-    let stmts = Parser::parse_sql(d.as_ref(), sql).ok()?;
-    let stmt = stmts.into_iter().next()?;
+/// The non-empty top-level RETURNING list of a DML statement.
+fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
+    let items = match stmt {
+        Statement::Insert(insert) => &insert.returning,
+        Statement::Update(update) => &update.returning,
+        Statement::Delete(delete) => &delete.returning,
+        _ => return None,
+    };
+    items.as_deref().filter(|items| !items.is_empty())
+}
 
+/// Tables a DML statement writes to, for resolving RETURNING columns.
+fn dml_scope(stmt: &Statement) -> Scope {
     match stmt {
-        Statement::Query(query) => process_query(&query, schema),
-        Statement::Insert(insert) => {
-            if let Some(ref returning) = insert.returning {
-                if !returning.is_empty() {
-                    let table_name = insert.table_name.to_string().to_lowercase();
-                    return Some(process_select_items(returning, schema, Some(&table_name)));
-                }
-            }
-            None
+        Statement::Insert(insert) => match &insert.table {
+            TableObject::TableName(name) => vec![(object_name(name), object_name(name))],
+            _ => Vec::new(),
+        },
+        Statement::Update(update) => table_scope(&update.table.relation),
+        Statement::Delete(delete) => match &delete.from {
+            FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
+                .first()
+                .map(|table| table_scope(&table.relation))
+                .unwrap_or_default(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+fn table_scope(factor: &TableFactor) -> Scope {
+    match factor {
+        TableFactor::Table { name, alias, .. } => {
+            let table = object_name(name);
+            let reference = alias
+                .as_ref()
+                .map(|alias| alias.name.value.to_lowercase())
+                .unwrap_or_else(|| table.clone());
+            vec![(reference, table)]
         }
-        Statement::Update { returning, .. } => {
-            if let Some(ref returning_items) = returning {
-                if !returning_items.is_empty() {
-                    return Some(process_select_items(returning_items, schema, None));
-                }
-            }
-            None
-        }
-        Statement::Delete(delete) => {
-            if let Some(ref returning_items) = delete.returning {
-                if !returning_items.is_empty() {
-                    return Some(process_select_items(returning_items, schema, None));
-                }
-            }
-            None
-        }
+        _ => Vec::new(),
+    }
+}
+
+/// Scope of a SELECT: its FROM tables, each followed by its joins.
+fn select_scope(from: &[TableWithJoins]) -> Scope {
+    from.iter()
+        .flat_map(|table| {
+            std::iter::once(&table.relation).chain(table.joins.iter().map(|join| &join.relation))
+        })
+        .flat_map(table_scope)
+        .collect()
+}
+
+/// The table an alias (or table name) refers to.
+fn resolve(reference: &str, scope: &Scope) -> String {
+    let reference = reference.to_lowercase();
+    scope
+        .iter()
+        .find(|(alias, _)| *alias == reference)
+        .map(|(_, table)| table.clone())
+        .unwrap_or(reference)
+}
+
+/// The SELECT whose columns a query returns: the left arm of a UNION, unparenthesized.
+fn leftmost_select(body: &SetExpr) -> Option<&Select> {
+    match body {
+        SetExpr::Select(select) => Some(select),
+        SetExpr::SetOperation { left, .. } => leftmost_select(left),
+        SetExpr::Query(query) => leftmost_select(&query.body),
         _ => None,
     }
 }
 
-/// Process a top-level Query (SELECT / WITH).
-fn process_query(query: &Query, schema: &Option<Schema>) -> Option<Vec<ColumnInfo>> {
-    match query.body.as_ref() {
-        SetExpr::Select(select) => process_select(select, schema),
-        SetExpr::SetOperation { left, .. } => {
-            if let SetExpr::Select(select) = left.as_ref() {
-                process_select(select, schema)
-            } else {
-                None
-            }
-        }
-        SetExpr::Query(inner_query) => process_query(inner_query, schema),
-        _ => None,
-    }
-}
-
-/// Process a SELECT statement.
-fn process_select(select: &Select, schema: &Option<Schema>) -> Option<Vec<ColumnInfo>> {
-    if select.projection.is_empty() {
-        return None;
-    }
-
-    let table_map = build_table_map(&select.from);
-    let mut columns = Vec::new();
-
-    for item in &select.projection {
-        match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                let col = infer_expr_type(expr, schema, &table_map);
-                columns.push(col);
-            }
-            SelectItem::Wildcard(_) => {
-                if let Some(ref schema_map) = schema {
-                    for table_with_joins in &select.from {
-                        let tables = extract_tables_from_join(table_with_joins);
-                        for tname in tables {
-                            let lower = tname.to_lowercase();
-                            if let Some(cols) = schema_map.get(&lower) {
-                                let mut col_names: Vec<&String> = cols.keys().collect();
-                                col_names.sort();
-                                for cn in col_names {
-                                    let sql_type = &cols[cn];
-                                    columns.push(ColumnInfo {
-                                        python_type: sql_type_name_to_python(sql_type),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    columns.push(ColumnInfo {
-                        python_type: "str".to_string(),
-                    });
-                }
-            }
-            SelectItem::QualifiedWildcard(name, _) => {
-                let table_ref = name.to_string().to_lowercase();
-                if let Some(ref schema_map) = schema {
-                    let real_table = table_map
-                        .get(&table_ref)
-                        .map(|s| s.as_str())
-                        .unwrap_or(&table_ref);
-                    if let Some(cols) = schema_map.get(real_table) {
-                        let mut col_names: Vec<&String> = cols.keys().collect();
-                        col_names.sort();
-                        for cn in col_names {
-                            let sql_type = &cols[cn];
-                            columns.push(ColumnInfo {
-                                python_type: sql_type_name_to_python(sql_type),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if columns.is_empty() {
-        None
-    } else {
-        Some(columns)
-    }
-}
-
-/// Extract function arguments from FunctionArguments enum.
-fn get_func_args(args: &FunctionArguments) -> Option<&[FunctionArg]> {
+fn first_arg(args: &FunctionArguments) -> Option<&Expr> {
     match args {
-        FunctionArguments::List(list) => Some(&list.args),
+        FunctionArguments::List(list) => match list.args.first()? {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Some(expr),
+            _ => None,
+        },
         _ => None,
     }
 }
 
-/// Infer the Python type for a single SQL expression.
-fn infer_expr_type(
-    expr: &Expr,
-    schema: &Option<Schema>,
-    table_map: &HashMap<String, String>,
-) -> ColumnInfo {
-    match expr {
-        // CAST(x AS type) or x::type — covers Cast, TryCast, SafeCast via CastKind
-        Expr::Cast { data_type, .. } => ColumnInfo {
-            python_type: sql_type_to_python(data_type),
-        },
+struct Analyzer<'a> {
+    schema: &'a Schema,
+    dialect: String,
+}
 
-        // Function calls
-        Expr::Function(func) => infer_function_type(func, schema, table_map),
-
-        // Column reference: table.column
-        Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
-            let table_ref = parts[parts.len() - 2].value.to_lowercase();
-            let col_name = parts[parts.len() - 1].value.to_lowercase();
-            if let Some(ref schema_map) = schema {
-                let real_table = table_map
-                    .get(&table_ref)
-                    .map(|s| s.as_str())
-                    .unwrap_or(&table_ref);
-                if let Some(cols) = schema_map.get(real_table) {
-                    if let Some(sql_type) = cols.get(&col_name) {
-                        return ColumnInfo {
-                            python_type: sql_type_name_to_python(sql_type),
-                        };
-                    }
-                }
-            }
-            ColumnInfo {
-                python_type: "str".to_string(),
-            }
-        }
-
-        // Unqualified column
-        Expr::Identifier(ident) => {
-            let col_name = ident.value.to_lowercase();
-            if let Some(ref schema_map) = schema {
-                for (_, cols) in schema_map {
-                    if let Some(sql_type) = cols.get(&col_name) {
-                        return ColumnInfo {
-                            python_type: sql_type_name_to_python(sql_type),
-                        };
-                    }
-                }
-            }
-            ColumnInfo {
-                python_type: "str".to_string(),
-            }
-        }
-
-        // Nested expression (parenthesized)
-        Expr::Nested(inner) => infer_expr_type(inner, schema, table_map),
-
-        // Subquery
-        Expr::Subquery(query) => {
-            if let Some(cols) = process_query(query, schema) {
-                if let Some(first) = cols.first() {
-                    return ColumnInfo {
-                        python_type: first.python_type.clone(),
-                    };
-                }
-            }
-            ColumnInfo {
-                python_type: "str".to_string(),
-            }
-        }
-
-        // CASE expression
-        Expr::Case {
-            results, else_result, ..
-        } => {
-            if let Some(first_result) = results.first() {
-                return infer_expr_type(first_result, schema, table_map);
-            }
-            if let Some(else_expr) = else_result {
-                return infer_expr_type(else_expr, schema, table_map);
-            }
-            ColumnInfo {
-                python_type: "str".to_string(),
-            }
-        }
-
-        // Exists subquery
-        Expr::Exists { .. } => ColumnInfo {
-            python_type: "bool".to_string(),
-        },
-
-        // InSubquery
-        Expr::InSubquery { .. } => ColumnInfo {
-            python_type: "bool".to_string(),
-        },
-
-        // Literal values
-        Expr::Value(v) => match v {
-            Value::Number(_, _) => ColumnInfo {
-                python_type: "int".to_string(),
+impl Analyzer<'_> {
+    fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Ty>>> {
+        match stmt {
+            Statement::Query(query) => self.query_columns(query),
+            _ => match returning(stmt) {
+                Some(items) => self.projection(items, &dml_scope(stmt)).map(non_empty),
+                None => Ok(None),
             },
-            Value::SingleQuotedString(_) | Value::DoubleQuotedString(_) => ColumnInfo {
-                python_type: "str".to_string(),
-            },
-            Value::Boolean(_) => ColumnInfo {
-                python_type: "bool".to_string(),
-            },
-            Value::Null => ColumnInfo {
-                python_type: "str".to_string(),
-            },
-            _ => ColumnInfo {
-                python_type: "str".to_string(),
-            },
-        },
-
-        // Default
-        _ => ColumnInfo {
-            python_type: "str".to_string(),
-        },
+        }
     }
-}
 
-/// Infer type from a SQL function call.
-fn infer_function_type(
-    func: &ast::Function,
-    schema: &Option<Schema>,
-    table_map: &HashMap<String, String>,
-) -> ColumnInfo {
-    let func_name = func.name.to_string().to_uppercase();
+    fn query_columns(&self, query: &Query) -> Inferred<Option<Vec<Ty>>> {
+        match query.body.as_ref() {
+            SetExpr::Insert(stmt)
+            | SetExpr::Update(stmt)
+            | SetExpr::Delete(stmt)
+            | SetExpr::Merge(stmt) => self.statement_columns(stmt),
+            body => match leftmost_select(body) {
+                Some(select) => self
+                    .projection(&select.projection, &select_scope(&select.from))
+                    .map(non_empty),
+                None => Ok(None),
+            },
+        }
+    }
 
-    // Check if the function has a cast on its argument
-    if let Some(args) = get_func_args(&func.args) {
-        if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Cast { data_type, .. }))) =
-            args.first()
-        {
-            if matches!(func_name.as_str(), "SUM" | "AVG" | "MIN" | "MAX") {
-                return ColumnInfo {
-                    python_type: sql_type_to_python(data_type),
-                };
+    /// One type per result column; a star may yield several.
+    fn projection(&self, items: &[SelectItem], scope: &Scope) -> Inferred<Vec<Ty>> {
+        let mut types = Vec::new();
+        for item in items {
+            let star = match item {
+                SelectItem::UnnamedExpr(expr)
+                | SelectItem::ExprWithAlias { expr, .. }
+                | SelectItem::ExprWithAliases { expr, .. } => {
+                    types.push(self.expr(expr, scope)?);
+                    continue;
+                }
+                SelectItem::Wildcard(_) => self.star_columns(None, scope),
+                SelectItem::QualifiedWildcard(
+                    SelectItemQualifiedWildcardKind::ObjectName(name),
+                    _,
+                ) => self.star_columns(Some(&object_name(name)), scope),
+                SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => None,
+            };
+            match star {
+                Some(columns) => types.extend(columns.iter().map(|(_, ty)| Some(python_type(ty)))),
+                None => types.push(None),
             }
         }
+        Ok(types)
     }
 
-    // Check if SUM/AVG has a column reference and we have schema
-    if matches!(func_name.as_str(), "SUM" | "AVG" | "MIN" | "MAX") {
-        if let Some(col_type) = infer_aggregate_from_schema(func, schema, table_map) {
-            return col_type;
+    /// Expand `*` (all scope tables) or `t.*` from the schema, or `None` if unknown.
+    fn star_columns(
+        &self,
+        reference: Option<&str>,
+        scope: &Scope,
+    ) -> Option<Vec<(String, String)>> {
+        let tables: Vec<String> = match reference {
+            Some(reference) => vec![resolve(reference, scope)],
+            None => scope.iter().map(|(_, table)| table.clone()).collect(),
+        };
+        if tables.is_empty() {
+            return None;
         }
+        let columns = tables
+            .iter()
+            .map(|table| self.schema.get(table))
+            .collect::<Option<Vec<_>>>()?;
+        Some(columns.into_iter().flatten().cloned().collect())
     }
 
-    match func_name.as_str() {
-        "COUNT" | "LENGTH" | "POSITION" | "CHAR_LENGTH" | "BIT_LENGTH" | "OCTET_LENGTH" => {
-            ColumnInfo {
-                python_type: "int".to_string(),
+    /// Schema type of a column: its qualifier's table, else the first scope table having it.
+    fn column_type(&self, expr: &Expr, scope: &Scope) -> Option<String> {
+        let lookup = |table: &str, column: &str| {
+            self.schema
+                .get(table)?
+                .iter()
+                .find(|(name, _)| name == column)
+                .map(|(_, ty)| ty.clone())
+        };
+        match expr {
+            Expr::Identifier(ident) => {
+                let column = ident.value.to_lowercase();
+                scope.iter().find_map(|(_, table)| lookup(table, &column))
             }
+            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
+                let table = resolve(&parts[parts.len() - 2].value, scope);
+                lookup(&table, &parts[parts.len() - 1].value.to_lowercase())
+            }
+            _ => None,
         }
-        "AVG" | "SUM" | "STDDEV" | "STDDEV_POP" | "STDDEV_SAMP" | "VARIANCE" | "VAR_POP"
-        | "VAR_SAMP" => ColumnInfo {
-            python_type: "float".to_string(),
-        },
-        "UPPER" | "LOWER" | "TRIM" | "CONCAT" | "SUBSTR" | "SUBSTRING" | "REPLACE"
-        | "STRING_AGG" => ColumnInfo {
-            python_type: "str".to_string(),
-        },
-        "COALESCE" => {
-            if let Some(args) = get_func_args(&func.args) {
-                if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.first() {
-                    return infer_expr_type(expr, schema, table_map);
+    }
+
+    fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Ty> {
+        let known = |ty: &str| Ok(Some(ty.to_string()));
+        match expr {
+            Expr::Cast { data_type, .. } => {
+                Ok(Some(python_type(&canonical_type(data_type, &self.dialect))))
+            }
+            Expr::Nested(inner) => self.expr(inner, scope),
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
+                Ok(self.column_type(expr, scope).map(|ty| python_type(&ty)))
+            }
+            Expr::Value(value) => match &value.value {
+                Value::Number(number, _) if number.contains(['.', 'e', 'E']) => known("float"),
+                Value::Number(..) => known("int"),
+                Value::Boolean(_) => known("bool"),
+                Value::Null | Value::Placeholder(_) => Ok(None),
+                _ => known("str"),
+            },
+            Expr::Exists { .. } | Expr::InSubquery { .. } => known("bool"),
+            Expr::Subquery(query) => match leftmost_select(&query.body) {
+                Some(select) if !select.projection.is_empty() => {
+                    let scope = select_scope(&select.from);
+                    Ok(self
+                        .projection(&select.projection[..1], &scope)?
+                        .into_iter()
+                        .next()
+                        .flatten())
+                }
+                _ => Ok(None),
+            },
+            Expr::Case {
+                conditions,
+                else_result,
+                ..
+            } => {
+                match conditions
+                    .first()
+                    .map(|when| &when.result)
+                    .or(else_result.as_deref())
+                {
+                    Some(branch) => self.expr(branch, scope),
+                    None => Ok(None),
                 }
             }
-            ColumnInfo {
-                python_type: "str".to_string(),
-            }
-        }
-        "ROW_NUMBER" | "RANK" | "DENSE_RANK" | "NTILE" => ColumnInfo {
-            python_type: "int".to_string(),
-        },
-        "NOW" | "CURRENT_TIMESTAMP" | "CURRENT_DATE" | "CURRENT_TIME" => ColumnInfo {
-            python_type: "str".to_string(),
-        },
-        "JSON_BUILD_OBJECT" | "JSONB_BUILD_OBJECT" | "TO_JSON" | "TO_JSONB" | "JSON_AGG"
-        | "JSONB_AGG" | "JSONB_OBJECT_AGG" | "JSON_OBJECT_AGG" => ColumnInfo {
-            python_type: "dict".to_string(),
-        },
-        _ => ColumnInfo {
-            python_type: "str".to_string(),
-        },
-    }
-}
-
-/// Try to infer aggregate function type from schema.
-fn infer_aggregate_from_schema(
-    func: &ast::Function,
-    schema: &Option<Schema>,
-    table_map: &HashMap<String, String>,
-) -> Option<ColumnInfo> {
-    let schema_map = schema.as_ref()?;
-    let args = get_func_args(&func.args)?;
-    let first_arg = args.first()?;
-
-    match first_arg {
-        FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::CompoundIdentifier(parts)))
-            if parts.len() >= 2 =>
-        {
-            let table_ref = parts[parts.len() - 2].value.to_lowercase();
-            let col_name = parts[parts.len() - 1].value.to_lowercase();
-            let real_table = table_map
-                .get(&table_ref)
-                .map(|s| s.as_str())
-                .unwrap_or(&table_ref);
-            let cols = schema_map.get(real_table)?;
-            let sql_type = cols.get(&col_name)?;
-            Some(ColumnInfo {
-                python_type: sql_type_name_to_python(sql_type),
-            })
-        }
-        FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(ident))) => {
-            let col_name = ident.value.to_lowercase();
-            for (_, cols) in schema_map {
-                if let Some(sql_type) = cols.get(&col_name) {
-                    return Some(ColumnInfo {
-                        python_type: sql_type_name_to_python(sql_type),
-                    });
+            Expr::Function(func) => {
+                let name = func.name.to_string().to_uppercase();
+                let arg = first_arg(&func.args);
+                match name.as_str() {
+                    "COUNT" => known("int"),
+                    "AVG" => known("float"),
+                    "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
+                    "COALESCE" => arg.map_or(Ok(None), |arg| self.expr(arg, scope)),
+                    _ => Ok(FUNCTION_TYPES.get(name.as_str()).map(|ty| ty.to_string())),
                 }
             }
-            None
-        }
-        _ => None,
-    }
-}
-
-/// Process RETURNING clause items.
-fn process_select_items(
-    items: &[SelectItem],
-    schema: &Option<Schema>,
-    table_name: Option<&str>,
-) -> Vec<ColumnInfo> {
-    let table_map = HashMap::new();
-    let mut columns = Vec::new();
-
-    for item in items {
-        match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                let mut col = infer_expr_type(expr, schema, &table_map);
-                // For unqualified columns in RETURNING, try table schema
-                if col.python_type == "str" {
-                    if let Expr::Identifier(ident) = expr {
-                        if let Some(ref schema_map) = schema {
-                            if let Some(tname) = table_name {
-                                if let Some(cols) = schema_map.get(tname) {
-                                    if let Some(sql_type) = cols.get(&ident.value.to_lowercase()) {
-                                        col.python_type = sql_type_name_to_python(sql_type);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                columns.push(col);
-            }
-            SelectItem::Wildcard(_) => {
-                if let Some(ref schema_map) = schema {
-                    if let Some(tname) = table_name {
-                        if let Some(cols) = schema_map.get(tname) {
-                            let mut col_names: Vec<&String> = cols.keys().collect();
-                            col_names.sort();
-                            for cn in col_names {
-                                let sql_type = &cols[cn];
-                                columns.push(ColumnInfo {
-                                    python_type: sql_type_name_to_python(sql_type),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {
-                columns.push(ColumnInfo {
-                    python_type: "str".to_string(),
-                });
-            }
+            _ => Ok(None),
         }
     }
 
-    columns
-}
-
-/// Build a map from table alias/name -> real table name.
-fn build_table_map(from: &[TableWithJoins]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for table_with_joins in from {
-        add_table_to_map(&table_with_joins.relation, &mut map);
-        for join in &table_with_joins.joins {
-            add_table_to_map(&join.relation, &mut map);
+    /// SUM/MIN/MAX take their argument's type; SUM falls back to float.
+    fn aggregate(&self, name: &str, arg: Option<&Expr>, scope: &Scope) -> Inferred<Ty> {
+        let ty = arg.map_or(Ok(None), |arg| self.expr(arg, scope))?;
+        if ty.is_some() || name != "SUM" || scope.is_empty() {
+            return Ok(ty.or_else(|| (name == "SUM").then(|| "float".to_string())));
         }
-    }
-    map
-}
-
-fn add_table_to_map(factor: &TableFactor, map: &mut HashMap<String, String>) {
-    if let TableFactor::Table { name, alias, .. } = factor {
-        let real_name = name.to_string().to_lowercase();
-        map.insert(real_name.clone(), real_name.clone());
-        if let Some(alias) = alias {
-            map.insert(alias.name.value.to_lowercase(), real_name);
+        let (table, column) = match arg {
+            Some(Expr::Identifier(ident)) => (scope[0].1.clone(), &ident.value),
+            Some(Expr::CompoundIdentifier(parts)) if parts.len() >= 2 => (
+                resolve(&parts[parts.len() - 2].value, scope),
+                &parts[parts.len() - 1].value,
+            ),
+            _ => return Ok(Some("float".to_string())),
+        };
+        if self.schema.contains_key(&table) {
+            return Err(format!(
+                "Column '{column}' not found in table '{table}' in schema. \
+                 If you want to query columns not in the schema, use an explicit cast: \
+                 SUM({column}::TYPE)"
+            ));
         }
+        Ok(Some("float".to_string()))
     }
 }
 
-fn extract_tables_from_join(table_with_joins: &TableWithJoins) -> Vec<String> {
-    let mut tables = Vec::new();
-    if let TableFactor::Table { name, .. } = &table_with_joins.relation {
-        tables.push(name.to_string().to_lowercase());
-    }
-    for join in &table_with_joins.joins {
-        if let TableFactor::Table { name, .. } = &join.relation {
-            tables.push(name.to_string().to_lowercase());
-        }
-    }
-    tables
+fn non_empty(types: Vec<Ty>) -> Option<Vec<Ty>> {
+    (!types.is_empty()).then_some(types)
 }
 
-/// Expand SELECT * into explicit column list.
+/// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
 pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let schema_map = schema.as_ref()?;
-    let d = make_dialect(dialect);
-    let stmts = Parser::parse_sql(d.as_ref(), sql).ok()?;
-    let stmt = stmts.into_iter().next()?;
-
-    let query = match stmt {
-        Statement::Query(q) => q,
-        _ => return None,
+    let schema = schema.as_ref().filter(|schema| !schema.is_empty())?;
+    let analyzer = Analyzer {
+        schema,
+        dialect: dialect.to_lowercase(),
     };
-
-    let select = match query.body.as_ref() {
-        SetExpr::Select(s) => s,
-        _ => return None,
-    };
-
-    let has_star = select.projection.iter().any(|item| {
-        matches!(
-            item,
-            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _)
-        )
-    });
-
-    if !has_star {
+    let Statement::Query(query) = parse_first(sql, dialect)? else {
         return None;
+    };
+    let scope = select_scope(&leftmost_select(&query.body)?.from);
+
+    let upper = sql.to_ascii_uppercase();
+    let select_idx = top_level(&upper, "SELECT", 0)?;
+    let from_idx = top_level(&upper, "FROM", select_idx)?;
+
+    let mut items = Vec::new();
+    let mut has_star = false;
+    for item in split_top_level(&sql[select_idx + "SELECT".len()..from_idx]) {
+        let Some(star) = STAR_ITEM.captures(item) else {
+            items.push(item.to_string());
+            continue;
+        };
+        let columns = analyzer.star_columns(star.get(1).map(|m| m.as_str()), &scope)?;
+        items.extend(columns.iter().map(|(name, ty)| format!("{name}::{ty}")));
+        has_star = true;
     }
-
-    let table_map = build_table_map(&select.from);
-
-    let mut expanded_cols = Vec::new();
-    for item in &select.projection {
-        match item {
-            SelectItem::Wildcard(_) => {
-                for table_with_joins in &select.from {
-                    let tables = extract_tables_from_join(table_with_joins);
-                    for tname in tables {
-                        let cols = schema_map.get(&tname)?;
-                        let mut col_names: Vec<&String> = cols.keys().collect();
-                        col_names.sort();
-                        for cn in col_names {
-                            let sql_type = &cols[cn];
-                            expanded_cols.push(format!("{}::{}", cn, sql_type));
-                        }
-                    }
-                }
-            }
-            SelectItem::QualifiedWildcard(name, _) => {
-                let table_ref = name.to_string().to_lowercase();
-                let real_table = table_map
-                    .get(&table_ref)
-                    .map(|s| s.as_str())
-                    .unwrap_or(&table_ref);
-                let cols = schema_map.get(real_table)?;
-                let mut col_names: Vec<&String> = cols.keys().collect();
-                col_names.sort();
-                for cn in col_names {
-                    let sql_type = &cols[cn];
-                    expanded_cols.push(format!("{}::{}", cn, sql_type));
-                }
-            }
-            _ => {
-                expanded_cols.push(item.to_string());
-            }
-        }
-    }
-
-    let sql_upper = sql.to_uppercase();
-    let select_pos = sql_upper.find("SELECT")?;
-    let from_pos = find_top_level_from(&sql_upper)?;
-
-    let prefix = &sql[..select_pos];
-    let suffix = &sql[from_pos..];
-    let columns_str = expanded_cols.join(", ");
-
-    Some(format!("{}SELECT {} {}", prefix, columns_str, suffix))
+    has_star.then(|| {
+        format!(
+            "{}SELECT {} {}",
+            &sql[..select_idx],
+            items.join(", "),
+            &sql[from_idx..]
+        )
+    })
 }
 
-/// Find the position of the top-level FROM keyword.
-fn find_top_level_from(sql_upper: &str) -> Option<usize> {
-    let mut depth = 0;
-    let bytes = sql_upper.as_bytes();
-    let mut i = 0;
+fn is_word(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
+}
 
-    while i < bytes.len() {
+/// Byte index of `keyword` outside parentheses at or after `start`.
+fn top_level(sql_upper: &str, keyword: &str, start: usize) -> Option<usize> {
+    let bytes = sql_upper.as_bytes();
+    let mut depth = 0i32;
+    for i in 0..bytes.len() {
         match bytes[i] {
             b'(' => depth += 1,
             b')' => depth -= 1,
-            b'F' if depth == 0 && i + 4 <= bytes.len() => {
-                if &sql_upper[i..i + 4] == "FROM" {
-                    let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-                    let after_ok =
-                        i + 4 >= bytes.len() || !bytes[i + 4].is_ascii_alphanumeric();
-                    if before_ok && after_ok {
-                        return Some(i);
-                    }
-                }
+            _ => {}
+        }
+        let end = i + keyword.len();
+        if i >= start
+            && depth == 0
+            && sql_upper.as_bytes().get(i..end) == Some(keyword.as_bytes())
+            && (i == 0 || !is_word(bytes[i - 1]))
+            && (end == bytes.len() || !is_word(bytes[end]))
+        {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Split on commas outside parentheses, trimming each item.
+fn split_top_level(text: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let (mut depth, mut start) = (0i32, 0);
+    for (i, byte) in text.bytes().enumerate() {
+        match byte {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b',' if depth == 0 => {
+                items.push(text[start..i].trim());
+                start = i + 1;
             }
             _ => {}
         }
-        i += 1;
+    }
+    items.push(text[start..].trim());
+    items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn infer(sql: &str) -> Option<String> {
+        infer_type(sql, "postgres", &None).unwrap()
     }
 
-    None
+    #[test]
+    fn test_dml_returning() {
+        assert_eq!(
+            infer("DELETE FROM t RETURNING id::INTEGER").as_deref(),
+            Some("tuple[int]")
+        );
+        assert_eq!(
+            infer("WITH x AS (SELECT 1) UPDATE t SET a = 1 RETURNING id::INTEGER").as_deref(),
+            Some("tuple[int]")
+        );
+        assert_eq!(infer("INSERT INTO t SELECT a::INTEGER FROM u"), None);
+    }
+
+    #[test]
+    fn test_schema_order_and_canonical_types() {
+        let schema = Some(load_schema(
+            "CREATE TABLE users (id INTEGER, score NUMERIC(10,2), tags TEXT[])",
+            "postgres",
+        ));
+        assert_eq!(
+            expand_star("SELECT * FROM users", "postgres", &schema).as_deref(),
+            Some("SELECT id::INT, score::DECIMAL(10, 2), tags::ARRAY<TEXT> FROM users")
+        );
+        assert_eq!(
+            infer_type("SELECT * FROM users", "postgres", &schema)
+                .unwrap()
+                .as_deref(),
+            Some("tuple[int, float, list]")
+        );
+    }
+
+    #[test]
+    fn test_sum_of_unknown_schema_column_is_an_error() {
+        let schema = Some(load_schema("CREATE TABLE users (id INT)", "postgres"));
+        assert!(infer_type("SELECT SUM(nope) FROM users", "postgres", &schema).is_err());
+    }
 }

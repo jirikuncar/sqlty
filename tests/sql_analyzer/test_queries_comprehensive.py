@@ -245,8 +245,8 @@ def test_subquery_in_select(analyzer: SQLAnalyzer) -> None:
             (SELECT COUNT(*)::INTEGER FROM posts WHERE user_id = u.id)
         FROM users u
     """)
-    # Subquery expressions without explicit cast function return str
-    assert result == "tuple[int, str, str]"
+    # A scalar subquery takes the type of its single column
+    assert result == "tuple[int, str, int]"
 
 
 def test_cte_simple(analyzer: SQLAnalyzer) -> None:

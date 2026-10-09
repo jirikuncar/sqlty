@@ -4,6 +4,8 @@
 //! - `rewrite_source()`: `"--sql\n..." → SQL[T]("--sql\n...")`
 //! - `strip_source()`: `SQL[T]("--sql\n...") → "--sql\n..."`
 //!
+//! Both work on the whole source, so triple-quoted strings spanning lines are
+//! handled, and mirror `sqlty._rewriter.SQLRewriter` match for match.
 //! The rewriter never modifies string content — it only adds/removes
 //! the `SQL[T]()` wrapper.  This guarantees `strip(rewrite(x)) == x`.
 
@@ -16,21 +18,39 @@ use crate::analyzer::{infer_type, returns_rows, Schema};
 // Regex patterns
 // ---------------------------------------------------------------------------
 
-/// Pattern to match triple-quoted strings: """..."""
-static TRIPLE_DOUBLE_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(?s)""".*?""""#).unwrap());
+/// A string literal starting at the beginning of the haystack; triple quotes first.
+static STRING_LITERAL: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"^(?s:""".*?"""|'''.*?'''|"[^"]*"|'[^']*')"#).unwrap());
 
-/// Pattern to match triple-quoted strings: '''...'''
-static TRIPLE_SINGLE_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)'''.*?'''").unwrap());
+/// f-strings and t-strings (PEP 750) with a `--sql` prefix: interpolated, so never rewritten.
+static FSTRING_SQL: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"#)
+        .unwrap()
+});
 
-/// Pattern to match single-line double-quoted strings: "..."
-static SINGLE_DOUBLE_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#""[^"]*""#).unwrap());
-
-/// Pattern to match single-line single-quoted strings: '...'
-static SINGLE_SINGLE_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"'[^']*'").unwrap());
+/// Spans of string literals not prefixed by a letter (`f"..."`, `r"..."` are skipped).
+///
+/// Equivalent to `re.finditer` with the lookbehind `(?<![a-zA-Z])`, which the
+/// `regex` crate lacks.
+fn string_literals(source: &str) -> Vec<(usize, usize)> {
+    let bytes = source.as_bytes();
+    let mut spans = Vec::new();
+    let mut pos = 0;
+    while let Some(offset) = source[pos..].find(['"', '\'']) {
+        let start = pos + offset;
+        let literal = (start == 0 || !bytes[start - 1].is_ascii_alphabetic())
+            .then(|| STRING_LITERAL.find(&source[start..]))
+            .flatten();
+        pos = match literal {
+            Some(m) => {
+                spans.push((start, start + m.end()));
+                start + m.end()
+            }
+            None => start + 1,
+        };
+    }
+    spans
+}
 
 // ---------------------------------------------------------------------------
 // Import style parsing
@@ -57,11 +77,20 @@ impl ImportStyleParsed {
     fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
     }
+
+    /// Regex matching `{wrapper_name}[T]("...")`; group `inner` is the string literal.
+    fn wrapper_pattern(&self) -> Regex {
+        Regex::new(&format!(
+            r#"(?s){}\[.*?\]\(\s*(?P<inner>""".*?"""|'''.*?'''|"[^"]*"|'[^']*')\s*\)"#,
+            regex::escape(&self.wrapper_name)
+        ))
+        .unwrap()
+    }
 }
 
 /// Parse an import-style string into its components.
 ///
-/// Returns `None` for unrecognised styles.
+/// Unrecognised styles fall back to `from sqlty import SQL`.
 fn parse_import_style(style: Option<&str>) -> ImportStyleParsed {
     match style {
         None | Some("from sqlty import SQL") => ImportStyleParsed {
@@ -93,26 +122,6 @@ fn parse_import_style(style: Option<&str>) -> ImportStyleParsed {
     }
 }
 
-/// Build a regex that matches `{wrapper_name}[T]("...")` wrappers.
-fn build_wrapper_pattern(wrapper_name: &str) -> Regex {
-    let escaped = regex::escape(wrapper_name);
-    Regex::new(&format!(
-        r#"{}(?:\[.*?\]\(\s*(?:""".*?"""|'''.*?'''|"[^"]*"|'[^']*')\s*\))"#,
-        escaped
-    ))
-    .unwrap()
-}
-
-/// Build a regex that extracts the inner string from `{wrapper_name}[T]("...")`.
-fn build_wrapper_extract_pattern(wrapper_name: &str) -> Regex {
-    let escaped = regex::escape(wrapper_name);
-    Regex::new(&format!(
-        r#"{}\[.*?\]\(\s*(""".*?"""|'''.*?'''|"[^"]*"|'[^']*')\s*\)"#,
-        escaped
-    ))
-    .unwrap()
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -130,41 +139,71 @@ pub fn rewrite_source(
     untyped: bool,
 ) -> String {
     let istyle = parse_import_style(import_style);
-    let wrapper_pattern = build_wrapper_pattern(&istyle.wrapper_name);
-    let untyped_name = untyped.then(|| istyle.untyped_name());
+    let fstring_lines: Vec<usize> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| FSTRING_SQL.is_match(line))
+        .map(|(i, _)| i + 1)
+        .collect();
+    let wrapper_spans: Vec<(usize, usize)> = istyle
+        .wrapper_pattern()
+        .find_iter(source)
+        .map(|m| (m.start(), m.end()))
+        .collect();
 
-    let mut result_lines: Vec<String> = Vec::new();
-    let mut any_rewritten = false;
-    let mut any_untyped = false;
-
-    for line in source.lines() {
-        let (rewritten, is_untyped) = rewrite_line(
-            line,
-            dialect,
-            schema,
-            &istyle.wrapper_name,
-            &wrapper_pattern,
-            untyped_name.as_deref(),
-        );
-        if rewritten != line {
-            any_rewritten = true;
-            any_untyped |= is_untyped;
+    let mut replacements = Vec::new();
+    let mut needs_untyped_import = false;
+    for (start, end) in string_literals(source) {
+        if wrapper_spans
+            .iter()
+            .any(|&(ws, we)| ws <= start && end <= we)
+            || fstring_lines.contains(&line_at(source, start))
+        {
+            continue;
         }
-        result_lines.push(rewritten);
+        let literal = &source[start..end];
+        let content = extract_string_content(literal).trim();
+        if !content.starts_with("--sql") {
+            continue;
+        }
+        let type_str = match infer_sql_content(content, dialect, schema) {
+            Some(inferred) => inferred,
+            None if untyped && is_untyped(content, dialect) => {
+                needs_untyped_import = true;
+                istyle.untyped_name()
+            }
+            // Don't wrap when inference fails — SQL[Any] is never useful.
+            None => continue,
+        };
+        let replacement = format!("{}[{}]({})", istyle.wrapper_name, type_str, literal);
+        replacements.push((start, end, replacement));
     }
 
-    let mut result = result_lines.join("\n");
-
-    // Preserve trailing newline if original had one
-    if source.ends_with('\n') && !result.ends_with('\n') {
-        result.push('\n');
+    if replacements.is_empty() {
+        return source.to_string();
+    }
+    let needs = |marker: &str| replacements.iter().any(|(_, _, r)| r.contains(marker));
+    let mut imports = Vec::new();
+    if needs("datetime.") && !has_import(source, "import datetime") {
+        imports.push("import datetime");
+    }
+    if needs("uuid.") && !has_import(source, "import uuid") {
+        imports.push("import uuid");
+    }
+    if !has_import(source, &istyle.import_line) {
+        imports.push(&istyle.import_line);
+    }
+    if let Some(line) = istyle.untyped_import() {
+        if needs_untyped_import && !has_import(source, line) {
+            imports.push(line);
+        }
     }
 
-    if any_rewritten {
-        result = inject_imports(&result, &istyle, any_untyped);
+    let result = splice(source, &replacements);
+    if imports.is_empty() {
+        return result;
     }
-
-    result
+    format!("{}\n{}", imports.join("\n"), result)
 }
 
 /// Strip Python source: `SQL[T]("--sql\n...")` → `"--sql\n..."`.
@@ -172,135 +211,61 @@ pub fn rewrite_source(
 /// Removes unused imports added by rewrite.
 pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
     let istyle = parse_import_style(import_style);
-    let extract_pattern = build_wrapper_extract_pattern(&istyle.wrapper_name);
+    let replacements: Vec<(usize, usize, String)> = istyle
+        .wrapper_pattern()
+        .captures_iter(source)
+        .filter_map(|cap| {
+            let wrapper = cap.get(0)?;
+            let inner = cap.name("inner")?.as_str();
+            is_sqlty_managed(extract_string_content(inner))
+                .then(|| (wrapper.start(), wrapper.end(), inner.to_string()))
+        })
+        .collect();
 
-    let mut result_lines: Vec<String> = Vec::new();
-    let mut any_stripped = false;
-
-    for line in source.lines() {
-        let stripped = strip_line(line, &extract_pattern);
-        if stripped != line {
-            any_stripped = true;
-        }
-        result_lines.push(stripped);
+    if replacements.is_empty() {
+        return source.to_string();
     }
-
-    let mut result = result_lines.join("\n");
-
-    // Preserve trailing newline
-    if source.ends_with('\n') && !result.ends_with('\n') {
-        result.push('\n');
-    }
-
-    if any_stripped {
-        result = remove_unused_imports(&result, &istyle);
-    }
-
-    result
-}
-
-// ---------------------------------------------------------------------------
-// Line-level processing
-// ---------------------------------------------------------------------------
-
-/// Rewrite a single line: detect `"--sql\n..."` and wrap with `{wrapper_name}[T](...)`.
-///
-/// Never modifies string content — only adds the wrapper. Returns the line
-/// and whether it was wrapped as `untyped_name`.
-fn rewrite_line(
-    line: &str,
-    dialect: &str,
-    schema: &Option<Schema>,
-    wrapper_name: &str,
-    wrapper_pattern: &Regex,
-    untyped_name: Option<&str>,
-) -> (String, bool) {
-    // Skip lines that already have wrapper
-    if wrapper_pattern.is_match(line) {
-        return (line.to_string(), false);
-    }
-
-    // Try each string pattern (triple-quoted first, then single-line)
-    let patterns: &[&Lazy<Regex>] = &[
-        &TRIPLE_DOUBLE_PATTERN,
-        &TRIPLE_SINGLE_PATTERN,
-        &SINGLE_DOUBLE_PATTERN,
-        &SINGLE_SINGLE_PATTERN,
-    ];
-
-    for pattern in patterns {
-        if let Some(m) = pattern.find(line) {
-            let string_literal = m.as_str();
-            let content = extract_string_content(string_literal);
-
-            if let Some(content) = content {
-                if content.trim_start().starts_with("--sql") {
-                    let sql_content = content.trim_start();
-                    let inferred = infer_from_sql_content(sql_content, dialect, schema);
-                    let untyped = untyped_name.filter(|_| inferred.is_none() && is_untyped(sql_content, dialect));
-                    let is_untyped = untyped.is_some();
-
-                    if let Some(type_str) = inferred.as_deref().or(untyped) {
-                        let replacement = format!("{}[{}]({})", wrapper_name, type_str, string_literal);
-                        return (line.replace(string_literal, &replacement), is_untyped);
-                    }
-                }
-            }
-        }
-    }
-
-    (line.to_string(), false)
-}
-
-/// Strip a single line: detect wrapper and unwrap.
-fn strip_line(line: &str, extract_pattern: &Regex) -> String {
-    if let Some(cap) = extract_pattern.captures(line) {
-        let full_match = cap.get(0).unwrap().as_str();
-        let inner = cap.get(1).unwrap().as_str();
-
-        // Only strip if the inner content is sqlty-managed
-        if let Some(content) = extract_string_content(inner) {
-            if is_sqlty_managed(&content) {
-                return line.replace(full_match, inner);
-            }
-        }
-    }
-
-    line.to_string()
+    remove_unused_imports(&splice(source, &replacements), &istyle)
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Extract string content from a quoted string literal (removes quotes).
-fn extract_string_content(literal: &str) -> Option<String> {
-    if literal.starts_with("\"\"\"") || literal.starts_with("'''") {
-        Some(literal[3..literal.len() - 3].to_string())
-    } else if literal.starts_with('"') || literal.starts_with('\'') {
-        Some(literal[1..literal.len() - 1].to_string())
-    } else {
-        None
+/// Apply non-overlapping `(start, end, replacement)` edits, given in source order.
+fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
+    let mut result = String::with_capacity(source.len());
+    let mut pos = 0;
+    for (start, end, replacement) in replacements {
+        result.push_str(&source[pos..*start]);
+        result.push_str(replacement);
+        pos = *end;
     }
+    result.push_str(&source[pos..]);
+    result
+}
+
+/// 1-indexed line number of a byte position.
+fn line_at(source: &str, pos: usize) -> usize {
+    source[..pos].matches('\n').count() + 1
+}
+
+/// Extract string content from a quoted string literal (removes quotes).
+fn extract_string_content(literal: &str) -> &str {
+    let quote = if literal.starts_with("\"\"\"") || literal.starts_with("'''") {
+        3
+    } else {
+        1
+    };
+    &literal[quote..literal.len() - quote]
 }
 
 /// Check if string content is sqlty-managed (starts with `--sql` + whitespace/\n).
 fn is_sqlty_managed(content: &str) -> bool {
-    let stripped = content.trim_start();
-    if !stripped.starts_with("--sql") {
+    let Some(rest) = content.trim_start().strip_prefix("--sql") else {
         return false;
-    }
-    let rest = &stripped[5..];
-    if rest.is_empty() {
-        return true;
-    }
-    // Source-text \n escape (backslash + n)
-    if rest.starts_with("\\n") {
-        return true;
-    }
-    // Whitespace: space, real newline, tab
-    let first = rest.as_bytes()[0];
-    matches!(first, b' ' | b'\n' | b'\r' | b'\t')
+    };
+    rest.is_empty() || rest.starts_with("\\n") || rest.starts_with([' ', '\n', '\r', '\t'])
 }
 
 /// Whether `SQL[UNTYPED]` fits: rows are expected but their type is unknown.
@@ -316,96 +281,44 @@ fn is_untyped(sql_content: &str, dialect: &str) -> bool {
     returns_rows(query, dialect)
 }
 
-/// Infer type from SQL content by letting the SQL parser handle `--sql` as a comment.
+/// Infer the row type of `--sql` string content, letting the SQL parser treat
+/// `--sql` as a comment.
 ///
 /// - `--sql\nSELECT ...` → `\\n` becomes real newline; parser sees `--sql`
 ///   as a comment and `SELECT ...` as the query.
 /// - `--sql SELECT ...` → entire line is a SQL comment → empty query → None.
-fn infer_from_sql_content(sql_content: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let mut query = sql_content.to_string();
-
-    // Convert source-text \\n escape to real newline so the parser
-    // sees --sql as a comment and the query on the next line.
-    if query.starts_with("--sql\\n") {
-        query = query.replacen("\\n", "\n", 1);
-    }
-
-    infer_type(&query, dialect, schema)
+///
+/// Inference errors (an unknown `SUM` column) count as uninferable.
+pub(crate) fn infer_sql_content(
+    sql_content: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+) -> Option<String> {
+    let query = match sql_content.strip_prefix("--sql\\n") {
+        Some(rest) => format!("--sql\n{rest}"),
+        None => sql_content.to_string(),
+    };
+    infer_type(&query, dialect, schema).ok().flatten()
 }
 
-/// Inject necessary imports at the top of the source.
-fn inject_imports(source: &str, istyle: &ImportStyleParsed, untyped: bool) -> String {
-    let wrapper_marker = format!("{}[", istyle.wrapper_name);
-    let needs_sql = source.contains(&wrapper_marker) && !has_import(source, &istyle.import_line);
-    let needs_datetime = source.contains("datetime.") && !has_import(source, "import datetime");
-    let needs_uuid = source.contains("uuid.") && !has_import(source, "import uuid");
-    let untyped_import = istyle
-        .untyped_import()
-        .filter(|line| untyped && !has_import(source, line));
-
-    if !needs_sql && !needs_datetime && !needs_uuid && untyped_import.is_none() {
-        return source.to_string();
-    }
-
-    let mut imports = Vec::new();
-    if needs_datetime {
-        imports.push("import datetime".to_string());
-    }
-    if needs_uuid {
-        imports.push("import uuid".to_string());
-    }
-    if needs_sql {
-        imports.push(istyle.import_line.clone());
-    }
-    if let Some(line) = untyped_import {
-        imports.push(line.to_string());
-    }
-
-    let import_block = imports.join("\n");
-    format!("{}\n{}", import_block, source)
-}
-
-/// Remove unused imports from the source.
+/// Remove sqlty/datetime/uuid imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyleParsed) -> String {
-    let lines: Vec<&str> = source.lines().collect();
-    let mut result = Vec::new();
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
-    let has_sql_usage = source.contains(&wrapper_marker);
-    let has_datetime_usage = source.contains("datetime.");
-    let has_uuid_usage = source.contains("uuid.");
     let untyped_import = istyle.untyped_import();
-    let has_untyped_usage = lines
-        .iter()
+    let untyped_used = source
+        .lines()
         .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
 
-    for line in &lines {
-        let trimmed = line.trim();
-
-        if Some(trimmed) == untyped_import && !has_untyped_usage {
-            continue;
-        }
-
-        // Remove configured import if wrapper no longer appears
-        if trimmed == istyle.import_line && !has_sql_usage {
-            continue;
-        }
-        // Remove "import datetime" if datetime. no longer appears
-        if trimmed == "import datetime" && !has_datetime_usage {
-            continue;
-        }
-        // Remove "import uuid" if uuid. no longer appears
-        if trimmed == "import uuid" && !has_uuid_usage {
-            continue;
-        }
-
-        result.push(*line);
-    }
-
-    let mut output = result.join("\n");
-    if source.ends_with('\n') && !output.ends_with('\n') {
-        output.push('\n');
-    }
-    output
+    source
+        .split_inclusive('\n')
+        .filter(|line| {
+            let line = line.trim();
+            !((Some(line) == untyped_import && !untyped_used)
+                || (line == istyle.import_line && !source.contains(&wrapper_marker))
+                || (line == "import datetime" && !source.contains("datetime."))
+                || (line == "import uuid" && !source.contains("uuid.")))
+        })
+        .collect()
 }
 
 /// Check if source already has a specific import.
@@ -485,7 +398,10 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     #[test]
     fn test_non_sql_unchanged() {
         let source = "x = 42\nname = \"hello\"";
-        assert_eq!(rewrite_source(source, "postgres", &None, None, false), source);
+        assert_eq!(
+            rewrite_source(source, "postgres", &None, None, false),
+            source
+        );
     }
 
     #[test]
@@ -573,7 +489,10 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     #[test]
     fn test_untyped_skipped_by_default() {
         let source = r#"q = "--sql\nVALUES (1, 2)""#;
-        assert_eq!(rewrite_source(source, "postgres", &None, None, false), source);
+        assert_eq!(
+            rewrite_source(source, "postgres", &None, None, false),
+            source
+        );
     }
 
     #[test]
@@ -609,7 +528,10 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             r#"q = "--sql\n""#,
             r#"q = "--sql VALUES (1, 2)""#,
         ] {
-            assert_eq!(rewrite_source(source, "postgres", &None, None, true), source);
+            assert_eq!(
+                rewrite_source(source, "postgres", &None, None, true),
+                source
+            );
         }
     }
 
@@ -618,5 +540,25 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
         let source = r#"q = "--sql\nSELECT FROM users""#;
         let result = rewrite_source(source, "postgres", &None, None, true);
         assert!(result.ends_with(r#"q = SQL[UNTYPED]("--sql\nSELECT FROM users")"#));
+    }
+
+    #[test]
+    fn test_multiline_triple_quoted_roundtrip() {
+        let source = "q = \"\"\"--sql\nSELECT id::INTEGER\nFROM users\"\"\"\n";
+        let result = rewrite_source(source, "postgres", &None, None, false);
+        assert_eq!(
+            result,
+            "from sqlty import SQL\nq = SQL[tuple[int]](\"\"\"--sql\nSELECT id::INTEGER\nFROM users\"\"\")\n"
+        );
+        assert_eq!(strip_source(&result, None), source);
+    }
+
+    #[test]
+    fn test_prefixed_strings_skipped() {
+        let source = "a = f\"--sql\\nSELECT {x}::INTEGER\"\nb = r\"--sql\\nSELECT 1::INTEGER\"";
+        assert_eq!(
+            rewrite_source(source, "postgres", &None, None, false),
+            source
+        );
     }
 }
