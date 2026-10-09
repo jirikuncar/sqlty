@@ -459,3 +459,35 @@ class User(TypedDict):
 """
         user = self._make_type_info(source, "User")
         assert check_type_compatibility(user, "nonexistent", "int") is False
+
+
+class TestTypedDictQualifiers:
+    """Qualifiers and PEP 728 metadata, via runtime and AST fallback."""
+
+    SOURCE = """\
+{imports}
+from typing import NotRequired, ReadOnly, TypedDict
+
+class Row(TypedDict, closed=True):
+    id: ReadOnly[int]
+    note: NotRequired[ReadOnly[str]]
+
+class Extra(TypedDict, extra_items=ReadOnly[int]):
+    day: str
+"""
+
+    def _extract(self, runtime: bool) -> dict[str, TypeInfo]:
+        imports = "" if runtime else "import not_installed"
+        return extract_type_definitions(self.SOURCE.format(imports=imports))
+
+    def test_runtime_and_ast_agree(self):
+        for runtime in (True, False):
+            types = self._extract(runtime)
+            row, extra = types["Row"], types["Extra"]
+            assert (row.resolved_hints is not None) is runtime
+            assert row.fields == [("id", "int"), ("note", "str")]
+            assert row.required == {"id"}
+            assert row.closed and row.keyed and row.extra_items is None
+            assert extra.extra_items == "int" and not extra.closed
+            assert check_type_compatibility(extra, "views", "int")
+            assert not check_type_compatibility(extra, "ratio", "float")

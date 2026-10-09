@@ -354,7 +354,14 @@ class MDTestCase:
 
         Expected format: [rule-name] "message"
         If no diagnostics are emitted, returns empty string.
+
+        Without a ``sql`` block, the Python block itself is checked with
+        ``check_source`` (so user types defined there are validated) and
+        every diagnostic is returned, one per line.
         """
+        if not self.sql_blocks:
+            return self._check_source_errors()
+
         from sqlty._checker import Checker
         from sqlty._lint import RuleConfig
         from sqlty._sql_analyzer import SQLAnalyzer
@@ -405,6 +412,19 @@ class MDTestCase:
             d = diagnostics[0]
             return f'[{d.rule}] "{d.message}"'
         return ""
+
+    def _check_source_errors(self) -> str:
+        """Run ``check_source`` on the Python block; one diagnostic per line."""
+        from sqlty.core import check_source
+
+        sqlty_config = self._get_sqlty_config()
+        diagnostics = check_source(
+            self._extract_source_lines(),
+            dialect=sqlty_config.get("dialect", "postgres"),
+            rules=sqlty_config.get("rules"),
+            import_style=sqlty_config.get("import-style"),
+        )
+        return "\n".join(f'[{d["rule"]}] "{d["message"]}"' for d in diagnostics)
 
 
 def _strip_import_lines(source: str, import_line: str = "from sqlty import SQL") -> str:
