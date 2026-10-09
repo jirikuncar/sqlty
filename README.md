@@ -136,6 +136,13 @@ with psycopg.connect("dbname=mydb") as conn:
 
 `sqlty.row_form(query)` returns `T` itself, and `row_factory(T)` the matching psycopg factory for use with your own cursors. Only queries built as `SQL[T](...)` carry `T` at runtime; `execute` falls back to tuples otherwise.
 
+`scalar` fetches a single value, typed from `SQL[tuple[T]]` or from any type expression, unions and `Literal` included (PEP 747 `TypeForm`). No row raises `LookupError`, so `None` always means SQL `NULL`:
+
+```python
+email = scalar(conn, SQL[tuple[str | None]]("--sql\nSELECT email::TEXT FROM users WHERE id = %s"), (1,))  # str | None
+role = scalar(conn, "--sql\nSELECT role::TEXT FROM users LIMIT 1", Literal["admin", "user"])
+```
+
 **Without sqlty**, if the SQL drifts from the Python type (column added, type changed, name mismatch), you get a runtime error. **With sqlty**, `sqlty check` catches the mismatch before the code runs.
 
 ## Schema-Based Inference

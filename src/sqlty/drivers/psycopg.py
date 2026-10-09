@@ -1,6 +1,7 @@
 """Typed psycopg3 helpers driven by the row type of ``SQL[T]``."""
 
-from typing import Any, LiteralString, TypeForm, cast, get_origin, is_typeddict
+from collections.abc import Mapping, Sequence
+from typing import Any, LiteralString, TypeForm, cast, get_origin, is_typeddict, overload
 
 from psycopg import Connection, Cursor
 from psycopg.abc import Params
@@ -8,7 +9,7 @@ from psycopg.rows import BaseRowFactory, class_row, dict_row, tuple_row
 
 from sqlty import SQL, row_form
 
-__all__ = ["execute", "row_factory"]
+__all__ = ["execute", "row_factory", "scalar"]
 
 
 def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
@@ -42,3 +43,41 @@ def execute[T](conn: Connection[Any], query: SQL[T], params: Params | None = Non
     """
     form = row_form(query, cast(TypeForm[T], tuple))
     return conn.cursor(row_factory=row_factory(form)).execute(cast(LiteralString, query), params)
+
+
+@overload
+def scalar[T](
+    conn: Connection[Any], query: SQL[tuple[T]], /, params: Params | None = None
+) -> T: ...
+
+
+@overload
+def scalar[T](
+    conn: Connection[Any],
+    query: LiteralString | SQL[Any],
+    form: TypeForm[T],
+    /,
+    params: Params | None = None,
+) -> T: ...
+
+
+def scalar(conn: Connection[Any], query: Any, /, *args: Any, **kwargs: Any) -> Any:
+    """Return the single column of the first row of ``query``.
+
+    The value is typed as ``T`` from ``SQL[tuple[T]]``, or as an explicit
+    ``form`` for plain strings and narrowing. Any type expression works,
+    including unions and ``Literal``. A query yielding no rows raises
+    ``LookupError``, so ``None`` always means SQL ``NULL``.
+
+    Example:
+        >>> email = scalar(conn, SQL[tuple[str | None]]("--sql\\nSELECT email::TEXT FROM users WHERE id = %s"), (1,))  # doctest: +SKIP
+        >>> role = scalar(conn, "--sql\\nSELECT role::TEXT FROM users LIMIT 1", Literal["admin", "user"])  # doctest: +SKIP
+    """
+    params = kwargs.get("params")
+    if args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str):
+        params = args[-1]
+    row = conn.cursor(row_factory=tuple_row).execute(query, params).fetchone()
+    if row is None:
+        raise LookupError("query returned no rows")
+    (value,) = row
+    return value
