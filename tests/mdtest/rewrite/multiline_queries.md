@@ -67,3 +67,14 @@ q = t"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: q = t"--sql\nSELECT {column}::INTEGER FROM users"
 # warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [tstring-skipped]
 ```
+
+## Wrapper split across lines by a formatter is not wrapped again
+
+```python
+q = SQL[tuple[int]](
+"--sql\nSELECT id::INTEGER FROM users"
+)
+# rewritten: q = SQL[tuple[int]](
+# rewritten: "--sql\nSELECT id::INTEGER FROM users"
+# rewritten: )
+```

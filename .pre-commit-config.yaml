@@ -20,14 +20,23 @@ repos:
         require_serial: true
         types: [python]
         files: ^examples/
+      # magic_codec/ keeps plain --sql strings: the codec wraps them at import time
       - id: sqlty-rewrite
         name: sqlty rewrite examples
-        entry: uv run sqlty rewrite examples/
+        entry: >-
+          uv run sqlty rewrite examples/01_quick_start examples/02_schema_inference
+          examples/03_pyproject_config examples/04_check_and_types examples/05_import_style
         language: system
         pass_filenames: false
         require_serial: true
         types: [python]
         files: ^examples/
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path rust/Cargo.toml --check
+        language: system
+        pass_filenames: false
+        types: [rust]
 
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

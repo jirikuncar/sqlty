@@ -882,3 +882,215 @@ class TestPerformanceBaselines:
         core.check_source(many_lines)
         elapsed_ms = (time.perf_counter() - start) * 1000
         assert elapsed_ms < 500, f"check_source too slow: {elapsed_ms:.0f} ms"
+
+
+# ---------------------------------------------------------------------------
+# Backend parity
+# ---------------------------------------------------------------------------
+
+
+def _parity_inputs() -> list[pytest.param]:
+    """Every SQL and Python block of the mdtests and README, with its test's config."""
+    from pathlib import Path
+
+    from tests.mdtest_runner import ASSERTION_RE, parse_mdtest_file
+
+    root = Path(__file__).resolve().parent.parent
+    params = []
+    for md in [*sorted((root / "tests" / "mdtest").rglob("*.md")), root / "README.md"]:
+        for case in parse_mdtest_file(md):
+            config = case._get_sqlty_config()
+            schema = config.get("schema")
+            options = {
+                "dialect": config.get("dialect", "postgres"),
+                "schema_sql": case.files.get(schema) if schema else None,
+                "import_style": config.get("import-style"),
+                "untyped": config.get("untyped") == "sentinel",
+            }
+            sources = [
+                "\n".join(
+                    line for line in block.splitlines() if not ASSERTION_RE.match(line.strip())
+                )
+                for block in case.python_blocks
+            ]
+            name = f"{md.relative_to(root)}::{case.name}"
+            params += [
+                pytest.param("sql", sql, options, id=f"{name}::sql{i}")
+                for i, sql in enumerate(case.sql_blocks)
+            ]
+            params += [
+                pytest.param("python", source, options, id=f"{name}::python{i}")
+                for i, source in enumerate(sources)
+            ]
+    return params
+
+
+def _outcome(call, backend: types.ModuleType):
+    """A call's result on ``backend``, or its exception type and message."""
+    try:
+        return call(backend)
+    except Exception as exc:
+        return type(exc).__name__, str(exc)
+
+
+@pytest.mark.parametrize(("kind", "text", "options"), _parity_inputs())
+def test_backend_parity(kind: str, text: str, options: dict):
+    """Rust and Python backends agree on every documented example."""
+    rs = pytest.importorskip("sqlty._core", reason="Rust backend not compiled")
+    import sqlty._core_py as py
+
+    dialect, schema_sql = options["dialect"], options["schema_sql"]
+    import_style, untyped = options["import_style"], options["untyped"]
+    if kind == "sql":
+        calls = {
+            "infer_type": lambda m: m.infer_type(text, dialect=dialect, schema_sql=schema_sql),
+            "expand_star": lambda m: m.expand_star(text, dialect=dialect, schema_sql=schema_sql),
+        }
+    else:
+        calls = {
+            "rewrite_source": lambda m: m.rewrite_source(
+                text,
+                dialect=dialect,
+                schema_sql=schema_sql,
+                import_style=import_style,
+                untyped=untyped,
+            ),
+            "strip_source": lambda m: m.strip_source(text, import_style=import_style),
+            "check_source": lambda m: m.check_source(
+                text, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+            ),
+        }
+    for name, call in calls.items():
+        assert _outcome(call, rs) == _outcome(call, py), name
+
+
+class TestParityRegressions:
+    """Cases where the backends used to diverge; each must hold on both."""
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("DELETE FROM t RETURNING id::INTEGER", "tuple[int]"),
+            ("WITH x AS (SELECT 1) DELETE FROM t RETURNING id::INTEGER", "tuple[int]"),
+            ("WITH x AS (SELECT 1) UPDATE t SET a = 1 RETURNING id::INTEGER", "tuple[int]"),
+            (
+                "WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x RETURNING id::INTEGER",
+                "tuple[int]",
+            ),
+            (
+                "WITH n AS (INSERT INTO t VALUES (1) RETURNING id) SELECT id::INTEGER FROM n",
+                "tuple[int]",
+            ),
+            ("INSERT INTO t SELECT a::INTEGER FROM u", None),
+            ("UPDATE t SET a = (SELECT b::INTEGER FROM u)", None),
+            ("CREATE TABLE x AS SELECT a::INTEGER FROM t", None),
+            ("SELECT a::INTEGER FROM t UNION SELECT b FROM u UNION SELECT c FROM v", "tuple[int]"),
+            ("SELECT 1, 1.5, 'a', TRUE, NULL", "tuple[int, float, str, bool, str]"),
+            ("SELECT COUNT(*) AS n, SUM(x) AS s FROM t", "tuple[int, float]"),
+            (
+                "SELECT AVG(x::INTEGER), MIN(x::INTEGER), MAX(d::DATE) FROM t",
+                "tuple[float, int, datetime.date]",
+            ),
+            ("SELECT COALESCE(x::INTEGER, 0), (x::INTEGER) FROM t", "tuple[int, int]"),
+            ("SELECT CASE WHEN a THEN 1::INTEGER ELSE 2 END FROM t", "tuple[int]"),
+            ("SELECT EXISTS (SELECT 1), x NOT IN (SELECT 1) FROM t", "tuple[bool, bool]"),
+            ("SELECT (SELECT y::INTEGER FROM u) FROM t", "tuple[int]"),
+            ("SELECT ROW_NUMBER() OVER (), json_build_object('a', 1) FROM t", "tuple[int, dict]"),
+            ("SELECT ts::DOUBLE PRECISION, tags::INT[] FROM t", "tuple[float, list]"),
+        ],
+    )
+    def test_infer_type(self, core: types.ModuleType, sql: str, expected: str | None):
+        assert core.infer_type(sql) == expected
+
+    _SCHEMA = (
+        "CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));"
+        "CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);"
+    )
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT * FROM users", "tuple[int, str, float]"),
+            (
+                "SELECT o.*, u.name FROM users u JOIN orders o ON TRUE",
+                "tuple[int, int, datetime.datetime, str]",
+            ),
+            (
+                "SELECT u.id, placed FROM users u JOIN orders o ON TRUE",
+                "tuple[int, datetime.datetime]",
+            ),
+            ("SELECT * FROM audit_log", "tuple[str]"),
+            ("SELECT MAX(placed), AVG(oid) FROM orders", "tuple[datetime.datetime, float]"),
+            ("DELETE FROM users RETURNING *", "tuple[int, str, float]"),
+            ("DELETE FROM users RETURNING id, name", "tuple[int, str]"),
+        ],
+    )
+    def test_infer_type_with_schema(self, core: types.ModuleType, sql: str, expected: str):
+        assert core.infer_type(sql, schema_sql=self._SCHEMA) == expected
+
+    def test_sum_of_unknown_schema_column_raises(self, core: types.ModuleType):
+        with pytest.raises(RuntimeError, match="Column 'nope' not found in table 'users'"):
+            core.infer_type("SELECT SUM(nope) FROM users", schema_sql=self._SCHEMA)
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT * FROM users", "SELECT id::INT, name::TEXT, score::DECIMAL(10, 2) FROM users"),
+            (
+                "SELECT o.*, 1 AS one FROM orders o",
+                "SELECT oid::INT, user_id::INT, placed::TIMESTAMPTZ, 1 AS one FROM orders o",
+            ),
+            ("SELECT * FROM users, audit_log", None),
+        ],
+    )
+    def test_expand_star(self, core: types.ModuleType, sql: str, expected: str | None):
+        assert core.expand_star(sql, schema_sql=self._SCHEMA) == expected
+
+    def test_rewrite_multiline_triple_quoted(self, core: types.ModuleType):
+        source = 'def f():\n    return """--sql\n    SELECT id::INTEGER\n    FROM users\n    """\n'
+        rewritten = core.rewrite_source(source)
+        assert rewritten == (
+            "from sqlty import SQL\n"
+            'def f():\n    return SQL[tuple[int]]("""--sql\n    SELECT id::INTEGER\n'
+            '    FROM users\n    """)\n'
+        )
+        assert core.strip_source(rewritten) == source
+
+    def test_formatter_split_wrapper(self, core: types.ModuleType):
+        wrapped = (
+            'from sqlty import SQL\nq = SQL[tuple[int]](\n    "--sql\\nSELECT 1::INTEGER"\n)\n'
+        )
+        assert core.rewrite_source(wrapped) == wrapped
+        assert core.strip_source(wrapped) == 'q = "--sql\\nSELECT 1::INTEGER"\n'
+
+    def test_rewrite_keeps_crlf(self, core: types.ModuleType):
+        source = 'q = "--sql\\nSELECT 1::INTEGER"\r\nx = 1\r\n'
+        rewritten = core.rewrite_source(source)
+        assert rewritten.endswith('("--sql\\nSELECT 1::INTEGER")\r\nx = 1\r\n')
+        assert core.strip_source(rewritten) == source
+
+    def test_rewrite_skips_prefixed_strings(self, core: types.ModuleType):
+        source = 'a = f"--sql\\nSELECT {x}::INTEGER"\nb = r"--sql\\nSELECT 1::INTEGER"'
+        assert core.rewrite_source(source) == source
+
+    def test_check_skips_user_type_annotations(self, core: types.ModuleType):
+        source = 'q = SQL[User]("--sql\\nSELECT id::INTEGER FROM users")'
+        assert core.check_source(source) == []
+
+    def test_check_skips_uninferable_query(self, core: types.ModuleType):
+        source = 'q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")'
+        assert [d["rule"] for d in core.check_source(source)] == ["inline-sql-comment"]
+
+    @pytest.mark.parametrize(
+        ("schema", "message"),
+        [
+            (None, "SELECT * used but no schema available"),
+            ("CREATE TABLE users (id INT);", "SELECT * used — expand to explicit column list"),
+        ],
+    )
+    def test_check_select_star_message(
+        self, core: types.ModuleType, schema: str | None, message: str
+    ):
+        source = 'q = SQL[tuple[str]]("--sql\\nselect * FROM users")'
+        diags = core.check_source(source, schema_sql=schema)
+        assert [d["message"] for d in diags if d["rule"].startswith("select-star")] == [message]

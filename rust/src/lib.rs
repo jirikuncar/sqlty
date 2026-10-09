@@ -18,6 +18,7 @@ mod rewriter;
 
 use std::collections::HashMap;
 
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -30,11 +31,14 @@ use pyo3::types::{PyDict, PyList};
 ///
 /// Returns:
 ///     Python type string (e.g., "tuple[int, str]") or None if inference fails
+///
+/// Raises:
+///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
-fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<String> {
+fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
     let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    analyzer::infer_type(sql, dialect, &schema)
+    analyzer::infer_type(sql, dialect, &schema).map_err(PyRuntimeError::new_err)
 }
 
 /// Rewrite Python source: "--sql\n..." -> SQL[T]("--sql\n...").

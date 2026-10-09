@@ -159,3 +159,27 @@ SELECT * FROM unknown_table
 ```python
 # expanded: None
 ```
+
+## Other projections are kept verbatim
+
+`schema.sql`:
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+```
+
+```toml
+[sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+```sql
+SELECT *, id::INTEGER + 1 AS next_id FROM users
+```
+
+```python
+# expanded: SELECT id::INT, name::TEXT, id::INTEGER + 1 AS next_id FROM users
+```

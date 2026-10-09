@@ -107,7 +107,7 @@ SELECT id::UUID FROM t
 ## Collection types
 
 ```sql
-SELECT tags::ARRAY, metadata::JSON, extra::JSONB FROM t
+SELECT tags::INT[], metadata::JSON, extra::JSONB FROM t
 ```
 
 ```python
@@ -126,7 +126,7 @@ SELECT
     c15::BOOLEAN, c16::BOOL,
     c17::DATE, c18::TIMESTAMP, c19::TIMESTAMPTZ, c20::DATETIME,
     c21::TIME, c22::TIMETZ, c23::INTERVAL,
-    c24::ARRAY, c25::JSON, c26::JSONB,
+    c24::INT[], c25::JSON, c26::JSONB,
     c27::UUID
 FROM t
 ```

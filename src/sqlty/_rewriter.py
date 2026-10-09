@@ -90,16 +90,19 @@ class ImportStyle:
         return cls(import_line="from sqlty import SQL", wrapper_name="SQL")
 
     def make_wrapper_pattern(self) -> re.Pattern[str]:
-        """Build a regex that matches ``{wrapper_name}[T]("...")``."""
+        """Build a regex that matches ``{wrapper_name}[T]("...")``.
+
+        The string may sit on its own lines, as formatters lay out long calls.
+        """
         escaped = re.escape(self.wrapper_name)
         return re.compile(
-            rf"(?P<wrapper>{escaped}\[.*?\]\("
+            rf"(?P<wrapper>{escaped}\[.*?\]\(\s*"
             r"(?P<inner>"
             r'""".*?"""'
             r"|'''.*?'''"
             r'|"[^"]*"'
             r"|'[^']*'"
-            r")\))",
+            r")\s*\))",
             re.DOTALL,
         )
 
@@ -356,12 +359,6 @@ _SQL_STRING_PATTERN = re.compile(
 _FSTRING_SQL_PATTERN = re.compile(
     r"""[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b"""
     r"""|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"""
-)
-
-# Match SQL[T]("...") or SQL[T]('...') or SQL[T]("""...""")
-_SQL_WRAPPER_PATTERN = re.compile(
-    r'(?P<wrapper>SQL\[.*?\]\((?P<inner>""".*?"""|\'\'\'.*?\'\'\'|"[^"]*"|\'[^\']*\')\))',
-    re.DOTALL,
 )
 
 

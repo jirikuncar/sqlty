@@ -239,7 +239,7 @@ def check_source(
         if annotated_type and annotated_type.startswith("tuple["):
             if rule_config.is_enabled("stale-type"):
                 current_type = rewriter._infer_type(sql_content)
-                if current_type != annotated_type:
+                if current_type not in ("Any", annotated_type):
                     diagnostics.append(
                         {
                             "rule": "stale-type",

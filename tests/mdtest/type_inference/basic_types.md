@@ -149,7 +149,7 @@ SELECT user_id::UUID FROM users
 ## Collection types
 
 ```sql
-SELECT tags::ARRAY, metadata::JSON, extra::JSONB FROM t
+SELECT tags::INT[], metadata::JSON, extra::JSONB FROM t
 ```
 
 ```python
