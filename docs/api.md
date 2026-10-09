@@ -100,7 +100,7 @@ Without `default`, a query with no runtime type raises `TypeError`. This covers 
 ## psycopg3 Driver
 
 ```python
-from sqlty.drivers.psycopg import execute, row_factory
+from sqlty.drivers.psycopg import execute, row_factory, scalar
 ```
 
 ### `row_factory(T)`
@@ -120,6 +120,18 @@ Executes `query: SQL[T]` and returns a `Cursor[T]` whose row factory is `row_fac
 ```python
 users = execute(conn, SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")).fetchall()  # list[User]
 ```
+
+### `scalar(conn, query, [form,] params=None)`
+
+Returns the single column of the first row. The value is typed as `T` from `query: SQL[tuple[T]]`, or as an explicit `form: TypeForm[T]` for plain `LiteralString` queries and narrowing. Unlike `type[T]`, a `TypeForm` accepts unions, `Literal` and other type expressions:
+
+```python
+email = scalar(conn, SQL[tuple[str | None]]("--sql\nSELECT email::TEXT FROM users WHERE id = %s"), (1,))  # str | None
+role = scalar(conn, "--sql\nSELECT role::TEXT FROM users LIMIT 1", Literal["admin", "user"])
+n = scalar(conn, "--sql\nSELECT max(id)::INTEGER FROM users", int | None)
+```
+
+`form` is not validated at runtime. A query yielding no rows raises `LookupError`, so `None` always means SQL `NULL`; a row with more than one column raises `ValueError`.
 
 ---
 

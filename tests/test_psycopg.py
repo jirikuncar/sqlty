@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, Literal, NamedTuple, TypedDict
 
 import pytest
 
@@ -16,7 +16,7 @@ psycopg = pytest.importorskip("psycopg")
 from psycopg.rows import dict_row, tuple_row  # noqa: E402
 
 from sqlty import SQL, row_form  # noqa: E402
-from sqlty.drivers.psycopg import execute, row_factory  # noqa: E402
+from sqlty.drivers.psycopg import execute, row_factory, scalar  # noqa: E402
 
 
 @dataclass
@@ -114,3 +114,32 @@ def test_execute_params(conn: Any) -> None:
 
 def test_execute_without_row_form(conn: Any) -> None:
     assert execute(conn, SQL(QUERY)).fetchall() == [(1, "ada")]
+
+
+def test_scalar_inferred(conn: Any) -> None:
+    query = SQL[tuple[str | None]]("--sql\nSELECT NULLIF(%s, '')::TEXT")
+    assert scalar(conn, query, ("ada",)) == "ada"
+    assert scalar(conn, query, params=("",)) is None
+
+
+def test_scalar_form(conn: Any) -> None:
+    assert scalar(conn, "--sql\nSELECT 'admin'::TEXT", Literal["admin", "user"]) == "admin"
+    assert scalar(conn, "--sql\nSELECT %(n)s::INTEGER", int | None, {"n": 7}) == 7
+
+
+def test_scalar_ignores_row_factories(conn: Any) -> None:
+    conn.row_factory = dict_row
+    try:
+        assert scalar(conn, SQL[UserDC]("--sql\nSELECT 1::INTEGER"), int) == 1
+    finally:
+        conn.row_factory = tuple_row
+
+
+def test_scalar_no_rows(conn: Any) -> None:
+    with pytest.raises(LookupError, match="no rows"):
+        scalar(conn, SQL[tuple[int]]("--sql\nSELECT 1::INTEGER WHERE false"))
+
+
+def test_scalar_many_columns(conn: Any) -> None:
+    with pytest.raises(ValueError, match="too many values"):
+        scalar(conn, QUERY, tuple[int, str])
