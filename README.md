@@ -185,6 +185,29 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/magic-codec.md).
 
+## Untyped Queries
+
+Queries that return rows sqlty can't type (`VALUES`, unparseable SQL) are
+left as plain strings by default. Opt in to mark them explicitly with the
+`UNTYPED` sentinel instead:
+
+```toml
+# pyproject.toml
+[tool.sqlty]
+untyped = "sentinel"  # or: sqlty rewrite --untyped sentinel
+```
+
+```python
+query = "--sql\nVALUES (1, 2)"
+# rewritten: query = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+```
+
+`UNTYPED` is a [PEP 661](https://peps.python.org/pep-0661/) sentinel, not
+`Any`: mypy, pyright and ty reject using its rows as a concrete type, and
+`sqlty check` reports it as `untyped-query` until casts or a schema make the
+row type known. Statements that return no rows (DDL, DML without `RETURNING`)
+stay unwrapped.
+
 ## Lint Rules
 
 | Rule | Default | Description |
@@ -199,6 +222,7 @@ The codec is registered automatically when sqlty is installed. See [magic codec 
 | `inline-sql-comment` | warn | `"--sql SELECT ..."` makes query a SQL comment |
 | `fstring-skipped` | warn | f-string with `--sql` skipped (cannot be statically rewritten) |
 | `tstring-skipped` | warn | t-string with `--sql` skipped (cannot be statically rewritten) |
+| `untyped-query` | warn | `SQL[UNTYPED]` query has no inferable row type |
 
 Configure in `pyproject.toml`:
 

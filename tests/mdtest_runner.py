@@ -218,7 +218,11 @@ class MDTestCase:
         import_style = sqlty_config.get("import-style")
 
         return SQLRewriter(
-            dialect=dialect, schema_path=schema_path_str, codec=codec, import_style=import_style
+            dialect=dialect,
+            schema_path=schema_path_str,
+            codec=codec,
+            import_style=import_style,
+            untyped=sqlty_config.get("untyped") == "sentinel",
         )
 
     def _rewrite(self) -> str:
@@ -234,7 +238,10 @@ class MDTestCase:
         source = self._extract_source_lines()
         result = rewriter.rewrite(source)
         # Strip import lines — assertions check only the code transformation
-        return _strip_import_lines(result.source, rewriter._import_style.import_line).strip()
+        style = rewriter._import_style
+        return _strip_import_lines(
+            result.source, style.import_line, style.untyped_import or style.import_line
+        ).strip()
 
     def _rewrite_file(self) -> str:
         """Compute rewritten form including imports (whole-file output).
@@ -427,7 +434,9 @@ class MDTestCase:
         return "\n".join(f'[{d["rule"]}] "{d["message"]}"' for d in diagnostics)
 
 
-def _strip_import_lines(source: str, import_line: str = "from sqlty import SQL") -> str:
+def _strip_import_lines(
+    source: str, import_line: str = "from sqlty import SQL", *extra_import_lines: str
+) -> str:
     """Remove import lines from rewriter output.
 
     The `# rewritten:` assertion checks only the code transformation,
@@ -436,7 +445,7 @@ def _strip_import_lines(source: str, import_line: str = "from sqlty import SQL")
     - import uuid
     - The configured import line (default: ``from sqlty import SQL``)
     """
-    skip = {"import datetime", "import uuid", import_line}
+    skip = {"import datetime", "import uuid", import_line, *extra_import_lines}
     lines = []
     for line in source.splitlines():
         stripped = line.strip()

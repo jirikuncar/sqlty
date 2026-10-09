@@ -5,7 +5,7 @@ SQL analysis utilities using sqlglot to extract column and type information.
 from pathlib import Path
 from typing import NamedTuple
 
-from sqlglot import exp, parse_one
+from sqlglot import exp, parse, parse_one
 
 from sqlty._type_codec import TupleCodec, TypeCodec
 
@@ -255,6 +255,26 @@ class SQLAnalyzer:
             columns.append(ColumnInfo(col_name, python_type, sql_type))
 
         return columns
+
+    def returns_rows(self, sql: str) -> bool:
+        """Whether ``sql`` yields rows: a query, DML with RETURNING, or unparseable SQL.
+
+        Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
+
+        Example:
+            >>> SQLAnalyzer().returns_rows("DELETE FROM users RETURNING id")
+            True
+            >>> SQLAnalyzer().returns_rows("DELETE FROM users")
+            False
+        """
+        try:
+            statements = parse(sql, dialect=self.dialect)
+        except Exception:
+            return True
+        statement = statements[0] if statements else None
+        if isinstance(statement, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
+            return bool(statement.args.get("returning"))
+        return isinstance(statement, (exp.Query, exp.Values))
 
     def analyze_select(self, sql: str) -> list[ColumnInfo] | None:
         """

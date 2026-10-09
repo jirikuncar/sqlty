@@ -10,7 +10,7 @@ try:
 except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development mode
 
-__all__ = ["SQL", "row_form", "sqlty"]
+__all__ = ["SQL", "UNTYPED", "row_form", "sqlty"]
 
 
 # Determine if auto-generation is enabled via environment variable
@@ -19,6 +19,15 @@ _auto_generate = os.environ.get("SQLTY_AUTO_GENERATE", "").lower() in {"1", "tru
 
 class SQL[T](str):
     pass
+
+
+UNTYPED = sentinel("UNTYPED")
+"""Row type of a query sqlty could not infer: ``SQL[UNTYPED]``.
+
+Unlike ``Any``, type checkers reject using an ``UNTYPED`` row as a concrete
+type. ``sqlty rewrite --untyped sentinel`` emits it; ``sqlty check`` flags it
+(``untyped-query``) until casts or a schema make the row type known.
+"""
 
 
 _MISSING: object = object()

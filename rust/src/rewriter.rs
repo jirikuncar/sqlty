@@ -10,7 +10,7 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::analyzer::{infer_type, Schema};
+use crate::analyzer::{infer_type, returns_rows, Schema};
 
 // ---------------------------------------------------------------------------
 // Regex patterns
@@ -42,6 +42,21 @@ struct ImportStyleParsed {
     import_line: String,
     /// The prefix for `[T](...)`, e.g. "Q" or "sqlty.SQL".
     wrapper_name: String,
+}
+
+impl ImportStyleParsed {
+    /// How `UNTYPED` is spelled: "UNTYPED" or "sqlty.UNTYPED".
+    fn untyped_name(&self) -> String {
+        match self.wrapper_name.rsplit_once('.') {
+            Some((module, _)) => format!("{}.UNTYPED", module),
+            None => "UNTYPED".to_string(),
+        }
+    }
+
+    /// Import line `UNTYPED` needs, or `None` when the module is imported.
+    fn untyped_import(&self) -> Option<&'static str> {
+        (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
+    }
 }
 
 /// Parse an import-style string into its components.
@@ -106,17 +121,34 @@ fn build_wrapper_extract_pattern(wrapper_name: &str) -> Regex {
 ///
 /// Adds necessary imports (SQL, datetime, uuid) at the top.
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
-pub fn rewrite_source(source: &str, dialect: &str, schema: &Option<Schema>, import_style: Option<&str>) -> String {
+/// With `untyped`, row-returning queries of unknown row type become `SQL[UNTYPED](...)`.
+pub fn rewrite_source(
+    source: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    import_style: Option<&str>,
+    untyped: bool,
+) -> String {
     let istyle = parse_import_style(import_style);
     let wrapper_pattern = build_wrapper_pattern(&istyle.wrapper_name);
+    let untyped_name = untyped.then(|| istyle.untyped_name());
 
     let mut result_lines: Vec<String> = Vec::new();
     let mut any_rewritten = false;
+    let mut any_untyped = false;
 
     for line in source.lines() {
-        let rewritten = rewrite_line(line, dialect, schema, &istyle.wrapper_name, &wrapper_pattern);
+        let (rewritten, is_untyped) = rewrite_line(
+            line,
+            dialect,
+            schema,
+            &istyle.wrapper_name,
+            &wrapper_pattern,
+            untyped_name.as_deref(),
+        );
         if rewritten != line {
             any_rewritten = true;
+            any_untyped |= is_untyped;
         }
         result_lines.push(rewritten);
     }
@@ -129,7 +161,7 @@ pub fn rewrite_source(source: &str, dialect: &str, schema: &Option<Schema>, impo
     }
 
     if any_rewritten {
-        result = inject_imports(&result, &istyle);
+        result = inject_imports(&result, &istyle, any_untyped);
     }
 
     result
@@ -173,11 +205,19 @@ pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
 
 /// Rewrite a single line: detect `"--sql\n..."` and wrap with `{wrapper_name}[T](...)`.
 ///
-/// Never modifies string content — only adds the wrapper.
-fn rewrite_line(line: &str, dialect: &str, schema: &Option<Schema>, wrapper_name: &str, wrapper_pattern: &Regex) -> String {
+/// Never modifies string content — only adds the wrapper. Returns the line
+/// and whether it was wrapped as `untyped_name`.
+fn rewrite_line(
+    line: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    wrapper_name: &str,
+    wrapper_pattern: &Regex,
+    untyped_name: Option<&str>,
+) -> (String, bool) {
     // Skip lines that already have wrapper
     if wrapper_pattern.is_match(line) {
-        return line.to_string();
+        return (line.to_string(), false);
     }
 
     // Try each string pattern (triple-quoted first, then single-line)
@@ -197,17 +237,19 @@ fn rewrite_line(line: &str, dialect: &str, schema: &Option<Schema>, wrapper_name
                 if content.trim_start().starts_with("--sql") {
                     let sql_content = content.trim_start();
                     let inferred = infer_from_sql_content(sql_content, dialect, schema);
+                    let untyped = untyped_name.filter(|_| inferred.is_none() && is_untyped(sql_content, dialect));
+                    let is_untyped = untyped.is_some();
 
-                    if let Some(type_str) = inferred {
+                    if let Some(type_str) = inferred.as_deref().or(untyped) {
                         let replacement = format!("{}[{}]({})", wrapper_name, type_str, string_literal);
-                        return line.replace(string_literal, &replacement);
+                        return (line.replace(string_literal, &replacement), is_untyped);
                     }
                 }
             }
         }
     }
 
-    line.to_string()
+    (line.to_string(), false)
 }
 
 /// Strip a single line: detect wrapper and unwrap.
@@ -261,6 +303,19 @@ fn is_sqlty_managed(content: &str) -> bool {
     matches!(first, b' ' | b'\n' | b'\r' | b'\t')
 }
 
+/// Whether `SQL[UNTYPED]` fits: rows are expected but their type is unknown.
+///
+/// Requires the `--sql` prefix to end its line; the space form is a SQL comment.
+fn is_untyped(sql_content: &str, dialect: &str) -> bool {
+    let rest = sql_content.strip_prefix("--sql").unwrap_or_default();
+    let query = match rest.strip_prefix("\\n") {
+        Some(query) => query,
+        None if rest.starts_with('\n') || rest.starts_with("\r\n") => rest,
+        None => return false,
+    };
+    returns_rows(query, dialect)
+}
+
 /// Infer type from SQL content by letting the SQL parser handle `--sql` as a comment.
 ///
 /// - `--sql\nSELECT ...` → `\\n` becomes real newline; parser sees `--sql`
@@ -279,13 +334,16 @@ fn infer_from_sql_content(sql_content: &str, dialect: &str, schema: &Option<Sche
 }
 
 /// Inject necessary imports at the top of the source.
-fn inject_imports(source: &str, istyle: &ImportStyleParsed) -> String {
+fn inject_imports(source: &str, istyle: &ImportStyleParsed, untyped: bool) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
     let needs_sql = source.contains(&wrapper_marker) && !has_import(source, &istyle.import_line);
     let needs_datetime = source.contains("datetime.") && !has_import(source, "import datetime");
     let needs_uuid = source.contains("uuid.") && !has_import(source, "import uuid");
+    let untyped_import = istyle
+        .untyped_import()
+        .filter(|line| untyped && !has_import(source, line));
 
-    if !needs_sql && !needs_datetime && !needs_uuid {
+    if !needs_sql && !needs_datetime && !needs_uuid && untyped_import.is_none() {
         return source.to_string();
     }
 
@@ -298,6 +356,9 @@ fn inject_imports(source: &str, istyle: &ImportStyleParsed) -> String {
     }
     if needs_sql {
         imports.push(istyle.import_line.clone());
+    }
+    if let Some(line) = untyped_import {
+        imports.push(line.to_string());
     }
 
     let import_block = imports.join("\n");
@@ -312,9 +373,17 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyleParsed) -> String {
     let has_sql_usage = source.contains(&wrapper_marker);
     let has_datetime_usage = source.contains("datetime.");
     let has_uuid_usage = source.contains("uuid.");
+    let untyped_import = istyle.untyped_import();
+    let has_untyped_usage = lines
+        .iter()
+        .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
 
     for line in &lines {
         let trimmed = line.trim();
+
+        if Some(trimmed) == untyped_import && !has_untyped_usage {
+            continue;
+        }
 
         // Remove configured import if wrapper no longer appears
         if trimmed == istyle.import_line && !has_sql_usage {
@@ -355,6 +424,7 @@ mod tests {
             "postgres",
             &None,
             None,
+            false,
         );
         assert!(result.contains("SQL[tuple[int]]"));
         assert!(result.contains("from sqlty import SQL"));
@@ -368,6 +438,7 @@ mod tests {
             "postgres",
             &None,
             None,
+            false,
         );
         assert!(result.contains(r#""--sql\nSELECT 1::INTEGER""#));
     }
@@ -380,6 +451,7 @@ mod tests {
             "postgres",
             &None,
             None,
+            false,
         );
         assert!(!result.contains("SQL["));
     }
@@ -396,8 +468,8 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     #[test]
     fn test_rewrite_idempotent() {
         let source = r#"q = "--sql\nSELECT 1::INTEGER""#;
-        let once = rewrite_source(source, "postgres", &None, None);
-        let twice = rewrite_source(&once, "postgres", &None, None);
+        let once = rewrite_source(source, "postgres", &None, None, false);
+        let twice = rewrite_source(&once, "postgres", &None, None, false);
         assert_eq!(once, twice);
     }
 
@@ -405,7 +477,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     fn test_strip_rewrite_roundtrip() {
         // strip(rewrite(source)) == source (ignoring imports)
         let original = r#"q = "--sql\nSELECT 1::INTEGER""#;
-        let rewritten = rewrite_source(original, "postgres", &None, None);
+        let rewritten = rewrite_source(original, "postgres", &None, None, false);
         let stripped = strip_source(&rewritten, None);
         assert_eq!(stripped.trim(), original.trim());
     }
@@ -413,7 +485,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     #[test]
     fn test_non_sql_unchanged() {
         let source = "x = 42\nname = \"hello\"";
-        assert_eq!(rewrite_source(source, "postgres", &None, None), source);
+        assert_eq!(rewrite_source(source, "postgres", &None, None, false), source);
     }
 
     #[test]
@@ -438,6 +510,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             "postgres",
             &None,
             Some("from sqlty import SQL as Q"),
+            false,
         );
         assert!(result.contains("Q[tuple[int]]"));
         assert!(result.contains("from sqlty import SQL as Q"));
@@ -451,6 +524,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             "postgres",
             &None,
             Some("import sqlty"),
+            false,
         );
         assert!(result.contains("sqlty.SQL[tuple[int]]"));
         assert!(result.contains("import sqlty"));
@@ -463,6 +537,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             "postgres",
             &None,
             Some("import sqlty as sy"),
+            false,
         );
         assert!(result.contains("sy.SQL[tuple[int]]"));
         assert!(result.contains("import sqlty as sy"));
@@ -472,7 +547,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     fn test_strip_with_alias_roundtrip() {
         let original = r#"q = "--sql\nSELECT 1::INTEGER""#;
         let style = Some("from sqlty import SQL as Q");
-        let rewritten = rewrite_source(original, "postgres", &None, style);
+        let rewritten = rewrite_source(original, "postgres", &None, style, false);
         let stripped = strip_source(&rewritten, style);
         assert_eq!(stripped.trim(), original.trim());
     }
@@ -481,7 +556,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     fn test_strip_with_module_import_roundtrip() {
         let original = r#"q = "--sql\nSELECT 1::INTEGER""#;
         let style = Some("import sqlty");
-        let rewritten = rewrite_source(original, "postgres", &None, style);
+        let rewritten = rewrite_source(original, "postgres", &None, style, false);
         let stripped = strip_source(&rewritten, style);
         assert_eq!(stripped.trim(), original.trim());
     }
@@ -490,8 +565,58 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     fn test_strip_with_module_alias_roundtrip() {
         let original = r#"q = "--sql\nSELECT 1::INTEGER""#;
         let style = Some("import sqlty as sy");
-        let rewritten = rewrite_source(original, "postgres", &None, style);
+        let rewritten = rewrite_source(original, "postgres", &None, style, false);
         let stripped = strip_source(&rewritten, style);
         assert_eq!(stripped.trim(), original.trim());
+    }
+
+    #[test]
+    fn test_untyped_skipped_by_default() {
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        assert_eq!(rewrite_source(source, "postgres", &None, None, false), source);
+    }
+
+    #[test]
+    fn test_untyped_sentinel() {
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        let result = rewrite_source(source, "postgres", &None, None, true);
+        assert_eq!(
+            result,
+            "from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED](\"--sql\\nVALUES (1, 2)\")"
+        );
+        assert_eq!(strip_source(&result, None), source);
+    }
+
+    #[test]
+    fn test_untyped_sentinel_module_import() {
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        let style = Some("import sqlty as sy");
+        let result = rewrite_source(source, "postgres", &None, style, true);
+        assert_eq!(
+            result,
+            "import sqlty as sy\nq = sy.SQL[sy.UNTYPED](\"--sql\\nVALUES (1, 2)\")"
+        );
+        assert_eq!(strip_source(&result, style), source);
+    }
+
+    #[test]
+    fn test_untyped_skips_statements_without_rows() {
+        for source in [
+            r#"q = "--sql\nDELETE FROM users""#,
+            r#"q = "--sql\nINSERT INTO users (id) VALUES (1)""#,
+            r#"q = "--sql\nCREATE TABLE users (id INTEGER)""#,
+            r#"q = "--sql\nBEGIN""#,
+            r#"q = "--sql\n""#,
+            r#"q = "--sql VALUES (1, 2)""#,
+        ] {
+            assert_eq!(rewrite_source(source, "postgres", &None, None, true), source);
+        }
+    }
+
+    #[test]
+    fn test_untyped_wraps_unparseable() {
+        let source = r#"q = "--sql\nSELECT FROM users""#;
+        let result = rewrite_source(source, "postgres", &None, None, true);
+        assert!(result.ends_with(r#"q = SQL[UNTYPED]("--sql\nSELECT FROM users")"#));
     }
 }

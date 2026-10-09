@@ -94,6 +94,7 @@ def rewrite_source(
     dialect: str = "postgres",
     schema_sql: str | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> str:
     """Rewrite Python source: "--sql ..." -> SQL[T]("--sql ...").
 
@@ -104,12 +105,21 @@ def rewrite_source(
         dialect: SQL dialect
         schema_sql: Optional CREATE TABLE statements
         import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+        untyped: Wrap row-returning queries of unknown row type as ``SQL[UNTYPED](...)``
+
+    Example:
+        >>> rewrite_source('q = "--sql\\\\nVALUES (1, 2)"', untyped=True)
+        'from sqlty import SQL\\nfrom sqlty import UNTYPED\\nq = SQL[UNTYPED]("--sql\\\\nVALUES (1, 2)")'
 
     Returns:
         Rewritten source code
     """
     return _backend_rewrite_source(
-        source, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+        source,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        untyped=untyped,
     )
 
 

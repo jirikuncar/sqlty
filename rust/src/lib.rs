@@ -47,14 +47,21 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Stri
 ///     dialect: SQL dialect
 ///     schema_sql: Optional CREATE TABLE statements
 ///     import_style: Import style (e.g. "from sqlty import SQL as Q")
+///     untyped: Wrap row-returning queries of unknown row type as SQL[UNTYPED](...)
 ///
 /// Returns:
 ///     Rewritten source code
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None))]
-fn rewrite_source(source: &str, dialect: &str, schema_sql: Option<&str>, import_style: Option<&str>) -> String {
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false))]
+fn rewrite_source(
+    source: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+    import_style: Option<&str>,
+    untyped: bool,
+) -> String {
     let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    rewriter::rewrite_source(source, dialect, &schema, import_style)
+    rewriter::rewrite_source(source, dialect, &schema, import_style, untyped)
 }
 
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".

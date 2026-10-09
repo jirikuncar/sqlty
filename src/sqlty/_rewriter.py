@@ -49,6 +49,17 @@ class ImportStyle:
     wrapper_name: str
     """The prefix for ``[T](...)``, e.g. ``"Q"`` or ``"sqlty.SQL"``."""
 
+    @property
+    def untyped_name(self) -> str:
+        """How ``UNTYPED`` is spelled: ``"UNTYPED"`` or ``"sqlty.UNTYPED"``."""
+        module, dot, _ = self.wrapper_name.rpartition(".")
+        return f"{module}{dot}UNTYPED"
+
+    @property
+    def untyped_import(self) -> str | None:
+        """Import line ``UNTYPED`` needs, or ``None`` when the module is imported."""
+        return None if "." in self.wrapper_name else "from sqlty import UNTYPED"
+
     @classmethod
     def parse(cls, style: str) -> ImportStyle:
         """Parse an import-style string into an ImportStyle.
@@ -111,6 +122,8 @@ class SQLRewriter:
         import_style: Import style string (e.g. ``"from sqlty import SQL as Q"``).
             Controls the import line injected and the wrapper prefix.
             See :class:`ImportStyle` for supported forms.
+        untyped: Wrap row-returning queries whose row type can't be inferred as
+            ``SQL[UNTYPED](...)`` instead of leaving them as plain strings.
     """
 
     def __init__(
@@ -119,6 +132,7 @@ class SQLRewriter:
         schema_path: str | None = None,
         codec: TypeCodec | None = None,
         import_style: str | None = None,
+        untyped: bool = False,
     ) -> None:
         from pathlib import Path
 
@@ -131,6 +145,7 @@ class SQLRewriter:
             ImportStyle.parse(import_style) if import_style else ImportStyle.default()
         )
         self._wrapper_pattern = self._import_style.make_wrapper_pattern()
+        self._untyped = untyped
 
     def _infer_type(self, sql_content: str) -> str:
         """Infer the Python return type from a SQL query string.
@@ -143,17 +158,20 @@ class SQLRewriter:
         - ``--sql<newline>SELECT ...`` → triple-quoted; parser sees comment + query.
         - ``--sql SELECT ...``  → entire line is a SQL comment → empty query.
         """
-        query = sql_content
-        # Convert source-text \\n escape to real newline so the parser
-        # sees --sql as a comment and the query on the next line.
-        if query.startswith("--sql\\n"):
-            query = query.replace("\\n", "\n", 1)
-
         try:
-            result = self._analyzer.generate_return_type(query, codec=self._codec)
+            result = self._analyzer.generate_return_type(_query(sql_content), codec=self._codec)
             return result if result else "Any"
         except Exception:
             return "Any"
+
+    def _is_untyped(self, sql_content: str) -> bool:
+        """Whether ``SQL[UNTYPED]`` fits: rows are expected but their type is unknown.
+
+        Requires the ``--sql`` prefix to end its line; the space form is a SQL comment.
+        """
+        return sql_content.removeprefix("--sql").startswith(
+            ("\\n", "\n", "\r\n")
+        ) and self._analyzer.returns_rows(_query(sql_content))
 
     def rewrite(self, source: str) -> RewriteResult:
         """Transform --sql prefixed strings into SQL[T](...) calls.
@@ -188,6 +206,8 @@ class SQLRewriter:
         has_sql_import = _has_import(source, import_line)
         has_datetime_import = _has_import(source, "import datetime")
         has_uuid_import = _has_import(source, "import uuid")
+        untyped_import = self._import_style.untyped_import
+        needs_untyped_import = False
         needs_sql_import = False
         needs_datetime = False
         needs_uuid = False
@@ -216,7 +236,10 @@ class SQLRewriter:
             inferred = self._infer_type(content.strip())
             # Don't wrap when inference fails — SQL[Any] is never useful.
             if inferred == "Any":
-                continue
+                if not (self._untyped and self._is_untyped(content.strip())):
+                    continue
+                inferred = self._import_style.untyped_name
+                needs_untyped_import = True
 
             replacement = f"{wrapper_name}[{inferred}]({string_literal})"
             replacements.append((match.start("str"), match.end("str"), replacement))
@@ -240,6 +263,8 @@ class SQLRewriter:
             imports_to_add.append("import uuid")
         if needs_sql_import and not has_sql_import:
             imports_to_add.append(import_line)
+        if needs_untyped_import and untyped_import and not _has_import(source, untyped_import):
+            imports_to_add.append(untyped_import)
 
         if imports_to_add:
             result = "\n".join(imports_to_add) + "\n" + result
@@ -283,10 +308,15 @@ class SQLRewriter:
         result: list[str] = []
         import_line = self._import_style.import_line
         wrapper_name = self._import_style.wrapper_name
+        untyped_import = self._import_style.untyped_import
         body = source  # full source for reference checking
+        untyped_used = any("UNTYPED" in line and line.strip() != untyped_import for line in lines)
 
         for line in lines:
             stripped = line.strip()
+
+            if stripped == untyped_import and not untyped_used:
+                continue
 
             # Remove sqlty import if wrapper no longer appears
             if stripped == import_line and f"{wrapper_name}[" not in body:
@@ -333,6 +363,13 @@ _SQL_WRAPPER_PATTERN = re.compile(
     r'(?P<wrapper>SQL\[.*?\]\((?P<inner>""".*?"""|\'\'\'.*?\'\'\'|"[^"]*"|\'[^\']*\')\))',
     re.DOTALL,
 )
+
+
+def _query(sql_content: str) -> str:
+    """Turn a source-text ``--sql\\n`` escape into a real newline for the parser."""
+    if sql_content.startswith("--sql\\n"):
+        return sql_content.replace("\\n", "\n", 1)
+    return sql_content
 
 
 def _extract_string_content(string_literal: str) -> str | None:

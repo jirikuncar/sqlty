@@ -57,6 +57,7 @@ def rewrite_source(
     dialect: str = "postgres",
     schema_sql: str | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> str:
     """Rewrite Python source: "--sql ..." -> SQL[T]("--sql ...").
 
@@ -67,11 +68,12 @@ def rewrite_source(
         dialect: SQL dialect
         schema_sql: Optional CREATE TABLE statements
         import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+        untyped: Wrap row-returning queries of unknown row type as ``SQL[UNTYPED](...)``
 
     Returns:
         Rewritten source code
     """
-    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style)
+    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style, untyped=untyped)
     return rewriter.rewrite(source).source
 
 
@@ -125,6 +127,7 @@ def check_source(
     - SELECT * usage (select-star, select-star-no-schema)
     - Stale rewrites (stale-rewrite) — --sql strings not yet wrapped
     - Stale types (stale-type) — SQL[T] doesn't match current inference
+    - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
     - User-defined types (column-count-mismatch, column-type-mismatch,
       column-name-mismatch) — SQL[UserType] fields vs query columns
 
@@ -153,6 +156,7 @@ def check_source(
 
     istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
     wrapper_name = istyle.wrapper_name
+    untyped_name = istyle.untyped_name
 
     diagnostics: list[dict[str, str | int | None]] = []
 
@@ -216,6 +220,22 @@ def check_source(
         # User-defined types (TypedDict, NamedTuple, etc.) are handled by
         # core.py's wrapper using runtime type resolution.
         annotated_type = _extract_type_from_wrapper(line_stripped, wrapper_name)
+        if annotated_type == untyped_name and rule_config.is_enabled("untyped-query"):
+            current_type = rewriter._infer_type(sql_content)
+            untyped = f"{wrapper_name}[{untyped_name}]"
+            message = (
+                f"{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+                if current_type == "Any"
+                else f"{untyped} can now be {wrapper_name}[{current_type}]; strip and rewrite to update"
+            )
+            diagnostics.append(
+                {
+                    "rule": "untyped-query",
+                    "message": message,
+                    "severity": rule_config.severity("untyped-query").value,
+                    "line": i,
+                }
+            )
         if annotated_type and annotated_type.startswith("tuple["):
             if rule_config.is_enabled("stale-type"):
                 current_type = rewriter._infer_type(sql_content)
@@ -268,17 +288,23 @@ def _make_analyzer(dialect: str, schema_sql: str | None) -> SQLAnalyzer:
 
 
 def _make_rewriter(
-    dialect: str, schema_sql: str | None, *, import_style: str | None = None
+    dialect: str,
+    schema_sql: str | None,
+    *,
+    import_style: str | None = None,
+    untyped: bool = False,
 ) -> SQLRewriter:
     """Create an SQLRewriter, optionally with schema."""
     import tempfile
 
+    schema_path = None
     if schema_sql:
-        fd, tmp_path = tempfile.mkstemp(suffix=".sql")
+        fd, schema_path = tempfile.mkstemp(suffix=".sql")
         with open(fd, "w") as f:
             f.write(schema_sql)
-        return SQLRewriter(dialect=dialect, schema_path=tmp_path, import_style=import_style)
-    return SQLRewriter(dialect=dialect, import_style=import_style)
+    return SQLRewriter(
+        dialect=dialect, schema_path=schema_path, import_style=import_style, untyped=untyped
+    )
 
 
 def _has_inline_sql_comment(line: str) -> bool:
