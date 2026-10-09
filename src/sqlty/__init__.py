@@ -25,7 +25,8 @@ UNTYPED = sentinel("UNTYPED")
 """Row type of a query sqlty could not infer: ``SQL[UNTYPED]``.
 
 Unlike ``Any``, type checkers reject using an ``UNTYPED`` row as a concrete
-type. ``sqlty rewrite --untyped sentinel`` emits it; ``sqlty check`` flags it
+type. ``sqlty rewrite --untyped sentinel`` emits it, as do generated stubs with
+``untyped = "sentinel"`` (including their catch-all overload); ``sqlty check`` flags it
 (``untyped-query``) until casts or a schema make the row type known.
 """
 

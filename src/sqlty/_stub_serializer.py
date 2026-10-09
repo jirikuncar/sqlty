@@ -11,6 +11,11 @@ from typing import Literal
 
 from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
 
+OVERLAP_PRAGMAS = (
+    '# mypy: disable-error-code="overload-overlap"\n# pyright: reportOverlappingOverload=false\n'
+)
+"""Typed overloads deliberately overlap a ``SQL[UNTYPED]`` catch-all."""
+
 
 class IRToASTSerializer:
     """Serializes intermediate representation to AST."""
@@ -217,14 +222,13 @@ class IRToASTSerializer:
             func_node = self._serialize_function_overload(overload, registry.name)
             function_overloads.append(func_node)
 
-        # Only use template signature if it's non-trivial
-        if template_sig:
-            fallback = self._serialize_function_fallback(
-                registry.name, template_signature=template_sig
+        function_overloads.append(
+            self._serialize_function_fallback(
+                registry.name,
+                template_signature=template_sig,
+                return_type=registry.fallback_return_type,
             )
-        else:
-            fallback = self._serialize_function_fallback(registry.name)
-        function_overloads.append(fallback)
+        )
 
         return function_overloads
 
@@ -404,7 +408,10 @@ class IRToASTSerializer:
         )
 
     def _serialize_function_fallback(
-        self, function_name: str, template_signature: ast.arguments | None = None
+        self,
+        function_name: str,
+        template_signature: ast.arguments | None = None,
+        return_type: str | None = None,
     ) -> ast.FunctionDef:
         """Serialize the generic fallback overload for a decorated/configured function.
 
@@ -415,6 +422,8 @@ class IRToASTSerializer:
                                Any annotations for all parameters. If not provided, uses simple
                                (query: str) -> str. Both cases include @overload decorator since
                                this is for .pyi stub files.
+            return_type: Return annotation, e.g. ``SQL[UNTYPED]``; defaults to ``Any`` for
+                         configured signatures and ``str`` otherwise.
 
         Returns:
             AST FunctionDef node for the fallback with @overload decorator
@@ -445,7 +454,7 @@ class IRToASTSerializer:
                 args=args,
                 body=[ast.Expr(value=ast.Constant(value=...))],
                 decorator_list=decorators,
-                returns=ast.Name(id="Any", ctx=ast.Load()),
+                returns=ast.parse(return_type or "Any", mode="eval").body,
                 type_params=[],
             )
         else:
@@ -465,7 +474,7 @@ class IRToASTSerializer:
                 ),
                 body=[ast.Expr(value=ast.Constant(value=...))],
                 decorator_list=decorators,
-                returns=ast.Name(id="str", ctx=ast.Load()),
+                returns=ast.parse(return_type or "str", mode="eval").body,
                 type_params=[],  # No type params for simpler stub
             )
 
@@ -509,11 +518,7 @@ class IRToTextSerializer:
             return self._serialize_with_preservation(stub, original_source, original_stub)
 
         # Otherwise, generate from scratch
-        module = self.ast_serializer.serialize_to_module(stub)
-        code = ast.unparse(module)
-        lines = code.split("\n")
-        formatted_lines = self._add_blank_lines(lines)
-        return "\n".join(formatted_lines) + "\n"
+        return self._fallback_to_full_generation(stub)
 
     def _serialize_with_preservation(
         self, stub: StubFile, original_source: str, original_stub: StubFile
@@ -650,7 +655,12 @@ class IRToTextSerializer:
         code = ast.unparse(module)
         lines = code.split("\n")
         formatted_lines = self._add_blank_lines(lines)
-        return "\n".join(formatted_lines) + "\n"
+        pragmas = (
+            OVERLAP_PRAGMAS
+            if any(registry.fallback_return_type for registry in stub.registries.values())
+            else ""
+        )
+        return pragmas + "\n".join(formatted_lines) + "\n"
 
     def _generate_overload_insertions(
         self,

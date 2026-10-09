@@ -145,7 +145,8 @@ n = scalar(conn, "--sql\nSELECT max(id)::INTEGER FROM users", int | None)
 dialect = "postgres"           # SQL dialect (postgres, mysql, sqlite)
 schema = "schema.sql"          # Path to schema file
 format-command = "ruff format --stdin-filename {filename} -"
-untyped = "skip"               # "sentinel": wrap row-returning queries of unknown type as SQL[UNTYPED]
+untyped = "skip"               # "sentinel": SQL[UNTYPED] for row-returning queries of unknown type
+                               # and for the catch-all overload of generated .pyi stubs
 
 [tool.sqlty.rules]             # Per-rule severity
 column-count-mismatch = "error"

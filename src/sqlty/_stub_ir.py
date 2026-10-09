@@ -15,6 +15,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_UNTYPED = re.compile(r"\bUNTYPED\b")
+FALLBACK = "<fallback>"
+"""Query shown for the catch-all overload in overload diffs."""
+
 
 @dataclass
 class SourceSpan:
@@ -92,6 +96,8 @@ class RegistryDecorator:
         ast_node: Original AST node if available
         is_function: Whether this represents a decorated function vs a class
         custom_imports: List of custom import statements from function config
+        fallback_return_type: Return type of the catch-all ``(query: str)`` overload,
+            e.g. ``SQL[UNTYPED]``; None keeps the legacy ``str``/``Any`` fallback
     """
 
     name: str
@@ -101,6 +107,7 @@ class RegistryDecorator:
     ast_node: ast.FunctionDef | None = None
     is_function: bool = False
     custom_imports: list[str] = field(default_factory=list)
+    fallback_return_type: str | None = None
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -131,6 +138,13 @@ class RegistryDecorator:
     def has_overload(self, query_literal: str) -> bool:
         """Check if an overload exists for a query literal."""
         return any(o.query_literal == query_literal for o in self.overloads)
+
+    def signatures(self) -> set[tuple[str, str]]:
+        """(query, return type) pairs, with ``FALLBACK`` for an explicit catch-all."""
+        pairs = {(o.query_literal, o.return_type) for o in self.overloads}
+        if self.fallback_return_type:
+            pairs.add((FALLBACK, self.fallback_return_type))
+        return pairs
 
     def get_sorted_overloads(self) -> list[OverloadSignature]:
         """Get overloads sorted by query literal for deterministic output."""
@@ -205,6 +219,8 @@ class StubFile:
                 - incremental: Add new overloads, keep existing ones (never removes)
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
+        if registry.name in self.registries:
+            self.registries[registry.name].fallback_return_type = registry.fallback_return_type
         if mode == "incremental":
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
@@ -250,7 +266,11 @@ class StubFile:
         # Check if Any or SQL is used in any return type or function signature
         uses_any = False
         uses_sql = False
+        uses_untyped = False
         for registry in self.registries.values():
+            if fallback := registry.fallback_return_type:
+                uses_sql = uses_sql or bool(re.search(r"\bSQL\[", fallback))
+                uses_untyped = uses_untyped or bool(_UNTYPED.search(fallback))
             for overload in registry.overloads:
                 return_type = overload.return_type
                 # Check for patterns that require imports
@@ -263,6 +283,8 @@ class StubFile:
                 # Check if SQL is used in return type
                 if re.search(r"\bSQL\[", return_type):
                     uses_sql = True
+                if _UNTYPED.search(return_type):
+                    uses_untyped = True
                 # Check if Any is used in function signature
                 if overload.function_signature:
                     sig_str = ast.unparse(overload.function_signature)
@@ -295,6 +317,12 @@ class StubFile:
                 parsed_import = self._parse_import_string(import_str)
                 if parsed_import is not None:
                     required.add(parsed_import)
+
+        if uses_untyped:
+            sqlty_imports = {imp for imp in required if imp.from_import and imp.module == "sqlty"}
+            names = sorted({name for imp in sqlty_imports for name in imp.names} | {"UNTYPED"})
+            required -= sqlty_imports
+            required.add(ImportStatement(module="sqlty", names=names, from_import=True))
 
         return required
 
@@ -345,11 +373,7 @@ class StubFile:
             self_registry = self.registries[name]
             other_registry = other.registries[name]
 
-            # Compare overload signatures (query literals and return types)
-            self_overloads = {(o.query_literal, o.return_type) for o in self_registry.overloads}
-            other_overloads = {(o.query_literal, o.return_type) for o in other_registry.overloads}
-
-            if self_overloads != other_overloads:
+            if self_registry.signatures() != other_registry.signatures():
                 return False
 
         return True
@@ -384,26 +408,15 @@ class StubFile:
             match self_registry, other_registry:
                 case (None, None):
                     continue  # Should not happen
-                case (None, RegistryDecorator(overloads=other_overloads)):
+                case (None, RegistryDecorator() as new):
                     # Registry exists in other but not in self (new registry)
-                    extra = [(o.query_literal, o.return_type) for o in other_overloads]
-                case (RegistryDecorator(overloads=self_overloads), None):
+                    extra = sorted(new.signatures())
+                case (RegistryDecorator() as old, None):
                     # Registry exists in self but not in other (removed registry)
-                    missing = [(o.query_literal, o.return_type) for o in self_overloads]
-                case (
-                    RegistryDecorator(overloads=self_overloads),
-                    RegistryDecorator(overloads=other_overloads),
-                ):
-                    # Both registries exist, compare overloads
-                    unique_self_overloads: set[tuple[str, str]] = {
-                        (o.query_literal, o.return_type) for o in self_overloads
-                    }
-                    unique_other_overloads: set[tuple[str, str]] = {
-                        (o.query_literal, o.return_type) for o in other_overloads
-                    }
-
-                    missing = sorted(unique_self_overloads - unique_other_overloads)
-                    extra = sorted(unique_other_overloads - unique_self_overloads)
+                    missing = sorted(old.signatures())
+                case (RegistryDecorator() as old, RegistryDecorator() as new):
+                    missing = sorted(old.signatures() - new.signatures())
+                    extra = sorted(new.signatures() - old.signatures())
 
             if missing or extra:
                 diff_result[name] = {"missing": missing, "extra": extra}

@@ -7,6 +7,7 @@ This module provides parsers to convert:
 
 import ast
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +153,17 @@ class PyiToIRParser:
                 stub.add_registry(registry)
 
         for node in tree.body:
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.returns
+                and (owner := stub.get_registry(node.name))
+                and self._is_overload(node)
+                and not self._extract_literal_from_annotation(node)
+            ):
+                returns = ast.unparse(node.returns)
+                owner.fallback_return_type = None if returns in ("str", "Any") else returns
+
+        for node in tree.body:
             if isinstance(node, ast.Assign):
                 self._parse_export_alias(node, stub)
 
@@ -166,11 +178,7 @@ class PyiToIRParser:
         Returns:
             OverloadSignature or None if not a valid overload
         """
-        has_overload = any(
-            isinstance(dec, ast.Name) and dec.id == "overload" for dec in node.decorator_list
-        )
-
-        if not has_overload:
+        if not self._is_overload(node):
             return None
 
         query_literal = self._extract_literal_from_annotation(node)
@@ -191,6 +199,12 @@ class PyiToIRParser:
             return_type=return_type,
             source_span=source_span,
             ast_node=node,
+        )
+
+    @staticmethod
+    def _is_overload(node: ast.FunctionDef) -> bool:
+        return any(
+            isinstance(dec, ast.Name) and dec.id == "overload" for dec in node.decorator_list
         )
 
     def _parse_function_registry(self, node: ast.FunctionDef) -> RegistryDecorator | None:
@@ -299,6 +313,7 @@ class CallInfoToIRParser:
         function_name: str = "sql",
         registry_detector: Any | None = None,
         function_configs: list[Any] | None = None,
+        untyped: bool = False,
     ) -> None:
         """Initialize the parser.
 
@@ -306,8 +321,11 @@ class CallInfoToIRParser:
             function_name: Name of the SQL function (e.g., "sql")
             registry_detector: Optional RegistryDetector for extracting function signatures
             function_configs: Optional list of function configurations
+            untyped: Give each registry a ``SQL[UNTYPED]`` catch-all (templated like its
+                overloads) instead of the legacy ``str``/``Any`` one
         """
         self.function_name = function_name
+        self.untyped = untyped
         self.registry_detector = registry_detector
         self.function_configs = function_configs or []
         # Build mapping of import_path -> config for quick lookup
@@ -364,6 +382,7 @@ class CallInfoToIRParser:
                 name=cls_name,
                 export_name=export_name,
                 custom_imports=custom_imports,
+                fallback_return_type=self.untyped_fallback(cls_name, cls_calls),
             )
 
             for call in cls_calls:
@@ -377,6 +396,23 @@ class CallInfoToIRParser:
             stub.add_import(import_stmt)
 
         return stub
+
+    def untyped_fallback(self, name: str, calls: Sequence[CallInfo] = ()) -> str | None:
+        """Catch-all return type in untyped mode: the registry's template applied to UNTYPED.
+
+        Example:
+            >>> CallInfoToIRParser(untyped=True).untyped_fallback("sql")
+            'SQL[UNTYPED]'
+        """
+        if not self.untyped:
+            return None
+        templates = [call.get("return_type_template") for call in calls] + [
+            config.get("return_type_template")
+            for path, config in self._config_by_import_path.items()
+            if path.rpartition(".")[2] == name
+        ]
+        template = next((t for t in templates if t), "SQL[{sqlty}]")
+        return template.replace("{sqlty}", "UNTYPED")
 
     def _call_info_to_overload(self, call: CallInfo) -> OverloadSignature:
         """Convert a CallInfo to an OverloadSignature.
