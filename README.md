@@ -89,7 +89,7 @@ error[column-count-mismatch]: User has 3 fields but query returns 2 columns
 warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
 ```
 
-`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors:
+`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors.:
 
 ```python
 from typing import NotRequired, ReadOnly, TypedDict
@@ -104,6 +104,24 @@ query = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, ratio::FLOAT FROM
 ```
 
 Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.
+
+### TypedDict inheritance
+
+Subclasses must respect a base's openness (PEP 728). A closed base admits no new keys, `extra_items`, or `closed=False`. A base with mutable `extra_items` must be kept exactly: no `closed=True`, `extra_items=Never`, `ReadOnly` or other type, and new keys must be `NotRequired` and of that type. A base with `ReadOnly` `extra_items` may be narrowed or closed, and new keys must be assignable to it. Keys a sibling base brings in count as new. Violations are `typeddict-inheritance` errors on the subclass's `class` line; a rejected override keeps the base's openness. Only same-file bases spelled as bare names (not generic or imported) are checked, and types are compared only when the answer is certain (plain classes and their unions):
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, closed=True):
+    id: int
+
+class User(Base):
+    name: str
+
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
+```
 
 ## psycopg3 Integration
 
@@ -232,6 +250,7 @@ a stub check reports them as stale.
 | `column-type-mismatch` | error | Annotation field type differs from inferred type |
 | `column-name-mismatch` | warn | Annotation field name differs from column name |
 | `typeddict-key-mismatch` | error | Query columns don't fit a closed / `extra_items` TypedDict's keys |
+| `typeddict-inheritance` | error | TypedDict subclass changes openness or adds keys a closed / `extra_items` base forbids (PEP 728) |
 | `select-star` | warn | `SELECT *` used (fixable: expand to explicit columns) |
 | `select-star-no-schema` | error | `SELECT *` used but no schema available |
 | `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |

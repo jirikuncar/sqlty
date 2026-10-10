@@ -153,6 +153,7 @@ column-count-mismatch = "error"
 column-type-mismatch = "error"
 column-name-mismatch = "warn"
 typeddict-key-mismatch = "error"
+typeddict-inheritance = "error"
 select-star = "warn"
 select-star-no-schema = "error"
 stale-rewrite = "warn"
@@ -194,6 +195,7 @@ CLI flags override config file values.
 | `column-type-mismatch` | error | no | Annotation field type differs from inferred type |
 | `column-name-mismatch` | warn | no | Annotation field name differs from column name |
 | `typeddict-key-mismatch` | error | no | Query columns don't fit a closed / `extra_items` TypedDict's keys |
+| `typeddict-inheritance` | error | no | TypedDict subclass changes openness or adds keys a closed / `extra_items` base forbids (PEP 728) |
 | `select-star` | warn | yes | `SELECT *` — expand to explicit columns |
 | `select-star-no-schema` | error | no | `SELECT *` with no schema available |
 | `stale-rewrite` | warn | yes | `--sql` strings not wrapped in `SQL[T](...)` |

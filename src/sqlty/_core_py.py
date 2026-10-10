@@ -129,7 +129,10 @@ def check_source(
     - Stale types (stale-type) — SQL[T] doesn't match current inference
     - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
     - User-defined types (column-count-mismatch, column-type-mismatch,
-      column-name-mismatch) — SQL[UserType] fields vs query columns
+      column-name-mismatch, typeddict-key-mismatch) — SQL[UserType] fields
+      vs query columns
+    - TypedDict inheritance (typeddict-inheritance) — PEP 728 violations of
+      a row type and its same-file bases, on their class lines
 
     When the annotated type is a user-defined type (TypedDict, NamedTuple,
     dataclass, Pydantic BaseModel) found in the same source file, the checker
