@@ -31,6 +31,8 @@ class TypeInfo:
 
     ``required``, ``closed`` and ``extra_items`` describe TypedDict keys
     (PEP 655, PEP 728); other kinds have every field required and are open.
+    ``errors`` lists PEP 728 inheritance violations of a TypedDict subclass;
+    ``bases`` names its TypedDict bases defined in the same source.
     """
 
     __slots__ = (
@@ -42,6 +44,11 @@ class TypeInfo:
         "closed",
         "extra_items",
         "extra_items_hint",
+        "extra_items_readonly",
+        "extra_items_owner",
+        "lineno",
+        "bases",
+        "errors",
     )
 
     def __init__(
@@ -64,6 +71,11 @@ class TypeInfo:
         self.closed = closed
         self.extra_items = extra_items
         self.extra_items_hint = extra_items_hint
+        self.extra_items_readonly = False
+        self.extra_items_owner: str | None = None  # class whose extra_items argument applies
+        self.lineno = 0
+        self.bases: list[str] = []
+        self.errors: list[str] = []
 
     @property
     def keyed(self) -> bool:
@@ -152,8 +164,11 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         )
 
         info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
+        info.lineno = node.lineno
+        new_keys = [k for k, _ in own_fields if k not in inherited]
         if kind == "TypedDict":
-            info.closed, info.extra_items = _closed_from_ast(keywords, aliases, parents)
+            info.bases = [p.name for p in parents]
+            _apply_openness(info, keywords, aliases, parents, new_keys)
             typeddicts[node.name] = info
         if not fields:
             continue
@@ -164,12 +179,10 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
             info.resolved_hints = _resolve_type_hints(cls, namespace)
             if kind == "TypedDict" and info.resolved_hints is not None:
                 info.required = frozenset(getattr(cls, "__required_keys__", info.required))
-                info.closed, extra = _closed_from_runtime(cls)
-                if extra is None:
-                    info.extra_items = None
-                else:
-                    info.extra_items_hint = _unwrap_optional(extra)
-                    info.extra_items = info.extra_items or getattr(extra, "__name__", str(extra))
+                _check_extra_items_types(info, cls, namespace, parents, new_keys)
+                owner = namespace.get(info.extra_items_owner or "")
+                if (extra := getattr(owner, "__extra_items__", None)) is not None:
+                    info.extra_items_hint = _unwrap_optional(_unwrap_qualifiers(extra))
 
         result[node.name] = info
 
@@ -305,23 +318,80 @@ def _unwrap_qualifiers(tp: typing.Any) -> typing.Any:
     return tp
 
 
-def _closed_from_runtime(cls: type) -> tuple[bool, typing.Any]:
-    """Return ``(closed, extra_items)`` per PEP 728, following TypedDict bases.
+def _check_extra_items_types(
+    info: TypeInfo,
+    cls: type,
+    namespace: dict[str, object],
+    parents: list[TypeInfo],
+    new_keys: list[str],
+) -> None:
+    """Check items and ``extra_items`` a subclass adds against a base's ``extra_items``.
 
-    ``__closed__`` / ``__extra_items__`` reflect only the class's own
-    arguments, so unset ones are inherited from the first keyed base.
-    ``extra_items=Never`` is ``closed=True``.
+    Per PEP 728, they must be assignable to a read-only base ``extra_items``
+    and consistent with a mutable one. A rejected ``extra_items`` override
+    keeps the base's.
     """
-    extra = getattr(cls, "__extra_items__", typing.NoExtraItems)
-    if extra is not typing.NoExtraItems:
-        extra = _unwrap_qualifiers(extra)
-        return (True, None) if extra in (typing.Never, typing.NoReturn) else (False, extra)
-    if (closed := getattr(cls, "__closed__", None)) is not None:
-        return closed, None
-    bases = (b for b in getattr(cls, "__orig_bases__", ()) if typing.is_typeddict(b))
-    return next(
-        (r for b in bases if (r := _closed_from_runtime(b)) != (False, None)), (False, None)
-    )
+    try:
+        hints = typing.get_type_hints(cls, globalns=namespace)
+    except Exception:
+        return
+    own = cls.__dict__.get("__extra_items__", typing.NoExtraItems)
+    own = None if own is typing.NoExtraItems else _unwrap_qualifiers(own)
+    for p in parents:
+        base_cls = namespace.get(p.extra_items_owner or "")
+        if (base := getattr(base_cls, "__extra_items__", None)) is None:
+            continue
+        base = _unwrap_qualifiers(base)
+        fits = _assignable if p.extra_items_readonly else _consistent
+        what = f"{'read-only ' if p.extra_items_readonly else ''}extra_items {_type_repr(base)}"
+        info.errors += [
+            f"{info.name}.{key} is {_type_repr(hints[key])} but base {p.name} has {what}"
+            for key in new_keys
+            if key in hints and not fits(hints[key], base)
+        ]
+        if own is not None and own not in _NEVER and not fits(own, base):
+            info.errors.append(
+                f"{info.name} extra_items {_type_repr(own)} doesn't fit base {p.name} {what}"
+            )
+            info.closed, info.extra_items = p.closed, p.extra_items
+            info.extra_items_readonly, info.extra_items_owner = (
+                p.extra_items_readonly,
+                p.extra_items_owner,
+            )
+
+
+_NEVER = (typing.Never, typing.NoReturn)
+
+
+def _union_members(tp: typing.Any) -> set[typing.Any]:
+    if typing.get_origin(tp) in (typing.Union, types.UnionType):
+        return set(typing.get_args(tp))
+    return {tp}
+
+
+def _consistent(src: typing.Any, dst: typing.Any) -> bool:
+    return typing.Any in (src, dst) or _union_members(src) == _union_members(dst)
+
+
+def _assignable(src: typing.Any, dst: typing.Any) -> bool:
+    """Whether every member of ``src`` is a member or subclass of one in ``dst``."""
+
+    def fits(s: typing.Any, d: typing.Any) -> bool:
+        if s == d or d in (object, typing.Any) or s is typing.Any or s in _NEVER:
+            return True
+        try:
+            return isinstance(s, type) and isinstance(d, type) and issubclass(s, d)
+        except TypeError:
+            return False
+
+    targets = _union_members(dst)
+    return all(any(fits(s, d) for d in targets) for s in _union_members(src))
+
+
+def _type_repr(tp: typing.Any) -> str:
+    if isinstance(tp, type) and not typing.get_args(tp):
+        return tp.__name__
+    return repr(tp).replace("typing.", "")
 
 
 def _types_compatible(field_type: type, expected_type: type) -> bool:
@@ -425,23 +495,71 @@ def _lineage(node: ast.ClassDef, classes: dict[str, ast.ClassDef]) -> dict[str, 
     return lineage | {node.name: node}
 
 
-def _closed_from_ast(
-    keywords: dict[str, ast.expr], aliases: dict[str, str], parents: list[TypeInfo]
-) -> tuple[bool, str | None]:
-    """Return ``(closed, extra_items)`` per PEP 728 from class keywords.
+def _apply_openness(
+    info: TypeInfo,
+    keywords: dict[str, ast.expr],
+    aliases: dict[str, str],
+    parents: list[TypeInfo],
+    new_keys: list[str],
+) -> None:
+    """Set ``closed`` / ``extra_items`` per PEP 728, recording violations in ``errors``.
 
     Without ``closed`` or ``extra_items`` the first keyed base's are inherited.
-    ``extra_items=Never`` (or ``NoReturn``) is ``closed=True``.
+    ``extra_items=Never`` (or ``NoReturn``) is ``closed=True``. A subclass of a
+    closed base must stay closed and add no keys; ``closed=False`` cannot
+    reopen a closed or ``extra_items`` base; a mutable base ``extra_items``
+    must be kept and only admits new ``NotRequired`` keys. An invalid
+    override keeps the base's openness.
     """
-    if (extra := keywords.get("extra_items")) is not None:
-        extra = _unwrap_qualifiers_ast(extra, aliases)[0]
-        if (name := _get_name(extra)) and aliases.get(name, name) in ("Never", "NoReturn"):
-            return True, None
-        return False, _normalize_type_str(ast.unparse(extra))
-    closed = keywords.get("closed")
-    if isinstance(closed, ast.Constant) and isinstance(closed.value, bool):
-        return closed.value, None
-    return next(((p.closed, p.extra_items) for p in parents if p.keyed), (False, None))
+    own: tuple[bool, str | None, bool] | None = None  # (closed, extra_items, read-only)
+    closed_kw = keywords.get("closed")
+    reopen = isinstance(closed_kw, ast.Constant) and closed_kw.value is False
+    if (extra_kw := keywords.get("extra_items")) is not None:
+        readonly = isinstance(extra_kw, ast.Subscript) and _is_name(
+            extra_kw.value, "ReadOnly", aliases
+        )
+        extra = _unwrap_qualifiers_ast(extra_kw, aliases)[0]
+        if _is_name(extra, "Never", aliases) or _is_name(extra, "NoReturn", aliases):
+            own = (True, None, False)
+        else:
+            own = (False, _normalize_type_str(ast.unparse(extra)), readonly)
+    elif isinstance(closed_kw, ast.Constant) and isinstance(closed_kw.value, bool):
+        own = (closed_kw.value, None, False)
+
+    keyed = [p for p in parents if p.keyed]
+    for p in keyed:
+        mutable_extra = p.extra_items is not None and not p.extra_items_readonly
+        if reopen:
+            what = "is closed" if p.closed else "has extra_items"
+            info.errors.append(f"{info.name} cannot set closed=False: base {p.name} {what}")
+        elif p.closed and own is not None and not own[0]:
+            info.errors.append(f"{info.name} must stay closed: base {p.name} is closed")
+        elif mutable_extra and own is not None and own[0]:
+            info.errors.append(f"{info.name} must keep base {p.name} extra_items {p.extra_items}")
+    header_invalid = bool(info.errors)
+    for p in keyed:
+        for key in new_keys:
+            if p.closed:
+                info.errors.append(f"{info.name} cannot add key '{key}' to closed base {p.name}")
+            elif not p.extra_items_readonly and key in info.required:
+                info.errors.append(
+                    f"{info.name}.{key} must be NotRequired: "
+                    f"base {p.name} has extra_items {p.extra_items}"
+                )
+
+    if own is None or header_invalid:
+        if keyed:
+            base = keyed[0]
+            info.closed, info.extra_items = base.closed, base.extra_items
+            info.extra_items_readonly = base.extra_items_readonly
+            info.extra_items_owner = base.extra_items_owner
+        return
+    info.closed, info.extra_items, info.extra_items_readonly = own
+    info.extra_items_owner = info.name if own[1] is not None else None
+
+
+def _is_name(node: ast.expr, name: str, aliases: dict[str, str]) -> bool:
+    return (n := _get_name(node)) is not None and aliases.get(n, n) == name
 
 
 def _get_name(node: ast.expr) -> str | None:

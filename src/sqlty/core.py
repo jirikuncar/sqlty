@@ -234,6 +234,8 @@ def _enhance_with_user_type_checks(
     For each SQL[UserType](...) line where UserType is found in source,
     runs the column-count, column-type, column-name and typeddict-key
     mismatch checks using runtime-resolved type hints when available.
+    TypedDict row types and their same-source bases also get
+    ``typeddict-inheritance`` diagnostics on their class line (PEP 728).
     """
     import re
 
@@ -257,6 +259,19 @@ def _enhance_with_user_type_checks(
         return diagnostics
 
     rule_config = RuleConfig(overrides=rules)
+
+    if rule_config.is_enabled("typeddict-inheritance"):
+        severity = rule_config.severity("typeddict-inheritance").value
+        for info in _typeddict_lineage([name for name, _ in user_type_lines.values()], type_defs):
+            diagnostics += [
+                {
+                    "rule": "typeddict-inheritance",
+                    "message": message,
+                    "severity": severity,
+                    "line": info.lineno,
+                }
+                for message in info.errors
+            ]
 
     # Create analyzer with schema if available
     import os
@@ -316,6 +331,22 @@ def _enhance_with_user_type_checks(
             schema_path.unlink(missing_ok=True)
 
     return diagnostics
+
+
+def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list[TypeInfo]:
+    """``names`` and their same-source TypedDict bases, bases first, each once."""
+    seen: dict[str, TypeInfo] = {}
+
+    def visit(name: str) -> None:
+        if name in seen or (info := type_defs.get(name)) is None:
+            return
+        for base in info.bases:
+            visit(base)
+        seen[name] = info
+
+    for name in names:
+        visit(name)
+    return list(seen.values())
 
 
 def _structural_diagnostics(

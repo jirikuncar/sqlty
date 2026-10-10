@@ -525,7 +525,10 @@ class Reopened(Extra, closed=False):
             assert extra_child.extra_items == "int" and not extra_child.closed
             assert not check_type_compatibility(extra_child, "ratio", "float")
 
-    def test_explicit_closed_false_overrides_base(self):
+    def test_closed_false_cannot_reopen_base(self):
         for runtime in (True, False):
             reopened = self._extract(runtime)["Reopened"]
-            assert not reopened.keyed
+            assert reopened.extra_items == "int" and not reopened.closed
+            assert reopened.errors == [
+                "Reopened cannot set closed=False: base Extra has extra_items"
+            ]

@@ -72,6 +72,7 @@ impl RuleConfig {
             "column-type-mismatch" => "error",
             "column-name-mismatch" => "warn",
             "typeddict-key-mismatch" => "error",
+            "typeddict-inheritance" => "error",
             "inline-sql-comment" => "warn",
             "untyped-query" => "warn",
             _ => "warn",

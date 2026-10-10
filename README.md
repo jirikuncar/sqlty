@@ -89,7 +89,7 @@ error[column-count-mismatch]: User has 3 fields but query returns 2 columns
 warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
 ```
 
-`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors:
+`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors. Subclasses that add keys to a closed base, pass `closed=False` to reopen a closed or `extra_items` base, or add keys that don't fit a base's `extra_items` are `typeddict-inheritance` errors:
 
 ```python
 from typing import NotRequired, ReadOnly, TypedDict
@@ -222,6 +222,7 @@ a call missing from a stale stub is a type error rather than silently untyped.
 | `column-type-mismatch` | error | Annotation field type differs from inferred type |
 | `column-name-mismatch` | warn | Annotation field name differs from column name |
 | `typeddict-key-mismatch` | error | Query columns don't fit a closed / `extra_items` TypedDict's keys |
+| `typeddict-inheritance` | error | TypedDict subclass reopens or adds keys a closed / `extra_items` base forbids |
 | `select-star` | warn | `SELECT *` used (fixable: expand to explicit columns) |
 | `select-star-no-schema` | error | `SELECT *` used but no schema available |
 | `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |
