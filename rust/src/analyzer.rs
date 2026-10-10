@@ -11,8 +11,8 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use sqlparser::ast::{
     ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
-    ObjectName, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
-    TableFactor, TableObject, TableWithJoins, Value,
+    ObjectName, OutputClause, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr,
+    Statement, TableFactor, TableObject, TableWithJoins, Value,
 };
 use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -292,6 +292,10 @@ fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
         Statement::Insert(insert) => &insert.returning,
         Statement::Update(update) => &update.returning,
         Statement::Delete(delete) => &delete.returning,
+        Statement::Merge(merge) => match &merge.output {
+            Some(OutputClause::Returning { select_items, .. }) => return Some(select_items),
+            _ => return None,
+        },
         _ => return None,
     };
     items.as_deref().filter(|items| !items.is_empty())
@@ -305,6 +309,7 @@ fn dml_scope(stmt: &Statement) -> Scope {
             _ => Vec::new(),
         },
         Statement::Update(update) => table_scope(&update.table.relation),
+        Statement::Merge(merge) => table_scope(&merge.table),
         Statement::Delete(delete) => match &delete.from {
             FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
                 .first()
