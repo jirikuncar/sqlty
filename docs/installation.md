@@ -47,7 +47,7 @@ For contributing or running tests:
 uv sync --all-groups
 ```
 
-Includes: pytest, mypy, ruff.
+Includes the dev tooling (pytest, mypy, ty, pyright, ruff, pre-commit, maturin) and the `cli`, `magic` and `psycopg` groups.
 
 ## Next Steps
 
