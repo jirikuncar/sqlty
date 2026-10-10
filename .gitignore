@@ -26,3 +26,6 @@ rust/target/
 *.dylib
 src/sqlty/_core.cpython-*.so
 src/sqlty/_core.*.pyd
+
+# Docs build output
+site/

@@ -187,4 +187,4 @@ pip uninstall sqlty
 
 ## Examples
 
-See [examples/magic_codec/](../examples/magic_codec/) for complete examples.
+See [examples/magic_codec/](https://github.com/jirikuncar/sqlty/tree/main/examples/magic_codec) for complete examples.
