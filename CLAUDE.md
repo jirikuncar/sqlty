@@ -26,7 +26,7 @@ uv run pre-commit run --all-files  # all hooks (run before every commit)
   guaranteeing `strip(rewrite(x)) == x`.
 - **Every new feature gets an mdtest** in `tests/mdtest/`. Use `make update-mdtest`
   to fill expected values.
-- **README.md is tested** — code blocks with assertion comments are executed
-  via `tests/test_readme.py`.
+- **README.md and docs/ are tested** — code blocks with assertion comments are executed
+  via `tests/test_docs.py`.
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
 - Docstrings and `--help` text should explain usage for both humans and AI agents.

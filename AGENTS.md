@@ -137,7 +137,7 @@ SELECT id::INTEGER FROM users"""
 ### Keeping tests updated
 
 - Run `make update-mdtest` after any change to rewriter, type inference, or lint logic.
-- README.md is also tested via `tests/test_readme.py` — keep assertion comments there current.
+- README.md and docs/ are also tested via `tests/test_docs.py` — keep assertion comments there current.
 - Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
 
 ## Documentation philosophy
@@ -172,7 +172,7 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md code blocks with assertion comments (`# rewritten:`, `# decoded:`, etc.)
+- README.md and docs/ code blocks with assertion comments (`# rewritten:`, `# decoded:`, etc.)
   are tested automatically. Keep them accurate.
 - Focus on **motivated examples** — show the problem first, then the solution.
 - Always show complete working code, not snippets.

@@ -125,3 +125,33 @@ def test_non_adjacent_assertions_stay_separate(tmp_path: Path) -> None:
     )
     (case,) = parse_mdtest_file(path)
     assert [(a.line, a.span) for a in case.assertions] == [(5, 1), (7, 1)]
+
+
+def test_assertion_checks_its_own_python_block(tmp_path: Path) -> None:
+    # The assertion lives in the first block; a later block in the same
+    # section must not be used as its source.
+    path = tmp_path / "sample.md"
+    path.write_text(
+        "## Before and after\n\n```python\n"
+        'q = "--sql\\nSELECT 1::INTEGER"\n'
+        '# rewritten: q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+        "```\n\n```python\n"
+        'other = "--sql\\nSELECT name::TEXT FROM users"\n'
+        "```\n"
+    )
+    (case,) = parse_mdtest_file(path)
+    assert [a.block for a in case.assertions] == [0]
+    case.run()
+
+
+def test_decoded_drops_coding_cookie(tmp_path: Path) -> None:
+    path = tmp_path / "sample.md"
+    path.write_text(
+        "## Codec\n\n```python\n"
+        "# coding: sqlty\n\n"
+        'q = "--sql\\nSELECT 1::INTEGER"\n'
+        '# decoded: q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+        "```\n"
+    )
+    (case,) = parse_mdtest_file(path)
+    case.run()

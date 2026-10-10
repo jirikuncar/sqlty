@@ -61,6 +61,7 @@ class Assertion:
     expected: str  # The expected value after the prefix
     line: int  # Line number in the .md file (1-indexed, for update mode)
     span: int = 1  # Number of consecutive comment lines holding the value
+    block: int = -1  # Index of the python block holding the assertion (-1: last)
 
 
 @dataclass
@@ -76,6 +77,8 @@ class MDTestCase:
     assertions: list[Assertion] = field(default_factory=list)
     update: bool = False
     updater: MDFileUpdater | None = None
+    # Python block of the assertion being computed; set by run().
+    _block: int = field(default=-1, init=False, repr=False)
 
     def _get_sqlty_config(self) -> dict:
         """Get the sqlty config, supporting both [sqlty] and [tool.sqlty] formats.
@@ -91,6 +94,7 @@ class MDTestCase:
     def run(self) -> None:
         """Execute all assertions in this test case."""
         for assertion in self.assertions:
+            self._block = assertion.block
             actual = self._compute(assertion)
             if actual == assertion.expected:
                 continue
@@ -294,8 +298,14 @@ class MDTestCase:
         return result.strip()
 
     def _extract_source_lines(self) -> str:
-        """Extract non-assertion source lines from the last python block."""
-        source = self.python_blocks[-1]
+        """Extract non-assertion source lines from the assertion's own python block.
+
+        Each assertion records the index of the python block it appears in,
+        so a section may hold several python blocks (e.g. a "before" block
+        with assertions followed by unrelated code) and every assertion is
+        checked against the block it is written in.
+        """
+        source = self.python_blocks[self._block]
         source_lines = []
         for line in source.splitlines():
             stripped = line.strip()
@@ -342,13 +352,20 @@ class MDTestCase:
 
         For `# decoded:`, we pass the non-assertion source lines through
         the decode() function and return the transformed code (without imports).
+        A leading ``# coding:`` cookie line is dropped from the output too, so
+        docs can show ``# coding: sqlty`` above the query and assert only the
+        transformed code.
         """
         from sqlty._decode import decode
 
         source = self._extract_source_lines()
         result, _ = decode(source.encode("utf-8"))
         # Strip import lines for clean comparison
-        return _strip_import_lines(result).strip()
+        result = _strip_import_lines(result).strip()
+        first, _, rest = result.partition("\n")
+        if re.match(r"^#.*coding[:=]", first):
+            result = rest.strip()
+        return result
 
     def _get_import_line(self) -> str:
         """Get the import line from the test's sqlty config."""
@@ -550,7 +567,10 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                     else:
                         sql_blocks.append(block_content)
                 elif code_block_lang in ("python", "py"):
-                    # Extract assertions from python block
+                    # Extract assertions from python block. A file-labelled block
+                    # is not a python_blocks entry; its assertions fall back to
+                    # the last python block.
+                    block_index = -1 if pending_file_label else len(python_blocks)
                     raw_assertions: list[Assertion] = []
                     for py_line_idx, py_line in enumerate(code_block_lines):
                         match = ASSERTION_RE.match(py_line.strip())
@@ -565,6 +585,7 @@ def parse_mdtest_file(md_path: Path, *, update: bool = False) -> list[MDTestCase
                                     kind=kind,
                                     expected=expected,
                                     line=assertion_md_line,
+                                    block=block_index,
                                 )
                             )
                     # Merge consecutive same-kind assertions into multi-line expected values.
@@ -688,6 +709,7 @@ def _merge_consecutive_assertions(assertions: list[Assertion]) -> list[Assertion
                 expected=prev.expected + "\n" + assertion.expected,
                 line=prev.line,
                 span=prev.span + 1,
+                block=prev.block,
             )
         else:
             merged.append(assertion)

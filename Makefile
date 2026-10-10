@@ -25,7 +25,7 @@ help:
 	@echo "Testing:"
 	@echo "  test              - Run all tests (unit + mdtest + e2e)"
 	@echo "  test-unit         - Run unit tests only (no e2e, no mdtest)"
-	@echo "  test-mdtest       - Run mdtest suite only"
+	@echo "  test-mdtest       - Run mdtest suite and docs tests"
 	@echo "  test-e2e          - Run end-to-end tests only"
 	@echo "  test-coverage     - Run pytest with coverage report"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
@@ -90,7 +90,7 @@ test-unit:
 
 .PHONY: test-mdtest
 test-mdtest:
-	uv run pytest tests/mdtest/ -v
+	uv run pytest tests/mdtest/ tests/test_docs.py -v
 
 .PHONY: test-e2e
 test-e2e:
@@ -102,7 +102,7 @@ test-coverage:
 
 .PHONY: update-mdtest
 update-mdtest:
-	uv run pytest tests/mdtest/ --update-mdtest -v
+	uv run pytest tests/mdtest/ tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 

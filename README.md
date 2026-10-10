@@ -196,8 +196,8 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
+
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: # coding: sqlty
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
