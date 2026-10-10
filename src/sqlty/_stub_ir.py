@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_UNTYPED = re.compile(r"\bUNTYPED\b")
+UNTYPED_RE = re.compile(r"\bUNTYPED\b")
 FALLBACK = "<fallback>"
 """Query shown for the catch-all overload in overload diffs."""
 
@@ -72,6 +72,13 @@ class OverloadSignature:
     self_type_template: str | None = (
         None  # Template for self parameter type with {sqlty} placeholder
     )
+
+    @property
+    def annotation(self) -> str:
+        """Rendered return annotation, e.g. ``SQL[tuple[int]]`` for a ``tuple[int]`` row."""
+        from ._stub_serializer import IRToASTSerializer
+
+        return ast.unparse(IRToASTSerializer().return_annotation(self))
 
     def __hash__(self) -> int:
         """Hash based on query literal for deduplication."""
@@ -141,7 +148,7 @@ class RegistryDecorator:
 
     def signatures(self) -> set[tuple[str, str]]:
         """(query, return type) pairs, with ``FALLBACK`` for an explicit catch-all."""
-        pairs = {(o.query_literal, o.return_type) for o in self.overloads}
+        pairs = {(o.query_literal, o.annotation) for o in self.overloads}
         if self.fallback_return_type:
             pairs.add((FALLBACK, self.fallback_return_type))
         return pairs
@@ -216,7 +223,8 @@ class StubFile:
         Args:
             registry: The registry to merge
             mode: Merge mode - "incremental" or "prune"
-                - incremental: Add new overloads, keep existing ones (never removes)
+                - incremental: Add new overloads and replace existing ones for the same query
+                  (e.g. a stale ``SQL[Any]`` superseded by ``SQL[UNTYPED]``); never removes
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
         if registry.name in self.registries:
@@ -224,8 +232,14 @@ class StubFile:
         if mode == "incremental":
             if registry.name in self.registries:
                 existing = self.registries[registry.name]
+                existing.custom_imports = list(
+                    dict.fromkeys(existing.custom_imports + registry.custom_imports)
+                )
                 for overload in registry.overloads:
-                    existing.add_overload(overload)
+                    current = next((o for o in existing.overloads if o == overload), None)
+                    if current is None or current.annotation != overload.annotation:
+                        existing.overloads.discard(overload)
+                        existing.add_overload(overload)
             else:
                 self.registries[registry.name] = registry
         elif mode == "prune":
@@ -270,9 +284,9 @@ class StubFile:
         for registry in self.registries.values():
             if fallback := registry.fallback_return_type:
                 uses_sql = uses_sql or bool(re.search(r"\bSQL\[", fallback))
-                uses_untyped = uses_untyped or bool(_UNTYPED.search(fallback))
+                uses_untyped = uses_untyped or bool(UNTYPED_RE.search(fallback))
             for overload in registry.overloads:
-                return_type = overload.return_type
+                return_type = overload.annotation
                 # Check for patterns that require imports
                 for pattern, import_stmt in type_patterns.items():
                     if re.search(pattern, return_type):
@@ -283,7 +297,7 @@ class StubFile:
                 # Check if SQL is used in return type
                 if re.search(r"\bSQL\[", return_type):
                     uses_sql = True
-                if _UNTYPED.search(return_type):
+                if UNTYPED_RE.search(return_type):
                     uses_untyped = True
                 # Check if Any is used in function signature
                 if overload.function_signature:

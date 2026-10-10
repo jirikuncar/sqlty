@@ -9,12 +9,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Literal
 
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
+from ._stub_ir import UNTYPED_RE, ImportStatement, OverloadSignature, RegistryDecorator, StubFile
 
-OVERLAP_PRAGMAS = (
-    '# mypy: disable-error-code="overload-overlap"\n# pyright: reportOverlappingOverload=false\n'
-)
-"""Typed overloads deliberately overlap a ``SQL[UNTYPED]`` catch-all."""
+OVERLAP_IGNORE = "ignore[overload-overlap]"
+"""Marks an overload that deliberately overlaps a ``SQL[UNTYPED]`` catch-all.
+
+mypy and pyright report the overlap on the earlier overload only when its return type is
+incompatible with the catch-all's, so ``SQL[Any]`` and ``SQL[UNTYPED]`` overloads stay unmarked
+and unrelated overlaps elsewhere are still reported.
+"""
 
 
 class IRToASTSerializer:
@@ -218,8 +221,16 @@ class IRToASTSerializer:
             if len(sig.posonlyargs) > 0 or len(sig.args) > 1 or len(sig.kwonlyargs) > 0:
                 template_sig = sig
 
+        fallback = registry.fallback_return_type
+        compatible = {fallback, UNTYPED_RE.sub("Any", fallback)} if fallback else set()
         for overload in overload_list:
             func_node = self._serialize_function_overload(overload, registry.name)
+            if (
+                compatible
+                and func_node.returns
+                and ast.unparse(func_node.returns) not in compatible
+            ):
+                func_node.type_comment = OVERLAP_IGNORE
             function_overloads.append(func_node)
 
         function_overloads.append(
@@ -268,31 +279,14 @@ class IRToASTSerializer:
         assert isinstance(result, ast.expr)
         return result
 
-    def _serialize_function_overload(
-        self, overload: OverloadSignature, function_name: str
-    ) -> ast.FunctionDef:
-        """Serialize a function overload (without classmethod decorator).
+    def return_annotation(self, overload: OverloadSignature) -> ast.expr:
+        """Return annotation of a function overload, e.g. ``SQL[tuple[int]]``.
 
-        Args:
-            overload: OverloadSignature to serialize
-            function_name: Name of the function
-
-        Returns:
-            AST FunctionDef node
+        Example:
+            >>> o = OverloadSignature("SELECT 1", "tuple[int]", return_type_template="SQL[{sqlty}]")
+            >>> ast.unparse(IRToASTSerializer().return_annotation(o))
+            'SQL[tuple[int]]'
         """
-        import copy
-
-        decorators: list[ast.expr] = [
-            ast.Name(id="overload", ctx=ast.Load()),
-        ]
-
-        literal_annotation = ast.Subscript(
-            value=ast.Name(id="Literal", ctx=ast.Load()),
-            slice=ast.Constant(value=overload.query_literal),
-            ctx=ast.Load(),
-        )
-
-        # Build return annotation
         # Priority 1: Use return_type_template if provided
         if overload.return_type_template:
             # Replace {sqlty} placeholder with the inferred type
@@ -318,6 +312,33 @@ class IRToASTSerializer:
         else:
             # Use the inferred return type directly
             return_annotation = ast.parse(overload.return_type, mode="eval").body
+        return return_annotation
+
+    def _serialize_function_overload(
+        self, overload: OverloadSignature, function_name: str
+    ) -> ast.FunctionDef:
+        """Serialize a function overload (without classmethod decorator).
+
+        Args:
+            overload: OverloadSignature to serialize
+            function_name: Name of the function
+
+        Returns:
+            AST FunctionDef node
+        """
+        import copy
+
+        decorators: list[ast.expr] = [
+            ast.Name(id="overload", ctx=ast.Load()),
+        ]
+
+        literal_annotation = ast.Subscript(
+            value=ast.Name(id="Literal", ctx=ast.Load()),
+            slice=ast.Constant(value=overload.query_literal),
+            ctx=ast.Load(),
+        )
+
+        return_annotation = self.return_annotation(overload)
 
         # Check if we have a custom function signature (for configured functions)
         if overload.function_signature:
@@ -655,12 +676,8 @@ class IRToTextSerializer:
         code = ast.unparse(module)
         lines = code.split("\n")
         formatted_lines = self._add_blank_lines(lines)
-        pragmas = (
-            OVERLAP_PRAGMAS
-            if any(registry.fallback_return_type for registry in stub.registries.values())
-            else ""
-        )
-        return pragmas + "\n".join(formatted_lines) + "\n"
+        code = "\n".join(formatted_lines) + "\n"
+        return code.replace(f": # type: {OVERLAP_IGNORE}", f":  # type: {OVERLAP_IGNORE}")
 
     def _generate_overload_insertions(
         self,

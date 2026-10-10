@@ -143,3 +143,65 @@ def test_untyped_stub_fallback_rejected(
     )
     errors = [line for line in result.stdout.splitlines() if marker in line]
     assert len(errors) == 1 and "UNTYPED" in errors[0], result.stdout
+
+
+# --- a sentinel-mode stub suppresses only the overlaps it creates ---
+
+OVERLAP_CALLS = """from queries import sql
+
+users = sql("SELECT id::INTEGER FROM users")
+pairs = sql("VALUES (1, 2)")
+purge = sql("DELETE FROM users")
+"""
+
+UNRELATED_OVERLAP = """
+
+@overload
+def other(x: int) -> int: ...
+@overload
+def other(x: object) -> str: ...
+"""
+
+
+@pytest.mark.parametrize(
+    ("checker", "command", "marker", "expected"),
+    [
+        ("mypy", ["mypy", "--no-error-summary", "--warn-unused-ignores"], ": error:", 1),
+        ("pyright", ["pyright", "--pythonpath", sys.executable], "- error:", 1),
+        # ty does not check overload overlap
+        (
+            "ty",
+            ["ty", "check", "--python", sys.prefix, "--error", "unused-ignore-comment"],
+            "error[",
+            0,
+        ),
+    ],
+    ids=["mypy", "pyright", "ty"],
+)
+def test_untyped_stub_overlap_scoped(
+    tmp_path: Path, checker: str, command: list[str], marker: str, expected: int
+) -> None:
+    """Generated overloads need no unused ignores; an unrelated overlap is still reported."""
+    if not shutil.which(checker):
+        pytest.skip(f"{checker} not installed")
+    from sqlty._generator import TypeStubGenerator
+
+    (tmp_path / "queries.py").write_text(
+        "from sqlty import sqlty\n\n\n@sqlty\ndef sql(query: str) -> str:\n    return query\n"
+    )
+    (tmp_path / "app.py").write_text(OVERLAP_CALLS)
+    (tmp_path / "pyrightconfig.json").write_text('{"reportUnnecessaryTypeIgnoreComment": "error"}')
+    stub = TypeStubGenerator(
+        function_configs=[{"import_path": "queries.sql", "query_param": "query"}],
+        untyped="sentinel",
+    ).generate_stub_file(tmp_path, mode="incremental,create")
+    assert stub.read_text().count("# type: ignore[overload-overlap]") == 1
+    stub.write_text(stub.read_text() + UNRELATED_OVERLAP)
+    other = stub.read_text().splitlines().index("def other(x: int) -> int: ...") + 1
+
+    result = subprocess.run(
+        [*command, "app.py", "queries.pyi"], capture_output=True, text=True, cwd=tmp_path
+    )
+    errors = [line for line in result.stdout.splitlines() if marker in line]
+    assert len(errors) == expected, result.stdout
+    assert all(f"queries.pyi:{other}:" in error for error in errors), result.stdout
