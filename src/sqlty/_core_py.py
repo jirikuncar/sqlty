@@ -27,7 +27,7 @@ import re
 
 from sqlty._checker import Checker
 from sqlty._lint import RuleConfig
-from sqlty._rewriter import SQLRewriter
+from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, skipped_string_rule
 from sqlty._sql_analyzer import SQLAnalyzer
 
 
@@ -128,6 +128,7 @@ def check_source(
     - Stale rewrites (stale-rewrite) — --sql strings not yet wrapped
     - Stale types (stale-type) — SQL[T] doesn't match current inference
     - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
+    - Interpolated strings (fstring-skipped, tstring-skipped) — f"--sql ..." is never rewritten
 
     User-defined types (``SQL[UserType]``) are skipped here; ``sqlty.core.check_source``
     validates them on top of either backend.
@@ -158,6 +159,18 @@ def check_source(
 
     for i, line in enumerate(source.splitlines(), 1):
         line_stripped = line.strip()
+
+        if skipped := skipped_string_rule(line_stripped):
+            if rule_config.is_enabled(skipped):
+                diagnostics.append(
+                    {
+                        "rule": skipped,
+                        "message": SKIPPED_STRING_MESSAGES[skipped],
+                        "severity": rule_config.severity(skipped).value,
+                        "line": i,
+                    }
+                )
+            continue
 
         # Check for unwrapped --sql strings (stale-rewrite)
         if _is_unwrapped_sql_string(line_stripped, wrapper_name):

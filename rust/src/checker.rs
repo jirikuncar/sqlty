@@ -7,6 +7,7 @@
 //! - `select-star-no-schema`: `SELECT *` with no schema available
 //! - `inline-sql-comment`: `"--sql SELECT ..."` (space) makes query a SQL comment
 //! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
+//! - `fstring-skipped` / `tstring-skipped`: interpolated `--sql` strings are never rewritten
 
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ use regex::Regex;
 
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
+use crate::rewriter::skipped_string_rule;
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -126,6 +128,25 @@ pub fn check_source(
     for (i, line) in source.lines().enumerate() {
         let line_num = i + 1;
         let trimmed = line.trim();
+
+        if let Some(rule) = skipped_string_rule(trimmed) {
+            if rule_config.is_enabled(rule) {
+                let kind = if rule == "tstring-skipped" {
+                    "t-string"
+                } else {
+                    "f-string"
+                };
+                diagnostics.push(Diagnostic {
+                    rule: rule.to_string(),
+                    message: format!(
+                        "{kind} with --sql prefix skipped ({kind}s cannot be statically rewritten)"
+                    ),
+                    severity: rule_config.severity(rule).to_string(),
+                    line: line_num,
+                });
+            }
+            continue;
+        }
 
         // Check for unwrapped --sql strings (stale-rewrite)
         if is_unwrapped_sql_string(trimmed, &wrapper_marker, &unwrapped_pat) {

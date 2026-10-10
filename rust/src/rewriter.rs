@@ -22,12 +22,23 @@ use crate::analyzer::{infer_type, returns_rows, Schema};
 static STRING_LITERAL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"^(?s:""".*?"""|'''.*?'''|"[^"]*"|'[^']*')"#).unwrap());
 
-/// f-strings and t-strings (PEP 750) with a `--sql` prefix: interpolated, so never rewritten.
 static CODING: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
+
+/// f-strings and t-strings (PEP 750) with a `--sql` prefix: interpolated, so never rewritten.
 static FSTRING_SQL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"#)
         .unwrap()
 });
+
+/// `fstring-skipped` or `tstring-skipped` when `line` has an interpolated `--sql` string.
+pub(crate) fn skipped_string_rule(line: &str) -> Option<&'static str> {
+    let prefix = FSTRING_SQL.find(line)?.as_str();
+    Some(if prefix.contains(['t', 'T']) {
+        "tstring-skipped"
+    } else {
+        "fstring-skipped"
+    })
+}
 
 /// Spans of string literals not prefixed by a letter (`f"..."`, `r"..."` are skipped).
 ///

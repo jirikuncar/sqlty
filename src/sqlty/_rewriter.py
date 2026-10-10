@@ -191,15 +191,9 @@ class SQLRewriter:
         # --- Pass 1: detect f/t-strings (line-by-line, for warnings) ---
         fstring_lines: set[int] = set()
         for line_num, line in enumerate(source.splitlines(), start=1):
-            if _FSTRING_SQL_PATTERN.search(line):
+            if rule := skipped_string_rule(line):
                 fstring_lines.add(line_num)
-                is_tstring = bool(re.search(r"""[tT]\s*["']""", line))
-                kind = "t-string" if is_tstring else "f-string"
-                rule = "tstring-skipped" if is_tstring else "fstring-skipped"
-                warnings.append(
-                    f"line {line_num}: {kind} with --sql prefix skipped "
-                    f"({kind}s cannot be statically rewritten) [{rule}]"
-                )
+                warnings.append(f"line {line_num}: {SKIPPED_STRING_MESSAGES[rule]} [{rule}]")
 
         # --- Pass 2: whole-source rewrite ---
         has_sql_import = _has_import(source, import_line)
@@ -354,6 +348,20 @@ _SQL_STRING_PATTERN = re.compile(
 
 # Match f-strings and t-strings (PEP 750, Python 3.14+) that contain --sql
 # (for emitting warnings). Both use interpolation so cannot be statically rewritten.
+SKIPPED_STRING_MESSAGES = {
+    rule: f"{kind} with --sql prefix skipped ({kind}s cannot be statically rewritten)"
+    for rule, kind in (("fstring-skipped", "f-string"), ("tstring-skipped", "t-string"))
+}
+
+
+def skipped_string_rule(line: str) -> str | None:
+    """``fstring-skipped`` or ``tstring-skipped`` when *line* has an interpolated ``--sql`` string."""
+    match = _FSTRING_SQL_PATTERN.search(line)
+    if match is None:
+        return None
+    return "tstring-skipped" if re.search("[tT]", match.group()) else "fstring-skipped"
+
+
 _FSTRING_SQL_PATTERN = re.compile(
     r"""[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b"""
     r"""|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"""
