@@ -385,7 +385,10 @@ def _is_subtype(src: typing.Any, dst: typing.Any) -> bool | None:
 
 
 def _member_fits(src: typing.Any, targets: list[typing.Any]) -> bool | None:
-    if src in _NEVER or any(src == d or d in (typing.Any, object) for d in targets):
+    # ``typing.Any`` is a class on 3.11+, so it must be caught before ``issubclass``.
+    if src is typing.Any or src in _NEVER:
+        return True
+    if any(src == d or d in (typing.Any, object) for d in targets):
         return True
     if not _is_plain(src):
         return None

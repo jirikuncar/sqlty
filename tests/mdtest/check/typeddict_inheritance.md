@@ -396,6 +396,81 @@ t = SQL[Views]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
 # error:
 ```
 
+## extra_items base — Any in a union is not flagged
+
+```python
+from typing import Any, NotRequired, ReadOnly, TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, extra_items=ReadOnly[int]):
+    id: int
+
+class Child(Base):
+    x: NotRequired[int | Any]
+
+class Mutable(TypedDict, extra_items=int):
+    id: int
+
+class Loose(Mutable):
+    x: NotRequired[int | Any]
+
+class Wide(TypedDict, extra_items=ReadOnly[int | Any]):
+    id: int
+
+class Score(Wide):
+    score: float
+
+class Top(TypedDict, extra_items=ReadOnly[object]):
+    id: int
+
+class Name(Top):
+    name: NotRequired[str | Any]
+
+q = SQL[Child]("--sql\nSELECT id::INTEGER FROM users")
+r = SQL[Loose]("--sql\nSELECT id::INTEGER FROM users")
+s = SQL[Score]("--sql\nSELECT id::INTEGER, score::FLOAT FROM users")
+t = SQL[Name]("--sql\nSELECT id::INTEGER FROM users")
+# error:
+```
+
+## extra_items base — Any in a union is not flagged without runtime resolution
+
+```python
+import not_installed
+from typing import Any, NotRequired, ReadOnly, TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, extra_items=ReadOnly[int]):
+    id: int
+
+class Child(Base):
+    x: NotRequired[int | Any]
+
+class Mutable(TypedDict, extra_items=int):
+    id: int
+
+class Loose(Mutable):
+    x: NotRequired[int | Any]
+
+class Wide(TypedDict, extra_items=ReadOnly[int | Any]):
+    id: int
+
+class Score(Wide):
+    score: float
+
+class Top(TypedDict, extra_items=ReadOnly[object]):
+    id: int
+
+class Name(Top):
+    name: NotRequired[str | Any]
+
+q = SQL[Child]("--sql\nSELECT id::INTEGER FROM users")
+r = SQL[Loose]("--sql\nSELECT id::INTEGER FROM users")
+s = SQL[Score]("--sql\nSELECT id::INTEGER, score::FLOAT FROM users")
+t = SQL[Name]("--sql\nSELECT id::INTEGER FROM users")
+# error:
+```
+
 ## Read-only extra_items base — required key of an assignable type is allowed
 
 ```python
