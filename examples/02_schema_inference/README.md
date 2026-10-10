@@ -4,7 +4,13 @@ Use a `CREATE TABLE` schema file so SQLTy can infer types without explicit `::TY
 
 ## Setup
 
-Provide a schema file with your table definitions:
+Point `[tool.sqlty]` at a schema file with your table definitions:
+
+```toml
+# pyproject.toml
+[tool.sqlty]
+schema = "schema.sql"
+```
 
 ```sql
 -- schema.sql
@@ -22,10 +28,10 @@ CREATE TABLE users (
 user_query = "--sql\nSELECT id, name, email FROM users"
 ```
 
-## Rewrite with schema
+## Rewrite
 
 ```bash
-sqlty rewrite --schema schema.sql .
+sqlty rewrite .
 ```
 
 Result:
@@ -43,7 +49,7 @@ Types are inferred from the schema: `id` is `INTEGER` -> `int`, `name` is `TEXT`
 With a schema loaded, `SELECT *` is expanded to explicit columns:
 
 ```bash
-sqlty rewrite --schema schema.sql .
+sqlty rewrite .
 ```
 
 `SELECT * FROM users` becomes `SELECT id::INTEGER, name::TEXT, email::VARCHAR, created_at::TIMESTAMP FROM users`.

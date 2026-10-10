@@ -23,6 +23,7 @@ static STRING_LITERAL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"^(?s:""".*?"""|'''.*?'''|"[^"]*"|'[^']*')"#).unwrap());
 
 /// f-strings and t-strings (PEP 750) with a `--sql` prefix: interpolated, so never rewritten.
+static CODING: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
 static FSTRING_SQL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"#)
         .unwrap()
@@ -203,7 +204,19 @@ pub fn rewrite_source(
     if imports.is_empty() {
         return result;
     }
-    format!("{}\n{}", imports.join("\n"), result)
+    let at = header_end(&result);
+    let sep = if at > 0 && !result[..at].ends_with('\n') {
+        "\n"
+    } else {
+        ""
+    };
+    format!(
+        "{}{}{}\n{}",
+        &result[..at],
+        sep,
+        imports.join("\n"),
+        &result[at..]
+    )
 }
 
 /// Strip Python source: `SQL[T]("--sql\n...")` → `"--sql\n..."`.
@@ -312,7 +325,7 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyleParsed) -> String {
     source
         .split_inclusive('\n')
         .filter(|line| {
-            let line = line.trim();
+            let line = line.trim_end();
             !((Some(line) == untyped_import && !untyped_used)
                 || (line == istyle.import_line && !source.contains(&wrapper_marker))
                 || (line == "import datetime" && !source.contains("datetime."))
@@ -321,9 +334,82 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyleParsed) -> String {
         .collect()
 }
 
-/// Check if source already has a specific import.
+/// Check for a top-level import; indented lines (docstrings, blocks) don't count.
 fn has_import(source: &str, import_str: &str) -> bool {
-    source.lines().any(|line| line.trim() == import_str)
+    source.lines().any(|line| line.trim_end() == import_str)
+}
+
+/// Offset where imports go: after shebang, coding cookie, docstring and `__future__`.
+fn header_end(source: &str) -> usize {
+    let line_end_at = |from: usize| {
+        source[from..]
+            .find('\n')
+            .map_or(source.len(), |i| from + i + 1)
+    };
+    let (mut pos, mut end, mut lineno) = (0, 0, 0);
+    let mut docstring = true;
+    while pos < source.len() {
+        let mut line_end = line_end_at(pos);
+        let line = source[pos..line_end].trim();
+        lineno += 1;
+        if line.is_empty() || line.starts_with('#') {
+            if (pos == 0 && line.starts_with("#!")) || (lineno <= 2 && CODING.is_match(line)) {
+                end = line_end;
+            }
+            pos = line_end;
+            continue;
+        }
+        if docstring {
+            if let Some(close) = docstring_end(source, pos) {
+                docstring = false;
+                pos = close;
+                end = close;
+                continue;
+            }
+        }
+        if !line.starts_with("from __future__ import") {
+            break;
+        }
+        docstring = false;
+        if line.contains('(') && !line.contains(')') {
+            line_end = source[pos..]
+                .find(')')
+                .map_or(source.len(), |i| line_end_at(pos + i));
+        }
+        pos = line_end;
+        end = line_end;
+    }
+    end
+}
+
+/// End of the line closing a string-literal statement starting at `pos`.
+fn docstring_end(source: &str, pos: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut i = pos;
+    if matches!(bytes.get(i), Some(b'r' | b'R' | b'u' | b'U')) {
+        i += 1;
+    }
+    let quote = ["\"\"\"", "'''", "\"", "'"]
+        .into_iter()
+        .find(|q| source[i..].starts_with(q))?;
+    i += quote.len();
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            _ if bytes[i..].starts_with(quote.as_bytes()) => break,
+            b'\n' if quote.len() == 1 => return None,
+            _ => i += 1,
+        }
+    }
+    if i >= bytes.len() {
+        return None;
+    }
+    let rest_end = source[i..].find('\n').map_or(source.len(), |n| i + n);
+    let rest = source[i + quote.len()..rest_end].trim();
+    if !rest.is_empty() && !rest.starts_with('#') {
+        return None;
+    }
+    Some((rest_end + 1).min(source.len()))
 }
 
 #[cfg(test)]

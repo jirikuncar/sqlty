@@ -128,13 +128,9 @@ def check_source(
     - Stale rewrites (stale-rewrite) — --sql strings not yet wrapped
     - Stale types (stale-type) — SQL[T] doesn't match current inference
     - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
-    - User-defined types (column-count-mismatch, column-type-mismatch,
-      column-name-mismatch) — SQL[UserType] fields vs query columns
 
-    When the annotated type is a user-defined type (TypedDict, NamedTuple,
-    dataclass, Pydantic BaseModel) found in the same source file, the checker
-    validates the type's fields against the SQL query columns structurally
-    instead of comparing against the inferred tuple type string.
+    User-defined types (``SQL[UserType]``) are skipped here; ``sqlty.core.check_source``
+    validates them on top of either backend.
 
     Args:
         source: Python source code

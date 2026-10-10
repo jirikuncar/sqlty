@@ -270,7 +270,9 @@ class SQLRewriter:
             imports_to_add.append(untyped_import)
 
         if imports_to_add:
-            result = "\n".join(imports_to_add) + "\n" + result
+            at = _header_end(result)
+            sep = "\n" if at and result[at - 1] != "\n" else ""
+            result = result[:at] + sep + "\n".join(imports_to_add) + "\n" + result[at:]
 
         return RewriteResult(source=result, warnings=warnings)
 
@@ -316,7 +318,7 @@ class SQLRewriter:
         untyped_used = any("UNTYPED" in line and line.strip() != untyped_import for line in lines)
 
         for line in lines:
-            stripped = line.strip()
+            stripped = line.rstrip()
 
             if stripped == untyped_import and not untyped_used:
                 continue
@@ -404,8 +406,73 @@ def _is_sqlty_managed(content: str) -> bool:
 
 
 def _has_import(source: str, import_line: str) -> bool:
-    """Check if source already contains a specific import."""
-    return any(line.strip() == import_line for line in source.splitlines())
+    """Check for a top-level import; indented lines (docstrings, blocks) don't count."""
+    return any(line.rstrip() == import_line for line in source.splitlines())
+
+
+def _header_end(source: str) -> int:
+    """Offset where imports go: after shebang, coding cookie, docstring and ``__future__``.
+
+    Example:
+        >>> src = "#!/bin/py\\n'''Doc.'''\\nfrom __future__ import annotations\\nx = 1\\n"
+        >>> src[_header_end(src):]
+        'x = 1\\n'
+    """
+    pos = end = lineno = 0
+    docstring = True
+    while pos < len(source):
+        nl = source.find("\n", pos)
+        line_end = len(source) if nl == -1 else nl + 1
+        line = source[pos:line_end].strip()
+        lineno += 1
+        if not line or line.startswith("#"):
+            if (pos == 0 and line.startswith("#!")) or (lineno <= 2 and _CODING.search(line)):
+                end = line_end
+            pos = line_end
+            continue
+        if docstring and (close := _docstring_end(source, pos)) is not None:
+            docstring = False
+            pos = end = close
+            continue
+        if not line.startswith("from __future__ import"):
+            break
+        docstring = False
+        if "(" in line and ")" not in line:
+            paren = source.find(")", pos)
+            nl = source.find("\n", paren) if paren != -1 else -1
+            line_end = len(source) if nl == -1 else nl + 1
+        pos = end = line_end
+    return end
+
+
+def _docstring_end(source: str, pos: int) -> int | None:
+    """End of the line closing a string-literal statement starting at *pos*, else None."""
+    match = _DOCSTRING_START.match(source, pos)
+    if match is None:
+        return None
+    quote = match.group("quote")
+    i = match.end()
+    while i < len(source):
+        if source[i] == "\\":
+            i += 2
+            continue
+        if source.startswith(quote, i):
+            break
+        if len(quote) == 1 and source[i] == "\n":
+            return None
+        i += 1
+    else:
+        return None
+    rest_end = source.find("\n", i)
+    rest_end = len(source) if rest_end == -1 else rest_end
+    rest = source[i + len(quote) : rest_end].strip()
+    if rest and not rest.startswith("#"):
+        return None
+    return min(rest_end + 1, len(source))
+
+
+_DOCSTRING_START = re.compile(r"[rRuU]?(?P<quote>\"\"\"|'''|\"|')")
+_CODING = re.compile(r"^#.*?coding[:=]")
 
 
 def _line_at(source: str, pos: int) -> int:
