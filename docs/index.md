@@ -93,8 +93,9 @@ dialect = "postgres"
 schema = "schema.sql"
 ```
 
+`schema.sql`:
+
 ```sql
--- schema.sql
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -102,12 +103,11 @@ CREATE TABLE users (
 );
 ```
 
-```python
-# No casts needed — types inferred from schema
-query = "--sql\nSELECT id, name, email FROM users"
+No casts needed — types inferred from schema:
 
-# After rewrite:
-query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+```python
+query = "--sql\nSELECT id, name, email FROM users"
+# rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
 ## User-Defined Types
@@ -232,9 +232,9 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
-
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: # coding: sqlty
+# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 See [magic codec documentation](magic-codec.md) for setup.

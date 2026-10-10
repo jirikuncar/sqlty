@@ -31,11 +31,8 @@ row = db.fetchone("SELECT id, name FROM users")
 SQLTy parses your SQL and infers the Python types:
 
 ```python
-# Before
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-
-# After: sqlty rewrite .
-query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ### 2. Structural validation of user types

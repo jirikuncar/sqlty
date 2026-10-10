@@ -160,9 +160,9 @@ Import-time transformation — `--sql` strings are automatically rewritten when 
 
 ```python
 # coding: sqlty
-
 user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: # coding: sqlty
+# decoded: user_query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 No `sqlty rewrite` step needed. Best for development and prototyping.

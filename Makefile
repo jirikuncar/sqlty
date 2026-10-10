@@ -95,7 +95,7 @@ test-coverage:
 
 .PHONY: update-mdtest
 update-mdtest:
-	uv run pytest tests/mdtest/ --update-mdtest -v
+	uv run pytest tests/mdtest/ tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 

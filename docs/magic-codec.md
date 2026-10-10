@@ -17,6 +17,7 @@ q = "--sql\nSELECT created_at::TIMESTAMP, user_id::UUID"
 # Transforms to:
 # import datetime
 # import uuid
+# from sqlty import SQL
 # q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, user_id::UUID")
 ```
 
@@ -63,9 +64,8 @@ python -c "import site; print([p for p in site.getsitepackages()])"
 Once set up, use `--sql` strings in your code:
 
 ```python
-# No encoding declaration or imports needed in individual files
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# Transforms to: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ### Automatic Import Injection
@@ -96,9 +96,9 @@ For explicit testing, the codec is also registered as "sqlty":
 import codecs
 
 codec = codecs.lookup("sqlty")
-code = b'q = "--sql\nSELECT 1::INTEGER"'
+code = b'q = "--sql\\nSELECT 1::INTEGER"'
 result, _ = codec.decode(code)
-# result: 'q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")'
+# result: 'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
 ```
 
 This allows testing the codec transformation without affecting UTF-8 globally.
@@ -110,9 +110,9 @@ For programmatic transformation without codec registration, import from `sqlty._
 ```python
 from sqlty._decode import decode  # No codec registration!
 
-code = b'q = "--sql\nSELECT 1::INTEGER"'
+code = b'q = "--sql\\nSELECT 1::INTEGER"'
 transformed, _ = decode(code)
-# transformed: 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")'
+# transformed: 'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
 ```
 
 Or use the CLI tool:

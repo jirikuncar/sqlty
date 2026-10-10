@@ -19,7 +19,7 @@ sqlty rewrite .
 ```python
 # 3. Result
 from sqlty import SQL
-query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+query = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ```bash
@@ -88,9 +88,9 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
-
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# At runtime: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: # coding: sqlty
+# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 **Best for:** Development, prototyping, rapid iteration.
