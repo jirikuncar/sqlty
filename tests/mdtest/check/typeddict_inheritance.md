@@ -1,10 +1,16 @@
 # TypedDict Inheritance of Closed and extra_items Bases
 
 PEP 728 restricts subclasses of closed and `extra_items` TypedDicts.
-Violations are `typeddict-inheritance` errors reported on the subclass, for
-TypedDicts used as `SQL[T]` row types and their bases. A subclass that tries
-to reopen or change a base's openness keeps the base's, so its keys are still
-matched against the query.
+Violations are `typeddict-inheritance` errors reported on the subclass's
+`class` line, for TypedDicts used as `SQL[T]` row types and their bases.
+Messages name the base whose header declared the openness. A subclass that
+tries to reopen or change a base's openness keeps the base's, so its keys are
+still matched against the query.
+
+Types are compared only when the answer is certain: plain classes and unions
+of them, with `int` -> `float` -> `complex` promotion. Generics, literals and
+other types are given the benefit of the doubt. Only bases defined in the same
+file and spelled as bare names are checked.
 
 ```toml
 [sqlty]
@@ -95,6 +101,74 @@ r = SQL[Middle]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [typeddict-inheritance] "Middle cannot add key 'name' to closed base Base"
 ```
 
+## Closed base reached through a pass-through subclass names the declaring base
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, closed=True):
+    id: int
+
+class Middle(Base):
+    pass
+
+class User(Middle):
+    name: str
+
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
+```
+
+## Multiple inheritance — keys from a sibling base
+
+A closed base admits no keys from an open sibling, in either base order.
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Closed(TypedDict, closed=True):
+    id: int
+
+class Open(TypedDict):
+    name: str
+
+class OpenFirst(Open, Closed):
+    pass
+
+class ClosedFirst(Closed, Open):
+    email: str
+
+q = SQL[OpenFirst]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+r = SQL[ClosedFirst]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# error: [typeddict-inheritance] "OpenFirst cannot add key 'name' to closed base Closed"
+# error: [typeddict-inheritance] "ClosedFirst cannot add key 'name' to closed base Closed"
+# error: [typeddict-inheritance] "ClosedFirst cannot add key 'email' to closed base Closed"
+```
+
+## Multiple inheritance — one message per key and declaring base
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, closed=True):
+    id: int
+
+class Left(Base):
+    pass
+
+class Right(Base):
+    pass
+
+class User(Left, Right):
+    name: str
+
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
+```
+
 ## Closed base — closed=False cannot reopen
 
 ```python
@@ -146,7 +220,7 @@ class User(Base, extra_items=str):
     pass
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# error: [typeddict-inheritance] "User must stay closed: base Base is closed"
+# error: [typeddict-inheritance] "User cannot set extra_items=str: base Base is closed"
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
 ```
 
@@ -232,8 +306,94 @@ class Flags(Base, extra_items=bool):
 
 q = SQL[Sealed]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
 r = SQL[Flags]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
-# error: [typeddict-inheritance] "Sealed must keep base Base extra_items int"
-# error: [typeddict-inheritance] "Flags extra_items bool doesn't fit base Base extra_items int"
+# error: [typeddict-inheritance] "Sealed cannot set closed=True: base Base has mutable extra_items int"
+# error: [typeddict-inheritance] "Flags cannot set extra_items=bool: base Base has mutable extra_items int"
+```
+
+## Mutable extra_items base — cannot become read-only
+
+```python
+from typing import ReadOnly, TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, extra_items=int):
+    id: int
+
+class User(Base, extra_items=ReadOnly[int]):
+    pass
+
+q = SQL[User]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
+# error: [typeddict-inheritance] "User cannot set extra_items=ReadOnly[int]: base Base has mutable extra_items int"
+```
+
+## extra_items type checks without runtime resolution
+
+Builtin scalar types and their unions are compared from source.
+
+```python
+import not_installed
+from typing import NotRequired, ReadOnly, TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, extra_items=int | None):
+    id: int
+
+class User(Base):
+    views: NotRequired[int]
+
+class Flags(Base, extra_items=bool):
+    pass
+
+class Scores(TypedDict, extra_items=ReadOnly[int | str]):
+    id: int
+
+class Ranked(Scores):
+    score: float
+
+q = SQL[User]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
+r = SQL[Flags]("--sql\nSELECT id::INTEGER FROM users")
+s = SQL[Ranked]("--sql\nSELECT id::INTEGER, score::FLOAT FROM users")
+# error: [typeddict-inheritance] "User.views is int but base Base has extra_items int | None"
+# error: [typeddict-inheritance] "Flags cannot set extra_items=bool: base Base has mutable extra_items int | None"
+# error: [typeddict-inheritance] "Ranked.score is float but base Scores has read-only extra_items int | str"
+```
+
+## Read-only extra_items base — undecidable types are not flagged
+
+```python
+from collections.abc import Sequence
+from typing import Literal, NotRequired, ReadOnly, TypedDict
+from sqlty import SQL
+
+class Ratio(TypedDict, extra_items=ReadOnly[float]):
+    id: int
+
+class Count(Ratio):
+    views: int
+
+class Items(TypedDict, extra_items=ReadOnly[Sequence[int]]):
+    id: int
+
+class Tags(Items):
+    tags: NotRequired[list[int]]
+
+class Text(TypedDict, extra_items=ReadOnly[str]):
+    id: int
+
+class Kind(Text):
+    kind: NotRequired[Literal["x"]]
+
+class Forward(TypedDict, extra_items=ReadOnly["int"]):
+    id: int
+
+class Views(Forward):
+    views: int
+
+q = SQL[Count]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
+r = SQL[Tags]("--sql\nSELECT id::INTEGER FROM users")
+s = SQL[Kind]("--sql\nSELECT id::INTEGER FROM users")
+t = SQL[Views]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
+# error:
 ```
 
 ## Read-only extra_items base — required key of an assignable type is allowed
@@ -320,6 +480,22 @@ class User(Open, closed=True):
     email: str
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# error:
+```
+
+## Imported bases are not checked
+
+Only bases defined in the same file are known, so a subclass of an imported
+closed TypedDict is not checked.
+
+```python
+from models import Base
+from sqlty import SQL
+
+class User(Base):
+    name: str
+
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error:
 ```
 

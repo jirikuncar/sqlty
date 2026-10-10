@@ -79,7 +79,10 @@ RULES: dict[str, LintRule] = {
         name="typeddict-inheritance",
         default_severity=Severity.ERROR,
         fixable=False,
-        description="TypedDict subclass reopens or adds keys a closed or extra_items base forbids",
+        description=(
+            "TypedDict subclass changes openness or adds keys a closed or extra_items base "
+            "forbids (PEP 728)"
+        ),
     ),
     "select-star": LintRule(
         name="select-star",
