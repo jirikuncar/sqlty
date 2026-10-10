@@ -2,6 +2,9 @@
 # magic_codec uses "# coding: sqlty" which type checkers cannot decode
 EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*" ! -name "magic_codec")
 
+# Zensical is pinned only here (CI runs `make docs`), outside the project dependency groups
+ZENSICAL := uvx --python 3.13 zensical@0.0.65
+
 # Get the absolute path to the repository root
 ROOT_DIR := $(shell pwd)
 
@@ -27,6 +30,10 @@ help:
 	@echo "  test-coverage     - Run pytest with coverage report"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
 	@echo "  bench             - Run Python vs Rust benchmarks"
+	@echo ""
+	@echo "Docs:"
+	@echo "  docs              - Build the docs site, strict via zensical.toml (output: site/)"
+	@echo "  docs-serve        - Serve the docs locally with live reload"
 	@echo ""
 	@echo "Examples:"
 	@echo "  check-examples    - Run sqlty check on all examples"
@@ -102,6 +109,16 @@ update-mdtest:
 .PHONY: bench
 bench:
 	uv run python benchmarks/bench_core.py
+
+# --- Docs ---
+
+.PHONY: docs
+docs:
+	$(ZENSICAL) build --clean
+
+.PHONY: docs-serve
+docs-serve:
+	$(ZENSICAL) serve
 
 # --- Examples ---
 

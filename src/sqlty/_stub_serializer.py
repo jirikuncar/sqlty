@@ -9,12 +9,24 @@ from collections import Counter
 from pathlib import Path
 from typing import Literal
 
-from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, StubFile
-
-OVERLAP_PRAGMAS = (
-    '# mypy: disable-error-code="overload-overlap"\n# pyright: reportOverlappingOverload=false\n'
+from ._stub_ir import (
+    UNTYPED_RE,
+    ImportStatement,
+    OverloadSignature,
+    RegistryDecorator,
+    StubFile,
+    render_return_annotation,
 )
-"""Typed overloads deliberately overlap a ``SQL[UNTYPED]`` catch-all."""
+
+OVERLAP_IGNORE = "ignore[overload-overlap]"
+"""Marks an overload that deliberately overlaps a ``SQL[UNTYPED]`` catch-all.
+
+mypy and pyright report the overlap on the earlier overload only when its return type is
+incompatible with the catch-all's, so overloads returning the catch-all's type, or that type with
+``Any`` for ``UNTYPED``, stay unmarked and unrelated overlaps elsewhere are still reported.
+pyright reports only the first incompatible overload per catch-all, so with
+``reportUnnecessaryTypeIgnoreComment`` it flags the ignores on later ones.
+"""
 
 
 class IRToASTSerializer:
@@ -218,8 +230,18 @@ class IRToASTSerializer:
             if len(sig.posonlyargs) > 0 or len(sig.args) > 1 or len(sig.kwonlyargs) > 0:
                 template_sig = sig
 
+        fallback = registry.fallback_return_type
+        # A string match stands in for "assignable to the catch-all": the generator emits no
+        # compatible return type other than these two, and both sides are ast.unparse output.
+        compatible = {fallback, UNTYPED_RE.sub("Any", fallback)} if fallback else set()
         for overload in overload_list:
             func_node = self._serialize_function_overload(overload, registry.name)
+            if (
+                compatible
+                and func_node.returns
+                and ast.unparse(func_node.returns) not in compatible
+            ):
+                func_node.type_comment = OVERLAP_IGNORE
             function_overloads.append(func_node)
 
         function_overloads.append(
@@ -231,42 +253,6 @@ class IRToASTSerializer:
         )
 
         return function_overloads
-
-    def _substitute_type_in_annotation(
-        self, annotation: ast.expr, replacement: ast.expr
-    ) -> ast.expr:
-        """Recursively substitute Any or generic type T with replacement type.
-
-        Args:
-            annotation: The annotation AST to process
-            replacement: The AST node to substitute in place of Any/T
-
-        Returns:
-            Modified annotation AST
-        """
-
-        class TypeSubstitutor(ast.NodeTransformer):
-            def __init__(self, replacement_node: ast.expr):
-                self.replacement = replacement_node
-
-            def visit_Name(self, node: ast.Name) -> ast.expr:
-                # Replace Any or T with the inferred type
-                if node.id in ("Any", "T"):
-                    import copy
-
-                    return copy.deepcopy(self.replacement)
-                return node
-
-            def visit_Subscript(self, node: ast.Subscript) -> ast.expr:
-                # For Union types (e.g., T | None), replace T but keep the union structure
-                # Visit the children
-                self.generic_visit(node)
-                return node
-
-        substitutor = TypeSubstitutor(replacement)
-        result = substitutor.visit(annotation)
-        assert isinstance(result, ast.expr)
-        return result
 
     def _serialize_function_overload(
         self, overload: OverloadSignature, function_name: str
@@ -292,32 +278,7 @@ class IRToASTSerializer:
             ctx=ast.Load(),
         )
 
-        # Build return annotation
-        # Priority 1: Use return_type_template if provided
-        if overload.return_type_template:
-            # Replace {sqlty} placeholder with the inferred type
-            templated_return_type = overload.return_type_template.replace(
-                "{sqlty}", overload.return_type
-            )
-            return_annotation = ast.parse(templated_return_type, mode="eval").body
-        # Priority 2: Use source annotation if available
-        elif overload.source_return_annotation:
-            # We have a source return annotation from the function definition
-            import copy
-
-            return_annotation = copy.deepcopy(overload.source_return_annotation)
-
-            # If we also have an inferred type (not Any), substitute it
-            if overload.return_type and overload.return_type != "Any":
-                inferred_type_ast = ast.parse(overload.return_type, mode="eval").body
-                # Replace Any or generic type parameter T with the inferred type
-                return_annotation = self._substitute_type_in_annotation(
-                    return_annotation, inferred_type_ast
-                )
-            # else: keep source annotation as-is (e.g., list[Any] stays list[Any])
-        else:
-            # Use the inferred return type directly
-            return_annotation = ast.parse(overload.return_type, mode="eval").body
+        return_annotation = render_return_annotation(overload)
 
         # Check if we have a custom function signature (for configured functions)
         if overload.function_signature:
@@ -655,12 +616,9 @@ class IRToTextSerializer:
         code = ast.unparse(module)
         lines = code.split("\n")
         formatted_lines = self._add_blank_lines(lines)
-        pragmas = (
-            OVERLAP_PRAGMAS
-            if any(registry.fallback_return_type for registry in stub.registries.values())
-            else ""
-        )
-        return pragmas + "\n".join(formatted_lines) + "\n"
+        code = "\n".join(formatted_lines) + "\n"
+        # ast.unparse emits one space before a type comment; PEP 8 and ruff want two
+        return code.replace(f": # type: {OVERLAP_IGNORE}", f":  # type: {OVERLAP_IGNORE}")
 
     def _generate_overload_insertions(
         self,

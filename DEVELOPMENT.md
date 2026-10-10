@@ -207,6 +207,23 @@ cargo test --manifest-path rust/Cargo.toml
 | `tests/mdtest_runner.py` | Markdown parser + snapshot assertion engine |
 | `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
 
+## Documentation Site
+
+The site at <https://jirikuncar.github.io/sqlty/> is built from `docs/` with
+[Zensical](https://zensical.org/) (configured in `zensical.toml`). Zensical is
+not a project dependency; the Make targets run a pinned version via `uvx`.
+The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
+
+```bash
+make docs        # strict build into site/ (fails on broken links or anchors)
+make docs-serve  # live preview at http://localhost:8000/sqlty/
+```
+
+Add new pages to `nav` in `zensical.toml`. CI builds the site on pull requests
+touching the docs and deploys it to GitHub Pages on push to `main`. One-time
+setup: in the repository Settings > Pages, set Source to "GitHub Actions";
+otherwise the first deploy fails.
+
 ## Contributing
 
 ### Development Process
@@ -241,7 +258,7 @@ cargo test --manifest-path rust/Cargo.toml
 
 ## Getting Help
 
-- **Documentation**: See [docs/](docs/)
+- **Documentation**: <https://jirikuncar.github.io/sqlty/> (sources in [docs/](docs/))
 - **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/jirikuncar/sqlty/issues)
 
 ## License

@@ -241,6 +241,13 @@ See [magic codec documentation](magic-codec.md) for setup.
 
 ## Next Steps
 
-- **[Usage Patterns](patterns.md)** — Which workflow is right for you
-- **[API Reference](api.md)** — Full CLI and configuration reference
-- **[Advanced Usage](advanced-usage.md)** — Dialects, schemas, pre-commit
+- **[Usage Patterns](patterns.md)** — Pick the right workflow: rewrite/strip, magic codec, schema inference
+- **[Examples](examples.md)** — Runnable projects, from simplest to most advanced
+- **[Advanced Usage](advanced-usage.md)** — Dialects, multiple schemas, pre-commit
+- **[Magic Codec](magic-codec.md)** — Import-time transformation
+- **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
+
+New here? Start with [Motivation](motivation.md).
+
+Contributing, testing, and architecture: see
+[DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md).
