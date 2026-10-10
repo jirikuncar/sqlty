@@ -6,7 +6,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 
 - Python 3.15+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) (optional — for compiling the native extension)
+- [Rust toolchain](https://rustup.rs/) (needed for the native extension and the `cargo-fmt` pre-commit hook)
 
 ## Setup
 
@@ -24,11 +24,8 @@ SQLTy includes an optional Rust extension (`sqlty._core`) for faster type infere
 When not compiled, the pure-Python fallback (`sqlty._core_py`) is used automatically.
 
 ```bash
-# Install maturin
-pip install maturin
-
-# Build and install the Rust extension into your venv
-maturin develop
+# maturin is installed by `uv sync --all-groups`
+uv run maturin develop
 ```
 
 To verify the Rust extension is loaded:
@@ -51,8 +48,8 @@ This ensures code is formatted and checked before each commit.
 - **Ruff**: Code formatting and linting with automatic fixes
 - **uv-lock**: Keeps the lockfile up to date
 - **mypy** and **ty**: Type checking for `src/`
-- **sqlty-check** / **sqlty-rewrite**: Verify and rewrite example files
-- **cargo-fmt**: `cargo fmt --check` for the Rust backend
+- **sqlty-check** / **sqlty-rewrite**: lint `examples/` and rewrite their `--sql` strings in place (`magic_codec/` excluded)
+- **cargo-fmt**: `cargo fmt --check` for the Rust backend (requires `cargo`)
 
 To manually run all pre-commit hooks:
 
