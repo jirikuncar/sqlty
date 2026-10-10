@@ -83,7 +83,6 @@ comments in Python code blocks are compared against computed values.
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
 | Magic codec | `tests/mdtest/codec/` | `basic_codec.md` |
-| Type codecs | `tests/mdtest/type_codec/` | `tuple_codec.md` |
 
 ### Writing a new test
 
@@ -219,7 +218,6 @@ src/sqlty/
 ├── _sql_analyzer.py     # SQL parsing + type inference (sqlglot)
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _checker.py          # Column validation, SELECT * detection
-├── _type_codec.py       # TypeCodec protocol + TupleCodec
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, version
 └── magic.py             # Python codec registration

@@ -1,6 +1,6 @@
-# TupleCodec (Default)
+# Row Tuples
 
-The default codec formats column types as `tuple[T, ...]`.
+Rows are typed as `tuple[T, ...]`, one element per column.
 
 ## Single column produces single-element tuple
 
@@ -36,19 +36,4 @@ FROM products
 
 ```python
 # inferred: tuple[int, str, float, bool, datetime.datetime]
-```
-
-## Explicit codec = "tuple" in config
-
-```toml
-[sqlty]
-codec = "tuple"
-```
-
-```sql
-SELECT id::INTEGER, name::TEXT FROM users
-```
-
-```python
-# inferred: tuple[int, str]
 ```

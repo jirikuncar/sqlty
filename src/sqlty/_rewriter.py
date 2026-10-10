@@ -20,7 +20,6 @@ import re
 from dataclasses import dataclass, field
 
 from sqlty._sql_analyzer import SQLAnalyzer
-from sqlty._type_codec import TypeCodec
 
 
 @dataclass(frozen=True)
@@ -121,7 +120,6 @@ class SQLRewriter:
     Args:
         dialect: SQL dialect for type inference (default: "postgres")
         schema_path: Optional path to schema file for schema-aware inference
-        codec: Optional TypeCodec for custom type formatting
         import_style: Import style string (e.g. ``"from sqlty import SQL as Q"``).
             Controls the import line injected and the wrapper prefix.
             See :class:`ImportStyle` for supported forms.
@@ -133,7 +131,6 @@ class SQLRewriter:
         self,
         dialect: str = "postgres",
         schema_path: str | None = None,
-        codec: TypeCodec | None = None,
         import_style: str | None = None,
         untyped: bool = False,
     ) -> None:
@@ -143,7 +140,6 @@ class SQLRewriter:
             dialect=dialect,
             schema_path=Path(schema_path) if schema_path else None,
         )
-        self._codec = codec
         self._import_style = (
             ImportStyle.parse(import_style) if import_style else ImportStyle.default()
         )
@@ -162,7 +158,7 @@ class SQLRewriter:
         - ``--sql SELECT ...``  → entire line is a SQL comment → empty query.
         """
         try:
-            result = self._analyzer.generate_return_type(_query(sql_content), codec=self._codec)
+            result = self._analyzer.generate_return_type(_query(sql_content))
             return result if result else "Any"
         except Exception:
             return "Any"

@@ -120,7 +120,6 @@ SQLTy uses a snapshot-based markdown test framework inspired by [ty's mdtest](ht
 tests/mdtest/
   type_inference/   # basic types, datetime, uuid, dialects, schema inference
   postgres/         # SELECT, RETURNING, CTE, JSON, aggregates, star expansion, advanced
-  type_codec/       # TypeCodec protocol: tuple codec, custom codecs
   rewrite/          # basic, edge cases, import injection, idempotency, multiline
   strip/            # basic, round-trip, idempotency, import removal
   check/            # star expansion, type annotation, lint rule config
@@ -172,7 +171,6 @@ uv run ruff check --fix .
 | `_core.pyi` | Type stubs for the Rust extension module |
 | `_cli.py` | ruff-style CLI: `rewrite`, `strip`, `check`, `version` |
 | `_sql_analyzer.py` | SQL parsing, type inference, star expansion (sqlglot-based) |
-| `_type_codec.py` | TypeCodec protocol + TupleCodec default |
 | `_rewriter.py` | Source-level rewrite/strip (`"--sql ..."` <-> `SQL[T](...)`) |
 | `_lint.py` | 7 lint rules with ty-style severity (error/warn/ignore) |
 | `_checker.py` | Column count/type/name validation, SELECT * detection |

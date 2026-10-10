@@ -14,10 +14,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, assert_never
-
-if TYPE_CHECKING:
-    from sqlty._type_codec import TypeCodec
+from typing import Literal, assert_never
 
 AssertionKind = Literal[
     "inferred",
@@ -147,54 +144,18 @@ class MDTestCase:
 
         analyzer = SQLAnalyzer(dialect=dialect, schema_path=schema_path)
 
-        # Build codec from config if specified
-        codec: TypeCodec | None = None
-        codec_config = sqlty_config.get("codec")
-        if codec_config:
-            codec = self._build_codec(codec_config)
-
         # Use the last SQL block as the query
         if not self.sql_blocks:
             return "None"
 
         sql = self.sql_blocks[-1]
-        result = analyzer.generate_return_type(sql, codec=codec)
+        result = analyzer.generate_return_type(sql)
 
         # Clean up temp schema file
         if schema_path and schema_path.exists():
             schema_path.unlink()
 
         return str(result) if result is not None else "None"
-
-    @staticmethod
-    def _build_codec(codec_config: dict | str) -> TypeCodec | None:
-        """Build a TypeCodec from TOML config.
-
-        Supports:
-            codec = "tuple"                    → TupleCodec (default)
-            codec = {template = "list[{types}]"}  → TemplateCodec
-        """
-        from sqlty._type_codec import TupleCodec
-
-        if isinstance(codec_config, str):
-            if codec_config == "tuple":
-                return TupleCodec()
-            return None
-
-        if isinstance(codec_config, dict):
-            template = codec_config.get("template")
-            if template:
-                # Inline template codec for testing custom formats
-                class _TemplateCodec:
-                    def __init__(self, tmpl: str) -> None:
-                        self._template = tmpl
-
-                    def format_type(self, column_types: list[str]) -> str:
-                        return self._template.replace("{types}", ", ".join(column_types))
-
-                return _TemplateCodec(template)
-
-        return None
 
     def _build_rewriter(self):
         """Build an SQLRewriter from test case config."""
@@ -213,18 +174,12 @@ class MDTestCase:
             tmp.write_text(self.files[schema_file])
             schema_path_str = str(tmp)
 
-        codec = None
-        codec_config = sqlty_config.get("codec")
-        if codec_config:
-            codec = self._build_codec(codec_config)
-
         # Handle import-style config
         import_style = sqlty_config.get("import-style")
 
         return SQLRewriter(
             dialect=dialect,
             schema_path=schema_path_str,
-            codec=codec,
             import_style=import_style,
             untyped=sqlty_config.get("untyped") == "sentinel",
         )
