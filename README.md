@@ -300,9 +300,9 @@ Browse `tests/mdtest/` to see behavior specified as readable markdown test suite
 ## Documentation
 
 - **[User Guide](docs/index.md)** — complete guide with examples
-- **[API Reference](docs/api.md)** — CLI, types, configuration, lint rules
-- **[Usage Patterns](docs/patterns.md)** — rewrite/strip, magic codec, schema inference
-- **[Advanced Usage](docs/advanced-usage.md)** — dialects, multiple schemas, pre-commit
+- **[Reference](docs/reference/cli.md)** — CLI, configuration, lint rules, Python API
+- **[Quickstart](docs/quickstart.md)** — rewrite/check/strip, pre-commit
+- **[Schema Inference](docs/guide/schema-inference.md)** — schemas and dialects
 
 ## Contributing
 

@@ -3,7 +3,7 @@
 The magic codec rewrites `--sql` strings when Python reads a source file, so
 the module runs with `SQL[T](...)` wrappers without a `sqlty rewrite` step.
 It is meant for scripts, notebooks and prototypes. For code you commit, run
-[`sqlty rewrite`](../index.md#quick-start) so type checkers see the types too: they
+[`sqlty rewrite`](../quickstart.md) so type checkers see the types too: they
 read the file on disk, not the decoded source.
 
 ## Usage
@@ -89,9 +89,9 @@ print(source)
 
 ## Configuration
 
-The codec uses the PostgreSQL dialect and no schema, so columns need explicit
-casts. It reads only `import-style` from the `pyproject.toml` found from the
-current working directory (see [Configuration](../api.md#configuration)).
+The codec uses the PostgreSQL dialect and no schema, so cast every column;
+an uncast column is typed `str`. It reads only `import-style` from the `pyproject.toml` found from the
+current working directory (see [Configuration](../reference/configuration.md#import-style)).
 
 ## Example
 
