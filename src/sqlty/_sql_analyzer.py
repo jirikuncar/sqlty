@@ -4,7 +4,7 @@ SQL analysis utilities using sqlglot to extract column and type information.
 
 import re
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from sqlglot import exp, parse
 from sqlglot.dialects.dialect import Dialect
@@ -12,6 +12,7 @@ from sqlglot.dialects.mysql import MySQL
 from sqlglot.dialects.postgres import Postgres
 from sqlglot.dialects.sqlite import SQLite
 from sqlglot.errors import ParseError
+from sqlglot.parser import Parser
 from sqlglot.tokens import TokenType
 
 from sqlty._type_codec import TupleCodec, TypeCodec
@@ -272,6 +273,8 @@ class SQLAnalyzer:
                 return None, "float"
             case exp.Sum() | exp.Min() | exp.Max():
                 return self._infer_aggregate(expr, scope)
+            case exp.Anonymous(this=exp.Identifier(quoted=True)):
+                return None, None
             case exp.Func():
                 name = expr.name if isinstance(expr, exp.Anonymous) else expr.sql_name()  # type: ignore[no-untyped-call]
                 return None, _FUNCTION_TYPES.get(name.upper())
@@ -421,9 +424,37 @@ _FUNCTION_TYPES = {
 }
 
 
-class _MySQL(MySQL):
-    """MySQL as sqlparser-rs reads it: spatial types, ``INT3``, ``INT SIGNED``, ``FLOAT UNSIGNED``."""
+# The overrides below rely on private sqlglot parser APIs: ``_parse_types``,
+# ``_parse_function_call``, ``_parse_number``, ``_tokens``, ``_curr``, ``_index``,
+# ``_retreat``, ``_match`` and ``_match_text_seq``, plus the ``schema`` and
+# ``anonymous`` keyword arguments. Recheck them when raising the sqlglot upper
+# bound in pyproject.toml.
 
+_UNSIGNED_TYPES = {
+    **Parser.SIGNED_TO_UNSIGNED_TYPE_TOKEN,
+    TokenType.FLOAT: TokenType.UDOUBLE,
+}
+
+
+class _QuotedFunctionNames(Parser):
+    """Read a quoted name such as ``"CAST"(x)`` as a plain call, as sqlparser-rs does."""
+
+    def _parse_function_call(self, *args: Any, **kwargs: Any) -> exp.Expression | None:
+        if self._curr and self._curr.token_type == TokenType.IDENTIFIER:
+            kwargs["anonymous"] = True
+        return super()._parse_function_call(*args, **kwargs)
+
+
+class _MySQL(MySQL):
+    """MySQL read the way sqlparser-rs reads it.
+
+    ``INT3``/``MIDDLEINT`` are ``MEDIUMINT`` and ``INT8`` is ``BIGINT``; a trailing
+    ``SIGNED`` is accepted; ``FLOAT UNSIGNED`` is ``UDOUBLE``; spatial types are
+    user-defined types; ``INT[]``, ``NUMERIC ... UNSIGNED`` and ``FIXED ... UNSIGNED``
+    are rejected.
+    """
+
+    # MySQL's CAST takes a fixed list of types; accepting any name matches sqlparser-rs.
     SUPPORTS_USER_DEFINED_TYPES = True
 
     class Tokenizer(MySQL.Tokenizer):
@@ -434,52 +465,57 @@ class _MySQL(MySQL):
             "INT8": TokenType.BIGINT,
         }
 
-    class Parser(MySQL.Parser):
-        SIGNED_TO_UNSIGNED_TYPE_TOKEN = {
-            **MySQL.Parser.SIGNED_TO_UNSIGNED_TYPE_TOKEN,
-            TokenType.FLOAT: TokenType.UDOUBLE,
-        }
+    class Parser(_QuotedFunctionNames, MySQL.Parser):
+        SIGNED_TO_UNSIGNED_TYPE_TOKEN = _UNSIGNED_TYPES
 
-        def _parse_types(
-            self, check_func: bool = False, schema: bool = False, allow_identifiers: bool = True
-        ) -> exp.Expression | None:
+        def _parse_types(self, *args: Any, **kwargs: Any) -> exp.Expression | None:
             start = self._index
-            this = super()._parse_types(check_func, schema, allow_identifiers)
+            this = super()._parse_types(*args, **kwargs)
             if not isinstance(this, exp.DataType):
                 return this
+            tokens = self._tokens[start : self._index]
             if this.is_type(exp.DataType.Type.ARRAY) and any(
-                token.token_type == TokenType.L_BRACKET
-                for token in self._tokens[start : self._index]
+                token.token_type == TokenType.L_BRACKET for token in tokens
             ):
                 self.raise_error("MySQL has no bracketed array types")
+            if this.is_type(exp.DataType.Type.UDECIMAL) and tokens[0].text.upper() in {
+                "NUMERIC",
+                "FIXED",
+            }:
+                self.raise_error("UNSIGNED applies to DECIMAL, not NUMERIC or FIXED")
             if this.is_type(*exp.DataType.NUMERIC_TYPES):
                 self._match_text_seq("SIGNED")  # type: ignore[no-untyped-call]
             return this
 
 
 class _SQLite(SQLite):
+    """SQLite with ``INT8`` as ``BIGINT`` and MySQL-style ``UNSIGNED``, as sqlparser-rs reads it."""
+
     class Tokenizer(SQLite.Tokenizer):
         KEYWORDS = {**SQLite.Tokenizer.KEYWORDS, "INT8": TokenType.BIGINT}
 
-    class Parser(SQLite.Parser):
-        SIGNED_TO_UNSIGNED_TYPE_TOKEN = _MySQL.Parser.SIGNED_TO_UNSIGNED_TYPE_TOKEN
+    class Parser(_QuotedFunctionNames, SQLite.Parser):
+        SIGNED_TO_UNSIGNED_TYPE_TOKEN = _UNSIGNED_TYPES
 
 
 class _Postgres(Postgres):
-    """PostgreSQL reading ``x::INT[3]`` and ``x::INT ARRAY[3]`` as casts to an array."""
+    """PostgreSQL with array casts read as sqlparser-rs reads them.
+
+    ``INT[3]`` comes from ``SUPPORTS_FIXED_SIZE_ARRAYS``; ``INT ARRAY`` and
+    ``INT ARRAY[3]`` anywhere in a list come from ``_parse_types``.
+    """
 
     SUPPORTS_FIXED_SIZE_ARRAYS = True
 
-    class Parser(Postgres.Parser):
-        def _parse_types(
-            self, check_func: bool = False, schema: bool = False, allow_identifiers: bool = True
-        ) -> exp.Expression | None:
-            this = super()._parse_types(check_func, schema, allow_identifiers)
-            if not isinstance(this, exp.DataType):
-                return this
+    class Parser(_QuotedFunctionNames, Postgres.Parser):
+        def _parse_types(self, *args: Any, **kwargs: Any) -> exp.Expression | None:
+            # schema=True would make sqlglot read `INT ARRAY, b INT` as INT[b INT].
+            this = super()._parse_types(*args, **{**kwargs, "schema": False})
             start = self._index
-            if not self._match_pair(TokenType.ARRAY, TokenType.L_BRACKET):  # type: ignore[no-untyped-call]
+            if not isinstance(this, exp.DataType) or not self._match(TokenType.ARRAY):  # type: ignore[no-untyped-call]
                 return this
+            if not self._match(TokenType.L_BRACKET):  # type: ignore[no-untyped-call]
+                return exp.DataType(this=exp.DataType.Type.ARRAY, expressions=[this], nested=True)
             size = self._parse_number()
             if size is None or not self._match(TokenType.R_BRACKET):  # type: ignore[no-untyped-call]
                 self._retreat(start)
@@ -500,19 +536,28 @@ _DIALECTS: dict[str, type[Dialect]] = {
 def _parse(sql: str, dialect: str) -> list[exp.Expression | None]:
     """Parse like sqlglot, but read types the way sqlparser-rs (the Rust backend) does.
 
-    A bare ``ARRAY`` type is rejected: PostgreSQL requires an element type
-    (``INT[]``, ``INT ARRAY``) and so does sqlparser-rs outside Snowflake.
+    In PostgreSQL, MySQL and SQLite, an ``ARRAY`` type needs an element type
+    (``INT[]``, ``INT ARRAY``) and a fixed size must be an integer literal
+    (``INT[3]``, not ``INT[n]``). Other dialects go to sqlglot unchanged.
 
     Raises:
         ParseError: ``sql`` is invalid or uses an unsupported type.
     """
-    statements = parse(sql, dialect=_DIALECTS.get(dialect.lower(), dialect))
+    known = _DIALECTS.get(dialect.lower())
+    statements = parse(sql, dialect=known or dialect)
+    if known is None:
+        return statements
     for statement in statements:
-        if statement and any(
-            dt.this == exp.DataType.Type.ARRAY and not dt.expressions
-            for dt in statement.find_all(exp.DataType)
-        ):
-            raise ParseError("ARRAY type needs an element type, e.g. INT[]")
+        for dt in statement.find_all(exp.DataType) if statement else ():
+            if dt.this != exp.DataType.Type.ARRAY:
+                continue
+            if not dt.expressions:
+                raise ParseError("ARRAY type needs an element type, e.g. INT[]")
+            if not all(
+                isinstance(size, exp.Literal) and size.is_int
+                for size in dt.args.get("values") or []
+            ):
+                raise ParseError("ARRAY size must be an integer literal, e.g. INT[3]")
     return statements
 
 
@@ -547,7 +592,7 @@ def _scope(relations: list[exp.Expression]) -> list[tuple[str, str]]:
 
 def _select_scope(select: exp.Select) -> list[tuple[str, str]]:
     """Scope of a SELECT: its FROM table, then joined tables."""
-    from_ = select.args.get("from")
+    from_ = select.args.get("from") or select.args.get("from_")  # sqlglot 30 renamed the key
     relations = [from_.this] if from_ else []
     return _scope(relations + [join.this for join in select.args.get("joins") or []])
 

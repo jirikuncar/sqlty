@@ -171,18 +171,38 @@ CLI flags override config file values.
 
 | SQL Type | Python Type | Import |
 |----------|-------------|--------|
-| `INTEGER`, `BIGINT`, `SMALLINT`, `INT` | `int` | Built-in |
+| `INTEGER`, `INT`, `BIGINT`, `SMALLINT`, `TINYINT`, `MEDIUMINT`, `YEAR` | `int` | Built-in |
+| `UTINYINT`, `USMALLINT`, `UMEDIUMINT`, `UINT`, `UBIGINT` (MySQL `... UNSIGNED`) | `int` | Built-in |
+| `SIGNED`, `UNSIGNED` (MySQL `CAST(x AS SIGNED)`) | `int` | Built-in |
 | `TEXT`, `VARCHAR`, `CHAR`, `STRING` | `str` | Built-in |
 | `BOOLEAN`, `BOOL` | `bool` | Built-in |
 | `FLOAT`, `DOUBLE`, `REAL` | `float` | Built-in |
-| `DECIMAL`, `NUMERIC` | `Decimal` | `from decimal import Decimal` |
+| `DECIMAL`, `NUMERIC` | `float` | Built-in |
+| `UDOUBLE`, `UDECIMAL` (MySQL `... UNSIGNED`) | `float` | Built-in |
 | `DATE` | `datetime.date` | `import datetime` |
 | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` | `import datetime` |
 | `TIME`, `TIMETZ` | `datetime.time` | `import datetime` |
 | `INTERVAL` | `datetime.timedelta` | `import datetime` |
-| `BYTEA`, `BLOB`, `BINARY` | `bytes` | Built-in |
-| `JSON`, `JSONB` | `Any` | `from typing import Any` |
+| `JSON`, `JSONB` | `dict` | Built-in |
 | `UUID` | `uuid.UUID` | `import uuid` |
+| Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list` | Built-in |
+| Anything else (`BYTEA`, `BLOB`, `ENUM`, ...) | `str` | Built-in |
+
+### Dialect notes
+
+Both backends read types the same way:
+
+- An array type needs an element type: `x::INT[]` is a `list`, but a bare
+  `x::ARRAY` is rejected and nothing is inferred. A fixed size must be an
+  integer literal (`INT[3]`, not `INT[n]`); the size itself is ignored.
+- MySQL has no `INT[]`; use `CAST(x AS UNSIGNED ARRAY)`.
+- In MySQL, `... UNSIGNED` becomes `U<type>` (`INT UNSIGNED` is `UINT`),
+  `FLOAT UNSIGNED` becomes `UDOUBLE`, and `INT3`/`MIDDLEINT` (`MEDIUMINT`) and
+  `INT8` (`BIGINT`) are aliases. `UNSIGNED` applies to `DECIMAL`/`DEC`, not to
+  `NUMERIC` or `FIXED`.
+- `SET(...)`, `SIGNED INTEGER` and `UNSIGNED INTEGER` are MySQL-only. In other
+  dialects they are rejected, and a schema `CREATE TABLE` that uses one is
+  skipped entirely, so `SELECT *` from that table cannot be expanded.
 
 ---
 

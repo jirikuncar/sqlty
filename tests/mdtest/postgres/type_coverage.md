@@ -140,6 +140,9 @@ SELECT tags::ARRAY FROM t
 
 ## MySQL-only types are invalid
 
+This file uses the default PostgreSQL dialect. Outside MySQL, `SET(...)` and
+`UNSIGNED INTEGER` are parse errors, so nothing is inferred.
+
 ```sql
 SELECT CAST(flags AS SET('x', 'y')), CAST(n AS UNSIGNED INTEGER) FROM t
 ```

@@ -79,8 +79,11 @@ Use PostgreSQL-style `::TYPE` casts to declare column types:
 | `::TIME` | `datetime.time` | `import datetime` |
 | `::INTERVAL` | `datetime.timedelta` | `import datetime` |
 | `::UUID` | `uuid.UUID` | `import uuid` |
-| `::JSON`, `::JSONB` | `Any` | `from typing import Any` |
-| `::BYTEA` | `bytes` | Built-in |
+| `::JSON`, `::JSONB` | `dict` | Built-in |
+| `::INT[]`, `::TEXT[]` | `list` | Built-in |
+
+`::INT[3]` is also a `list` cast (the size is ignored); a bare `::ARRAY` without an
+element type is invalid. Types sqlty does not map, such as `::BYTEA`, become `str`.
 
 ### Schema-Based Inference
 

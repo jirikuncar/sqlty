@@ -236,6 +236,8 @@ DELETE FROM users WHERE id = 1 RETURNING *
 
 ## MERGE RETURNING
 
+`MERGE ... RETURNING` needs PostgreSQL 17 or later.
+
 ```sql
 MERGE INTO users u USING staged s ON u.id = s.id
 WHEN MATCHED THEN UPDATE SET name = s.name
