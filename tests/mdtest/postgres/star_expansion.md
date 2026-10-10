@@ -159,3 +159,104 @@ schema = "schema.sql"
 SELECT *, id::INTEGER + 1 AS next_id FROM users
 -- expanded: SELECT id::INT, name::TEXT, id::INTEGER + 1 AS next_id FROM users
 ```
+
+## `expand_star`
+
+### Expands with schema
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```sql
+SELECT * FROM users
+-- expanded: SELECT id::INT, name::TEXT FROM users
+```
+
+### Non star returns none
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```sql
+SELECT id FROM users
+-- expanded: None
+```
+
+### Returns str or none
+
+```sql
+SELECT * FROM t
+-- expanded: None
+```
+
+## Former backend divergences
+
+### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...`
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);
+```
+
+```sql
+SELECT * FROM users
+-- expanded: SELECT id::INT, name::TEXT, score::DECIMAL(10, 2) FROM users
+```
+
+### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...` (2)
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);
+```
+
+```sql
+SELECT o.*, 1 AS one FROM orders o
+-- expanded: SELECT oid::INT, user_id::INT, placed::TIMESTAMPTZ, 1 AS one FROM orders o
+```
+
+### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...` (3)
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);
+```
+
+```sql
+SELECT * FROM users, audit_log
+-- expanded: None
+```

@@ -18,8 +18,10 @@ import pytest
 from _pytest._code.code import TerminalRepr, TracebackStyle
 
 from .parser import ParseError, Section, parse
-from .runner import MDTestFailure, Run, backend
 from .updater import Updater
+
+# sqlty is imported lazily (runner) so coverage, which starts after -p plugins
+# load, sees its module-level lines.
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -109,6 +111,8 @@ class MDTestItem(pytest.Item):
             self.add_marker(pytest.mark.xfail(reason=section.directives["xfail"], strict=True))
 
     def runtest(self) -> None:
+        from .runner import Run, backend
+
         run = Run(self.section, self.updater)
         if self.backend is None:
             run.run()
@@ -119,6 +123,8 @@ class MDTestItem(pytest.Item):
     def repr_failure(
         self, excinfo: pytest.ExceptionInfo[BaseException], style: TracebackStyle | None = None
     ) -> str | TerminalRepr:
+        from .runner import MDTestFailure
+
         if isinstance(excinfo.value, MDTestFailure):
             return f"{excinfo.value}\n\nrerun: uv run pytest '{self.nodeid}'"
         return super().repr_failure(excinfo, style)

@@ -65,7 +65,7 @@ SQLTy has three test layers:
 
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
-| **Unit** | `tests/sql_analyzer/`, `tests/generator/`, etc. | Internal modules | `pytest` |
+| **Unit** | `tests/test_core_invariants.py`, `tests/generator/`, etc. | Invariants over the mdtest corpus, backend parity, stubs | `pytest` |
 | **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint — on both backends | `tests/_mdtest` plugin |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
 

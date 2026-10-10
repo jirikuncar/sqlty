@@ -197,7 +197,7 @@ def test_ignored_and_prose_blocks(tmp_path: Path) -> None:
             "invalid rule setting nope = 'warn'",
         ),
         ("## A\n\n<!-- mdtest:nope -->\n", "unknown directive mdtest:nope"),
-        ("## A\n\n```py\n# inferred: x\n```\n", "write `-- inferred:`"),
+        ("## A\n\n```py\n# inferred: x\n```\n", "write `-- inferred:` inside the sql block"),
         ("## A\n\n```py\nx = 1\n# error: [r]\n```\n", "`# error:` has no code line below it"),
         ("## A\n\n```py\n", "unclosed code block"),
         (

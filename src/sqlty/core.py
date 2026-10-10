@@ -9,8 +9,8 @@ Backend selection via ``SQLTY_LIB`` environment variable:
 - ``SQLTY_LIB=rs``  — force the Rust backend (``_core``); fails if not compiled
 - unset (default)   — auto: use Rust if available, otherwise Python
 
-Both implementations must satisfy the same API contract
-(see ``tests/test_core_conformance.py``).
+Both implementations must satisfy the same API contract: every mdtest runs on
+each, and ``tests/test_core_invariants.py`` compares them.
 
 ``check_source`` is wrapped to add Python-side user-defined type checking
 (TypedDict, NamedTuple, dataclass, Pydantic) on top of whichever backend

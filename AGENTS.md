@@ -136,6 +136,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 |-----------|-------|---------------|
 | `-- inferred:` | in the `sql` block | `core.infer_type()` |
 | `-- expanded:` | in the `sql` block | `core.expand_star()` |
+| `-- columns:` | in the `sql` block | `SQLAnalyzer.analyze_select()`: `name: type (SQL_TYPE)` per line |
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
@@ -191,6 +192,8 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 ### README and docs
 
 - README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
+- `tests/test_core_invariants.py` checks idempotency, round trip and backend agreement
+  over every mdtest code block: new mdtests extend it automatically.
 - `docs/rules.md` and `docs/reference/cli.md` are generated; `tests/test_docs.py`
   checks them, relative links, and that `examples/` need no rewrite. Regenerate
   with `uv run pytest tests/test_docs.py --update-mdtest`.

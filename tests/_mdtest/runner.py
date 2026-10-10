@@ -76,6 +76,14 @@ class Run:
                 return str(
                     core.expand_star(query, dialect=self.dialect, schema_sql=self.schema_sql)
                 )
+            case "columns":
+                from sqlty._core_py import _make_analyzer
+
+                analyzer = _make_analyzer(self.dialect, self.schema_sql)
+                columns = analyzer.analyze_select(self.section.query)
+                if columns is None:
+                    return "None"
+                return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
             case "rewritten":
                 return _without_imports(self._rewritten, self._imports).strip()
             case "rewritten-file":

@@ -1,5 +1,13 @@
 # Plan: Documentation as Tests (ty mdtest pattern)
 
+> **Status: done.** Deviations from the plan below:
+> - Code before sub-headings is allowed (docs need it); code is never inherited, so ty's rule bought nothing.
+> - Rule pages live in `src/sqlty/rules/` to ship in the wheel; `sqlty rule NAME` (ruff's `ruff rule`) instead of `check --explain`.
+> - New `-- columns:` assertion for `SQLAnalyzer.analyze_select()` (names and SQL types).
+> - Custom tests were migrated by tracing their `sqlty` calls; what remains is `tests/test_core_invariants.py`
+>   (idempotency, round trip and backend agreement over the whole Markdown corpus, plus exceptions, CRLF, timing).
+> - Coverage of `src/sqlty` is unchanged (73%, no line lost); 288 Python tests became Markdown sections.
+
 Goal: one Markdown corpus that is both the user documentation and the
 behavioral specification, executed by a single pytest plugin against both
 backends. Custom Python tests shrink to what Markdown cannot express.

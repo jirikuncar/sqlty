@@ -14,20 +14,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast, get_args
 
-from sqlty._lint import RULES, Severity
-
 Kind = Literal[
     "inferred",
     "expanded",
+    "columns",
     "rewritten",
     "rewritten-file",
     "stripped",
     "error",
     "decoded",
 ]
-SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded")
+SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns")
 PY_KINDS: tuple[Kind, ...] = ("rewritten", "rewritten-file", "stripped", "error", "decoded")
-BACKEND_KINDS = frozenset(get_args(Kind)) - {"decoded"}
+BACKEND_KINDS = frozenset(get_args(Kind)) - {"decoded", "columns"}
 DIRECTIVES = frozenset({"skip", "xfail", "backend"})
 CONFIG_KEYS = frozenset(
     {
@@ -44,7 +43,7 @@ CONFIG_KEYS = frozenset(
 
 _PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)}):(?: (.*))?$")
 _SQL_ASSERTION = re.compile(rf"^(\s*)--\s+({'|'.join(SQL_KINDS)}):(?: (.*))?$")
-_MISPLACED = re.compile(r"^\s*#\s+(inferred|expanded):")
+_MISPLACED = re.compile(rf"^\s*#\s+({'|'.join(SQL_KINDS)}):")
 _TRAILING_ERROR = re.compile(r"^(.*?\S)\s+#\s+error:(?: (.*))?$")
 _FENCE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([\w+-]*)\s*(.*)$")
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -225,7 +224,7 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
             _append(section.assertions, assertion)
             continue
         if _MISPLACED.match(text):
-            raise fail(md, "write `-- inferred:`/`-- expanded:` inside the sql block")
+            raise fail(md, f"write `-- {text.split()[1]}` inside the sql block")
         if match := _TRAILING_ERROR.match(text):
             code, value = match.groups()
             section.assertions.append(
@@ -276,6 +275,8 @@ def _append(assertions: list[Assertion], new: Assertion) -> None:
 
 
 def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
+    from sqlty._lint import RULES, Severity
+
     try:
         config = tomllib.loads(content)
     except tomllib.TOMLDecodeError as e:
@@ -295,7 +296,7 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
 def _validate(section: Section, fail: Fail) -> None:
     kinds = {a.kind for a in section.assertions}
     if kinds & set(SQL_KINDS) and section.sql_blocks != 1:
-        raise fail(section.line, "`-- inferred:`/`-- expanded:` need exactly one sql block")
+        raise fail(section.line, "sql assertions need exactly one sql block")
     if kinds & set(PY_KINDS) and not section.python:
         raise fail(section.line, "python assertions need a python block")
     schema = section.settings.get("schema")
