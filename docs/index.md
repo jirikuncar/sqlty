@@ -241,12 +241,13 @@ See [magic codec documentation](magic-codec.md) for setup.
 
 ## Next Steps
 
-1. **[Motivation](motivation.md)** — Understand the problem and when SQLTy helps
-2. **[Installation](installation.md)** — Setup (Python 3.15+)
-3. **[Usage Patterns](patterns.md)** — Pick the right workflow: rewrite/strip, magic codec, schema inference
-4. **[Advanced Usage](advanced-usage.md)** — Dialects, multiple schemas, pre-commit
-5. **[Magic Codec](magic-codec.md)** — Import-time transformation
-6. **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
+- **[Usage Patterns](patterns.md)** — Pick the right workflow: rewrite/strip, magic codec, schema inference
+- **[Examples](examples.md)** — Runnable projects, from simplest to most advanced
+- **[Advanced Usage](advanced-usage.md)** — Dialects, multiple schemas, pre-commit
+- **[Magic Codec](magic-codec.md)** — Import-time transformation
+- **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
+
+New here? Start with [Motivation](motivation.md).
 
 Contributing, testing, and architecture: see
 [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md).

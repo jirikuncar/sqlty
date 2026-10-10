@@ -7,6 +7,7 @@ repo_name = "jirikuncar/sqlty"
 edit_uri = "edit/main/docs/"
 docs_dir = "docs"
 site_dir = "site"
+# Abort `zensical build` on warnings (broken links/anchors are validated by default)
 strict = true
 nav = [
   { "User Guide" = "index.md" },
@@ -19,12 +20,9 @@ nav = [
   { "API Reference" = "api.md" },
 ]
 
-[project.validation]
-invalid_links = true
-invalid_link_anchors = true
-
 [project.theme]
 features = [
+  "content.action.edit",
   "content.code.copy",
   "navigation.footer",
   "navigation.instant",

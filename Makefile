@@ -2,7 +2,7 @@
 # magic_codec uses "# coding: sqlty" which type checkers cannot decode
 EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*" ! -name "magic_codec")
 
-# Zensical is pinned here and in .github/workflows/docs.yml, outside the project dependency groups
+# Zensical is pinned only here (CI runs `make docs`), outside the project dependency groups
 ZENSICAL := uvx --python 3.13 zensical@0.0.65
 
 # Get the absolute path to the repository root
@@ -32,7 +32,7 @@ help:
 	@echo "  bench             - Run Python vs Rust benchmarks"
 	@echo ""
 	@echo "Docs:"
-	@echo "  docs              - Build the docs site in strict mode (output: site/)"
+	@echo "  docs              - Build the docs site, strict via zensical.toml (output: site/)"
 	@echo "  docs-serve        - Serve the docs locally with live reload"
 	@echo ""
 	@echo "Examples:"
@@ -114,7 +114,7 @@ bench:
 
 .PHONY: docs
 docs:
-	$(ZENSICAL) build --strict --clean
+	$(ZENSICAL) build --clean
 
 .PHONY: docs-serve
 docs-serve:
