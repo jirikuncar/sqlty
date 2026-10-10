@@ -166,6 +166,7 @@ def check_source(
     """
     import re
 
+    from sqlty._core_py import _logical_lines
     from sqlty._rewriter import ImportStyle
     from sqlty._type_extractor import extract_type_definitions
 
@@ -184,8 +185,8 @@ def check_source(
     # Find all non-tuple {wrapper_name}[T](...) annotations — these need special handling
     # because stale-type always fires for non-tuple types ("User" != "tuple[int, str]")
     non_tuple_lines: set[int] = set()
-    for i, line in enumerate(source.splitlines(), 1):
-        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line.strip())
+    for i, line in _logical_lines(source, wrapper_name):
+        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line)
         if type_match:
             annotated_type = type_match.group(1)
             if not annotated_type.startswith("tuple["):
@@ -237,6 +238,7 @@ def _enhance_with_user_type_checks(
     """
     import re
 
+    from sqlty._core_py import _logical_lines
     from sqlty._lint import RuleConfig
     from sqlty._sql_analyzer import SQLAnalyzer
 
@@ -244,10 +246,10 @@ def _enhance_with_user_type_checks(
 
     # Build map of lines with user-type annotations found in source
     user_type_lines: dict[int, tuple[str, TypeInfo]] = {}
-    for i, line in enumerate(source.splitlines(), 1):
+    for i, line in _logical_lines(source, wrapper_name):
         if i not in non_tuple_lines:
             continue
-        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line.strip())
+        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line)
         if type_match:
             annotated_type = type_match.group(1)
             if annotated_type in type_defs:
@@ -275,12 +277,11 @@ def _enhance_with_user_type_checks(
     try:
         analyzer = SQLAnalyzer(dialect=dialect, schema_path=schema_path)
 
-        for i, line in enumerate(source.splitlines(), 1):
+        for i, stripped in _logical_lines(source, wrapper_name):
             if i not in user_type_lines:
                 continue
 
             type_name, type_info = user_type_lines[i]
-            stripped = line.strip()
 
             # Extract SQL content from wrapper
             sql_match = re.search(

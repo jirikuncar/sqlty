@@ -157,9 +157,7 @@ def check_source(
 
     diagnostics: list[dict[str, str | int | None]] = []
 
-    for i, line in enumerate(source.splitlines(), 1):
-        line_stripped = line.strip()
-
+    for i, line_stripped in _logical_lines(source, wrapper_name):
         if skipped := skipped_string_rule(line_stripped):
             if rule_config.is_enabled(skipped):
                 diagnostics.append(
@@ -324,6 +322,28 @@ def _has_inline_sql_comment(line: str) -> bool:
     ``"--sql\\nSELECT ..."`` where the actual SQL starts on the next line.
     """
     return bool(re.search(r"""["']--sql [^\\]""", line))
+
+
+def _logical_lines(source: str, wrapper_name: str) -> list[tuple[int, str]]:
+    """Stripped lines, with a wrapper split by a formatter joined onto its first line.
+
+    Example:
+        >>> _logical_lines('q = SQL[tuple[int]](\\n    "--sql\\\\nSELECT 1"\\n)', "SQL")
+        [(1, 'q = SQL[tuple[int]]("--sql\\\\nSELECT 1")')]
+    """
+    opener = re.compile(rf"{re.escape(wrapper_name)}\[.*\]\($")
+    lines = [line.strip() for line in source.splitlines()]
+    result: list[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if opener.search(line) and i + 2 < len(lines) and lines[i + 2].startswith(")"):
+            result.append((i + 1, line + lines[i + 1].rstrip(",") + lines[i + 2]))
+            i += 3
+            continue
+        result.append((i + 1, line))
+        i += 1
+    return result
 
 
 def _is_unwrapped_sql_string(line: str, wrapper_name: str = "SQL") -> bool:

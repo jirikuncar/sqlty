@@ -125,9 +125,8 @@ pub fn check_source(
     let unwrapped_pat = unwrapped_sql_pattern();
     let inline_pat = inline_sql_comment_pattern();
 
-    for (i, line) in source.lines().enumerate() {
-        let line_num = i + 1;
-        let trimmed = line.trim();
+    for (line_num, logical) in logical_lines(source, &wrapper_name) {
+        let trimmed = logical.as_str();
 
         if let Some(rule) = skipped_string_rule(trimmed) {
             if rule_config.is_enabled(rule) {
@@ -256,6 +255,25 @@ pub fn check_source(
 /// Check if a line has `"--sql SELECT ..."` (space after --sql, not \n).
 fn has_inline_sql_comment(line: &str, pattern: &Regex) -> bool {
     pattern.is_match(line)
+}
+
+/// Stripped lines, with a wrapper split by a formatter joined onto its first line.
+fn logical_lines(source: &str, wrapper_name: &str) -> Vec<(usize, String)> {
+    let opener = Regex::new(&format!(r"{}\[.*\]\($", regex::escape(wrapper_name))).unwrap();
+    let lines: Vec<&str> = source.lines().map(str::trim).collect();
+    let mut result = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        if opener.is_match(lines[i]) && i + 2 < lines.len() && lines[i + 2].starts_with(')') {
+            let inner = lines[i + 1].trim_end_matches(',');
+            result.push((i + 1, format!("{}{}{}", lines[i], inner, lines[i + 2])));
+            i += 3;
+            continue;
+        }
+        result.push((i + 1, lines[i].to_string()));
+        i += 1;
+    }
+    result
 }
 
 /// Check if a line contains an unwrapped --sql string (not in wrapper).
