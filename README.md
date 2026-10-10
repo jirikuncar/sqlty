@@ -99,8 +99,8 @@ class Metrics(TypedDict, extra_items=int):
     day: ReadOnly[str]
     note: NotRequired[str]
 
-query = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, ratio::FLOAT FROM stats")
 # error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
+query = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, ratio::FLOAT FROM stats")
 ```
 
 Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.

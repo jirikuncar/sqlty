@@ -12,17 +12,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM users
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT, email::VARCHAR(255) FROM users
+-- expanded: SELECT id::INT, name::TEXT, email::VARCHAR(255) FROM users
 ```
 
 ## Qualified star — table prefix
@@ -36,27 +33,21 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT users.* FROM users
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT FROM users
+-- expanded: SELECT id::INT, name::TEXT FROM users
 ```
 
 ## No schema — returns None
 
 ```sql
 SELECT * FROM users
-```
-
-```python
-# expanded: None
+-- expanded: None
 ```
 
 ## No star — returns None
@@ -70,17 +61,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT id::INTEGER, name::TEXT FROM users
-```
-
-```python
-# expanded: None
+-- expanded: None
 ```
 
 ## Table alias with qualified star
@@ -94,17 +82,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT u.* FROM users u
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT FROM users u
+-- expanded: SELECT id::INT, name::TEXT FROM users u
 ```
 
 ## Multi-table star expansion
@@ -123,17 +108,14 @@ CREATE TABLE orders (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM users, orders
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT, order_id::INT, amount::DECIMAL FROM users, orders
+-- expanded: SELECT id::INT, name::TEXT, order_id::INT, amount::DECIMAL FROM users, orders
 ```
 
 ## Unknown table — returns None
@@ -147,17 +129,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM unknown_table
-```
-
-```python
-# expanded: None
+-- expanded: None
 ```
 
 ## Other projections are kept verbatim
@@ -171,15 +150,12 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT *, id::INTEGER + 1 AS next_id FROM users
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT, id::INTEGER + 1 AS next_id FROM users
+-- expanded: SELECT id::INT, name::TEXT, id::INTEGER + 1 AS next_id FROM users
 ```

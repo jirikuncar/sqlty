@@ -7,22 +7,21 @@ make the row type known.
 ## SQL[UNTYPED] is flagged
 
 ```python
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ```
 
 ## Inferable query suggests the row type
 
 ```python
-q = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
 # error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
+q = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Rule can be ignored
 
 ```toml
-[sqlty]
-[sqlty.rules]
+[tool.sqlty.rules]
 untyped-query = "ignore"
 ```
 
@@ -34,13 +33,13 @@ q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ## Module import style
 
 ```toml
-[sqlty]
+[tool.sqlty]
 import-style = "import sqlty"
-[sqlty.rules]
+[tool.sqlty.rules]
 untyped-query = "warn"
 ```
 
 ```python
-q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
 # error: [untyped-query] "sqlty.SQL[sqlty.UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
 ```

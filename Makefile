@@ -83,7 +83,7 @@ test-unit:
 
 .PHONY: test-mdtest
 test-mdtest:
-	uv run pytest tests/mdtest/ -v
+	uv run pytest tests/mdtest/ README.md -v
 
 .PHONY: test-e2e
 test-e2e:
@@ -95,7 +95,7 @@ test-coverage:
 
 .PHONY: update-mdtest
 update-mdtest:
-	uv run pytest tests/mdtest/ --update-mdtest -v
+	uv run pytest tests/mdtest/ README.md --update-mdtest -v
 
 # --- Benchmarks ---
 

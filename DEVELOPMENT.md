@@ -66,7 +66,7 @@ SQLTy has three test layers:
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
 | **Unit** | `tests/sql_analyzer/`, `tests/generator/`, etc. | Internal modules | `pytest` |
-| **mdtest** | `tests/mdtest/*.md` | Type inference, rewrite, strip, lint | Markdown snapshot engine |
+| **mdtest** | `tests/mdtest/*.md`, `README.md` | Type inference, rewrite, strip, lint — on both backends | `tests/_mdtest` plugin |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
 
 ### Make targets
@@ -88,7 +88,7 @@ make bench          # Python vs Rust backend benchmarks
 uv run pytest
 
 # Specific test layer
-uv run pytest tests/mdtest/ -v
+uv run pytest tests/mdtest/ README.md -v
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest
 uv run pytest tests/e2e/ -v
 
@@ -99,20 +99,7 @@ uv run pytest tests/mdtest/type_inference/basic_types.md -v
 
 ### Markdown Tests (mdtest)
 
-SQLTy uses a snapshot-based markdown test framework inspired by [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md). Each `.md` file in `tests/mdtest/` is a test suite; each heading is a test case.
-
-**Assertion types:**
-
-| Prefix | What it tests |
-|--------|-------------|
-| `# inferred:` | Type inference via `SQLAnalyzer.generate_return_type()` |
-| `# rewritten:` | Source rewriting via `SQLRewriter.rewrite()` |
-| `# stripped:` | Source stripping via `SQLRewriter.strip()` |
-| `# expanded:` | Star expansion via `SQLAnalyzer.expand_star()` |
-| `# error:` | Lint diagnostics via `Checker.check_query()` |
-| `# decoded:` | Magic codec via `decode()` |
-
-**Writing a new test:** Add a heading + code blocks to the appropriate `.md` file. Use `make update-mdtest` to fill in expected values automatically.
+Format, assertions and workflow: see [AGENTS.md](AGENTS.md#markdown-tests-mdtest).
 
 **Test directory layout:**
 
@@ -122,7 +109,7 @@ tests/mdtest/
   postgres/         # SELECT, RETURNING, CTE, JSON, aggregates, star expansion, advanced
   rewrite/          # basic, edge cases, import injection, idempotency, multiline
   strip/            # basic, round-trip, idempotency, import removal
-  check/            # star expansion, type annotation, lint rule config
+  check/            # star expansion, type annotation, user types, lint rule config
   codec/            # basic decode, auto imports, runtime execution
 ```
 
@@ -203,8 +190,8 @@ cargo test --manifest-path rust/Cargo.toml
 
 | Module | Purpose |
 |--------|---------|
-| `tests/conftest.py` | pytest plugin: `.md` discovery, `--update-mdtest` flag |
-| `tests/mdtest_runner.py` | Markdown parser + snapshot assertion engine |
+| `tests/_mdtest/` | mdtest plugin: parser, runner over `sqlty.core`, `--update-mdtest` |
+| `tests/conftest.py` | `core` fixture parametrised by backend |
 | `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
 
 ## Contributing

@@ -890,38 +890,27 @@ class TestPerformanceBaselines:
 
 
 def _parity_inputs() -> list[pytest.param]:
-    """Every SQL and Python block of the mdtests and README, with its test's config."""
+    """Every mdtest's SQL query and Python code, with its config."""
     from pathlib import Path
 
-    from tests.mdtest_runner import ASSERTION_RE, parse_mdtest_file
+    from tests._mdtest.parser import parse
 
     root = Path(__file__).resolve().parent.parent
     params = []
     for md in [*sorted((root / "tests" / "mdtest").rglob("*.md")), root / "README.md"]:
-        for case in parse_mdtest_file(md):
-            config = case._get_sqlty_config()
-            schema = config.get("schema")
+        for section in parse(md):
+            settings = section.settings
             options = {
-                "dialect": config.get("dialect", "postgres"),
-                "schema_sql": case.files.get(schema) if schema else None,
-                "import_style": config.get("import-style"),
-                "untyped": config.get("untyped") == "sentinel",
+                "dialect": settings.get("dialect", "postgres"),
+                "schema_sql": section.files.get(settings.get("schema", "")),
+                "import_style": settings.get("import-style"),
+                "untyped": settings.get("untyped") == "sentinel",
             }
-            sources = [
-                "\n".join(
-                    line for line in block.splitlines() if not ASSERTION_RE.match(line.strip())
-                )
-                for block in case.python_blocks
-            ]
-            name = f"{md.relative_to(root)}::{case.name}"
-            params += [
-                pytest.param("sql", sql, options, id=f"{name}::sql{i}")
-                for i, sql in enumerate(case.sql_blocks)
-            ]
-            params += [
-                pytest.param("python", source, options, id=f"{name}::python{i}")
-                for i, source in enumerate(sources)
-            ]
+            name = f"{md.relative_to(root)}::{section.name}"
+            if section.sql:
+                params.append(pytest.param("sql", section.query, options, id=f"{name}::sql"))
+            if section.python:
+                params.append(pytest.param("python", section.code.text, options, id=f"{name}::py"))
     return params
 
 

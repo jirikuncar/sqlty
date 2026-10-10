@@ -6,20 +6,14 @@ Rows are typed as `tuple[T, ...]`, one element per column.
 
 ```sql
 SELECT id::INTEGER FROM users
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## Two columns
 
 ```sql
 SELECT id::INTEGER, name::TEXT FROM users
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## Many columns
@@ -32,8 +26,5 @@ SELECT
     active::BOOLEAN,
     created_at::TIMESTAMP
 FROM products
-```
-
-```python
-# inferred: tuple[int, str, float, bool, datetime.datetime]
+-- inferred: tuple[int, str, float, bool, datetime.datetime]
 ```

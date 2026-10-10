@@ -1,7 +1,7 @@
 # PostgreSQL RETURNING Clause
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -10,10 +10,7 @@ dialect = "postgres"
 ```sql
 INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')
 RETURNING id::INTEGER
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## INSERT RETURNING multiple columns
@@ -22,10 +19,7 @@ RETURNING id::INTEGER
 INSERT INTO users (name, email)
 VALUES ('Alice', 'alice@example.com')
 RETURNING id::INTEGER, name::TEXT, created_at::TIMESTAMP
-```
-
-```python
-# inferred: tuple[int, str, datetime.datetime]
+-- inferred: tuple[int, str, datetime.datetime]
 ```
 
 ## INSERT with multiple VALUES rows
@@ -34,10 +28,7 @@ RETURNING id::INTEGER, name::TEXT, created_at::TIMESTAMP
 INSERT INTO users (name, email)
 VALUES ('Alice', 'alice@example.com'), ('Bob', 'bob@example.com')
 RETURNING id::INTEGER, name::TEXT
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## INSERT ON CONFLICT DO UPDATE RETURNING
@@ -47,10 +38,7 @@ INSERT INTO users (email, name)
 VALUES ('alice@example.com', 'Alice')
 ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
 RETURNING id::INTEGER, name::TEXT, email::TEXT
-```
-
-```python
-# inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str]
 ```
 
 ## INSERT ON CONFLICT DO NOTHING RETURNING
@@ -60,10 +48,7 @@ INSERT INTO users (email, name)
 VALUES ('alice@example.com', 'Alice')
 ON CONFLICT (email) DO NOTHING
 RETURNING id::INTEGER
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## UPDATE RETURNING single column
@@ -71,10 +56,7 @@ RETURNING id::INTEGER
 ```sql
 UPDATE users SET name = 'Bob' WHERE id = 1
 RETURNING id::INTEGER
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## UPDATE RETURNING multiple columns
@@ -82,10 +64,7 @@ RETURNING id::INTEGER
 ```sql
 UPDATE users SET name = 'Bob', email = 'bob@new.com' WHERE id = 1
 RETURNING id::INTEGER, name::TEXT, email::TEXT, updated_at::TIMESTAMP
-```
-
-```python
-# inferred: tuple[int, str, str, datetime.datetime]
+-- inferred: tuple[int, str, str, datetime.datetime]
 ```
 
 ## UPDATE with FROM clause RETURNING
@@ -96,10 +75,7 @@ SET status = 'shipped'
 FROM shipments s
 WHERE o.id = s.order_id
 RETURNING o.id::INTEGER, o.status::TEXT, s.tracking_number::TEXT
-```
-
-```python
-# inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str]
 ```
 
 ## DELETE RETURNING single column
@@ -107,10 +83,7 @@ RETURNING o.id::INTEGER, o.status::TEXT, s.tracking_number::TEXT
 ```sql
 DELETE FROM users WHERE active = false
 RETURNING id::INTEGER
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## DELETE RETURNING multiple columns
@@ -118,40 +91,28 @@ RETURNING id::INTEGER
 ```sql
 DELETE FROM users WHERE last_login < NOW() - INTERVAL '1 year'
 RETURNING id::INTEGER, name::TEXT, email::TEXT, last_login::TIMESTAMP
-```
-
-```python
-# inferred: tuple[int, str, str, datetime.datetime]
+-- inferred: tuple[int, str, str, datetime.datetime]
 ```
 
 ## DML without RETURNING returns None
 
 ```sql
 INSERT INTO users (name) VALUES ('test')
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## UPDATE without RETURNING returns None
 
 ```sql
 UPDATE users SET name = 'test' WHERE id = 1
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## DELETE without RETURNING returns None
 
 ```sql
 DELETE FROM users WHERE id = 1
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## DELETE RETURNING without WHERE
@@ -160,10 +121,7 @@ DELETE FROM users WHERE id = 1
 
 ```sql
 DELETE FROM users RETURNING id::INTEGER
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## WITH ... DELETE RETURNING
@@ -172,10 +130,7 @@ DELETE FROM users RETURNING id::INTEGER
 WITH stale AS (SELECT id FROM sessions WHERE expired)
 DELETE FROM users USING stale WHERE users.id = stale.id
 RETURNING users.id::INTEGER, users.name::TEXT
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## WITH ... UPDATE RETURNING
@@ -184,10 +139,7 @@ RETURNING users.id::INTEGER, users.name::TEXT
 WITH banned AS (SELECT user_id FROM reports)
 UPDATE users SET active = false FROM banned WHERE users.id = banned.user_id
 RETURNING id::INTEGER
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## WITH ... INSERT RETURNING
@@ -196,10 +148,7 @@ RETURNING id::INTEGER
 WITH incoming AS (SELECT 'Alice' AS name)
 INSERT INTO users (name) SELECT name FROM incoming
 RETURNING id::INTEGER, name::TEXT
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## INSERT ... SELECT without RETURNING returns None
@@ -208,10 +157,7 @@ The inner SELECT feeds the insert; the statement itself returns no rows.
 
 ```sql
 INSERT INTO archive SELECT id::INTEGER FROM users
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## RETURNING * expands the target table from the schema
@@ -222,14 +168,11 @@ CREATE TABLE users (id INTEGER, name TEXT);
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 schema = "schema.sql"
 ```
 
 ```sql
 DELETE FROM users WHERE id = 1 RETURNING *
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
