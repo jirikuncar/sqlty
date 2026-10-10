@@ -51,5 +51,4 @@ Includes: pytest, mypy, ruff.
 
 ## Next Steps
 
-- [Quick Start](index.md#quick-start)
-- [Examples](examples.md)
+- [Quick Start](guide/quick-start.md)

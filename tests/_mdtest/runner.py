@@ -73,7 +73,9 @@ class Run:
                 return str(core.infer_type(query, dialect=self.dialect, schema_sql=self.schema_sql))
             case "expanded":
                 query = self.section.query
-                return str(core.expand_star(query, dialect=self.dialect, schema_sql=self.schema_sql))
+                return str(
+                    core.expand_star(query, dialect=self.dialect, schema_sql=self.schema_sql)
+                )
             case "rewritten":
                 return _without_imports(self._rewritten, self._imports).strip()
             case "rewritten-file":
@@ -134,11 +136,16 @@ class Run:
         path = self.section.path
         return [
             *(f"{path}:{a.target}: unmatched assertion `# error: {a.expected}`" for a in unmatched),
-            *(f'{path}:{line}: unexpected diagnostic [{rule}] "{msg}"' for line, rule, msg in unexpected),
+            *(
+                f'{path}:{line}: unexpected diagnostic [{rule}] "{msg}"'
+                for line, rule, msg in unexpected
+            ),
         ]
 
     def _mismatch(self, assertion: Assertion, actual: str) -> str:
-        head = f"{self.section.path}:{assertion.line}: `{assertion.comment} {assertion.kind}:` failed"
+        head = (
+            f"{self.section.path}:{assertion.line}: `{assertion.comment} {assertion.kind}:` failed"
+        )
         if "\n" not in assertion.expected + actual:
             return f"{head}\n  expected: {assertion.expected}\n  actual:   {actual}"
         diff = difflib.unified_diff(
@@ -152,7 +159,9 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
     value = _ERROR_VALUE.match(assertion.expected)
     if value is None or assertion.target != line:
         return False
-    return (value["rule"] in (None, rule)) and (value["message"] is None or value["message"] in message)
+    return (value["rule"] in (None, rule)) and (
+        value["message"] is None or value["message"] in message
+    )
 
 
 def _without_imports(source: str, imports: set[str]) -> str:

@@ -6,7 +6,7 @@ Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run a
 
 ```bash
 uv run pytest                              # all tests (577+)
-uv run pytest tests/mdtest/ README.md -v   # mdtest suite only
+uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests only
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests only
 uv run pytest tests/e2e/ -v               # end-to-end tests
 uv run pytest -k "integer cast"           # filter by name
@@ -72,10 +72,15 @@ SELECT id::INTEGER, name::TEXT FROM users"""
 Every new feature, bug fix, or behavior change **must** have an mdtest. The
 format follows [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md);
 the plugin is `tests/_mdtest/`, and `mdtest_paths` in `pyproject.toml` lists
-the collected files (`tests/mdtest/`, `README.md`). Every test runs through
-`sqlty.core` on each backend: `name[py]`, `name[rs]`.
+the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
+(user docs), `src/sqlty/rules/` (one page per lint rule, printed by
+`sqlty rule NAME`). Every test runs through `sqlty.core` on each backend:
+`name[py]`, `name[rs]`.
 
 ### Where to add tests
+
+User-visible behavior belongs in `docs/guide/` too; edge cases only in
+`tests/mdtest/`. A new lint rule needs `src/sqlty/rules/<name>.md`.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
@@ -88,11 +93,10 @@ the collected files (`tests/mdtest/`, `README.md`). Every test runs through
 
 ### Structure
 
-- A heading with `python`/`sql` blocks is a test, named by its headings joined
-  with ` - ` (the H1 title excluded). A heading with sub-headings is a group:
-  it may only hold setup, which its descendants inherit.
-- Setup: an unlabelled `toml` block is `[tool.sqlty]` config (`dialect`,
-  `schema`, `import-style`, `untyped`, `rules`; anything else is an error); a
+- A heading with assertions is a test, named by its headings joined with
+  ` - ` (the H1 title excluded).
+- Setup is inherited by nested headings, code is not: an unlabelled `toml`
+  block is `[tool.sqlty]` config (unknown keys and rules are errors); a
   `` `schema.sql`: `` label before a block makes it a file.
 - Python blocks in one test concatenate; prose may sit between them.
 - Other languages (`bash`, `text`, ...) and blocks tagged ```` ```python ignore ````
@@ -186,7 +190,10 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md is an mdtest file; its assertions run with the suite.
+- README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
+- `docs/rules.md` and `docs/reference/cli.md` are generated; `tests/test_docs.py`
+  checks them, relative links, and that `examples/` need no rewrite. Regenerate
+  with `uv run pytest tests/test_docs.py --update-mdtest`.
 - Focus on **motivated examples** — show the problem first, then the solution.
 - Always show complete working code, not snippets.
 

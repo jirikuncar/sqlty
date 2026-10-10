@@ -74,7 +74,9 @@ class MDTestFile(pytest.File):
         backends = self.config.stash[BACKENDS_KEY]
         for section in sections:
             if not section.uses_backend:
-                yield MDTestItem.from_parent(self, name=section.name, section=section, updater=updater)
+                yield MDTestItem.from_parent(
+                    self, name=section.name, section=section, updater=updater
+                )
                 continue
             forced = section.directives.get("backend")
             for name in backends:

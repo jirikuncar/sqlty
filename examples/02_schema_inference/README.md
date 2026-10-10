@@ -1,55 +1,12 @@
-# Schema-Based Inference
+# Schema Inference
 
-Use a `CREATE TABLE` schema file so SQLTy can infer types without explicit `::TYPE` casts.
-
-## Setup
-
-Point `[tool.sqlty]` at a schema file with your table definitions:
-
-```toml
-# pyproject.toml
-[tool.sqlty]
-schema = "schema.sql"
-```
-
-```sql
--- schema.sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
-
-## Write queries (no casts needed)
-
-```python
-user_query = "--sql\nSELECT id, name, email FROM users"
-```
-
-## Rewrite
+Runnable project for [schema inference](../../docs/guide/schema-inference.md). `pyproject.toml` points at `schema.sql`, so `queries.py` needs no casts.
 
 ```bash
-sqlty rewrite .
+cd examples/02_schema_inference
+sqlty check .
+sqlty strip . && sqlty rewrite .   # round trip, no diff
 ```
 
-Result:
-
-```python
-from sqlty import SQL
-
-user_query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
-```
-
-Types are inferred from the schema: `id` is `INTEGER` -> `int`, `name` is `TEXT` -> `str`, etc.
-
-## Star expansion
-
-With a schema loaded, `SELECT *` is expanded to explicit columns:
-
-```bash
-sqlty rewrite .
-```
-
-`SELECT * FROM users` becomes `SELECT id::INTEGER, name::TEXT, email::VARCHAR, created_at::TIMESTAMP FROM users`.
+CI keeps it current: `tests/test_docs.py` fails if a query needs rewriting
+or a row type is stale.

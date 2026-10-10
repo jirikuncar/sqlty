@@ -146,7 +146,7 @@ def test_failure_report(tmp_path: Path) -> None:
         reports.append(str(excinfo.value))
     report = "\n".join(reports)
     assert f"{path}:8: `# rewritten-file:` failed" in report
-    assert f'{path}:34: unexpected diagnostic [stale-rewrite]' in report
+    assert f"{path}:34: unexpected diagnostic [stale-rewrite]" in report
     assert f"{path}:34: unmatched assertion `# error: [select-star]`" in report
 
 
@@ -196,7 +196,6 @@ def test_ignored_and_prose_blocks(tmp_path: Path) -> None:
             "## A\n\n```toml\n[tool.sqlty.rules]\nnope = 'warn'\n```\n",
             "invalid rule setting nope = 'warn'",
         ),
-        ("## A\n\n```py\nx = 1\n```\n\n### B\n", "heading not valid inside test 'A'"),
         ("## A\n\n<!-- mdtest:nope -->\n", "unknown directive mdtest:nope"),
         ("## A\n\n```py\n# inferred: x\n```\n", "write `-- inferred:`"),
         ("## A\n\n```py\nx = 1\n# error: [r]\n```\n", "`# error:` has no code line below it"),

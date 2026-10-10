@@ -1,17 +1,17 @@
 """Markdown -> test sections.
 
-A heading opens a section. Sections with ``python``/``sql`` blocks are tests;
-sections with sub-headings are groups and may only hold setup (``toml``
-config and labelled files), which their descendants inherit.
+A heading opens a section; sections with assertions are tests. Setup
+(``toml`` config and labelled files) is inherited by nested sections, code
+never is.
 """
 
 from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Literal, cast, get_args
 
 from sqlty._lint import RULES, Severity
@@ -29,7 +29,18 @@ SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded")
 PY_KINDS: tuple[Kind, ...] = ("rewritten", "rewritten-file", "stripped", "error", "decoded")
 BACKEND_KINDS = frozenset(get_args(Kind)) - {"decoded"}
 DIRECTIVES = frozenset({"skip", "xfail", "backend"})
-CONFIG_KEYS = frozenset({"dialect", "schema", "import-style", "untyped", "rules"})
+CONFIG_KEYS = frozenset(
+    {
+        "dialect",
+        "schema",
+        "schemas",
+        "import-style",
+        "untyped",
+        "rules",
+        "format-command",
+        "functions",
+    }
+)
 
 _PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)}):(?: (.*))?$")
 _SQL_ASSERTION = re.compile(rf"^(\s*)--\s+({'|'.join(SQL_KINDS)}):(?: (.*))?$")
@@ -150,10 +161,7 @@ def parse(path: Path, text: str | None = None) -> list[Section]:
             level = len(heading.group(1))
             while stack[-1].level >= level:
                 stack.pop()
-            parent = stack[-1]
-            if parent.has_code:
-                raise fail(lineno, f"heading not valid inside test {parent.name!r}")
-            section = parent.child(heading.group(2), level, lineno)
+            section = stack[-1].child(heading.group(2), level, lineno)
             stack.append(section)
             sections.append(section)
             label = None
@@ -241,7 +249,11 @@ def _add_sql(section: Section, body: list[str], start: int) -> None:
             _append(
                 section.assertions,
                 Assertion(
-                    cast(Kind, kind), (value or "").rstrip(), start + offset, comment="--", indent=indent
+                    cast(Kind, kind),
+                    (value or "").rstrip(),
+                    start + offset,
+                    comment="--",
+                    indent=indent,
                 ),
             )
         else:

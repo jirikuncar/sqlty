@@ -183,7 +183,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/magic-codec.md).
+The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/guide/magic-codec.md).
 
 ## Untyped Queries
 
@@ -216,22 +216,8 @@ a call missing from a stale stub is a type error rather than silently untyped.
 
 ## Lint Rules
 
-| Rule | Default | Description |
-|------|---------|-------------|
-| `column-count-mismatch` | error | Annotation has different field count than query |
-| `column-type-mismatch` | error | Annotation field type differs from inferred type |
-| `column-name-mismatch` | warn | Annotation field name differs from column name |
-| `typeddict-key-mismatch` | error | Query columns don't fit a closed / `extra_items` TypedDict's keys |
-| `select-star` | warn | `SELECT *` used (fixable: expand to explicit columns) |
-| `select-star-no-schema` | error | `SELECT *` used but no schema available |
-| `stale-rewrite` | warn | `--sql` strings not wrapped in `SQL[T](...)` |
-| `stale-type` | warn | Type annotation doesn't match current inference |
-| `inline-sql-comment` | warn | `"--sql SELECT ..."` makes query a SQL comment |
-| `fstring-skipped` | warn | f-string with `--sql` skipped (cannot be statically rewritten) |
-| `tstring-skipped` | warn | t-string with `--sql` skipped (cannot be statically rewritten) |
-| `untyped-query` | warn | `SQL[UNTYPED]` query has no inferable row type |
-
-Configure in `pyproject.toml`:
+`sqlty check` runs [12 rules](docs/rules.md); `sqlty rule NAME` explains one.
+Configure severities in `pyproject.toml`:
 
 ```toml
 [tool.sqlty.rules]
@@ -267,13 +253,14 @@ make test-unit       # unit tests only
 ```
 
 Browse `tests/mdtest/` to see behavior specified as readable markdown test suites.
+This README and everything under `docs/` run the same way.
 
 ## Documentation
 
-- **[User Guide](docs/index.md)** — complete guide with examples
-- **[API Reference](docs/api.md)** — CLI, types, configuration, lint rules
-- **[Usage Patterns](docs/patterns.md)** — rewrite/strip, magic codec, schema inference
-- **[Advanced Usage](docs/advanced-usage.md)** — dialects, multiple schemas, pre-commit
+- **[Documentation](docs/index.md)** — guide, rules and reference, all tested
+- **[Quick Start](docs/guide/quick-start.md)** — write, rewrite, check, strip
+- **[Configuration](docs/guide/configuration.md)** — `[tool.sqlty]`, dialects, severities, pre-commit
+- **[Lint Rules](docs/rules.md)** — one page per rule
 
 ## Contributing
 

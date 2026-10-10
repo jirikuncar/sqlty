@@ -66,7 +66,7 @@ SQLTy has three test layers:
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
 | **Unit** | `tests/sql_analyzer/`, `tests/generator/`, etc. | Internal modules | `pytest` |
-| **mdtest** | `tests/mdtest/*.md`, `README.md` | Type inference, rewrite, strip, lint — on both backends | `tests/_mdtest` plugin |
+| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint — on both backends | `tests/_mdtest` plugin |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
 
 ### Make targets
@@ -88,7 +88,7 @@ make bench          # Python vs Rust backend benchmarks
 uv run pytest
 
 # Specific test layer
-uv run pytest tests/mdtest/ README.md -v
+uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest
 uv run pytest tests/e2e/ -v
 

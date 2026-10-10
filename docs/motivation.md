@@ -31,11 +31,8 @@ row = db.fetchone("SELECT id, name FROM users")
 SQLTy parses your SQL and infers the Python types:
 
 ```python
-# Before
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-
-# After: sqlty rewrite .
-query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ### 2. Structural validation of user types
@@ -43,21 +40,39 @@ query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 Define your own types and sqlty validates them against the query:
 
 ```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
 class User(TypedDict):
     id: int
     name: str
 
+
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# sqlty check validates field count, types, and names
+# error:
 ```
 
 ### 3. Lint checks catch drift
 
 When queries change but annotations don't, `sqlty check` catches it:
 
-```
-error[stale-type]: SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
-error[column-type-mismatch]: User.id is str but query column 'id' infers int
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class User(TypedDict):
+    id: str
+    name: str
+
+
+# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+users = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
+user = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Trade-offs
