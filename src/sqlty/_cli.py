@@ -4,6 +4,7 @@ Commands:
     sqlty rewrite [OPTIONS] [PATH...]   Rewrite source files
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
+    sqlty rule [NAME]                   Explain a lint rule, or list them
     sqlty version                       Print version
 """
 
@@ -22,10 +23,35 @@ logger = logging.getLogger(__name__)
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
-    import argparse
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
-    if argv is None:
-        argv = sys.argv[1:]
+    if args.version:
+        _cmd_version()
+        return
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+
+    match args.command:
+        case "rewrite":
+            _cmd_rewrite(args)
+        case "strip":
+            _cmd_strip(args)
+        case "check":
+            _cmd_check(args)
+        case "rule":
+            _cmd_rule(args.name)
+        case "version":
+            _cmd_version()
+        case _:
+            parser.print_help()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The ``sqlty`` argument parser; ``docs/reference/cli.md`` is rendered from it."""
+    import argparse
 
     parser = argparse.ArgumentParser(
         prog="sqlty",
@@ -84,33 +110,19 @@ def main(argv: list[str] | None = None) -> None:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Auto-fix fixable issues (expand SELECT *, update stale types)",
+        help="Not implemented yet: reports issues without changing files",
     )
+
+    # --- rule ---
+    rule_parser = subparsers.add_parser(
+        "rule",
+        help="Explain a lint rule (sqlty rule stale-type), or list all rules",
+    )
+    rule_parser.add_argument("name", nargs="?", help="Rule name, e.g. select-star")
 
     # --- version ---
     subparsers.add_parser("version", help="Print version and exit")
-
-    args = parser.parse_args(argv)
-
-    if args.version:
-        _cmd_version()
-        return
-
-    if args.command is None:
-        parser.print_help()
-        sys.exit(0)
-
-    match args.command:
-        case "rewrite":
-            _cmd_rewrite(args)
-        case "strip":
-            _cmd_strip(args)
-        case "check":
-            _cmd_check(args)
-        case "version":
-            _cmd_version()
-        case _:
-            parser.print_help()
+    return parser
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -237,6 +249,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
+    if args.fix:
+        logger.warning("--fix is not implemented yet; no files are changed")
+
     # Load rule config from pyproject.toml [tool.sqlty.rules]
     rules = _load_rules(args.paths[0] if args.paths else None)
 
@@ -273,6 +288,21 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _cmd_rule(name: str | None) -> None:
+    """Rule command: print a rule's documentation, or the rule table."""
+    from sqlty._lint import RULES, rule_doc
+
+    if name is None:
+        width = max(map(len, RULES))
+        for rule in RULES.values():
+            print(f"{rule.name:<{width}}  {rule.default_severity.value:<5}  {rule.description}")
+        return
+    if name not in RULES:
+        logger.error("Unknown rule %r; run `sqlty rule` for the list", name)
+        sys.exit(2)
+    print(rule_doc(name), end="")
 
 
 def _cmd_version() -> None:
