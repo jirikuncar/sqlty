@@ -4,19 +4,24 @@ The magic codec allows automatic transformation of strings prefixed with `--sql`
 
 ## Overview
 
+The `# decoded:` line shows the code Python actually runs:
+
 ```python
 q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# Automatically transforms to:
-# q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-The codec automatically adds necessary imports when types require them:
+The codec automatically adds necessary imports when types require them
+(illustrative output):
 
 ```python
 q = "--sql\nSELECT created_at::TIMESTAMP, user_id::UUID"
 # Transforms to:
 # import datetime
 # import uuid
+#
+# from sqlty import SQL
+#
 # q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, user_id::UUID")
 ```
 
@@ -60,12 +65,11 @@ python -c "import site; print([p for p in site.getsitepackages()])"
 
 ## Usage
 
-Once set up, use `--sql` strings in your code:
+Once set up, use `--sql` strings in your code. No `# coding:` declaration or imports are needed in individual files:
 
 ```python
-# No encoding declaration or imports needed in individual files
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# Transforms to: SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ### Automatic Import Injection
@@ -92,15 +96,15 @@ Without casts or for non-result-set queries (DML without RETURNING, DDL), the st
 For explicit testing, the codec is also registered as "sqlty":
 
 ```python
-# coding: sqlty
 import codecs
 
 codec = codecs.lookup("sqlty")
-code = b'q = "--sql\nSELECT 1::INTEGER"'
+code = b'q = "--sql\\nSELECT 1::INTEGER"'
 result, _ = codec.decode(code)
-# result: 'q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")'
+# result: 'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
 ```
 
+The `# result:` comment is illustrative output, not a checked assertion.
 This allows testing the codec transformation without affecting UTF-8 globally.
 
 ## Direct Usage (Without Codec Registration)
@@ -110,10 +114,12 @@ For programmatic transformation without codec registration, import from `sqlty._
 ```python
 from sqlty._decode import decode  # No codec registration!
 
-code = b'q = "--sql\nSELECT 1::INTEGER"'
+code = b'q = "--sql\\nSELECT 1::INTEGER"'
 transformed, _ = decode(code)
-# transformed: 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")'
+# transformed: 'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
 ```
+
+As above, the `# transformed:` comment is illustrative output.
 
 Or use the CLI tool:
 
