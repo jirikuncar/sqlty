@@ -201,7 +201,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/magic-codec.md).
+The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/guide/magic-codec.md).
 
 ## Untyped Queries
 

@@ -239,14 +239,14 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-See [magic codec documentation](magic-codec.md) for setup.
+See [magic codec documentation](guide/magic-codec.md) for setup.
 
 ## Next Steps
 
 - **[Usage Patterns](patterns.md)** — Pick the right workflow: rewrite/strip, magic codec, schema inference
 - **[Examples](examples.md)** — Runnable projects, from simplest to most advanced
 - **[Advanced Usage](advanced-usage.md)** — Dialects, multiple schemas, pre-commit
-- **[Magic Codec](magic-codec.md)** — Import-time transformation
+- **[Magic Codec](guide/magic-codec.md)** — Import-time transformation
 - **[API Reference](api.md)** — CLI commands, types, configuration, lint rules
 
 New here? Start with [Motivation](motivation.md).

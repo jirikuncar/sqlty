@@ -15,7 +15,7 @@ nav = [
   { "Installation" = "installation.md" },
   { "Usage Patterns" = "patterns.md" },
   { "Advanced Usage" = "advanced-usage.md" },
-  { "Magic Codec" = "magic-codec.md" },
+  { "Magic Codec" = "guide/magic-codec.md" },
   { "Examples" = "examples.md" },
   { "API Reference" = "api.md" },
 ]

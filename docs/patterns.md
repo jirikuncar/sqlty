@@ -106,7 +106,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 **Best for:** Development, prototyping, rapid iteration.
 
-See [magic codec documentation](magic-codec.md).
+See [magic codec documentation](guide/magic-codec.md).
 
 ## Pattern 5: psycopg3 Row Factories
 

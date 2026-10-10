@@ -200,6 +200,36 @@ Run Rust unit tests independently:
 cargo test --manifest-path rust/Cargo.toml
 ```
 
+### Magic codec internals
+
+User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).
+
+| File | Role |
+|------|------|
+| `src/sqlty/_decode.py` | Pure decode logic, no side effects; delegates inference to `SQLRewriter` |
+| `src/sqlty/_rewriter.py` | Source-level rewrite/strip engine shared with the CLI |
+| `src/sqlty/magic.py` | Codec registration (skipped when `SQLTY_NO_MAGIC` is set) and `python -m sqlty.magic` |
+| `sqlty_magic.pth` | `import sqlty.magic` hook for site-packages; not included in the wheel |
+| `tests/mdtest/codec/` | Snapshot tests for `decode()` |
+| `tests/test_magic*.py`, `tests/e2e/test_magic_codec_e2e.py` | Integration and end-to-end tests |
+
+How it works:
+
+1. Importing `sqlty.magic` registers a codec search function for `sqlty`
+   (and for UTF-8 aliases, which has no effect in practice: CPython decodes
+   UTF-8 source without a codec lookup).
+2. When Python compiles a file declaring `# coding: sqlty`, it calls
+   `decode()` on the raw bytes.
+3. `decode()` tokenizes the source, infers a row type for each `--sql` string
+   with `SQLRewriter`, wraps it in `SQL[T](...)` and adds the needed imports
+   (placed with isort when it is installed, otherwise prepended). On any
+   error it returns the source unchanged.
+4. Python compiles the transformed text.
+
+Python caches codec lookups, so registration must happen before the first
+file declaring `# coding: sqlty` is compiled. Use `sqlty._decode.decode`
+directly when you need the transformation without registering the codec.
+
 ### Test modules
 
 | Module | Purpose |
