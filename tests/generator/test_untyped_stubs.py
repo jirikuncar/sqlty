@@ -161,6 +161,31 @@ def test_only_incompatible_overloads_suppress_overlap(tmp_path: Path) -> None:
     assert "# mypy:" not in content and "# pyright:" not in content
 
 
+@pytest.mark.parametrize("template", ["SQL[ {sqlty} ]", "SQL[{sqlty}|None]"])
+def test_overlap_ignore_ignores_template_spacing(tmp_path: Path, template: str) -> None:
+    content = (
+        _generator(return_type_template=template)
+        .generate_stub_file(_queries(tmp_path), mode="create")
+        .read_text()
+    )
+    ignored = [line for line in content.splitlines() if "# type: ignore" in line]
+    assert len(ignored) == 1 and "SELECT id::INTEGER" in ignored[0], content
+
+
+def test_legacy_pragma_stub_passes_check_and_is_upgraded(tmp_path: Path) -> None:
+    """``check`` compares overloads, not text; ``incremental`` drops file-level pragmas."""
+    queries = _queries(tmp_path)
+    stub = tmp_path / "queries.pyi"
+    stub.write_text(
+        '# mypy: disable-error-code="overload-overlap"\n'
+        "# pyright: reportOverlappingOverload=false\n"
+        + SENTINEL_STUB.replace("  # type: ignore[overload-overlap]", "")
+    )
+    assert _generator().check(queries) == 0
+    _generator().generate_stub_file(queries, mode="incremental")
+    assert stub.read_text() == SENTINEL_STUB
+
+
 def test_check(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     queries = _queries(tmp_path)
     _generator().generate_stub_file(queries, mode="incremental,create")
@@ -179,9 +204,10 @@ def test_check_detects_missing_sentinel(tmp_path: Path, capsys: pytest.CaptureFi
     assert _generator("skip").check(queries) == 0
     assert _generator().check(queries) == 1
     out = capsys.readouterr().out
-    assert "+ 2 overload(s) added" in out
-    assert "VALUES (1, 2) → SQL[Any]" in out
-    assert "VALUES (1, 2) → SQL[UNTYPED]" in out
+    removed, added = out.split("- 1 overload(s) removed:")[1].split("+ 2 overload(s) added:")
+    assert "VALUES (1, 2) → SQL[Any]" in removed
+    assert "<fallback> → SQL[UNTYPED]" in added
+    assert "VALUES (1, 2) → SQL[UNTYPED]" in added
 
 
 def test_auto_generate(tmp_path: Path) -> None:

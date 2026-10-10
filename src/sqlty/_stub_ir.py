@@ -11,6 +11,7 @@ The IR provides a clean separation between:
 """
 
 import ast
+import copy
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,10 +76,11 @@ class OverloadSignature:
 
     @property
     def annotation(self) -> str:
-        """Rendered return annotation, e.g. ``SQL[tuple[int]]`` for a ``tuple[int]`` row."""
-        from ._stub_serializer import IRToASTSerializer
+        """Rendered return annotation, e.g. ``SQL[tuple[int]]`` for a ``tuple[int]`` row.
 
-        return ast.unparse(IRToASTSerializer().return_annotation(self))
+        Re-rendered on every access; the dataclass is mutable, so the result is not cached.
+        """
+        return ast.unparse(render_return_annotation(self))
 
     def __hash__(self) -> int:
         """Hash based on query literal for deduplication."""
@@ -89,6 +91,39 @@ class OverloadSignature:
         if not isinstance(other, OverloadSignature):
             return NotImplemented
         return self.query_literal == other.query_literal
+
+
+class _TypeSubstitutor(ast.NodeTransformer):
+    """Replaces ``Any`` and ``T`` names with a copy of ``replacement``."""
+
+    def __init__(self, replacement: ast.expr):
+        self.replacement = replacement
+
+    def visit_Name(self, node: ast.Name) -> ast.expr:
+        return copy.deepcopy(self.replacement) if node.id in ("Any", "T") else node
+
+
+def render_return_annotation(overload: OverloadSignature) -> ast.expr:
+    """Return annotation of an overload: template, then source annotation, then raw type.
+
+    Example:
+        >>> o = OverloadSignature("SELECT 1", "tuple[int]", return_type_template="SQL[{sqlty}]")
+        >>> ast.unparse(render_return_annotation(o))
+        'SQL[tuple[int]]'
+    """
+    if overload.return_type_template:
+        templated = overload.return_type_template.replace("{sqlty}", overload.return_type)
+        return ast.parse(templated, mode="eval").body
+    if overload.source_return_annotation:
+        annotation = copy.deepcopy(overload.source_return_annotation)
+        # Keep the source annotation as-is (e.g. list[Any]) when nothing was inferred
+        if overload.return_type and overload.return_type != "Any":
+            inferred = ast.parse(overload.return_type, mode="eval").body
+            result = _TypeSubstitutor(inferred).visit(annotation)
+            assert isinstance(result, ast.expr)
+            return result
+        return annotation
+    return ast.parse(overload.return_type, mode="eval").body
 
 
 @dataclass
@@ -125,6 +160,24 @@ class RegistryDecorator:
         initial_size = len(self.overloads)
         self.overloads.add(overload)
         return len(self.overloads) > initial_size
+
+    def update(self, other: RegistryDecorator) -> None:
+        """Add ``other``'s overloads, replace those whose rendered return annotation changed,
+        and union custom imports; never removes.
+
+        Example:
+            >>> reg = RegistryDecorator("sql", {OverloadSignature("VALUES (1)", "SQL[Any]")})
+            >>> reg.update(RegistryDecorator("sql", {OverloadSignature("VALUES (1)", "SQL[UNTYPED]")}))
+            >>> [o.return_type for o in reg.overloads]
+            ['SQL[UNTYPED]']
+        """
+        self.custom_imports = list(dict.fromkeys(self.custom_imports + other.custom_imports))
+        current = {o.query_literal: o for o in self.overloads}
+        for overload in other.overloads:
+            existing = current.get(overload.query_literal)
+            if existing is None or existing.annotation != overload.annotation:
+                self.overloads.discard(overload)
+                self.overloads.add(overload)
 
     def remove_overload(self, query_literal: str) -> bool:
         """Remove an overload by query literal.
@@ -223,23 +276,16 @@ class StubFile:
         Args:
             registry: The registry to merge
             mode: Merge mode - "incremental" or "prune"
-                - incremental: Add new overloads and replace existing ones for the same query
-                  (e.g. a stale ``SQL[Any]`` superseded by ``SQL[UNTYPED]``); never removes
+                - incremental: Add new overloads, replace those whose rendered return
+                  annotation changed (e.g. a stale ``SQL[Any]`` superseded by ``SQL[UNTYPED]``,
+                  or a hand-edited return type), and union custom imports; never removes
                 - prune: Remove overloads not in the new registry (only removes, never adds)
         """
         if registry.name in self.registries:
             self.registries[registry.name].fallback_return_type = registry.fallback_return_type
         if mode == "incremental":
             if registry.name in self.registries:
-                existing = self.registries[registry.name]
-                existing.custom_imports = list(
-                    dict.fromkeys(existing.custom_imports + registry.custom_imports)
-                )
-                for overload in registry.overloads:
-                    current = next((o for o in existing.overloads if o == overload), None)
-                    if current is None or current.annotation != overload.annotation:
-                        existing.overloads.discard(overload)
-                        existing.add_overload(overload)
+                self.registries[registry.name].update(registry)
             else:
                 self.registries[registry.name] = registry
         elif mode == "prune":
