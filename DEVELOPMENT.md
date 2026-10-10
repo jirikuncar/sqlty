@@ -50,8 +50,9 @@ This ensures code is formatted and checked before each commit.
 - **Standard checks**: AST validation, YAML/TOML/JSON syntax, merge conflicts, trailing whitespace
 - **Ruff**: Code formatting and linting with automatic fixes
 - **uv-lock**: Keeps the lockfile up to date
-- **mypy**: Type checking for the src directory
-- **sqlty-examples**: Verify example files
+- **mypy** and **ty**: Type checking for `src/`
+- **sqlty-check** / **sqlty-rewrite**: Verify and rewrite example files
+- **cargo-fmt**: `cargo fmt --check` for the Rust backend
 
 To manually run all pre-commit hooks:
 

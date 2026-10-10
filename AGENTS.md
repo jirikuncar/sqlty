@@ -38,8 +38,10 @@ the conflict without rewriting remote history. No exceptions.
 uv run pre-commit run --all-files
 ```
 
-This runs mypy, ty, ruff (lint + format), trailing whitespace fixes, and other
-checks defined in `.pre-commit-config.yaml`. Fix all errors before creating
+This runs mypy and ty on `src/`, `sqlty check`/`sqlty rewrite` on
+`examples/`, `cargo fmt --check` on `rust/`, ruff (lint + format), uv-lock,
+and standard file checks (trailing whitespace, YAML/TOML/JSON syntax, etc.)
+defined in `.pre-commit-config.yaml`. Fix all errors before creating
 a commit.
 
 ## The `--sql\n` convention

@@ -47,7 +47,7 @@ For contributing or running tests:
 uv sync --all-groups
 ```
 
-Includes: pytest, mypy, ruff.
+Includes: pytest, mypy, ty, pyright, ruff, pre-commit.
 
 ## Next Steps
 
