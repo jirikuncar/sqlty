@@ -1,18 +1,20 @@
 //! SQL type inference, mirroring `sqlty._sql_analyzer` (the sqlglot-based Python backend).
 //!
 //! Rows come from the leftmost `SELECT` of a query or from the top-level
-//! `RETURNING` of INSERT/UPDATE/DELETE. Types are spelled the way sqlglot
+//! `RETURNING` of INSERT/UPDATE/DELETE/MERGE. Types are spelled the way sqlglot
 //! spells them (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`)
 //! so that schema-driven output matches between backends.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sqlparser::ast::{
-    ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
-    ObjectName, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
-    TableFactor, TableObject, TableWithJoins, Value,
+    visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
+    FunctionArguments, ObjectName, OutputClause, Query, Select, SelectItem,
+    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject, TableWithJoins,
+    Value,
 };
 use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -25,14 +27,22 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("BIGINT", "int"),
         ("SMALLINT", "int"),
         ("TINYINT", "int"),
+        ("MEDIUMINT", "int"),
+        ("YEAR", "int"),
         ("SIGNED", "int"),
         ("UNSIGNED", "int"),
+        ("UTINYINT", "int"),
+        ("USMALLINT", "int"),
+        ("UMEDIUMINT", "int"),
+        ("UINT", "int"),
         ("UBIGINT", "int"),
         ("FLOAT", "float"),
         ("DOUBLE", "float"),
         ("REAL", "float"),
         ("DECIMAL", "float"),
         ("NUMERIC", "float"),
+        ("UDOUBLE", "float"),
+        ("UDECIMAL", "float"),
         ("TEXT", "str"),
         ("VARCHAR", "str"),
         ("CHAR", "str"),
@@ -133,32 +143,90 @@ type Ty = Option<String>;
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
 type Inferred<T> = Result<T, String>;
 
-fn make_dialect(dialect: &str) -> Box<dyn sqlparser::dialect::Dialect> {
-    match dialect.to_lowercase().as_str() {
-        "postgres" | "postgresql" => Box::new(PostgreSqlDialect {}),
-        "mysql" => Box::new(MySqlDialect {}),
-        "sqlite" => Box::new(SQLiteDialect {}),
-        _ => Box::new(GenericDialect {}),
+/// A dialect name, matched case-insensitively; unknown names read as generic SQL.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SqlDialect {
+    Postgres,
+    MySql,
+    Sqlite,
+    Generic,
+}
+
+impl SqlDialect {
+    fn from_name(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "postgres" | "postgresql" => Self::Postgres,
+            "mysql" => Self::MySql,
+            "sqlite" => Self::Sqlite,
+            _ => Self::Generic,
+        }
+    }
+
+    fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
+        match self {
+            Self::Postgres => Box::new(PostgreSqlDialect {}),
+            Self::MySql => Box::new(MySqlDialect {}),
+            Self::Sqlite => Box::new(SQLiteDialect {}),
+            Self::Generic => Box::new(GenericDialect {}),
+        }
     }
 }
 
-fn parse_first(sql: &str, dialect: &str) -> Option<Statement> {
-    Parser::parse_sql(make_dialect(dialect).as_ref(), sql)
-        .ok()?
-        .into_iter()
-        .next()
+/// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
+fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+}
+
+/// Whether `stmts` use what sqlparser accepts but the dialect (and sqlglot) does not:
+/// `CAST(x AS <not a type>)`, which sqlparser re-reads as a call to a function
+/// named `CAST`, and MySQL-only types such as `SET('a')` in other dialects.
+fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
+    let foreign = |dt: &DataType| {
+        dialect != SqlDialect::MySql
+            && matches!(
+                dt,
+                DataType::Set(_) | DataType::SignedInteger | DataType::UnsignedInteger
+            )
+    };
+    let bad_expr = |expr: &Expr| match expr {
+        Expr::Function(func)
+            if func.name.0.len() == 1
+                && func.name.0[0]
+                    .as_ident()
+                    .is_some_and(|ident| ident.quote_style.is_none())
+                && func.name.to_string().eq_ignore_ascii_case("CAST") =>
+        {
+            ControlFlow::Break(())
+        }
+        Expr::Cast { data_type, .. } if foreign(data_type) => ControlFlow::Break(()),
+        _ => ControlFlow::Continue(()),
+    };
+    stmts.iter().any(|stmt| {
+        visit_expressions(stmt, bad_expr).is_break()
+            || matches!(stmt, Statement::CreateTable(create)
+                if create.columns.iter().any(|col| foreign(&col.data_type)))
+    })
+}
+
+fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
+    parse(sql, dialect)?.into_iter().next()
 }
 
 /// Spell a SQL type the way sqlglot does, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
-fn canonical_type(dt: &DataType, dialect: &str) -> String {
+fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
     if let DataType::Array(elem) = dt {
         return match elem {
             ArrayElemTypeDef::None => "ARRAY".to_string(),
             ArrayElemTypeDef::AngleBracket(inner)
-            | ArrayElemTypeDef::SquareBracket(inner, _)
             | ArrayElemTypeDef::Parenthesis(inner)
-            | ArrayElemTypeDef::Qualified(inner, _) => {
+            | ArrayElemTypeDef::Qualified(inner, None)
+            | ArrayElemTypeDef::SquareBracket(inner, None) => {
                 format!("ARRAY<{}>", canonical_type(inner, dialect))
+            }
+            ArrayElemTypeDef::SquareBracket(inner, Some(size))
+            | ArrayElemTypeDef::Qualified(inner, Some(size)) => {
+                format!("ARRAY<{}>[{size}]", canonical_type(inner, dialect))
             }
         };
     }
@@ -174,33 +242,43 @@ fn canonical_type(dt: &DataType, dialect: &str) -> String {
         _ => (text.clone(), String::new()),
     };
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-    let postgres = matches!(dialect, "postgres" | "postgresql");
-    let base = match name.as_str() {
+    let (name, unsigned) = match name.strip_suffix(" UNSIGNED") {
+        Some(name) => (name, true),
+        None => (name.as_str(), false),
+    };
+    let mysql = dialect == SqlDialect::MySql;
+    let base = match name {
         "TIMESTAMP WITH TIME ZONE" => "TIMESTAMPTZ",
         "TIME WITH TIME ZONE" => "TIMETZ",
         "TIMESTAMP WITHOUT TIME ZONE" => "TIMESTAMP",
         "TIME WITHOUT TIME ZONE" => "TIME",
         "INTEGER" | "INT4" => "INT",
+        "INT1" => "TINYINT",
         "INT2" => "SMALLINT",
         "INT8" => "BIGINT",
-        "FLOAT" if postgres => "DOUBLE",
+        "FLOAT" if dialect == SqlDialect::Postgres => "DOUBLE",
         "FLOAT8" | "DOUBLE PRECISION" => "DOUBLE",
         "FLOAT4" | "REAL" => "FLOAT",
-        "NUMERIC" => "DECIMAL",
-        "CHARACTER VARYING" => "VARCHAR",
-        "CHARACTER" => "CHAR",
+        "NUMERIC" | "DEC" | "FIXED" => "DECIMAL",
+        "CHARACTER VARYING" | "NVARCHAR" => "VARCHAR",
+        "CHARACTER" | "NCHAR" => "CHAR",
+        "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" => "TEXT",
+        "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" => "BLOB",
         "STRING" => "TEXT",
         "BOOL" => "BOOLEAN",
         "BYTEA" | "BLOB" => "VARBINARY",
         other => other,
     };
-    let base = match (dialect, base) {
-        ("mysql", "TIMESTAMP") => "TIMESTAMPTZ",
-        ("mysql", "SIGNED") => "BIGINT",
-        ("mysql", "UNSIGNED") => "UBIGINT",
+    let base = match (mysql, base) {
+        (true, "TIMESTAMP") => "TIMESTAMPTZ",
+        (true, "INT3" | "MIDDLEINT") => "MEDIUMINT",
+        (true, "SIGNED" | "SIGNED INTEGER") => "BIGINT",
+        (true, "UNSIGNED" | "UNSIGNED INTEGER") => "UBIGINT",
+        _ if unsigned && base == "FLOAT" => "DOUBLE",
         _ => base,
     };
-    format!("{base}{args}")
+    let sign = if unsigned { "U" } else { "" };
+    format!("{sign}{base}{args}")
 }
 
 /// Map a canonical SQL type to a Python type string; unknown types are `str`.
@@ -220,10 +298,10 @@ fn object_name(name: &ObjectName) -> String {
 
 /// Load schema from CREATE TABLE SQL statements.
 pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
-    let dialect = dialect.to_lowercase();
+    let dialect = SqlDialect::from_name(dialect);
     schema_sql
         .split(';')
-        .filter_map(|stmt| parse_first(stmt.trim(), &dialect))
+        .filter_map(|stmt| parse_first(stmt.trim(), dialect))
         .filter_map(|stmt| match stmt {
             Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
             _ => None,
@@ -234,7 +312,7 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
                 .iter()
                 .filter(|col| col.data_type != DataType::Unspecified)
                 .map(|col| {
-                    let sql_type = canonical_type(&col.data_type, &dialect);
+                    let sql_type = canonical_type(&col.data_type, dialect);
                     (col.name.value.to_lowercase(), sql_type)
                 })
                 .collect();
@@ -248,9 +326,9 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred
     let empty = Schema::new();
     let analyzer = Analyzer {
         schema: schema.as_ref().unwrap_or(&empty),
-        dialect: dialect.to_lowercase(),
+        dialect: SqlDialect::from_name(dialect),
     };
-    let Some(stmt) = parse_first(sql, dialect) else {
+    let Some(stmt) = parse_first(sql, analyzer.dialect) else {
         return Ok(None);
     };
     let types = analyzer.statement_columns(&stmt)?;
@@ -267,9 +345,9 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 pub fn returns_rows(sql: &str, dialect: &str) -> bool {
-    match Parser::parse_sql(make_dialect(dialect).as_ref(), sql) {
-        Err(_) => true,
-        Ok(stmts) => stmts.first().is_some_and(statement_returns_rows),
+    match parse(sql, SqlDialect::from_name(dialect)) {
+        None => true,
+        Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
 }
 
@@ -286,12 +364,20 @@ fn statement_returns_rows(stmt: &Statement) -> bool {
     }
 }
 
-/// The non-empty top-level RETURNING list of a DML statement.
+/// The non-empty top-level RETURNING list of INSERT/UPDATE/DELETE/MERGE.
 fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
     let items = match stmt {
         Statement::Insert(insert) => &insert.returning,
         Statement::Update(update) => &update.returning,
         Statement::Delete(delete) => &delete.returning,
+        Statement::Merge(merge) => {
+            return match &merge.output {
+                Some(OutputClause::Returning { select_items, .. }) if !select_items.is_empty() => {
+                    Some(select_items)
+                }
+                _ => None,
+            };
+        }
         _ => return None,
     };
     items.as_deref().filter(|items| !items.is_empty())
@@ -311,6 +397,7 @@ fn dml_scope(stmt: &Statement) -> Scope {
                 .map(|table| table_scope(&table.relation))
                 .unwrap_or_default(),
         },
+        Statement::Merge(merge) => table_scope(&merge.table),
         _ => Vec::new(),
     }
 }
@@ -371,7 +458,7 @@ fn first_arg(args: &FunctionArguments) -> Option<&Expr> {
 
 struct Analyzer<'a> {
     schema: &'a Schema,
-    dialect: String,
+    dialect: SqlDialect,
 }
 
 impl Analyzer<'_> {
@@ -472,7 +559,7 @@ impl Analyzer<'_> {
         let known = |ty: &str| Ok(Some(ty.to_string()));
         match expr {
             Expr::Cast { data_type, .. } => {
-                Ok(Some(python_type(&canonical_type(data_type, &self.dialect))))
+                Ok(Some(python_type(&canonical_type(data_type, self.dialect))))
             }
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
@@ -560,9 +647,9 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
     let schema = schema.as_ref().filter(|schema| !schema.is_empty())?;
     let analyzer = Analyzer {
         schema,
-        dialect: dialect.to_lowercase(),
+        dialect: SqlDialect::from_name(dialect),
     };
-    let Statement::Query(query) = parse_first(sql, dialect)? else {
+    let Statement::Query(query) = parse_first(sql, analyzer.dialect)? else {
         return None;
     };
     let scope = select_scope(&leftmost_select(&query.body)?.from);
