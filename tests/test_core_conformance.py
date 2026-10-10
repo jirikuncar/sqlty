@@ -85,6 +85,86 @@ class TestInferType:
         assert result is not None
 
 
+class TestParserParity:
+    """Both backends parse types and statements alike (sqlglot vs sqlparser-rs)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect", "expected"),
+        [
+            ("SELECT x::ARRAY FROM t", "postgres", None),
+            ("SELECT CAST(x AS ARRAY) FROM t", "mysql", None),
+            (
+                "SELECT x::INT[3], y::TEXT[2][2], z::INT ARRAY[3] FROM t",
+                "postgres",
+                "tuple[list, list, list]",
+            ),
+            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[str]"),
+            ("SELECT CAST(x AS INT[]) FROM t", "mysql", None),
+            ("SELECT CAST(x AS UNSIGNED ARRAY) FROM t", "mysql", "tuple[list]"),
+            ("SELECT CAST(x AS SET('a')) FROM t", "postgres", None),
+            ("SELECT CAST(x AS SIGNED INTEGER) FROM t", "sqlite", None),
+            ("SELECT CAST(x AS UNSIGNED INTEGER) FROM t", "mysql", "tuple[int]"),
+            ("SELECT CAST(x AS INT3), CAST(y AS MIDDLEINT) FROM t", "mysql", "tuple[int, int]"),
+            (
+                "SELECT CAST(x AS INT SIGNED), CAST(y AS FLOAT UNSIGNED) FROM t",
+                "mysql",
+                "tuple[int, float]",
+            ),
+            ("SELECT CAST(x AS POINT) FROM t", "mysql", "tuple[str]"),
+            (
+                "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE "
+                "RETURNING merge_action(), t.id::INT",
+                "postgres",
+                "tuple[str, int]",
+            ),
+            ("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "postgres", None),
+        ],
+    )
+    def test_infer_type(self, core: types.ModuleType, sql: str, dialect: str, expected: str | None):
+        assert core.infer_type(sql, dialect=dialect) == expected
+
+    @pytest.mark.parametrize(
+        ("column_types", "dialect", "expected"),
+        [
+            (
+                "INT3, MIDDLEINT, INT8, INT(11) SIGNED, BIGINT(20) UNSIGNED, FLOAT UNSIGNED",
+                "mysql",
+                "c0::MEDIUMINT, c1::MEDIUMINT, c2::BIGINT, c3::INT(11), c4::UBIGINT(20), c5::UDOUBLE",
+            ),
+            (
+                "YEAR, BIT(8), DATETIME(6), TIMESTAMP, ENUM('a'), SET('a'), JSON, LONGBLOB, TINYTEXT, POINT",
+                "mysql",
+                "c0::YEAR, c1::BIT(8), c2::DATETIME(6), c3::TIMESTAMPTZ, c4::ENUM('A'), "
+                "c5::SET('A'), c6::JSON, c7::BLOB, c8::TEXT, c9::POINT",
+            ),
+            ("INT8, INT", "sqlite", "c0::BIGINT, c1::INT"),
+            (
+                "INT[3][3], INT ARRAY[4], TEXT[]",
+                "postgres",
+                "c0::ARRAY<ARRAY<INT>[3]>[3], c1::ARRAY<INT>[4], c2::ARRAY<TEXT>",
+            ),
+        ],
+    )
+    def test_schema_types(
+        self, core: types.ModuleType, column_types: str, dialect: str, expected: str
+    ):
+        columns = ", ".join(f"c{i} {t}" for i, t in enumerate(column_types.split(", ")))
+        schema = f"CREATE TABLE t ({columns});"
+        result = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
+        assert result == f"SELECT {expected} FROM t"
+
+    @pytest.mark.parametrize("dialect", ["postgres", "sqlite"])
+    def test_mysql_only_column_skips_table(self, core: types.ModuleType, dialect: str):
+        schema = "CREATE TABLE t (a INT, b SET('x'));"
+        assert core.infer_type("SELECT a FROM t", dialect=dialect, schema_sql=schema) == (
+            "tuple[str]"
+        )
+
+    def test_merge_without_returning_not_wrapped(self, core: types.ModuleType):
+        source = 'q = "--sql\\nMERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE"'
+        assert core.rewrite_source(source, untyped=True) == source
+
+
 # ---------------------------------------------------------------------------
 # rewrite_source
 # ---------------------------------------------------------------------------

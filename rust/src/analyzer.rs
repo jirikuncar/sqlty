@@ -1,18 +1,20 @@
 //! SQL type inference, mirroring `sqlty._sql_analyzer` (the sqlglot-based Python backend).
 //!
 //! Rows come from the leftmost `SELECT` of a query or from the top-level
-//! `RETURNING` of INSERT/UPDATE/DELETE. Types are spelled the way sqlglot
+//! `RETURNING` of INSERT/UPDATE/DELETE/MERGE. Types are spelled the way sqlglot
 //! spells them (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`)
 //! so that schema-driven output matches between backends.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sqlparser::ast::{
-    ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr, FunctionArguments,
-    ObjectName, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
-    TableFactor, TableObject, TableWithJoins, Value,
+    visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
+    FunctionArguments, ObjectName, OutputClause, Query, Select, SelectItem,
+    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject, TableWithJoins,
+    Value,
 };
 use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -25,14 +27,22 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("BIGINT", "int"),
         ("SMALLINT", "int"),
         ("TINYINT", "int"),
+        ("MEDIUMINT", "int"),
+        ("YEAR", "int"),
         ("SIGNED", "int"),
         ("UNSIGNED", "int"),
+        ("UTINYINT", "int"),
+        ("USMALLINT", "int"),
+        ("UMEDIUMINT", "int"),
+        ("UINT", "int"),
         ("UBIGINT", "int"),
         ("FLOAT", "float"),
         ("DOUBLE", "float"),
         ("REAL", "float"),
         ("DECIMAL", "float"),
         ("NUMERIC", "float"),
+        ("UDOUBLE", "float"),
+        ("UDECIMAL", "float"),
         ("TEXT", "str"),
         ("VARCHAR", "str"),
         ("CHAR", "str"),
@@ -142,11 +152,41 @@ fn make_dialect(dialect: &str) -> Box<dyn sqlparser::dialect::Dialect> {
     }
 }
 
+/// Parse `sql`, rejecting what sqlparser accepts but the dialect (and sqlglot) does not:
+/// `CAST(x AS <not a type>)`, which sqlparser re-reads as a call to a function
+/// named `CAST`, and MySQL-only types such as `SET('a')` in other dialects.
+fn parse(sql: &str, dialect: &str) -> Option<Vec<Statement>> {
+    let stmts = Parser::parse_sql(make_dialect(dialect).as_ref(), sql).ok()?;
+    let mysql = dialect.eq_ignore_ascii_case("mysql");
+    let foreign = |dt: &DataType| {
+        !mysql
+            && matches!(
+                dt,
+                DataType::Set(_) | DataType::SignedInteger | DataType::UnsignedInteger
+            )
+    };
+    let bad_expr = visit_expressions(&stmts, |expr| match expr {
+        Expr::Function(func)
+            if func.name.0.len() == 1
+                && func.name.0[0]
+                    .as_ident()
+                    .is_some_and(|ident| ident.quote_style.is_none())
+                && func.name.to_string().eq_ignore_ascii_case("CAST") =>
+        {
+            ControlFlow::Break(())
+        }
+        Expr::Cast { data_type, .. } if foreign(data_type) => ControlFlow::Break(()),
+        _ => ControlFlow::Continue(()),
+    });
+    let bad_column = stmts.iter().any(|stmt| match stmt {
+        Statement::CreateTable(create) => create.columns.iter().any(|col| foreign(&col.data_type)),
+        _ => false,
+    });
+    (bad_expr.is_continue() && !bad_column).then_some(stmts)
+}
+
 fn parse_first(sql: &str, dialect: &str) -> Option<Statement> {
-    Parser::parse_sql(make_dialect(dialect).as_ref(), sql)
-        .ok()?
-        .into_iter()
-        .next()
+    parse(sql, dialect)?.into_iter().next()
 }
 
 /// Spell a SQL type the way sqlglot does, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
@@ -155,10 +195,14 @@ fn canonical_type(dt: &DataType, dialect: &str) -> String {
         return match elem {
             ArrayElemTypeDef::None => "ARRAY".to_string(),
             ArrayElemTypeDef::AngleBracket(inner)
-            | ArrayElemTypeDef::SquareBracket(inner, _)
             | ArrayElemTypeDef::Parenthesis(inner)
-            | ArrayElemTypeDef::Qualified(inner, _) => {
+            | ArrayElemTypeDef::Qualified(inner, None)
+            | ArrayElemTypeDef::SquareBracket(inner, None) => {
                 format!("ARRAY<{}>", canonical_type(inner, dialect))
+            }
+            ArrayElemTypeDef::SquareBracket(inner, Some(size))
+            | ArrayElemTypeDef::Qualified(inner, Some(size)) => {
+                format!("ARRAY<{}>[{size}]", canonical_type(inner, dialect))
             }
         };
     }
@@ -174,21 +218,28 @@ fn canonical_type(dt: &DataType, dialect: &str) -> String {
         _ => (text.clone(), String::new()),
     };
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (name, unsigned) = match name.strip_suffix(" UNSIGNED") {
+        Some(name) => (name, true),
+        None => (name.as_str(), false),
+    };
     let postgres = matches!(dialect, "postgres" | "postgresql");
-    let base = match name.as_str() {
+    let base = match name {
         "TIMESTAMP WITH TIME ZONE" => "TIMESTAMPTZ",
         "TIME WITH TIME ZONE" => "TIMETZ",
         "TIMESTAMP WITHOUT TIME ZONE" => "TIMESTAMP",
         "TIME WITHOUT TIME ZONE" => "TIME",
         "INTEGER" | "INT4" => "INT",
+        "INT1" => "TINYINT",
         "INT2" => "SMALLINT",
         "INT8" => "BIGINT",
         "FLOAT" if postgres => "DOUBLE",
         "FLOAT8" | "DOUBLE PRECISION" => "DOUBLE",
         "FLOAT4" | "REAL" => "FLOAT",
-        "NUMERIC" => "DECIMAL",
-        "CHARACTER VARYING" => "VARCHAR",
-        "CHARACTER" => "CHAR",
+        "NUMERIC" | "DEC" | "FIXED" => "DECIMAL",
+        "CHARACTER VARYING" | "NVARCHAR" => "VARCHAR",
+        "CHARACTER" | "NCHAR" => "CHAR",
+        "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" => "TEXT",
+        "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" => "BLOB",
         "STRING" => "TEXT",
         "BOOL" => "BOOLEAN",
         "BYTEA" | "BLOB" => "VARBINARY",
@@ -196,11 +247,14 @@ fn canonical_type(dt: &DataType, dialect: &str) -> String {
     };
     let base = match (dialect, base) {
         ("mysql", "TIMESTAMP") => "TIMESTAMPTZ",
-        ("mysql", "SIGNED") => "BIGINT",
-        ("mysql", "UNSIGNED") => "UBIGINT",
+        ("mysql", "INT3" | "MIDDLEINT") => "MEDIUMINT",
+        ("mysql", "SIGNED" | "SIGNED INTEGER") => "BIGINT",
+        ("mysql", "UNSIGNED" | "UNSIGNED INTEGER") => "UBIGINT",
+        _ if unsigned && base == "FLOAT" => "DOUBLE",
         _ => base,
     };
-    format!("{base}{args}")
+    let sign = if unsigned { "U" } else { "" };
+    format!("{sign}{base}{args}")
 }
 
 /// Map a canonical SQL type to a Python type string; unknown types are `str`.
@@ -267,9 +321,9 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 pub fn returns_rows(sql: &str, dialect: &str) -> bool {
-    match Parser::parse_sql(make_dialect(dialect).as_ref(), sql) {
-        Err(_) => true,
-        Ok(stmts) => stmts.first().is_some_and(statement_returns_rows),
+    match parse(sql, dialect) {
+        None => true,
+        Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
 }
 
@@ -286,12 +340,20 @@ fn statement_returns_rows(stmt: &Statement) -> bool {
     }
 }
 
-/// The non-empty top-level RETURNING list of a DML statement.
+/// The non-empty top-level RETURNING list of INSERT/UPDATE/DELETE/MERGE.
 fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
     let items = match stmt {
         Statement::Insert(insert) => &insert.returning,
         Statement::Update(update) => &update.returning,
         Statement::Delete(delete) => &delete.returning,
+        Statement::Merge(merge) => {
+            return match &merge.output {
+                Some(OutputClause::Returning { select_items, .. }) if !select_items.is_empty() => {
+                    Some(select_items)
+                }
+                _ => None,
+            };
+        }
         _ => return None,
     };
     items.as_deref().filter(|items| !items.is_empty())
@@ -311,6 +373,7 @@ fn dml_scope(stmt: &Statement) -> Scope {
                 .map(|table| table_scope(&table.relation))
                 .unwrap_or_default(),
         },
+        Statement::Merge(merge) => table_scope(&merge.table),
         _ => Vec::new(),
     }
 }

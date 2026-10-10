@@ -6,7 +6,13 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
-from sqlglot import exp, parse, parse_one
+from sqlglot import exp, parse
+from sqlglot.dialects.dialect import Dialect
+from sqlglot.dialects.mysql import MySQL
+from sqlglot.dialects.postgres import Postgres
+from sqlglot.dialects.sqlite import SQLite
+from sqlglot.errors import ParseError
+from sqlglot.tokens import TokenType
 
 from sqlty._type_codec import TupleCodec, TypeCodec
 
@@ -32,6 +38,8 @@ class SQLAnalyzer:
         "BIGINT": "int",
         "SMALLINT": "int",
         "TINYINT": "int",
+        "MEDIUMINT": "int",
+        "YEAR": "int",
         "FLOAT": "float",
         "DOUBLE": "float",
         "REAL": "float",
@@ -57,7 +65,14 @@ class SQLAnalyzer:
         # MySQL ``CAST(x AS SIGNED/UNSIGNED)``
         "SIGNED": "int",
         "UNSIGNED": "int",
+        # MySQL ``... UNSIGNED`` columns
+        "UTINYINT": "int",
+        "USMALLINT": "int",
+        "UMEDIUMINT": "int",
+        "UINT": "int",
         "UBIGINT": "int",
+        "UDOUBLE": "float",
+        "UDECIMAL": "float",
     }
 
     def __init__(self, dialect: str = "postgres", schema_path: Path | None = None) -> None:
@@ -93,7 +108,7 @@ class SQLAnalyzer:
                 continue
 
             try:
-                ast = parse_one(statement, dialect=self.dialect)
+                ast = _parse_one(statement, self.dialect)
 
                 # Look for CREATE TABLE statements
                 if isinstance(ast, exp.Create) and ast.find(exp.Table):
@@ -136,7 +151,7 @@ class SQLAnalyzer:
             False
         """
         try:
-            statements = parse(sql, dialect=self.dialect)
+            statements = _parse(sql, self.dialect)
         except Exception:
             return True
         statement = statements[0] if statements else None
@@ -161,7 +176,7 @@ class SQLAnalyzer:
             RuntimeError: ``SUM(column)`` names a column missing from a schema table.
         """
         try:
-            ast = parse_one(sql, dialect=self.dialect)
+            ast = _parse_one(sql, self.dialect)
         except Exception:
             return None
 
@@ -312,7 +327,7 @@ class SQLAnalyzer:
         if not self.schema:
             return None
         try:
-            select = _leftmost_select(parse_one(sql, dialect=self.dialect))
+            select = _leftmost_select(_parse_one(sql, self.dialect))
         except Exception:
             return None
         if select is None:
@@ -404,6 +419,109 @@ _FUNCTION_TYPES = {
         "dict",
     ),
 }
+
+
+class _MySQL(MySQL):
+    """MySQL as sqlparser-rs reads it: spatial types, ``INT3``, ``INT SIGNED``, ``FLOAT UNSIGNED``."""
+
+    SUPPORTS_USER_DEFINED_TYPES = True
+
+    class Tokenizer(MySQL.Tokenizer):
+        KEYWORDS = {
+            **MySQL.Tokenizer.KEYWORDS,
+            "INT3": TokenType.MEDIUMINT,
+            "MIDDLEINT": TokenType.MEDIUMINT,
+            "INT8": TokenType.BIGINT,
+        }
+
+    class Parser(MySQL.Parser):
+        SIGNED_TO_UNSIGNED_TYPE_TOKEN = {
+            **MySQL.Parser.SIGNED_TO_UNSIGNED_TYPE_TOKEN,
+            TokenType.FLOAT: TokenType.UDOUBLE,
+        }
+
+        def _parse_types(
+            self, check_func: bool = False, schema: bool = False, allow_identifiers: bool = True
+        ) -> exp.Expression | None:
+            start = self._index
+            this = super()._parse_types(check_func, schema, allow_identifiers)
+            if not isinstance(this, exp.DataType):
+                return this
+            if this.is_type(exp.DataType.Type.ARRAY) and any(
+                token.token_type == TokenType.L_BRACKET
+                for token in self._tokens[start : self._index]
+            ):
+                self.raise_error("MySQL has no bracketed array types")
+            if this.is_type(*exp.DataType.NUMERIC_TYPES):
+                self._match_text_seq("SIGNED")  # type: ignore[no-untyped-call]
+            return this
+
+
+class _SQLite(SQLite):
+    class Tokenizer(SQLite.Tokenizer):
+        KEYWORDS = {**SQLite.Tokenizer.KEYWORDS, "INT8": TokenType.BIGINT}
+
+    class Parser(SQLite.Parser):
+        SIGNED_TO_UNSIGNED_TYPE_TOKEN = _MySQL.Parser.SIGNED_TO_UNSIGNED_TYPE_TOKEN
+
+
+class _Postgres(Postgres):
+    """PostgreSQL reading ``x::INT[3]`` and ``x::INT ARRAY[3]`` as casts to an array."""
+
+    SUPPORTS_FIXED_SIZE_ARRAYS = True
+
+    class Parser(Postgres.Parser):
+        def _parse_types(
+            self, check_func: bool = False, schema: bool = False, allow_identifiers: bool = True
+        ) -> exp.Expression | None:
+            this = super()._parse_types(check_func, schema, allow_identifiers)
+            if not isinstance(this, exp.DataType):
+                return this
+            start = self._index
+            if not self._match_pair(TokenType.ARRAY, TokenType.L_BRACKET):  # type: ignore[no-untyped-call]
+                return this
+            size = self._parse_number()
+            if size is None or not self._match(TokenType.R_BRACKET):  # type: ignore[no-untyped-call]
+                self._retreat(start)
+                return this
+            return exp.DataType(
+                this=exp.DataType.Type.ARRAY, expressions=[this], values=[size], nested=True
+            )
+
+
+_DIALECTS: dict[str, type[Dialect]] = {
+    "mysql": _MySQL,
+    "sqlite": _SQLite,
+    "postgres": _Postgres,
+    "postgresql": _Postgres,
+}
+
+
+def _parse(sql: str, dialect: str) -> list[exp.Expression | None]:
+    """Parse like sqlglot, but read types the way sqlparser-rs (the Rust backend) does.
+
+    A bare ``ARRAY`` type is rejected: PostgreSQL requires an element type
+    (``INT[]``, ``INT ARRAY``) and so does sqlparser-rs outside Snowflake.
+
+    Raises:
+        ParseError: ``sql`` is invalid or uses an unsupported type.
+    """
+    statements = parse(sql, dialect=_DIALECTS.get(dialect.lower(), dialect))
+    for statement in statements:
+        if statement and any(
+            dt.this == exp.DataType.Type.ARRAY and not dt.expressions
+            for dt in statement.find_all(exp.DataType)
+        ):
+            raise ParseError("ARRAY type needs an element type, e.g. INT[]")
+    return statements
+
+
+def _parse_one(sql: str, dialect: str) -> exp.Expression:
+    """The first statement of ``sql``, like sqlglot's ``parse_one``, with ``_parse``'s checks."""
+    statements = _parse(sql, dialect)
+    if not statements or statements[0] is None:
+        raise ParseError(f"No expression was parsed from '{sql}'")
+    return statements[0]
 
 
 def _leftmost_select(node: exp.Expression | None) -> exp.Select | None:

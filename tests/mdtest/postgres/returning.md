@@ -233,3 +233,49 @@ DELETE FROM users WHERE id = 1 RETURNING *
 ```python
 # inferred: tuple[int, str]
 ```
+
+## MERGE RETURNING
+
+```sql
+MERGE INTO users u USING staged s ON u.id = s.id
+WHEN MATCHED THEN UPDATE SET name = s.name
+WHEN NOT MATCHED THEN INSERT (id, name) VALUES (s.id, s.name)
+RETURNING merge_action(), u.id::INTEGER, u.name::TEXT
+```
+
+```python
+# inferred: tuple[str, int, str]
+```
+
+## MERGE without RETURNING returns None
+
+```sql
+MERGE INTO users u USING staged s ON u.id = s.id
+WHEN MATCHED THEN DELETE
+```
+
+```python
+# inferred: None
+```
+
+## MERGE RETURNING * expands the target table from the schema
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```toml
+[sqlty]
+schema = "schema.sql"
+```
+
+```sql
+MERGE INTO users u USING staged s ON u.id = s.id
+WHEN MATCHED THEN DELETE
+RETURNING *
+```
+
+```python
+# inferred: tuple[int, str]
+```
