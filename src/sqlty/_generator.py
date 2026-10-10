@@ -663,7 +663,8 @@ class TypeStubGenerator:
             output_path: Path for the generated stub file
             class_name: Name of the Query class (used as fallback)
             mode: Generation mode - comma-separated list of actions:
-                - incremental: Add new overloads to existing stub
+                - incremental: Add new overloads and replace existing ones whose return
+                  annotation changed (including hand edits); never removes
                 - prune: Remove overloads no longer in source
                 - create: Only create missing stubs (skip if exists)
                 Examples: "incremental", "incremental,prune", "incremental,prune,create"

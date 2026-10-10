@@ -24,9 +24,7 @@ pairs = sql("VALUES (1, 2)")
 purge = sql("DELETE FROM users")
 """
 
-SENTINEL_STUB = """# mypy: disable-error-code="overload-overlap"
-# pyright: reportOverlappingOverload=false
-from typing import Literal, overload, Any
+SENTINEL_STUB = """from typing import Literal, overload, Any
 from sqlty import SQL, UNTYPED
 
 
@@ -35,7 +33,7 @@ def sql(query: Literal['DELETE FROM users']) -> SQL[Any]:
     ...
 
 @overload
-def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:
+def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:  # type: ignore[overload-overlap]
     ...
 
 @overload
@@ -88,15 +86,13 @@ def test_custom_template(tmp_path: Path) -> None:
     ).generate_stub_file(_queries(tmp_path), mode="incremental,create")
     content = stub.read_text()
     assert "from psycopg import Cursor\nfrom sqlty import UNTYPED\n" in content
-    assert "def sql(query: Literal['VALUES (1, 2)']) -> Cursor[UNTYPED]:" in content
+    assert "def sql(query: Literal['VALUES (1, 2)']) -> Cursor[UNTYPED]:\n" in content
     assert content.endswith("def sql(query: str) -> Cursor[UNTYPED]:\n    ...\n")
 
 
 def test_no_calls_stub(tmp_path: Path) -> None:
     stub = _generator().generate_stub_file(_queries(tmp_path, ""), mode="incremental,create")
     assert stub.read_text() == (
-        '# mypy: disable-error-code="overload-overlap"\n'
-        "# pyright: reportOverlappingOverload=false\n"
         "from typing import Literal, overload\n"
         "from sqlty import SQL, UNTYPED\n\n\n"
         "@overload\n"
@@ -142,6 +138,54 @@ def test_switching_mode_updates_fallback(tmp_path: Path, before: str, after: str
     assert stub.read_text() == expected.read_text()
 
 
+@pytest.mark.parametrize(("before", "after"), [("skip", "sentinel"), ("sentinel", "skip")])
+def test_incremental_replaces_stale_overloads(tmp_path: Path, before: str, after: str) -> None:
+    """VALUES (1, 2) flips between SQL[Any] and SQL[UNTYPED] without regenerating from scratch."""
+    queries = _queries(tmp_path)
+    stub = _generator(before).generate_stub_file(queries, mode="incremental,create")
+    _generator(after).generate_stub_file(queries, mode="incremental")
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    expected = _generator(after).generate_stub_file(_queries(fresh), mode="create")
+    assert stub.read_text() == expected.read_text()
+    assert _generator(after).check(queries) == 0
+
+
+def test_only_incompatible_overloads_suppress_overlap(tmp_path: Path) -> None:
+    content = _generator().generate_stub_file(_queries(tmp_path), mode="create").read_text()
+    ignored = [line for line in content.splitlines() if "# type: ignore" in line]
+    assert ignored == [
+        "def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:"
+        "  # type: ignore[overload-overlap]"
+    ]
+    assert "# mypy:" not in content and "# pyright:" not in content
+
+
+@pytest.mark.parametrize("template", ["SQL[ {sqlty} ]", "SQL[{sqlty}|None]"])
+def test_overlap_ignore_ignores_template_spacing(tmp_path: Path, template: str) -> None:
+    content = (
+        _generator(return_type_template=template)
+        .generate_stub_file(_queries(tmp_path), mode="create")
+        .read_text()
+    )
+    ignored = [line for line in content.splitlines() if "# type: ignore" in line]
+    assert len(ignored) == 1 and "SELECT id::INTEGER" in ignored[0], content
+
+
+def test_legacy_pragma_stub_passes_check_and_is_upgraded(tmp_path: Path) -> None:
+    """``check`` compares overloads, not text; ``incremental`` drops file-level pragmas."""
+    queries = _queries(tmp_path)
+    stub = tmp_path / "queries.pyi"
+    stub.write_text(
+        '# mypy: disable-error-code="overload-overlap"\n'
+        "# pyright: reportOverlappingOverload=false\n"
+        + SENTINEL_STUB.replace("  # type: ignore[overload-overlap]", "")
+    )
+    assert _generator().check(queries) == 0
+    _generator().generate_stub_file(queries, mode="incremental")
+    assert stub.read_text() == SENTINEL_STUB
+
+
 def test_check(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     queries = _queries(tmp_path)
     _generator().generate_stub_file(queries, mode="incremental,create")
@@ -159,7 +203,11 @@ def test_check_detects_missing_sentinel(tmp_path: Path, capsys: pytest.CaptureFi
 
     assert _generator("skip").check(queries) == 0
     assert _generator().check(queries) == 1
-    assert "+ 1 overload(s) added" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    removed, added = out.split("- 1 overload(s) removed:")[1].split("+ 2 overload(s) added:")
+    assert "VALUES (1, 2) → SQL[Any]" in removed
+    assert "<fallback> → SQL[UNTYPED]" in added
+    assert "VALUES (1, 2) → SQL[UNTYPED]" in added
 
 
 def test_auto_generate(tmp_path: Path) -> None:
