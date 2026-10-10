@@ -412,7 +412,8 @@ class CallInfoToIRParser:
             if path.rpartition(".")[2] == name
         ]
         template = next((t for t in templates if t), "SQL[{sqlty}]")
-        return template.replace("{sqlty}", "UNTYPED")
+        # Normalized so it matches annotations unparsed from overloads and parsed stubs
+        return ast.unparse(ast.parse(template.replace("{sqlty}", "UNTYPED"), mode="eval"))
 
     def _call_info_to_overload(self, call: CallInfo) -> OverloadSignature:
         """Convert a CallInfo to an OverloadSignature.

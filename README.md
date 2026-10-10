@@ -232,6 +232,16 @@ and the catch-all `(query: str)` overload returns `SQL[UNTYPED]` (or the
 function's `return_type_template` applied to `UNTYPED`) instead of `str`, so
 a call missing from a stale stub is a type error rather than silently untyped.
 
+Typed overloads that overlap the `SQL[UNTYPED]` catch-all carry a per-line
+`# type: ignore[overload-overlap]`, so other overlaps in the stub are still
+reported. pyright reports only the first such overlap per catch-all, so with
+`reportUnnecessaryTypeIgnoreComment` enabled it flags the remaining ignores;
+with `enableTypeIgnoreComments = false` it reports the overlaps instead.
+Incremental stub updates add new overloads and replace existing ones whose
+return type changed (including hand edits), so switching `untyped` mode
+rewrites `SQL[Any]`/`SQL[UNTYPED]` overloads on the next update; until then
+a stub check reports them as stale.
+
 ## Lint Rules
 
 | Rule | Default | Description |

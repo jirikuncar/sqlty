@@ -78,6 +78,35 @@ def test_stub_file_merge_incremental():
     assert len(stub.registries["Query"].overloads) == 3  # Only SELECT 3 added
 
 
+def test_stub_file_merge_incremental_replaces_hand_edited_overload():
+    stub = StubFile()
+    edited = OverloadSignature("DELETE FROM users", "SQL[tuple[int]]")
+    unchanged = OverloadSignature("SELECT 1", "SQL[tuple[int]]")
+    stub.add_registry(RegistryDecorator(name="sql", overloads={edited, unchanged}))
+
+    generated = RegistryDecorator(
+        name="sql",
+        overloads={
+            OverloadSignature("DELETE FROM users", "SQL[Any]"),
+            OverloadSignature("SELECT 1", "SQL[tuple[int]]"),
+        },
+    )
+    stub.merge_registry(generated, mode="incremental")
+
+    overloads = {o.query_literal: o for o in stub.registries["sql"].overloads}
+    assert overloads["DELETE FROM users"].return_type == "SQL[Any]"
+    assert overloads["SELECT 1"] is unchanged
+
+
+def test_stub_file_merge_incremental_dedupes_custom_imports():
+    stub = StubFile()
+    stub.add_registry(RegistryDecorator(name="sql", custom_imports=["import a", "import b"]))
+    stub.merge_registry(
+        RegistryDecorator(name="sql", custom_imports=["import b", "import c"]), mode="incremental"
+    )
+    assert stub.registries["sql"].custom_imports == ["import a", "import b", "import c"]
+
+
 def test_stub_file_replace_via_add_registry():
     """Test replacing entire registry via add_registry (no merge mode)."""
     stub = StubFile()
