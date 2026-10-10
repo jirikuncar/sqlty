@@ -9,6 +9,8 @@ Verifies that the public `sqlty.core` module:
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_core_imports():
     """The core module should import all public functions."""
@@ -199,6 +201,36 @@ def test_check_source_typeddict_key_mismatch_severity():
     assert severities() == ["error", "error"]
     assert severities({"typeddict-key-mismatch": "warn"}) == ["warn", "warn"]
     assert severities({"column-name-mismatch": "error"}) == ["error", "error"]
+
+
+@pytest.mark.parametrize("imports", ["", "import not_installed\n"])
+def test_check_source_typeddict_inheritance_lines(imports: str):
+    """typeddict-inheritance errors sit on the offending subclass's class line."""
+    from sqlty.core import check_source
+
+    source = imports + (
+        "from typing import TypedDict\n"
+        "from sqlty import SQL\n"
+        "class Base(TypedDict, closed=True):\n"
+        "    id: int\n"
+        "class Middle(Base):\n"
+        "    name: str\n"
+        "class User(Middle):\n"
+        "    pass\n"
+        "class Other(Base, closed=False):\n"
+        "    pass\n"
+        'q = SQL[User]("--sql\\nSELECT id::INTEGER, name::TEXT FROM users")\n'
+        'r = SQL[Other]("--sql\\nSELECT id::INTEGER FROM users")\n'
+    )
+    offset = len(imports.splitlines())
+    assert [
+        (d["line"], d["message"])
+        for d in check_source(source, dialect="postgres")
+        if d["rule"] == "typeddict-inheritance"
+    ] == [
+        (5 + offset, "Middle cannot add key 'name' to closed base Base"),
+        (9 + offset, "Other cannot set closed=False: base Base is closed"),
+    ]
 
 
 def test_check_source_inline_sql_comment_unwrapped():

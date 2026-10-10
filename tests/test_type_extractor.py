@@ -1,10 +1,16 @@
 """Unit tests for _type_extractor module."""
 
 import datetime
+import typing
 import uuid
+from collections.abc import Sequence
+
+import pytest
 
 from sqlty._type_extractor import (
     TypeInfo,
+    _consistent,
+    _is_subtype,
     check_type_compatibility,
     extract_type_definitions,
     parse_tuple_annotation,
@@ -525,7 +531,123 @@ class Reopened(Extra, closed=False):
             assert extra_child.extra_items == "int" and not extra_child.closed
             assert not check_type_compatibility(extra_child, "ratio", "float")
 
-    def test_explicit_closed_false_overrides_base(self):
+    def test_closed_false_cannot_reopen_base(self):
         for runtime in (True, False):
             reopened = self._extract(runtime)["Reopened"]
-            assert not reopened.keyed
+            assert reopened.extra_items == "int" and not reopened.closed
+            assert reopened.errors == [
+                "Reopened cannot set closed=False: base Extra has extra_items"
+            ]
+
+
+INHERITANCE_SOURCE = """\
+{imports}
+from typing import NotRequired, ReadOnly, TypedDict
+
+class Closed(TypedDict, closed=True):
+    id: int
+
+class AddsKey(Closed):
+    name: str
+
+class Widens(Closed, extra_items=str):
+    id: int
+
+class Mutable(TypedDict, extra_items=int | None):
+    id: int
+
+class Seals(Mutable, closed=True):
+    id: int
+
+class Retypes(Mutable, extra_items=str):
+    id: int
+
+class RequiredKey(Mutable):
+    views: int | None
+
+class WrongKey(Mutable):
+    views: NotRequired[str]
+
+class Scores(TypedDict, extra_items=ReadOnly[int]):
+    id: int
+
+class Floats(Scores):
+    score: float
+
+class Narrows(Scores, extra_items=bool):
+    id: int
+"""
+
+
+class TestTypedDictInheritance:
+    """PEP 728 inheritance errors and openness fallback, via runtime and AST."""
+
+    CASES: typing.ClassVar = {
+        "AddsKey": ["AddsKey cannot add key 'name' to closed base Closed"],
+        "Widens": ["Widens cannot set extra_items=str: base Closed is closed"],
+        "Seals": ["Seals cannot set closed=True: base Mutable has mutable extra_items int | None"],
+        "Retypes": [
+            "Retypes cannot set extra_items=str: base Mutable has mutable extra_items int | None"
+        ],
+        "RequiredKey": [
+            "RequiredKey.views must be NotRequired: base Mutable has extra_items int | None"
+        ],
+        "WrongKey": ["WrongKey.views is str but base Mutable has extra_items int | None"],
+        "Floats": ["Floats.score is float but base Scores has read-only extra_items int"],
+        "Narrows": [],
+    }
+
+    @pytest.mark.parametrize("runtime", [True, False])
+    @pytest.mark.parametrize("name", list(CASES))
+    def test_errors(self, name: str, runtime: bool):
+        types = extract_type_definitions(
+            INHERITANCE_SOURCE.format(imports="" if runtime else "import not_installed")
+        )
+        assert (types[name].resolved_hints is not None) is runtime
+        assert types[name].errors == self.CASES[name]
+
+    @pytest.mark.parametrize("runtime", [True, False])
+    def test_rejected_override_keeps_base_openness(self, runtime: bool):
+        types = extract_type_definitions(
+            INHERITANCE_SOURCE.format(imports="" if runtime else "import not_installed")
+        )
+        widens, seals, retypes = types["Widens"], types["Seals"], types["Retypes"]
+        assert widens.closed and widens.extra_items is None and widens.owner == "Closed"
+        for info in (seals, retypes):
+            assert not info.closed and info.extra_items == "int" and not info.extra_items_readonly
+            assert info.extra_items_type == int | None and info.owner == "Mutable"
+        narrows = types["Narrows"]
+        assert narrows.extra_items == "bool" and not narrows.extra_items_readonly
+        assert narrows.extra_items_type is bool and narrows.owner == "Narrows"
+
+
+@pytest.mark.parametrize(
+    ("src", "dst", "subtype", "consistent"),
+    [
+        (int, int, True, True),
+        (bool, int, True, False),
+        (int, bool, False, False),
+        (int, float, True, False),
+        (float, complex, True, False),
+        (float, int, False, False),
+        (int | None, None | int, True, True),
+        (int, int | None, True, False),
+        (int | None, int, False, False),
+        (typing.Any, int, True, True),
+        (int, typing.Any, True, True),
+        (int, object, True, False),
+        (int | typing.Any, int, True, True),
+        (int, int | typing.Any, True, True),
+        (float, int | typing.Any, True, True),
+        (int | typing.Any, object, True, True),
+        (str | typing.Any, int, False, False),
+        (typing.Never, int, True, False),
+        (list[int], list, None, None),
+        (list[int], Sequence[int], None, None),
+        (typing.Literal["x"], str, None, None),
+        (str, None, None, None),
+    ],
+)
+def test_subtype_and_consistency(src, dst, subtype, consistent):
+    assert _is_subtype(src, dst) is subtype
+    assert _consistent(src, dst) is consistent

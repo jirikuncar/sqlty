@@ -59,20 +59,21 @@ uv run pre-commit run --all-files
 
 ## Running Tests
 
-SQLTy has three test layers:
+SQLTy has four test layers:
 
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
 | **Unit** | `tests/sql_analyzer/`, `tests/generator/`, etc. | Internal modules | `pytest` |
 | **mdtest** | `tests/mdtest/*.md` | Type inference, rewrite, strip, lint | Markdown snapshot engine |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
+| **Docs** | `README.md`, `docs/**/*.md` | Code examples in user docs | `tests/test_docs.py` (mdtest engine) |
 
 ### Make targets
 
 ```bash
 make test           # Run all tests (unit + mdtest + e2e)
 make test-unit      # Unit tests only (no e2e, no mdtest)
-make test-mdtest    # Mdtest suite only
+make test-mdtest    # Mdtest suite + docs tests
 make test-e2e       # End-to-end tests only
 make test-coverage  # All tests with coverage report
 make update-mdtest  # Update mdtest assertions with actual values

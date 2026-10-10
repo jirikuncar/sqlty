@@ -12,6 +12,7 @@ Configuration via pyproject.toml:
     column-type-mismatch = "error"      # default
     column-name-mismatch = "warn"       # default
     typeddict-key-mismatch = "error"    # default
+    typeddict-inheritance = "error"     # default
     select-star = "warn"                # default
     select-star-no-schema = "error"     # default
     stale-rewrite = "warn"              # default
@@ -73,6 +74,15 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="Query columns don't fit the keys of a closed or extra_items TypedDict",
+    ),
+    "typeddict-inheritance": LintRule(
+        name="typeddict-inheritance",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description=(
+            "TypedDict subclass changes openness or adds keys a closed or extra_items base "
+            "forbids (PEP 728)"
+        ),
     ),
     "select-star": LintRule(
         name="select-star",
