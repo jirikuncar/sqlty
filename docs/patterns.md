@@ -16,10 +16,12 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 sqlty rewrite .
 ```
 
+3. Result (each `# rewritten-file:` line is one line of the rewritten file):
+
 ```python
-# 3. Result
-from sqlty import SQL
-query = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ```bash
@@ -72,12 +74,21 @@ Use a `CREATE TABLE` schema file to infer types without explicit casts:
 schema = "schema.sql"
 ```
 
-```python
-# No ::TYPE casts needed
-query = "--sql\nSELECT id, name, email FROM users"
+`schema.sql`:
 
-# After rewrite:
-query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+```
+
+No `::TYPE` casts needed — `sqlty rewrite` infers the types from the schema:
+
+```python
+query = "--sql\nSELECT id, name, email FROM users"
+# rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
 **Best for:** Projects with existing schema files.
@@ -88,8 +99,8 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
+
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: # coding: sqlty
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 

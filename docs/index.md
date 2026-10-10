@@ -27,13 +27,12 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 sqlty rewrite queries.py
 ```
 
-Result:
+Result — `queries.py` after the rewrite (each `# rewritten-file:` line is one line of the output):
 
 ```python
-# queries.py
-from sqlty import SQL
-
-query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 **3. Check for issues:**
@@ -232,8 +231,8 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
+
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: # coding: sqlty
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 

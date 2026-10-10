@@ -20,12 +20,14 @@ count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
 sqlty rewrite examples/01_quick_start/
 ```
 
-```python
-# queries.py — after rewrite
-from sqlty import SQL
+`queries.py` after the rewrite (each `# rewritten-file:` line is one line of the output):
 
-user_query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-count_query = SQL[tuple[int]]("--sql\nSELECT COUNT(*)::INTEGER FROM users")
+```python
+user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: user_query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten-file: count_query = SQL[tuple[int]]("--sql\nSELECT COUNT(*)::INTEGER FROM users")
 ```
 
 ```bash
@@ -160,8 +162,8 @@ Import-time transformation — `--sql` strings are automatically rewritten when 
 
 ```python
 # coding: sqlty
+
 user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: # coding: sqlty
 # decoded: user_query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 

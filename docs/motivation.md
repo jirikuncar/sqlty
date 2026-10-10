@@ -28,7 +28,7 @@ row = db.fetchone("SELECT id, name FROM users")
 
 ### 1. Type inference from SQL
 
-SQLTy parses your SQL and infers the Python types:
+SQLTy parses your SQL and infers the Python types. The `# rewritten:` line shows the code after `sqlty rewrite .`:
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
