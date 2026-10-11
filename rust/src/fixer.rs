@@ -49,7 +49,7 @@ pub fn fix_source(
     let mut introduced = BTreeSet::new();
     let mut edits = Vec::new();
     for call in wrapper_calls(&source, &tokenize(&source), &style.wrapper_name) {
-        let (Some(literals), Some(mut content)) = (&call.literals, call.content(&source)) else {
+        let Some(mut content) = call.content(&source).filter(|_| call.exact) else {
             continue;
         };
         if !is_sqlty_managed(&content) {
@@ -57,7 +57,7 @@ pub fn fix_source(
         }
         let mut literal_edit = None;
         if let ([span], Some(schema)) = (
-            literals.as_slice(),
+            call.strings.as_slice(),
             schema.as_ref().filter(|_| enabled("select-star")),
         ) {
             let literal = &source[span.clone()];

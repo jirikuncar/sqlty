@@ -4,7 +4,8 @@ Default severity: **warn**
 
 ## What it does
 
-Flags f-strings starting with `--sql`, which rewrite leaves alone.
+Flags f-strings starting with `--sql`, alone or in a concatenation, which
+rewrite leaves alone.
 
 ## Why is this bad?
 

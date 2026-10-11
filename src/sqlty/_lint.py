@@ -20,6 +20,7 @@ Configuration via pyproject.toml:
     inline-sql-comment = "warn"         # default
     fstring-skipped = "warn"            # default
     tstring-skipped = "warn"            # default
+    unchecked-query = "warn"            # default
     untyped-query = "warn"              # default
 """
 
@@ -131,6 +132,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=False,
         description="t-string with --sql prefix skipped (cannot be statically rewritten)",
+    ),
+    "unchecked-query": LintRule(
+        name="unchecked-query",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="--sql query is not plain string literals (raw, bytes, an expression), so it is not checked",
     ),
     "untyped-query": LintRule(
         name="untyped-query",

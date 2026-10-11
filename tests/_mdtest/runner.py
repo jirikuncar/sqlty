@@ -70,9 +70,10 @@ class Run:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
             case "rewritten":
-                return _without_imports(_parses(text, self._rewrite(text)), self._imports).strip()
+                rewritten = _parses(text, self._rewrite(text), same_strings=True)
+                return _without_imports(rewritten, self._imports).strip()
             case "rewritten-file":
-                return _parses(text, self._rewrite(text)).strip()
+                return _parses(text, self._rewrite(text), same_strings=True).strip()
             case "fixed":
                 fixed = _parses(text, self._fix(text))
                 if (again := self._fix(fixed)) != fixed:
@@ -81,7 +82,8 @@ class Run:
                     )
                 return fixed.strip()
             case "stripped":
-                return core.strip_source(text, import_style=self.import_style).strip()
+                stripped = core.strip_source(text, import_style=self.import_style)
+                return _parses(text, stripped, same_strings=True).strip()
             case "decoded":
                 from sqlty._decode import decode
 
@@ -173,8 +175,21 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
     )
 
 
-def _parses(source: str, output: str) -> str:
-    """``output``, which must be valid Python when ``source`` is."""
+def string_constants(source: str) -> list[str]:
+    """Every string value in ``source``, implicit concatenation applied, sorted."""
+    return sorted(
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+
+
+def _parses(source: str, output: str, *, same_strings: bool = False) -> str:
+    """``output``, which must be valid Python when ``source`` is.
+
+    With ``same_strings``, it must also hold the same strings: rewrite and strip
+    only add or remove wrappers, never join, split or change a string.
+    """
     try:
         ast.parse(source)
     except SyntaxError:
@@ -183,6 +198,8 @@ def _parses(source: str, output: str) -> str:
         ast.parse(output)
     except SyntaxError as error:
         raise AssertionError(f"output is not valid Python ({error}):\n{output}") from error
+    if same_strings and string_constants(output) != string_constants(source):
+        raise AssertionError(f"output changes the strings of the source:\n{output}")
     return output
 
 

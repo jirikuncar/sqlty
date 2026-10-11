@@ -3,7 +3,7 @@
 A wrapper's argument runs to its matching `)`: every implicitly concatenated
 string, comments and a trailing comma included. `check`, `check --fix`,
 `rewrite` and `strip` all read it as one query, so their output stays valid
-Python.
+Python. Where the strings can't stand alone, `strip` keeps the parentheses.
 
 ## Implicitly concatenated strings
 
@@ -41,28 +41,15 @@ r = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER " "AS n")
 # stripped: r = "--sql\nSELECT 1::INTEGER " "AS n"
 ```
 
-### Kept when the strings need the call's parentheses
+### Parentheses kept when the strings need them
 
 ```python
 from sqlty import SQL
 
 q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER "
                     "AS n")
-# stripped: from sqlty import SQL
-# stripped:
-# stripped: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER "
+# stripped: q = ("--sql\nSELECT 1::INTEGER "
 # stripped:                     "AS n")
-```
-
-### Mixed with an f-string
-
-```python
-x = 1
-q = ("--sql\nSELECT 1::INTEGER "
-     f"AS n{x}")
-# rewritten: x = 1
-# rewritten: q = ("--sql\nSELECT 1::INTEGER "
-# rewritten:      f"AS n{x}")
 ```
 
 ## Comment before the closing parenthesis
@@ -79,9 +66,7 @@ SELECT 1::INTEGER AS n"""  # c
 # fixed: q = SQL[tuple[int]]("""--sql
 # fixed: SELECT 1::INTEGER AS n"""  # c
 # fixed: )
-# stripped: from sqlty import SQL
-# stripped:
-# stripped: q = SQL[tuple[str]]("""--sql
+# stripped: q = ("""--sql
 # stripped: SELECT 1::INTEGER AS n"""  # c
 # stripped: )
 ```
@@ -111,13 +96,16 @@ a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), SQL[tuple[int]]("--sql\nSELE
 # fixed: a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), SQL[tuple[str]]("--sql\nSELECT 'x'::TEXT")
 ```
 
-## Other arguments are left alone
+## Other arguments are reported, not edited
+
+A wrapper whose argument is not only string literals is neither checked nor
+edited; `unchecked-query` reports it.
 
 ```python
 from sqlty import SQL
 
+# error: [unchecked-query] "--sql query is not plain string literals, so it is not checked or rewritten"
 q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
-# error:
 # fixed: from sqlty import SQL
 # fixed:
 # fixed: q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
@@ -125,4 +113,76 @@ q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
 # stripped: from sqlty import SQL
 # stripped:
 # stripped: q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
+```
+
+## Interpolated or raw parts skip the whole concatenation
+
+```python
+x = 1
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+q = ("--sql\nSELECT 1::INTEGER "
+     f"AS n{x}")
+# error: [unchecked-query] "--sql query is not plain string literals, so it is not checked or rewritten"
+r = ("--sql\nSELECT 1::INTEGER "
+     r"AS n")
+# rewritten: x = 1
+# rewritten: q = ("--sql\nSELECT 1::INTEGER "
+# rewritten:      f"AS n{x}")
+# rewritten: r = ("--sql\nSELECT 1::INTEGER "
+# rewritten:      r"AS n")
+```
+
+## A wrapper from another module is not wrapped again
+
+```python
+import mod
+
+q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
+# error:
+# rewritten: import mod
+# rewritten:
+# rewritten: q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
+# stripped: import mod
+# stripped:
+# stripped: q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
+## Nested f-string quotes don't hide a statement's end
+
+PEP 701 lets an f-string field hold the quote and brackets of its own
+string; the docstring stays a statement of its own.
+
+```python
+x = f"{"("}"
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = "--sql\nSELECT 1::INTEGER AS n"
+"""Attribute doc."""
+# rewritten: x = f"{"("}"
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten: """Attribute doc."""
+```
+
+### Strip keeps a multi-line wrapper valid
+
+```python
+from sqlty import SQL
+
+x = f"{"("}"
+y = 1 if"(" else 2
+q = SQL[tuple[int]](
+    "--sql\nSELECT 1::INTEGER "
+    "AS n"
+)
+# stripped: x = f"{"("}"
+# stripped: y = 1 if"(" else 2
+# stripped: q = (
+# stripped:     "--sql\nSELECT 1::INTEGER "
+# stripped:     "AS n"
+# stripped: )
+# rewritten: x = f"{"("}"
+# rewritten: y = 1 if"(" else 2
+# rewritten: q = SQL[tuple[int]](
+# rewritten:     "--sql\nSELECT 1::INTEGER "
+# rewritten:     "AS n"
+# rewritten: )
 ```

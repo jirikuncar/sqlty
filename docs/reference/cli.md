@@ -34,9 +34,11 @@ nearest `pyproject.toml` above it that has one; see
 ## `sqlty rewrite`
 
 Wrap `--sql` strings in `SQL[T](...)` with the inferred row type and add the
-imports the types need. Existing wrappers are left alone. f- and t-strings
-starting with `--sql` are reported on stderr (`fstring-skipped`,
-`tstring-skipped`) unless `-q` is given or the rule is set to `ignore`; they
+imports the types need. Implicitly concatenated strings are wrapped as one
+query. Existing wrappers are left alone. `--sql` strings that are not plain
+literals (f-, t-, raw or bytes strings, alone or in a concatenation) are
+skipped and reported on stderr (`fstring-skipped`, `tstring-skipped`,
+`unchecked-query`) unless `-q` is given or the rule is set to `ignore`; they
 never change the exit code.
 
 ```
@@ -56,7 +58,11 @@ Exit code: 0, or 1 with `--check` when files would change.
 ## `sqlty strip`
 
 Remove `SQL[...](...)` wrappers around `--sql` strings, including
-hand-written row types such as `SQL[User]`, and the sqlty import line.
+hand-written row types such as `SQL[User]`, and the sqlty import line. When the
+strings can't stand alone (a comment outside them, or line breaks that only the
+call's parentheses allow), the parentheses stay: `SQL[T]("..."  # c\n)` becomes
+`("..."  # c\n)`. A wrapper whose argument is not only string literals
+(`SQL[T]("--sql..." + x)`) is left in place.
 
 ```
 sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
@@ -66,7 +72,7 @@ sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 
 | Option | Description |
 |--------|-------------|
-| `--check` | Do not modify files; print `Would strip <file>` and exit 1 if any file contains wrappers |
+| `--check` | Do not modify files; print `Would strip <file>` and exit 1 if any file would change |
 | `--diff` | Print a unified diff instead of modifying files |
 
 Exit code: 0, or 1 with `--check` when files would change.
