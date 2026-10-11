@@ -73,8 +73,13 @@ class SQLAnalyzer:
         "UMEDIUMINT": "int",
         "UINT": "int",
         "UBIGINT": "int",
+        "INT128": "int",
+        "UINT128": "int",
+        "INT256": "int",
+        "UINT256": "int",
         "UDOUBLE": "float",
         "UDECIMAL": "float",
+        "BIGDECIMAL": "float",
     }
 
     def __init__(self, dialect: str = "postgres", schema_path: Path | None = None) -> None:

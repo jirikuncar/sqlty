@@ -98,11 +98,6 @@ class TestParserParity:
             "tuple[str]"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="sqlparser-rs has no INT3/MIDDLEINT keyword: `INT3 UNSIGNED` is a parse error, "
-        "so Rust skips the table while Python reads b::UMEDIUMINT",
-    )
     def test_int3_unsigned_column(self):
         rs = pytest.importorskip("sqlty._core", reason="Rust backend not compiled")
         import sqlty._core_py as py

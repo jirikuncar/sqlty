@@ -1,8 +1,4 @@
-"""Type stubs for the Rust extension module (sqlty._core).
-
-These stubs ensure that mypy/pyright can type-check code that imports from
-the Rust extension, even when the extension isn't compiled.
-"""
+"""Type stubs for the Rust extension module (sqlty._core)."""
 
 def infer_type(
     sql: str,
@@ -10,6 +6,13 @@ def infer_type(
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> str | None: ...
+def analyze_select(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[str, str | None, str | None]] | None: ...
+def returns_rows(sql: str, *, dialect: str = "postgres") -> bool: ...
 def rewrite_source(
     source: str,
     *,
@@ -19,6 +22,15 @@ def rewrite_source(
     untyped: bool = False,
 ) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
+def fix_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    rules: dict[str, str] | None = None,
+) -> str: ...
 def expand_star(
     sql: str,
     *,
@@ -34,3 +46,6 @@ def check_source(
     import_style: str | None = None,
     untyped: bool = False,
 ) -> list[dict[str, str | int | None]]: ...
+def wrapped_queries(
+    source: str, *, import_style: str | None = None
+) -> list[tuple[int, str, str]]: ...

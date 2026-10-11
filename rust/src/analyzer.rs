@@ -9,14 +9,17 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, ObjectName, OutputClause, Query, Select, SelectItem,
     SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject, TableWithJoins,
     Value,
 };
-use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::dialect::{
+    dialect_from_str, ClickHouseDialect, GenericDialect, MySqlDialect, PostgreSqlDialect,
+    SQLiteDialect,
+};
 use sqlparser::parser::Parser;
 
 /// Mapping from canonical SQL type names to Python type strings.
@@ -36,6 +39,10 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("UMEDIUMINT", "int"),
         ("UINT", "int"),
         ("UBIGINT", "int"),
+        ("INT128", "int"),
+        ("UINT128", "int"),
+        ("INT256", "int"),
+        ("UINT256", "int"),
         ("FLOAT", "float"),
         ("DOUBLE", "float"),
         ("REAL", "float"),
@@ -43,6 +50,7 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("NUMERIC", "float"),
         ("UDOUBLE", "float"),
         ("UDECIMAL", "float"),
+        ("BIGDECIMAL", "float"),
         ("TEXT", "str"),
         ("VARCHAR", "str"),
         ("CHAR", "str"),
@@ -140,20 +148,34 @@ pub type Schema = HashMap<String, Vec<(String, String)>>;
 /// `(reference, table)` pairs for the tables a statement reads, in query order.
 type Scope = Vec<(String, String)>;
 
-/// A column's Python type, `None` when unknown (rendered as `str`).
-type Ty = Option<String>;
-
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
 type Inferred<T> = Result<T, String>;
 
-/// A dialect name, matched case-insensitively; unknown names read as generic SQL.
+/// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SqlDialect {
     Postgres,
     MySql,
     Sqlite,
-    Generic,
+    ClickHouse,
+    Other(&'static str),
 }
+
+/// sqlparser dialects beyond the special-cased ones; sqlglot's `tsql` is sqlparser's `mssql`.
+const OTHER_DIALECTS: [&str; 12] = [
+    "ansi",
+    "bigquery",
+    "databricks",
+    "duckdb",
+    "hive",
+    "mssql",
+    "oracle",
+    "redshift",
+    "snowflake",
+    "spark",
+    "sparksql",
+    "teradata",
+];
 
 impl SqlDialect {
     fn from_name(name: &str) -> Self {
@@ -161,7 +183,14 @@ impl SqlDialect {
             "postgres" | "postgresql" => Self::Postgres,
             "mysql" => Self::MySql,
             "sqlite" => Self::Sqlite,
-            _ => Self::Generic,
+            "clickhouse" => Self::ClickHouse,
+            "tsql" => Self::Other("mssql"),
+            other => Self::Other(
+                OTHER_DIALECTS
+                    .into_iter()
+                    .find(|known| *known == other)
+                    .unwrap_or("generic"),
+            ),
         }
     }
 
@@ -170,7 +199,8 @@ impl SqlDialect {
             Self::Postgres => Box::new(PostgreSqlDialect {}),
             Self::MySql => Box::new(MySqlDialect {}),
             Self::Sqlite => Box::new(SQLiteDialect {}),
-            Self::Generic => Box::new(GenericDialect {}),
+            Self::ClickHouse => Box::new(ClickHouseDialect {}),
+            Self::Other(name) => dialect_from_str(name).unwrap_or_else(|| Box::new(GenericDialect)),
         }
     }
 }
@@ -181,17 +211,65 @@ static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?")
 /// DB-API placeholders (`%s`, `%(name)s`) and the `%%` escape, which sqlparser can't read.
 static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%\(\w+\)s|%s").unwrap());
 
+/// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
+static QMARK: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
+});
+
+/// MySQL type spellings sqlparser rejects: `INT3`/`MIDDLEINT` before `UNSIGNED`, and `ZEROFILL`.
+static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
+    [
+        (
+            Regex::new(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)").unwrap(),
+            "MEDIUMINT$1$2",
+        ),
+        (
+            Regex::new(r"(?i)(?:\s+UNSIGNED)?\s+ZEROFILL\b").unwrap(),
+            " UNSIGNED",
+        ),
+    ]
+});
+
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 ///
-/// Placeholders parse as `NULL`, a value of unknown type, and `%%` as `%`, as in the Python backend.
+/// Placeholders parse as `NULL`, a value of unknown type, and `%%` as `%`. In PostgreSQL,
+/// where `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
+/// the query doesn't parse as written.
 fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let sql = SQL_MARKER.replace(sql, "");
-    let sql = PLACEHOLDER.replace_all(&sql, |caps: &regex::Captures| match &caps[0] {
-        "%%" => "%",
-        _ => "NULL",
-    });
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), &sql).ok()?;
+    let mut sql = SQL_MARKER.replace(sql, "").into_owned();
+    sql = PLACEHOLDER
+        .replace_all(&sql, |caps: &Captures| match &caps[0] {
+            "%%" => "%",
+            _ => "NULL",
+        })
+        .into_owned();
+    if dialect == SqlDialect::MySql {
+        for (pattern, replacement) in MYSQL_TYPE_FIXES.iter() {
+            sql = pattern.replace_all(&sql, *replacement).into_owned();
+        }
+    }
+    let parser = dialect.parser_dialect();
+    let stmts = match Parser::parse_sql(parser.as_ref(), &sql) {
+        Ok(stmts) => stmts,
+        Err(_) if dialect == SqlDialect::Postgres && sql.contains('?') => {
+            Parser::parse_sql(parser.as_ref(), &numbered_placeholders(&sql)).ok()?
+        }
+        Err(_) => return None,
+    };
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+}
+
+fn numbered_placeholders(sql: &str) -> String {
+    let mut n = 0;
+    QMARK
+        .replace_all(sql, |caps: &Captures| match caps.get(1) {
+            Some(_) => {
+                n += 1;
+                format!("${n}")
+            }
+            None => caps[0].to_string(),
+        })
+        .into_owned()
 }
 
 /// Whether `stmts` use what sqlparser accepts but the dialect (and sqlglot) does not:
@@ -270,8 +348,26 @@ fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
         "TIME WITHOUT TIME ZONE" => "TIME",
         "INTEGER" | "INT4" => "INT",
         "INT1" => "TINYINT",
-        "INT2" => "SMALLINT",
-        "INT8" => "BIGINT",
+        "INT2" | "INT16" => "SMALLINT",
+        "INT32" => "INT",
+        "INT8" if dialect == SqlDialect::ClickHouse => "TINYINT",
+        "INT8" | "INT64" => "BIGINT",
+        "UINT8" => "UTINYINT",
+        "UINT16" => "USMALLINT",
+        "UINT32" => "UINT",
+        "UINT64" => "UBIGINT",
+        "HUGEINT" => "INT128",
+        "UHUGEINT" => "UINT128",
+        "FLOAT32" => "FLOAT",
+        "FLOAT64" => "DOUBLE",
+        "NUMBER" => "DECIMAL",
+        "BIGNUMERIC" => "BIGDECIMAL",
+        "VARCHAR2" | "NVARCHAR2" => "VARCHAR",
+        "CLOB" => "TEXT",
+        "BYTES" => "BINARY",
+        "UNIQUEIDENTIFIER" => "UUID",
+        "TIMESTAMP_NTZ" | "DATETIME2" => "TIMESTAMP",
+        "TIMESTAMP_TZ" | "TIMESTAMP_LTZ" | "DATETIMEOFFSET" => "TIMESTAMPTZ",
         "FLOAT" if dialect == SqlDialect::Postgres => "DOUBLE",
         "FLOAT8" | "DOUBLE PRECISION" => "DOUBLE",
         "FLOAT4" | "REAL" => "FLOAT",
@@ -339,22 +435,30 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
+    Ok(analyze_select(sql, dialect, schema)?.map(|columns| {
+        let types: Vec<&str> = columns
+            .iter()
+            .map(|col| col.python_type.as_deref().unwrap_or("str"))
+            .collect();
+        format!("tuple[{}]", types.join(", "))
+    }))
+}
+
+/// The result columns of a query, or `None` when it returns no rows or doesn't parse.
+pub fn analyze_select(
+    sql: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+) -> Inferred<Option<Vec<Column>>> {
     let empty = Schema::new();
     let analyzer = Analyzer {
         schema: schema.as_ref().unwrap_or(&empty),
         dialect: SqlDialect::from_name(dialect),
     };
-    let Some(stmt) = parse_first(sql, analyzer.dialect) else {
-        return Ok(None);
-    };
-    let types = analyzer.statement_columns(&stmt)?;
-    Ok(types.map(|types| {
-        let types: Vec<&str> = types
-            .iter()
-            .map(|ty| ty.as_deref().unwrap_or("str"))
-            .collect();
-        format!("tuple[{}]", types.join(", "))
-    }))
+    match parse_first(sql, analyzer.dialect) {
+        Some(stmt) => analyzer.statement_columns(&stmt),
+        None => Ok(None),
+    }
 }
 
 /// Whether `sql` yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -472,13 +576,96 @@ fn first_arg(args: &FunctionArguments) -> Option<&Expr> {
     }
 }
 
+/// A result column: name, Python type and SQL type; unknown types are `None`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Column {
+    pub name: String,
+    pub python_type: Option<String>,
+    pub sql_type: Option<String>,
+}
+
+impl Column {
+    fn unknown(name: &str) -> Self {
+        Column {
+            name: name.to_string(),
+            python_type: None,
+            sql_type: None,
+        }
+    }
+}
+
+/// `(python_type, sql_type)` of an expression.
+type Typed = (Option<String>, Option<String>);
+
+fn known(python_type: &str) -> Inferred<Typed> {
+    Ok((Some(python_type.to_string()), None))
+}
+
+fn from_sql_type(sql_type: String) -> Typed {
+    (Some(python_type(&sql_type)), Some(sql_type))
+}
+
+/// Functions whose result type is known, besides those in [`FUNCTION_TYPES`].
+const TYPED_FUNCTIONS: [&str; 6] = ["COUNT", "AVG", "SUM", "MIN", "MAX", "COALESCE"];
+
+/// Typed functions whose unaliased column is still named after the function, as in sqlglot.
+const NAMED_FUNCTIONS: [&str; 7] = [
+    "OCTET_LENGTH",
+    "JSON_BUILD_OBJECT",
+    "JSONB_BUILD_OBJECT",
+    "TO_JSON",
+    "TO_JSONB",
+    "JSONB_AGG",
+    "JSONB_OBJECT_AGG",
+];
+
+/// Name of an unaliased result column: a column's name, a literal's text, `*` for
+/// `COUNT(*)`, the function's name for a call sqlty can't type; empty for anything else.
+fn column_name(expr: &Expr) -> String {
+    match expr {
+        Expr::Identifier(ident) => ident.value.clone(),
+        Expr::CompoundIdentifier(parts) => parts
+            .last()
+            .map(|part| part.value.clone())
+            .unwrap_or_default(),
+        Expr::Cast { expr, .. } | Expr::UnaryOp { expr, .. } => column_name(expr),
+        Expr::Extract { field, .. } => field.to_string(),
+        Expr::Value(value) => match &value.value {
+            Value::Number(number, _) => number.clone(),
+            Value::Null => "NULL".to_string(),
+            Value::Boolean(_) | Value::Placeholder(_) => String::new(),
+            other => other.clone().into_string().unwrap_or_default(),
+        },
+        Expr::Function(func) => {
+            let name = func.name.to_string().to_uppercase();
+            let star = matches!(&func.args, FunctionArguments::List(list)
+                if matches!(list.args.first(), Some(FunctionArg::Unnamed(FunctionArgExpr::Wildcard))));
+            let typed = TYPED_FUNCTIONS.contains(&name.as_str())
+                || FUNCTION_TYPES.contains_key(name.as_str());
+            if name == "COUNT" && star {
+                "*".to_string()
+            } else if typed && !NAMED_FUNCTIONS.contains(&name.as_str()) {
+                String::new()
+            } else {
+                func.name
+                    .0
+                    .last()
+                    .and_then(|part| part.as_ident())
+                    .map(|ident| ident.value.clone())
+                    .unwrap_or_default()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
 struct Analyzer<'a> {
     schema: &'a Schema,
     dialect: SqlDialect,
 }
 
 impl Analyzer<'_> {
-    fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Ty>>> {
+    fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Column>>> {
         match stmt {
             Statement::Query(query) => self.query_columns(query),
             _ => match returning(stmt) {
@@ -488,7 +675,7 @@ impl Analyzer<'_> {
         }
     }
 
-    fn query_columns(&self, query: &Query) -> Inferred<Option<Vec<Ty>>> {
+    fn query_columns(&self, query: &Query) -> Inferred<Option<Vec<Column>>> {
         match query.body.as_ref() {
             SetExpr::Insert(stmt)
             | SetExpr::Update(stmt)
@@ -503,30 +690,61 @@ impl Analyzer<'_> {
         }
     }
 
-    /// One type per result column; a star may yield several.
-    fn projection(&self, items: &[SelectItem], scope: &Scope) -> Inferred<Vec<Ty>> {
-        let mut types = Vec::new();
+    /// One column per result column; a star may yield several.
+    fn projection(&self, items: &[SelectItem], scope: &Scope) -> Inferred<Vec<Column>> {
+        let mut columns = Vec::new();
         for item in items {
-            let star = match item {
-                SelectItem::UnnamedExpr(expr)
-                | SelectItem::ExprWithAlias { expr, .. }
-                | SelectItem::ExprWithAliases { expr, .. } => {
-                    types.push(self.expr(expr, scope)?);
+            let (expr, name) = match item {
+                SelectItem::UnnamedExpr(expr) => (expr, column_name(expr)),
+                SelectItem::ExprWithAlias { expr, alias } => (expr, alias.value.clone()),
+                SelectItem::ExprWithAliases { expr, aliases } => (
+                    expr,
+                    aliases
+                        .first()
+                        .map_or_else(|| column_name(expr), |a| a.value.clone()),
+                ),
+                SelectItem::Wildcard(_) => {
+                    columns.extend(self.star(None, scope));
                     continue;
                 }
-                SelectItem::Wildcard(_) => self.star_columns(None, scope),
                 SelectItem::QualifiedWildcard(
                     SelectItemQualifiedWildcardKind::ObjectName(name),
                     _,
-                ) => self.star_columns(Some(&object_name(name)), scope),
-                SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => None,
+                ) => {
+                    columns.extend(self.star(Some(&object_name(name)), scope));
+                    continue;
+                }
+                SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
+                    columns.push(Column::unknown("*"));
+                    continue;
+                }
             };
-            match star {
-                Some(columns) => types.extend(columns.iter().map(|(_, ty)| Some(python_type(ty)))),
-                None => types.push(None),
-            }
+            let (python_type, sql_type) = self.expr(expr, scope)?;
+            columns.push(Column {
+                name,
+                python_type,
+                sql_type,
+            });
         }
-        Ok(types)
+        Ok(columns)
+    }
+
+    /// Columns of a star from the schema, or a single unknown `*` column.
+    fn star(&self, reference: Option<&str>, scope: &Scope) -> Vec<Column> {
+        match self.star_columns(reference, scope) {
+            Some(columns) => columns
+                .into_iter()
+                .map(|(name, sql_type)| {
+                    let (python_type, sql_type) = from_sql_type(sql_type);
+                    Column {
+                        name,
+                        python_type,
+                        sql_type,
+                    }
+                })
+                .collect(),
+            None => vec![Column::unknown("*")],
+        }
     }
 
     /// Expand `*` (all scope tables) or `t.*` from the schema, or `None` if unknown.
@@ -571,24 +789,25 @@ impl Analyzer<'_> {
         }
     }
 
-    fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Ty> {
-        let known = |ty: &str| Ok(Some(ty.to_string()));
+    fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => {
-                Ok(Some(python_type(&canonical_type(data_type, self.dialect))))
+                Ok(from_sql_type(canonical_type(data_type, self.dialect)))
             }
             Expr::Nested(inner) => self.expr(inner, scope),
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
-                Ok(self.column_type(expr, scope).map(|ty| python_type(&ty)))
-            }
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self
+                .column_type(expr, scope)
+                .map_or((None, None), from_sql_type)),
             Expr::Value(value) => match &value.value {
                 Value::Number(number, _) if number.contains(['.', 'e', 'E']) => known("float"),
                 Value::Number(..) => known("int"),
                 Value::Boolean(_) => known("bool"),
-                Value::Null | Value::Placeholder(_) => Ok(None),
+                Value::Null | Value::Placeholder(_) => Ok((None, None)),
                 _ => known("str"),
             },
             Expr::Exists { .. } | Expr::InSubquery { .. } => known("bool"),
+            Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
+            Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => match leftmost_select(&query.body) {
                 Some(select) if !select.projection.is_empty() => {
                     let scope = select_scope(&select.from);
@@ -596,9 +815,9 @@ impl Analyzer<'_> {
                         .projection(&select.projection[..1], &scope)?
                         .into_iter()
                         .next()
-                        .flatten())
+                        .map_or((None, None), |col| (col.python_type, col.sql_type)))
                 }
-                _ => Ok(None),
+                _ => Ok((None, None)),
             },
             Expr::Case {
                 conditions,
@@ -611,29 +830,36 @@ impl Analyzer<'_> {
                     .or(else_result.as_deref())
                 {
                     Some(branch) => self.expr(branch, scope),
-                    None => Ok(None),
+                    None => Ok((None, None)),
                 }
             }
             Expr::Function(func) => {
                 let name = func.name.to_string().to_uppercase();
                 let arg = first_arg(&func.args);
                 match name.as_str() {
-                    "COUNT" => known("int"),
+                    "COUNT" => Ok((Some("int".to_string()), Some("INTEGER".to_string()))),
                     "AVG" => known("float"),
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
-                    "COALESCE" => arg.map_or(Ok(None), |arg| self.expr(arg, scope)),
-                    _ => Ok(FUNCTION_TYPES.get(name.as_str()).map(|ty| ty.to_string())),
+                    "COALESCE" => arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope)),
+                    _ => Ok((
+                        FUNCTION_TYPES.get(name.as_str()).map(|ty| ty.to_string()),
+                        None,
+                    )),
                 }
             }
-            _ => Ok(None),
+            _ => Ok((None, None)),
         }
     }
 
-    /// SUM/MIN/MAX take their argument's type; SUM falls back to float.
-    fn aggregate(&self, name: &str, arg: Option<&Expr>, scope: &Scope) -> Inferred<Ty> {
-        let ty = arg.map_or(Ok(None), |arg| self.expr(arg, scope))?;
-        if ty.is_some() || name != "SUM" || scope.is_empty() {
-            return Ok(ty.or_else(|| (name == "SUM").then(|| "float".to_string())));
+    /// SUM/MIN/MAX take their argument's type; SUM falls back to `NUMERIC`.
+    fn aggregate(&self, name: &str, arg: Option<&Expr>, scope: &Scope) -> Inferred<Typed> {
+        let typed = arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope))?;
+        let numeric = || Ok((Some("float".to_string()), Some("NUMERIC".to_string())));
+        if typed.0.is_some() || name != "SUM" {
+            return Ok(typed);
+        }
+        if scope.is_empty() {
+            return numeric();
         }
         let (table, column) = match arg {
             Some(Expr::Identifier(ident)) => (scope[0].1.clone(), &ident.value),
@@ -641,7 +867,7 @@ impl Analyzer<'_> {
                 resolve(&parts[parts.len() - 2].value, scope),
                 &parts[parts.len() - 1].value,
             ),
-            _ => return Ok(Some("float".to_string())),
+            _ => return numeric(),
         };
         if self.schema.contains_key(&table) {
             return Err(format!(
@@ -650,12 +876,12 @@ impl Analyzer<'_> {
                  SUM({column}::TYPE)"
             ));
         }
-        Ok(Some("float".to_string()))
+        numeric()
     }
 }
 
-fn non_empty(types: Vec<Ty>) -> Option<Vec<Ty>> {
-    (!types.is_empty()).then_some(types)
+fn non_empty(columns: Vec<Column>) -> Option<Vec<Column>> {
+    (!columns.is_empty()).then_some(columns)
 }
 
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.

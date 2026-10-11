@@ -1,32 +1,35 @@
-//! sqlty._core — Rust implementation of the core computation functions.
-//!
-//! This module is compiled as a native Python extension via PyO3 + maturin.
-//! It replaces `sqlty._core_py` (pure Python fallback) with identical behavior
-//! but significantly better performance.
-//!
-//! The Python import-switching facade in `sqlty/core.py`:
-//! ```python
-//! try:
-//!     from sqlty._core import infer_type, rewrite_source, ...  # Rust (fast)
-//! except ImportError:
-//!     from sqlty._core_py import infer_type, rewrite_source, ...  # Python fallback
-//! ```
+//! sqlty._core — the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
 
 mod analyzer;
 mod checker;
+mod fixer;
 mod rewriter;
 
 use std::collections::HashMap;
 
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+
+use rewriter::ImportStyle;
+
+type ColumnTuple = (String, Option<String>, Option<String>);
+
+fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
+    schema_sql.map(|s| analyzer::load_schema(s, dialect))
+}
+
+fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
+    ImportStyle::parse(import_style)
+        .map(drop)
+        .map_err(PyValueError::new_err)
+}
 
 /// Infer the Python return type for a SQL query.
 ///
 /// Args:
 ///     sql: SQL query string (e.g., "SELECT id::INTEGER, name::TEXT FROM users")
-///     dialect: SQL dialect (postgres, mysql, sqlite)
+///     dialect: SQL dialect (postgres, mysql, sqlite, ...)
 ///     schema_sql: Optional CREATE TABLE statements for schema-aware inference
 ///
 /// Returns:
@@ -37,8 +40,40 @@ use pyo3::types::{PyDict, PyList};
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
-    let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    analyzer::infer_type(sql, dialect, &schema).map_err(PyRuntimeError::new_err)
+    analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
+        .map_err(PyRuntimeError::new_err)
+}
+
+/// Result columns of a query as `(name, python_type, sql_type)` tuples.
+///
+/// Returns None when the query returns no rows or doesn't parse; unknown types are None.
+///
+/// Raises:
+///     RuntimeError: SUM(column) names a column missing from a schema table
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn analyze_select(
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> PyResult<Option<Vec<ColumnTuple>>> {
+    let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
+        .map_err(PyRuntimeError::new_err)?;
+    Ok(columns.map(|columns| {
+        columns
+            .into_iter()
+            .map(|col| (col.name, col.python_type, col.sql_type))
+            .collect()
+    }))
+}
+
+/// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
+///
+/// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres"))]
+fn returns_rows(sql: &str, dialect: &str) -> bool {
+    analyzer::returns_rows(sql, dialect)
 }
 
 /// Rewrite Python source: "--sql\n..." -> SQL[T]("--sql\n...").
@@ -46,15 +81,8 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Op
 /// Adds necessary imports (SQL, datetime, uuid) at the top.
 /// Never modifies string content — only adds the SQL[T]() wrapper.
 ///
-/// Args:
-///     source: Python source code
-///     dialect: SQL dialect
-///     schema_sql: Optional CREATE TABLE statements
-///     import_style: Import style (e.g. "from sqlty import SQL as Q")
-///     untyped: Wrap row-returning queries of unknown row type as SQL[UNTYPED](...)
-///
-/// Returns:
-///     Rewritten source code
+/// Raises:
+///     ValueError: unsupported import_style
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false))]
 fn rewrite_source(
@@ -63,55 +91,72 @@ fn rewrite_source(
     schema_sql: Option<&str>,
     import_style: Option<&str>,
     untyped: bool,
-) -> String {
-    let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    rewriter::rewrite_source(source, dialect, &schema, import_style, untyped)
+) -> PyResult<String> {
+    check_import_style(import_style)?;
+    Ok(rewriter::rewrite_source(
+        source,
+        dialect,
+        &schema(schema_sql, dialect),
+        import_style,
+        untyped,
+    ))
 }
 
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
 ///
 /// Removes unused imports added by rewrite.
 ///
-/// Args:
-///     source: Python source code with SQL[T](...) wrappers
-///     import_style: Import style (e.g. "from sqlty import SQL as Q")
-///
-/// Returns:
-///     Stripped source code
+/// Raises:
+///     ValueError: unsupported import_style
 #[pyfunction]
 #[pyo3(signature = (source, *, import_style = None))]
-fn strip_source(source: &str, import_style: Option<&str>) -> String {
-    rewriter::strip_source(source, import_style)
+fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
+    check_import_style(import_style)?;
+    Ok(rewriter::strip_source(source, import_style))
+}
+
+/// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None))]
+fn fix_source(
+    source: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+    import_style: Option<&str>,
+    untyped: bool,
+    rules: Option<HashMap<String, String>>,
+) -> PyResult<String> {
+    check_import_style(import_style)?;
+    Ok(fixer::fix_source(
+        source,
+        dialect,
+        &schema(schema_sql, dialect),
+        import_style,
+        untyped,
+        rules,
+    ))
 }
 
 /// Expand SELECT * into explicit column list.
-///
-/// Args:
-///     sql: SQL query containing SELECT *
-///     dialect: SQL dialect
-///     schema_sql: CREATE TABLE statements (required for expansion)
 ///
 /// Returns:
 ///     SQL with expanded columns, or None if expansion is not possible
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<String> {
-    let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    analyzer::expand_star(sql, dialect, &schema)
+    analyzer::expand_star(sql, dialect, &schema(schema_sql, dialect))
 }
 
 /// Check Python source for SQL type issues.
 ///
-/// Args:
-///     source: Python source code
-///     dialect: SQL dialect
-///     schema_sql: Optional CREATE TABLE statements
-///     rules: Rule severity overrides (e.g., {"select-star": "ignore"})
-///     import_style: Import style (e.g. "from sqlty import SQL as Q")
-///     untyped: Report uninferable row queries as stale-rewrite, as rewrite wraps them
-///
 /// Returns:
 ///     List of diagnostic dicts with keys: rule, message, severity, line
+///
+/// Raises:
+///     ValueError: unsupported import_style
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false))]
 fn check_source<'py>(
@@ -122,30 +167,52 @@ fn check_source<'py>(
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
-) -> Bound<'py, PyList> {
-    let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    let diagnostics = checker::check_source(source, dialect, &schema, rules, import_style, untyped);
-
+) -> PyResult<Bound<'py, PyList>> {
+    check_import_style(import_style)?;
+    let diagnostics = checker::check_source(
+        source,
+        dialect,
+        &schema(schema_sql, dialect),
+        rules,
+        import_style,
+        untyped,
+    );
     let list = PyList::empty(py);
     for diag in diagnostics {
         let dict = PyDict::new(py);
-        dict.set_item("rule", &diag.rule).unwrap();
-        dict.set_item("message", &diag.message).unwrap();
-        dict.set_item("severity", &diag.severity).unwrap();
-        dict.set_item("line", diag.line).unwrap();
-        list.append(dict).unwrap();
+        dict.set_item("rule", &diag.rule)?;
+        dict.set_item("message", &diag.message)?;
+        dict.set_item("severity", &diag.severity)?;
+        dict.set_item("line", diag.line)?;
+        list.append(dict)?;
     }
-
-    list
+    Ok(list)
 }
 
-/// PyO3 module definition — this becomes `sqlty._core`.
+/// `(line, annotation, query)` for each `SQL[T]("--sql ...")` call in Python source.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, import_style = None))]
+fn wrapped_queries(
+    source: &str,
+    import_style: Option<&str>,
+) -> PyResult<Vec<(usize, String, String)>> {
+    check_import_style(import_style)?;
+    Ok(checker::wrapped_queries(source, import_style))
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
+    m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
+    m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     Ok(())
 }

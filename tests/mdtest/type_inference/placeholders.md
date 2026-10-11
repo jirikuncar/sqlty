@@ -36,3 +36,25 @@ dialect = "mysql"
 q = "--sql\nSELECT CAST(id AS SIGNED) FROM users WHERE id = %s"
 # rewritten: q = SQL[tuple[int]]("--sql\nSELECT CAST(id AS SIGNED) FROM users WHERE id = %s")
 ```
+
+## PostgreSQL question marks
+
+<!-- mdtest:backend rs -->
+
+`?` placeholders are read as `$1`, `$2`, ... when the query doesn't parse as
+written: in PostgreSQL `?` is also a JSONB operator, which keeps its meaning.
+
+```sql
+SELECT id::INTEGER FROM users WHERE id = ? AND name = ?
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT id::INTEGER FROM users WHERE tags ? 'admin'
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT id::INTEGER FROM users WHERE tags ?| array['a'] AND id = ?
+-- inferred: tuple[int]
+```

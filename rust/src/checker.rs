@@ -15,7 +15,7 @@ use regex::Regex;
 
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
-use crate::rewriter::{header_end, rewrite_source, skipped_string_rule};
+use crate::rewriter::{header_end, rewrite_source, skipped_string_rule, ImportStyle};
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -87,22 +87,6 @@ impl RuleConfig {
     }
 }
 
-/// Parse import-style into wrapper_name.
-fn parse_wrapper_name(import_style: Option<&str>) -> String {
-    match import_style {
-        None | Some("from sqlty import SQL") => "SQL".to_string(),
-        Some(s) if s.starts_with("from sqlty import SQL as ") => {
-            s["from sqlty import SQL as ".len()..].trim().to_string()
-        }
-        Some("import sqlty") => "sqlty.SQL".to_string(),
-        Some(s) if s.starts_with("import sqlty as ") => {
-            let alias = s["import sqlty as ".len()..].trim();
-            format!("{}.SQL", alias)
-        }
-        Some(_) => "SQL".to_string(),
-    }
-}
-
 /// Check Python source code for SQL type issues.
 pub fn check_source(
     source: &str,
@@ -116,7 +100,7 @@ pub fn check_source(
     let has_schema = schema.is_some();
     let mut diagnostics = Vec::new();
 
-    let wrapper_name = parse_wrapper_name(import_style);
+    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     let wrapper_marker = format!("{}[", wrapper_name);
     let untyped_name = match wrapper_name.rsplit_once('.') {
         Some((module, _)) => format!("{}.UNTYPED", module),
@@ -258,6 +242,29 @@ pub fn check_source(
     }
 
     diagnostics
+}
+
+/// `(line, annotation, query)` for each `{wrapper}[T]("--sql ...")` call, without the `--sql` prefix.
+pub fn wrapped_queries(source: &str, import_style: Option<&str>) -> Vec<(usize, String, String)> {
+    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
+    let sql_content_pat = build_sql_content_pattern(&wrapper_name);
+    let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
+    logical_lines(source, &wrapper_name)
+        .into_iter()
+        .filter_map(|(line, logical)| {
+            let annotated = extract_type_from_wrapper(&logical, &type_annotation_pat)?;
+            let content = extract_sql_from_wrapper(&logical, &sql_content_pat)?;
+            Some((line, annotated, strip_sql_prefix(&content).to_string()))
+        })
+        .collect()
+}
+
+fn strip_sql_prefix(content: &str) -> &str {
+    ["--sql\\n", "--sql ", "--sql\n", "--sql"]
+        .into_iter()
+        .find_map(|prefix| content.strip_prefix(prefix))
+        .unwrap_or(content)
+        .trim()
 }
 
 /// Check if a line has `"--sql SELECT ..."` (space after --sql, not \n).

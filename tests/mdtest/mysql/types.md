@@ -150,3 +150,32 @@ dialect = "mysql"
 SELECT CAST(tags AS INT[]) FROM t
 -- inferred: None
 ```
+
+## INT3, MIDDLEINT and ZEROFILL
+
+<!-- mdtest:backend rs -->
+
+`INT3 UNSIGNED` and `MIDDLEINT UNSIGNED` are `UMEDIUMINT`. `ZEROFILL` implies
+`UNSIGNED`.
+
+`schema.sql`:
+```sql
+CREATE TABLE items (
+    a INT3 UNSIGNED,
+    b MIDDLEINT(8) UNSIGNED,
+    c INT(5) ZEROFILL,
+    d BIGINT UNSIGNED ZEROFILL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM items
+-- inferred: tuple[int, int, int, int]
+-- expanded: SELECT a::UMEDIUMINT, b::UMEDIUMINT(8), c::UINT(5), d::UBIGINT FROM items
+```

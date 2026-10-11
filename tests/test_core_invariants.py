@@ -25,6 +25,9 @@ MARKDOWN = [
 ]
 
 
+RUST_ONLY: set[str] = set()
+
+
 def _corpus(kind: str) -> list[Any]:
     """Every mdtest's SQL query or Python code, with its options."""
     params = []
@@ -37,6 +40,8 @@ def _corpus(kind: str) -> list[Any]:
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
             }
+            if section.directives.get("backend") == "rs":
+                RUST_ONLY.add(f"{md.relative_to(ROOT)}::{section.name}")
             units = [u for u in section.units if u.lang == kind]
             for i, unit in enumerate(units):
                 name = f"{md.relative_to(ROOT)}::{section.name}" + (f"::{i}" if i else "")
@@ -109,8 +114,10 @@ def _outcome(call: Any, backend: types.ModuleType) -> Any:
 
 
 @pytest.mark.parametrize(("sql", "options"), SQL)
-def test_backends_agree_on_sql(sql: str, options: dict) -> None:
+def test_backends_agree_on_sql(request: pytest.FixtureRequest, sql: str, options: dict) -> None:
     rs = pytest.importorskip("sqlty._core", reason="Rust backend not compiled")
+    if request.node.callspec.id.split("::0")[0] in RUST_ONLY:
+        pytest.skip("Rust only")
     import sqlty._core_py as py
 
     kw = {"dialect": options["dialect"], "schema_sql": options["schema_sql"]}
