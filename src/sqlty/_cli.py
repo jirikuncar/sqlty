@@ -152,7 +152,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 # --- Command implementations ---
 
-_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped")
+_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query")
 
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:

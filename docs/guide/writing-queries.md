@@ -66,6 +66,15 @@ WHERE active
 # rewritten-file: """)
 ```
 
+Implicitly concatenated strings are one query, wrapped as a whole:
+
+```python
+query = ("--sql\nSELECT id::INTEGER, email::TEXT "
+         "FROM users")
+# rewritten: query = (SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, email::TEXT "
+# rewritten:          "FROM users"))
+```
+
 The rewriter never changes the string itself, only the wrapper around it.
 
 ## Casts declare column types

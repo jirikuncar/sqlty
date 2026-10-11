@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import difflib
+import io
 import re
+import tokenize
 from functools import cached_property
 
 import sqlty.core as core
@@ -69,18 +72,20 @@ class Run:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
             case "rewritten":
-                return _without_imports(self._rewrite(text), self._imports).strip()
+                rewritten = _parses(text, self._rewrite(text), same_strings=True)
+                return _without_imports(rewritten, self._imports).strip()
             case "rewritten-file":
-                return self._rewrite(text).strip()
+                return _parses(text, self._rewrite(text), same_strings=True).strip()
             case "fixed":
-                fixed = self._fix(text)
+                fixed = _parses(text, self._fix(text))
                 if (again := self._fix(fixed)) != fixed:
                     raise AssertionError(
                         f"check --fix is not idempotent; a second run gives:\n{again}"
                     )
                 return fixed.strip()
             case "stripped":
-                return core.strip_source(text, import_style=self.import_style).strip()
+                stripped = core.strip_source(text, import_style=self.import_style)
+                return _parses(text, stripped, same_strings=True).strip()
             case "decoded":
                 from sqlty._decode import decode
 
@@ -170,6 +175,45 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
     return (value["rule"] in (None, rule)) and (
         value["message"] is None or value["message"] in message
     )
+
+
+def string_constants(source: str) -> list[str]:
+    """Every string value in ``source``, implicit concatenation applied, sorted."""
+    return sorted(
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+
+
+def comments(source: str) -> list[str]:
+    """Every comment in ``source``, sorted."""
+    return sorted(
+        token.string
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT
+    )
+
+
+def _parses(source: str, output: str, *, same_strings: bool = False) -> str:
+    """``output``, which must be valid Python with the same comments when ``source`` is.
+
+    With ``same_strings``, it must also hold the same strings: rewrite and strip
+    only add or remove wrappers, never join, split or change a string.
+    """
+    try:
+        ast.parse(source)
+    except SyntaxError:
+        return output
+    try:
+        ast.parse(output)
+    except SyntaxError as error:
+        raise AssertionError(f"output is not valid Python ({error}):\n{output}") from error
+    if comments(output) != comments(source):
+        raise AssertionError(f"output changes the comments of the source:\n{output}")
+    if same_strings and string_constants(output) != string_constants(source):
+        raise AssertionError(f"output changes the strings of the source:\n{output}")
+    return output
 
 
 def _without_imports(source: str, imports: set[str]) -> str:
