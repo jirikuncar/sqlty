@@ -1,9 +1,9 @@
-//! SQL type inference, mirroring `sqlty._sql_analyzer` (the sqlglot-based Python backend).
+//! SQL type inference with sqlparser-rs.
 //!
 //! Rows come from the leftmost `SELECT` of a query or from the top-level
-//! `RETURNING` of INSERT/UPDATE/DELETE/MERGE. Types are spelled the way sqlglot
-//! spells them (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`)
-//! so that schema-driven output matches between backends.
+//! `RETURNING` of INSERT/UPDATE/DELETE/MERGE. Type names are canonicalized
+//! (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`), as
+//! `SELECT *` expansion writes them back into queries.
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
@@ -161,7 +161,7 @@ enum SqlDialect {
     Other(&'static str),
 }
 
-/// sqlparser dialects beyond the special-cased ones; sqlglot's `tsql` is sqlparser's `mssql`.
+/// sqlparser dialects beyond the special-cased ones; `tsql` is read as `mssql`.
 const OTHER_DIALECTS: [&str; 12] = [
     "ansi",
     "bigquery",
@@ -272,7 +272,7 @@ fn numbered_placeholders(sql: &str) -> String {
         .into_owned()
 }
 
-/// Whether `stmts` use what sqlparser accepts but the dialect (and sqlglot) does not:
+/// Whether `stmts` use what sqlparser accepts but the dialect does not:
 /// `CAST(x AS <not a type>)`, which sqlparser re-reads as a call to a function
 /// named `CAST`, and MySQL-only types such as `SET('a')` in other dialects.
 fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
@@ -307,7 +307,7 @@ fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
     parse(sql, dialect)?.into_iter().next()
 }
 
-/// Spell a SQL type the way sqlglot does, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
+/// Canonical spelling of a SQL type, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
 fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
     if let DataType::Array(elem) = dt {
         return match elem {
@@ -608,7 +608,7 @@ fn from_sql_type(sql_type: String) -> Typed {
 /// Functions whose result type is known, besides those in [`FUNCTION_TYPES`].
 const TYPED_FUNCTIONS: [&str; 6] = ["COUNT", "AVG", "SUM", "MIN", "MAX", "COALESCE"];
 
-/// Typed functions whose unaliased column is still named after the function, as in sqlglot.
+/// Typed functions whose unaliased column is still named after the function.
 const NAMED_FUNCTIONS: [&str; 7] = [
     "OCTET_LENGTH",
     "JSON_BUILD_OBJECT",

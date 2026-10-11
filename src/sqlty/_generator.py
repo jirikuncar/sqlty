@@ -564,7 +564,7 @@ class TypeStubGenerator:
                     imports.append("from sqlty import SQL")
 
     def _infer_types_from_sql(self, calls: list[CallInfo], module_path: Path) -> None:
-        """Infer return types by analyzing SQL queries using sqlglot.
+        """Infer return types by analyzing SQL queries.
 
         Args:
             calls: List of call information to analyze

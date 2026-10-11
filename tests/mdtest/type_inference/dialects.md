@@ -38,8 +38,6 @@ SELECT CAST(id AS INTEGER) FROM users
 
 ## Other dialects
 
-<!-- mdtest:backend rs -->
-
 Any dialect [sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs)
 knows is parsed with its own rules (`tsql` is `mssql`); unknown names read as
 generic SQL. Common type names are spelled the PostgreSQL way.

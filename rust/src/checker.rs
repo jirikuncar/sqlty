@@ -244,8 +244,12 @@ pub fn check_source(
     diagnostics
 }
 
-/// `(line, annotation, query)` for each `{wrapper}[T]("--sql ...")` call, without the `--sql` prefix.
-pub fn wrapped_queries(source: &str, import_style: Option<&str>) -> Vec<(usize, String, String)> {
+/// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
+/// without its `--sql` prefix, `None` unless the call holds a one-line `--sql` string.
+pub fn wrapped_queries(
+    source: &str,
+    import_style: Option<&str>,
+) -> Vec<(usize, String, Option<String>)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     let sql_content_pat = build_sql_content_pattern(&wrapper_name);
     let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
@@ -253,8 +257,9 @@ pub fn wrapped_queries(source: &str, import_style: Option<&str>) -> Vec<(usize, 
         .into_iter()
         .filter_map(|(line, logical)| {
             let annotated = extract_type_from_wrapper(&logical, &type_annotation_pat)?;
-            let content = extract_sql_from_wrapper(&logical, &sql_content_pat)?;
-            Some((line, annotated, strip_sql_prefix(&content).to_string()))
+            let query = extract_sql_from_wrapper(&logical, &sql_content_pat)
+                .map(|content| strip_sql_prefix(&content).to_string());
+            Some((line, annotated, query))
         })
         .collect()
 }

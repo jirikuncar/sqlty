@@ -5,7 +5,7 @@
 //! - `strip_source()`: `SQL[T]("--sql\n...") → "--sql\n..."`
 //!
 //! Both work on the whole source, so triple-quoted strings spanning lines are
-//! handled, and mirror `sqlty._rewriter.SQLRewriter` match for match.
+//! handled.
 //! The rewriter never modifies string content — it only adds/removes
 //! the `SQL[T]()` wrapper.  This guarantees `strip(rewrite(x)) == x`.
 

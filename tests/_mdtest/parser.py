@@ -16,7 +16,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast, get_args
+from typing import Any, Literal, cast
 
 Kind = Literal[
     "inferred",
@@ -38,8 +38,7 @@ PY_KINDS: tuple[Kind, ...] = (
     "error",
     "decoded",
 )
-BACKEND_KINDS = frozenset(get_args(Kind)) - {"decoded", "columns"}
-DIRECTIVES = frozenset({"skip", "xfail", "backend"})
+DIRECTIVES = frozenset({"skip", "xfail"})
 CONFIG_KEYS = frozenset(
     {
         "dialect",
@@ -130,10 +129,6 @@ class Section:
     def settings(self) -> dict[str, Any]:
         settings: dict[str, Any] = self.config.get("tool", {}).get("sqlty", {})
         return settings
-
-    @property
-    def uses_backend(self) -> bool:
-        return any(a.kind in BACKEND_KINDS for a in self.assertions)
 
     def child(self, title: str, level: int, line: int) -> Section:
         return Section(
@@ -327,9 +322,6 @@ def _validate(section: Section, fail: Fail) -> None:
     schema = section.settings.get("schema")
     if schema is not None and schema not in section.files:
         raise fail(section.line, f"schema {schema!r} has no `{schema}`: block")
-    backend = section.directives.get("backend")
-    if backend is not None and backend not in ("py", "rs"):
-        raise fail(section.line, f"mdtest:backend must be py or rs, not {backend!r}")
 
 
 def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

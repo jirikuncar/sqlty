@@ -153,8 +153,6 @@ SELECT CAST(tags AS INT[]) FROM t
 
 ## INT3, MIDDLEINT and ZEROFILL
 
-<!-- mdtest:backend rs -->
-
 `INT3 UNSIGNED` and `MIDDLEINT UNSIGNED` are `UMEDIUMINT`. `ZEROFILL` implies
 `UNSIGNED`.
 

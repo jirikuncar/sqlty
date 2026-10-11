@@ -189,7 +189,10 @@ fn check_source<'py>(
     Ok(list)
 }
 
-/// `(line, annotation, query)` for each `SQL[T]("--sql ...")` call in Python source.
+/// `(line, annotation, query)` for each `SQL[T](...)` call in Python source.
+///
+/// `query` is the `--sql` string without its prefix, or None when the call
+/// doesn't hold a one-line `--sql` string.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
@@ -198,7 +201,7 @@ fn check_source<'py>(
 fn wrapped_queries(
     source: &str,
     import_style: Option<&str>,
-) -> PyResult<Vec<(usize, String, String)>> {
+) -> PyResult<Vec<(usize, String, Option<String>)>> {
     check_import_style(import_style)?;
     Ok(checker::wrapped_queries(source, import_style))
 }

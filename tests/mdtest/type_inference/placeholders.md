@@ -39,8 +39,6 @@ q = "--sql\nSELECT CAST(id AS SIGNED) FROM users WHERE id = %s"
 
 ## PostgreSQL question marks
 
-<!-- mdtest:backend rs -->
-
 `?` placeholders are read as `$1`, `$2`, ... when the query doesn't parse as
 written: in PostgreSQL `?` is also a JSONB operator, which keeps its meaning.
 
