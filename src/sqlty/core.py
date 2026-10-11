@@ -21,8 +21,8 @@ from sqlty._core import (
     returns_rows,
     rewrite_source,
     strip_source,
-    wrapped_queries,
 )
+from sqlty._core import wrapped_queries as _wrapped_queries
 
 if TYPE_CHECKING:
     from sqlty._lint import RuleConfig
@@ -87,7 +87,7 @@ def check_source(
     )
     user_queries = [
         (line, name, query)
-        for line, name, query in wrapped_queries(source, import_style=import_style)
+        for line, name, query in _wrapped_queries(source, import_style=import_style)
         if not name.startswith("tuple[")
     ]
     if not user_queries:

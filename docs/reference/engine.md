@@ -52,6 +52,9 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
 
 ## Known gaps
 
+- **Multi-line queries in row type checks.** `SQL[User]("""--sql ...""")` over
+  several lines gets no column checks against `User`; `typeddict-inheritance`
+  still runs.
 - **SQLite free-form type names.** SQLite accepts any type name and derives an
   affinity (sqlite.org/datatype3.html section 3.1), but `UNSIGNED BIG INT`,
   `VARYING CHARACTER(255)` or `NATIVE CHARACTER(70)` make sqlty skip the
@@ -68,6 +71,8 @@ Earlier versions also shipped a pure-Python backend built on
   `# coding: utf-8` in the decoded text.
 - Dialects other than PostgreSQL, MySQL and SQLite follow sqlparser-rs rather
   than sqlglot.
+- An unsupported `import-style` is an error instead of falling back to
+  `from sqlty import SQL`.
 - `SQLTY_LIB` is gone.
 
 ## Benchmarks

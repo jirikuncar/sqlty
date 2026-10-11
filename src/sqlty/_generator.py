@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 import asttokens
 
-from sqlty import _core
+from sqlty import core
 from sqlty._formatter import formatter
 
 from ._collector import CallInfo, LiteralCallCollector
@@ -60,11 +60,11 @@ class QueryTyper:
         except Exception as e:
             raise RuntimeError(f"Failed to read schema file {schema_path}: {e}") from e
 
-    def generate_return_type(self, sql: str) -> str | None:
-        return _core.infer_type(sql, dialect=self.dialect, schema_sql=self.schema_sql)
+    def infer_type(self, sql: str) -> str | None:
+        return core.infer_type(sql, dialect=self.dialect, schema_sql=self.schema_sql)
 
     def returns_rows(self, sql: str) -> bool:
-        return _core.returns_rows(sql, dialect=self.dialect)
+        return core.returns_rows(sql, dialect=self.dialect)
 
 
 class TypeStubGenerator:
@@ -93,7 +93,7 @@ class TypeStubGenerator:
         self.last_import_source: str | None = None
         self.last_is_registry_method: bool = False
         # Cache analyzers per registry for performance
-        self._analyzer_cache: dict[str, QueryTyper] = {}
+        self._typer_cache: dict[str, QueryTyper] = {}
         self._format_command = format_command
         self._check_mode = False
         self._verbose = verbose
@@ -310,8 +310,8 @@ class TypeStubGenerator:
         """
         # Check if we already have a cached analyzer for this registry+class combination
         cache_key = f"{registry_name or str(module_path)}::{registry_class or ''}"
-        if cache_key in self._analyzer_cache:
-            return self._analyzer_cache[cache_key]
+        if cache_key in self._typer_cache:
+            return self._typer_cache[cache_key]
 
         schema_to_use: Path | None = None
         schema_source = "default"
@@ -363,7 +363,7 @@ class TypeStubGenerator:
         analyzer = QueryTyper.load(self.sql_dialect, schema_to_use)
 
         # Cache it
-        self._analyzer_cache[cache_key] = analyzer
+        self._typer_cache[cache_key] = analyzer
 
         # Log schema usage
         if schema_to_use:
@@ -376,12 +376,12 @@ class TypeStubGenerator:
     def _get_analyzer_for_schema(self, schema_path: Path) -> QueryTyper:
         """Analyzer for the ``schema`` of a ``[[tool.sqlty.functions]]`` entry."""
         cache_key = f"schema::{schema_path}"
-        if cache_key not in self._analyzer_cache:
+        if cache_key not in self._typer_cache:
             logging.getLogger(__name__).warning(
                 "Using schema from %s (function config)", schema_path
             )
-            self._analyzer_cache[cache_key] = QueryTyper.load(self.sql_dialect, schema_path)
-        return self._analyzer_cache[cache_key]
+            self._typer_cache[cache_key] = QueryTyper.load(self.sql_dialect, schema_path)
+        return self._typer_cache[cache_key]
 
     # Delegation methods for backward compatibility with tests
     def _get_registry_names(self, module_path: Path) -> list[str]:
@@ -595,7 +595,7 @@ class TypeStubGenerator:
                     registry_name, module_path, registry_class
                 )
 
-            sql_type = analyzer.generate_return_type(literal)
+            sql_type = analyzer.infer_type(literal)
             if sql_type:
                 call["return_type"] = sql_type
             elif self._untyped and analyzer.returns_rows(literal):
