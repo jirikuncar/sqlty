@@ -527,7 +527,7 @@ def _newtype_assignments(tree: ast.Module, aliases: dict[str, str]) -> dict[str,
     """Module-level ``X = NewType("X", T)`` with ``T`` a type expression, by name.
 
     Example:
-        >>> list(_newtype_assignments(ast.parse("U = NewType('U', int)\nV = NewType('V', f())"), {}))
+        >>> list(_newtype_assignments(ast.parse("U = NewType('U', int)\\nV = NewType('V', f())"), {}))
         ['U']
     """
     return {
