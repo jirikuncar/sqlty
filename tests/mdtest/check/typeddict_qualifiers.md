@@ -12,7 +12,7 @@ key: `NotRequired` keys may be absent, extra columns are only allowed with
 their bases (PEP 728). Key-set violations are `typeddict-key-mismatch`.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -39,8 +39,8 @@ from sqlty import SQL
 class User(TypedDict):
     id: ReadOnly[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 # error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
+q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Required and NotRequired nested with ReadOnly
@@ -85,8 +85,8 @@ class User(TypedDict):
     id: int
     name: NotRequired[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 # error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
+q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Closed — exact match
@@ -113,8 +113,8 @@ class User(TypedDict, closed=True):
     id: int
     name: str
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 # error: [column-count-mismatch] "User has 2 fields but query returns 3 columns"
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 ```
 
 ## Closed — NotRequired key may be absent
@@ -141,8 +141,8 @@ class User(TypedDict, closed=True):
     id: int
     email: NotRequired[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User has no key for query column 'name'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Closed — missing required key
@@ -156,8 +156,8 @@ class User(TypedDict, closed=True):
     name: str
     email: NotRequired[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User.name is required but missing from query"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## extra_items — typed extras allowed
@@ -182,8 +182,8 @@ from sqlty import SQL
 class Metrics(TypedDict, extra_items=int):
     day: str
 
-q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 # error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
+q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 ```
 
 ## extra_items — missing required key
@@ -195,8 +195,8 @@ from sqlty import SQL
 class Metrics(TypedDict, extra_items=int):
     day: str
 
-q = SQL[Metrics]("--sql\nSELECT views::INTEGER FROM stats")
 # error: [typeddict-key-mismatch] "Metrics.day is required but missing from query"
+q = SQL[Metrics]("--sql\nSELECT views::INTEGER FROM stats")
 ```
 
 ## extra_items — type mismatch without runtime resolution
@@ -209,8 +209,8 @@ from sqlty import SQL
 class Metrics(TypedDict, extra_items=int):
     day: str
 
-q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 # error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
+q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 ```
 
 ## extra_items=Never is closed
@@ -222,8 +222,8 @@ from sqlty import SQL
 class User(TypedDict, extra_items=Never):
     id: int
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-count-mismatch] "User has 1 fields but query returns 2 columns"
+q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## extra_items=NoReturn is closed
@@ -236,8 +236,8 @@ class User(typing.TypedDict, extra_items=typing.NoReturn):
     id: int
     name: typing.NotRequired[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## extra_items=Never is closed without runtime resolution
@@ -251,8 +251,8 @@ class User(TypedDict, extra_items=Nothing):
     id: int
     name: NotRequired[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## Subclass of a closed TypedDict is closed
@@ -271,9 +271,9 @@ class Base(TypedDict, closed=True):
 class User(Base):
     note: ReadOnly[str]
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
 # error: [typeddict-key-mismatch] "User.note is required but missing from query"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## Subclass without own fields inherits keys and closedness
@@ -289,8 +289,8 @@ class Base(TypedDict, closed=True):
 class User(Base):
     pass
 
-q = SQL[User]("--sql\nSELECT name::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User.id is required but missing from query"
+q = SQL[User]("--sql\nSELECT name::TEXT FROM users")
 ```
 
 ## Subclass of a closed TypedDict without runtime resolution
@@ -310,9 +310,9 @@ class Middle(Base):
 class User(Middle):
     pass
 
-q = SQL[User]("--sql\nSELECT name::TEXT, email::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
 # error: [typeddict-key-mismatch] "User.id is required but missing from query"
+q = SQL[User]("--sql\nSELECT name::TEXT, email::TEXT FROM users")
 ```
 
 ## Subclass closes a read-only extra_items base
@@ -327,9 +327,9 @@ class Base(TypedDict, extra_items=ReadOnly[str]):
 class User(Base, closed=True):
     name: str
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
 # error: [typeddict-key-mismatch] "User.name is required but missing from query"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## Subclass inherits extra_items
@@ -344,8 +344,8 @@ class Base(TypedDict, extra_items=int):
 class Metrics(Base):
     pass
 
-q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 # error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
+q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 ```
 
 ## Subclass of an open TypedDict stays open
@@ -360,14 +360,14 @@ class Base(TypedDict):
 class User(Base):
     name: str
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 # error: [column-name-mismatch] "User.name doesn't match query column 'email'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## typeddict-key-mismatch is configurable
 
 ```toml
-[sqlty.rules]
+[tool.sqlty.rules]
 typeddict-key-mismatch = "ignore"
 ```
 

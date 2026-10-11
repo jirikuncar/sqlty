@@ -4,6 +4,7 @@ Commands:
     sqlty rewrite [OPTIONS] [PATH...]   Rewrite source files
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
+    sqlty rule [NAME]                   Explain a lint rule, or list them
     sqlty version                       Print version
 """
 
@@ -11,23 +12,47 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
-
-    from sqlty._config import SQLTyConfig
 
 logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
-    import argparse
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
-    if argv is None:
-        argv = sys.argv[1:]
+    if args.version:
+        _cmd_version()
+        return
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+
+    match args.command:
+        case "rewrite":
+            _cmd_rewrite(args)
+        case "strip":
+            _cmd_strip(args)
+        case "check":
+            _cmd_check(args)
+        case "rule":
+            _cmd_rule(args.name)
+        case "version":
+            _cmd_version()
+        case _:
+            parser.print_help()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The ``sqlty`` argument parser; ``docs/reference/cli.md`` is rendered from it."""
+    import argparse
 
     parser = argparse.ArgumentParser(
         prog="sqlty",
@@ -86,33 +111,20 @@ def main(argv: list[str] | None = None) -> None:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Auto-fix fixable issues (expand SELECT *, update stale types)",
+        help="Fix what can be fixed (stale-rewrite, stale-type, select-star with a schema, "
+        "untyped-query once inferable), then report the rest",
     )
+
+    # --- rule ---
+    rule_parser = subparsers.add_parser(
+        "rule",
+        help="Explain a lint rule (sqlty rule stale-type), or list all rules",
+    )
+    rule_parser.add_argument("name", nargs="?", help="Rule name, e.g. select-star")
 
     # --- version ---
     subparsers.add_parser("version", help="Print version and exit")
-
-    args = parser.parse_args(argv)
-
-    if args.version:
-        _cmd_version()
-        return
-
-    if args.command is None:
-        parser.print_help()
-        sys.exit(0)
-
-    match args.command:
-        case "rewrite":
-            _cmd_rewrite(args)
-        case "strip":
-            _cmd_strip(args)
-        case "check":
-            _cmd_check(args)
-        case "version":
-            _cmd_version()
-        case _:
-            parser.print_help()
+    return parser
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -122,17 +134,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         nargs="*",
         type=Path,
         default=[Path(".")],
-        help="Files or directories to process (default: current directory)",
+        help="Files or directories (default: .); each file uses its nearest pyproject.toml",
     )
     parser.add_argument(
         "--dialect",
         choices=["postgres", "sqlite", "mysql"],
-        help="SQL dialect; overrides pyproject.toml (default: its dialect, else postgres)",
+        help="SQL dialect (default: [tool.sqlty] dialect, else postgres)",
     )
     parser.add_argument(
         "--schema",
         type=Path,
-        help="Path to schema .sql file for enhanced inference",
+        help="Schema .sql file for every path (default: [tool.sqlty] schema per project)",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
@@ -145,21 +157,23 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     """Rewrite command: transform --sql strings into SQL[T](...) calls."""
     from sqlty.core import rewrite_source
 
-    files = _files_with_settings(args)
+    resolver = SettingsResolver(args)
+    files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
         return
 
     changed = 0
-    for path, settings in files:
+    for path in files:
         original = path.read_text(encoding="utf-8")
+        settings = resolver.for_file(path)
         rewritten = rewrite_source(
             original,
             dialect=settings.dialect,
             schema_sql=settings.schema_sql,
             import_style=settings.import_style,
-            untyped=settings.untyped == "sentinel",
+            untyped=settings.untyped,
         )
 
         if rewritten == original:
@@ -189,16 +203,17 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
-    files = _files_with_settings(args)
+    resolver = SettingsResolver(args)
+    files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
         return
 
     changed = 0
-    for path, settings in files:
+    for path in files:
         original = path.read_text(encoding="utf-8")
-        stripped = strip_source(original, import_style=settings.import_style)
+        stripped = strip_source(original, import_style=resolver.for_file(path).import_style)
 
         if stripped == original:
             continue
@@ -225,9 +240,10 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
-    from sqlty.core import check_source
+    from sqlty.core import check_source, fix_source
 
-    files = _files_with_settings(args)
+    resolver = SettingsResolver(args)
+    files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
@@ -235,15 +251,33 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     total_errors = 0
     total_warnings = 0
+    total_fixed = 0
 
-    for path, settings in files:
+    for path in files:
         source = path.read_text(encoding="utf-8")
+        settings = resolver.for_file(path)
+        if args.fix:
+            fixed = fix_source(
+                source,
+                dialect=settings.dialect,
+                schema_sql=settings.schema_sql,
+                import_style=settings.import_style,
+                untyped=settings.untyped,
+                rules=settings.rules,
+            )
+            if fixed != source:
+                path.write_text(fixed, encoding="utf-8")
+                source = fixed
+                total_fixed += 1
+                if args.verbose:
+                    print(f"Fixed {path}")
         diagnostics = check_source(
             source,
             dialect=settings.dialect,
             schema_sql=settings.schema_sql,
             rules=settings.rules,
             import_style=settings.import_style,
+            untyped=settings.untyped,
         )
 
         for diag in diagnostics:
@@ -260,6 +294,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             if not args.quiet:
                 print(f"{path}:{line}: [{rule}] {message}")
 
+    if total_fixed and not args.quiet:
+        print(f"Fixed {total_fixed} file(s)")
     if not args.quiet and (total_errors or total_warnings):
         parts = []
         if total_errors:
@@ -270,6 +306,21 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _cmd_rule(name: str | None) -> None:
+    """Rule command: print a rule's documentation, or the rule table."""
+    from sqlty._lint import RULES, rule_doc
+
+    if name is None:
+        width = max(map(len, RULES))
+        for rule in RULES.values():
+            print(f"{rule.name:<{width}}  {rule.default_severity.value:<5}  {rule.description}")
+        return
+    if name not in RULES:
+        logger.error("Unknown rule %r; run `sqlty rule` for the list", name)
+        sys.exit(2)
+    print(rule_doc(name), end="")
 
 
 def _cmd_version() -> None:
@@ -293,50 +344,56 @@ def _collect_python_files(paths: list[Path]) -> list[Path]:
     return files
 
 
-class _Settings(NamedTuple):
-    dialect: str
-    schema_sql: str | None
-    import_style: str | None
-    rules: dict[str, str] | None
-    untyped: str
+@dataclass(frozen=True)
+class Settings:
+    """``[tool.sqlty]`` of the nearest ``pyproject.toml``, with CLI flags on top."""
+
+    dialect: str = "postgres"
+    schema_sql: str | None = None
+    import_style: str | None = None
+    untyped: bool = False
+    rules: dict[str, str] | None = None
 
 
-def _files_with_settings(args: argparse.Namespace) -> list[tuple[Path, _Settings]]:
-    """Pair each Python file under ``args.paths`` with the settings that apply to it.
+class SettingsResolver:
+    """Resolve settings per file, so each project directory uses its own config.
 
-    Each file uses the nearest ``[tool.sqlty]`` table found by walking up from
-    its directory (see `load_config`), so ``sqlty rewrite proj_a proj_b``
-    applies each project's schema, dialect, import style, rules and
-    ``untyped`` mode to its own files. ``--dialect``, ``--schema`` and
-    ``--untyped`` override every table.
+    Example:
+        >>> import argparse
+        >>> args = argparse.Namespace(dialect="sqlite", schema=None, untyped=None)
+        >>> SettingsResolver(args).for_file(Path("missing/dir/q.py")).dialect
+        'sqlite'
     """
-    from sqlty._config import load_config
 
-    cli_schema = _load_schema(args.schema) if args.schema else None
-    by_dir: dict[Path, tuple[SQLTyConfig, Path | None]] = {}
-    by_config: dict[Path | None, _Settings] = {}
-    result: list[tuple[Path, _Settings]] = []
-    for path in _collect_python_files(args.paths):
-        if path.parent not in by_dir:
-            by_dir[path.parent] = load_config(path.parent)
-        config, config_dir = by_dir[path.parent]
-        if config_dir not in by_config:
-            by_config[config_dir] = _Settings(
-                dialect=args.dialect or config.get("dialect", "postgres"),
-                schema_sql=cli_schema if args.schema else _config_schema(config, config_dir),
-                import_style=config.get("import_style"),
-                rules=config.get("rules"),
-                untyped=getattr(args, "untyped", None) or config.get("untyped", "skip"),
-            )
-        result.append((path, by_config[config_dir]))
-    return result
+    def __init__(self, args: argparse.Namespace) -> None:
+        self._args = args
+        self._schema_sql = _load_schema(args.schema) if args.schema else None
+        self._by_dir: dict[Path, Settings] = {}
 
+    def for_file(self, path: Path) -> Settings:
+        directory = path.parent.resolve()
+        if directory not in self._by_dir:
+            self._by_dir[directory] = self._resolve(directory)
+        return self._by_dir[directory]
 
-def _config_schema(config: SQLTyConfig, config_dir: Path | None) -> str | None:
-    """The ``schema`` of a ``[tool.sqlty]`` table, relative to its ``pyproject.toml``."""
-    if "schema" in config and config_dir is not None:
-        return _load_schema(config_dir / config["schema"])
-    return None
+    def _resolve(self, directory: Path) -> Settings:
+        from sqlty._config import load_config
+
+        config, config_dir = load_config(directory)
+        args = self._args
+        schema_sql = self._schema_sql
+        if schema_sql is None and "schema" in config and config_dir is not None:
+            schema_sql = _load_schema(config_dir / config["schema"])
+        untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
+        if untyped not in ("skip", "sentinel"):
+            raise SystemExit(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
+        return Settings(
+            dialect=args.dialect or config.get("dialect", "postgres"),
+            schema_sql=schema_sql,
+            import_style=config.get("import_style"),
+            untyped=untyped == "sentinel",
+            rules=config.get("rules"),
+        )
 
 
 def _load_schema(schema_path: Path) -> str | None:

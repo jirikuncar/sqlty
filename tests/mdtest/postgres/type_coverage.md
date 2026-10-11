@@ -3,7 +3,7 @@
 All 27 SQL types mapped to Python types. Every type must appear at least once.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -17,10 +17,7 @@ SELECT
     d::SMALLINT,
     e::TINYINT
 FROM t
-```
-
-```python
-# inferred: tuple[int, int, int, int, int]
+-- inferred: tuple[int, int, int, int, int]
 ```
 
 ## Float family
@@ -33,10 +30,7 @@ SELECT
     d::DECIMAL,
     e::NUMERIC
 FROM t
-```
-
-```python
-# inferred: tuple[float, float, float, float, float]
+-- inferred: tuple[float, float, float, float, float]
 ```
 
 ## String family
@@ -48,10 +42,7 @@ SELECT
     c::CHAR,
     d::STRING
 FROM t
-```
-
-```python
-# inferred: tuple[str, str, str, str]
+-- inferred: tuple[str, str, str, str]
 ```
 
 ## Parameterized string types
@@ -60,20 +51,14 @@ VARCHAR(N) and CHAR(N) strip the parameter:
 
 ```sql
 SELECT name::VARCHAR(255), code::CHAR(10) FROM t
-```
-
-```python
-# inferred: tuple[str, str]
+-- inferred: tuple[str, str]
 ```
 
 ## Boolean family
 
 ```sql
 SELECT a::BOOLEAN, b::BOOL FROM t
-```
-
-```python
-# inferred: tuple[bool, bool]
+-- inferred: tuple[bool, bool]
 ```
 
 ## Date and time family
@@ -88,30 +73,21 @@ SELECT
     f::TIMETZ,
     g::INTERVAL
 FROM t
-```
-
-```python
-# inferred: tuple[datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta]
+-- inferred: tuple[datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta]
 ```
 
 ## UUID type
 
 ```sql
 SELECT id::UUID FROM t
-```
-
-```python
-# inferred: tuple[uuid.UUID]
+-- inferred: tuple[uuid.UUID]
 ```
 
 ## Collection types
 
 ```sql
 SELECT tags::INT[], metadata::JSON, extra::JSONB FROM t
-```
-
-```python
-# inferred: tuple[list, dict, dict]
+-- inferred: tuple[list, dict, dict]
 ```
 
 ## Fixed-size array casts
@@ -120,10 +96,7 @@ PostgreSQL reads `x::INT[3]` as a cast (the size is ignored), not as a subscript
 
 ```sql
 SELECT a::INT[3], b::TEXT[2][2], c::INT ARRAY[3] FROM t
-```
-
-```python
-# inferred: tuple[list, list, list]
+-- inferred: tuple[list, list, list]
 ```
 
 ## Bare ARRAY cast is invalid
@@ -132,10 +105,7 @@ PostgreSQL needs an element type: `INT[]` or `INT ARRAY`, never plain `ARRAY`.
 
 ```sql
 SELECT tags::ARRAY FROM t
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## MySQL-only types are invalid
@@ -145,10 +115,7 @@ This file uses the default PostgreSQL dialect. Outside MySQL, `SET(...)` and
 
 ```sql
 SELECT CAST(flags AS SET('x', 'y')), CAST(n AS UNSIGNED INTEGER) FROM t
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## All 27 types in one query
@@ -166,18 +133,12 @@ SELECT
     c24::INT[], c25::JSON, c26::JSONB,
     c27::UUID
 FROM t
-```
-
-```python
-# inferred: tuple[int, int, int, int, int, float, float, float, float, float, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list, dict, dict, uuid.UUID]
+-- inferred: tuple[int, int, int, int, int, float, float, float, float, float, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list, dict, dict, uuid.UUID]
 ```
 
 ## Unknown type defaults to str
 
 ```sql
 SELECT value::CUSTOM_TYPE FROM t
-```
-
-```python
-# inferred: tuple[str]
+-- inferred: tuple[str]
 ```

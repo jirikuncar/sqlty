@@ -26,14 +26,14 @@ stale-type = "error"
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` differs from the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
-| [`untyped-query`](#untyped-query) | Rewrite | warn | no | `SQL[UNTYPED]` query |
+| [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 
-"Fixable" means the fix is mechanical, as described under each rule.
-`sqlty check --fix` does not apply fixes yet.
+`sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
+rule's page.
 
-The examples below show what `sqlty check` reports for each block. `# check:`
-lines list every diagnostic, warnings included; an empty `# check:` means
-nothing is reported.
+The examples below show what `sqlty check` reports for each block. `# error:`
+lines sit above the line they report on, warnings included; a bare `# error:`
+means nothing is reported.
 
 ## Row type rules
 
@@ -53,8 +53,8 @@ from sqlty import SQL
 class User(TypedDict):
     id: int
 
+# error: [column-count-mismatch] "User has 1 fields but query returns 2 columns"
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [column-count-mismatch] "User has 1 fields but query returns 2 columns"
 ```
 
 Fix: add or remove fields, or change the query.
@@ -65,8 +65,7 @@ Default: error. A field can't hold the values of its column's inferred type.
 Also reported for extra columns that don't fit a TypedDict's `extra_items`
 type. A field typed `Any`, a union containing `Any` or the column type, or
 `float` for an `int` column is accepted; a narrower field, such as `bool` for
-an `int` column, is not. See
-[`tests/mdtest/check/any_fields.md`](https://github.com/jirikuncar/sqlty/blob/main/tests/mdtest/check/any_fields.md).
+an `int` column, is not; see `sqlty rule column-type-mismatch`.
 
 ```python
 from typing import TypedDict
@@ -76,8 +75,8 @@ class User(TypedDict):
     id: str
     name: str
 
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 ```
 
 Fix: change the field type or the cast.
@@ -96,8 +95,8 @@ class User(TypedDict):
     user_id: int
     name: str
 
+# error: [column-name-mismatch] "User.user_id doesn't match query column 'id'"
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [column-name-mismatch] "User.user_id doesn't match query column 'id'"
 ```
 
 Fix: rename the field or alias the column (`id AS user_id`).
@@ -115,9 +114,9 @@ class User(TypedDict, closed=True):
     id: int
     name: str
 
+# error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+# error: [typeddict-key-mismatch] "User.name is required but missing from query"
 q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# check: [typeddict-key-mismatch] "User has no key for query column 'email'"
-# check: [typeddict-key-mismatch] "User.name is required but missing from query"
 ```
 
 Fix: add the key (as `NotRequired` if it may be missing), allow
@@ -137,11 +136,11 @@ from sqlty import SQL
 class Base(TypedDict, closed=True):
     id: int
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Base):
     name: str
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 ```
 
 Fix: see [TypedDict inheritance](../guide/row-types.md#typeddict-inheritance)
@@ -154,9 +153,9 @@ for what a subclass may do.
 Default: error. `SELECT *` without a schema: sqlty cannot know the columns.
 
 ```python
+# error: [select-star-no-schema] "SELECT * used but no schema available"
+# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
-# check: [select-star-no-schema] "SELECT * used but no schema available"
-# check: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 ```
 
 Fix: list the columns, or configure a
@@ -181,11 +180,12 @@ schema = "schema.sql"
 ```python
 from sqlty import SQL
 
+# error: [select-star] "SELECT * used — expand to explicit column list"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
-# check: [select-star] "SELECT * used — expand to explicit column list"
 ```
 
-Fix: replace `*` with the column list.
+Fix: `sqlty check --fix` replaces `*` with the cast column list from the
+schema, unless the string holds escapes or quotes.
 
 ### inline-sql-comment
 
@@ -193,13 +193,12 @@ Default: warn. `--sql` is followed by a space instead of a newline, so the
 whole query is a SQL comment and the string is never wrapped.
 
 ```python
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
 q = "--sql SELECT id::INTEGER FROM users"
-# check: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
-# check: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
 ```
 
-Such a string is also reported as `stale-rewrite`. Fix: replace the space
-after `--sql` with `\n`; `sqlty rewrite` does not change string contents.
+Fix: `sqlty check --fix` replaces the space after `--sql` with `\n` in plain
+string literals; `sqlty rewrite` never changes string contents.
 
 ## Rewrite rules
 
@@ -209,14 +208,13 @@ Default: warn. A string starting with `--sql` is not wrapped in
 `SQL[T](...)`.
 
 ```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql\nSELECT id::INTEGER FROM users"
-# check: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 ```
 
-Fix: run `sqlty rewrite`. The rule also fires for strings `rewrite` leaves
-alone: statements without rows, uninferable queries in `skip` mode, f- and
-t-strings, and the `"--sql SELECT"` form. Use `sqlty rewrite --check` to
-fail only on strings that would change (see [CI](../recipes/ci.md)).
+Fix: `sqlty rewrite` or `sqlty check --fix`. Only strings `rewrite` would wrap
+are reported: statements without rows, uninferable queries in `skip` mode,
+f- and t-strings and the `"--sql SELECT"` form are not.
 
 ### stale-type
 
@@ -227,26 +225,24 @@ covered by the row type rules instead.
 ```python
 from sqlty import SQL
 
+# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 ```
 
-Fix: edit `T`, or strip and rewrite the file; see
+Fix: `sqlty check --fix` writes the inferred `T`; see also
 [Editing queries](../guide/writing-queries.md#editing-queries).
 
 ### fstring-skipped
 
 Default: warn. An f-string starting with `--sql` is skipped by the rewriter,
-because its content is only known at runtime. The rewriter API returns it
-as a warning:
+because its content is only known at runtime:
 
 ```python
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
 q = f"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: f-string with --sql prefix skipped (f-strings cannot be statically rewritten) [fstring-skipped]
 ```
 
-The CLI does not print this warning; `sqlty check` reports the string as
-`stale-rewrite`. Fix: use query parameters instead of interpolation.
+Fix: use query parameters instead of interpolation.
 
 ### tstring-skipped
 
@@ -254,8 +250,8 @@ Default: warn. Same as `fstring-skipped`, for t-strings
 ([PEP 750](https://peps.python.org/pep-0750/)).
 
 ```python
+# error: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
 q = t"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [tstring-skipped]
 ```
 
 ### untyped-query
@@ -265,9 +261,9 @@ Default: warn. A query is wrapped as `SQL[UNTYPED](...)`
 known, the message suggests it.
 
 ```python
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-# check: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 ```
 
-Fix: add casts or schema entries, then update `T`; see
-[Editing queries](../guide/writing-queries.md#editing-queries).
+Fix: add casts or schema entries; `sqlty check --fix` then writes the row
+type.

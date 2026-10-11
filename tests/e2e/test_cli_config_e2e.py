@@ -1,4 +1,8 @@
-"""End-to-end tests for per-file ``pyproject.toml`` resolution in the CLI."""
+"""End-to-end tests for per-file ``pyproject.toml`` resolution in the CLI.
+
+``tests/test_cli.py`` covers multi-path rewrite, ``--dialect`` and ``untyped``;
+these cover nested projects, ``strip``, ``--schema``, rules per project and
+the monorepo case (a ``pyproject.toml`` without ``[tool.sqlty]`` is skipped)."""
 
 import subprocess
 from collections.abc import Callable
@@ -40,13 +44,6 @@ EXPECTED = {
     "schema": 'from sqlty import SQL\nq = SQL[tuple[int, str]]("--sql\\nSELECT id, name FROM users")\n',
     "styled": 'from sqlty import SQL as Q\nq = Q[tuple[int, str]]("--sql\\nSELECT id, name FROM users")\n',
 }
-
-
-@pytest.mark.parametrize("order", [["plain", "schema", "styled"], ["styled", "schema", "plain"]])
-def test_rewrite_uses_each_paths_config(cli: Cli, projects: dict[str, Path], order: list[str]):
-    result = cli(["rewrite", *(projects[name] for name in order)])
-    assert result.returncode == 0, result.stderr
-    assert {name: (p / "queries.py").read_text() for name, p in projects.items()} == EXPECTED
 
 
 def test_rewrite_parent_directory_uses_nested_configs(cli: Cli, projects: dict[str, Path]):
@@ -93,33 +90,6 @@ def test_monorepo_package_without_sqlty_table_uses_root_config(cli: Cli, tmp_pat
     assert result.returncode == 0, result.stderr
     assert (package / "a.py").read_text() == EXPECTED["schema"]
     assert (root / "queries.py").read_text() == EXPECTED["schema"]
-
-
-BACKTICK = 'q = "--sql\\nSELECT `id` FROM users"\n'
-
-
-@pytest.mark.parametrize(
-    ("flags", "wrapped"),
-    [([], {"sqlite": True, "default": False}), (["--dialect", "postgres"], {"sqlite": False})],
-)
-def test_dialect_per_project(cli: Cli, tmp_path: Path, flags: list[str], wrapped: dict[str, bool]):
-    for name, config in (("sqlite", 'dialect = "sqlite"\n'), ("default", "")):
-        config += 'schema = "schema.sql"\n'
-        project = _project(tmp_path, name, config)
-        (project / "queries.py").write_text(BACKTICK)
-    result = cli(["rewrite", *flags, *(tmp_path / name for name in wrapped)])
-    assert result.returncode == 0, result.stderr
-    for name, expected in wrapped.items():
-        assert ("SQL[tuple[int]]" in (tmp_path / name / "queries.py").read_text()) is expected
-
-
-def test_untyped_per_project(cli: Cli, tmp_path: Path):
-    unknown = 'q = "--sql\\nVALUES (1, 2)"\n'
-    for name, config in (("sentinel", 'untyped = "sentinel"\n'), ("skip", "")):
-        (_project(tmp_path, name, config) / "queries.py").write_text(unknown)
-    assert cli(["rewrite", tmp_path]).returncode == 0
-    assert "SQL[UNTYPED]" in (tmp_path / "sentinel" / "queries.py").read_text()
-    assert (tmp_path / "skip" / "queries.py").read_text() == unknown
 
 
 def test_check_rules_per_project(cli: Cli, tmp_path: Path):

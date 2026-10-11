@@ -7,22 +7,21 @@ make the row type known.
 ## SQL[UNTYPED] is flagged
 
 ```python
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ```
 
 ## Inferable query suggests the row type
 
 ```python
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 q = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
 ```
 
 ## Rule can be ignored
 
 ```toml
-[sqlty]
-[sqlty.rules]
+[tool.sqlty.rules]
 untyped-query = "ignore"
 ```
 
@@ -34,13 +33,31 @@ q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ## Module import style
 
 ```toml
-[sqlty]
+[tool.sqlty]
 import-style = "import sqlty"
-[sqlty.rules]
+[tool.sqlty.rules]
 untyped-query = "warn"
 ```
 
 ```python
-q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
 # error: [untyped-query] "sqlty.SQL[sqlty.UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
+```
+
+## Sentinel: uninferable rows are stale until rewritten
+
+With `untyped = "sentinel"`, rewrite wraps queries of unknown row type, so
+check reports them and `--fix` wraps them.
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = "--sql\nVALUES (1, 2)"
+# fixed: from sqlty import SQL
+# fixed: from sqlty import UNTYPED
+# fixed: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ```

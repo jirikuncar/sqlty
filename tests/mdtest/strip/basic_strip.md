@@ -99,3 +99,27 @@ q = SQL[tuple[int]](
 )
 # stripped: q = "--sql\nSELECT id::INTEGER FROM users"
 ```
+
+## Wrapper-like text in a comment is not stripped
+
+The row type never spans lines, so a match can't start in the comment.
+
+```python
+from sqlty import SQL
+# see SQL[T] docs
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# stripped: from sqlty import SQL
+# stripped: # see SQL[T] docs
+# stripped: q = "--sql\nSELECT 1::INTEGER"
+```
+
+## Formatter trailing comma
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]](
+    "--sql\nSELECT 1::INTEGER",
+)
+# stripped: q = "--sql\nSELECT 1::INTEGER"
+```

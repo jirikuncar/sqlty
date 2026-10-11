@@ -16,7 +16,7 @@ q = "--sql\nVALUES (1, 2)"
 ## Sentinel: uninferable query is wrapped as SQL[UNTYPED]
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -28,7 +28,7 @@ q = "--sql\nVALUES (1, 2)"
 ## Sentinel: DML without RETURNING returns no rows
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -44,7 +44,7 @@ u = "--sql\nUPDATE users SET name = 'x'"
 ## Sentinel: DDL and transaction control return no rows
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -60,7 +60,7 @@ b = "--sql\nBEGIN"
 ## Sentinel: the space form is a SQL comment, not a query
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -72,7 +72,7 @@ q = "--sql VALUES (1, 2)"
 ## Sentinel: empty query is left alone
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -84,7 +84,7 @@ q = "--sql\n"
 ## Sentinel: imports UNTYPED next to SQL
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -98,7 +98,7 @@ q = "--sql\nSELECT FROM users"
 ## Sentinel: inferable queries keep their row type
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -114,7 +114,7 @@ d = "--sql\nSELEC id FROM users"
 ## Sentinel: RETURNING makes the row type inferable
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -126,7 +126,7 @@ q = "--sql\nDELETE FROM users RETURNING id::INTEGER"
 ## Sentinel: existing SQL[UNTYPED] wrapper is left alone
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
 
@@ -142,7 +142,7 @@ q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ## Sentinel with aliased import
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 import-style = "from sqlty import SQL as Q"
 ```
@@ -157,7 +157,7 @@ q = "--sql\nVALUES (1, 2)"
 ## Sentinel with module import
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 import-style = "import sqlty"
 ```
@@ -171,7 +171,7 @@ q = "--sql\nVALUES (1, 2)"
 ## Sentinel with module alias
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 import-style = "import sqlty as sy"
 ```

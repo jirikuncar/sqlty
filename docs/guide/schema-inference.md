@@ -61,10 +61,9 @@ Nullability is not tracked: `email` above is `str`, not `str | None`.
 1. `--schema PATH` on the command line, relative to the current directory.
 2. `schema` in `[tool.sqlty]`, relative to the directory of `pyproject.toml`.
 
-`pyproject.toml` is the nearest one with a `[tool.sqlty]` table, found by
-walking up from each file's directory, so files in different projects use
-their own schemas. A schema file that does not exist is reported as a warning
-and inference continues without it.
+Each file uses the nearest `pyproject.toml` above it that has a `[tool.sqlty]`
+table. A schema file that does not exist is reported as a warning and
+inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
 `@sqlty` helpers takes its schema from `@sqlty(schema=...)`; see
@@ -105,7 +104,7 @@ CREATE TABLE notes (
 ```python
 notes = "--sql\nSELECT id, title, score, attachment, created_at FROM notes"
 stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
-# rewritten: notes = SQL[tuple[int, str, float, str, datetime.datetime]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
+# rewritten: notes = SQL[tuple[int, str, float, bytes, datetime.datetime]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
 # rewritten: stats = SQL[tuple[int, float, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 

@@ -8,7 +8,7 @@ does not fit an `int` column. This holds whether field types are resolved at
 runtime or read from source (when an import is unavailable).
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -106,8 +106,8 @@ from sqlty import SQL
 class Row(NamedTuple):
     flag: bool
 
-q = SQL[Row]("--sql\nSELECT flag::INTEGER FROM users")
 # error: [column-type-mismatch] "Row.flag is bool but query column 'flag' infers int"
+q = SQL[Row]("--sql\nSELECT flag::INTEGER FROM users")
 ```
 
 ## Narrower fields mismatch without runtime resolution
@@ -120,8 +120,8 @@ from sqlty import SQL
 class Row(NamedTuple):
     flag: bool
 
-q = SQL[Row]("--sql\nSELECT flag::INTEGER FROM users")
 # error: [column-type-mismatch] "Row.flag is bool but query column 'flag' infers int"
+q = SQL[Row]("--sql\nSELECT flag::INTEGER FROM users")
 ```
 
 ## Union without the column type still mismatches
@@ -134,8 +134,8 @@ from sqlty import SQL
 class Row(TypedDict):
     id: str | bytes
 
-q = SQL[Row]("--sql\nSELECT id::INTEGER FROM users")
 # error: [column-type-mismatch] "Row.id is str | bytes but query column 'id' infers int"
+q = SQL[Row]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## `extra_items=Any` accepts any extra column
@@ -151,38 +151,93 @@ q = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT, views::INTEGER FROM sta
 # error:
 ```
 
-## Annotation fields typed `Any`
+## Every annotation form
 
-```toml
-[sqlty]
-dialect = "postgres"
-[sqlty.annotation]
-type = "User"
-fields = [["id", "int | Any"], ["name", "Any"]]
-```
+Each `INTEGER` column fits these fields, whether the annotations are resolved
+at runtime or only read from source.
 
-```sql
-SELECT id::INTEGER, name::TEXT FROM users
-```
+### Accepted, resolved at runtime
 
 ```python
+import typing
+import typing as t
+from typing import Annotated, Any, NamedTuple, Optional, Union
+from typing import Any as A
+from sqlty import SQL
+
+class Row(NamedTuple):
+    a: Any
+    b: int | Any
+    c: Optional[Union[str, Any]]
+    d: int | str
+    e: float
+    f: typing.Any
+    g: t.Any
+    h: A
+    i: Annotated[int, "id"]
+
+q = SQL[Row]("--sql\nSELECT a::INTEGER, b::INTEGER, c::INTEGER, d::INTEGER, e::INTEGER, f::INTEGER, g::INTEGER, h::INTEGER, i::INTEGER FROM users")
 # error:
 ```
 
-## Narrower annotation fields mismatch
-
-```toml
-[sqlty]
-dialect = "postgres"
-[sqlty.annotation]
-type = "User"
-fields = [["flag", "bool"]]
-```
-
-```sql
-SELECT flag::INTEGER FROM users
-```
+### Accepted, read from source
 
 ```python
-# error: [column-type-mismatch] "User.flag is bool but query column 'flag' infers int"
+import not_installed
+import typing
+import typing as t
+from typing import Annotated, Any, NamedTuple, Optional, Union
+from typing import Any as A
+from sqlty import SQL
+
+class Row(NamedTuple):
+    a: Any
+    b: int | Any
+    c: Optional[Union[str, Any]]
+    d: int | str
+    e: float
+    f: typing.Any
+    g: t.Any
+    h: A
+    i: Annotated[int, "id"]
+
+q = SQL[Row]("--sql\nSELECT a::INTEGER, b::INTEGER, c::INTEGER, d::INTEGER, e::INTEGER, f::INTEGER, g::INTEGER, h::INTEGER, i::INTEGER FROM users")
+# error:
+```
+
+### Rejected, resolved at runtime
+
+```python
+import typing
+import typing as t
+from typing import Annotated, Any, NamedTuple, Optional, Union
+from typing import Any as A
+from sqlty import SQL
+
+class Row(NamedTuple):
+    x: str | bytes
+    y: bool
+
+# error: [column-type-mismatch] "Row.x is str | bytes but query column 'x' infers int"
+# error: [column-type-mismatch] "Row.y is bool but query column 'y' infers int"
+q = SQL[Row]("--sql\nSELECT x::INTEGER, y::INTEGER FROM users")
+```
+
+### Rejected, read from source
+
+```python
+import not_installed
+import typing
+import typing as t
+from typing import Annotated, Any, NamedTuple, Optional, Union
+from typing import Any as A
+from sqlty import SQL
+
+class Row(NamedTuple):
+    x: str | bytes
+    y: bool
+
+# error: [column-type-mismatch] "Row.x is str | bytes but query column 'x' infers int"
+# error: [column-type-mismatch] "Row.y is bool but query column 'y' infers int"
+q = SQL[Row]("--sql\nSELECT x::INTEGER, y::INTEGER FROM users")
 ```

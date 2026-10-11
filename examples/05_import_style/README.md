@@ -1,36 +1,12 @@
-# Example: Configurable Import Style
+# Import Style
 
-Set `import-style` in `pyproject.toml` to control how sqlty writes the SQL wrapper.
-
-## Configuration
-
-```toml
-[tool.sqlty]
-import-style = "from sqlty import SQL as Q"
-```
-
-## Supported styles
-
-| `import-style` value               | Wrapper emitted           | Import line added              |
-|------------------------------------|---------------------------|--------------------------------|
-| `from sqlty import SQL` (default)  | `SQL[T](...)`             | `from sqlty import SQL`        |
-| `from sqlty import SQL as Q`       | `Q[T](...)`               | `from sqlty import SQL as Q`   |
-| `import sqlty`                     | `sqlty.SQL[T](...)`       | `import sqlty`                 |
-| `import sqlty as sy`               | `sy.SQL[T](...)`          | `import sqlty as sy`           |
-
-## Try it
+Runnable project for [import style](../../docs/reference/configuration.md). `pyproject.toml` sets `import-style`, so queries are wrapped as `Q[T](...)`.
 
 ```bash
-# Rewrite uses Q[T](...) wrapper
-sqlty rewrite .
-
-# Strip removes Q[T](...) wrapper
-sqlty strip .
-
-# Check detects Q[T](...) wrappers
+cd examples/05_import_style
 sqlty check .
+sqlty strip . && sqlty rewrite .   # round trip, no diff
 ```
 
-## Round-trip guarantee
-
-With the same `import-style` configuration, `strip(rewrite(source)) == source`.
+CI keeps it current: `tests/test_docs.py` fails if a query needs rewriting
+or a row type is stale.

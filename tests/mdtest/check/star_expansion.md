@@ -2,12 +2,10 @@
 
 ## Star with no schema is an error
 
-```sql
-SELECT * FROM users
-```
-
 ```python
+from sqlty import SQL
 # error: [select-star-no-schema] "SELECT * used but no schema available"
+q = SQL[tuple[str]]("--sql\nSELECT * FROM users")
 ```
 
 ## Star with schema produces warning
@@ -22,17 +20,15 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
-```sql
-SELECT * FROM users
-```
-
 ```python
+from sqlty import SQL
 # error: [select-star] "SELECT * used — expand to explicit column list"
+q = SQL[tuple[int, str, str]]("--sql\nSELECT * FROM users")
 ```
 
 ## Star with schema and rule disabled produces no error
@@ -46,27 +42,23 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
-[sqlty.rules]
+[tool.sqlty.rules]
 select-star = "ignore"
 ```
 
-```sql
-SELECT * FROM users
-```
-
 ```python
+from sqlty import SQL
+q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # error:
 ```
 
 ## Explicit columns produce no error
 
-```sql
-SELECT id::INTEGER, name::TEXT FROM users
-```
-
 ```python
+from sqlty import SQL
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error:
 ```

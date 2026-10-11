@@ -1,21 +1,16 @@
 # Configuration
 
-sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI resolves it per
-file: each `.py` file uses the nearest `pyproject.toml` with a `[tool.sqlty]`
-table, found by walking up from its directory, so `sqlty rewrite app_a app_b`
-(or `sqlty check .` over a repository with nested projects) applies each
-project's schema, dialect, import style, rules and `untyped` mode to its own
-files. The magic codec searches from the current directory, and stub
-generation from the directory of the helper's module.
+sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI uses, for each
+file, the nearest `pyproject.toml` above it; the magic codec searches from the
+current directory, and stub generation from the directory of the helper's
+module. Command-line flags override the file. Unknown keys are ignored.
 
 In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
-package's packaging-only `pyproject.toml` does not hide the workspace's
-config. The closest table wins; settings are not merged with tables in
+package's packaging-only `pyproject.toml` in a monorepo does not hide the
+root config. The closest table wins; settings are not merged with tables in
 parent directories. To change one setting for a nested project, give it its
-own complete `[tool.sqlty]` table.
-
-Command-line flags (`--dialect`, `--schema`, `--untyped`) override the table
-for every path. Unknown keys are ignored.
+own complete `[tool.sqlty]` table. Command-line flags (`--dialect`,
+`--schema`, `--untyped`) override the table for every path.
 
 ```toml
 [tool.sqlty]
