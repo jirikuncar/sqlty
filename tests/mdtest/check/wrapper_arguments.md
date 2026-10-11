@@ -132,19 +132,75 @@ r = ("--sql\nSELECT 1::INTEGER "
 # rewritten:      r"AS n")
 ```
 
-## A wrapper from another module is not wrapped again
+## A wrapper from another module is checked, never wrapped again
+
+`mod.SQL[...]` and `sqlty.SQL[...]` are checked and fixed like `SQL[...]`;
+`strip` leaves them alone.
 
 ```python
 import mod
 
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
-# error:
+# fixed: import mod
+# fixed:
+# fixed: q = mod.SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
 # rewritten: import mod
 # rewritten:
 # rewritten: q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
 # stripped: import mod
 # stripped:
 # stripped: q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
+## An f-string in a wrapper is reported once
+
+```python
+from sqlty import SQL
+
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+q = SQL[tuple[int]](f"--sql\nSELECT {column}::INTEGER FROM users")
+```
+
+## Comments after a trailing comma are kept
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER",  # c
+)
+# stripped: q = ("--sql\nSELECT 1::INTEGER"  # c
+# stripped: )
+```
+
+## A format spec over lines in a triple-quoted f-string
+
+```python
+from sqlty import SQL
+
+x = 1
+y = f"""{x:
+}"""
+z = 1
+"""Example: SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")"""
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = "--sql\nSELECT 1::INTEGER AS n"
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: x = 1
+# fixed: y = f"""{x:
+# fixed: }"""
+# fixed: z = 1
+# fixed: """Example: SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")"""
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# stripped: from sqlty import SQL
+# stripped:
+# stripped: x = 1
+# stripped: y = f"""{x:
+# stripped: }"""
+# stripped: z = 1
+# stripped: """Example: SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")"""
+# stripped: q = "--sql\nSELECT 1::INTEGER AS n"
 ```
 
 ## Nested f-string quotes don't hide a statement's end

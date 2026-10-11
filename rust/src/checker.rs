@@ -177,10 +177,16 @@ pub fn check_source(
         }
     }
 
-    for call in calls.iter().filter(|call| call.exact) {
+    for call in &calls {
         let line_num = line_at(source, call.span.start);
         let Some(sql_content) = call.content(source) else {
-            if after_marker(&content(source, &call.strings)).is_some() {
+            let interpolated = call.strings.iter().any(|span| {
+                source[span.clone()]
+                    .split(['"', '\''])
+                    .next()
+                    .is_some_and(|prefix| prefix.contains(['f', 'F', 't', 'T']))
+            });
+            if !interpolated && after_marker(&content(source, &call.strings)).is_some() {
                 report(
                     "unchecked-query",
                     skipped_message("unchecked-query"),
@@ -274,7 +280,6 @@ pub fn wrapped_queries(
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     wrapper_calls(source, &tokenize(source), &wrapper_name)
         .into_iter()
-        .filter(|call| call.exact)
         .map(|call| {
             let query = call.content(source).and_then(|content| {
                 let rest = after_marker(&content)?;

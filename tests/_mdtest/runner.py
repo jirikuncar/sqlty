@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import difflib
+import io
 import re
+import tokenize
 from functools import cached_property
 
 import sqlty.core as core
@@ -184,8 +186,17 @@ def string_constants(source: str) -> list[str]:
     )
 
 
+def comments(source: str) -> list[str]:
+    """Every comment in ``source``, sorted."""
+    return sorted(
+        token.string
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT
+    )
+
+
 def _parses(source: str, output: str, *, same_strings: bool = False) -> str:
-    """``output``, which must be valid Python when ``source`` is.
+    """``output``, which must be valid Python with the same comments when ``source`` is.
 
     With ``same_strings``, it must also hold the same strings: rewrite and strip
     only add or remove wrappers, never join, split or change a string.
@@ -198,6 +209,8 @@ def _parses(source: str, output: str, *, same_strings: bool = False) -> str:
         ast.parse(output)
     except SyntaxError as error:
         raise AssertionError(f"output is not valid Python ({error}):\n{output}") from error
+    if comments(output) != comments(source):
+        raise AssertionError(f"output changes the comments of the source:\n{output}")
     if same_strings and string_constants(output) != string_constants(source):
         raise AssertionError(f"output changes the strings of the source:\n{output}")
     return output

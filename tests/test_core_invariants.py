@@ -18,7 +18,7 @@ import pytest
 
 import sqlty.core as core
 from tests._mdtest.parser import parse
-from tests._mdtest.runner import string_constants
+from tests._mdtest.runner import comments, string_constants
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN = [
@@ -100,15 +100,16 @@ def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
 
 
 def _check_outputs(source: str, options: dict) -> None:
-    """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid, rewrite and
-    strip keep every string as it is, and ``check --fix`` is idempotent."""
-    expected = string_constants(source)
+    """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid and every
+    comment, rewrite and strip keep every string as it is, and ``check --fix`` is idempotent."""
+    expected, kept = string_constants(source), comments(source)
     rewritten = core.rewrite_source(source, **options)
-    assert string_constants(rewritten) == expected, rewritten
+    assert (string_constants(rewritten), comments(rewritten)) == (expected, kept), rewritten
     stripped = core.strip_source(source, import_style=options["import_style"])
-    assert string_constants(stripped) == expected, stripped
+    assert (string_constants(stripped), comments(stripped)) == (expected, kept), stripped
     fixed = core.fix_source(source, **options)
     ast.parse(fixed)
+    assert comments(fixed) == kept, fixed
     assert core.fix_source(fixed, **options) == fixed
 
 
@@ -149,6 +150,11 @@ _FRAGMENTS = [
     "k = [\n    SQL[tuple[int]]('--sql\\nSELECT 1::INTEGER', ),\n]\n",
     'l = t"{x:{"("}}"\n',
     "m = '--sql\\nVALUES (1, 2)'\n",
+    'n = f"""{x:\n}"""\n',
+    'o = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER",  # c\n)\n',
+    'p = mod.SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")\n',
+    '"""Example: SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER AS n")"""\n',
+    'r = (a\n@ b, "--sql\\nSELECT 1::INTEGER "\n"AS n")\n',
 ]
 
 

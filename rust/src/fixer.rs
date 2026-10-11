@@ -49,7 +49,7 @@ pub fn fix_source(
     let mut introduced = BTreeSet::new();
     let mut edits = Vec::new();
     for call in wrapper_calls(&source, &tokenize(&source), &style.wrapper_name) {
-        let Some(mut content) = call.content(&source).filter(|_| call.exact) else {
+        let Some(mut content) = call.content(&source) else {
             continue;
         };
         if !is_sqlty_managed(&content) {

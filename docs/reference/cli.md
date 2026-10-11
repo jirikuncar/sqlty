@@ -62,7 +62,8 @@ hand-written row types such as `SQL[User]`, and the sqlty import line. When the
 strings can't stand alone (a comment outside them, or line breaks that only the
 call's parentheses allow), the parentheses stay: `SQL[T]("..."  # c\n)` becomes
 `("..."  # c\n)`. A wrapper whose argument is not only string literals
-(`SQL[T]("--sql..." + x)`) is left in place.
+(`SQL[T]("--sql..." + x)`) is left in place, as is a dotted `mod.SQL[T](...)`,
+which `check` still checks.
 
 ```
 sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]

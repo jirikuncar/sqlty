@@ -73,7 +73,7 @@ fn string_end(bytes: &[u8], at: usize, fields: bool) -> Option<usize> {
             b'\\' => i += 2,
             b'\n' if len == 1 => return None,
             b'{' if fields && bytes.get(i + 1) == Some(&b'{') => i += 2,
-            b'{' if fields => i = field_end(bytes, i + 1)?,
+            b'{' if fields => i = field_end(bytes, i + 1, len == 3)?,
             byte if byte == quote && bytes[i..].starts_with(&bytes[at..at + len]) => {
                 return Some(i + len)
             }
@@ -83,8 +83,9 @@ fn string_end(bytes: &[u8], at: usize, fields: bool) -> Option<usize> {
     None
 }
 
-/// End of an f-string replacement field whose expression starts at `i`.
-fn field_end(bytes: &[u8], mut i: usize) -> Option<usize> {
+/// End of an f-string replacement field whose expression starts at `i`; `triple`
+/// when the f-string is triple-quoted.
+fn field_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
     let mut depth = 0usize;
     while i < bytes.len() {
         match bytes[i] {
@@ -108,7 +109,7 @@ fn field_end(bytes: &[u8], mut i: usize) -> Option<usize> {
                 depth = depth.saturating_sub(1);
                 i += 1;
             }
-            b':' if depth == 0 => return spec_end(bytes, i + 1),
+            b':' if depth == 0 => return spec_end(bytes, i + 1, triple),
             b'#' => {
                 i = bytes[i..]
                     .iter()
@@ -122,12 +123,12 @@ fn field_end(bytes: &[u8], mut i: usize) -> Option<usize> {
 }
 
 /// End of a format spec starting at `i`, with nested replacement fields.
-fn spec_end(bytes: &[u8], mut i: usize) -> Option<usize> {
+fn spec_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
     while i < bytes.len() {
         match bytes[i] {
-            b'{' => i = field_end(bytes, i + 1)?,
+            b'{' => i = field_end(bytes, i + 1, triple)?,
             b'}' => return Some(i + 1),
-            b'\n' => return None,
+            b'\n' if !triple => return None,
             _ => i += 1,
         }
     }
@@ -142,9 +143,7 @@ fn starts_statement(source: &str, at: usize) -> bool {
         .split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .next()
         .unwrap_or_default();
-    line.starts_with('@')
-        || matches!(word, "def" | "class" | "import" | "async")
-        || (word == "from" && line.contains(" import "))
+    matches!(word, "def" | "class" | "import") || (word == "from" && line.contains(" import "))
 }
 
 /// The token starting at `i`, a byte that is no whitespace.
@@ -417,8 +416,7 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ve
         let plain = !code.is_empty() && code.iter().all(|&j| tokens[j].is_plain(source));
         let bare = plain && {
             let (first, last) = (code[0], code[code.len() - 1]);
-            let outside = args
-                .clone()
+            let outside = (open + 1..close)
                 .any(|j| tokens[j].kind == Kind::Comment && (j < first || j > last));
             let split = code
                 .windows(2)
@@ -481,6 +479,7 @@ mod tests {
             "t\"{f'{\"[\"}'}\"",
             "f\"{{(\"",
             "f\"\"\"{x  # (\n}\"\"\"",
+            "f\"\"\"{x:\n}\"\"\"",
         ] {
             assert_eq!(texts(source), vec![(Kind::Str, source)], "{source}");
         }
@@ -534,6 +533,17 @@ mod tests {
     }
 
     #[test]
+    fn test_matmul_at_line_start_keeps_depth() {
+        let source = "x = (a\n@ b, \"q \"\n\"n\")\n";
+        let tokens = tokenize(source);
+        let groups: Vec<usize> = string_groups(source, &tokens)
+            .iter()
+            .map(Vec::len)
+            .collect();
+        assert_eq!(groups, vec![2]);
+    }
+
+    #[test]
     fn test_call_spans_concatenation_and_comments() {
         let source = "q = SQL[tuple[int]](\"a \\\"b\\\" \"  # c\n  'd'  # e\n)\nr = SQL[T](x)";
         let found = calls(source);
@@ -566,6 +576,7 @@ mod tests {
             ("q = (SQL[T](\"a\"\n \"b\"))", true),
             ("q = (SQL[T](  # c\n\"a\"))", false),
             ("q = SQL[T](f\"a\")", false),
+            ("q = SQL[T](\"a\",  # c\n)", false),
             ("if\"(\": pass\nq = SQL[T](\n \"a\"\n \"b\"\n)", false),
         ] {
             let found = calls(source);
