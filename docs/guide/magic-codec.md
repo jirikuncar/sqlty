@@ -41,7 +41,14 @@ purge = "--sql\nDELETE FROM sessions WHERE expired"
 ## Registering the codec
 
 Python looks up the `sqlty` encoding when it compiles the file, so the codec
-must be registered first. Importing `sqlty.magic` registers it:
+must be registered first. Installing sqlty from a wheel (`pip install sqlty`,
+`uv add sqlty`) adds a `sqlty_magic.pth` file to site-packages that imports
+`sqlty.magic` on every interpreter start, so the codec is registered before
+your code runs.
+
+Editable installs of a sqlty checkout (`uv sync`, `maturin develop`) do not
+add the `.pth` file. There, or wherever the hook is disabled, import
+`sqlty.magic` before the first module that uses the codec:
 
 ```python
 import sqlty.magic  # noqa: F401  registers the "sqlty" codec
@@ -49,22 +56,12 @@ import sqlty.magic  # noqa: F401  registers the "sqlty" codec
 import queries  # queries.py starts with "# coding: sqlty"
 ```
 
-To register it for every interpreter start, add a `.pth` file containing
-`import sqlty.magic` to your environment's site-packages. The repository ships
-one as
-[`sqlty_magic.pth`](https://github.com/jirikuncar/sqlty/blob/main/sqlty_magic.pth);
-installing the package does not add it for you. Find the directory with:
-
-```bash
-python -c "import site; print(site.getsitepackages())"
-```
-
 Without registration, a file declaring `# coding: sqlty` fails with
 `SyntaxError: unknown encoding: sqlty`. Files without the declaration are
 never transformed, even with the codec registered.
 
 Set `SQLTY_NO_MAGIC` to any non-empty value (even `0`) before `sqlty.magic`
-is imported to skip registration, for example to turn a `.pth` hook off for
+is imported to skip registration, for example to turn the `.pth` hook off for
 one run:
 
 ```bash

@@ -52,6 +52,10 @@ python-source = "src"
 module-name = "sqlty._core"
 features = ["pyo3/extension-module"]
 manifest-path = "rust/Cargo.toml"
+# Ship the startup hook at the wheel root so it lands in site-packages and
+# registers the "sqlty" codec on interpreter start (see docs/guide/magic-codec.md).
+# A plain path targets both the sdist and the wheel.
+include = ["sqlty_magic.pth"]
 
 [dependency-groups]
 dev = [

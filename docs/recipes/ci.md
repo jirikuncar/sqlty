@@ -7,7 +7,33 @@ Any CI system can use them.
 
 ## Pre-commit
 
-Use local hooks that call the `sqlty` installed in your environment:
+The sqlty repository publishes two hooks. Both receive the staged Python
+files as arguments:
+
+| Hook id | Runs |
+|---------|------|
+| `sqlty-rewrite` | `sqlty rewrite <files>` |
+| `sqlty-check` | `sqlty check <files>` |
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/jirikuncar/sqlty
+    rev: main  # pin a commit: pre-commit autoupdate --bleeding-edge --freeze
+    hooks:
+      - id: sqlty-rewrite
+      - id: sqlty-check
+```
+
+Pin `rev` to a commit SHA or a release tag newer than `v0.0.1.dev1`; that
+tag predates the working hooks. pre-commit installs sqlty from source into
+its own environment, which compiles the Rust extension, so the first run
+needs a Rust toolchain (`cargo`) and takes a few minutes. Pass options with
+`args`, for example `args: [--dialect, sqlite]`. The `sqlty` hook id is a
+deprecated alias of `sqlty-rewrite`.
+
+To skip the build or reuse the `sqlty` already installed in your
+environment, use local hooks instead:
 
 ```yaml
 # .pre-commit-config.yaml

@@ -1,19 +1,24 @@
-- id: sqlty
-  name: sqlty stub generation
-  description: Generate type stubs for SQL queries
-  entry: sqlty
+- id: sqlty-rewrite
+  name: sqlty rewrite
+  description: Wrap --sql strings in SQL[T](...) calls in place
+  entry: sqlty rewrite
   language: python
   types: [python]
-  pass_filenames: false
   require_serial: true
-  args: ["."]
 
 - id: sqlty-check
   name: sqlty check
-  description: Check that type stubs for SQL queries are up-to-date
-  entry: sqlty
+  description: Lint SQL[T] queries for type mismatches and drift
+  entry: sqlty check
   language: python
   types: [python]
-  pass_filenames: false
   require_serial: true
-  args: [".", "--check", "--verbose"]
+
+# Deprecated alias of sqlty-rewrite, kept so existing configs using `id: sqlty` work.
+- id: sqlty
+  name: sqlty rewrite
+  description: Deprecated alias of sqlty-rewrite
+  entry: sqlty rewrite
+  language: python
+  types: [python]
+  require_serial: true
