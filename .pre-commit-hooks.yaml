@@ -1,19 +1,25 @@
-- id: sqlty
-  name: sqlty stub generation
-  description: Generate type stubs for SQL queries
-  entry: sqlty
+# sqlty requires Python >= 3.15: set `language_version: python3.15` on the hook
+# or `default_language_version: {python: python3.15}` in .pre-commit-config.yaml.
+# Rewrite and check work file by file, so pre-commit may run them in parallel.
+- id: sqlty-rewrite
+  name: sqlty rewrite
+  description: Wrap --sql strings in SQL[T](...) calls in place
+  entry: sqlty rewrite
   language: python
   types: [python]
-  pass_filenames: false
-  require_serial: true
-  args: ["."]
 
 - id: sqlty-check
   name: sqlty check
-  description: Check that type stubs for SQL queries are up-to-date
-  entry: sqlty
+  description: Lint SQL[T] queries; fails only on error-severity rules (by default row type mismatches and SELECT * without a schema; drift such as stale-type is a warning)
+  entry: sqlty check
   language: python
   types: [python]
-  pass_filenames: false
-  require_serial: true
-  args: [".", "--check", "--verbose"]
+
+# Deprecated alias of sqlty-rewrite, kept so existing configs using `id: sqlty` work.
+# It used to generate stubs; it now rewrites the staged files in place.
+- id: sqlty
+  name: sqlty rewrite (deprecated id 'sqlty', use sqlty-rewrite)
+  description: Deprecated alias of sqlty-rewrite (rewrites files in place; no longer generates stubs)
+  entry: sqlty rewrite
+  language: python
+  types: [python]

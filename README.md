@@ -109,9 +109,10 @@ query = "--sql\nSELECT id, name, email FROM users"
   `execute(conn, SQL[User](...))` returns a `Cursor[User]` with the matching
   row factory; `scalar` fetches one typed value.
 - **[Magic codec](https://jirikuncar.github.io/sqlty/guide/magic-codec/).**
-  Files declaring `# coding: sqlty` are rewritten when imported. The wheel
-  installs a `.pth` file that registers the codec at startup; with an
-  editable or source install, register it with `import sqlty.magic`.
+  Files declaring `# coding: sqlty` are rewritten when imported. Installing
+  sqlty adds a `.pth` file that registers the codec at startup
+  (`SQLTY_NO_MAGIC=1` turns it off); in an editable install of a sqlty
+  checkout, register it with `import sqlty.magic`.
 - **[Untyped queries](https://jirikuncar.github.io/sqlty/guide/untyped/).**
   With `untyped = "sentinel"`, queries sqlty cannot type become
   `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
