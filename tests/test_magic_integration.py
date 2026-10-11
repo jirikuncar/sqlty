@@ -94,7 +94,6 @@ def test_codec_no_unnecessary_imports():
 def test_magic_codec_integration():
     """Test the full codec integration with a real Python file."""
     # Create a test Python file that uses the magic codec
-    # No encoding declaration needed - magic codec overrides UTF-8
     test_code = """from sqlty import magic
 
 # This should be transformed by the codec

@@ -1,49 +1,17 @@
-"""Magic codec for automatic --sql string transformation via Python's codec system.
+"""The ``sqlty`` source codec: ``--sql`` strings become ``SQL[T](...)`` at import.
 
-This module registers a custom Python codec that enables automatic transformation
-of strings prefixed with '--sql' into SQL[T](...) calls with type inference.
+Modules opt in with a coding declaration on their first or second line::
 
-IMPORTANT: Importing this module automatically registers the codec (unless
-SQLTY_NO_MAGIC environment variable is set). If you only need the decode function
-without codec registration, use 'sqlty._decode' instead.
-
-Automatic Registration (Default):
-    import sqlty.magic  # Registers codec immediately
-
-    # Now use # coding: sqlty in files
     # coding: sqlty
-    q = "--sql SELECT 1::INTEGER"
-    # Python automatically transforms to: SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+    q = "--sql\nSELECT 1::INTEGER"  # Python sees SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 
-Disable Auto-Registration:
-    import os
-    os.environ['SQLTY_NO_MAGIC'] = '1'
-    import sqlty.magic  # Won't register codec
+Importing this module registers the codec; the ``sqlty_magic.pth`` file that a
+wheel install puts in ``site-packages`` imports it at interpreter startup.
+``SQLTY_NO_MAGIC=1`` skips the registration. Other files, UTF-8 ones included,
+are never transformed.
 
-    # Or import decode directly without registration:
-    from sqlty._decode import decode
-
-Direct Decode Usage:
-    from sqlty._decode import decode  # No side effects
-
-    code = b'q = "--sql SELECT 1::INTEGER"'
-    transformed, _ = decode(code)
-
-CLI Tool:
-    python -m sqlty.magic <filename>
-    # Transforms a file and outputs the result
-
-For Global Setup:
-    When you install sqlty, a 'sqlty_magic.pth' file is automatically added to your
-    site-packages directory. This file imports sqlty.magic on Python startup, enabling
-    the codec globally.
-
-    To disable this behavior, set SQLTY_NO_MAGIC=1 environment variable:
-        export SQLTY_NO_MAGIC=1
-
-    Then use '# coding: sqlty' in any file for automatic transformation.
-
-See docs/magic-codec.md for complete documentation.
+``sqlty._decode.decode`` transforms bytes without registering anything, and
+``python -m sqlty.magic FILE`` prints a module as the codec decodes it.
 """
 
 from __future__ import annotations
@@ -108,18 +76,6 @@ class StreamReader(_Utf8StreamReader):
         self._decoded = False
 
 
-# Create the custom codec info that will be used for UTF-8 and sqlty
-_custom_codec_info = codecs.CodecInfo(
-    name="utf-8",
-    encode=utf_8_codec.encode,
-    decode=decode,
-    incrementalencoder=utf_8_codec.incrementalencoder,
-    incrementaldecoder=IncrementalDecoder,
-    streamreader=StreamReader,
-    streamwriter=utf_8_codec.streamwriter,
-)
-
-# Also create a separate codec info for "sqlty" for testing purposes
 _sqlty_codec_info = codecs.CodecInfo(
     name="sqlty",
     encode=utf_8_codec.encode,
@@ -132,67 +88,15 @@ _sqlty_codec_info = codecs.CodecInfo(
 
 
 def _codec_search(encoding: str) -> CodecInfo | None:
-    """Search function for codec registration.
-
-    This function provides the custom codec for:
-    - UTF-8 and its aliases (for automatic transformation)
-    - "sqlty" (for explicit testing)
-
-    Args:
-        encoding: The encoding name being looked up
-
-    Returns:
-        Custom CodecInfo for supported encodings, None otherwise
-    """
-    # Normalize the encoding name (lowercase, remove hyphens and underscores)
-    normalized = encoding.lower().replace("-", "").replace("_", "")
-
-    # Handle UTF-8 and its common aliases
-    if normalized in ("utf8", "utf", "u8"):
-        return _custom_codec_info
-
-    # Handle "sqlty" for explicit testing
-    if normalized == "sqlty":
-        return _sqlty_codec_info
-
-    return None
+    return _sqlty_codec_info if encoding == "sqlty" else None
 
 
 def register() -> None:
-    """Register the custom codec with Python's codec registry.
-
-    This attempts to override UTF-8 codec for automatic --sql string transformation.
-
-    Note: Due to Python's codec caching (built-in codecs are registered before user
-    code runs), this only works when called very early during Python startup.
-
-    When you install sqlty, a 'sqlty_magic.pth' file is automatically added to your
-    site-packages directory, which imports this module on Python startup. This enables
-    the codec globally for all Python sessions.
-
-    To disable automatic registration, set SQLTY_NO_MAGIC=1 environment variable
-    before starting Python.
-
-    Alternatively, use the decode() function from sqlty._decode directly to transform
-    source code without any codec registration.
-    """
-    import _codecs
-
-    # Register our search function
+    """Register the ``sqlty`` codec; registering twice is harmless."""
+    codecs.unregister(_codec_search)
     codecs.register(_codec_search)
 
-    # Attempt to clear the codec cache
-    # This may not work if UTF-8 was already cached before this runs
-    try:
-        _codecs.unregister(_codec_search)
-        codecs.register(_codec_search)
-    except Exception:
-        # If unregister fails, just continue with registration
-        pass
 
-
-# Automatically register when the module is imported
-# Skip registration if SQLTY_NO_MAGIC environment variable is set
 if not os.environ.get("SQLTY_NO_MAGIC"):
     register()
 
