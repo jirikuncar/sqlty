@@ -2,8 +2,7 @@
 
 Edits are addressed by line numbers recorded at parse time; each applied
 edit shifts the lines after it, so the updater maps original lines to
-current ones. Sections may update in any order, and a section run for both
-backends is updated once.
+current ones. Sections may update in any order.
 """
 
 from __future__ import annotations

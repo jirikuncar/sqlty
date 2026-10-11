@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["sqlglot>=27.29.0,<31", "asttokens>=3.0.0"]
+dependencies = ["asttokens>=3.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"

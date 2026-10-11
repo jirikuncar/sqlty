@@ -84,8 +84,7 @@ format follows [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/
 the plugin is `tests/_mdtest/`, and `mdtest_paths` in `pyproject.toml` lists
 the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
 (user docs, also the Zensical site), `src/sqlty/rules/` (one page per lint rule, printed by
-`sqlty rule NAME`). Every test runs through `sqlty.core` on each backend:
-`name[py]`, `name[rs]`.
+`sqlty rule NAME`). Every test runs through `sqlty.core`.
 
 ### Where to add tests
 
@@ -113,8 +112,7 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
   blocks are not part of it. Prose may sit between blocks.
 - Other languages (`bash`, `text`, ...) and blocks tagged ```` ```python ignore ````
   are prose.
-- Directives: `<!-- mdtest:skip reason -->`, `<!-- mdtest:xfail reason -->`,
-  `<!-- mdtest:backend py -->`.
+- Directives: `<!-- mdtest:skip reason -->`, `<!-- mdtest:xfail reason -->`.
 
 ````markdown
 ## Schema-based TypedDict mismatch
@@ -148,7 +146,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 |-----------|-------|---------------|
 | `-- inferred:` | in the `sql` block | `core.infer_type()` |
 | `-- expanded:` | in the `sql` block | `core.expand_star()` |
-| `-- columns:` | in the `sql` block | `SQLAnalyzer.analyze_select()`: `name: type (SQL_TYPE)` per line |
+| `-- columns:` | in the `sql` block | `core.analyze_select()`: `name: type (SQL_TYPE)` per line |
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
@@ -167,7 +165,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 2. `make update-mdtest` fills them in; errors are written above their lines.
 3. Review the diff, then commit.
 
-`uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch[rs]'`
+`uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch'`
 reruns one test; failures print this command.
 
 - Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
@@ -181,13 +179,12 @@ Include examples that an AI agent or a developer new to the codebase can copy-pa
 Use the `Example:` doctest convention:
 
 ```python
-def rewrite(self, source: str) -> RewriteResult:
-    """Transform --sql prefixed strings into SQL[T](...) calls.
+def analyze_select(sql: str, *, dialect: str = "postgres") -> list[ColumnInfo] | None:
+    """Result columns of a query, or ``None`` when it returns no rows or doesn't parse.
 
     Example:
-        >>> r = SQLRewriter()
-        >>> r.rewrite('q = "--sql\\nSELECT id::INTEGER FROM users"').source
-        'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")'
+        >>> analyze_select("SELECT id::INTEGER FROM users")
+        [ColumnInfo(name='id', python_type='int', sql_type='INT')]
     """
 ```
 
@@ -205,8 +202,8 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 ### README and docs
 
 - README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
-- `tests/test_core_invariants.py` checks idempotency, round trip and backend agreement
-  over every mdtest code block: new mdtests extend it automatically.
+- `tests/test_core_invariants.py` checks idempotency and round trips over every
+  mdtest code block: new mdtests extend it automatically.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
   matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
@@ -236,7 +233,7 @@ decoded at import time, which type checkers cannot do.
 |------|------|----|------------|
 | Setting attributes on a function (`fn.__sqlty__ = True`) | `attr-defined` | `invalid-assignment` / `unresolved-attribute` | Suppress both on the same line |
 | `__name__` of a `Callable` | Allowed | Not part of `Callable` | `getattr(fn, "__name__", "unknown")` |
-| Backend imports in `core.py` (`_core.pyi` stub and `_core_py.py`) | Checks every branch | Checks every branch | Keep signatures identical |
+| Rust functions (`sqlty._core`) | Read from `_core.pyi` | Read from `_core.pyi` | Keep the stub in sync with `rust/src/lib.rs` |
 | Optional `psycopg` dependency | `ignore_missing_imports` override in `pyproject.toml` | Installed by `uv sync --all-groups` | No inline suppression |
 
 ### Suppression comments
@@ -259,14 +256,12 @@ test with an explicit expected error count.
 ```
 src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
-├── core.py              # Public API: try Rust _core, fall back to _core_py
-├── _core_py.py          # Pure-Python: infer_type, rewrite_source, strip_source, check_source
-├── _rewriter.py         # SQLRewriter: whole-source regex rewrite/strip
-├── _fixer.py           # fix_source: sqlty check --fix, built on sqlty.core
-├── _sql_analyzer.py     # SQL parsing + type inference (sqlglot)
+├── core.py              # Public API over the Rust engine, plus row type checks
+├── _core.pyi            # Stub for sqlty._core (rust/src/lib.rs)
+├── _type_extractor.py   # Row types (TypedDict, dataclass, ...) for structural checks
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
-├── _checker.py          # Column validation, SELECT * detection
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, version
 └── magic.py             # Python codec registration
+rust/src/                # The engine, sqlty._core: lib.rs (PyO3), analyzer, rewriter, checker, fixer
 ```

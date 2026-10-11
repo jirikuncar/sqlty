@@ -1,23 +1,16 @@
-"""Both backends parse types and statements alike (sqlglot vs sqlparser-rs)."""
+"""How the engine reads SQL types and statements across dialects."""
 
 from __future__ import annotations
 
-import types
+import re
+from pathlib import Path
 
 import pytest
 
-
-def _outcome(call, backend: types.ModuleType):
-    """A call's result on ``backend``, or its exception type and message."""
-    try:
-        return call(backend)
-    except Exception as exc:
-        return type(exc).__name__, str(exc)
+import sqlty.core as core
 
 
-class TestParserParity:
-    """Both backends parse types and statements alike (sqlglot vs sqlparser-rs)."""
-
+class TestParser:
     @pytest.mark.parametrize(
         ("sql", "dialect", "expected"),
         [
@@ -57,7 +50,7 @@ class TestParserParity:
             ("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "postgres", None),
         ],
     )
-    def test_infer_type(self, core: types.ModuleType, sql: str, dialect: str, expected: str | None):
+    def test_infer_type(self, sql: str, dialect: str, expected: str | None):
         assert core.infer_type(sql, dialect=dialect) == expected
 
     @pytest.mark.parametrize(
@@ -83,37 +76,26 @@ class TestParserParity:
             ("INT ARRAY, INT", "postgres", "c0::ARRAY<INT>, c1::INT"),
         ],
     )
-    def test_schema_types(
-        self, core: types.ModuleType, column_types: str, dialect: str, expected: str
-    ):
+    def test_schema_types(self, column_types: str, dialect: str, expected: str):
         columns = ", ".join(f"c{i} {t}" for i, t in enumerate(column_types.split(", ")))
         schema = f"CREATE TABLE t ({columns});"
         result = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
         assert result == f"SELECT {expected} FROM t"
 
     @pytest.mark.parametrize("dialect", ["postgres", "sqlite"])
-    def test_mysql_only_column_skips_table(self, core: types.ModuleType, dialect: str):
+    def test_mysql_only_column_skips_table(self, dialect: str):
         schema = "CREATE TABLE t (a INT, b SET('x'));"
         assert core.infer_type("SELECT a FROM t", dialect=dialect, schema_sql=schema) == (
             "tuple[str]"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="sqlparser-rs has no INT3/MIDDLEINT keyword: `INT3 UNSIGNED` is a parse error, "
-        "so Rust skips the table while Python reads b::UMEDIUMINT",
-    )
     def test_int3_unsigned_column(self):
-        rs = pytest.importorskip("sqlty._core", reason="Rust backend not compiled")
-        import sqlty._core_py as py
-
         schema = "CREATE TABLE t (a INT, b INT3 UNSIGNED);"
-        outcomes = {
-            m.expand_star("SELECT * FROM t", dialect="mysql", schema_sql=schema) for m in (py, rs)
-        }
-        assert len(outcomes) == 1
+        assert core.expand_star("SELECT * FROM t", dialect="mysql", schema_sql=schema) == (
+            "SELECT a::INT, b::UMEDIUMINT FROM t"
+        )
 
-    def test_merge_without_returning_not_wrapped(self, core: types.ModuleType):
+    def test_merge_without_returning_not_wrapped(self):
         source = 'q = "--sql\\nMERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE"'
         assert core.rewrite_source(source, untyped=True) == source
 
@@ -145,50 +127,56 @@ class TestQueryInput:
             ("SELECT id FROM users WHERE id = %s", "sqlite", "tuple[int]"),
         ],
     )
-    def test_infer_type(self, core: types.ModuleType, sql: str, dialect: str, expected: str | None):
+    def test_infer_type(self, sql: str, dialect: str, expected: str | None):
         assert core.infer_type(sql, dialect=dialect, schema_sql=self.SCHEMA) == expected
 
-    def test_schema_is_not_a_query(self, core: types.ModuleType):
+    def test_schema_is_not_a_query(self):
         """Placeholders are not replaced in schema DDL, where MySQL rejects them."""
         schema = "CREATE TABLE t (a INT DEFAULT %s);"
         assert core.expand_star("SELECT * FROM t", dialect="mysql", schema_sql=schema) is None
 
 
-def test_type_tables_agree():
-    """Rust's SQL_TO_PYTHON_TYPE lists the same types as SQLAnalyzer.SQL_TO_PYTHON_TYPE."""
-    import re
-    from pathlib import Path
-
-    from sqlty._sql_analyzer import SQLAnalyzer
-
+def _type_table() -> dict[str, str]:
     source = (Path(__file__).resolve().parent.parent / "rust/src/analyzer.rs").read_text()
     table = source[
         source.index("static SQL_TO_PYTHON_TYPE") : source.index("static FUNCTION_TYPES")
     ]
-    assert dict(re.findall(r'\("(\w+)", "([\w.]+)"\)', table)) == SQLAnalyzer.SQL_TO_PYTHON_TYPE
-
-
-def _type_names() -> list[str]:
-    from sqlty._sql_analyzer import SQLAnalyzer
-
-    return sorted(SQLAnalyzer.SQL_TO_PYTHON_TYPE)
+    return dict(re.findall(r'\("(\w+)", "([\w.]+)"\)', table))
 
 
 @pytest.mark.parametrize("dialect", ["postgres", "mysql", "sqlite"])
-@pytest.mark.parametrize("sql_type", _type_names())
-def test_type_names_agree(sql_type: str, dialect: str):
-    """Every mapped type name casts and expands alike on both backends."""
-    rs = pytest.importorskip("sqlty._core", reason="Rust backend not compiled")
-    import sqlty._core_py as py
+@pytest.mark.parametrize(("sql_type", "python_type"), sorted(_type_table().items()))
+def test_type_names(sql_type: str, python_type: str, dialect: str):
+    """A mapped type name, cast or in a schema, is its Python type.
 
+    A bare ``ARRAY`` needs an element type, so the cast doesn't parse and the
+    schema table is skipped.
+    """
     schema = f"CREATE TABLE t (c {sql_type});"
-    calls = [
-        lambda m: m.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect),
-        lambda m: m.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema),
-        lambda m: m.infer_type("SELECT * FROM t", dialect=dialect, schema_sql=schema),
-    ]
-    for call in calls:
-        assert _outcome(call, rs) == _outcome(call, py)
+    cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
+    column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
+    if sql_type == "ARRAY":
+        assert (cast, column) == (None, "tuple[str]")
+    else:
+        assert cast == column == f"tuple[{python_type}]"
+        expanded = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
+        assert expanded is not None and expanded.startswith("SELECT c::")
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT 1", True),
+        ("DELETE FROM t RETURNING id", True),
+        ("DELETE FROM t", False),
+        ("CREATE TABLE t (a INT)", False),
+        ("NOT VALID SQL", True),
+        ("", False),
+        ("SELECT id FROM t WHERE id = ?", True),
+    ],
+)
+def test_returns_rows(sql: str, expected: bool):
+    assert core.returns_rows(sql) is expected
 
 
 @pytest.mark.parametrize("imports", ["", "import not_installed\n"])
