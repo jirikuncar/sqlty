@@ -91,9 +91,12 @@ impl ImportStyleParsed {
     }
 
     /// Regex matching `{wrapper_name}[T]("...")`; group `inner` is the string literal.
+    ///
+    /// `T` stays on one line; the string may sit on its own lines with a trailing
+    /// comma, as formatters lay out long calls.
     fn wrapper_pattern(&self) -> Regex {
         Regex::new(&format!(
-            r#"(?s){}\[.*?\]\(\s*(?P<inner>""".*?"""|'''.*?'''|"[^"]*"|'[^']*')\s*\)"#,
+            r#"(?s){}\[[^\n]*?\]\(\s*(?P<inner>""".*?"""|'''.*?'''|"[^"]*"|'[^']*')\s*,?\s*\)"#,
             regex::escape(&self.wrapper_name)
         ))
         .unwrap()
@@ -169,7 +172,7 @@ pub fn rewrite_source(
         if wrapper_spans
             .iter()
             .any(|&(ws, we)| ws <= start && end <= we)
-            || fstring_lines.contains(&line_at(source, start))
+            || (!fstring_lines.is_empty() && fstring_lines.contains(&line_at(source, start)))
         {
             continue;
         }

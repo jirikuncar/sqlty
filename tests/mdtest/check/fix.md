@@ -246,3 +246,33 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed:
 # fixed: q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
+
+## Formatter trailing comma is kept
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[str]](
+    "--sql\nSELECT id::INTEGER FROM users",
+)
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int]](
+# fixed:     "--sql\nSELECT id::INTEGER FROM users",
+# fixed: )
+```
+
+## UNTYPED import stays while used elsewhere
+
+```python
+from sqlty import SQL
+from sqlty import UNTYPED
+
+q = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
+missing = UNTYPED
+# fixed: from sqlty import SQL
+# fixed: from sqlty import UNTYPED
+# fixed:
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: missing = UNTYPED
+```

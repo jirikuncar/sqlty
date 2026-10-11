@@ -91,17 +91,18 @@ class ImportStyle:
     def make_wrapper_pattern(self) -> re.Pattern[str]:
         """Build a regex that matches ``{wrapper_name}[T]("...")``.
 
-        The string may sit on its own lines, as formatters lay out long calls.
+        ``T`` stays on one line; the string may sit on its own lines with a
+        trailing comma, as formatters lay out long calls.
         """
         escaped = re.escape(self.wrapper_name)
         return re.compile(
-            rf"(?P<wrapper>{escaped}\[.*?\]\(\s*"
+            rf"(?P<wrapper>{escaped}\[[^\n]*?\]\(\s*"
             r"(?P<inner>"
             r'""".*?"""'
             r"|'''.*?'''"
             r'|"[^"]*"'
             r"|'[^']*'"
-            r")\s*\))",
+            r")\s*,?\s*\))",
             re.DOTALL,
         )
 

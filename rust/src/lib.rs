@@ -108,11 +108,12 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 ///     schema_sql: Optional CREATE TABLE statements
 ///     rules: Rule severity overrides (e.g., {"select-star": "ignore"})
 ///     import_style: Import style (e.g. "from sqlty import SQL as Q")
+///     untyped: Report uninferable row queries as stale-rewrite, as rewrite wraps them
 ///
 /// Returns:
 ///     List of diagnostic dicts with keys: rule, message, severity, line
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false))]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
@@ -120,9 +121,10 @@ fn check_source<'py>(
     schema_sql: Option<&str>,
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
+    untyped: bool,
 ) -> Bound<'py, PyList> {
     let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    let diagnostics = checker::check_source(source, dialect, &schema, rules, import_style);
+    let diagnostics = checker::check_source(source, dialect, &schema, rules, import_style, untyped);
 
     let list = PyList::empty(py);
     for diag in diagnostics {

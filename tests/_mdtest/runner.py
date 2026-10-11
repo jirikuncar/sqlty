@@ -134,6 +134,7 @@ class Run:
                 schema_sql=self.schema_sql,
                 rules=self.rules,
                 import_style=self.import_style,
+                untyped=self.untyped,
             )
         ]
         expected = [a for a in assertions if a.expected]

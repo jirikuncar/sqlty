@@ -32,4 +32,5 @@ def check_source(
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> list[dict[str, str | int | None]]: ...

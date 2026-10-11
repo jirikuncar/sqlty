@@ -84,3 +84,11 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert out.startswith("q.py:5: [inline-sql-comment]")
     assert "Fixed 1 file(s)" in out
+
+
+def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = true\n")
+    args = build_parser().parse_args(["check", str(tmp_path)])
+
+    with pytest.raises(SystemExit, match="untyped must be 'skip' or 'sentinel'"):
+        SettingsResolver(args).for_file(tmp_path / "q.py")

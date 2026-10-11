@@ -43,3 +43,21 @@ untyped-query = "warn"
 # error: [untyped-query] "sqlty.SQL[sqlty.UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
 ```
+
+## Sentinel: uninferable rows are stale until rewritten
+
+With `untyped = "sentinel"`, rewrite wraps queries of unknown row type, so
+check reports them and `--fix` wraps them.
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = "--sql\nVALUES (1, 2)"
+# fixed: from sqlty import SQL
+# fixed: from sqlty import UNTYPED
+# fixed: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+```

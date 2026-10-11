@@ -277,6 +277,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             schema_sql=settings.schema_sql,
             rules=settings.rules,
             import_style=settings.import_style,
+            untyped=settings.untyped,
         )
 
         for diag in diagnostics:
@@ -384,6 +385,8 @@ class SettingsResolver:
         if schema_sql is None and "schema" in config and config_dir is not None:
             schema_sql = _load_schema(config_dir / config["schema"])
         untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
+        if untyped not in ("skip", "sentinel"):
+            raise SystemExit(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
         return Settings(
             dialect=args.dialect or config.get("dialect", "postgres"),
             schema_sql=schema_sql,

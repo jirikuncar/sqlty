@@ -179,6 +179,7 @@ def check_source(
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
@@ -194,6 +195,7 @@ def check_source(
         schema_sql: Optional CREATE TABLE statements
         rules: Rule severity overrides
         import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+        untyped: Report uninferable row queries as stale-rewrite, as rewrite wraps them
 
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
@@ -210,7 +212,12 @@ def check_source(
 
     # Run the backend check_source (Rust or Python)
     diagnostics = _backend_check_source(
-        source, dialect=dialect, schema_sql=schema_sql, rules=rules, import_style=import_style
+        source,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
     )
 
     # Extract user-defined type definitions from source

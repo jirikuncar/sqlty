@@ -1,1 +1,1 @@
-import sqlty.magic
+import codecs, os; os.environ.get("SQLTY_NO_MAGIC") or codecs.register(lambda name: name == "sqlty" and __import__("sqlty.magic", fromlist=["_codec_search"])._codec_search(name) or None)

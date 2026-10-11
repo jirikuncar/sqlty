@@ -94,6 +94,7 @@ def test_fix_leaves_nothing_stale(core: types.ModuleType, source: str, options: 
             dialect=options["dialect"],
             schema_sql=options["schema_sql"],
             import_style=options["import_style"],
+            untyped=options["untyped"],
         )
         if d["rule"] in ("stale-rewrite", "stale-type")
     ]

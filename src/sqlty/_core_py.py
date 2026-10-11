@@ -120,6 +120,7 @@ def check_source(
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
@@ -139,6 +140,7 @@ def check_source(
         schema_sql: Optional CREATE TABLE statements
         rules: Rule severity overrides (e.g., {"select-star": "ignore"})
         import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+        untyped: Report uninferable row queries as stale-rewrite, as rewrite wraps them
 
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
@@ -148,7 +150,7 @@ def check_source(
     analyzer = _make_analyzer(dialect, schema_sql)
     rule_config = RuleConfig(overrides=rules)
     checker = Checker(analyzer=analyzer, rule_config=rule_config)
-    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style)
+    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style, untyped=untyped)
     has_schema = schema_sql is not None
 
     istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
@@ -156,7 +158,9 @@ def check_source(
     untyped_name = istyle.untyped_name
 
     diagnostics: list[dict[str, str | int | None]] = []
-    wrappable = _wrappable_lines(source, rewriter)
+    wrappable = (
+        _wrappable_lines(source, rewriter) if rule_config.is_enabled("stale-rewrite") else set()
+    )
 
     for i, line_stripped in _logical_lines(source, wrapper_name):
         if skipped := skipped_string_rule(line_stripped):
@@ -230,11 +234,11 @@ def check_source(
         annotated_type = _extract_type_from_wrapper(line_stripped, wrapper_name)
         if annotated_type == untyped_name and rule_config.is_enabled("untyped-query"):
             current_type = rewriter._infer_type(sql_content)
-            untyped = f"{wrapper_name}[{untyped_name}]"
+            sentinel = f"{wrapper_name}[{untyped_name}]"
             message = (
-                f"{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+                f"{sentinel} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
                 if current_type == "Any"
-                else f"{untyped} can now be {wrapper_name}[{current_type}]; run sqlty check --fix"
+                else f"{sentinel} can now be {wrapper_name}[{current_type}]; run sqlty check --fix"
             )
             diagnostics.append(
                 {
@@ -303,16 +307,20 @@ def _make_rewriter(
     untyped: bool = False,
 ) -> SQLRewriter:
     """Create an SQLRewriter, optionally with schema."""
+    import os
     import tempfile
 
-    schema_path = None
-    if schema_sql:
-        fd, schema_path = tempfile.mkstemp(suffix=".sql")
+    if not schema_sql:
+        return SQLRewriter(dialect=dialect, import_style=import_style, untyped=untyped)
+    fd, schema_path = tempfile.mkstemp(suffix=".sql")
+    try:
         with open(fd, "w") as f:
             f.write(schema_sql)
-    return SQLRewriter(
-        dialect=dialect, schema_path=schema_path, import_style=import_style, untyped=untyped
-    )
+        return SQLRewriter(
+            dialect=dialect, schema_path=schema_path, import_style=import_style, untyped=untyped
+        )
+    finally:
+        os.unlink(schema_path)
 
 
 def _has_inline_sql_comment(line: str) -> bool:

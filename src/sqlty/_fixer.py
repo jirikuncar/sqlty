@@ -59,11 +59,10 @@ def fix_source(
             return match[0]
         if schema_sql and enabled("select-star"):
             content = _expand_star(content, quote, core.expand_star, dialect, schema_sql)
-        current = infer(content)
         refresh = (annotated.startswith("tuple[") and enabled("stale-type")) or (
             annotated == style.untyped_name and enabled("untyped-query")
         )
-        row_type = current if refresh and current else annotated
+        row_type = (infer(content) if refresh else None) or annotated
         if row_type != annotated:
             introduced.add(row_type)
         return f"{style.wrapper_name}[{row_type}]({match['space']}{quote}{content}{quote}{match['end']}"
@@ -74,13 +73,13 @@ def fix_source(
 
 def _wrapper_pattern(style: ImportStyle) -> re.Pattern[str]:
     return re.compile(
-        rf"{re.escape(style.wrapper_name)}\[(?P<type>.*?)\]\((?P<space>\s*)"
+        rf"{re.escape(style.wrapper_name)}\[(?P<type>[^\n]*?)\]\((?P<space>\s*)"
         r"(?P<inner>"
         r'""".*?"""'
         r"|'''.*?'''"
         r'|"[^"]*"'
         r"|'[^']*'"
-        r")(?P<end>\s*\))",
+        r")(?P<end>\s*,?\s*\))",
         re.DOTALL,
     )
 
@@ -113,10 +112,11 @@ def _fix_imports(source: str, style: ImportStyle, introduced: set[str]) -> str:
     needed = [m for m in ("datetime", "uuid") if any(f"{m}." in t for t in introduced)]
     missing = [f"import {m}" for m in needed if not _has_import(source, f"import {m}")]
     untyped = style.untyped_import
-    if untyped and _has_import(source, untyped) and f"{style.untyped_name}]" not in source:
-        source = "".join(
-            line for line in source.splitlines(keepends=True) if line.rstrip() != untyped
-        )
+    if untyped and _has_import(source, untyped):
+        lines = source.splitlines(keepends=True)
+        rest = "".join(line for line in lines if line.rstrip() != untyped)
+        if not re.search(rf"\b{style.untyped_name}\b", rest):
+            source = rest
     if missing:
         at = _header_end(source)
         source = source[:at] + "\n".join(missing) + "\n" + source[at:]

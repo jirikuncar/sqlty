@@ -17,7 +17,8 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 ```
 
 Installing sqlty adds `sqlty_magic.pth` to `site-packages`, which registers
-the codec at interpreter startup. `SQLTY_NO_MAGIC=1` disables the
+the codec at interpreter startup; sqlty itself is imported only when a file
+declares it. `SQLTY_NO_MAGIC=1` disables the
 registration. Files without the declaration are not transformed.
 
 ## Imports
