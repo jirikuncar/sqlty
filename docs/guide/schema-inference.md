@@ -61,7 +61,8 @@ Nullability is not tracked: `email` above is `str`, not `str | None`.
 1. `--schema PATH` on the command line, relative to the current directory.
 2. `schema` in `[tool.sqlty]`, relative to the directory of `pyproject.toml`.
 
-Each file uses the nearest `pyproject.toml` above it. A schema file that does not exist is reported as a warning and
+Each file uses the nearest `pyproject.toml` above it that has a `[tool.sqlty]`
+table. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
@@ -76,9 +77,7 @@ used by any command yet; see
 
 The dialect decides how queries and the schema are parsed. Choose
 `postgres` (default), `sqlite` or `mysql` with `dialect` in `[tool.sqlty]` or
-`--dialect` on the command line. When `pyproject.toml` sets a dialect, an
-explicit `--dialect postgres` does not override it, because `postgres` is
-also the flag's default; any other value does.
+`--dialect` on the command line, which overrides `pyproject.toml`.
 
 ### SQLite
 
