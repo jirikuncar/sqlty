@@ -239,8 +239,10 @@ literals, wrapped or not.
 
 ### stale-rewrite
 
-Default: warn. A string starting with `--sql` is not wrapped in
-`SQL[T](...)`.
+Default: warn. A `--sql` string that `rewrite` would wrap is not wrapped in
+`SQL[T](...)`. The marker may follow whitespace or a line break, as in a
+triple-quoted string that opens on its own line; implicitly concatenated
+strings are one query.
 
 ```python
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
@@ -251,7 +253,6 @@ Fix: `sqlty rewrite` or `sqlty check --fix`. Only strings `rewrite` would wrap
 are reported: statements without rows, uninferable queries in `skip` mode,
 the `"--sql SELECT"` form, and strings that are not plain literals
 (f-, t-, raw or bytes strings, alone or in a concatenation) are not.
-Implicitly concatenated strings count as one query.
 
 ### stale-type
 

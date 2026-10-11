@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ast
 import random
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -64,10 +63,16 @@ def test_strip_is_idempotent(source: str, options: dict) -> None:
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
 def test_strip_undoes_rewrite(source: str, options: dict) -> None:
-    """``strip(rewrite(x)) == x`` for sources without sqlty wrappers or imports."""
+    """``strip(rewrite(x)) == x`` for sources that ``strip`` leaves alone.
+
+    Other sqlty imports may be there: rewrite adds what is missing on lines of
+    its own, which strip removes again. Strip also removes the lines it would
+    add when they were written by hand, so those sources are skipped.
+    """
     style = options["import_style"]
+    own_lines = {style or "from sqlty import SQL", "from sqlty import UNTYPED"}
     if (
-        re.search(r"^(from|import) sqlty", source, re.M)
+        own_lines & {line.strip() for line in source.splitlines()}
         or core.strip_source(source, import_style=style) != source
     ):
         pytest.skip("source already uses sqlty")

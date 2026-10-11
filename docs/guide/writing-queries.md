@@ -91,7 +91,9 @@ query = "--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions"
 ```
 
 The rewriter adds `import datetime` and `import uuid` when the row type needs
-them.
+them. `SQL` and `UNTYPED` already imported by any top-level
+`from sqlty import ...` (a list, parentheses, `*`) are not imported again; a
+missing one gets a line of its own.
 
 Literals, `COUNT(*)` and casts inside expressions are typed too. A column
 without a cast, schema entry or literal type becomes `str`, as does an
@@ -231,7 +233,9 @@ sqlty rewrite queries.py   # "--sql\n..." -> SQL[T]("--sql\n...")
 
 Neither command changes the string contents, only the wrapper and the
 `from sqlty import SQL` import. For a file whose `--sql` strings are all
-plain, `strip(rewrite(x)) == x`.
+plain, `strip(rewrite(x)) == x`, unless it already has a hand-written import
+line that `strip` removes too: `from sqlty import SQL`,
+`from sqlty import UNTYPED`, or the configured `import-style` line.
 
 !!! warning "`strip` removes hand-written row types"
     `strip` removes every wrapper, including `SQL[User]`, and the sqlty

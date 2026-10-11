@@ -355,6 +355,26 @@ mod tests {
     }
 
     #[test]
+    fn test_stale_rewrite_agrees_with_rewrite() {
+        for (source, line) in [
+            ("q = \"\"\"\n--sql\nSELECT 1::INTEGER AS n\"\"\"", 1),
+            (
+                "x = 1\nq = SQL[tuple[int]](\"--sql\\nSELECT 1\"), \"--sql\\nSELECT 2\"",
+                2,
+            ),
+            ("q = '  --sql\\nSELECT 1'", 1),
+        ] {
+            let diags = check_source(source, "postgres", &None, None, None, false);
+            let lines: Vec<usize> = diags
+                .iter()
+                .filter(|d| d.rule == "stale-rewrite")
+                .map(|d| d.line)
+                .collect();
+            assert_eq!(lines, vec![line], "{source}");
+        }
+    }
+
+    #[test]
     fn test_unwrappable_string_is_not_stale() {
         for source in [
             r#"q = "--sql SELECT 1::INTEGER""#,

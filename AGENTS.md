@@ -68,7 +68,9 @@ q = "--sql SELECT id::INTEGER FROM users"
 ```
 
 `rewrite`/`strip` never modify string content, only the `SQL[T]()` wrapper,
-so `strip(rewrite(x)) == x`. `check --fix` is the exception: its
+so `strip(rewrite(x)) == x` for files without wrappers or a hand-written
+import line that `strip` removes (`from sqlty import SQL`, `from sqlty import
+UNTYPED`, or the configured `import-style` line). `check --fix` is the exception: its
 `inline-sql-comment`, `select-star` and `mysql-sql-marker` fixes edit content.
 `-- sql\n` is an alternative marker that MySQL also reads as a comment.
 For triple-quoted multiline strings, use a real newline:
