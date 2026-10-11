@@ -64,9 +64,7 @@ def test_generator(tmp_path: Path) -> None:
 
 def test_runtime(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(PYPROJECT)
-    (tmp_path / "db.py").write_text(
-        "import asyncio\n" + DB + f"\nasyncio.run({CALL.strip()})\n"
-    )
+    (tmp_path / "db.py").write_text("import asyncio\n" + DB + f"\nasyncio.run({CALL.strip()})\n")
     (tmp_path / "main.py").write_text("import db\n")
     for _ in range(2):
         result = subprocess.run(
