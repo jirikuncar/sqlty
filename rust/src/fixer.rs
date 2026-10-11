@@ -8,15 +8,13 @@ use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 
 use crate::analyzer::{expand_star, Schema};
-use crate::checker::RuleConfig;
+use crate::checker::{RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     extract_string_content, has_import, header_end, infer_sql_content, is_sqlty_managed,
-    rewrite_source, ImportStyle,
+    rewrite_source, splice, string_literals, ImportStyle,
 };
 
-/// `"--sql SELECT ..."` opening a plain string literal; raw, f- and t-strings are left alone.
-static INLINE_SQL_COMMENT: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(?P<quote>[uU]?(?:"""|'''|"|'))--sql (?P<next>\S)"#).unwrap());
+const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
 /// A `--sql` marker line at the start of string content.
 static SQL_PREFIX: Lazy<Regex> =
@@ -47,9 +45,11 @@ pub fn fix_source(
     let fixed = wrapper_pattern(&style)
         .replace_all(&source, |caps: &Captures| {
             let (annotated, literal) = (&caps["type"], &caps["inner"]);
-            let quote = ["\"\"\"", "'''", "\"", "'"]
+            let quoted = literal.trim_start_matches(['u', 'U']);
+            let prefix = &literal[..literal.len() - quoted.len()];
+            let quote = QUOTES
                 .into_iter()
-                .find(|q| literal.starts_with(q))
+                .find(|q| quoted.starts_with(q))
                 .unwrap_or("\"");
             let mut content = extract_string_content(literal).to_string();
             if !is_sqlty_managed(&content) {
@@ -68,7 +68,7 @@ pub fn fix_source(
                 introduced.insert(row_type.clone());
             }
             format!(
-                "{}[{row_type}]({}{quote}{content}{quote}{}",
+                "{}[{row_type}]({}{prefix}{quote}{content}{quote}{}",
                 style.wrapper_name, &caps["space"], &caps["end"]
             )
         })
@@ -79,26 +79,32 @@ pub fn fix_source(
     fix_imports(fixed, &style, &introduced)
 }
 
+/// `"--sql SELECT ..."` to `"--sql\nSELECT ..."` in plain string literals that
+/// `inline-sql-comment` reports, so prose such as `"--sql flag enables it"` is kept.
+/// This and `select-star` are the only fixes that change string content.
 fn fix_inline_sql_comments(source: &str) -> String {
-    INLINE_SQL_COMMENT
-        .replace_all(source, |caps: &Captures| {
-            let start = caps.get(0).map_or(0, |m| m.start());
-            let after_word = source[..start]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-            if after_word {
-                caps[0].to_string()
-            } else {
-                format!("{}--sql\\n{}", &caps["quote"], &caps["next"])
-            }
+    let edits: Vec<(usize, usize, String)> = string_literals(source)
+        .into_iter()
+        .filter(|&(start, end)| {
+            INLINE_SQL_COMMENT_CONTENT.is_match(extract_string_content(&source[start..end]))
         })
-        .into_owned()
+        .map(|(start, end)| {
+            let literal = &source[start..end];
+            let quoted = literal.trim_start_matches(['u', 'U']);
+            let quote = QUOTES
+                .into_iter()
+                .find(|q| quoted.starts_with(q))
+                .unwrap_or("\"");
+            let at = end - quoted.len() + quote.len() + "--sql".len();
+            (at, at + 1, "\\n".to_string())
+        })
+        .collect();
+    splice(source, &edits)
 }
 
 fn wrapper_pattern(style: &ImportStyle) -> Regex {
     Regex::new(&format!(
-        r#"(?s){}\[(?P<type>[^\n]*?)\]\((?P<space>\s*)(?P<inner>""".*?"""|'''.*?'''|"[^"]*"|'[^']*')(?P<end>\s*,?\s*\))"#,
+        r#"(?s){}\[(?P<type>[^\n]*?)\]\((?P<space>\s*)(?P<inner>[uU]?(?:""".*?"""|'''.*?'''|"[^"]*"|'[^']*'))(?P<end>\s*,?\s*\))"#,
         regex::escape(&style.wrapper_name)
     ))
     .unwrap()

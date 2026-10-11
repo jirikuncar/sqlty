@@ -74,6 +74,14 @@ jobs:
           python -m pip install --no-deps --no-index --find-links dist sqlty
           python -c "import sqlty._core"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check sqlty_magic.pth is in the wheel root and RECORD
+        shell: bash
+        run: python tests/check_dist.py dist/*.whl
+
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -97,6 +105,10 @@ jobs:
         with:
           command: sdist
           args: --out dist --manifest-path rust/Cargo.toml
+
+      - name: Check sqlty_magic.pth is in the sdist
+        shell: bash
+        run: python3 tests/check_dist.py dist/*.tar.gz
 
       - name: Upload sdist
         uses: actions/upload-artifact@v4

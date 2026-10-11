@@ -7,7 +7,44 @@ Any CI system can use them.
 
 ## Pre-commit
 
-Use local hooks that call the `sqlty` installed in your environment:
+The sqlty repository publishes two hooks. Both receive the staged Python
+files as arguments:
+
+| Hook id | Runs |
+|---------|------|
+| `sqlty-rewrite` | `sqlty rewrite <files>` |
+| `sqlty-check` | `sqlty check <files>` |
+
+```yaml
+# .pre-commit-config.yaml
+default_language_version:
+  python: python3.15  # sqlty requires Python >= 3.15
+repos:
+  - repo: https://github.com/jirikuncar/sqlty
+    rev: <commit SHA>  # pre-commit autoupdate --bleeding-edge --freeze
+    hooks:
+      - id: sqlty-rewrite
+      - id: sqlty-check
+```
+
+No release includes these hooks yet (`v0.0.1.dev1` predates them), so pin
+`rev` to a commit: `pre-commit autoupdate --bleeding-edge --freeze` fills in
+the current one. pre-commit builds the hook environment with the Python it
+runs on unless told otherwise, and sqlty needs 3.15: keep
+`default_language_version`, or set `language_version: python3.15` on each
+hook. pre-commit installs sqlty from source into that environment, which
+compiles the Rust extension, so the first run needs a Rust toolchain
+(`cargo`) and takes a few minutes. Pass options with `args`, for example
+`args: [--dialect, sqlite]`.
+
+`sqlty-check` fails the commit only for rules with severity `error`; drift
+such as [`stale-type`](../reference/rules.md#stale-type) is a warning unless
+you promote it (see [below](#fail-on-drift-and-mismatches)). The `sqlty` hook
+id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files and
+no longer generates stubs.
+
+To skip the build or reuse the `sqlty` already installed in your
+environment, use local hooks instead:
 
 ```yaml
 # .pre-commit-config.yaml

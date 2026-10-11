@@ -73,14 +73,12 @@ class Run:
             case "rewritten-file":
                 return self._rewrite(text).strip()
             case "fixed":
-                return core.fix_source(
-                    text,
-                    dialect=self.dialect,
-                    schema_sql=self.schema_sql,
-                    import_style=self.import_style,
-                    untyped=self.untyped,
-                    rules=self.rules,
-                ).strip()
+                fixed = self._fix(text)
+                if (again := self._fix(fixed)) != fixed:
+                    raise AssertionError(
+                        f"check --fix is not idempotent; a second run gives:\n{again}"
+                    )
+                return fixed.strip()
             case "stripped":
                 return core.strip_source(text, import_style=self.import_style).strip()
             case "decoded":
@@ -90,6 +88,16 @@ class Run:
                 return _CODING.sub("", decoded, count=1).strip()
             case "error":
                 raise AssertionError("errors are matched per line")
+
+    def _fix(self, text: str) -> str:
+        return core.fix_source(
+            text,
+            dialect=self.dialect,
+            schema_sql=self.schema_sql,
+            import_style=self.import_style,
+            untyped=self.untyped,
+            rules=self.rules,
+        )
 
     def _rewrite(self, text: str) -> str:
         return core.rewrite_source(

@@ -88,7 +88,7 @@ RULES: dict[str, LintRule] = {
         name="select-star",
         default_severity=Severity.WARN,
         fixable=True,
-        description="SELECT * used — expand to explicit column list",
+        description="SELECT * used — expand to explicit column list (joins need a manual edit)",
     ),
     "select-star-no-schema": LintRule(
         name="select-star-no-schema",

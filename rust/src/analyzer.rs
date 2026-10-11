@@ -12,9 +12,9 @@ use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
-    FunctionArguments, ObjectName, OutputClause, Query, Select, SelectItem,
-    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject, TableWithJoins,
-    Value,
+    FunctionArguments, Join, JoinConstraint, JoinOperator, ObjectName, OutputClause, Query, Select,
+    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject,
+    TableWithJoins, Value,
 };
 use sqlparser::dialect::{
     dialect_from_str, ClickHouseDialect, GenericDialect, MySqlDialect, PostgreSqlDialect,
@@ -466,7 +466,10 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
-    Ok(analyze_select(sql, dialect, schema)?.map(|columns| {
+    let columns = analyze_select(sql, dialect, schema)?;
+    // A `*` the schema cannot resolve leaves the row type unknown.
+    let columns = columns.filter(|columns| !columns.iter().any(Column::is_unknown_star));
+    Ok(columns.map(|columns| {
         let types: Vec<&str> = columns
             .iter()
             .map(|col| col.python_type.as_deref().unwrap_or("str"))
@@ -482,14 +485,16 @@ pub fn analyze_select(
     schema: &Option<Schema>,
 ) -> Inferred<Option<Vec<Column>>> {
     let empty = Schema::new();
+    let dialect = SqlDialect::from_name(dialect);
+    let Some(stmt) = parse_first(sql, dialect) else {
+        return Ok(None);
+    };
     let analyzer = Analyzer {
         schema: schema.as_ref().unwrap_or(&empty),
-        dialect: SqlDialect::from_name(dialect),
+        dialect,
+        ctes: cte_names(&stmt),
     };
-    match parse_first(sql, analyzer.dialect) {
-        Some(stmt) => analyzer.statement_columns(&stmt),
-        None => Ok(None),
-    }
+    analyzer.statement_columns(&stmt)
 }
 
 /// Whether `sql` yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -577,6 +582,69 @@ fn select_scope(from: &[TableWithJoins]) -> Scope {
         .collect()
 }
 
+/// Sources of a SELECT: each FROM relation followed by its joins (`FROM a, b` counts two).
+fn relations(from: &[TableWithJoins]) -> impl Iterator<Item = &TableFactor> {
+    from.iter().flat_map(|table| {
+        std::iter::once(&table.relation).chain(table.joins.iter().map(|join| &join.relation))
+    })
+}
+
+/// The name a relation is referred to by: its alias, else its table name.
+fn relation_name(factor: &TableFactor) -> Option<String> {
+    let alias = match factor {
+        TableFactor::Table { name, alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || object_name(name),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::Derived { alias, .. } => alias.as_ref(),
+        _ => None,
+    };
+    alias.map(|alias| alias.name.value.to_lowercase())
+}
+
+/// Whether a join merges same-named columns (`USING`, `NATURAL`), so `*` does not list them all.
+fn merges_columns(join: &Join) -> bool {
+    use JoinOperator::*;
+    let constraint = match &join.join_operator {
+        Join(c)
+        | Inner(c)
+        | Left(c)
+        | LeftOuter(c)
+        | Right(c)
+        | RightOuter(c)
+        | FullOuter(c)
+        | CrossJoin(c)
+        | Semi(c)
+        | LeftSemi(c)
+        | RightSemi(c)
+        | Anti(c)
+        | LeftAnti(c)
+        | RightAnti(c)
+        | StraightJoin(c)
+        | AsOf { constraint: c, .. } => c,
+        _ => return false,
+    };
+    matches!(
+        constraint,
+        JoinConstraint::Using(_) | JoinConstraint::Natural
+    )
+}
+
+/// Lowercased names of the top-level CTEs of a statement.
+fn cte_names(stmt: &Statement) -> Vec<String> {
+    match stmt {
+        Statement::Query(query) => query
+            .with
+            .iter()
+            .flat_map(|with| &with.cte_tables)
+            .map(|cte| cte.alias.name.value.to_lowercase())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// The table an alias (or table name) refers to.
 fn resolve(reference: &str, scope: &Scope) -> String {
     let reference = reference.to_lowercase();
@@ -622,6 +690,10 @@ impl Column {
             python_type: None,
             sql_type: None,
         }
+    }
+
+    fn is_unknown_star(&self) -> bool {
+        self.name == "*" && self.python_type.is_none()
     }
 }
 
@@ -694,6 +766,7 @@ fn column_name(expr: &Expr) -> String {
 struct Analyzer<'a> {
     schema: &'a Schema,
     dialect: SqlDialect,
+    ctes: Vec<String>,
 }
 
 impl Analyzer<'_> {
@@ -701,7 +774,9 @@ impl Analyzer<'_> {
         match stmt {
             Statement::Query(query) => self.query_columns(query),
             _ => match returning(stmt) {
-                Some(items) => self.projection(items, &dml_scope(stmt)).map(non_empty),
+                Some(items) => self
+                    .projection(items, &dml_scope(stmt), None)
+                    .map(non_empty),
                 None => Ok(None),
             },
         }
@@ -715,15 +790,25 @@ impl Analyzer<'_> {
             | SetExpr::Merge(stmt) => self.statement_columns(stmt),
             body => match leftmost_select(body) {
                 Some(select) => self
-                    .projection(&select.projection, &select_scope(&select.from))
+                    .projection(
+                        &select.projection,
+                        &select_scope(&select.from),
+                        Some(&select.from),
+                    )
                     .map(non_empty),
                 None => Ok(None),
             },
         }
     }
 
-    /// One column per result column; a star may yield several.
-    fn projection(&self, items: &[SelectItem], scope: &Scope) -> Inferred<Vec<Column>> {
+    /// One column per result column; a star may yield several, or one unknown `*`
+    /// column when the schema cannot resolve it. `from` is the SELECT's FROM clause.
+    fn projection(
+        &self,
+        items: &[SelectItem],
+        scope: &Scope,
+        from: Option<&[TableWithJoins]>,
+    ) -> Inferred<Vec<Column>> {
         let mut columns = Vec::new();
         for item in items {
             let (expr, name) = match item {
@@ -736,14 +821,14 @@ impl Analyzer<'_> {
                         .map_or_else(|| column_name(expr), |a| a.value.clone()),
                 ),
                 SelectItem::Wildcard(_) => {
-                    columns.extend(self.star(None, scope));
+                    columns.extend(self.star(None, scope, from));
                     continue;
                 }
                 SelectItem::QualifiedWildcard(
                     SelectItemQualifiedWildcardKind::ObjectName(name),
                     _,
                 ) => {
-                    columns.extend(self.star(Some(&object_name(name)), scope));
+                    columns.extend(self.star(Some(&object_name(name)), scope, from));
                     continue;
                 }
                 SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
@@ -762,8 +847,17 @@ impl Analyzer<'_> {
     }
 
     /// Columns of a star from the schema, or a single unknown `*` column.
-    fn star(&self, reference: Option<&str>, scope: &Scope) -> Vec<Column> {
-        match self.star_columns(reference, scope) {
+    fn star(
+        &self,
+        reference: Option<&str>,
+        scope: &Scope,
+        from: Option<&[TableWithJoins]>,
+    ) -> Vec<Column> {
+        let resolvable = from.is_none_or(|from| self.star_resolvable(from, reference));
+        match resolvable
+            .then(|| self.star_columns(reference, scope))
+            .flatten()
+        {
             Some(columns) => columns
                 .into_iter()
                 .map(|col| {
@@ -777,6 +871,24 @@ impl Analyzer<'_> {
                 .collect(),
             None => vec![Column::unknown("*")],
         }
+    }
+
+    /// Whether `*` (or `t.*`) reads only plain tables, so the schema gives its columns.
+    ///
+    /// Subqueries and CTEs have no schema entry, and `USING`/`NATURAL` joins merge
+    /// columns, so their stars are unresolved.
+    fn star_resolvable(&self, from: &[TableWithJoins], reference: Option<&str>) -> bool {
+        if reference.is_none() && from.iter().flat_map(|t| &t.joins).any(merges_columns) {
+            return false;
+        }
+        let reference = reference.map(str::to_lowercase);
+        let mut matched = relations(from)
+            .filter(|factor| reference.is_none() || relation_name(factor) == reference)
+            .peekable();
+        matched.peek().is_some()
+            && matched.all(|factor| {
+                matches!(factor, TableFactor::Table { name, .. } if !self.ctes.contains(&object_name(name)))
+            })
     }
 
     /// Expand `*` (all scope tables) or `t.*` from the schema, or `None` if unknown.
@@ -840,7 +952,7 @@ impl Analyzer<'_> {
                 Some(select) if !select.projection.is_empty() => {
                     let scope = select_scope(&select.from);
                     Ok(self
-                        .projection(&select.projection[..1], &scope)?
+                        .projection(&select.projection[..1], &scope, Some(&select.from))?
                         .into_iter()
                         .next()
                         .map_or((None, None), |col| (col.python_type, col.sql_type)))
@@ -915,14 +1027,23 @@ fn non_empty(columns: Vec<Column>) -> Option<Vec<Column>> {
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
 pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
     let schema = schema.as_ref().filter(|schema| !schema.is_empty())?;
+    let dialect = SqlDialect::from_name(dialect);
+    let stmt = parse_first(sql, dialect)?;
     let analyzer = Analyzer {
         schema,
-        dialect: SqlDialect::from_name(dialect),
+        dialect,
+        ctes: cte_names(&stmt),
     };
-    let Statement::Query(query) = parse_first(sql, analyzer.dialect)? else {
+    let Statement::Query(query) = &stmt else {
         return None;
     };
-    let scope = select_scope(&leftmost_select(&query.body)?.from);
+    let select = leftmost_select(&query.body)?;
+    // Expansion drops table qualifiers, so with more than one source it could
+    // write ambiguous columns.
+    if relations(&select.from).count() != 1 {
+        return None;
+    }
+    let scope = select_scope(&select.from);
 
     let upper = sql.to_ascii_uppercase();
     let select_idx = top_level(&upper, "SELECT", 0)?;
@@ -935,7 +1056,11 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
             items.push(item.to_string());
             continue;
         };
-        let columns = analyzer.star_columns(star.get(1).map(|m| m.as_str()), &scope)?;
+        let reference = star.get(1).map(|m| m.as_str());
+        if !analyzer.star_resolvable(&select.from, reference) {
+            return None;
+        }
+        let columns = analyzer.star_columns(reference, &scope)?;
         items.extend(
             columns
                 .iter()

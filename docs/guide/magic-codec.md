@@ -42,7 +42,17 @@ purge = "--sql\nDELETE FROM sessions WHERE expired"
 ## Registering the codec
 
 Python looks up the `sqlty` encoding when it compiles the file, so the codec
-must be registered first. Importing `sqlty.magic` registers it:
+must be registered first. Installing sqlty (`pip install sqlty`,
+`uv add sqlty`, or building it from the sdist) adds a
+[`sqlty_magic.pth`](https://github.com/jirikuncar/sqlty/blob/main/src/sqlty_magic.pth)
+file to site-packages. Python runs its one line in every interpreter that
+uses that environment: it registers a lookup that answers only the `sqlty`
+encoding and imports `sqlty.magic` the first time a file declares it, so
+startup does not import sqlty.
+
+Editable installs (`uv sync` or `pip install -e .` inside a sqlty checkout,
+`maturin develop`) do not add the `.pth` file. There, or wherever the hook is
+disabled, import `sqlty.magic` before the first module that uses the codec:
 
 ```python
 import sqlty.magic  # noqa: F401  registers the "sqlty" codec
@@ -50,27 +60,23 @@ import sqlty.magic  # noqa: F401  registers the "sqlty" codec
 import queries  # queries.py starts with "# coding: sqlty"
 ```
 
-To register it for every interpreter start, add a `.pth` file containing
-`import sqlty.magic` to your environment's site-packages. The repository ships
-one as
-[`sqlty_magic.pth`](https://github.com/jirikuncar/sqlty/blob/main/sqlty_magic.pth);
-installing the package does not add it for you. Find the directory with:
-
-```bash
-python -c "import site; print(site.getsitepackages())"
-```
-
 Without registration, a file declaring `# coding: sqlty` fails with
 `SyntaxError: unknown encoding: sqlty`. Files without the declaration are
 never transformed, even with the codec registered.
 
-Set `SQLTY_NO_MAGIC` to any non-empty value (even `0`) before `sqlty.magic`
-is imported to skip registration, for example to turn a `.pth` hook off for
-one run:
+Set `SQLTY_NO_MAGIC` to any non-empty value (even `0`) to skip registration,
+both in the `.pth` hook at startup and when `sqlty.magic` is imported, for
+example to turn the hook off for one run:
 
 ```bash
 SQLTY_NO_MAGIC=1 python script.py
 ```
+
+Import the module, or run it with `python -m module`. Running a
+`# coding: sqlty` file directly as a script (`python script.py`) can fail with
+`NameError: name 'SQL' is not defined`, because Python drops the import the
+codec adds ([#111](https://github.com/jirikuncar/sqlty/issues/111)). Importing
+`SQL` and the types the queries need yourself avoids it.
 
 ## Inspecting the output
 

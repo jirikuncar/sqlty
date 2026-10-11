@@ -186,7 +186,7 @@ User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).
 |------|------|
 | `src/sqlty/_decode.py` | Pure decode logic, no side effects; wraps strings with `rewrite_source` |
 | `src/sqlty/magic.py` | Codec registration (skipped when `SQLTY_NO_MAGIC` is set) and `python -m sqlty.magic` |
-| `sqlty_magic.pth` | `import sqlty.magic` hook for site-packages; not included in the wheel |
+| `src/sqlty_magic.pth` | Startup hook registering a lazy `sqlty` codec lookup (imports `sqlty.magic` on first use, skipped when `SQLTY_NO_MAGIC` is set); shipped at the wheel root via `[tool.maturin] include` (needs maturin >= 1.12.1), not added by editable installs; `tests/check_dist.py` checks built wheels and sdists |
 | `tests/mdtest/codec/` | Snapshot tests for `decode()` |
 | `tests/test_magic*.py`, `tests/e2e/test_magic_codec_e2e.py` | Integration and end-to-end tests |
 

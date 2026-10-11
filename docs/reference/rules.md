@@ -154,12 +154,11 @@ Default: error. `SELECT *` without a schema: sqlty cannot know the columns.
 
 ```python
 # error: [select-star-no-schema] "SELECT * used but no schema available"
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
 ```
 
 Fix: list the columns, or configure a
-[schema](../guide/schema-inference.md).
+[schema](../guide/schema-inference.md). The annotation is not compared with an inferred type, and `check --fix` does not change it.
 
 ### select-star
 
@@ -180,12 +179,15 @@ schema = "schema.sql"
 ```python
 from sqlty import SQL
 
-# error: [select-star] "SELECT * used — expand to explicit column list"
+# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
 
 Fix: `sqlty check --fix` replaces `*` with the cast column list from the
-schema, unless the string holds escapes or quotes.
+schema, unless the string holds escapes or quotes or the query reads from more
+than one table (`JOIN` or `FROM a, b`), because the expansion drops table
+qualifiers. A `*` the schema cannot resolve (a subquery, a CTE, a `USING` or
+`NATURAL` join) gets no inferred type, so its annotation is kept.
 
 ### inline-sql-comment
 
@@ -197,8 +199,14 @@ whole query is a SQL comment and the string is never wrapped.
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 
+Only a statement after the space is reported: `SELECT` with a column,
+`WITH ... AS (`, `INSERT INTO`, `UPDATE t SET`, `DELETE FROM`, `VALUES (`,
+DDL such as `CREATE TABLE`, `TRUNCATE`, `MERGE INTO` or `EXPLAIN`. Text such as
+`"--sql flag enables it"` is not.
+
 Fix: `sqlty check --fix` replaces the space after `--sql` with `\n` in plain
-string literals; `sqlty rewrite` never changes string contents.
+string literals (not raw, f- or t-strings) that this rule reports;
+`sqlty rewrite` never changes string contents.
 
 ## Rewrite rules
 
