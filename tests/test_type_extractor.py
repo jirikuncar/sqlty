@@ -1,5 +1,6 @@
 """Unit tests for _type_extractor module."""
 
+import ast
 import datetime
 import typing
 import uuid
@@ -10,7 +11,9 @@ import pytest
 from sqlty._type_extractor import (
     TypeInfo,
     _consistent,
+    _erase,
     _is_subtype,
+    _newtype_assignments,
     check_type_compatibility,
     extract_type_definitions,
     field_accepts,
@@ -647,6 +650,8 @@ class TestTypedDictInheritance:
         (list[int], Sequence[int], None, None),
         (typing.Literal["x"], str, None, None),
         (str, None, None, None),
+        (int, typing.NewType("UserId", int), None, None),
+        (list, list[int], None, None),
     ],
 )
 def test_subtype_and_consistency(src, dst, subtype, consistent):
@@ -665,8 +670,42 @@ def test_subtype_and_consistency(src, dst, subtype, consistent):
         ("str | bytes", "int", False),
         ("bool", "int", False),
         ("str", None, True),
+        ("list[str]", "list", True),
+        ("list[list[int]] | None", "list", True),
+        ("dict[str, int]", "list", False),
     ],
 )
 def test_field_accepts(annotation: str, column: str | None, ok: bool):
     """String-only annotations (``SQL[tuple[...]]`` items) use the same subtype check."""
     assert field_accepts(annotation, column) is ok
+
+
+UserId = typing.NewType("UserId", int)
+
+
+@pytest.mark.parametrize(
+    ("tp", "erased"),
+    [
+        (UserId, int),
+        (typing.NewType("AdminId", UserId), int),
+        (typing.NewType("Tags", list[str]), list),
+        (dict[str, list[int]], dict),
+        (UserId | list[str], int | list),
+        (typing.Literal["x"], typing.Literal["x"]),
+        (None, None),
+    ],
+)
+def test_erase(tp, erased):
+    assert _erase(tp) == erased
+
+
+def test_newtype_assignments_only_type_expressions():
+    src = """
+A = NewType("A", int)
+B = NewType("B", list[str] | None)
+C = NewType("Other", int)
+D = NewType("D", print("x") or int)
+E = NewType("E", f())
+F = NewType("F", int + str)
+"""
+    assert list(_newtype_assignments(ast.parse(src), {})) == ["A", "B"]

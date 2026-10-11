@@ -254,7 +254,7 @@ pub fn check_source(
                 if let Some(annotated_type) = annotated.filter(|ty| ty.starts_with("tuple[")) {
                     let current_type = infer_from_sql_content(&sql_content, dialect, schema);
                     if let Some(ref current) = current_type {
-                        if *current != annotated_type {
+                        if !refines_tuple(&annotated_type, current) {
                             diagnostics.push(Diagnostic {
                                 rule: "stale-type".to_string(),
                                 message: format!(
@@ -364,6 +364,54 @@ fn extract_sql_from_wrapper(line: &str, pattern: &Regex) -> Option<String> {
     }
 }
 
+/// Whether `annotated` is `inferred` or parametrises some of its bare generics
+/// (`tuple[int, list[str]]` for `tuple[int, list]`), so it is not stale.
+///
+/// Element types are not checked: inference only yields a bare `list`.
+pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
+    fn balanced(args: &str) -> bool {
+        let mut depth = 0i32;
+        args.bytes().all(|byte| {
+            depth += match byte {
+                b'[' => 1,
+                b']' => -1,
+                _ => 0,
+            };
+            depth >= 0
+        }) && depth == 0
+    }
+    fn items(ty: &str) -> Option<Vec<&str>> {
+        let inner = ty.strip_prefix("tuple[")?.strip_suffix(']')?;
+        let (mut items, mut depth, mut start) = (Vec::new(), 0i32, 0);
+        for (i, byte) in inner.bytes().enumerate() {
+            match byte {
+                b'[' => depth += 1,
+                b']' => depth -= 1,
+                b',' if depth == 0 => {
+                    items.push(inner[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        items.push(inner[start..].trim());
+        Some(items)
+    }
+    match (items(annotated), items(inferred)) {
+        (Some(ours), Some(theirs)) if ours.len() == theirs.len() => {
+            ours.iter().zip(&theirs).all(|(a, i)| {
+                a == i
+                    || (["list", "dict", "set", "frozenset", "tuple"].contains(i)
+                        && a.strip_prefix(i)
+                            .and_then(|rest| rest.strip_prefix('['))
+                            .and_then(|rest| rest.strip_suffix(']'))
+                            .is_some_and(balanced))
+            })
+        }
+        _ => false,
+    }
+}
+
 /// Extract the type annotation from wrapper pattern.
 fn extract_type_from_wrapper(line: &str, pattern: &Regex) -> Option<String> {
     let cap = pattern.captures(line)?;
@@ -416,6 +464,38 @@ mod tests {
         let stale_types: Vec<_> = diags.iter().filter(|d| d.rule == "stale-type").collect();
         assert_eq!(stale_types.len(), 1);
         assert!(stale_types[0].message.contains("tuple[int]"));
+    }
+
+    #[test]
+    fn test_parametrised_tuple_item_is_not_stale() {
+        let source =
+            r#"q = SQL[tuple[int, list[str]]]("--sql\nSELECT 1::INTEGER, t::TEXT[] FROM t")"#;
+        let diags = check_source(source, "postgres", &None, None, None, false);
+        assert!(diags.iter().all(|d| d.rule != "stale-type"));
+        assert!(refines_tuple("tuple[int, list[str]]", "tuple[int, list]"));
+        assert!(!refines_tuple("tuple[str, list[str]]", "tuple[int, list]"));
+        assert!(!refines_tuple("tuple[int, list[str]]", "tuple[int, li]"));
+        assert!(!refines_tuple("tuple[int[str]]", "tuple[int]"));
+        assert!(!refines_tuple("tuple[[int]]", "tuple[]"));
+        assert!(!refines_tuple(
+            "tuple[int, list[str] | str]",
+            "tuple[int, list]"
+        ));
+        assert!(!refines_tuple(
+            "tuple[list[str] | list[int]]",
+            "tuple[list]"
+        ));
+        assert!(!refines_tuple(
+            "tuple[int, list[str] | None]",
+            "tuple[int, list]"
+        ));
+        assert!(!refines_tuple("tuple[int, list[str]]", "tuple[int]"));
+        assert!(!refines_tuple("list[str]", "list"));
+        assert!(refines_tuple(
+            "tuple[dict[str, list[int]], int]",
+            "tuple[dict, int]"
+        ));
+        assert!(refines_tuple("tuple[list[list[int]]]", "tuple[list]"));
     }
 
     #[test]

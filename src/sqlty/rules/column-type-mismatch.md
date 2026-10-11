@@ -52,3 +52,24 @@ class Row(NamedTuple):
 # error: [column-type-mismatch] "Row.active is bool but query column 'active' infers int"
 q = SQL[Row]("--sql\nSELECT id::INTEGER, total::INTEGER, active::INTEGER FROM orders")
 ```
+
+A `NewType` field is accepted wherever its supertype is, and a parametrised
+generic such as `list[str]` for a column that infers the bare `list` (array
+element types are not inferred):
+
+```python
+from typing import NamedTuple, NewType
+
+from sqlty import SQL
+
+UserId = NewType("UserId", int)
+
+
+class User(NamedTuple):
+    id: UserId
+    tags: list[str]
+
+
+q = SQL[User]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# error:
+```
