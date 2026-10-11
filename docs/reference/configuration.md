@@ -5,6 +5,13 @@ file, the nearest `pyproject.toml` above it; the magic codec searches from the
 current directory, and stub generation from the directory of the helper's
 module. Command-line flags override the file. Unknown keys are ignored.
 
+In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
+package's packaging-only `pyproject.toml` in a monorepo does not hide the
+root config. The closest table wins; settings are not merged with tables in
+parent directories. To change one setting for a nested project, give it its
+own complete `[tool.sqlty]` table. Command-line flags (`--dialect`,
+`--schema`, `--untyped`) override the table for every path.
+
 ```toml
 [tool.sqlty]
 dialect = "postgres"
@@ -35,8 +42,7 @@ query_param = "query"
 ## `dialect`
 
 SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`
-or `"mysql"`. CLI: `--dialect`. Because `postgres` is the flag's default, an
-explicit `--dialect postgres` does not override this key. See
+or `"mysql"`. CLI: `--dialect`, which overrides this key. See
 [Dialects](../guide/schema-inference.md#dialects).
 
 ## `schema`

@@ -167,8 +167,5 @@ containing `%s` or `%(name)s`, and cannot parse `--sql` queries in the MySQL
 dialect. Run sqlty with `SQLTY_LIB=py` until this is fixed; see
 [Backends](../reference/backends.md#known-gaps).
 
-**Explicit `--dialect postgres`.** It does not override a `dialect` set in
-`pyproject.toml`; see [Schema inference](../guide/schema-inference.md#dialects).
-
 Related issue:
 [#19 Create migration tool for existing codebases](https://github.com/jirikuncar/sqlty/issues/19).
