@@ -182,18 +182,33 @@ pub fn rewrite_source_with(
         return insert_inline(&result, &imports.join("; "));
     }
     let at = header_end(&result);
+    let eol = line_ending(&result, at);
     let sep = if at > 0 && !result[..at].ends_with('\n') {
-        "\n"
+        eol
     } else {
         ""
     };
     format!(
-        "{}{}{}\n{}",
+        "{}{}{}{}{}",
         &result[..at],
         sep,
-        imports.join("\n"),
+        imports.join(eol),
+        eol,
         &result[at..]
     )
+}
+
+/// Line ending of the line at `at`, else of the line before it.
+pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
+    let end = source[at..]
+        .find('\n')
+        .map(|i| at + i)
+        .or_else(|| source[..at].rfind('\n'));
+    if end.is_some_and(|i| source[..i].ends_with('\r')) {
+        "\r\n"
+    } else {
+        "\n"
+    }
 }
 
 /// `(start, end, wrapped)` for each string group `rewrite` wraps, in source order.
@@ -431,13 +446,14 @@ fn sqlty_imports(source: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     for i in 0..tokens.len() {
         let start = tokens[i].span.start;
-        let statement = i == 0 || matches!(text(i - 1), "\n" | "\r\n" | ";");
-        let top_level = source[..start]
-            .rsplit('\n')
-            .next()
-            .is_some_and(|line| !line.starts_with([' ', '\t']));
+        let line = source[..start].rsplit('\n').next().unwrap_or_default();
+        let statement = match text(i.wrapping_sub(1)) {
+            "" | "\n" | "\r\n" => true,
+            ";" => !is_compound(line),
+            _ => false,
+        };
         if !(statement
-            && top_level
+            && !line.starts_with([' ', '\t'])
             && text(i) == "from"
             && text(i + 1) == "sqlty"
             && text(i + 2) == "import")
@@ -563,7 +579,7 @@ fn insert_inline(source: &str, imports: &str) -> String {
     let (at, text) = match spare {
         _ if !is_compound(line) => (pos, format!("{imports}; ")),
         Some((at, sep)) => (at, format!("{imports}{sep}")),
-        None => (pos, format!("{imports}\n")),
+        None => (pos, format!("{imports}{}", line_ending(source, pos))),
     };
     format!("{}{}{}", &source[..at], text, &source[at..])
 }
@@ -577,7 +593,18 @@ fn is_compound(line: &str) -> bool {
     line.starts_with('@')
         || matches!(
             word,
-            "def" | "class" | "if" | "for" | "while" | "with" | "try" | "async"
+            "def"
+                | "class"
+                | "if"
+                | "elif"
+                | "else"
+                | "for"
+                | "while"
+                | "with"
+                | "try"
+                | "except"
+                | "finally"
+                | "async"
         )
         || (word == "match"
             && line
@@ -716,7 +743,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_sqlty_imports() {
-        let source = "from sqlty import SQL as Q, UNTYPED  # c\nfrom sqlty import (\n    A,  # )\n    B as C,\n)\nx = 1; from sqlty import *\n    from sqlty import D\n'''\nfrom sqlty import E\n'''\n";
+        let source = "from sqlty import SQL as Q, UNTYPED  # c\nfrom sqlty import (\n    A,  # )\n    B as C,\n)\nx = 1; from sqlty import *\nif x: pass; from sqlty import F\nelse: pass; from sqlty import G\n    from sqlty import D\n'''\nfrom sqlty import E\n'''\n";
         let pairs: Vec<(&str, &str)> = vec![
             ("SQL", "Q"),
             ("UNTYPED", "UNTYPED"),
@@ -729,6 +756,46 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             .map(|(n, b)| (n.to_string(), b.to_string()))
             .collect();
         assert_eq!(sqlty_imports(source), expected);
+    }
+
+    #[test]
+    fn test_import_in_compound_statement_line_is_not_top_level() {
+        let source = "from typing import TYPE_CHECKING\nif TYPE_CHECKING: pass; from sqlty import SQL\nq = \"--sql\\nSELECT 1::INTEGER\"\n";
+        let rewritten = rewrite_source(source, "postgres", &None, None, false);
+        assert!(
+            rewritten.starts_with("from sqlty import SQL\nfrom typing"),
+            "{rewritten}"
+        );
+        assert_eq!(strip_source(&rewritten, None), source);
+    }
+
+    #[test]
+    fn test_crlf_inserted_lines() {
+        for (source, expected) in [
+            (
+                "q = \"--sql\\nSELECT NOW()::TIMESTAMP\"\r\n",
+                "import datetime\r\nfrom sqlty import SQL\r\nq = SQL[",
+            ),
+            (
+                "\"\"\"Doc.\"\"\"\r\nq = \"--sql\\nSELECT 1::INTEGER\"",
+                "\"\"\"Doc.\"\"\"\r\nfrom sqlty import SQL\r\nq = SQL[",
+            ),
+            (
+                "\"\"\"Doc.\"\"\"\r\nq = \"--sql\\nSELECT 1::INTEGER\"\r\n",
+                "\"\"\"Doc.\"\"\"\r\nfrom sqlty import SQL\r\nq = SQL[",
+            ),
+        ] {
+            let rewritten = rewrite_source(source, "postgres", &None, None, false);
+            assert!(rewritten.starts_with(expected), "{rewritten:?}");
+            assert_eq!(strip_source(&rewritten, None), source);
+        }
+        let docstring_only = "\"\"\"Doc.\"\"\"";
+        assert_eq!(line_ending(docstring_only, docstring_only.len()), "\n");
+        let compound = keep_lines("def f():\r\n    pass\r\nq = \"--sql\\nSELECT 1::INTEGER\"\r\n");
+        assert!(
+            compound.starts_with("from sqlty import SQL\r\ndef f():"),
+            "{compound:?}"
+        );
     }
 
     #[test]

@@ -61,8 +61,9 @@ def test_strip_is_idempotent(source: str, options: dict) -> None:
     assert core.strip_source(once, import_style=options["import_style"]) == once
 
 
+@pytest.mark.parametrize("eol", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_strip_undoes_rewrite(source: str, options: dict) -> None:
+def test_strip_undoes_rewrite(source: str, options: dict, eol: str) -> None:
     """``strip(rewrite(x)) == x`` for sources that ``strip`` leaves alone.
 
     Other sqlty imports may be there: rewrite adds what is missing on lines of
@@ -76,6 +77,7 @@ def test_strip_undoes_rewrite(source: str, options: dict) -> None:
         or core.strip_source(source, import_style=style) != source
     ):
         pytest.skip("source already uses sqlty")
+    source = source.replace("\n", eol)
     rewritten = core.rewrite_source(source, **options)
     assert core.strip_source(rewritten, import_style=style) == source
 
@@ -126,15 +128,16 @@ def test_outputs_parse(source: str, options: dict) -> None:
 @pytest.mark.parametrize(("source", "options"), PYTHON)
 def test_crlf_outputs(source: str, options: dict) -> None:
     """With CRLF line endings, every command gives the LF result with CRLF line endings."""
+    source = source if source.endswith("\n") else source + "\n"
     crlf = source.replace("\n", "\r\n")
     _check_outputs(crlf, options)
-    lf = lambda text: text.replace("\r\n", "\n")  # noqa: E731
+    to_crlf = lambda text: text.replace("\n", "\r\n")  # noqa: E731
     style = options["import_style"]
-    assert lf(core.rewrite_source(crlf, **options)) == core.rewrite_source(source, **options)
-    assert lf(core.strip_source(crlf, import_style=style)) == core.strip_source(
-        source, import_style=style
+    assert core.rewrite_source(crlf, **options) == to_crlf(core.rewrite_source(source, **options))
+    assert core.strip_source(crlf, import_style=style) == to_crlf(
+        core.strip_source(source, import_style=style)
     )
-    assert lf(core.fix_source(crlf, **options)) == core.fix_source(source, **options)
+    assert core.fix_source(crlf, **options) == to_crlf(core.fix_source(source, **options))
 
 
 _FRAGMENTS = [
