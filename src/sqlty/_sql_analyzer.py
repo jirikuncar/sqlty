@@ -193,20 +193,29 @@ class SQLAnalyzer:
         select = _leftmost_select(ast)
         if select is None or not select.expressions:
             return None
-        return self._process_projections(select.expressions, _select_scope(select)) or None
+        return self._process_projections(select.expressions, _select_scope(select), select) or None
 
     def _process_projections(
-        self, projections: list[exp.Expression], scope: list[tuple[str, str]]
+        self,
+        projections: list[exp.Expression],
+        scope: list[tuple[str, str]],
+        select: exp.Select | None = None,
     ) -> list[ColumnInfo]:
-        """Infer one ``ColumnInfo`` per result column; a star may yield several."""
+        """Infer one ``ColumnInfo`` per result column; a star may yield several.
+
+        A star that cannot be resolved from the schema yields one ``*`` column.
+        """
         columns: list[ColumnInfo] = []
         for projection in projections:
             expr = projection.this if isinstance(projection, exp.Alias) else projection
             if isinstance(expr, exp.Star) or (
                 isinstance(expr, exp.Column) and isinstance(expr.this, exp.Star)
             ):
-                expanded = self._star_columns(
-                    expr.table if isinstance(expr, exp.Column) else None, scope
+                table_ref = expr.table if isinstance(expr, exp.Column) else None
+                expanded = (
+                    self._star_columns(table_ref, scope)
+                    if select is None or _star_resolvable(select, table_ref)
+                    else None
                 )
                 columns.extend(expanded or [ColumnInfo("*", None, None)])
                 continue
@@ -262,7 +271,9 @@ class SQLAnalyzer:
                 select = _leftmost_select(query)
                 if select is None or not select.expressions:
                     return None, None
-                first = self._process_projections(select.expressions[:1], _select_scope(select))
+                first = self._process_projections(
+                    select.expressions[:1], _select_scope(select), select
+                )
                 return (first[0].sql_type, first[0].python_type) if first else (None, None)
             case exp.Case():
                 ifs = expr.args.get("ifs") or []
@@ -334,7 +345,9 @@ class SQLAnalyzer:
             select = _leftmost_select(_parse_one(sql, self.dialect))
         except Exception:
             return None
-        if select is None:
+        # Expansion drops table qualifiers, so with more than one source it could
+        # write ambiguous columns.
+        if select is None or len(_relations(select)) != 1:
             return None
         scope = _select_scope(select)
 
@@ -352,7 +365,7 @@ class SQLAnalyzer:
                 items.append(item)
                 continue
             columns = self._star_columns(star.group(1), scope)
-            if columns is None:
+            if columns is None or not _star_resolvable(select, star.group(1)):
                 return None
             items.extend(f"{col.name}::{col.sql_type}" for col in columns)
             has_star = True
@@ -372,7 +385,8 @@ class SQLAnalyzer:
         - "SELECT id, name FROM users" -> "tuple[str, str]" (if types can't be inferred)
         """
         columns = self.analyze_select(sql)
-        if not columns:
+        # No columns, or a ``*`` the schema cannot resolve: the row type is unknown.
+        if not columns or any(col.name == "*" and col.python_type is None for col in columns):
             return None
 
         # Build type list
@@ -593,11 +607,36 @@ def _scope(relations: list[exp.Expression]) -> list[tuple[str, str]]:
     ]
 
 
-def _select_scope(select: exp.Select) -> list[tuple[str, str]]:
-    """Scope of a SELECT: its FROM table, then joined tables."""
+def _relations(select: exp.Select) -> list[exp.Expression]:
+    """Sources of a SELECT: its FROM relation, then joined ones (``FROM a, b`` is a join)."""
     from_ = select.args.get("from") or select.args.get("from_")  # sqlglot 30 renamed the key
     relations = [from_.this] if from_ else []
-    return _scope(relations + [join.this for join in select.args.get("joins") or []])
+    return relations + [join.this for join in select.args.get("joins") or []]
+
+
+def _select_scope(select: exp.Select) -> list[tuple[str, str]]:
+    """Scope of a SELECT: its FROM table, then joined tables."""
+    return _scope(_relations(select))
+
+
+def _star_resolvable(select: exp.Select, table_ref: str | None) -> bool:
+    """Whether ``*`` (or ``t.*``) reads only plain tables, so the schema gives its columns.
+
+    Subqueries and CTEs have no schema entry, and ``USING``/``NATURAL`` joins merge
+    columns, so their stars are unresolved. Mirrors ``star_resolvable`` in Rust.
+    """
+    relations = _relations(select)
+    if table_ref:
+        relations = [r for r in relations if r.alias_or_name.lower() == table_ref.lower()]
+    elif any(
+        join.args.get("using") or join.args.get("method") == "NATURAL"
+        for join in select.args.get("joins") or []
+    ):
+        return False
+    ctes = {cte.alias_or_name.lower() for cte in select.root().find_all(exp.CTE)}
+    return bool(relations) and all(
+        isinstance(r, exp.Table) and r.name.lower() not in ctes for r in relations
+    )
 
 
 def _resolve(reference: str, scope: list[tuple[str, str]]) -> str:

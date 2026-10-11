@@ -112,3 +112,38 @@ r = '--sql\nSELECT name::TEXT FROM users'
 # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # rewritten-file: r = SQL[tuple[str]]('--sql\nSELECT name::TEXT FROM users')
 ```
+
+## Apostrophes in comments and escaped quotes hide no strings
+
+A comment is skipped as a whole, and a backslash escapes the next character,
+so neither opens a string that would swallow the next query.
+
+```python
+# it's a helper
+a = 'it\'s'
+q = "--sql\nSELECT id::INTEGER FROM users"
+b = br'\'"'
+r = '--sql\nSELECT name::TEXT FROM users'
+# that's all
+# rewritten-file: from sqlty import SQL
+# rewritten-file: # it's a helper
+# rewritten-file: a = 'it\'s'
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: b = br'\'"'
+# rewritten-file: r = SQL[tuple[str]]('--sql\nSELECT name::TEXT FROM users')
+# rewritten-file: # that's all
+```
+
+## A `u` string is wrapped like a plain one
+
+```python
+q = u"--sql\nSELECT id::INTEGER FROM users"
+# rewritten: q = SQL[tuple[int]](u"--sql\nSELECT id::INTEGER FROM users")
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]](u"--sql\nSELECT id::INTEGER FROM users")
+# stripped: q = u"--sql\nSELECT id::INTEGER FROM users"
+```

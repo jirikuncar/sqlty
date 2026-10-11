@@ -18,9 +18,17 @@ use crate::analyzer::{infer_type, returns_rows, Schema};
 // Regex patterns
 // ---------------------------------------------------------------------------
 
-/// A string literal starting at the beginning of the haystack; triple quotes first.
-static STRING_LITERAL: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"^(?s:""".*?"""|'''.*?'''|"[^"]*"|'[^']*')"#).unwrap());
+/// A string literal starting at the beginning of the haystack; triple quotes first,
+/// backslash escapes skipped.
+static STRING_LITERAL: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r#"^(?s:"""(?:\\.|[^\\])*?"""|'''(?:\\.|[^\\])*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')"#,
+    )
+    .unwrap()
+});
+
+/// A valid string prefix (`rb`, `f`, `u`, ...), possibly empty.
+static STRING_PREFIX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?i:[bft]r?|r[bft]?|u)?$").unwrap());
 
 static CODING: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
 
@@ -40,24 +48,34 @@ pub(crate) fn skipped_string_rule(line: &str) -> Option<&'static str> {
     })
 }
 
-/// Spans of string literals not prefixed by a letter (`f"..."`, `r"..."` are skipped).
+/// Spans of plain string literals (no prefix but `u`), skipping comments.
 ///
-/// Prefixed literals are still scanned past, so their closing quote is not
-/// paired with the next opening one; mirrors `_SQL_STRING_PATTERN` in Python.
+/// Raw, bytes, f- and t-strings are scanned past, so their closing quote is not
+/// paired with the next opening one. A quote after letters that are no string
+/// prefix (`it's`) opens no literal. Mirrors `_SQL_STRING_PATTERN` in Python.
 fn string_literals(source: &str) -> Vec<(usize, usize)> {
-    let bytes = source.as_bytes();
     let mut spans = Vec::new();
     let mut pos = 0;
-    while let Some(offset) = source[pos..].find(['"', '\'']) {
+    while let Some(offset) = source[pos..].find(['"', '\'', '#']) {
         let start = pos + offset;
+        if source[start..].starts_with('#') {
+            pos = source[start..]
+                .find('\n')
+                .map_or(source.len(), |n| start + n);
+            continue;
+        }
+        let before = &source[..start];
+        let prefix = &before[before
+            .trim_end_matches(|c: char| c.is_alphanumeric() || c == '_')
+            .len()..];
         pos = match STRING_LITERAL.find(&source[start..]) {
-            Some(m) => {
-                if start == 0 || !bytes[start - 1].is_ascii_alphabetic() {
-                    spans.push((start, start + m.end()));
+            Some(m) if STRING_PREFIX.is_match(prefix) => {
+                if prefix.is_empty() || prefix.eq_ignore_ascii_case("u") {
+                    spans.push((start - prefix.len(), start + m.end()));
                 }
                 start + m.end()
             }
-            None => start + 1,
+            _ => start + 1,
         };
     }
     spans
@@ -95,7 +113,7 @@ impl ImportStyleParsed {
     /// comma, as formatters lay out long calls.
     fn wrapper_pattern(&self) -> Regex {
         Regex::new(&format!(
-            r#"(?s){}\[[^\n]*?\]\(\s*(?P<inner>""".*?"""|'''.*?'''|"[^"]*"|'[^']*')\s*,?\s*\)"#,
+            r#"(?s){}\[[^\n]*?\]\(\s*(?P<inner>[uU]?(?:""".*?"""|'''.*?'''|"[^"]*"|'[^']*'))\s*,?\s*\)"#,
             regex::escape(&self.wrapper_name)
         ))
         .unwrap()
@@ -276,8 +294,9 @@ fn line_at(source: &str, pos: usize) -> usize {
     source[..pos].matches('\n').count() + 1
 }
 
-/// Extract string content from a quoted string literal (removes quotes).
+/// Extract string content from a quoted string literal (removes quotes and a `u` prefix).
 fn extract_string_content(literal: &str) -> &str {
+    let literal = literal.trim_start_matches(['u', 'U']);
     let quote = if literal.starts_with("\"\"\"") || literal.starts_with("'''") {
         3
     } else {
@@ -444,12 +463,12 @@ mod tests {
 
     #[test]
     fn test_string_literals_skip_past_prefixed_strings() {
-        let source = "f = f\"a\"\nh = \"b\"\n";
+        let source = "# it's\nf = f\"a\" + br'\\'\"' + 'it\\'s' + u\"c\"\nh = \"b\"\n";
         let spans: Vec<&str> = string_literals(source)
             .into_iter()
             .map(|(start, end)| &source[start..end])
             .collect();
-        assert_eq!(spans, vec!["\"b\""]);
+        assert_eq!(spans, vec!["'it\\'s'", "u\"c\"", "\"b\""]);
     }
 
     #[test]

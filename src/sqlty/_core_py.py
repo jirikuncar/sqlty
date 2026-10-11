@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import re
 
-from sqlty._checker import Checker, has_select_star
-from sqlty._lint import RuleConfig
+from sqlty._checker import Checker
+from sqlty._lint import INLINE_SQL_COMMENT, RuleConfig
 from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, _header_end, skipped_string_rule
 from sqlty._sql_analyzer import SQLAnalyzer
 
@@ -207,7 +207,7 @@ def check_source(
             continue
 
         # Check inline-sql-comment on wrapped strings
-        if rule_config.is_enabled("inline-sql-comment") and sql_content.startswith("--sql "):
+        if rule_config.is_enabled("inline-sql-comment") and INLINE_SQL_COMMENT.match(sql_content):
             diagnostics.append(
                 {
                     "rule": "inline-sql-comment",
@@ -233,10 +233,9 @@ def check_source(
         # User-defined types (TypedDict, NamedTuple, etc.) are handled by
         # core.py's wrapper using runtime type resolution.
         annotated_type = _extract_type_from_wrapper(line_stripped, wrapper_name)
-        # Without a schema, ``*`` has no known columns, so its inferred type is a guess.
-        guessed = not has_schema and has_select_star(sql_content)
+        # A ``*`` the schema cannot resolve infers no type, so neither rule guesses one.
         if annotated_type == untyped_name and rule_config.is_enabled("untyped-query"):
-            current_type = "Any" if guessed else rewriter._infer_type(sql_content)
+            current_type = rewriter._infer_type(sql_content)
             sentinel = f"{wrapper_name}[{untyped_name}]"
             message = (
                 f"{sentinel} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
@@ -252,7 +251,7 @@ def check_source(
                 }
             )
         if annotated_type and annotated_type.startswith("tuple["):
-            if rule_config.is_enabled("stale-type") and not guessed:
+            if rule_config.is_enabled("stale-type"):
                 current_type = rewriter._infer_type(sql_content)
                 if current_type not in ("Any", annotated_type):
                     diagnostics.append(
@@ -327,13 +326,13 @@ def _make_rewriter(
 
 
 def _has_inline_sql_comment(line: str) -> bool:
-    """Check if a line has --sql followed by space (not \\n).
+    """Check if a line has a string ``"--sql SELECT ..."``: a statement after a space.
 
     ``"--sql SELECT ..."`` is problematic because ``--sql SELECT ...`` is a
     SQL line comment, making the entire query empty.  The correct format is
     ``"--sql\\nSELECT ..."`` where the actual SQL starts on the next line.
     """
-    return bool(re.search(r"""["']--sql [^\\]""", line))
+    return re.search(r"[\"']" + INLINE_SQL_COMMENT.pattern, line) is not None
 
 
 def _wrappable_lines(source: str, rewriter: SQLRewriter) -> set[int]:
@@ -390,7 +389,7 @@ def _is_unwrapped_sql_string(line: str, wrapper_name: str = "SQL") -> bool:
 def _extract_sql_from_wrapper(line: str, wrapper_name: str = "SQL") -> str | None:
     """Extract SQL content from {wrapper_name}[T]("--sql ...") pattern."""
     escaped = re.escape(wrapper_name)
-    match = re.search(rf'{escaped}\[.*?\]\(\s*["\'](.+?)["\']\s*\)', line, re.DOTALL)
+    match = re.search(rf'{escaped}\[.*?\]\(\s*[uU]?["\'](.+?)["\']\s*\)', line, re.DOTALL)
     if match:
         content = match.group(1)
         if content.startswith("--sql"):

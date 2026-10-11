@@ -235,7 +235,9 @@ SELECT name, placed FROM users JOIN orders ON user_id = users.id
 -- inferred: tuple[str, datetime.datetime]
 ```
 
-## Star over a table missing from the schema stays one column
+## Star over a table missing from the schema has no row type
+
+The columns of `*` are unknown, so no type is inferred and nothing is guessed.
 
 `schema.sql`:
 ```sql
@@ -249,5 +251,5 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM audit_log
--- inferred: tuple[str]
+-- inferred: None
 ```

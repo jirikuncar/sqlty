@@ -41,7 +41,7 @@ select-star = "error"
 
 ```python
 from sqlty import SQL
-# error: [select-star] "SELECT * used — expand to explicit column list"
+# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
 
@@ -63,4 +63,17 @@ table = "users"
 f = f"--sql\nSELECT id FROM {table}"
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql\nSELECT id::INTEGER FROM users"
+```
+
+## Space after the marker in prose is not reported
+
+`inline-sql-comment` needs a statement after the marker, as `check --fix` does.
+
+```python
+msg = "--sql flag enables it"
+todo = "--sql delete me later"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+q = "--sql DELETE FROM users"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+r = u"--sql select id::INTEGER from users"
 ```
