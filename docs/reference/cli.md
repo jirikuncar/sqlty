@@ -1,19 +1,20 @@
 # CLI
 
 ```
-sqlty [-h] [--version] {rewrite,strip,check,version} ...
+sqlty [-h] [--version] {rewrite,strip,check,rule,version} ...
 ```
 
 ```bash
 sqlty rewrite .   # "--sql\n..." -> SQL[T]("--sql\n...")
 sqlty check .     # lint row types, drift, SELECT *
+sqlty check --fix .  # apply the fixable rules, report the rest
 sqlty strip .     # SQL[T]("--sql\n...") -> "--sql\n..."
 ```
 
 Each command takes files or directories (default: the current directory) and
-processes every `.py` file under them. Settings come from `[tool.sqlty]` in
-the first `pyproject.toml` found by walking up from the first path; see
-[Configuration](configuration.md). Command-line flags override it.
+processes every `.py` file under them. Each file uses `[tool.sqlty]` from the
+nearest `pyproject.toml` above it; see [Configuration](configuration.md).
+Command-line flags override it.
 
 ## Common options
 
@@ -22,7 +23,7 @@ the first `pyproject.toml` found by walking up from the first path; see
 | Option | Description |
 |--------|-------------|
 | `paths ...` | Files or directories to process (default: `.`) |
-| `--dialect {postgres,sqlite,mysql}` | SQL dialect (default: `postgres`). An explicit `postgres` does not override a `dialect` in `pyproject.toml` |
+| `--dialect {postgres,sqlite,mysql}` | SQL dialect; overrides `dialect` in `pyproject.toml` (default: `postgres`) |
 | `--schema SCHEMA` | Schema `.sql` file; overrides `schema` in `pyproject.toml` |
 | `-v`, `--verbose` | Print each file `rewrite` or `strip` changes |
 | `-q`, `--quiet` | Suppress non-error output |
@@ -85,11 +86,19 @@ sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 
 | Option | Description |
 |--------|-------------|
-| `--fix` | Accepted, but currently does not change files |
+| `--fix` | Apply the [fixable rules](rules.md), write the files, then report what remains |
 
 Rule severities come from `[tool.sqlty.rules]`; see [Rules](rules.md).
 
 Exit code: 1 if any diagnostic has severity `error`, otherwise 0.
+
+## `sqlty rule`
+
+Print a rule's documentation, or list every rule with its default severity.
+
+```
+sqlty rule [-h] [name]
+```
 
 ## `sqlty version`
 

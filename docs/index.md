@@ -9,13 +9,8 @@ correct.
 
 ## From a raw query to a typed one
 
-Mark a query with `--sql` and cast its columns:
-
-```python
-query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
-```
-
-Run `sqlty rewrite .`, and the file becomes:
+Mark a query with `--sql` and cast its columns. Run `sqlty rewrite .`, and
+the file becomes what the `rewritten-file` lines show:
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"

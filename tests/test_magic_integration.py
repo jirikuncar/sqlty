@@ -94,7 +94,6 @@ def test_codec_no_unnecessary_imports():
 def test_magic_codec_integration():
     """Test the full codec integration with a real Python file."""
     # Create a test Python file that uses the magic codec
-    # No encoding declaration needed - magic codec overrides UTF-8
     test_code = """from sqlty import magic
 
 # This should be transformed by the codec
@@ -224,3 +223,13 @@ SELECT id::INTEGER, name::TEXT
     # q3 should be transformed
     assert "SQL[tuple[int, str]]" in result
     assert length == len(code)
+
+
+def test_decode_accepts_buffer_types():
+    """decode() accepts any bytes-like object, as the codec protocol requires."""
+    from sqlty._decode import decode
+
+    src = b'q = "--sql\\nSELECT 1::INTEGER"'
+    expected = decode(src)
+    assert decode(bytearray(src)) == expected
+    assert decode(memoryview(src)) == expected

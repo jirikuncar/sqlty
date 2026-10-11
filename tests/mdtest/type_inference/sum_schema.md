@@ -1,0 +1,177 @@
+# SUM with a Schema
+
+## SUM of integer column with schema returns int
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(quantity) FROM products
+-- inferred: tuple[int]
+```
+
+## SUM of float column with schema returns float
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(price) FROM products
+-- inferred: tuple[float]
+```
+
+## Explicit cast takes precedence over schema (1)
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(quantity::FLOAT) FROM products
+-- inferred: tuple[float]
+```
+
+## Explicit cast takes precedence over schema (2)
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(price::INTEGER) FROM products
+-- inferred: tuple[int]
+```
+
+## Mixing schema-inferred and cast-specified types
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(quantity), SUM(price::INTEGER) FROM products
+-- inferred: tuple[int, int]
+```
+
+## Multiple SUM operations with schema inference
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(quantity), SUM(price) FROM products
+-- inferred: tuple[int, float]
+```
+
+## SUM of unknown column with explicit cast works
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(unknown_col::INTEGER) FROM products
+-- inferred: tuple[int]
+```
+
+## SUM with unknown table falls back to float
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE products (
+            id INTEGER PRIMARY KEY,
+            quantity INTEGER NOT NULL,
+            price FLOAT NOT NULL
+        );
+```
+
+```sql
+SELECT SUM(amount) FROM orders
+-- inferred: tuple[float]
+```

@@ -27,7 +27,7 @@ import re
 
 from sqlty._checker import Checker
 from sqlty._lint import RuleConfig
-from sqlty._rewriter import SQLRewriter
+from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, _header_end, skipped_string_rule
 from sqlty._sql_analyzer import SQLAnalyzer
 
 
@@ -120,6 +120,7 @@ def check_source(
     schema_sql: str | None = None,
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
+    untyped: bool = False,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
@@ -128,16 +129,11 @@ def check_source(
     - Stale rewrites (stale-rewrite) — --sql strings not yet wrapped
     - Stale types (stale-type) — SQL[T] doesn't match current inference
     - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
-    - User-defined types (column-count-mismatch, column-type-mismatch,
-      column-name-mismatch, typeddict-key-mismatch) — SQL[UserType] fields
-      vs query columns
-    - TypedDict inheritance (typeddict-inheritance) — PEP 728 violations of
-      a row type and its same-file bases, on their class lines
+    - Interpolated strings (fstring-skipped, tstring-skipped) — f"--sql ..." is never rewritten
 
-    When the annotated type is a user-defined type (TypedDict, NamedTuple,
-    dataclass, Pydantic BaseModel) found in the same source file, the checker
-    validates the type's fields against the SQL query columns structurally
-    instead of comparing against the inferred tuple type string.
+    User-defined types (``SQL[UserType]``: the ``column-*``, ``typeddict-key-mismatch``
+    and ``typeddict-inheritance`` rules) are skipped here; ``sqlty.core.check_source``
+    validates them on top of either backend.
 
     Args:
         source: Python source code
@@ -145,6 +141,7 @@ def check_source(
         schema_sql: Optional CREATE TABLE statements
         rules: Rule severity overrides (e.g., {"select-star": "ignore"})
         import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
+        untyped: Report uninferable row queries as stale-rewrite, as rewrite wraps them
 
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
@@ -154,7 +151,7 @@ def check_source(
     analyzer = _make_analyzer(dialect, schema_sql)
     rule_config = RuleConfig(overrides=rules)
     checker = Checker(analyzer=analyzer, rule_config=rule_config)
-    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style)
+    rewriter = _make_rewriter(dialect, schema_sql, import_style=import_style, untyped=untyped)
     has_schema = schema_sql is not None
 
     istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
@@ -162,13 +159,26 @@ def check_source(
     untyped_name = istyle.untyped_name
 
     diagnostics: list[dict[str, str | int | None]] = []
+    wrappable = (
+        _wrappable_lines(source, rewriter) if rule_config.is_enabled("stale-rewrite") else set()
+    )
 
-    for i, line in enumerate(source.splitlines(), 1):
-        line_stripped = line.strip()
+    for i, line_stripped in _logical_lines(source, wrapper_name):
+        if skipped := skipped_string_rule(line_stripped):
+            if rule_config.is_enabled(skipped):
+                diagnostics.append(
+                    {
+                        "rule": skipped,
+                        "message": SKIPPED_STRING_MESSAGES[skipped],
+                        "severity": rule_config.severity(skipped).value,
+                        "line": i,
+                    }
+                )
+            continue
 
         # Check for unwrapped --sql strings (stale-rewrite)
         if _is_unwrapped_sql_string(line_stripped, wrapper_name):
-            if rule_config.is_enabled("stale-rewrite"):
+            if i in wrappable and rule_config.is_enabled("stale-rewrite"):
                 diagnostics.append(
                     {
                         "rule": "stale-rewrite",
@@ -225,11 +235,11 @@ def check_source(
         annotated_type = _extract_type_from_wrapper(line_stripped, wrapper_name)
         if annotated_type == untyped_name and rule_config.is_enabled("untyped-query"):
             current_type = rewriter._infer_type(sql_content)
-            untyped = f"{wrapper_name}[{untyped_name}]"
+            sentinel = f"{wrapper_name}[{untyped_name}]"
             message = (
-                f"{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+                f"{sentinel} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
                 if current_type == "Any"
-                else f"{untyped} can now be {wrapper_name}[{current_type}]; strip and rewrite to update"
+                else f"{sentinel} can now be {wrapper_name}[{current_type}]; run sqlty check --fix"
             )
             diagnostics.append(
                 {
@@ -298,16 +308,20 @@ def _make_rewriter(
     untyped: bool = False,
 ) -> SQLRewriter:
     """Create an SQLRewriter, optionally with schema."""
+    import os
     import tempfile
 
-    schema_path = None
-    if schema_sql:
-        fd, schema_path = tempfile.mkstemp(suffix=".sql")
+    if not schema_sql:
+        return SQLRewriter(dialect=dialect, import_style=import_style, untyped=untyped)
+    fd, schema_path = tempfile.mkstemp(suffix=".sql")
+    try:
         with open(fd, "w") as f:
             f.write(schema_sql)
-    return SQLRewriter(
-        dialect=dialect, schema_path=schema_path, import_style=import_style, untyped=untyped
-    )
+        return SQLRewriter(
+            dialect=dialect, schema_path=schema_path, import_style=import_style, untyped=untyped
+        )
+    finally:
+        os.unlink(schema_path)
 
 
 def _has_inline_sql_comment(line: str) -> bool:
@@ -318,6 +332,47 @@ def _has_inline_sql_comment(line: str) -> bool:
     ``"--sql\\nSELECT ..."`` where the actual SQL starts on the next line.
     """
     return bool(re.search(r"""["']--sql [^\\]""", line))
+
+
+def _wrappable_lines(source: str, rewriter: SQLRewriter) -> set[int]:
+    """Lines holding a string that ``rewrite`` would wrap.
+
+    Rewrite only inserts imports at the header and wraps strings in place,
+    so each other line keeps its position, shifted past the imports.
+
+    Example:
+        >>> _wrappable_lines('a = "--sql\\\\nSELECT 1::INTEGER"\\nb = "--sql\\\\nDROP TABLE t"', SQLRewriter())
+        {1}
+    """
+    original = source.splitlines()
+    rewritten = rewriter.rewrite(source).source.splitlines()
+    added = len(rewritten) - len(original)
+    head = source[: _header_end(source)].count("\n")
+    return {
+        i + 1 for i, line in enumerate(original) if rewritten[i if i < head else i + added] != line
+    }
+
+
+def _logical_lines(source: str, wrapper_name: str) -> list[tuple[int, str]]:
+    """Stripped lines, with a wrapper split by a formatter joined onto its first line.
+
+    Example:
+        >>> _logical_lines('q = SQL[tuple[int]](\\n    "--sql\\\\nSELECT 1"\\n)', "SQL")
+        [(1, 'q = SQL[tuple[int]]("--sql\\\\nSELECT 1")')]
+    """
+    opener = re.compile(rf"{re.escape(wrapper_name)}\[.*\]\($")
+    lines = [line.strip() for line in source.splitlines()]
+    result: list[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if opener.search(line) and i + 2 < len(lines) and lines[i + 2].startswith(")"):
+            result.append((i + 1, line + lines[i + 1].rstrip(",") + lines[i + 2]))
+            i += 3
+            continue
+        result.append((i + 1, line))
+        i += 1
+    return result
 
 
 def _is_unwrapped_sql_string(line: str, wrapper_name: str = "SQL") -> bool:

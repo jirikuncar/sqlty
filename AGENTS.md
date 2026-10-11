@@ -6,7 +6,7 @@ Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run a
 
 ```bash
 uv run pytest                              # all tests (577+)
-uv run pytest tests/mdtest/ -v             # mdtest suite only
+uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests only
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests only
 uv run pytest tests/e2e/ -v               # end-to-end tests
 uv run pytest -k "integer cast"           # filter by name
@@ -76,13 +76,20 @@ q = """--sql
 SELECT id::INTEGER, name::TEXT FROM users"""
 ```
 
-## Adding mdtests for new features
+## Markdown tests (mdtest)
 
-Every new feature, bug fix, or behavior change **must** have a corresponding
-mdtest in `tests/mdtest/`. The test framework is snapshot-based: assertion
-comments in Python code blocks are compared against computed values.
+Every new feature, bug fix, or behavior change **must** have an mdtest. The
+format follows [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md);
+the plugin is `tests/_mdtest/`, and `mdtest_paths` in `pyproject.toml` lists
+the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
+(user docs, also the Zensical site), `src/sqlty/rules/` (one page per lint rule, printed by
+`sqlty rule NAME`). Every test runs through `sqlty.core` on each backend:
+`name[py]`, `name[rs]`.
 
 ### Where to add tests
+
+User-visible behavior belongs in `docs/guide/` too; edge cases only in
+`tests/mdtest/`. A new lint rule needs `src/sqlty/rules/<name>.md`.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
@@ -92,53 +99,76 @@ comments in Python code blocks are compared against computed values.
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
 | Magic codec | `tests/mdtest/codec/` | `basic_codec.md` |
-| Type codecs | `tests/mdtest/type_codec/` | `tuple_codec.md` |
 
-### Writing a new test
+### Structure
 
-1. Add a `##` heading in the appropriate `.md` file (or create a new one):
+- A heading with assertions is a test, named by its headings joined with
+  ` - ` (the H1 title excluded).
+- Setup is inherited by nested headings, code is not: an unlabelled `toml`
+  block is `[tool.sqlty]` config (unknown keys and rules are errors); a
+  `` `schema.sql`: `` label before a block makes it a file.
+- Each block with assertions is checked on its own, together with the
+  assertion-free python blocks right before it (literate setup); later
+  blocks are not part of it. Prose may sit between blocks.
+- Other languages (`bash`, `text`, ...) and blocks tagged ```` ```python ignore ````
+  are prose.
+- Directives: `<!-- mdtest:skip reason -->`, `<!-- mdtest:xfail reason -->`,
+  `<!-- mdtest:backend py -->`.
 
 ````markdown
-## New feature description
+## Schema-based TypedDict mismatch
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
 
 ```python
-q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten:
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: str
+
+# error: [column-count-mismatch] "User has 1 fields but query returns 2 columns"
+q = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 ````
 
-2. Run `make update-mdtest` to auto-fill the expected value.
+### Assertions
 
-3. Verify the result makes sense, then commit.
+| Assertion | Where | Compared with |
+|-----------|-------|---------------|
+| `-- inferred:` | in the `sql` block | `core.infer_type()` |
+| `-- expanded:` | in the `sql` block | `core.expand_star()` |
+| `-- columns:` | in the `sql` block | `SQLAnalyzer.analyze_select()`: `name: type (SQL_TYPE)` per line |
+| `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
+| `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
+| `# stripped:` | `python`, whole code | `core.strip_source()` |
+| `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
+| `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
+| `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 
-### Assertion types
+- Consecutive comments of one kind form a multi-line value.
+- `# error:` takes a rule, a message substring, or both. A test with any
+  `# error:` fails on every diagnostic it doesn't assert; a bare `# error:`
+  asserts there are none.
 
-| Prefix | Tests | Computed by |
-|--------|-------|------------|
-| `# inferred:` | Type inference result | `SQLAnalyzer.generate_return_type()` |
-| `# rewritten:` | Rewritten source (no imports) | `SQLRewriter.rewrite()` |
-| `# rewritten-file:` | Rewritten source (with imports) | `SQLRewriter.rewrite()` |
-| `# stripped:` | Stripped source | `SQLRewriter.strip()` |
-| `# expanded:` | Star expansion | `SQLAnalyzer.expand_star()` |
-| `# error:` | Lint diagnostic | `Checker.check_query()` |
-| `# check:` | Every diagnostic for the block, warnings included | `check_source()` |
-| `# decoded:` | Magic codec output | `decode()` |
-| `# warning:` | Rewriter warning | `SQLRewriter.rewrite().warnings` |
+### Workflow
 
-Multi-line assertions use consecutive same-prefix comments:
+1. Write the code with empty assertions (`# rewritten:`, `# error:`).
+2. `make update-mdtest` fills them in; errors are written above their lines.
+3. Review the diff, then commit.
 
-```python
-q = """--sql
-SELECT id::INTEGER FROM users"""
-# rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("""--sql
-# rewritten-file: SELECT id::INTEGER FROM users""")
-```
+`uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch[rs]'`
+reruns one test; failures print this command.
 
-### Keeping tests updated
-
-- Run `make update-mdtest` after any change to rewriter, type inference, or lint logic.
-- README.md and docs/ are also tested via `tests/test_docs.py` — keep assertion comments there current.
 - Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
 
 ## Documentation philosophy
@@ -173,8 +203,13 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md and docs/ code blocks with assertion comments (`# rewritten:`, `# decoded:`, etc.)
-  are tested automatically. Keep them accurate.
+- README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
+- `tests/test_core_invariants.py` checks idempotency, round trip and backend agreement
+  over every mdtest code block: new mdtests extend it automatically.
+- `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
+  matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
+  relative links resolve, that `examples/` need no rewrite, and runs the
+  `>>>` examples in `docs/reference/python-api.md`.
 - Focus on **motivated examples** — show the problem first, then the solution.
 - Always show complete working code, not snippets.
 
@@ -226,10 +261,10 @@ src/sqlty/
 ├── core.py              # Public API: try Rust _core, fall back to _core_py
 ├── _core_py.py          # Pure-Python: infer_type, rewrite_source, strip_source, check_source
 ├── _rewriter.py         # SQLRewriter: whole-source regex rewrite/strip
+├── _fixer.py           # fix_source: sqlty check --fix, built on sqlty.core
 ├── _sql_analyzer.py     # SQL parsing + type inference (sqlglot)
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _checker.py          # Column validation, SELECT * detection
-├── _type_codec.py       # TypeCodec protocol + TupleCodec
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, version
 └── magic.py             # Python codec registration

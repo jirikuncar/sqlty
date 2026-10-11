@@ -1,29 +1,24 @@
 # Lint Rule Configuration
 
-## Default config — star is warned
-
-```sql
-SELECT * FROM users
-```
+## Default config — star without schema is an error
 
 ```python
+from sqlty import SQL
 # error: [select-star-no-schema] "SELECT * used but no schema available"
+q = SQL[tuple[str]]("--sql\nSELECT * FROM users")
 ```
 
 ## All rules disabled — no diagnostics
 
 ```toml
-[sqlty]
-[sqlty.rules]
+[tool.sqlty.rules]
 select-star = "ignore"
 select-star-no-schema = "ignore"
 ```
 
-```sql
-SELECT * FROM users
-```
-
 ```python
+from sqlty import SQL
+q = SQL[tuple[str]]("--sql\nSELECT * FROM users")
 # error:
 ```
 
@@ -38,18 +33,16 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 schema = "schema.sql"
-[sqlty.rules]
+[tool.sqlty.rules]
 select-star = "error"
 ```
 
-```sql
-SELECT * FROM users
-```
-
 ```python
+from sqlty import SQL
 # error: [select-star] "SELECT * used — expand to explicit column list"
+q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
 
 ## Uninferable wrapped query is not stale
@@ -58,6 +51,6 @@ A `--sql SELECT ...` space form is a SQL comment with no row type; only
 `inline-sql-comment` reports it.
 
 ```python
-q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ```

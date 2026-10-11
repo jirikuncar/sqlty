@@ -143,4 +143,5 @@ q = "--sql\nSELECT 1::INTEGER"
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |
 | `strip_source(source, *, import_style=None)` | Stripped source |
+| `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None)` | Source with `sqlty check --fix` applied |
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: dicts with `rule`, `message`, `severity`, `line` |
