@@ -125,10 +125,10 @@ class PyiToIRParser:
                 )
 
         # Group function overloads by name
-        function_overloads: dict[str, list[ast.FunctionDef]] = {}
+        function_overloads: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
 
         for node in tree.body:
-            if isinstance(node, ast.FunctionDef):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 overload = self._parse_overload_method(node)
                 if overload:
                     if node.name not in function_overloads:
@@ -143,6 +143,7 @@ class PyiToIRParser:
                     export_name=func_name,
                     docstring="",
                     ast_node=overload_nodes[0],  # Use first node for AST reference
+                    is_async=isinstance(overload_nodes[0], ast.AsyncFunctionDef),
                 )
 
                 for node in overload_nodes:
@@ -155,7 +156,7 @@ class PyiToIRParser:
 
         for node in tree.body:
             if (
-                isinstance(node, ast.FunctionDef)
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.returns
                 and (owner := stub.get_registry(node.name))
                 and self._is_overload(node)
@@ -170,7 +171,9 @@ class PyiToIRParser:
 
         return stub
 
-    def _parse_overload_method(self, node: ast.FunctionDef) -> OverloadSignature | None:
+    def _parse_overload_method(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> OverloadSignature | None:
         """Parse a method definition into an OverloadSignature.
 
         Args:
@@ -203,7 +206,7 @@ class PyiToIRParser:
         )
 
     @staticmethod
-    def _is_overload(node: ast.FunctionDef) -> bool:
+    def _is_overload(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         return any(
             isinstance(dec, ast.Name) and dec.id == "overload" for dec in node.decorator_list
         )
@@ -261,7 +264,9 @@ class PyiToIRParser:
             logging.getLogger(__name__).debug("Failed to extract source span: %s", e)
             return None
 
-    def _extract_literal_from_annotation(self, node: ast.FunctionDef) -> str | None:
+    def _extract_literal_from_annotation(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> str | None:
         """Extract the query literal from a Literal[...] type annotation.
 
         Args:
@@ -384,6 +389,7 @@ class CallInfoToIRParser:
                 export_name=export_name,
                 custom_imports=custom_imports,
                 fallback_return_type=self.untyped_fallback(cls_name, cls_calls),
+                is_async=self._is_async(cls_name, cls_calls),
             )
 
             for call in cls_calls:
@@ -397,6 +403,13 @@ class CallInfoToIRParser:
             stub.add_import(import_stmt)
 
         return stub
+
+    def _is_async(self, name: str, calls: Sequence[CallInfo]) -> bool:
+        """Whether the helper defined in a runtime call's ``registry_file`` is ``async def``."""
+        if not self.registry_detector:
+            return False
+        files = {f for call in calls if (f := call.get("registry_file"))}
+        return any(self.registry_detector.is_async_function(Path(f), name) for f in files)
 
     def untyped_fallback(self, name: str, calls: Sequence[CallInfo] = ()) -> str | None:
         """Catch-all return type in untyped mode: the registry's template applied to UNTYPED.

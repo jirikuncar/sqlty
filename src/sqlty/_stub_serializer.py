@@ -253,6 +253,8 @@ class IRToASTSerializer:
             )
         )
 
+        if registry.is_async:
+            return [_as_async(node) for node in function_overloads]
         return function_overloads
 
     def _serialize_function_overload(
@@ -421,6 +423,21 @@ class IRToASTSerializer:
                 returns=ast.parse(return_type or "str", mode="eval").body,
                 type_params=[],  # No type params for simpler stub
             )
+
+
+def _as_async(node: ast.stmt) -> ast.stmt:
+    """Turn a ``def`` overload into the matching ``async def``."""
+    if not isinstance(node, ast.FunctionDef):
+        return node
+    return ast.AsyncFunctionDef(
+        name=node.name,
+        args=node.args,
+        body=node.body,
+        decorator_list=node.decorator_list,
+        returns=node.returns,
+        type_comment=node.type_comment,
+        type_params=node.type_params,
+    )
 
 
 def _narrowed_type_param(return_type: str) -> ast.expr | None:

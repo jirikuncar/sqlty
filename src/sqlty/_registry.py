@@ -52,7 +52,7 @@ class RegistryDetector:
             tree = ast.parse(source)
             for node in ast.walk(tree):
                 # Check decorated functions with @sqlty(schema="...")
-                if isinstance(node, ast.FunctionDef):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if name and node.name != name:
                         continue
 
@@ -127,7 +127,10 @@ class RegistryDetector:
                         source = f.read()
                     tree = ast.parse(source)
                     for node in ast.walk(tree):
-                        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                        if (
+                            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and node.name == func_name
+                        ):
                             if func_name not in registry_classes:
                                 registry_classes.append(func_name)
                             break
@@ -166,7 +169,7 @@ class RegistryDetector:
             source = module_path.read_text()
             tree = ast.parse(source)
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == name:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
                     # Check if it has @sqlty decorator
                     for decorator in node.decorator_list:
                         if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
@@ -369,7 +372,10 @@ class RegistryDetector:
             source = module_path.read_text()
             tree = ast.parse(source)
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                if (
+                    isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name == function_name
+                ):
                     return node.args
         except Exception:
             pass
@@ -395,9 +401,26 @@ class RegistryDetector:
             source = module_path.read_text()
             tree = ast.parse(source)
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                if (
+                    isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name == function_name
+                ):
                     return node.returns
         except Exception:
             pass
 
         return None
+
+    def is_async_function(self, module_path: Path, function_name: str) -> bool:
+        """Whether ``function_name`` is defined with ``async def`` in ``module_path``.
+
+        Generated overloads of an async helper are ``async def`` so that ``await`` type checks.
+        """
+        try:
+            tree = ast.parse(module_path.read_text())
+        except Exception:
+            return False
+        return any(
+            isinstance(node, ast.AsyncFunctionDef) and node.name == function_name
+            for node in ast.walk(tree)
+        )
