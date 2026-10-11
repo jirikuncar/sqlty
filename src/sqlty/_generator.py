@@ -262,10 +262,12 @@ class TypeStubGenerator:
     ) -> SQLAnalyzer:
         """Get the appropriate SQLAnalyzer for a registry.
 
-        Priority:
-        1. Registry-specific schema from schema_mappings (module or ``module.function`` key)
+        Priority (most to least specific; a function entry's ``schema`` is handled by
+        ``_get_analyzer_for_schema`` before this):
+        1. ``module.function`` key in schema_mappings (``[tool.sqlty.schemas]``)
         2. __schema_path__ from the decorated function (``@sqlty(schema=...)``)
-        3. Global schema from schema_mappings[None] (``schema`` in ``[tool.sqlty]``)
+        3. ``module`` key in schema_mappings
+        4. Global schema from schema_mappings[None] (``schema`` in ``[tool.sqlty]``)
 
         Args:
             registry_name: Name of the registry module (e.g., 'user_queries')
@@ -297,43 +299,32 @@ class TypeStubGenerator:
                 if registry_file.exists():
                     registry_module_path = registry_file
 
-        # Priority 1: Registry-specific schema from mappings
-        # Support both module names (e.g., 'user_queries') and fully qualified names (e.g., 'user_queries.UserQueries')
-        class_name = None  # Initialize for later use
-        if registry_name:
-            # First try the module name directly (from pyproject.toml)
-            if registry_name in self.schema_mappings:
-                schema_to_use = self.schema_mappings[registry_name]
-                schema_source = f"mapping for '{registry_name}'"
-            else:
-                # Fallback to fully qualified name for backward compatibility
-                class_name = registry_class or None
+        class_name = registry_class
+        if registry_name and not class_name:
+            class_names = self._registry_detector.get_registry_names(registry_module_path)
+            class_name = class_names[0] if class_names else None
 
-                # Fallback to first registry class if resolution failed
-                if not class_name:
-                    class_names = self._registry_detector.get_registry_names(registry_module_path)
-                    class_name = class_names[0] if class_names else None
+        # Priority 1: ``module.function`` key in schema_mappings
+        fqn = f"{registry_name}.{class_name}" if registry_name and class_name else None
+        if fqn and fqn in self.schema_mappings:
+            schema_to_use = self.schema_mappings[fqn]
+            schema_source = f"mapping for '{fqn}'"
 
-                if class_name:
-                    fqn = f"{registry_name}.{class_name}"
-                    if fqn in self.schema_mappings:
-                        schema_to_use = self.schema_mappings[fqn]
-                        schema_source = f"mapping for '{fqn}'"
-
-        # Priority 2: __schema_path__ from registry class
+        # Priority 2: __schema_path__ from the decorated function
         if schema_to_use is None:
-            # Determine which class name to use for schema lookup:
-            # - If registry_name exists, we've resolved class_name above (may differ from registry_class)
-            # - If registry_name is None, registry_class contains the direct class name
-            lookup_class_name = class_name if registry_name else registry_class
             detected_schema = self._registry_detector.get_schema_path_from_registry(
-                registry_module_path, name=lookup_class_name
+                registry_module_path, name=class_name
             )
             if detected_schema:
                 schema_to_use = detected_schema
                 schema_source = "__schema_path__"
 
-        # Priority 3: global schema provided via schema_mappings[None]
+        # Priority 3: module key in schema_mappings
+        if schema_to_use is None and registry_name and registry_name in self.schema_mappings:
+            schema_to_use = self.schema_mappings[registry_name]
+            schema_source = f"mapping for '{registry_name}'"
+
+        # Priority 4: global schema provided via schema_mappings[None]
         if schema_to_use is None and None in self.schema_mappings:
             schema_to_use = self.schema_mappings[None]
             schema_source = "global schema"

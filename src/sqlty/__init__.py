@@ -104,7 +104,12 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
 
     When _auto_generate is enabled:
     - Verifies the decorated function is registered in pyproject.toml
-    - Keeps automatic generation of stub files
+    - Wraps it: each call binds its arguments to the signature (defaults applied),
+      records the ``query_param`` and ``return_type_param`` values for the stub,
+      and passes all arguments through unchanged
+    - Writes the stub files at interpreter exit
+
+    Otherwise the function is returned unchanged.
     """
 
     def decorator(fn: F) -> F:
@@ -139,7 +144,7 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
 
                     if function_name:
                         # Load config from pyproject.toml
-                        config, _ = load_config(Path(file_path).parent)
+                        config, config_dir = load_config(Path(file_path).parent)
 
                         # Check if this function is registered in pyproject.toml
                         # Expected format: [tool.sqlty.functions] with import_path
@@ -160,6 +165,10 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                             None,
                         )
 
+                        if func_config is not None and "schema" in func_config:
+                            func_config = func_config.copy()
+                            root = config_dir or Path.cwd()
+                            func_config["schema"] = str(root / func_config["schema"])
                         if func_config is None:
                             warnings.warn(
                                 f"Function {expected_import_path} is decorated with @sqlty but not "
@@ -179,22 +188,36 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                 signature = inspect.signature(cast(Any, fn))
                 query_param = func_config["query_param"]
                 return_type_param = func_config.get("return_type_param")
+                resolved_config = func_config
 
                 @functools.wraps(fn)  # type: ignore
                 def wrapper(*args: Any, **kwargs: Any) -> Any:
+                    """Record the call for stub generation, then call the helper unchanged.
+
+                    Arguments are bound to the helper's signature (defaults applied) to read
+                    ``query_param`` and ``return_type_param``; calls that do not bind, or
+                    whose query is not a ``str``, are not recorded.
+                    """
                     try:
-                        arguments = signature.bind(*args, **kwargs).arguments
+                        bound = signature.bind(*args, **kwargs)
                     except TypeError:
-                        arguments = {}
-                    query = arguments.get(query_param)
-                    if isinstance(query, str):
-                        auto_generate_stub(
-                            cast(Any, fn),
-                            query,
-                            arguments.get(return_type_param) if return_type_param else None,
-                            return_type_param,
-                        )
+                        pass
+                    else:
+                        bound.apply_defaults()
+                        query = bound.arguments.get(query_param)
+                        if isinstance(query, str):
+                            auto_generate_stub(
+                                cast(Any, fn),
+                                query,
+                                resolved_config,
+                                bound.arguments.get(return_type_param)
+                                if return_type_param
+                                else None,
+                            )
                     return fn(*args, **kwargs)  # type: ignore
+
+                if inspect.iscoroutinefunction(fn):
+                    inspect.markcoroutinefunction(wrapper)
 
                 # Copy over the attributes to the wrapper
                 wrapper.__sqlty__ = True  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]

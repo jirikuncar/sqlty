@@ -249,6 +249,7 @@ class IRToASTSerializer:
                 registry.name,
                 template_signature=template_sig,
                 return_type=registry.fallback_return_type,
+                query_param_name=overload_list[0].query_param_name if template_sig else "query",
             )
         )
 
@@ -291,9 +292,7 @@ class IRToASTSerializer:
 
             return_tp_name = overload.return_type_param
             return_tp_annotation = (
-                ast.parse(f"type[{overload.return_type}] | None", mode="eval").body
-                if return_tp_name
-                else None
+                _narrowed_type_param(overload.return_type) if return_tp_name else None
             )
 
             # Check in regular args
@@ -330,6 +329,7 @@ class IRToASTSerializer:
                     elif arg.arg == return_tp_name and return_tp_annotation:
                         arg.annotation = return_tp_annotation
 
+            _fix_query_default(args, query_param_name, overload.query_literal)
             function_args = args
         else:
             # Default: simple query parameter
@@ -356,18 +356,21 @@ class IRToASTSerializer:
         function_name: str,
         template_signature: ast.arguments | None = None,
         return_type: str | None = None,
+        query_param_name: str = "query",
     ) -> ast.FunctionDef:
         """Serialize the generic fallback overload for a decorated/configured function.
 
         Args:
             function_name: Name of the function
             template_signature: Optional signature to use as template for configured functions.
-                               If provided, uses this as the fallback signature with generic
-                               Any annotations for all parameters. If not provided, uses simple
+                               If provided, uses this as the fallback signature with ``str``
+                               for the query parameter and ``Any`` for the others. If not
+                               provided, uses simple
                                (query: str) -> str. Both cases include @overload decorator since
                                this is for .pyi stub files.
             return_type: Return annotation, e.g. ``SQL[UNTYPED]``; defaults to ``Any`` for
                          configured signatures and ``str`` otherwise.
+            query_param_name: Parameter annotated ``str`` in a template signature.
 
         Returns:
             AST FunctionDef node for the fallback with @overload decorator
@@ -382,14 +385,11 @@ class IRToASTSerializer:
             # For configured functions, use the template signature but set all annotations to Any
             args = copy.deepcopy(template_signature)
 
-            # Replace all annotations with Any
-            any_annotation = ast.Name(id="Any", ctx=ast.Load())
-            for arg in args.args:
-                arg.annotation = copy.deepcopy(any_annotation)
-            for arg in args.posonlyargs:
-                arg.annotation = copy.deepcopy(any_annotation)
-            for arg in args.kwonlyargs:
-                arg.annotation = copy.deepcopy(any_annotation)
+            # Annotate the query parameter as str and every other parameter as Any
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                arg.annotation = ast.Name(
+                    id="str" if arg.arg == query_param_name else "Any", ctx=ast.Load()
+                )
             # Note: **params: Any should already have Any annotation, keep it
 
             # Use Any as the generic fallback return type for configured functions
@@ -421,6 +421,53 @@ class IRToASTSerializer:
                 returns=ast.parse(return_type or "str", mode="eval").body,
                 type_params=[],  # No type params for simpler stub
             )
+
+
+def _narrowed_type_param(return_type: str) -> ast.expr | None:
+    """``type[X] | None`` for a ``return_type_param`` whose argument was a single class or
+    generic; ``None`` (keep the source annotation) for unions and anything unparsable.
+
+    Example:
+        >>> ast.unparse(_narrowed_type_param("list[int]"))
+        'type[list[int]] | None'
+        >>> _narrowed_type_param("int | None") is None
+        True
+    """
+    try:
+        node = ast.parse(return_type, mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(node, ast.Name | ast.Attribute | ast.Subscript):
+        return None
+    return ast.parse(f"type[{return_type}] | None", mode="eval").body
+
+
+def _fix_query_default(args: ast.arguments, name: str, literal: str) -> None:
+    """Make a defaulted query parameter valid in a ``Literal[...]`` overload.
+
+    The default becomes ``...``. It is dropped instead when it differs from the overload's
+    literal and the parameter can be required, so a call that omits the query does not
+    match the overload.
+    """
+    positional = [*args.posonlyargs, *args.args]
+    first_default = len(positional) - len(args.defaults)
+    for i, arg in enumerate(positional):
+        if arg.arg == name and i >= first_default:
+            default = args.defaults[i - first_default]
+            if _differs(default, literal) and i == first_default:
+                args.defaults.pop(0)
+            else:
+                args.defaults[i - first_default] = ast.Constant(value=...)
+            return
+    for i, arg in enumerate(args.kwonlyargs):
+        kw_default = args.kw_defaults[i]
+        if arg.arg == name and kw_default is not None:
+            args.kw_defaults[i] = None if _differs(kw_default, literal) else ast.Constant(value=...)
+            return
+
+
+def _differs(default: ast.expr, literal: str) -> bool:
+    return not (isinstance(default, ast.Constant) and default.value == literal)
 
 
 class IRToTextSerializer:

@@ -63,6 +63,16 @@ Keys use the module name the helper has at runtime, so a helper in a script
 run directly is under `__main__`. `rewrite` and `check` do not read this
 table.
 
+A stub uses the first schema found, from most to least specific:
+
+| Order | Source |
+|-------|--------|
+| 1 | `schema` in the helper's [`[[tool.sqlty.functions]]`](#functions) entry |
+| 2 | `schemas["module.function"]` |
+| 3 | `@sqlty(schema=...)` |
+| 4 | `schemas["module"]` |
+| 5 | top-level [`schema`](#schema) |
+
 ## `rules`
 
 Severity per [lint rule](rules.md): `"error"`, `"warn"` or `"ignore"`.
@@ -96,7 +106,8 @@ Example: [`examples/05_import_style/`](https://github.com/jirikuncar/sqlty/tree/
 
 `"skip"` (default) leaves row-returning queries of unknown type as plain
 strings. `"sentinel"` wraps them as `SQL[UNTYPED](...)`, and makes the
-catch-all overload of generated stubs return `SQL[UNTYPED]`. CLI:
+catch-all overload of generated stubs return `SQL[UNTYPED]` instead of `str`
+(or `Any` for a helper with more parameters than the query). CLI:
 `sqlty rewrite --untyped`. See [Untyped queries](../guide/untyped.md).
 
 ## `format-command`
@@ -110,7 +121,8 @@ format-command = "ruff format --stdin-filename {filename} -"
 ```
 
 Stub generation pipes each `.pyi` file it writes through the command,
-with `{filename}` replaced by the stub path. If the command fails, the
+with `{filename}` replaced by the shell-quoted stub path (do not quote it in
+the command). If the command fails, the
 unformatted stub is written and a warning is logged. `sqlty rewrite` does not
 run the formatter; run yours after it.
 

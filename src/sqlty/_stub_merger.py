@@ -5,12 +5,16 @@ Compatibility layer using IR-based implementation internally.
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ._collector import CallInfo
 from ._stub_ir import StubFile
 from ._stub_parser import CallInfoToIRParser, PyiToIRParser
 from ._stub_serializer import IRToTextSerializer
+
+if TYPE_CHECKING:
+    from ._config import FunctionConfigComplete
+    from ._registry import RegistryDetector
 
 
 def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
@@ -39,8 +43,8 @@ class StubMerger:
         self,
         function_name: str = "sql",
         untyped: bool = False,
-        registry_detector: Any | None = None,
-        function_configs: list[Any] | None = None,
+        registry_detector: RegistryDetector | None = None,
+        function_configs: list[FunctionConfigComplete] | None = None,
     ):
         self.function_name = function_name
         self._pyi_parser = PyiToIRParser(function_name)

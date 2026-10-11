@@ -65,7 +65,9 @@ Each file uses the nearest `pyproject.toml` above it. A schema file that does no
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
-`@sqlty` helpers also reads `schema`, and a helper can override it with
+`@sqlty` helpers runs at runtime, so there is no `--schema`: it reads `schema`
+from `[tool.sqlty]` in the `pyproject.toml` nearest the file of the first
+recorded helper (not one per file, as above). A helper can override it with
 `schema` in its `[[tool.sqlty.functions]]` entry,
 [`[tool.sqlty.schemas]`](../reference/configuration.md#schemas) (schemas
 per module or helper) or `@sqlty(schema=...)`; see
