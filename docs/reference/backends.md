@@ -32,10 +32,12 @@ as do the tested examples in this documentation.
 Both backends must give the same results. The guarantees are tested, not
 assumed:
 
-- [`tests/test_core_conformance.py`](https://github.com/jirikuncar/sqlty/blob/main/tests/test_core_conformance.py)
-  runs one contract against every available backend: inferred types,
-  rewrite and strip output, idempotency (`rewrite(rewrite(x)) == rewrite(x)`),
-  round trips, and that string contents are never modified.
+- Every [mdtest](https://github.com/jirikuncar/sqlty/tree/main/tests/mdtest)
+  runs against every available backend: inferred types, rewrite and strip
+  output, and check diagnostics.
+  [`tests/test_core_invariants.py`](https://github.com/jirikuncar/sqlty/blob/main/tests/test_core_invariants.py)
+  adds idempotency (`rewrite(rewrite(x)) == rewrite(x)`), round trips, and
+  that string contents are never modified.
 - CI runs the test suite with the Rust extension, and again without it
   (except the end-to-end tests).
 - Tests compare the SQL type tables of both backends to catch drift.
@@ -46,9 +48,8 @@ Known differences, and gaps both backends share, are tracked in
 [PLAN-FUTURE.md](https://github.com/jirikuncar/sqlty/blob/main/PLAN-FUTURE.md#backend-parity-gaps).
 In short:
 
-- `%s` and `%(name)s` placeholders (the psycopg style) are understood only
-  with `dialect = "postgres"`; both backends infer nothing for them in MySQL
-  or SQLite.
+- In PostgreSQL, `?` is a placeholder only in Python (see
+  [Placeholders](#placeholders)).
 - MySQL `INT3 UNSIGNED` / `MIDDLEINT UNSIGNED` columns parse in Python but
   make Rust skip the table.
 - MySQL `ZEROFILL` columns make both backends skip the table.
@@ -56,6 +57,29 @@ In short:
   make both backends skip the table.
 - Rust reads dialects other than PostgreSQL, MySQL and SQLite as generic SQL;
   only those three are kept in parity.
+
+## Placeholders
+
+A placeholder is a value of unknown type, so it does not stop inference.
+Which placeholders each backend reads, per dialect:
+
+| Placeholder | PostgreSQL | MySQL | SQLite |
+|---|---|---|---|
+| `%s`, `%b`, `%t`, `%(name)s` (psycopg, PyMySQL, mysqlclient) | both | both | both |
+| `%%` (an escaped `%`) | both | both | both |
+| `$1` | both | both | both |
+| `?` | Python only | both | both |
+| `:name` | both | both | both |
+
+The `%` forms are replaced before parsing, everywhere in the query, as
+psycopg does: write `'a%%'` for a literal `%` in a string.
+
+!!! warning "MySQL servers reject the `--sql` marker"
+    sqlty infers MySQL queries, `%s` included, but the `--sql` marker line is
+    part of the string the driver sends. MySQL and MariaDB read `--` as a
+    comment only when whitespace follows it, so a query that starts with
+    `--sql\n` fails at runtime with a syntax error (1064). See
+    [Schema inference](../guide/schema-inference.md#mysql).
 
 ## Benchmarks
 

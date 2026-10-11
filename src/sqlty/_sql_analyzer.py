@@ -15,10 +15,7 @@ from sqlglot.errors import ParseError
 from sqlglot.parser import Parser
 from sqlglot.tokens import TokenType
 
-from sqlty._type_codec import TupleCodec, TypeCodec
-
 # Module-level default to avoid re-creating per call
-_default_codec = TupleCodec()
 
 
 class ColumnInfo(NamedTuple):
@@ -63,6 +60,10 @@ class SQLAnalyzer:
         "JSON": "dict",
         "JSONB": "dict",
         "UUID": "uuid.UUID",
+        "BYTEA": "bytes",
+        "BLOB": "bytes",
+        "BINARY": "bytes",
+        "VARBINARY": "bytes",
         # MySQL ``CAST(x AS SIGNED/UNSIGNED)``
         "SIGNED": "int",
         "UNSIGNED": "int",
@@ -152,7 +153,7 @@ class SQLAnalyzer:
             False
         """
         try:
-            statements = _parse(sql, self.dialect)
+            statements = _parse(_query_input(sql), self.dialect)
         except Exception:
             return True
         statement = statements[0] if statements else None
@@ -177,7 +178,7 @@ class SQLAnalyzer:
             RuntimeError: ``SUM(column)`` names a column missing from a schema table.
         """
         try:
-            ast = _parse_one(sql, self.dialect)
+            ast = _parse_one(_query_input(sql), self.dialect)
         except Exception:
             return None
 
@@ -330,7 +331,7 @@ class SQLAnalyzer:
         if not self.schema:
             return None
         try:
-            select = _leftmost_select(_parse_one(sql, self.dialect))
+            select = _leftmost_select(_parse_one(_query_input(sql), self.dialect))
         except Exception:
             return None
         if select is None:
@@ -359,26 +360,17 @@ class SQLAnalyzer:
             return None
         return f"{sql[:select_idx]}SELECT {', '.join(items)} {sql[from_idx:]}"
 
-    def generate_return_type(
-        self,
-        sql: str,
-        codec: TypeCodec | None = None,
-    ) -> str | None:
+    def generate_return_type(self, sql: str) -> str | None:
         """
         Generate a Python return type annotation for a SQL query.
 
         Args:
             sql: SQL query string to analyze
-            codec: Optional TypeCodec for formatting the result.
-                   Defaults to TupleCodec() which produces "tuple[int, str]".
 
         For example:
         - "SELECT id, name FROM users" -> "tuple[int, str]" (if types can be inferred)
         - "SELECT id, name FROM users" -> "tuple[str, str]" (if types can't be inferred)
         """
-        if codec is None:
-            codec = _default_codec
-
         columns = self.analyze_select(sql)
         if not columns:
             return None
@@ -392,7 +384,7 @@ class SQLAnalyzer:
                 # Default to str if type can't be inferred
                 types.append("str")
 
-        return codec.format_type(types)
+        return f"tuple[{', '.join(types)}]"
 
 
 _DML = (exp.Insert, exp.Update, exp.Delete, exp.Merge)
@@ -412,9 +404,12 @@ _FUNCTION_TYPES = {
     ),
     **dict.fromkeys(
         ["UPPER", "LOWER", "TRIM", "CONCAT", "SUBSTR", "SUBSTRING", "REPLACE", "STRING_AGG"]
-        + ["NOW", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME", "GROUP_CONCAT"],
+        + ["GROUP_CONCAT"],
         "str",
     ),
+    **dict.fromkeys(["NOW", "CURRENT_TIMESTAMP"], "datetime.datetime"),
+    "CURRENT_DATE": "datetime.date",
+    "CURRENT_TIME": "datetime.time",
     **dict.fromkeys(
         ["JSON_BUILD_OBJECT", "JSONB_BUILD_OBJECT", "TO_JSON", "TO_JSONB", "JSON_AGG", "JSONB_AGG"]
         + ["JSONB_OBJECT_AGG", "JSON_OBJECT_AGG", "J_S_O_N_ARRAY_AGG", "J_S_O_N_B_OBJECT_AGG"]
@@ -559,6 +554,23 @@ def _parse(sql: str, dialect: str) -> list[exp.Expression | None]:
             ):
                 raise ParseError("ARRAY size must be an integer literal, e.g. INT[3]")
     return statements
+
+
+# psycopg placeholders (``%s``, ``%b``, ``%t``, ``%(name)s``, ...) and the ``%%`` escape.
+_PLACEHOLDER = re.compile(r"%%|%(?:\([^)]+\))?[sbt]")
+
+
+def _query_input(sql: str) -> str:
+    """``sql`` with placeholders as ``NULL``, a value of unknown type, and ``%%`` as ``%``.
+
+    Like psycopg, literals and comments are not skipped; any query this mangles
+    fails to parse and stays uninferred rather than mistyped.
+
+    Example:
+        >>> _query_input("SELECT %s, %(a-b)t, 5 %% 2")
+        'SELECT NULL, NULL, 5 % 2'
+    """
+    return _PLACEHOLDER.sub(lambda m: "%" if m[0] == "%%" else "NULL", sql)
 
 
 def _parse_one(sql: str, dialect: str) -> exp.Expression:

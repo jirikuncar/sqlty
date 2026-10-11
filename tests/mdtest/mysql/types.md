@@ -19,18 +19,15 @@ CREATE TABLE items (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM items
-```
-
-```python
-# inferred: tuple[int, int, int, int, int, int, int]
-# expanded: SELECT a::TINYINT, b::MEDIUMINT, c::MEDIUMINT, d::MEDIUMINT, e::BIGINT, f::INT(11), g::YEAR FROM items
+-- inferred: tuple[int, int, int, int, int, int, int]
+-- expanded: SELECT a::TINYINT, b::MEDIUMINT, c::MEDIUMINT, d::MEDIUMINT, e::BIGINT, f::INT(11), g::YEAR FROM items
 ```
 
 ## Unsigned columns
@@ -50,18 +47,15 @@ CREATE TABLE items (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM items
-```
-
-```python
-# inferred: tuple[int, int, float, float]
-# expanded: SELECT a::UINT, b::UBIGINT(20), c::UDOUBLE, d::UDECIMAL(10, 2) FROM items
+-- inferred: tuple[int, int, float, float]
+-- expanded: SELECT a::UINT, b::UBIGINT(20), c::UDOUBLE, d::UDECIMAL(10, 2) FROM items
 ```
 
 ## Temporal and other columns
@@ -88,18 +82,15 @@ CREATE TABLE items (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM items
-```
-
-```python
-# inferred: tuple[float, str, datetime.datetime, datetime.datetime, str, str, dict, str, str, str]
-# expanded: SELECT a::DOUBLE, b::BIT(8), c::DATETIME(6), d::TIMESTAMPTZ, e::ENUM('X', 'Y'), f::SET('X', 'Y'), g::JSON, h::BLOB, i::TEXT, j::POINT FROM items
+-- inferred: tuple[float, str, datetime.datetime, datetime.datetime, str, str, dict, bytes, str, str]
+-- expanded: SELECT a::DOUBLE, b::BIT(8), c::DATETIME(6), d::TIMESTAMPTZ, e::ENUM('X', 'Y'), f::SET('X', 'Y'), g::JSON, h::BLOB, i::TEXT, j::POINT FROM items
 ```
 
 ## Unsigned NUMERIC and FIXED are rejected
@@ -108,16 +99,13 @@ SELECT * FROM items
 `FIXED`, so nothing is inferred.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 ```
 
 ```sql
 SELECT CAST(a AS NUMERIC(8,3) UNSIGNED), CAST(b AS FIXED UNSIGNED) FROM t
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```
 
 ## Integer CASTs
@@ -126,16 +114,13 @@ SELECT CAST(a AS NUMERIC(8,3) UNSIGNED), CAST(b AS FIXED UNSIGNED) FROM t
 targets.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 ```
 
 ```sql
 SELECT CAST(a AS SIGNED), CAST(b AS UNSIGNED INTEGER), CAST(c AS YEAR) FROM t
-```
-
-```python
-# inferred: tuple[int, int, int]
+-- inferred: tuple[int, int, int]
 ```
 
 ## Multi-valued index CAST to an array
@@ -143,16 +128,13 @@ SELECT CAST(a AS SIGNED), CAST(b AS UNSIGNED INTEGER), CAST(c AS YEAR) FROM t
 MySQL's only array type is the `... ARRAY` cast used by multi-valued indexes.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 ```
 
 ```sql
 SELECT CAST(doc->'$.zips' AS UNSIGNED ARRAY) FROM t
-```
-
-```python
-# inferred: tuple[list]
+-- inferred: tuple[list]
 ```
 
 ## Bracketed array types are not MySQL
@@ -160,14 +142,11 @@ SELECT CAST(doc->'$.zips' AS UNSIGNED ARRAY) FROM t
 PostgreSQL's `INT[]` is a parse error in MySQL, so nothing is inferred.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "mysql"
 ```
 
 ```sql
 SELECT CAST(tags AS INT[]) FROM t
-```
-
-```python
-# inferred: None
+-- inferred: None
 ```

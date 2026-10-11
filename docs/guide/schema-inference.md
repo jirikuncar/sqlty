@@ -61,8 +61,7 @@ Nullability is not tracked: `email` above is `str`, not `str | None`.
 1. `--schema PATH` on the command line, relative to the current directory.
 2. `schema` in `[tool.sqlty]`, relative to the directory of `pyproject.toml`.
 
-`pyproject.toml` is found by walking up from the first path given on the
-command line. A schema file that does not exist is reported as a warning and
+Each file uses the nearest `pyproject.toml` above it. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
@@ -106,7 +105,7 @@ CREATE TABLE notes (
 ```python
 notes = "--sql\nSELECT id, title, score, attachment, created_at FROM notes"
 stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
-# rewritten: notes = SQL[tuple[int, str, float, str, datetime.datetime]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
+# rewritten: notes = SQL[tuple[int, str, float, bytes, datetime.datetime]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
 # rewritten: stats = SQL[tuple[int, float, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
@@ -148,6 +147,16 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 
 `TINYINT(1)` is an `int`, not a `bool`. See the
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.
+
+!!! warning "MySQL servers reject `--sql` queries"
+    The `--sql` marker line is part of the query: `SQL[T]` is a `str`, and
+    PyMySQL and mysqlclient send it to the server unchanged. MySQL and
+    MariaDB read `--` as a comment only when whitespace follows it, so
+    `--sql\nSELECT ...` fails at runtime with a syntax error (1064), even
+    though sqlty types it. Until sqlty accepts a MySQL-safe marker, drop the
+    marker line before executing, e.g. `cur.execute(query.partition("\n")[2])`.
+    Placeholders (`%s`, `%(name)s`) are inferred in every dialect; see
+    [Backends](../reference/backends.md#placeholders).
 
 ## Example projects
 

@@ -5,9 +5,8 @@ Example demonstrating the magic codec for --sql prefix strings.
 This example shows how to use the magic codec to automatically transform
 strings prefixed with --sql into SQL[T](...) calls with type inference.
 
-To use this feature:
-1. Import the magic module: from sqlty import magic
-2. Use --sql prefix in your strings
+Run it with sqlty installed from a wheel, which ships sqlty_magic.pth to
+register the codec at startup: python examples/magic_codec/demo.py
 
 The codec will automatically:
 - Detect strings starting with --sql
@@ -15,8 +14,7 @@ The codec will automatically:
 - Infer the return type
 - Transform the string into SQL[T]("...")
 
-Note: No encoding declaration change is needed. The magic codec overrides
-UTF-8, so files can continue using # coding: utf-8 or no declaration.
+Only modules declaring ``# coding: sqlty`` are transformed.
 """
 
 import datetime

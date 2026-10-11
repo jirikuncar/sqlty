@@ -5,7 +5,6 @@
 //! spells them (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`)
 //! so that schema-driven output matches between backends.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
@@ -61,12 +60,16 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("JSON", "dict"),
         ("JSONB", "dict"),
         ("UUID", "uuid.UUID"),
+        ("BYTEA", "bytes"),
+        ("BLOB", "bytes"),
+        ("BINARY", "bytes"),
+        ("VARBINARY", "bytes"),
     ])
 });
 
 /// Result types of functions by name (COUNT, AVG, SUM, MIN, MAX and COALESCE are special-cased).
 static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let groups: [(&[&str], &str); 4] = [
+    let groups: [(&[&str], &str); 7] = [
         (
             &[
                 "LENGTH",
@@ -103,13 +106,12 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
                 "REPLACE",
                 "STRING_AGG",
                 "GROUP_CONCAT",
-                "NOW",
-                "CURRENT_TIMESTAMP",
-                "CURRENT_DATE",
-                "CURRENT_TIME",
             ],
             "str",
         ),
+        (&["NOW", "CURRENT_TIMESTAMP"], "datetime.datetime"),
+        (&["CURRENT_DATE"], "datetime.date"),
+        (&["CURRENT_TIME"], "datetime.time"),
         (
             &[
                 "JSON_BUILD_OBJECT",
@@ -131,12 +133,6 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
 });
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
-
-/// A psycopg placeholder (`%s`, `%(name)s`) in group 1, or a literal, quoted name or comment to skip.
-static PYFORMAT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|%%|(%(?:\(\w+\))?s)"#)
-        .unwrap()
-});
 
 /// Schema: table name -> columns as `(name, canonical SQL type)` in declaration order.
 pub type Schema = HashMap<String, Vec<(String, String)>>;
@@ -179,32 +175,36 @@ impl SqlDialect {
     }
 }
 
+/// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
+static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
+
+/// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
+static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
+
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let sql = parser_input(sql, dialect);
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), &sql).ok()?;
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
 }
 
-/// `sql` as sqlparser should read it. The `--sql` marker line is dropped, since
-/// MySQL only reads `--` followed by whitespace as a comment. In Postgres, psycopg's
-/// `%s` and `%(name)s` placeholders, which sqlglot parses, become `$1`, `$2`, ...
-fn parser_input(sql: &str, dialect: SqlDialect) -> Cow<'_, str> {
-    let sql = match sql.strip_prefix("--sql") {
-        Some(rest) => rest.find('\n').map_or("", |i| &rest[i..]),
-        None => sql,
-    };
-    if dialect != SqlDialect::Postgres {
-        return Cow::Borrowed(sql);
-    }
-    let mut n = 0;
-    PYFORMAT.replace_all(sql, |caps: &Captures| match caps.get(1) {
-        Some(_) => {
-            n += 1;
-            format!("${n}")
-        }
-        None => caps[0].to_string(),
-    })
+/// Parse a query (not schema DDL) through [`parser_input`].
+fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    parse(&parser_input(sql), dialect)
+}
+
+/// `sql` as sqlparser should read it, in every dialect, as in the Python backend:
+/// the `--sql` marker line is dropped (a leading space form like `--sql SELECT 1`
+/// leaves nothing), placeholders become `NULL`, a value of unknown type, and `%%`
+/// becomes `%`. Like psycopg, literals and comments are not skipped; any query this
+/// mangles fails to parse and stays uninferred rather than mistyped.
+fn parser_input(sql: &str) -> String {
+    let sql = SQL_MARKER.replace(sql, "");
+    PLACEHOLDER
+        .replace_all(&sql, |caps: &Captures| match &caps[0] {
+            "%%" => "%",
+            _ => "NULL",
+        })
+        .into_owned()
 }
 
 /// Whether `stmts` use what sqlparser accepts but the dialect (and sqlglot) does not:
@@ -239,7 +239,7 @@ fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
 }
 
 fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
-    parse(sql, dialect)?.into_iter().next()
+    parse_query(sql, dialect)?.into_iter().next()
 }
 
 /// Spell a SQL type the way sqlglot does, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
@@ -330,7 +330,7 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     let dialect = SqlDialect::from_name(dialect);
     schema_sql
         .split(';')
-        .filter_map(|stmt| parse_first(stmt.trim(), dialect))
+        .filter_map(|stmt| parse(stmt.trim(), dialect)?.into_iter().next())
         .filter_map(|stmt| match stmt {
             Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
             _ => None,
@@ -374,7 +374,7 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 pub fn returns_rows(sql: &str, dialect: &str) -> bool {
-    match parse(sql, SqlDialect::from_name(dialect)) {
+    match parse_query(sql, SqlDialect::from_name(dialect)) {
         None => true,
         Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
@@ -420,13 +420,13 @@ fn dml_scope(stmt: &Statement) -> Scope {
             _ => Vec::new(),
         },
         Statement::Update(update) => table_scope(&update.table.relation),
+        Statement::Merge(merge) => table_scope(&merge.table),
         Statement::Delete(delete) => match &delete.from {
             FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
                 .first()
                 .map(|table| table_scope(&table.relation))
                 .unwrap_or_default(),
         },
-        Statement::Merge(merge) => table_scope(&merge.table),
         _ => Vec::new(),
     }
 }
@@ -795,19 +795,20 @@ mod tests {
 
     #[test]
     fn test_parser_input() {
-        let pg = SqlDialect::Postgres;
         assert_eq!(
-            parser_input("--sql\nSELECT %s, %(id)s, '%s', \"%s\", 5 %% 2 -- %s", pg),
-            "\nSELECT $1, $2, '%s', \"%s\", 5 %% 2 -- %s"
+            parser_input("  --sql\r\nSELECT %s, %(id)s, %b, %(a-b)t, '%s', 5 %% 2"),
+            "SELECT NULL, NULL, NULL, NULL, 'NULL', 5 % 2"
         );
-        assert_eq!(parser_input("--sql SELECT 1", pg), "");
-        assert_eq!(parser_input("SELECT %s", SqlDialect::MySql), "SELECT %s");
+        assert_eq!(parser_input("--sql SELECT 1"), "");
+        assert_eq!(parser_input("SELECT %d, %%(a)s"), "SELECT %d, %(a)s");
         assert_eq!(
             infer_type("--sql\nSELECT 1 AS x", "mysql", &None)
                 .unwrap()
                 .as_deref(),
             Some("tuple[int]")
         );
+        // Schema DDL is not a query: a `%s` there is not a placeholder.
+        assert!(load_schema("CREATE TABLE t (a INT DEFAULT %s)", "postgres").is_empty());
     }
 
     #[test]

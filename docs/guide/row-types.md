@@ -35,11 +35,11 @@ a = SQL[UserDict]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 b = SQL[UserTuple]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 c = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 d = SQL[UserModel]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check:
+# error:
 ```
 
-`# check:` lines list every diagnostic `sqlty check` reports for the block,
-warnings included; an empty `# check:` means it reports nothing.
+`# error:` lines sit above the line `sqlty check` reports on, warnings
+included; a bare `# error:` means it reports nothing.
 
 !!! warning "Do not strip files with row types"
     `sqlty strip` turns `SQL[User](...)` back into a plain string, and the
@@ -75,12 +75,12 @@ class Account(TypedDict):
 class Short(TypedDict):
     id: int
 
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 a = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-name-mismatch] "Account.user_id doesn't match query column 'id'"
 b = SQL[Account]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
 c = SQL[Short]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [column-type-mismatch] "User.id is str but query column 'id' infers int"
-# check: [column-name-mismatch] "Account.user_id doesn't match query column 'id'"
-# check: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
 ```
 
 Annotations are resolved with Python's typing machinery when the module can
@@ -99,7 +99,7 @@ class Event(NamedTuple):
     token: UUID
 
 q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP, token::UUID FROM events")
-# check:
+# error:
 ```
 
 ## TypedDict qualifiers
@@ -117,8 +117,8 @@ class User(TypedDict):
     name: NotRequired[str]
 
 ok = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 short = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
-# check: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 ```
 
 ## Closed TypedDicts
@@ -140,10 +140,10 @@ class User(TypedDict, closed=True):
     email: NotRequired[str]
 
 reordered = SQL[User]("--sql\nSELECT name::TEXT, id::INTEGER FROM users")
+# error: [typeddict-key-mismatch] "User has no key for query column 'phone'"
 extra = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, phone::TEXT FROM users")
+# error: [typeddict-key-mismatch] "User.name is required but missing from query"
 missing = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# check: [typeddict-key-mismatch] "User has no key for query column 'phone'"
-# check: [typeddict-key-mismatch] "User.name is required but missing from query"
 ```
 
 With `extra_items=T`, extra columns are allowed and must have type `T`:
@@ -156,8 +156,8 @@ class Metrics(TypedDict, extra_items=ReadOnly[int]):
     day: str
 
 counts = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, clicks::INTEGER FROM stats")
+# error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
 ratio = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
-# check: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
 ```
 
 ## TypedDict inheritance
@@ -181,6 +181,7 @@ from sqlty import SQL
 class Base(TypedDict, closed=True):
     id: int
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Base):
     name: str
 
@@ -190,14 +191,13 @@ class Counters(TypedDict, extra_items=int):
 class Page(Counters):
     views: NotRequired[int]
 
+# error: [typeddict-inheritance] "Bad.clicks must be NotRequired: base Counters has extra_items int"
 class Bad(Counters):
     clicks: int
 
 a = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 b = SQL[Page]("--sql\nSELECT id::INTEGER, views::INTEGER FROM pages")
 c = SQL[Bad]("--sql\nSELECT id::INTEGER, clicks::INTEGER FROM pages")
-# check: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
-# check: [typeddict-inheritance] "Bad.clicks must be NotRequired: base Counters has extra_items int"
 ```
 
 A rejected override keeps the base's openness, so the subclass's keys are

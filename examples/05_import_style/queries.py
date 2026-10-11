@@ -15,3 +15,7 @@ After ``sqlty rewrite .``::
 
 Run ``sqlty strip .`` to reverse.
 """
+
+from sqlty import SQL as Q
+
+q = Q[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")

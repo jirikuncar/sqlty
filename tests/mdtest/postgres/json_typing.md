@@ -1,7 +1,7 @@
 # PostgreSQL JSON Typing
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -11,50 +11,35 @@ This file tests JSON/JSONB type inference. Currently JSON/JSONB maps to `dict`.
 
 ```sql
 SELECT metadata::JSON FROM users
-```
-
-```python
-# inferred: tuple[dict]
+-- inferred: tuple[dict]
 ```
 
 ## JSONB column cast
 
 ```sql
 SELECT metadata::JSONB FROM users
-```
-
-```python
-# inferred: tuple[dict]
+-- inferred: tuple[dict]
 ```
 
 ## JSON field extraction with ->> (returns text)
 
 ```sql
 SELECT id::INTEGER, (data->>'name')::TEXT FROM users
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## Nested JSON extraction
 
 ```sql
 SELECT id::INTEGER, (data->'address'->>'city')::TEXT FROM users
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## JSON extraction with cast to non-text type
 
 ```sql
 SELECT id::INTEGER, (data->>'age')::INTEGER FROM users
-```
-
-```python
-# inferred: tuple[int, int]
+-- inferred: tuple[int, int]
 ```
 
 ## json_build_object — basic
@@ -64,10 +49,7 @@ SELECT json_build_object(
     'id', id,
     'name', name
 )::JSON FROM users
-```
-
-```python
-# inferred: tuple[dict]
+-- inferred: tuple[dict]
 ```
 
 ## json_build_object — with typed fields
@@ -78,10 +60,7 @@ SELECT json_build_object(
     'name', name::TEXT,
     'email', email::TEXT
 )::JSON FROM users
-```
-
-```python
-# inferred: tuple[dict]
+-- inferred: tuple[dict]
 ```
 
 ## jsonb_build_object — basic
@@ -95,10 +74,7 @@ SELECT jsonb_build_object(
 FROM users u
 LEFT JOIN orders o ON u.id = o.user_id
 GROUP BY u.id, u.name
-```
-
-```python
-# inferred: tuple[dict]
+-- inferred: tuple[dict]
 ```
 
 ## JSON with mixed non-JSON columns
@@ -115,8 +91,5 @@ SELECT
     )::JSON,
     u.active::BOOLEAN
 FROM users u
-```
-
-```python
-# inferred: tuple[int, str, datetime.datetime, uuid.UUID, dict, bool]
+-- inferred: tuple[int, str, datetime.datetime, uuid.UUID, dict, bool]
 ```
