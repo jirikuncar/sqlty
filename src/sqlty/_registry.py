@@ -52,7 +52,7 @@ class RegistryDetector:
             tree = ast.parse(source)
             for node in ast.walk(tree):
                 # Check decorated functions with @sqlty(schema="...")
-                if isinstance(node, ast.FunctionDef):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if name and node.name != name:
                         continue
 
@@ -127,7 +127,10 @@ class RegistryDetector:
                         source = f.read()
                     tree = ast.parse(source)
                     for node in ast.walk(tree):
-                        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                        if (
+                            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and node.name == func_name
+                        ):
                             if func_name not in registry_classes:
                                 registry_classes.append(func_name)
                             break
@@ -159,27 +162,8 @@ class RegistryDetector:
         Returns:
             True if name is a function decorated with @sqlty, False otherwise
         """
-        if not module_path.exists():
-            return False
-
-        try:
-            source = module_path.read_text()
-            tree = ast.parse(source)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == name:
-                    # Check if it has @sqlty decorator
-                    for decorator in node.decorator_list:
-                        if isinstance(decorator, ast.Name) and decorator.id == "sqlty":
-                            return True
-                        elif isinstance(decorator, ast.Call):
-                            if (
-                                isinstance(decorator.func, ast.Name)
-                                and decorator.func.id == "sqlty"
-                            ):
-                                return True
-            return False
-        except Exception:
-            return False
+        node = self._find_function(module_path, name)
+        return node is not None and _has_sqlty_decorator(node)
 
     def resolve_import_to_registry_module(
         self, import_source: str, source_file: Path, import_level: int = 0
@@ -362,19 +346,8 @@ class RegistryDetector:
         Returns:
             The ast.arguments node representing the function signature, or None if not found
         """
-        if not module_path.exists():
-            return None
-
-        try:
-            source = module_path.read_text()
-            tree = ast.parse(source)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                    return node.args
-        except Exception:
-            pass
-
-        return None
+        node = self._find_function(module_path, function_name)
+        return node.args if node else None
 
     def get_function_return_annotation(
         self, module_path: Path, function_name: str
@@ -388,16 +361,54 @@ class RegistryDetector:
         Returns:
             The AST expr node representing the return annotation, or None if not found
         """
-        if not module_path.exists():
-            return None
+        node = self._find_function(module_path, function_name)
+        return node.returns if node else None
 
+    def is_async_function(self, module_path: Path, function_name: str) -> bool:
+        """Whether the helper is a coroutine function (``async def`` without ``yield``).
+
+        Async generators are excluded: their stub overloads stay plain ``def``.
+        """
+        node = self._find_function(module_path, function_name)
+        return isinstance(node, ast.AsyncFunctionDef) and not _contains_yield(node)
+
+    @staticmethod
+    def _find_function(
+        module_path: Path, name: str
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        """The module-level definition of ``name``, preferring an ``@sqlty``-decorated one."""
         try:
-            source = module_path.read_text()
-            tree = ast.parse(source)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                    return node.returns
+            tree = ast.parse(module_path.read_text())
         except Exception:
-            pass
+            return None
+        defs = [
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+        ]
+        return next(
+            (node for node in defs if _has_sqlty_decorator(node)), defs[-1] if defs else None
+        )
 
-        return None
+
+def _has_sqlty_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    return any(
+        isinstance(dec, ast.Name)
+        and dec.id == "sqlty"
+        or isinstance(dec, ast.Call)
+        and isinstance(dec.func, ast.Name)
+        and dec.func.id == "sqlty"
+        for dec in node.decorator_list
+    )
+
+
+def _contains_yield(node: ast.AST) -> bool:
+    """Whether ``node``'s own body yields, ignoring nested functions, lambdas and classes."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.Yield, ast.YieldFrom)):
+            return True
+        if not isinstance(
+            child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+        ) and _contains_yield(child):
+            return True
+    return False

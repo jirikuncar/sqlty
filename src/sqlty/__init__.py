@@ -102,6 +102,10 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
         def sql_with_schema(query: Literal) -> Any:
             return query
 
+        # Async helpers get async def overloads
+        @sqlty
+        async def fetch(query: Literal) -> Any: ...
+
     When _auto_generate is enabled:
     - Verifies the decorated function is registered in pyproject.toml
     - Wraps it: each call binds its arguments to the signature (defaults applied),
