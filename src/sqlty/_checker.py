@@ -122,8 +122,8 @@ class Checker:
             sql: The SQL query string
             has_schema: Whether a schema is available for expansion
         """
-        # Simple check: does the SQL contain SELECT *
-        if "SELECT *" not in sql.upper() and "SELECT\n*" not in sql.upper():
+        upper = sql.upper()
+        if "SELECT *" not in upper and "SELECT\n*" not in upper:
             return None
 
         if not has_schema:
@@ -137,7 +137,7 @@ class Checker:
             if self._rules.is_enabled("select-star"):
                 return Diagnostic(
                     rule="select-star",
-                    message="SELECT * used — expand to explicit column list",
+                    message="SELECT * used — expand to explicit column list (joins need a manual edit)",
                     severity=self._rules.severity("select-star"),
                 )
 

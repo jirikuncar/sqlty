@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::analyzer::Schema;
@@ -22,15 +23,42 @@ fn unwrapped_sql_pattern() -> Regex {
     Regex::new(r#"["']--sql(\s|\\n)"#).unwrap()
 }
 
-/// Pattern to detect --sql followed by a space (not \n) — the query becomes a SQL comment.
-fn inline_sql_comment_pattern() -> Regex {
-    Regex::new(r#"["']--sql [^\\]"#).unwrap()
-}
+/// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
+/// which makes the whole query a SQL comment. Each keyword needs what its statement
+/// needs (`DELETE FROM`, `UPDATE t SET`, ...), so prose such as `"--sql delete me
+/// later"` does not match. Same pattern as `INLINE_SQL_COMMENT` in `sqlty._lint`.
+const INLINE_SQL_COMMENT: &str = concat!(
+    r"--sql[ \t]+(?i:",
+    r"SELECT\s+[^\s;]",
+    r"|WITH\s+(?:RECURSIVE\s+)?\w+[^;]*?\bAS\s*\(",
+    r"|INSERT\s+INTO\b",
+    r#"|UPDATE\s+[\w."]+(?:\s+(?:AS\s+)?\w+)?\s+SET\b"#,
+    r"|DELETE\s+FROM\b",
+    r"|VALUES\s*\(",
+    r"|(?:CREATE|ALTER|DROP)\s+(?:(?:OR\s+REPLACE|TEMP|TEMPORARY|UNIQUE|MATERIALIZED)\s+)*",
+    r"(?:TABLE|VIEW|INDEX|SCHEMA|SEQUENCE|FUNCTION|TYPE|EXTENSION|DATABASE|TRIGGER|PROCEDURE|ROLE)\b",
+    r"|TRUNCATE\s+(?:TABLE\s+)?\w",
+    r"|MERGE\s+INTO\b",
+    r"|EXPLAIN\s+(?:(?:ANALYZE|VERBOSE)\s+)*(?:SELECT|WITH|INSERT|UPDATE|DELETE|VALUES)\b",
+    r")"
+);
+
+/// A string on a line opening with `INLINE_SQL_COMMENT`.
+static INLINE_SQL_COMMENT_IN_LINE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(&format!(r#"["']{INLINE_SQL_COMMENT}"#)).unwrap());
+
+/// String content starting with `INLINE_SQL_COMMENT`.
+static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
+    Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Build a regex to extract SQL content from `{wrapper_name}[T]("--sql ...")`.
 fn build_sql_content_pattern(wrapper_name: &str) -> Regex {
     let escaped = regex::escape(wrapper_name);
-    Regex::new(&format!(r#"{}\[.*?\]\(\s*["'](.+?)["']\s*\)"#, escaped)).unwrap()
+    Regex::new(&format!(
+        r#"{}\[.*?\]\(\s*[uU]?["'](.+?)["']\s*\)"#,
+        escaped
+    ))
+    .unwrap()
 }
 
 /// Build a regex to extract the type annotation from `{wrapper_name}[T](...)`.
@@ -125,7 +153,6 @@ pub fn check_source(
     let sql_content_pat = build_sql_content_pattern(&wrapper_name);
     let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
     let unwrapped_pat = unwrapped_sql_pattern();
-    let inline_pat = inline_sql_comment_pattern();
 
     let wrappable = if rule_config.is_enabled("stale-rewrite") {
         wrappable_lines(source, dialect, schema, import_style, untyped)
@@ -167,7 +194,7 @@ pub fn check_source(
             }
             // Also check for inline-sql-comment on unwrapped strings
             if rule_config.is_enabled("inline-sql-comment")
-                && has_inline_sql_comment(trimmed, &inline_pat)
+                && INLINE_SQL_COMMENT_IN_LINE.is_match(trimmed)
             {
                 diagnostics.push(Diagnostic {
                     rule: "inline-sql-comment".to_string(),
@@ -182,7 +209,9 @@ pub fn check_source(
         // Check for SQL[T](...) wrappers
         if let Some(sql_content) = extract_sql_from_wrapper(trimmed, &sql_content_pat) {
             // Check inline-sql-comment on wrapped strings
-            if rule_config.is_enabled("inline-sql-comment") && sql_content.starts_with("--sql ") {
+            if rule_config.is_enabled("inline-sql-comment")
+                && INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content)
+            {
                 diagnostics.push(Diagnostic {
                     rule: "inline-sql-comment".to_string(),
                     message: r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#.to_string(),
@@ -197,7 +226,7 @@ pub fn check_source(
                 if has_schema && rule_config.is_enabled("select-star") {
                     diagnostics.push(Diagnostic {
                         rule: "select-star".to_string(),
-                        message: "SELECT * used — expand to explicit column list".to_string(),
+                        message: "SELECT * used — expand to explicit column list (joins need a manual edit)".to_string(),
                         severity: rule_config.severity("select-star").to_string(),
                         line: line_num,
                     });
@@ -215,6 +244,7 @@ pub fn check_source(
             if annotated.as_deref() == Some(untyped_name.as_str()) {
                 if rule_config.is_enabled("untyped-query") {
                     let untyped = format!("{}[{}]", wrapper_name, untyped_name);
+                    // A `*` the schema cannot resolve infers no type, so none is guessed.
                     let message = match infer_from_sql_content(&sql_content, dialect, schema) {
                         Some(current) => format!(
                             "{} can now be {}[{}]; run sqlty check --fix",
@@ -258,11 +288,6 @@ pub fn check_source(
     }
 
     diagnostics
-}
-
-/// Check if a line has `"--sql SELECT ..."` (space after --sql, not \n).
-fn has_inline_sql_comment(line: &str, pattern: &Regex) -> bool {
-    pattern.is_match(line)
 }
 
 /// Lines holding a string that `rewrite` would wrap.

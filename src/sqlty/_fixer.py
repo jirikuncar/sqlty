@@ -9,12 +9,18 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from sqlty._lint import RuleConfig
-from sqlty._rewriter import ImportStyle, _has_import, _header_end, _is_sqlty_managed, _query
+from sqlty._lint import INLINE_SQL_COMMENT, RuleConfig
+from sqlty._rewriter import (
+    _SQL_STRING_PATTERN,
+    ImportStyle,
+    _has_import,
+    _header_end,
+    _is_sqlty_managed,
+    _query,
+    is_plain_literal,
+)
 
 _QUOTES = ('"""', "'''", '"', "'")
-# ``"--sql SELECT ..."`` opening a plain string literal; raw, f- and t-strings are left alone.
-_INLINE_SQL_COMMENT = re.compile(r"""(?<!\w)([uU]?(?:\"\"\"|'''|"|'))--sql (?=\S)""")
 
 
 def fix_source(
@@ -38,7 +44,7 @@ def fix_source(
     enabled = RuleConfig(overrides=rules).is_enabled
     style = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
     if enabled("inline-sql-comment"):
-        source = _INLINE_SQL_COMMENT.sub(r"\1--sql\\n", source)
+        source = _fix_inline_sql_comments(source)
     if enabled("stale-rewrite"):
         source = core.rewrite_source(
             source,
@@ -58,19 +64,22 @@ def fix_source(
 
     def fix(match: re.Match[str]) -> str:
         annotated, literal = match["type"], match["inner"]
-        quote = next(q for q in _QUOTES if literal.startswith(q))
-        content = literal[len(quote) : -len(quote)]
+        prefix = literal[: len(literal) - len(literal.lstrip("uU"))]
+        quote = next(q for q in _QUOTES if literal.startswith(q, len(prefix)))
+        content = literal[len(prefix) + len(quote) : -len(quote)]
         if not _is_sqlty_managed(content):
             return match[0]
         if schema_sql and enabled("select-star"):
             content = _expand_star(content, quote, core.expand_star, dialect, schema_sql)
+        # Inference gives no type for a ``*`` the schema cannot resolve, so it is kept.
         refresh = (annotated.startswith("tuple[") and enabled("stale-type")) or (
             annotated == style.untyped_name and enabled("untyped-query")
         )
         row_type = (infer(content) if refresh else None) or annotated
         if row_type != annotated:
             introduced.add(row_type)
-        return f"{style.wrapper_name}[{row_type}]({match['space']}{quote}{content}{quote}{match['end']}"
+        literal = f"{prefix}{quote}{content}{quote}"
+        return f"{style.wrapper_name}[{row_type}]({match['space']}{literal}{match['end']}"
 
     fixed = _wrapper_pattern(style).sub(fix, source)
     return _fix_imports(fixed, style, introduced) if fixed != source else source
@@ -79,12 +88,12 @@ def fix_source(
 def _wrapper_pattern(style: ImportStyle) -> re.Pattern[str]:
     return re.compile(
         rf"{re.escape(style.wrapper_name)}\[(?P<type>[^\n]*?)\]\((?P<space>\s*)"
-        r"(?P<inner>"
+        r"(?P<inner>[uU]?(?:"
         r'""".*?"""'
         r"|'''.*?'''"
         r'|"[^"]*"'
         r"|'[^']*'"
-        r")(?P<end>\s*,?\s*\))",
+        r"))(?P<end>\s*,?\s*\))",
         re.DOTALL,
     )
 
@@ -101,6 +110,7 @@ def _expand_star(
     if match is None:
         return content
     prefix, query = match.groups()
+    # ``expand_star`` returns None for joins, where dropped qualifiers would be ambiguous.
     if "*" not in query or "\\" in query or quote[0] in query:
         return content
     try:
@@ -111,6 +121,26 @@ def _expand_star(
     if expanded is None or "\\" in expanded or quote[0] in expanded or multiline:
         return content
     return prefix + expanded
+
+
+def _fix_inline_sql_comments(source: str) -> str:
+    """``"--sql SELECT ..."`` to ``"--sql\\nSELECT ..."`` in plain string literals.
+
+    Only strings that ``inline-sql-comment`` reports are changed, so prose such
+    as ``"--sql flag enables it"`` is left alone. This and ``select-star`` are
+    the only fixes that change string content.
+    """
+    replacements: list[int] = []
+    for match in _SQL_STRING_PATTERN.finditer(source):
+        if not is_plain_literal(match):
+            continue
+        literal = match["str"]
+        quote = next(q for q in _QUOTES if literal.startswith(q))
+        if INLINE_SQL_COMMENT.match(literal[len(quote) : -len(quote)]):
+            replacements.append(match.start("str") + len(quote) + len("--sql"))
+    for at in reversed(replacements):
+        source = source[:at] + "\\n" + source[at + 1 :]
+    return source
 
 
 def _fix_imports(source: str, style: ImportStyle, introduced: set[str]) -> str:

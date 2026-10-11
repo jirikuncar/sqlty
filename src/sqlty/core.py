@@ -341,7 +341,7 @@ def _enhance_with_user_type_checks(
 
             # Extract SQL content from wrapper
             sql_match = re.search(
-                rf'{escaped_wrapper}\[.*?\]\(\s*["\'](.+?)["\']\s*\)', stripped, re.DOTALL
+                rf'{escaped_wrapper}\[.*?\]\(\s*[uU]?["\'](.+?)["\']\s*\)', stripped, re.DOTALL
             )
             if not sql_match:
                 continue

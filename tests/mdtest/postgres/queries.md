@@ -383,7 +383,7 @@ GROUP BY user_id
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[str]
+-- inferred: None
 ```
 
 ## SELECT without FROM clause

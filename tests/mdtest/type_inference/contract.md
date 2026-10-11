@@ -311,7 +311,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT * FROM audit_log
--- inferred: tuple[str]
+-- inferred: None
 ```
 
 ### Schema: `SELECT MAX(placed), AVG(oid) FROM orders`
