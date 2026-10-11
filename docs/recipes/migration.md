@@ -75,12 +75,6 @@ query = "--sql\nSELECT id, name, created_at FROM users WHERE id = %s"
 # rewritten: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
 ```
 
-!!! warning "`%s` placeholders need the Python backend"
-    The default Rust backend leaves queries with `%s` or `%(name)s`
-    placeholders unwrapped, so `sqlty rewrite` does nothing for this one.
-    Run sqlty with `SQLTY_LIB=py` until the gap is fixed; see
-    [Backends](../reference/backends.md#known-gaps).
-
 Without a schema, an uncast column is typed `str`, which is wrong for most
 of them.
 
@@ -161,11 +155,6 @@ values as parameters (`%s`) instead.
 
 **Nullable columns.** Row types are never `T | None`. Annotate the field in
 a row type if the column can be `NULL`.
-
-**Rust backend gaps.** The default Rust backend does not infer queries
-containing `%s` or `%(name)s`, and cannot parse `--sql` queries in the MySQL
-dialect. Run sqlty with `SQLTY_LIB=py` until this is fixed; see
-[Backends](../reference/backends.md#known-gaps).
 
 **Explicit `--dialect postgres`.** It does not override a `dialect` set in
 `pyproject.toml`; see [Schema inference](../guide/schema-inference.md#dialects).

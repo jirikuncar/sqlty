@@ -5,11 +5,12 @@
 //! spells them (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`)
 //! so that schema-driven output matches between backends.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, ObjectName, OutputClause, Query, Select, SelectItem,
@@ -131,6 +132,12 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
+/// A psycopg placeholder (`%s`, `%(name)s`) in group 1, or a literal, quoted name or comment to skip.
+static PYFORMAT: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|%%|(%(?:\(\w+\))?s)"#)
+        .unwrap()
+});
+
 /// Schema: table name -> columns as `(name, canonical SQL type)` in declaration order.
 pub type Schema = HashMap<String, Vec<(String, String)>>;
 
@@ -174,8 +181,30 @@ impl SqlDialect {
 
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    let sql = parser_input(sql, dialect);
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), &sql).ok()?;
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+}
+
+/// `sql` as sqlparser should read it. The `--sql` marker line is dropped, since
+/// MySQL only reads `--` followed by whitespace as a comment. In Postgres, psycopg's
+/// `%s` and `%(name)s` placeholders, which sqlglot parses, become `$1`, `$2`, ...
+fn parser_input(sql: &str, dialect: SqlDialect) -> Cow<'_, str> {
+    let sql = match sql.strip_prefix("--sql") {
+        Some(rest) => rest.find('\n').map_or("", |i| &rest[i..]),
+        None => sql,
+    };
+    if dialect != SqlDialect::Postgres {
+        return Cow::Borrowed(sql);
+    }
+    let mut n = 0;
+    PYFORMAT.replace_all(sql, |caps: &Captures| match caps.get(1) {
+        Some(_) => {
+            n += 1;
+            format!("${n}")
+        }
+        None => caps[0].to_string(),
+    })
 }
 
 /// Whether `stmts` use what sqlparser accepts but the dialect (and sqlglot) does not:
@@ -761,6 +790,23 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("tuple[int, float, list]")
+        );
+    }
+
+    #[test]
+    fn test_parser_input() {
+        let pg = SqlDialect::Postgres;
+        assert_eq!(
+            parser_input("--sql\nSELECT %s, %(id)s, '%s', \"%s\", 5 %% 2 -- %s", pg),
+            "\nSELECT $1, $2, '%s', \"%s\", 5 %% 2 -- %s"
+        );
+        assert_eq!(parser_input("--sql SELECT 1", pg), "");
+        assert_eq!(parser_input("SELECT %s", SqlDialect::MySql), "SELECT %s");
+        assert_eq!(
+            infer_type("--sql\nSELECT 1 AS x", "mysql", &None)
+                .unwrap()
+                .as_deref(),
+            Some("tuple[int]")
         );
     }
 

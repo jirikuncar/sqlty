@@ -188,6 +188,73 @@ class TestParserParity:
         assert core.rewrite_source(source, untyped=True) == source
 
 
+class TestPlaceholders:
+    """psycopg ``%s`` / ``%(name)s`` placeholders are read as parameters in PostgreSQL only."""
+
+    SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);"
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect", "expected"),
+        [
+            ("SELECT id, name FROM users WHERE id = %s", "postgres", "tuple[int, str]"),
+            ("SELECT id, name FROM users WHERE id = %(id)s", "postgres", "tuple[int, str]"),
+            (
+                "SELECT id FROM users WHERE id = %s AND name = %(name)s OR id = $1 LIMIT %s",
+                "postgres",
+                "tuple[int]",
+            ),
+            (
+                "INSERT INTO users (id, name) VALUES (%s, %(name)s) RETURNING id",
+                "postgres",
+                "tuple[int]",
+            ),
+            ("--sql\nSELECT %s AS x", "postgres", "tuple[str]"),
+            ("SELECT name FROM users WHERE name LIKE '%(x)s' -- %s", "postgres", "tuple[str]"),
+            ("SELECT id FROM users WHERE id = %s", "mysql", None),
+            ("SELECT id FROM users WHERE id = %s", "sqlite", None),
+        ],
+    )
+    def test_infer_type(self, core: types.ModuleType, sql: str, dialect: str, expected: str | None):
+        assert core.infer_type(sql, dialect=dialect, schema_sql=self.SCHEMA) == expected
+
+    def test_rewrite(self, core: types.ModuleType):
+        source = 'q = "--sql\\nSELECT id, name FROM users WHERE id = %s"'
+        result = core.rewrite_source(source, schema_sql=self.SCHEMA)
+        assert 'SQL[tuple[int, str]]("--sql\\nSELECT id, name FROM users WHERE id = %s")' in result
+
+    def test_check_stale_type(self, core: types.ModuleType):
+        source = 'q = SQL[tuple[str]]("--sql\\nSELECT id FROM users WHERE name = %(name)s")'
+        diags = core.check_source(source, schema_sql=self.SCHEMA)
+        assert [d["rule"] for d in diags] == ["stale-type"]
+
+
+class TestMySqlMarker:
+    """The ``--sql`` marker is not a MySQL comment (no space after ``--``) but is never SQL."""
+
+    SCHEMA = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);"
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("--sql\nSELECT 1 AS x", "tuple[int]"),
+            ("--sql\nSELECT id, name FROM users", "tuple[int, str]"),
+            ("--sql SELECT id FROM users", None),
+        ],
+    )
+    def test_infer_type(self, core: types.ModuleType, sql: str, expected: str | None):
+        assert core.infer_type(sql, dialect="mysql", schema_sql=self.SCHEMA) == expected
+
+    def test_rewrite(self, core: types.ModuleType):
+        source = 'q = "--sql\\nSELECT id, name FROM users"'
+        result = core.rewrite_source(source, dialect="mysql", schema_sql=self.SCHEMA)
+        assert 'SQL[tuple[int, str]]("--sql\\nSELECT id, name FROM users")' in result
+
+    def test_check_stale_type(self, core: types.ModuleType):
+        source = 'q = SQL[tuple[str, str]]("--sql\\nSELECT id, name FROM users")'
+        diags = core.check_source(source, dialect="mysql", schema_sql=self.SCHEMA)
+        assert [d["rule"] for d in diags] == ["stale-type"]
+
+
 # ---------------------------------------------------------------------------
 # rewrite_source
 # ---------------------------------------------------------------------------

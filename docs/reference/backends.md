@@ -42,22 +42,13 @@ assumed:
 
 ## Known gaps
 
-Two Rust gaps affect common code. Set `SQLTY_LIB=py` to work around them:
-
-- **Query parameters.** The Rust backend infers nothing for a query that
-  contains `%s` or `%(name)s` placeholders (the psycopg style), so
-  `sqlty rewrite` leaves it unwrapped and `sqlty check` skips `stale-type`
-  for it. Row type checks such as `column-type-mismatch` still run. The
-  Python backend handles these placeholders for PostgreSQL, but not for
-  MySQL.
-- **MySQL.** MySQL requires whitespace after `--` for a comment, and the Rust
-  parser follows that, so `--sql` followed by the query fails to parse with
-  `dialect = "mysql"`: `rewrite` wraps nothing and `check` infers nothing.
-
-Other known differences, and gaps both backends share, are tracked in
+Known differences, and gaps both backends share, are tracked in
 [PLAN-FUTURE.md](https://github.com/jirikuncar/sqlty/blob/main/PLAN-FUTURE.md#backend-parity-gaps).
 In short:
 
+- `%s` and `%(name)s` placeholders (the psycopg style) are understood only
+  with `dialect = "postgres"`; both backends infer nothing for them in MySQL
+  or SQLite.
 - MySQL `INT3 UNSIGNED` / `MIDDLEINT UNSIGNED` columns parse in Python but
   make Rust skip the table.
 - MySQL `ZEROFILL` columns make both backends skip the table.

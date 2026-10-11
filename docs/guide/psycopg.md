@@ -41,11 +41,6 @@ with psycopg.connect("dbname=app") as conn:
 `sqlty check` makes sure `User` matches the columns before the code runs
 (see [Row types](row-types.md)); psycopg builds `User` objects at runtime.
 
-!!! warning "Placeholders need the Python backend"
-    The default Rust backend leaves queries with `%s` or `%(name)s`
-    unwrapped. Run sqlty with `SQLTY_LIB=py`; see
-    [Backends](../reference/backends.md#known-gaps).
-
 The row factory is chosen from the query's runtime row type
 ([`row_form`](row-types.md#the-row-type-at-runtime)):
 
