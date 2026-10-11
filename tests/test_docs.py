@@ -1,60 +1,85 @@
-"""Run mdtest assertions embedded in README.md and docs/**/*.md.
+"""Docs agree with the code: rule pages and table match ``RULES``, examples are
+rewritten, links resolve, and ``>>>`` examples in the Python API page run.
 
-Ensures that code examples shown in the documentation stay in sync with
-the actual behaviour of sqlty's rewriter, type inference, and codec.
-Files without assertion comments contribute no test cases.
-
-Note: TOML config blocks apply to every later heading in the same file,
-not only to child headings, so a section inherits ``[tool.sqlty]`` settings
-(e.g. ``schema``) from earlier sibling sections. ``# decoded:`` ignores
-config, but a new ``# rewritten:`` or ``# inferred:`` assertion added after a
-TOML block may pick it up; repeat or reset the config in that section if it
-matters.
-
-Run with ``--update-mdtest`` to rewrite assertion comments in place.
-
-``>>>`` examples in the pages listed in ``_DOCTEST_FILES`` run as doctests.
+Code blocks with assertions are mdtests, collected by ``tests/_mdtest``.
 """
 
 from __future__ import annotations
 
 import doctest
+import re
 from pathlib import Path
 
 import pytest
 
-from tests.mdtest_runner import MDFileUpdater, MDTestCase, parse_mdtest_file
+from sqlty._config import load_config
+from sqlty._lint import RULES
+from sqlty.core import check_source, rewrite_source
 
-_ROOT = Path(__file__).resolve().parent.parent
-# README.md is required: a missing file must error, not yield zero cases.
-_FILES = [_ROOT / "README.md", *sorted((_ROOT / "docs").rglob("*.md"))]
-_CASES = [case for path in _FILES for case in parse_mdtest_file(path)]
-_UPDATERS: dict[Path, MDFileUpdater] = {}
-
-
-@pytest.mark.parametrize(
-    "case", _CASES, ids=[f"{c.md_path.relative_to(_ROOT)}::{c.name}" for c in _CASES]
-)
-def test_docs(case: MDTestCase, request: pytest.FixtureRequest) -> None:
-    if request.config.getoption("--update-mdtest"):
-        case.update = True
-        case.updater = _UPDATERS.setdefault(case.md_path, MDFileUpdater(case.md_path))
-    case.run()
+ROOT = Path(__file__).resolve().parent.parent
+RULE_DOCS = ROOT / "src" / "sqlty" / "rules"
+EXAMPLES = sorted(p for p in (ROOT / "examples").glob("0*") if p.is_dir())
 
 
-_DOCTEST_FILES = [_ROOT / "docs" / "reference" / "python-api.md"]
+def test_rules_table() -> None:
+    """The table in ``docs/reference/rules.md`` lists every rule with its defaults."""
+    text = (ROOT / "docs" / "reference" / "rules.md").read_text()
+    rows = re.findall(r"^\| \[`([\w-]+)`\]\(#[\w-]+\) \| [\w ]+ \| (\w+) \| (\w+) \|", text, re.M)
+    assert sorted(rows) == sorted(
+        (r.name, r.default_severity.value, "yes" if r.fixable else "no") for r in RULES.values()
+    )
 
 
-@pytest.mark.parametrize(
-    "path", _DOCTEST_FILES, ids=[str(p.relative_to(_ROOT)) for p in _DOCTEST_FILES]
-)
-def test_docs_doctest(path: Path) -> None:
+def test_python_api_doctest() -> None:
+    path = ROOT / "docs" / "reference" / "python-api.md"
     # Blank out code fences so a closing ``` is not read as expected output.
     text = "\n".join(
         "" if line.lstrip().startswith("```") else line for line in path.read_text().splitlines()
     )
     test = doctest.DocTestParser().get_doctest(text, {}, path.name, str(path), 0)
-    runner = doctest.DocTestRunner(optionflags=doctest.ELLIPSIS)
-    result = runner.run(test)
+    result = doctest.DocTestRunner(optionflags=doctest.ELLIPSIS).run(test)
     assert result.attempted > 0
     assert result.failed == 0
+
+
+def test_rule_docs() -> None:
+    assert {p.stem for p in RULE_DOCS.glob("*.md")} == set(RULES)
+    for rule in RULES.values():
+        head = (RULE_DOCS / f"{rule.name}.md").read_text().splitlines()[:3]
+        assert head == [
+            f"# {rule.name}",
+            "",
+            f"Default severity: **{rule.default_severity.value}**",
+        ]
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=[p.name for p in EXAMPLES])
+def test_examples_are_rewritten(example: Path) -> None:
+    """Each example is current under its own ``[tool.sqlty]``."""
+    config, config_dir = load_config(example)
+    schema = config.get("schema")
+    options = {
+        "dialect": config.get("dialect", "postgres"),
+        "schema_sql": (config_dir / schema).read_text() if config_dir and schema else None,
+        "import_style": config.get("import_style"),
+    }
+    for path in sorted(example.glob("*.py")):
+        source = path.read_text()
+        assert rewrite_source(source, **options) == source, f"{path}: run sqlty rewrite"
+        stale = [d for d in check_source(source, **options) if str(d["rule"]).startswith("stale-")]
+        assert not stale, f"{path}: {stale}"
+
+
+MARKDOWN = sorted(
+    {ROOT / name for name in ("README.md", "AGENTS.md", "DEVELOPMENT.md", "CLAUDE.md")}
+    | {*ROOT.glob("docs/**/*.md"), *RULE_DOCS.glob("*.md"), *ROOT.glob("examples/*/README.md")}
+)
+
+
+@pytest.mark.parametrize("page", MARKDOWN, ids=[str(p.relative_to(ROOT)) for p in MARKDOWN])
+def test_links(page: Path) -> None:
+    prose = re.sub(r"^(`{3,}).*?^\1", "", page.read_text(), flags=re.M | re.S)
+    prose = re.sub(r"`[^`\n]*`", "", prose)
+    links = re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", prose)
+    broken = [link for link in links if "://" not in link and not (page.parent / link).exists()]
+    assert not broken

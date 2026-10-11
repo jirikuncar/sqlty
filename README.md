@@ -29,7 +29,7 @@ Comment lines such as `# rewritten-file:` show the result; the test suite
 checks them.
 
 Each cast becomes a Python type: `INTEGER` is `int`, `TEXT` is `str`,
-`TIMESTAMP` is `datetime.datetime` (see the
+`TIMESTAMP` is `datetime.datetime`, `BYTEA` is `bytes` (see the
 [type mapping](https://jirikuncar.github.io/sqlty/guide/writing-queries/#type-mapping)).
 `SQL[T]` is a `str` subclass, so the query still works anywhere a string
 does, and editors and type checkers now know its row type.
@@ -75,8 +75,8 @@ class User(TypedDict):
     id: str
     name: str
 
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 ```
 
 ### Schema inference
@@ -109,8 +109,9 @@ query = "--sql\nSELECT id, name, email FROM users"
   `execute(conn, SQL[User](...))` returns a `Cursor[User]` with the matching
   row factory; `scalar` fetches one typed value.
 - **[Magic codec](https://jirikuncar.github.io/sqlty/guide/magic-codec/).**
-  Files declaring `# coding: sqlty` are rewritten when imported, once the
-  codec is registered with `import sqlty.magic`.
+  Files declaring `# coding: sqlty` are rewritten when imported. The wheel
+  installs a `.pth` file that registers the codec at startup; with an
+  editable or source install, register it with `import sqlty.magic`.
 - **[Untyped queries](https://jirikuncar.github.io/sqlty/guide/untyped/).**
   With `untyped = "sentinel"`, queries sqlty cannot type become
   `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
@@ -131,7 +132,9 @@ query = "--sql\nSELECT id, name, email FROM users"
 
 ## Lint rules
 
-`sqlty check` runs a set of rules with configurable severity. See the
+`sqlty check` runs a set of rules with configurable severity;
+`sqlty check --fix` applies the fixable ones and `sqlty rule NAME` explains
+one. See the
 [rules reference](https://jirikuncar.github.io/sqlty/reference/rules/).
 
 ## Backends

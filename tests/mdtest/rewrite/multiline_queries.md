@@ -53,9 +53,9 @@ and a warning is emitted. Set `fstring-skipped = "ignore"` in
 `[tool.sqlty.rules]` to silence. For t-strings, use `tstring-skipped`.
 
 ```python
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
 q = f"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: q = f"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: f-string with --sql prefix skipped (f-strings cannot be statically rewritten) [fstring-skipped]
 ```
 
 ## T-strings (PEP 750) are not rewritten
@@ -63,9 +63,21 @@ q = f"--sql\nSELECT {column}::INTEGER FROM users"
 Template strings (Python 3.14+) also use interpolation and are skipped:
 
 ```python
+# error: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
 q = t"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: q = t"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [tstring-skipped]
+```
+
+## Silencing skipped f-strings
+
+```toml
+[tool.sqlty.rules]
+fstring-skipped = "ignore"
+```
+
+```python
+q = f"--sql\nSELECT {column}::INTEGER FROM users"
+# error:
 ```
 
 ## Wrapper split across lines by a formatter is not wrapped again

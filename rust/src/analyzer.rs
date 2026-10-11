@@ -60,12 +60,16 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("JSON", "dict"),
         ("JSONB", "dict"),
         ("UUID", "uuid.UUID"),
+        ("BYTEA", "bytes"),
+        ("BLOB", "bytes"),
+        ("BINARY", "bytes"),
+        ("VARBINARY", "bytes"),
     ])
 });
 
 /// Result types of functions by name (COUNT, AVG, SUM, MIN, MAX and COALESCE are special-cased).
 static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let groups: [(&[&str], &str); 4] = [
+    let groups: [(&[&str], &str); 7] = [
         (
             &[
                 "LENGTH",
@@ -102,13 +106,12 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
                 "REPLACE",
                 "STRING_AGG",
                 "GROUP_CONCAT",
-                "NOW",
-                "CURRENT_TIMESTAMP",
-                "CURRENT_DATE",
-                "CURRENT_TIME",
             ],
             "str",
         ),
+        (&["NOW", "CURRENT_TIMESTAMP"], "datetime.datetime"),
+        (&["CURRENT_DATE"], "datetime.date"),
+        (&["CURRENT_TIME"], "datetime.time"),
         (
             &[
                 "JSON_BUILD_OBJECT",
@@ -172,9 +175,22 @@ impl SqlDialect {
     }
 }
 
+/// A leading `--sql` marker line: MySQL only reads `-- ` (with a space) as a comment.
+static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
+
+/// DB-API placeholders (`%s`, `%(name)s`) and the `%%` escape, which sqlparser can't read.
+static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%\(\w+\)s|%s").unwrap());
+
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
+///
+/// Placeholders parse as `NULL`, a value of unknown type, and `%%` as `%`, as in the Python backend.
 fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    let sql = SQL_MARKER.replace(sql, "");
+    let sql = PLACEHOLDER.replace_all(&sql, |caps: &regex::Captures| match &caps[0] {
+        "%%" => "%",
+        _ => "NULL",
+    });
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), &sql).ok()?;
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
 }
 
@@ -391,13 +407,13 @@ fn dml_scope(stmt: &Statement) -> Scope {
             _ => Vec::new(),
         },
         Statement::Update(update) => table_scope(&update.table.relation),
+        Statement::Merge(merge) => table_scope(&merge.table),
         Statement::Delete(delete) => match &delete.from {
             FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
                 .first()
                 .map(|table| table_scope(&table.relation))
                 .unwrap_or_default(),
         },
-        Statement::Merge(merge) => table_scope(&merge.table),
         _ => Vec::new(),
     }
 }

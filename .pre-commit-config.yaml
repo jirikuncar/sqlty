@@ -19,20 +19,10 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
-      - id: sqlty-check
-        name: sqlty check examples
-        entry: uv run sqlty check examples/
-        language: system
-        pass_filenames: false
-        require_serial: true
-        types: [python]
-        files: ^examples/
       # magic_codec/ keeps plain --sql strings: the codec wraps them at import time
-      - id: sqlty-rewrite
-        name: sqlty rewrite examples
-        entry: >-
-          uv run sqlty rewrite examples/01_quick_start examples/02_schema_inference
-          examples/03_pyproject_config examples/04_check_and_types examples/05_import_style
+      - id: sqlty-examples
+        name: sqlty rewrite + check examples
+        entry: bash -c 'uv run sqlty rewrite -q examples/0*/ && uv run sqlty check -q examples/0*/'
         language: system
         pass_filenames: false
         require_serial: true

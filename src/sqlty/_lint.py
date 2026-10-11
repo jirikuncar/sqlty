@@ -129,7 +129,7 @@ RULES: dict[str, LintRule] = {
     "untyped-query": LintRule(
         name="untyped-query",
         default_severity=Severity.WARN,
-        fixable=False,
+        fixable=True,
         description="SQL[UNTYPED] query has no inferable row type; add casts or a schema",
     ),
 }
@@ -186,3 +186,15 @@ class RuleConfig:
         """Create RuleConfig from a [tool.sqlty] config dict."""
         rules = config.get("rules", {})
         return cls(overrides=rules)
+
+
+def rule_doc(name: str) -> str:
+    """Markdown documentation of a rule, shipped as ``sqlty/rules/<name>.md``.
+
+    Example:
+        >>> rule_doc("stale-type").splitlines()[0]
+        '# stale-type'
+    """
+    from importlib.resources import files
+
+    return (files("sqlty") / "rules" / f"{name}.md").read_text(encoding="utf-8")

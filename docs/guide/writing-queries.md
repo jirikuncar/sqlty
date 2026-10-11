@@ -104,9 +104,9 @@ An f-string or t-string is built at runtime, so it cannot be rewritten. sqlty
 skips every `--sql` string on a line that holds one:
 
 ```python
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
 query = f"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: query = f"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: f-string with --sql prefix skipped (f-strings cannot be statically rewritten) [fstring-skipped]
 ```
 
 `sqlty check` reports such strings as
@@ -130,8 +130,9 @@ parameters instead of interpolating them, and keep the query a plain literal.
 | `INTERVAL` | `datetime.timedelta` |
 | `JSON`, `JSONB` | `dict` |
 | `UUID` | `uuid.UUID` |
+| `BYTEA`, `BLOB`, `BINARY`, `VARBINARY` | `bytes` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list` |
-| Anything else (`BYTEA`, `BLOB`, `ENUM`, ...) | `str` |
+| Anything else (`ENUM`, `SET`, ...) | `str` |
 
 ### Dialect notes
 
@@ -152,7 +153,7 @@ See [Schema inference](schema-inference.md#dialects) for choosing a dialect.
 ## Editing queries
 
 `sqlty rewrite` never replaces an existing wrapper, so after you change the
-SQL inside `SQL[T](...)`, `T` stays as it was. There are two ways to update
+SQL inside `SQL[T](...)`, `T` stays as it was. There are three ways to update
 it.
 
 ### Edit in place
@@ -161,17 +162,29 @@ Change the SQL inside the wrapper and run `sqlty check`. It reports
 [`stale-type`](../reference/rules.md#stale-type) when a `SQL[tuple[...]]` no
 longer matches the query, and the
 [row type rules](../reference/rules.md#row-type-rules) when a named
-[row type](row-types.md) no longer fits. Then update `T` by hand:
+[row type](row-types.md) no longer fits:
+
+```python
+from sqlty import SQL
+
+# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+```
+
+`sqlty check --fix` then writes the inferred `T` into every stale
+`SQL[tuple[...]]` and `SQL[UNTYPED]`; row types you wrote by hand are left for
+you to update:
 
 ```python
 from sqlty import SQL
 
 q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
-# check: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 ```
 
-This works for every file, and it is the only safe workflow once a file has
-row types you wrote by hand.
+This works for every file, including ones with row types you wrote by hand.
 
 ### Strip and rewrite
 

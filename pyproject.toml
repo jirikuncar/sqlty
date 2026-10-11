@@ -52,6 +52,7 @@ python-source = "src"
 module-name = "sqlty._core"
 features = ["pyo3/extension-module"]
 manifest-path = "rust/Cargo.toml"
+include = [{ path = "sqlty_magic.pth", format = "wheel" }]
 
 [dependency-groups]
 dev = [
@@ -71,8 +72,10 @@ magic = ["isort>=7.0.0"]
 psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]
-addopts = ["--cov-report=term-missing", "--cov-report=html", "-v"]
-testpaths = ["tests"]
+addopts = ["-p", "tests._mdtest.plugin", "--cov-report=term-missing", "--cov-report=html", "-v"]
+pythonpath = ["."]
+testpaths = ["tests", "docs", "src/sqlty/rules", "README.md"]
+mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md"]
 markers = [
     "e2e: end-to-end tests (subprocess + inline-snapshot)",
     "slow: slow tests that can be skipped with -m 'not slow'",

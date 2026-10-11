@@ -56,6 +56,9 @@ Warnings leave the exit code at 0; errors such as a
 [row type](guide/row-types.md) mismatch exit with 1. The
 [rules reference](reference/rules.md) lists every diagnostic.
 
+`sqlty check --fix .` updates the stale type in place, then reports anything
+left that needs a decision.
+
 ## 4. Name the columns
 
 Replace `tuple[...]` with a `TypedDict`, `NamedTuple`, dataclass or Pydantic
@@ -70,10 +73,10 @@ class User(TypedDict):
     name: str
 
 user_query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# check:
+# error:
 ```
 
-The empty `# check:` line means `sqlty check` reports nothing for this file.
+The bare `# error:` line means `sqlty check` reports nothing for this file.
 See [Row types](guide/row-types.md).
 
 ## 5. Edit queries
