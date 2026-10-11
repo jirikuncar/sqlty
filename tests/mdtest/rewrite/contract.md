@@ -104,7 +104,7 @@ q = "--sql\nUPDATE users SET name = 'x'"
 ### Insert without returning not wrapped
 
 ```python
-q = "--sql\nINSERT INTO users (name) VALUES ('x')" 
+q = "--sql\nINSERT INTO users (name) VALUES ('x')"
 # rewritten-file: q = "--sql\nINSERT INTO users (name) VALUES ('x')"
 ```
 

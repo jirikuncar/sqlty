@@ -53,14 +53,14 @@ SELECT EXTRACT(YEAR FROM created_at) FROM events
 
 ```sql
 SELECT NOW()
--- inferred: tuple[str]
+-- inferred: tuple[datetime.datetime]
 ```
 
 ## CURRENT_TIMESTAMP to hit line 115
 
 ```sql
 SELECT CURRENT_TIMESTAMP
--- inferred: tuple[str]
+-- inferred: tuple[datetime.datetime]
 ```
 
 ## SQL that results in empty column list

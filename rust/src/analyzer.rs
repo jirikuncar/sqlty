@@ -50,12 +50,16 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("JSON", "dict"),
         ("JSONB", "dict"),
         ("UUID", "uuid.UUID"),
+        ("BYTEA", "bytes"),
+        ("BLOB", "bytes"),
+        ("BINARY", "bytes"),
+        ("VARBINARY", "bytes"),
     ])
 });
 
 /// Result types of functions by name (COUNT, AVG, SUM, MIN, MAX and COALESCE are special-cased).
 static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let groups: [(&[&str], &str); 4] = [
+    let groups: [(&[&str], &str); 7] = [
         (
             &[
                 "LENGTH",
@@ -92,13 +96,12 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
                 "REPLACE",
                 "STRING_AGG",
                 "GROUP_CONCAT",
-                "NOW",
-                "CURRENT_TIMESTAMP",
-                "CURRENT_DATE",
-                "CURRENT_TIME",
             ],
             "str",
         ),
+        (&["NOW", "CURRENT_TIMESTAMP"], "datetime.datetime"),
+        (&["CURRENT_DATE"], "datetime.date"),
+        (&["CURRENT_TIME"], "datetime.time"),
         (
             &[
                 "JSON_BUILD_OBJECT",

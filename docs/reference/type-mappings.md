@@ -65,7 +65,7 @@ SELECT a::INTEGER[], b::TEXT[] FROM t
 
 ```sql
 SELECT a::BYTEA FROM t
--- inferred: tuple[str]
+-- inferred: tuple[bytes]
 ```
 
 ## Expressions
@@ -75,5 +75,5 @@ Literals, aggregates and common functions have known types; anything else is
 
 ```sql
 SELECT 1, 1.5, 'a', TRUE, COUNT(*), AVG(x::INTEGER), NOW(), LOWER(name) FROM t
--- inferred: tuple[int, float, str, bool, int, float, str, str]
+-- inferred: tuple[int, float, str, bool, int, float, datetime.datetime, str]
 ```

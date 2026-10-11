@@ -19,7 +19,10 @@ import pytest
 from tests._mdtest.parser import parse
 
 ROOT = Path(__file__).resolve().parent.parent
-MARKDOWN = [*sorted((ROOT / "tests" / "mdtest").rglob("*.md")), *sorted((ROOT / "docs").rglob("*.md"))]
+MARKDOWN = [
+    *sorted((ROOT / "tests" / "mdtest").rglob("*.md")),
+    *sorted((ROOT / "docs").rglob("*.md")),
+]
 
 
 def _corpus(kind: str) -> list[Any]:
@@ -61,7 +64,10 @@ def test_strip_is_idempotent(core: types.ModuleType, source: str, options: dict)
 def test_strip_undoes_rewrite(core: types.ModuleType, source: str, options: dict) -> None:
     """``strip(rewrite(x)) == x`` for sources without sqlty wrappers or imports."""
     style = options["import_style"]
-    if re.search(r"^(from|import) sqlty", source, re.M) or core.strip_source(source, import_style=style) != source:
+    if (
+        re.search(r"^(from|import) sqlty", source, re.M)
+        or core.strip_source(source, import_style=style) != source
+    ):
         pytest.skip("source already uses sqlty")
     rewritten = core.rewrite_source(source, **options)
     assert core.strip_source(rewritten, import_style=style) == source
@@ -116,7 +122,9 @@ def test_crlf_is_kept(core: types.ModuleType) -> None:
 
 @pytest.fixture()
 def many_queries() -> str:
-    return "\n".join(f'q{i} = "--sql\\nSELECT id::INTEGER FROM t{i}"\nx{i} = {i}' for i in range(50))
+    return "\n".join(
+        f'q{i} = "--sql\\nSELECT id::INTEGER FROM t{i}"\nx{i} = {i}' for i in range(50)
+    )
 
 
 @pytest.mark.parametrize(

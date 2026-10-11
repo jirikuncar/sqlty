@@ -51,6 +51,10 @@ class SQLAnalyzer:
         "JSON": "dict",
         "JSONB": "dict",
         "UUID": "uuid.UUID",
+        "BYTEA": "bytes",
+        "BLOB": "bytes",
+        "BINARY": "bytes",
+        "VARBINARY": "bytes",
         # MySQL ``CAST(x AS SIGNED/UNSIGNED)``
         "SIGNED": "int",
         "UNSIGNED": "int",
@@ -382,9 +386,12 @@ _FUNCTION_TYPES = {
     ),
     **dict.fromkeys(
         ["UPPER", "LOWER", "TRIM", "CONCAT", "SUBSTR", "SUBSTRING", "REPLACE", "STRING_AGG"]
-        + ["NOW", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME", "GROUP_CONCAT"],
+        + ["GROUP_CONCAT"],
         "str",
     ),
+    **dict.fromkeys(["NOW", "CURRENT_TIMESTAMP"], "datetime.datetime"),
+    "CURRENT_DATE": "datetime.date",
+    "CURRENT_TIME": "datetime.time",
     **dict.fromkeys(
         ["JSON_BUILD_OBJECT", "JSONB_BUILD_OBJECT", "TO_JSON", "TO_JSONB", "JSON_AGG", "JSONB_AGG"]
         + ["JSONB_OBJECT_AGG", "JSON_OBJECT_AGG", "J_S_O_N_ARRAY_AGG", "J_S_O_N_B_OBJECT_AGG"]

@@ -175,7 +175,7 @@ SELECT
     document::BYTEA,
     image::BLOB
 FROM files
--- inferred: tuple[int, str, str]
+-- inferred: tuple[int, bytes, bytes]
 ```
 
 ## BOOLEAN type
