@@ -144,13 +144,18 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: casts = SQL[tuple[int, str]]("--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 
-!!! warning "MySQL needs the Python backend"
-    The default Rust backend wraps and checks nothing for
-    `dialect = "mysql"`. Run sqlty with `SQLTY_LIB=py`; see
-    [Backends](../reference/backends.md#known-gaps).
-
 `TINYINT(1)` is an `int`, not a `bool`. See the
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.
+
+!!! warning "MySQL servers reject `--sql` queries"
+    The `--sql` marker line is part of the query: `SQL[T]` is a `str`, and
+    PyMySQL and mysqlclient send it to the server unchanged. MySQL and
+    MariaDB read `--` as a comment only when whitespace follows it, so
+    `--sql\nSELECT ...` fails at runtime with a syntax error (1064), even
+    though sqlty types it. Until sqlty accepts a MySQL-safe marker, drop the
+    marker line before executing, e.g. `cur.execute(query.partition("\n")[2])`.
+    Placeholders (`%s`, `%(name)s`) are inferred in every dialect; see
+    [Backends](../reference/backends.md#placeholders).
 
 ## Example projects
 
