@@ -282,3 +282,30 @@ SELECT scheduled_time::TIME FROM events
 SELECT id::INTEGER, created_at::TIMESTAMP, birth_date::DATE FROM users
 -- inferred: tuple[int, datetime.datetime, datetime.date]
 ```
+
+## String and position functions
+
+```sql
+SELECT TRIM(name), SUBSTRING(name FROM 1 FOR 2), POSITION('a' IN name) FROM users
+-- columns: : str (None)
+-- columns: : str (None)
+-- columns: : int (None)
+```
+
+## Unaliased function names
+
+Calls sqlty can't type are named after the function; typed ones have no name.
+Alias columns that a row type matches by name.
+
+```sql
+SELECT NULLIF(a::INTEGER, 0), my_fn(b), COUNT(*), count(c), LOWER(d), json_build_object('k', 1), NOT e, -f, -1 FROM t
+-- columns: NULLIF: None (None)
+-- columns: my_fn: None (None)
+-- columns: *: int (INTEGER)
+-- columns: : int (INTEGER)
+-- columns: : str (None)
+-- columns: json_build_object: dict (None)
+-- columns: : None (None)
+-- columns: : None (None)
+-- columns: 1: None (None)
+```

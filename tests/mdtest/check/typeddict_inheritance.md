@@ -594,3 +594,24 @@ class User(Base, closed=False):
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error:
 ```
+
+## Row type of a call without a one-line query
+
+The class is still checked when the query spans lines or isn't a literal;
+only the column checks need the query.
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, closed=True):
+    id: int
+
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
+class User(Base):
+    name: str
+
+q = SQL[User]("""--sql
+SELECT id::INTEGER FROM users""")
+r = SQL[User](query)
+```

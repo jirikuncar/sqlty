@@ -18,13 +18,14 @@ import ast
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import asttokens
 
+from sqlty import core
 from sqlty._formatter import formatter
-from sqlty._sql_analyzer import SQLAnalyzer
 
 from ._collector import CallInfo, LiteralCallCollector
 from ._config import FunctionConfigComplete
@@ -34,6 +35,36 @@ from ._stub_parser import CallInfoToIRParser
 
 if TYPE_CHECKING:
     from ._stub_ir import StubFile
+
+
+@dataclass(frozen=True)
+class QueryTyper:
+    """Row types of queries in one dialect, against an optional schema."""
+
+    dialect: str
+    schema_sql: str | None = None
+
+    @classmethod
+    def load(cls, dialect: str, schema_path: Path | None) -> QueryTyper:
+        """Read the schema file, if any.
+
+        Raises:
+            RuntimeError: The schema file is missing or can't be read.
+        """
+        if schema_path is None:
+            return cls(dialect)
+        if not schema_path.exists():
+            raise RuntimeError(f"Schema file not found: {schema_path}")
+        try:
+            return cls(dialect, schema_path.read_text())
+        except Exception as e:
+            raise RuntimeError(f"Failed to read schema file {schema_path}: {e}") from e
+
+    def infer_type(self, sql: str) -> str | None:
+        return core.infer_type(sql, dialect=self.dialect, schema_sql=self.schema_sql)
+
+    def returns_rows(self, sql: str) -> bool:
+        return core.returns_rows(sql, dialect=self.dialect)
 
 
 class TypeStubGenerator:
@@ -59,11 +90,10 @@ class TypeStubGenerator:
         self.schema_mappings = (
             schema_mappings or {}
         )  # Registry name -> schema path mappings (None key allowed for global)
-        self.sql_analyzer = SQLAnalyzer(dialect=sql_dialect)
         self.last_import_source: str | None = None
         self.last_is_registry_method: bool = False
         # Cache analyzers per registry for performance
-        self._analyzer_cache: dict[str, SQLAnalyzer] = {}
+        self._typer_cache: dict[str, QueryTyper] = {}
         self._format_command = format_command
         self._check_mode = False
         self._verbose = verbose
@@ -265,8 +295,8 @@ class TypeStubGenerator:
         registry_name: str | None,
         module_path: Path,
         registry_class: str | None = None,
-    ) -> SQLAnalyzer:
-        """Get the appropriate SQLAnalyzer for a registry.
+    ) -> QueryTyper:
+        """Get the appropriate QueryTyper for a registry.
 
         Priority (most to least specific; a function entry's ``schema`` is handled by
         ``_get_analyzer_for_schema`` before this):
@@ -282,12 +312,12 @@ class TypeStubGenerator:
                            If provided, only that class's __schema_path__ is used.
 
         Returns:
-            Appropriate SQLAnalyzer instance
+            Appropriate QueryTyper instance
         """
         # Check if we already have a cached analyzer for this registry+class combination
         cache_key = f"{registry_name or str(module_path)}::{registry_class or ''}"
-        if cache_key in self._analyzer_cache:
-            return self._analyzer_cache[cache_key]
+        if cache_key in self._typer_cache:
+            return self._typer_cache[cache_key]
 
         schema_to_use: Path | None = None
         schema_source = "default"
@@ -336,10 +366,10 @@ class TypeStubGenerator:
             schema_source = "global schema"
 
         # Create analyzer
-        analyzer = SQLAnalyzer(dialect=self.sql_dialect, schema_path=schema_to_use)
+        analyzer = QueryTyper.load(self.sql_dialect, schema_to_use)
 
         # Cache it
-        self._analyzer_cache[cache_key] = analyzer
+        self._typer_cache[cache_key] = analyzer
 
         # Log schema usage
         if schema_to_use:
@@ -349,17 +379,15 @@ class TypeStubGenerator:
 
         return analyzer
 
-    def _get_analyzer_for_schema(self, schema_path: Path) -> SQLAnalyzer:
+    def _get_analyzer_for_schema(self, schema_path: Path) -> QueryTyper:
         """Analyzer for the ``schema`` of a ``[[tool.sqlty.functions]]`` entry."""
         cache_key = f"schema::{schema_path}"
-        if cache_key not in self._analyzer_cache:
+        if cache_key not in self._typer_cache:
             logging.getLogger(__name__).warning(
                 "Using schema from %s (function config)", schema_path
             )
-            self._analyzer_cache[cache_key] = SQLAnalyzer(
-                dialect=self.sql_dialect, schema_path=schema_path
-            )
-        return self._analyzer_cache[cache_key]
+            self._typer_cache[cache_key] = QueryTyper.load(self.sql_dialect, schema_path)
+        return self._typer_cache[cache_key]
 
     # Delegation methods for backward compatibility with tests
     def _get_registry_names(self, module_path: Path) -> list[str]:
@@ -548,7 +576,7 @@ class TypeStubGenerator:
                     imports.append("from sqlty import SQL")
 
     def _infer_types_from_sql(self, calls: list[CallInfo], module_path: Path) -> None:
-        """Infer return types by analyzing SQL queries using sqlglot.
+        """Infer return types by analyzing SQL queries.
 
         Args:
             calls: List of call information to analyze
@@ -573,7 +601,7 @@ class TypeStubGenerator:
                     registry_name, module_path, registry_class
                 )
 
-            sql_type = analyzer.generate_return_type(literal)
+            sql_type = analyzer.infer_type(literal)
             if sql_type:
                 call["return_type"] = sql_type
             elif self._untyped and analyzer.returns_rows(literal):

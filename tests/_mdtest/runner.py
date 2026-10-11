@@ -4,37 +4,19 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections.abc import Iterator
-from contextlib import contextmanager
 from functools import cached_property
-from importlib import import_module
-
-import pytest
 
 import sqlty.core as core
 
 from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
 
-BACKENDS = {"py": "sqlty._core_py", "rs": "sqlty._core"}
 _CODING = re.compile(r"\A#.*coding[:=].*\n?")
 _ERROR_VALUE = re.compile(r'^(?:\[(?P<rule>[\w-]+)\])?\s*(?:"(?P<message>.*)")?$')
 
 
 class MDTestFailure(Exception):
     pass
-
-
-@contextmanager
-def backend(name: str) -> Iterator[None]:
-    """Route ``sqlty.core`` to one backend."""
-    module = import_module(BACKENDS[name])
-    with pytest.MonkeyPatch.context() as mp:
-        for attr in ("check_source", "rewrite_source", "strip_source"):
-            mp.setattr(core, f"_backend_{attr}", getattr(module, attr))
-        for attr in ("infer_type", "expand_star"):
-            mp.setattr(core, attr, getattr(module, attr))
-        yield
 
 
 class Run:
@@ -80,10 +62,9 @@ class Run:
             case "expanded":
                 return str(core.expand_star(text, dialect=self.dialect, schema_sql=self.schema_sql))
             case "columns":
-                from sqlty._core_py import _make_analyzer
-
-                analyzer = _make_analyzer(self.dialect, self.schema_sql)
-                columns = analyzer.analyze_select(text)
+                columns = core.analyze_select(
+                    text, dialect=self.dialect, schema_sql=self.schema_sql
+                )
                 if columns is None:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
@@ -129,11 +110,9 @@ class Run:
 
     @cached_property
     def _imports(self) -> set[str]:
-        from sqlty._rewriter import ImportStyle
-
-        style = ImportStyle.parse(self.import_style) if self.import_style else ImportStyle.default()
-        extra = {style.untyped_import} if style.untyped_import else set()
-        return {"import datetime", "import uuid", style.import_line, *extra}
+        style = (self.import_style or "from sqlty import SQL").strip()
+        extra = {"from sqlty import UNTYPED"} if style.startswith("from ") else set()
+        return {"import datetime", "import uuid", style, *extra}
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code

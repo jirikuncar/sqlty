@@ -25,31 +25,9 @@ Configuration via pyproject.toml:
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-
-# ``--sql SELECT ...``: a space after the marker, then the start of a SQL statement,
-# which makes the whole query a SQL comment (``inline-sql-comment``). Each keyword
-# needs what its statement needs (``DELETE FROM``, ``UPDATE t SET``, ...), so prose
-# such as ``"--sql delete me later"`` does not match. No parser is involved, and
-# ``INLINE_SQL_COMMENT`` in ``rust/src/checker.rs`` is the same pattern.
-INLINE_SQL_COMMENT = re.compile(
-    r"--sql[ \t]+(?i:"
-    r"SELECT\s+[^\s;]"
-    r"|WITH\s+(?:RECURSIVE\s+)?\w+[^;]*?\bAS\s*\("
-    r"|INSERT\s+INTO\b"
-    r"|UPDATE\s+[\w.\"]+(?:\s+(?:AS\s+)?\w+)?\s+SET\b"
-    r"|DELETE\s+FROM\b"
-    r"|VALUES\s*\("
-    r"|(?:CREATE|ALTER|DROP)\s+(?:(?:OR\s+REPLACE|TEMP|TEMPORARY|UNIQUE|MATERIALIZED)\s+)*"
-    r"(?:TABLE|VIEW|INDEX|SCHEMA|SEQUENCE|FUNCTION|TYPE|EXTENSION|DATABASE|TRIGGER|PROCEDURE|ROLE)\b"
-    r"|TRUNCATE\s+(?:TABLE\s+)?\w"
-    r"|MERGE\s+INTO\b"
-    r"|EXPLAIN\s+(?:(?:ANALYZE|VERBOSE)\s+)*(?:SELECT|WITH|INSERT|UPDATE|DELETE|VALUES)\b"
-    r")"
-)
 
 
 class Severity(Enum):

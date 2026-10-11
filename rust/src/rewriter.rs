@@ -5,7 +5,7 @@
 //! - `strip_source()`: `SQL[T]("--sql\n...") → "--sql\n..."`
 //!
 //! Both work on the whole source, so triple-quoted strings spanning lines are
-//! handled, and mirror `sqlty._rewriter.SQLRewriter` match for match.
+//! handled.
 //! The rewriter never modifies string content — it only adds/removes
 //! the `SQL[T]()` wrapper.  This guarantees `strip(rewrite(x)) == x`.
 
@@ -53,7 +53,7 @@ pub(crate) fn skipped_string_rule(line: &str) -> Option<&'static str> {
 /// Raw, bytes, f- and t-strings are scanned past, so their closing quote is not
 /// paired with the next opening one. A quote after letters that are no string
 /// prefix (`it's`) opens no literal. Mirrors `_SQL_STRING_PATTERN` in Python.
-fn string_literals(source: &str) -> Vec<(usize, usize)> {
+pub(crate) fn string_literals(source: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut pos = 0;
     while let Some(offset) = source[pos..].find(['"', '\'', '#']) {
@@ -85,17 +85,53 @@ fn string_literals(source: &str) -> Vec<(usize, usize)> {
 // Import style parsing
 // ---------------------------------------------------------------------------
 
-/// Parsed import-style configuration.
-struct ImportStyleParsed {
-    /// The import statement to inject (e.g. "from sqlty import SQL as Q").
-    import_line: String,
-    /// The prefix for `[T](...)`, e.g. "Q" or "sqlty.SQL".
-    wrapper_name: String,
+/// Parsed `import-style`: the import line to inject and the `[T](...)` wrapper prefix.
+///
+/// `from sqlty import SQL` -> `SQL`, `from sqlty import SQL as Q` -> `Q`,
+/// `import sqlty` -> `sqlty.SQL`, `import sqlty as sy` -> `sy.SQL`.
+pub(crate) struct ImportStyle {
+    pub import_line: String,
+    pub wrapper_name: String,
 }
 
-impl ImportStyleParsed {
+impl Default for ImportStyle {
+    fn default() -> Self {
+        ImportStyle {
+            import_line: "from sqlty import SQL".to_string(),
+            wrapper_name: "SQL".to_string(),
+        }
+    }
+}
+
+impl ImportStyle {
+    pub fn parse(style: Option<&str>) -> Result<Self, String> {
+        let Some(style) = style.map(str::trim).filter(|style| !style.is_empty()) else {
+            return Ok(Self::default());
+        };
+        let wrapper_name = if style == "from sqlty import SQL" {
+            "SQL".to_string()
+        } else if let Some(alias) = style.strip_prefix("from sqlty import SQL as ") {
+            alias.trim().to_string()
+        } else if style == "import sqlty" {
+            "sqlty.SQL".to_string()
+        } else if let Some(alias) = style.strip_prefix("import sqlty as ") {
+            format!("{}.SQL", alias.trim())
+        } else {
+            return Err(format!("Unsupported import-style: '{style}'"));
+        };
+        Ok(ImportStyle {
+            import_line: style.to_string(),
+            wrapper_name,
+        })
+    }
+
+    /// [`ImportStyle::parse`], with the default for an unsupported style.
+    pub fn or_default(style: Option<&str>) -> Self {
+        Self::parse(style).unwrap_or_default()
+    }
+
     /// How `UNTYPED` is spelled: "UNTYPED" or "sqlty.UNTYPED".
-    fn untyped_name(&self) -> String {
+    pub fn untyped_name(&self) -> String {
         match self.wrapper_name.rsplit_once('.') {
             Some((module, _)) => format!("{}.UNTYPED", module),
             None => "UNTYPED".to_string(),
@@ -103,7 +139,7 @@ impl ImportStyleParsed {
     }
 
     /// Import line `UNTYPED` needs, or `None` when the module is imported.
-    fn untyped_import(&self) -> Option<&'static str> {
+    pub fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
     }
 
@@ -117,40 +153,6 @@ impl ImportStyleParsed {
             regex::escape(&self.wrapper_name)
         ))
         .unwrap()
-    }
-}
-
-/// Parse an import-style string into its components.
-///
-/// Unrecognised styles fall back to `from sqlty import SQL`.
-fn parse_import_style(style: Option<&str>) -> ImportStyleParsed {
-    match style {
-        None | Some("from sqlty import SQL") => ImportStyleParsed {
-            import_line: "from sqlty import SQL".to_string(),
-            wrapper_name: "SQL".to_string(),
-        },
-        Some(s) if s.starts_with("from sqlty import SQL as ") => {
-            let alias = s["from sqlty import SQL as ".len()..].trim();
-            ImportStyleParsed {
-                import_line: s.to_string(),
-                wrapper_name: alias.to_string(),
-            }
-        }
-        Some("import sqlty") => ImportStyleParsed {
-            import_line: "import sqlty".to_string(),
-            wrapper_name: "sqlty.SQL".to_string(),
-        },
-        Some(s) if s.starts_with("import sqlty as ") => {
-            let alias = s["import sqlty as ".len()..].trim();
-            ImportStyleParsed {
-                import_line: s.to_string(),
-                wrapper_name: format!("{}.SQL", alias),
-            }
-        }
-        Some(_) => ImportStyleParsed {
-            import_line: "from sqlty import SQL".to_string(),
-            wrapper_name: "SQL".to_string(),
-        },
     }
 }
 
@@ -170,7 +172,7 @@ pub fn rewrite_source(
     import_style: Option<&str>,
     untyped: bool,
 ) -> String {
-    let istyle = parse_import_style(import_style);
+    let istyle = ImportStyle::or_default(import_style);
     let fstring_lines: Vec<usize> = source
         .lines()
         .enumerate()
@@ -254,7 +256,7 @@ pub fn rewrite_source(
 ///
 /// Removes unused imports added by rewrite.
 pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
-    let istyle = parse_import_style(import_style);
+    let istyle = ImportStyle::or_default(import_style);
     let replacements: Vec<(usize, usize, String)> = istyle
         .wrapper_pattern()
         .captures_iter(source)
@@ -277,7 +279,7 @@ pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
 // ---------------------------------------------------------------------------
 
 /// Apply non-overlapping `(start, end, replacement)` edits, given in source order.
-fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
+pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
     let mut result = String::with_capacity(source.len());
     let mut pos = 0;
     for (start, end, replacement) in replacements {
@@ -295,7 +297,7 @@ fn line_at(source: &str, pos: usize) -> usize {
 }
 
 /// Extract string content from a quoted string literal (removes quotes and a `u` prefix).
-fn extract_string_content(literal: &str) -> &str {
+pub(crate) fn extract_string_content(literal: &str) -> &str {
     let literal = literal.trim_start_matches(['u', 'U']);
     let quote = if literal.starts_with("\"\"\"") || literal.starts_with("'''") {
         3
@@ -306,7 +308,7 @@ fn extract_string_content(literal: &str) -> &str {
 }
 
 /// Check if string content is sqlty-managed (starts with `--sql` + whitespace/\n).
-fn is_sqlty_managed(content: &str) -> bool {
+pub(crate) fn is_sqlty_managed(content: &str) -> bool {
     let Some(rest) = content.trim_start().strip_prefix("--sql") else {
         return false;
     };
@@ -346,7 +348,7 @@ pub(crate) fn infer_sql_content(
 }
 
 /// Remove sqlty/datetime/uuid imports that are no longer referenced.
-fn remove_unused_imports(source: &str, istyle: &ImportStyleParsed) -> String {
+fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
     let untyped_import = istyle.untyped_import();
     let untyped_used = source
@@ -366,7 +368,7 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyleParsed) -> String {
 }
 
 /// Check for a top-level import; indented lines (docstrings, blocks) don't count.
-fn has_import(source: &str, import_str: &str) -> bool {
+pub(crate) fn has_import(source: &str, import_str: &str) -> bool {
     source.lines().any(|line| line.trim_end() == import_str)
 }
 

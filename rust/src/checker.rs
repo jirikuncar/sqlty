@@ -16,7 +16,7 @@ use regex::Regex;
 
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
-use crate::rewriter::{header_end, rewrite_source, skipped_string_rule};
+use crate::rewriter::{header_end, rewrite_source, skipped_string_rule, ImportStyle};
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -26,7 +26,7 @@ fn unwrapped_sql_pattern() -> Regex {
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
 /// which makes the whole query a SQL comment. Each keyword needs what its statement
 /// needs (`DELETE FROM`, `UPDATE t SET`, ...), so prose such as `"--sql delete me
-/// later"` does not match. Same pattern as `INLINE_SQL_COMMENT` in `sqlty._lint`.
+/// later"` does not match.
 const INLINE_SQL_COMMENT: &str = concat!(
     r"--sql[ \t]+(?i:",
     r"SELECT\s+[^\s;]",
@@ -48,7 +48,7 @@ static INLINE_SQL_COMMENT_IN_LINE: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!(r#"["']{INLINE_SQL_COMMENT}"#)).unwrap());
 
 /// String content starting with `INLINE_SQL_COMMENT`.
-static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
+pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Build a regex to extract SQL content from `{wrapper_name}[T]("--sql ...")`.
@@ -115,22 +115,6 @@ impl RuleConfig {
     }
 }
 
-/// Parse import-style into wrapper_name.
-fn parse_wrapper_name(import_style: Option<&str>) -> String {
-    match import_style {
-        None | Some("from sqlty import SQL") => "SQL".to_string(),
-        Some(s) if s.starts_with("from sqlty import SQL as ") => {
-            s["from sqlty import SQL as ".len()..].trim().to_string()
-        }
-        Some("import sqlty") => "sqlty.SQL".to_string(),
-        Some(s) if s.starts_with("import sqlty as ") => {
-            let alias = s["import sqlty as ".len()..].trim();
-            format!("{}.SQL", alias)
-        }
-        Some(_) => "SQL".to_string(),
-    }
-}
-
 /// Check Python source code for SQL type issues.
 pub fn check_source(
     source: &str,
@@ -144,7 +128,7 @@ pub fn check_source(
     let has_schema = schema.is_some();
     let mut diagnostics = Vec::new();
 
-    let wrapper_name = parse_wrapper_name(import_style);
+    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     let wrapper_marker = format!("{}[", wrapper_name);
     let untyped_name = match wrapper_name.rsplit_once('.') {
         Some((module, _)) => format!("{}.UNTYPED", module),
@@ -288,6 +272,34 @@ pub fn check_source(
     }
 
     diagnostics
+}
+
+/// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
+/// without its `--sql` prefix, `None` unless the call holds a one-line `--sql` string.
+pub fn wrapped_queries(
+    source: &str,
+    import_style: Option<&str>,
+) -> Vec<(usize, String, Option<String>)> {
+    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
+    let sql_content_pat = build_sql_content_pattern(&wrapper_name);
+    let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
+    logical_lines(source, &wrapper_name)
+        .into_iter()
+        .filter_map(|(line, logical)| {
+            let annotated = extract_type_from_wrapper(&logical, &type_annotation_pat)?;
+            let query = extract_sql_from_wrapper(&logical, &sql_content_pat)
+                .map(|content| strip_sql_prefix(&content).to_string());
+            Some((line, annotated, query))
+        })
+        .collect()
+}
+
+fn strip_sql_prefix(content: &str) -> &str {
+    ["--sql\\n", "--sql ", "--sql\n", "--sql"]
+        .into_iter()
+        .find_map(|prefix| content.strip_prefix(prefix))
+        .unwrap_or(content)
+        .trim()
 }
 
 /// Lines holding a string that `rewrite` would wrap.

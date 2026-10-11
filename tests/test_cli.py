@@ -94,3 +94,11 @@ def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
 
     with pytest.raises(SystemExit, match="untyped must be 'skip' or 'sentinel'"):
         SettingsResolver(args).for_file(tmp_path / "q.py")
+
+
+def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "from x import SQL"\n')
+    args = build_parser().parse_args(["check", str(tmp_path)])
+
+    with pytest.raises(SystemExit, match="Unsupported import-style: 'from x import SQL'"):
+        SettingsResolver(args).for_file(tmp_path / "q.py")
