@@ -673,6 +673,9 @@ def test_subtype_and_consistency(src, dst, subtype, consistent):
         ("list[str]", "list", True),
         ("list[list[int]] | None", "list", True),
         ("dict[str, int]", "list", False),
+        ("typing.List[str]", "list", True),
+        ("List[str]", "list", True),
+        ("typing.Dict[str, int]", "list", False),
     ],
 )
 def test_field_accepts(annotation: str, column: str | None, ok: bool):
@@ -697,6 +700,26 @@ UserId = typing.NewType("UserId", int)
 )
 def test_erase(tp, erased):
     assert _erase(tp) == erased
+
+
+@pytest.mark.parametrize(
+    ("imports", "annotation", "expected"),
+    [
+        ("import typing as t", "t.List[str]", list[str]),
+        ("import typing", "typing.List[str]", list[str]),
+        ("from typing import List", "List[str]", list[str]),
+        ("from typing import List as L", "L[str]", list[str]),
+        ("from typing import Dict", "Dict[str, int]", dict[str, int]),
+        ("from typing import Set", "Set[int]", set[int]),
+        ("from typing import FrozenSet", "FrozenSet[int]", frozenset[int]),
+        ("from typing import Tuple", "Tuple[int, str]", tuple[int, str]),
+    ],
+)
+def test_typing_generics_without_runtime_resolution(imports, annotation, expected):
+    src = f"import not_installed\n{imports}\nfrom typing import TypedDict\nclass Row(TypedDict):\n    x: {annotation}\n"
+    row = extract_type_definitions(src)["Row"]
+    assert row.field_types["x"] == expected
+    assert check_type_compatibility(row, "x", "list") is (typing.get_origin(expected) is list)
 
 
 def test_newtype_assignments_only_type_expressions():
