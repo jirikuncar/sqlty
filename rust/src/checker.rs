@@ -16,12 +16,16 @@ use regex::Regex;
 
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
-use crate::rewriter::{header_end, rewrite_source, skipped_string_rule, ImportStyle};
+use crate::rewriter::{
+    after_marker, extract_string_content, header_end, line_at, rewrite_source, skipped_string_rule,
+    starts_with_line_break, string_literals, strip_line_break, ImportStyle,
+};
 
-/// Pattern to detect unwrapped --sql strings.
-fn unwrapped_sql_pattern() -> Regex {
-    Regex::new(r#"["']--sql(\s|\\n)"#).unwrap()
-}
+/// A string opening with the marker: `--sql` before whitespace or a line break, or
+/// `-- sql` before a line break (escaped, or the end of a triple-quoted line).
+static UNWRAPPED_SQL: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"["'](?:--sql(?:\s|\\(?:r\\)?n|$)|-- sql(?:\\(?:r\\)?n|\s*$))"#).unwrap()
+});
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
 /// which makes the whole query a SQL comment. Each keyword needs what its statement
@@ -51,14 +55,38 @@ static INLINE_SQL_COMMENT_IN_LINE: Lazy<Regex> =
 pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
-/// Build a regex to extract SQL content from `{wrapper_name}[T]("--sql ...")`.
-fn build_sql_content_pattern(wrapper_name: &str) -> Regex {
-    let escaped = regex::escape(wrapper_name);
-    Regex::new(&format!(
-        r#"{}\[.*?\]\(\s*[uU]?["'](.+?)["']\s*\)"#,
-        escaped
+/// Marked string contents of `{wrapper_name}[T]("...")` calls, by the line each
+/// call starts on. A triple-quoted string may span lines.
+fn wrapped_contents(source: &str, wrapper_name: &str) -> HashMap<usize, String> {
+    let pattern = Regex::new(&format!(
+        r#"(?s){}\[[^\n]*?\]\(\s*(?P<inner>[uU]?(?:""".*?"""|'''.*?'''|"[^"\n]*"|'[^'\n]*'))\s*,?\s*\)"#,
+        regex::escape(wrapper_name)
     ))
-    .unwrap()
+    .unwrap();
+    let mut contents = HashMap::new();
+    for caps in pattern.captures_iter(source) {
+        let content = extract_string_content(&caps["inner"]);
+        if after_marker(content).is_some() {
+            let line = line_at(source, caps.get(0).map_or(0, |m| m.start()));
+            contents.entry(line).or_insert_with(|| content.to_string());
+        }
+    }
+    contents
+}
+
+/// Lines with a plain string opening with `--sql` and a line break, which MySQL
+/// and MariaDB reject: they read `--` as a comment only before whitespace.
+fn mysql_marker_lines(source: &str) -> Vec<usize> {
+    string_literals(source)
+        .into_iter()
+        .filter(|&(start, end)| {
+            extract_string_content(&source[start..end])
+                .trim_start()
+                .strip_prefix("--sql")
+                .is_some_and(starts_with_line_break)
+        })
+        .map(|(start, _)| line_at(source, start))
+        .collect()
 }
 
 /// Build a regex to extract the type annotation from `{wrapper_name}[T](...)`.
@@ -134,9 +162,14 @@ pub fn check_source(
         Some((module, _)) => format!("{}.UNTYPED", module),
         None => "UNTYPED".to_string(),
     };
-    let sql_content_pat = build_sql_content_pattern(&wrapper_name);
+    let wrapped = wrapped_contents(source, &wrapper_name);
     let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
-    let unwrapped_pat = unwrapped_sql_pattern();
+    let mysql_markers =
+        if dialect.eq_ignore_ascii_case("mysql") && rule_config.is_enabled("mysql-sql-marker") {
+            mysql_marker_lines(source)
+        } else {
+            Vec::new()
+        };
 
     let wrappable = if rule_config.is_enabled("stale-rewrite") {
         wrappable_lines(source, dialect, schema, import_style, untyped)
@@ -146,6 +179,16 @@ pub fn check_source(
 
     for (line_num, logical) in logical_lines(source, &wrapper_name) {
         let trimmed = logical.as_str();
+
+        if mysql_markers.contains(&line_num) {
+            diagnostics.push(Diagnostic {
+                rule: "mysql-sql-marker".to_string(),
+                message: r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#
+                    .to_string(),
+                severity: rule_config.severity("mysql-sql-marker").to_string(),
+                line: line_num,
+            });
+        }
 
         if let Some(rule) = skipped_string_rule(trimmed) {
             if rule_config.is_enabled(rule) {
@@ -167,7 +210,7 @@ pub fn check_source(
         }
 
         // Check for unwrapped --sql strings (stale-rewrite)
-        if is_unwrapped_sql_string(trimmed, &wrapper_marker, &unwrapped_pat) {
+        if is_unwrapped_sql_string(trimmed, &wrapper_marker) {
             if wrappable.contains(&line_num) && rule_config.is_enabled("stale-rewrite") {
                 diagnostics.push(Diagnostic {
                     rule: "stale-rewrite".to_string(),
@@ -191,7 +234,7 @@ pub fn check_source(
         }
 
         // Check for SQL[T](...) wrappers
-        if let Some(sql_content) = extract_sql_from_wrapper(trimmed, &sql_content_pat) {
+        if let Some(sql_content) = wrapped.get(&line_num).cloned() {
             // Check inline-sql-comment on wrapped strings
             if rule_config.is_enabled("inline-sql-comment")
                 && INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content)
@@ -275,31 +318,25 @@ pub fn check_source(
 }
 
 /// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
-/// without its `--sql` prefix, `None` unless the call holds a one-line `--sql` string.
+/// without its marker, `None` unless the call holds a marked string literal.
 pub fn wrapped_queries(
     source: &str,
     import_style: Option<&str>,
 ) -> Vec<(usize, String, Option<String>)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
-    let sql_content_pat = build_sql_content_pattern(&wrapper_name);
+    let wrapped = wrapped_contents(source, &wrapper_name);
     let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
     logical_lines(source, &wrapper_name)
         .into_iter()
         .filter_map(|(line, logical)| {
             let annotated = extract_type_from_wrapper(&logical, &type_annotation_pat)?;
-            let query = extract_sql_from_wrapper(&logical, &sql_content_pat)
-                .map(|content| strip_sql_prefix(&content).to_string());
+            let query = wrapped.get(&line).and_then(|content| {
+                let rest = after_marker(content)?;
+                Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
+            });
             Some((line, annotated, query))
         })
         .collect()
-}
-
-fn strip_sql_prefix(content: &str) -> &str {
-    ["--sql\\n", "--sql ", "--sql\n", "--sql"]
-        .into_iter()
-        .find_map(|prefix| content.strip_prefix(prefix))
-        .unwrap_or(content)
-        .trim()
 }
 
 /// Lines holding a string that `rewrite` would wrap.
@@ -346,22 +383,8 @@ fn logical_lines(source: &str, wrapper_name: &str) -> Vec<(usize, String)> {
 }
 
 /// Check if a line contains an unwrapped --sql string (not in wrapper).
-fn is_unwrapped_sql_string(line: &str, wrapper_marker: &str, pattern: &Regex) -> bool {
-    if line.contains(wrapper_marker) {
-        return false;
-    }
-    pattern.is_match(line)
-}
-
-/// Extract SQL content from wrapper pattern.
-fn extract_sql_from_wrapper(line: &str, pattern: &Regex) -> Option<String> {
-    let cap = pattern.captures(line)?;
-    let content = cap.get(1)?.as_str();
-    if content.starts_with("--sql") {
-        Some(content.to_string())
-    } else {
-        None
-    }
+fn is_unwrapped_sql_string(line: &str, wrapper_marker: &str) -> bool {
+    !line.contains(wrapper_marker) && UNWRAPPED_SQL.is_match(line)
 }
 
 /// Extract the type annotation from wrapper pattern.
@@ -516,5 +539,20 @@ mod tests {
             diags[0].message,
             "sqlty.SQL[sqlty.UNTYPED] can now be sqlty.SQL[tuple[int]]; run sqlty check --fix"
         );
+    }
+
+    #[test]
+    fn test_wrapped_contents_span_lines() {
+        let source = r#"q = SQL[tuple[str]]("""--sql
+SELECT 1""")
+r = SQL[T](
+    "-- sql\nSELECT 2",
+)
+s = SQL[T]("plain")
+"#;
+        let contents = wrapped_contents(source, "SQL");
+        assert_eq!(contents[&1], "--sql\nSELECT 1");
+        assert_eq!(contents[&3], r"-- sql\nSELECT 2");
+        assert_eq!(contents.len(), 2);
     }
 }

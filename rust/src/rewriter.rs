@@ -197,7 +197,7 @@ pub fn rewrite_source(
         }
         let literal = &source[start..end];
         let content = extract_string_content(literal).trim();
-        if !content.starts_with("--sql") {
+        if after_marker(content).is_none() {
             continue;
         }
         let type_str = match infer_sql_content(content, dialect, schema) {
@@ -292,7 +292,7 @@ pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> S
 }
 
 /// 1-indexed line number of a byte position.
-fn line_at(source: &str, pos: usize) -> usize {
+pub(crate) fn line_at(source: &str, pos: usize) -> usize {
     source[..pos].matches('\n').count() + 1
 }
 
@@ -307,32 +307,51 @@ pub(crate) fn extract_string_content(literal: &str) -> &str {
     &literal[quote..literal.len() - quote]
 }
 
-/// Check if string content is sqlty-managed (starts with `--sql` + whitespace/\n).
+/// Line breaks that can end the marker line: escaped in source text, or real.
+const LINE_BREAKS: [&str; 4] = ["\\r\\n", "\\n", "\r\n", "\n"];
+
+/// String content after the sqlty marker: `--sql`, or `-- sql` before a line break,
+/// a form MySQL also reads as a comment.
+pub(crate) fn after_marker(content: &str) -> Option<&str> {
+    let content = content.trim_start();
+    if let Some(rest) = content.strip_prefix("--sql") {
+        return Some(rest);
+    }
+    let rest = content.strip_prefix("-- sql")?;
+    starts_with_line_break(rest).then_some(rest)
+}
+
+pub(crate) fn starts_with_line_break(text: &str) -> bool {
+    LINE_BREAKS.iter().any(|lb| text.starts_with(lb))
+}
+
+/// `text` without one leading line break, escaped or real.
+pub(crate) fn strip_line_break(text: &str) -> Option<&str> {
+    LINE_BREAKS.iter().find_map(|lb| text.strip_prefix(lb))
+}
+
+/// Check if string content is sqlty-managed: the marker, then whitespace or a line break.
 pub(crate) fn is_sqlty_managed(content: &str) -> bool {
-    let Some(rest) = content.trim_start().strip_prefix("--sql") else {
+    let Some(rest) = after_marker(content) else {
         return false;
     };
-    rest.is_empty() || rest.starts_with("\\n") || rest.starts_with([' ', '\n', '\r', '\t'])
+    rest.is_empty() || starts_with_line_break(rest) || rest.starts_with([' ', '\t'])
 }
 
 /// Whether `SQL[UNTYPED]` fits: rows are expected but their type is unknown.
 ///
-/// Requires the `--sql` prefix to end its line; the space form is a SQL comment.
+/// Requires the marker to end its line; the space form is a SQL comment.
 fn is_untyped(sql_content: &str, dialect: &str) -> bool {
-    let rest = sql_content.strip_prefix("--sql").unwrap_or_default();
-    let query = match rest.strip_prefix("\\n") {
-        Some(query) => query,
-        None if rest.starts_with('\n') || rest.starts_with("\r\n") => rest,
-        None => return false,
-    };
-    returns_rows(query, dialect)
+    after_marker(sql_content)
+        .and_then(strip_line_break)
+        .is_some_and(|query| returns_rows(query, dialect))
 }
 
-/// Infer the row type of `--sql` string content.
+/// Infer the row type of marked string content.
 ///
-/// - `--sql\nSELECT ...` → `\\n` becomes a real newline, and
-///   `analyzer::parser_input` drops the marker line before parsing.
-/// - `--sql SELECT ...` → there is no newline, so nothing is left to parse → None.
+/// - `--sql\nSELECT ...` → an escaped line break (`\\n`, `\\r\\n`) becomes a real
+///   one, and `analyzer::parser_input` drops the marker line before parsing.
+/// - `--sql SELECT ...` → there is no line break, so nothing is left to parse → None.
 ///
 /// Inference errors (an unknown `SUM` column) count as uninferable.
 pub(crate) fn infer_sql_content(
@@ -340,11 +359,14 @@ pub(crate) fn infer_sql_content(
     dialect: &str,
     schema: &Option<Schema>,
 ) -> Option<String> {
-    let query = match sql_content.strip_prefix("--sql\\n") {
-        Some(rest) => format!("--sql\n{rest}"),
-        None => sql_content.to_string(),
+    let rest = after_marker(sql_content)?;
+    let rest = match rest.strip_prefix("\\r\\n").or(rest.strip_prefix("\\n")) {
+        Some(query) => format!("\n{query}"),
+        None => rest.to_string(),
     };
-    infer_type(&query, dialect, schema).ok().flatten()
+    infer_type(&format!("--sql{rest}"), dialect, schema)
+        .ok()
+        .flatten()
 }
 
 /// Remove sqlty/datetime/uuid imports that are no longer referenced.
@@ -544,6 +566,10 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
         assert!(is_sqlty_managed("--sql SELECT 1"));
         assert!(is_sqlty_managed("--sql\\nSELECT 1"));
         assert!(is_sqlty_managed("--sql\nSELECT 1"));
+        assert!(is_sqlty_managed("--sql\\r\\nSELECT 1"));
+        assert!(is_sqlty_managed("-- sql\\nSELECT 1"));
+        assert!(is_sqlty_managed("-- sql\nSELECT 1"));
+        assert!(!is_sqlty_managed("-- sql query for users"));
         assert!(!is_sqlty_managed("SELECT 1"));
         assert!(!is_sqlty_managed("custom query"));
     }
@@ -689,5 +715,26 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             rewrite_source(source, "postgres", &None, None, false),
             source
         );
+    }
+
+    #[test]
+    fn test_markers_infer() {
+        for content in [
+            r"--sql\nSELECT 1",
+            r"--sql\r\nSELECT 1",
+            r"-- sql\nSELECT 1",
+            "--sql\nSELECT 1",
+            "-- sql\r\nSELECT 1",
+        ] {
+            let inferred = infer_sql_content(content, "postgres", &None);
+            assert_eq!(inferred.as_deref(), Some("tuple[int]"), "{content}");
+        }
+        for content in ["--sql SELECT 1", "-- sql SELECT 1", r"-- sqlx\nSELECT 1"] {
+            assert_eq!(
+                infer_sql_content(content, "postgres", &None),
+                None,
+                "{content}"
+            );
+        }
     }
 }

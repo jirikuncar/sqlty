@@ -11,16 +11,17 @@ use crate::analyzer::{expand_star, Schema};
 use crate::checker::{RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     extract_string_content, has_import, header_end, infer_sql_content, is_sqlty_managed,
-    rewrite_source, splice, string_literals, ImportStyle,
+    rewrite_source, splice, starts_with_line_break, string_literals, ImportStyle,
 };
 
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
 /// A `--sql` marker line at the start of string content.
 static SQL_PREFIX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)^(\s*--sql(?:\\n|\n))(.*)").unwrap());
+    Lazy::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
 
-/// Fix `inline-sql-comment`, `stale-rewrite`, `select-star`, `stale-type` and `untyped-query`.
+/// Fix `inline-sql-comment`, `mysql-sql-marker`, `stale-rewrite`, `select-star`,
+/// `stale-type` and `untyped-query`.
 pub fn fix_source(
     source: &str,
     dialect: &str,
@@ -35,6 +36,9 @@ pub fn fix_source(
     let mut source = source.to_string();
     if enabled("inline-sql-comment") {
         source = fix_inline_sql_comments(&source);
+    }
+    if dialect.eq_ignore_ascii_case("mysql") && enabled("mysql-sql-marker") {
+        source = fix_mysql_markers(&source);
     }
     if enabled("stale-rewrite") {
         source = rewrite_source(&source, dialect, schema, import_style, untyped);
@@ -97,6 +101,26 @@ fn fix_inline_sql_comments(source: &str) -> String {
                 .unwrap_or("\"");
             let at = end - quoted.len() + quote.len() + "--sql".len();
             (at, at + 1, "\\n".to_string())
+        })
+        .collect();
+    splice(source, &edits)
+}
+
+/// `"--sql\n..."` to `"-- sql\n..."`, the marker MySQL reads as a comment.
+fn fix_mysql_markers(source: &str) -> String {
+    let edits: Vec<(usize, usize, String)> = string_literals(source)
+        .into_iter()
+        .filter_map(|(start, end)| {
+            let literal = &source[start..end];
+            let content = extract_string_content(literal);
+            let marked = content.trim_start();
+            marked
+                .strip_prefix("--sql")
+                .is_some_and(starts_with_line_break)
+                .then(|| {
+                    let at = end - literal.len() + literal.find(marked).unwrap_or_default();
+                    (at, at + "--sql".len(), "-- sql".to_string())
+                })
         })
         .collect();
     splice(source, &edits)
@@ -202,5 +226,20 @@ mod tests {
             fix("from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT now()\")"),
             "import datetime\nfrom sqlty import SQL\nq = SQL[tuple[datetime.datetime]](\"--sql\\nSELECT now()\")"
         );
+    }
+
+    #[test]
+    fn test_mysql_markers_fixed_in_plain_literals() {
+        let source = r#"a = "--sql\nSELECT 1"
+b = """  --sql
+SELECT 1"""
+c = f"--sql\nSELECT 1"
+d = "--sql SELECT 1""#;
+        let fixed = r#"a = "-- sql\nSELECT 1"
+b = """  -- sql
+SELECT 1"""
+c = f"--sql\nSELECT 1"
+d = "--sql SELECT 1""#;
+        assert_eq!(fix_mysql_markers(source), fixed);
     }
 }

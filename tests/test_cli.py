@@ -102,3 +102,22 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
 
     with pytest.raises(SystemExit, match="Unsupported import-style: 'from x import SQL'"):
         SettingsResolver(args).for_file(tmp_path / "q.py")
+
+
+@pytest.mark.parametrize(
+    ("config", "flags", "expected"),
+    [
+        ("", [], ["q.py:2: [fstring-skipped]", "q.py:3: [tstring-skipped]"]),
+        ("", ["-q"], []),
+        ('[tool.sqlty.rules]\nfstring-skipped = "ignore"\n', [], ["q.py:3: [tstring-skipped]"]),
+    ],
+)
+def test_rewrite_reports_skipped_strings(tmp_path, monkeypatch, capsys, config, flags, expected):
+    (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
+    (tmp_path / "q.py").write_text('x = 1\na = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x}"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", *flags, "q.py"])
+
+    err = capsys.readouterr().err.splitlines()
+    assert [line.split(" ", 2)[0] + " " + line.split(" ", 2)[1] for line in err] == expected

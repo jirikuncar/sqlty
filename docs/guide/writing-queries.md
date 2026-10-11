@@ -30,6 +30,17 @@ query = '--sql\nSELECT id::INTEGER FROM users'
 # rewritten: query = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
 ```
 
+MySQL and MariaDB read `--` as a comment only before whitespace, so their
+servers reject `--sql`. Use `-- sql` there: it is a comment in every dialect,
+and sqlty reads it as the marker too. With `dialect = "mysql"`, `sqlty check`
+reports `--sql` as [`mysql-sql-marker`](../reference/rules.md#mysql-sql-marker)
+and `--fix` changes it.
+
+```python
+query = "-- sql\nSELECT id::INTEGER FROM users"
+# rewritten: query = SQL[tuple[int]]("-- sql\nSELECT id::INTEGER FROM users")
+```
+
 ## Multi-line queries
 
 In a triple-quoted string, start the query on the line after `--sql`:
@@ -109,8 +120,9 @@ query = f"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: query = f"--sql\nSELECT {column}::INTEGER FROM users"
 ```
 
-`sqlty check` reports such strings as
-[`stale-rewrite`](../reference/rules.md#stale-rewrite). Pass values as query
+`sqlty check` and `sqlty rewrite` report such strings as
+[`fstring-skipped`](../reference/rules.md#fstring-skipped) and
+[`tstring-skipped`](../reference/rules.md#tstring-skipped). Pass values as query
 parameters instead of interpolating them, and keep the query a plain literal.
 
 ## Type mapping

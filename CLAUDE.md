@@ -24,7 +24,8 @@ uv run pre-commit run --all-files  # all hooks (run before every commit)
   empty query and the string is not wrapped. `rewrite`/`strip` never
   modify string content, only the `SQL[T]()` wrapper, so
   `strip(rewrite(x)) == x`. `check --fix` is the exception: its
-  `inline-sql-comment` and `select-star` fixes edit content.
+  `inline-sql-comment`, `select-star` and `mysql-sql-marker` fixes edit content.
+  `-- sql\n` is an alternative marker that MySQL also reads as a comment.
 - **Every new feature gets an mdtest** in `tests/mdtest/`. Use `make update-mdtest`
   to fill expected values.
 - **README.md and docs/ are tested** — they are mdtest files, collected by the

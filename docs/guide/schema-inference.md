@@ -150,14 +150,13 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.
 
 !!! warning "MySQL servers reject `--sql` queries"
-    The `--sql` marker line is part of the query: `SQL[T]` is a `str`, and
-    PyMySQL and mysqlclient send it to the server unchanged. MySQL and
-    MariaDB read `--` as a comment only when whitespace follows it, so
-    `--sql\nSELECT ...` fails at runtime with a syntax error (1064), even
-    though sqlty types it. Until sqlty accepts a MySQL-safe marker, drop the
-    marker line before executing, e.g. `cur.execute(query.partition("\n")[2])`.
-    Placeholders (`%s`, `%(name)s`) are inferred in every dialect; see
-    [Engine](../reference/engine.md#placeholders).
+    The marker line is part of the query: `SQL[T]` is a `str`, and PyMySQL
+    and mysqlclient send it to the server unchanged. MySQL and MariaDB read
+    `--` as a comment only when whitespace follows it, so `--sql\nSELECT ...`
+    fails at runtime with a syntax error (1064). Write `-- sql\nSELECT ...`:
+    `sqlty check` reports [`mysql-sql-marker`](../reference/rules.md#mysql-sql-marker)
+    and `sqlty check --fix` changes it. Placeholders (`%s`, `%(name)s`) are
+    inferred in every dialect; see [Engine](../reference/engine.md#placeholders).
 
 ## Example projects
 
