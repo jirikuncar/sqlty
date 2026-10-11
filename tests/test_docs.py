@@ -23,11 +23,14 @@ from sqlty.core import check_source, rewrite_source
 ROOT = Path(__file__).resolve().parent.parent
 RULE_DOCS = ROOT / "src" / "sqlty" / "rules"
 EXAMPLES = sorted(p for p in (ROOT / "examples").glob("0*") if p.is_dir())
+# __main__ runs the CLI on import; _core is compiled and has no docstrings.
+# drivers/ is a namespace package, which walk_packages skips.
 MODULES = sorted(
     m.name
     for m in pkgutil.walk_packages(sqlty.__path__, "sqlty.")
     if not m.name.endswith("__main__") and m.name != "sqlty._core"
 )
+WITH_EXAMPLES = {"sqlty", "sqlty.core", "sqlty._decode"}
 
 
 def test_rules_table() -> None:
@@ -58,6 +61,7 @@ def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     module = importlib.import_module(name)
     result = doctest.testmod(module, optionflags=doctest.ELLIPSIS)
     assert result.failed == 0
+    assert result.attempted > 0 or name not in WITH_EXAMPLES
 
 
 def test_rule_docs() -> None:
