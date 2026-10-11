@@ -301,7 +301,7 @@ q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
-## Former backend divergences
+## Regression cases
 
 ### Rewrite skips prefixed strings
 

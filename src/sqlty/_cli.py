@@ -378,6 +378,7 @@ class SettingsResolver:
 
     def _resolve(self, directory: Path) -> Settings:
         from sqlty._config import load_config
+        from sqlty.core import strip_source
 
         config, config_dir = load_config(directory)
         args = self._args
@@ -387,10 +388,18 @@ class SettingsResolver:
         untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
         if untyped not in ("skip", "sentinel"):
             raise SystemExit(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
+        import_style = config.get("import_style")
+        try:
+            strip_source("", import_style=import_style)
+        except ValueError as exc:
+            raise SystemExit(
+                f"{config_dir}/pyproject.toml: {exc}; use 'from sqlty import SQL [as Q]' "
+                "or 'import sqlty [as sy]'"
+            ) from None
         return Settings(
             dialect=args.dialect or config.get("dialect", "postgres"),
             schema_sql=schema_sql,
-            import_style=config.get("import_style"),
+            import_style=import_style,
             untyped=untyped == "sentinel",
             rules=config.get("rules"),
         )

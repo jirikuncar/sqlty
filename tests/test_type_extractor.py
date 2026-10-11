@@ -1,5 +1,6 @@
 """Unit tests for _type_extractor module."""
 
+import ast
 import datetime
 import typing
 import uuid
@@ -10,7 +11,9 @@ import pytest
 from sqlty._type_extractor import (
     TypeInfo,
     _consistent,
+    _erase,
     _is_subtype,
+    _newtype_assignments,
     check_type_compatibility,
     extract_type_definitions,
     field_accepts,
@@ -647,6 +650,8 @@ class TestTypedDictInheritance:
         (list[int], Sequence[int], None, None),
         (typing.Literal["x"], str, None, None),
         (str, None, None, None),
+        (int, typing.NewType("UserId", int), None, None),
+        (list, list[int], None, None),
     ],
 )
 def test_subtype_and_consistency(src, dst, subtype, consistent):
@@ -665,6 +670,9 @@ def test_subtype_and_consistency(src, dst, subtype, consistent):
         ("str | bytes", "int", False),
         ("bool", "int", False),
         ("str", None, True),
+        ("list[str]", "list", True),
+        ("list[list[int]] | None", "list", True),
+        ("dict[str, int]", "list", False),
     ],
 )
 def test_field_accepts(annotation: str, column: str | None, ok: bool):
@@ -672,13 +680,32 @@ def test_field_accepts(annotation: str, column: str | None, ok: bool):
     assert field_accepts(annotation, column) is ok
 
 
-def test_checker_annotation_fields_use_field_accepts():
-    from sqlty._checker import Checker
-    from sqlty._sql_analyzer import SQLAnalyzer
+UserId = typing.NewType("UserId", int)
 
-    checker = Checker(SQLAnalyzer())
-    sql = "SELECT id::INTEGER, name::TEXT FROM users"
-    assert checker.check_query(sql, [("id", "int | Any"), ("name", "Any")], "User") == []
-    [diag] = checker.check_query("SELECT flag::INTEGER FROM users", [("flag", "bool")], "User")
-    assert diag.rule == "column-type-mismatch"
-    assert diag.message == "User.flag is bool but query column 'flag' infers int"
+
+@pytest.mark.parametrize(
+    ("tp", "erased"),
+    [
+        (UserId, int),
+        (typing.NewType("AdminId", UserId), int),
+        (typing.NewType("Tags", list[str]), list),
+        (dict[str, list[int]], dict),
+        (UserId | list[str], int | list),
+        (typing.Literal["x"], typing.Literal["x"]),
+        (None, None),
+    ],
+)
+def test_erase(tp, erased):
+    assert _erase(tp) == erased
+
+
+def test_newtype_assignments_only_type_expressions():
+    src = """
+A = NewType("A", int)
+B = NewType("B", list[str] | None)
+C = NewType("Other", int)
+D = NewType("D", print("x") or int)
+E = NewType("E", f())
+F = NewType("F", int + str)
+"""
+    assert list(_newtype_assignments(ast.parse(src), {})) == ["A", "B"]

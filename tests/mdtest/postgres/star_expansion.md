@@ -208,7 +208,7 @@ SELECT * FROM t
 -- expanded: None
 ```
 
-## Former backend divergences
+## Regression cases
 
 ### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...`
 
@@ -262,4 +262,28 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 ```sql
 SELECT * FROM users, audit_log
 -- expanded: None
+```
+
+## Quoted column names keep their quotes
+
+`schema.sql`:
+```sql
+CREATE TABLE t (id INTEGER, "My Col" TEXT);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM t
+-- expanded: SELECT id::INT, "My Col"::TEXT FROM t
+-- columns: id: int (INT)
+-- columns: my col: str (TEXT)
+```
+
+```python
+q = SQL[tuple[int, str]]('--sql\nSELECT * FROM t')
+# fixed: q = SQL[tuple[int, str]]('--sql\nSELECT id::INT, "My Col"::TEXT FROM t')
 ```

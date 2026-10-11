@@ -83,8 +83,9 @@ query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 Point sqlty at your `CREATE TABLE` statements and the casts become optional
 ([Schema inference guide](https://jirikuncar.github.io/sqlty/guide/schema-inference/)).
-PostgreSQL, SQLite and MySQL are supported; with MySQL, the Rust backend has a
-[known gap](https://jirikuncar.github.io/sqlty/reference/backends/#known-gaps).
+PostgreSQL, SQLite and MySQL are supported, and other
+[dialects](https://jirikuncar.github.io/sqlty/reference/engine/#dialects) on a
+best-effort basis.
 
 ```toml
 # pyproject.toml
@@ -138,13 +139,13 @@ query = "--sql\nSELECT id, name, email FROM users"
 one. See the
 [rules reference](https://jirikuncar.github.io/sqlty/reference/rules/).
 
-## Backends
+## Engine
 
-The CLI and `sqlty.core` use a Rust extension when available, with a
-pure-Python fallback held to the same tests. See
-[Backends](https://jirikuncar.github.io/sqlty/reference/backends/) for
-[benchmarks](https://jirikuncar.github.io/sqlty/reference/backends/#benchmarks)
-and how to choose one.
+SQL parsing, type inference and source rewriting run in a Rust engine
+([sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs) via
+[PyO3](https://pyo3.rs)); wheels cover Linux, macOS and Windows. See
+[Engine](https://jirikuncar.github.io/sqlty/reference/engine/) for dialects and
+[benchmarks](https://jirikuncar.github.io/sqlty/reference/engine/#benchmarks).
 
 ## Contributing
 

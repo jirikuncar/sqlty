@@ -144,15 +144,6 @@ wheels = [
 ]
 
 [[package]]
-name = "isort"
-version = "7.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/63/53/4f3c058e3bace40282876f9b553343376ee687f3c35a525dc79dbd450f88/isort-7.0.0.tar.gz", hash = "sha256:5513527951aadb3ac4292a41a16cbc50dd1642432f5e8c20057d414bdafb4187", size = 805049, upload-time = "2025-10-11T13:30:59.107Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/ed/e3705d6d02b4f7aea715a353c8ce193efd0b5db13e204df895d38734c244/isort-7.0.0-py3-none-any.whl", hash = "sha256:1bcabac8bc3c36c7fb7b98a76c8abb18e0f841a3ba81decac7691008592499c1", size = 94672, upload-time = "2025-10-11T13:30:57.665Z" },
-]
-
-[[package]]
 name = "librt"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -453,20 +444,10 @@ wheels = [
 ]
 
 [[package]]
-name = "sqlglot"
-version = "27.29.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d1/50/766692a83468adb1bde9e09ea524a01719912f6bc4fdb47ec18368320f6e/sqlglot-27.29.0.tar.gz", hash = "sha256:2270899694663acef94fa93497971837e6fadd712f4a98b32aee1e980bc82722", size = 5503507, upload-time = "2025-10-29T13:50:24.594Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9b/70/20c1912bc0bfebf516d59d618209443b136c58a7cff141afa7cf30969988/sqlglot-27.29.0-py3-none-any.whl", hash = "sha256:9a5ea8ac61826a7763de10cad45a35f0aa9bfcf7b96ee74afb2314de9089e1cb", size = 526060, upload-time = "2025-10-29T13:50:22.061Z" },
-]
-
-[[package]]
 name = "sqlty"
 source = { editable = "." }
 dependencies = [
     { name = "asttokens" },
-    { name = "sqlglot" },
 ]
 
 [package.optional-dependencies]
@@ -490,9 +471,6 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
-magic = [
-    { name = "isort" },
-]
 psycopg = [
     { name = "psycopg" },
 ]
@@ -501,7 +479,6 @@ psycopg = [
 requires-dist = [
     { name = "asttokens", specifier = ">=3.0.0" },
     { name = "psycopg", marker = "extra == 'psycopg'", specifier = ">=3.2.12" },
-    { name = "sqlglot", specifier = ">=27.29.0,<31" },
 ]
 provides-extras = ["psycopg"]
 
@@ -519,7 +496,6 @@ dev = [
     { name = "ruff", specifier = ">=0.16.10" },
     { name = "ty", specifier = ">=0.0.85" },
 ]
-magic = [{ name = "isort", specifier = ">=7.0.0" }]
 psycopg = [{ name = "psycopg", specifier = ">=3.2.12" }]
 
 [[package]]

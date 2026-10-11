@@ -29,7 +29,7 @@ help:
 	@echo "  test-e2e          - Run end-to-end tests only"
 	@echo "  test-coverage     - Run pytest with coverage report"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
-	@echo "  bench             - Run Python vs Rust benchmarks"
+	@echo "  bench             - Run sqlty.core benchmarks"
 	@echo ""
 	@echo "Docs:"
 	@echo "  docs              - Build the docs site, strict via zensical.toml (output: site/)"

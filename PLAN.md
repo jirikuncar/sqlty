@@ -1,5 +1,8 @@
 # Plan: Simplify Snapshot Codec — ruff-style CLI + Markdown Tests
 
+> **Historical record.** The pure-Python backend (`_core_py`, `_sql_analyzer`)
+> described below was removed; sqlty now uses only the Rust engine.
+
 > **Deferred items** (stub generation, structured return types) are in `PLAN-FUTURE.md`.
 
 ## Problem Statement

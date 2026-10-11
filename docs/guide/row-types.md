@@ -85,7 +85,10 @@ c = SQL[Short]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 A field passes the type check when it can hold the column's values: `Any`, a
 union containing `Any` or the column type, and `float` for an `int` column
-are all accepted, but `bool` for an `int` column is not.
+are all accepted, but `bool` for an `int` column is not. A `NewType` is
+accepted wherever its supertype is, and a parametrised generic such as
+`list[str]` or `dict[str, int]` for a column that infers the bare `list` or
+`dict`.
 
 Annotations are resolved with Python's typing machinery when the module can
 be imported, so `from datetime import datetime` matches a `TIMESTAMP` column

@@ -78,7 +78,8 @@ per module or helper) or `@sqlty(schema=...)`; see
 
 The dialect decides how queries and the schema are parsed. Choose
 `postgres` (default), `sqlite` or `mysql` with `dialect` in `[tool.sqlty]` or
-`--dialect` on the command line, which overrides `pyproject.toml`.
+`--dialect` on the command line, which overrides `pyproject.toml`. Other
+[dialects](../reference/engine.md#dialects) can be set in `pyproject.toml`.
 
 ### SQLite
 
@@ -111,7 +112,7 @@ stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
 
 SQLite accepts free-form type names such as `UNSIGNED BIG INT`; sqlty does
 not, and skips a table that uses one (see
-[Backends](../reference/backends.md#known-gaps)).
+[Engine](../reference/engine.md#known-gaps)).
 
 ### MySQL
 
@@ -156,7 +157,7 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
     though sqlty types it. Until sqlty accepts a MySQL-safe marker, drop the
     marker line before executing, e.g. `cur.execute(query.partition("\n")[2])`.
     Placeholders (`%s`, `%(name)s`) are inferred in every dialect; see
-    [Backends](../reference/backends.md#placeholders).
+    [Engine](../reference/engine.md#placeholders).
 
 ## Example projects
 

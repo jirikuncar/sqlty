@@ -92,4 +92,97 @@ from sqlty import SQL
 
 # error: [stale-type] "SQL[tuple[str, list[str]]] should be SQL[tuple[int, list]]"
 q = SQL[tuple[str, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, list]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+```
+
+## Unions with a parametrised item are still stale
+
+Only an item that is exactly `list[...]` refines an inferred `list`;
+`list[str] | str` and `list[str] | None` are reported.
+
+```python
+from sqlty import SQL
+
+# error: [stale-type] "SQL[tuple[int, list[str] | str]] should be SQL[tuple[int, list]]"
+a = SQL[tuple[int, list[str] | str]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# error: [stale-type] "SQL[tuple[int, list[str] | None]] should be SQL[tuple[int, list]]"
+b = SQL[tuple[int, list[str] | None]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+```
+
+## Optional and nested `list[...]` fields
+
+```python
+from typing import Optional, TypedDict
+from sqlty import SQL
+
+class Row(TypedDict):
+    tags: Optional[list[str]]
+    labels: list[str] | None
+    grid: list[list[int]]
+
+q = SQL[Row]("--sql\nSELECT tags::TEXT[], labels::TEXT[], grid::INTEGER[][] FROM users")
+# error:
+```
+
+## `NewType` of a `NewType` and of `list[str]`
+
+```python
+from typing import NewType, TypedDict
+from sqlty import SQL
+
+UserId = NewType("UserId", int)
+AdminId = NewType("AdminId", UserId)
+Tags = NewType("Tags", list[str])
+
+class Row(TypedDict):
+    id: AdminId
+    tags: Tags
+
+class Bad(TypedDict):
+    id: AdminId
+
+q = SQL[Row]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# error: [column-type-mismatch] "Bad.id is AdminId but query column 'id' infers str"
+r = SQL[Bad]("--sql\nSELECT id::TEXT FROM users")
+```
+
+## `NewType` of a `NewType` and of `list[str]` without runtime resolution
+
+```python
+import not_installed
+from typing import NewType, TypedDict
+from sqlty import SQL
+
+UserId = NewType("UserId", int)
+AdminId = NewType("AdminId", UserId)
+Tags = NewType("Tags", list[str])
+
+class Row(TypedDict):
+    id: AdminId
+    tags: Tags
+
+class Bad(TypedDict):
+    id: AdminId
+
+q = SQL[Row]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# error: [column-type-mismatch] "Bad.id is AdminId but query column 'id' infers str"
+r = SQL[Bad]("--sql\nSELECT id::TEXT FROM users")
+```
+
+## Element types are not checked
+
+Array columns infer a bare `list`, so the element type of a `list[...]` field
+is not compared: a `list[int]` field on a `TEXT[]` column is accepted.
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Row(TypedDict):
+    tags: list[int]
+
+q = SQL[Row]("--sql\nSELECT tags::TEXT[] FROM users")
+# error:
 ```

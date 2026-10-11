@@ -41,8 +41,9 @@ query_param = "query"
 
 ## `dialect`
 
-SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`
-or `"mysql"`. CLI: `--dialect`, which overrides this key. See
+SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
+`"mysql"`, or another [dialect](engine.md#dialects) sqlparser-rs knows. CLI:
+`--dialect` (the first three only), which overrides this key. See
 [Dialects](../guide/schema-inference.md#dialects).
 
 ## `schema`
