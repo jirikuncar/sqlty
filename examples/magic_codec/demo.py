@@ -5,7 +5,7 @@ Example demonstrating the magic codec for --sql prefix strings.
 This example shows how to use the magic codec to automatically transform
 strings prefixed with --sql into SQL[T](...) calls with type inference.
 
-Run it with sqlty installed from a wheel, which ships sqlty_magic.pth to
+Run it with sqlty installed (not editable), which ships sqlty_magic.pth to
 register the codec at startup: python examples/magic_codec/demo.py
 
 The codec will automatically:
