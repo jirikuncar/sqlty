@@ -173,4 +173,12 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
 
 
 def _without_imports(source: str, imports: set[str]) -> str:
-    return "\n".join(line for line in source.splitlines() if line.rstrip() not in imports)
+    lines = []
+    for line in source.splitlines():
+        head, sep, rest = line.partition("; ")
+        while sep and head in imports:
+            line = rest
+            head, sep, rest = line.partition("; ")
+        if line.rstrip() not in imports:
+            lines.append(line)
+    return "\n".join(lines)
