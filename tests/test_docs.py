@@ -12,10 +12,13 @@ TOML block may pick it up; repeat or reset the config in that section if it
 matters.
 
 Run with ``--update-mdtest`` to rewrite assertion comments in place.
+
+``>>>`` examples in the pages listed in ``_DOCTEST_FILES`` run as doctests.
 """
 
 from __future__ import annotations
 
+import doctest
 from pathlib import Path
 
 import pytest
@@ -37,3 +40,21 @@ def test_docs(case: MDTestCase, request: pytest.FixtureRequest) -> None:
         case.update = True
         case.updater = _UPDATERS.setdefault(case.md_path, MDFileUpdater(case.md_path))
     case.run()
+
+
+_DOCTEST_FILES = [_ROOT / "docs" / "reference" / "python-api.md"]
+
+
+@pytest.mark.parametrize(
+    "path", _DOCTEST_FILES, ids=[str(p.relative_to(_ROOT)) for p in _DOCTEST_FILES]
+)
+def test_docs_doctest(path: Path) -> None:
+    # Blank out code fences so a closing ``` is not read as expected output.
+    text = "\n".join(
+        "" if line.lstrip().startswith("```") else line for line in path.read_text().splitlines()
+    )
+    test = doctest.DocTestParser().get_doctest(text, {}, path.name, str(path), 0)
+    runner = doctest.DocTestRunner(optionflags=doctest.ELLIPSIS)
+    result = runner.run(test)
+    assert result.attempted > 0
+    assert result.failed == 0

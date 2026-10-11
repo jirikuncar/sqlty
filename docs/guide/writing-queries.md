@@ -1,0 +1,218 @@
+# Writing queries
+
+sqlty works on string literals that start with `--sql`. It infers a row type
+for each one and `sqlty rewrite` wraps the string in `SQL[T](...)`.
+
+## The `--sql` prefix
+
+Put `--sql` on its own line, then the query. In a single-line string, use the
+`\n` escape:
+
+```python
+query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
+# rewritten: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+`--sql` is a SQL line comment, so the database ignores it. A space instead of
+the newline turns the whole query into that comment: sqlty sees an empty
+query and leaves the string alone (`sqlty check` reports
+[`inline-sql-comment`](../reference/rules.md#inline-sql-comment)):
+
+```python
+query = "--sql SELECT id::INTEGER FROM users"
+# rewritten: query = "--sql SELECT id::INTEGER FROM users"
+```
+
+Single quotes work the same way:
+
+```python
+query = '--sql\nSELECT id::INTEGER FROM users'
+# rewritten: query = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
+```
+
+## Multi-line queries
+
+In a triple-quoted string, start the query on the line after `--sql`:
+
+```python
+query = """--sql
+SELECT id::INTEGER, email::TEXT
+FROM users
+WHERE active
+"""
+# rewritten-file: from sqlty import SQL
+# rewritten-file: query = SQL[tuple[int, str]]("""--sql
+# rewritten-file: SELECT id::INTEGER, email::TEXT
+# rewritten-file: FROM users
+# rewritten-file: WHERE active
+# rewritten-file: """)
+```
+
+The rewriter never changes the string itself, only the wrapper around it.
+
+## Casts declare column types
+
+Without a [schema](schema-inference.md), sqlty reads column types from
+PostgreSQL-style `::TYPE` casts or from `CAST(x AS TYPE)`:
+
+```python
+query = "--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions"
+# rewritten-file: import datetime
+# rewritten-file: import uuid
+# rewritten-file: from sqlty import SQL
+# rewritten-file: query = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions")
+```
+
+The rewriter adds `import datetime` and `import uuid` when the row type needs
+them.
+
+Literals, `COUNT(*)` and casts inside expressions are typed too. A column
+without a cast, schema entry or literal type becomes `str`, as does an
+expression sqlty cannot type, such as arithmetic. Cast the whole expression
+when the default is wrong:
+
+```python
+query = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, (x::INTEGER + 1)::INTEGER, name FROM t"
+# rewritten: query = SQL[tuple[int, int, str, int, str]]("--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, (x::INTEGER + 1)::INTEGER, name FROM t")
+```
+
+Row types are never optional: a nullable column is typed as its base type.
+Annotate a [row type](row-types.md) with `T | None` when you need it.
+
+## Which statements are wrapped
+
+Only statements that return rows get a row type. DML gets one when it has
+`RETURNING`; DML without it, DDL, transaction control and invalid SQL stay
+plain strings:
+
+```python
+deleted = "--sql\nDELETE FROM users WHERE id = 1 RETURNING id::INTEGER"
+purge = "--sql\nDELETE FROM users WHERE id = 1"
+broken = "--sql\nSELEC id FROM users"
+# rewritten: deleted = SQL[tuple[int]]("--sql\nDELETE FROM users WHERE id = 1 RETURNING id::INTEGER")
+# rewritten: purge = "--sql\nDELETE FROM users WHERE id = 1"
+# rewritten: broken = "--sql\nSELEC id FROM users"
+```
+
+Queries that return rows of an unknown type (`VALUES`, unparseable `SELECT`)
+are also left alone by default; see [Untyped queries](untyped.md) to mark them
+explicitly.
+
+## f-strings and t-strings
+
+An f-string or t-string is built at runtime, so it cannot be rewritten. sqlty
+skips every `--sql` string on a line that holds one:
+
+```python
+query = f"--sql\nSELECT {column}::INTEGER FROM users"
+# rewritten: query = f"--sql\nSELECT {column}::INTEGER FROM users"
+# warning: line 1: f-string with --sql prefix skipped (f-strings cannot be statically rewritten) [fstring-skipped]
+```
+
+`sqlty check` reports such strings as
+[`stale-rewrite`](../reference/rules.md#stale-rewrite). Pass values as query
+parameters instead of interpolating them, and keep the query a plain literal.
+
+## Type mapping
+
+| SQL type | Python type |
+|----------|-------------|
+| `INTEGER`, `INT`, `BIGINT`, `SMALLINT`, `TINYINT`, `MEDIUMINT`, `YEAR` | `int` |
+| `UTINYINT`, `USMALLINT`, `UMEDIUMINT`, `UINT`, `UBIGINT` (MySQL `... UNSIGNED`) | `int` |
+| `SIGNED`, `UNSIGNED` (MySQL `CAST(x AS SIGNED)`) | `int` |
+| `TEXT`, `VARCHAR`, `CHAR`, `STRING` | `str` |
+| `BOOLEAN`, `BOOL` | `bool` |
+| `FLOAT`, `DOUBLE`, `REAL`, `DECIMAL`, `NUMERIC` | `float` |
+| `UDOUBLE`, `UDECIMAL` (MySQL `... UNSIGNED`) | `float` |
+| `DATE` | `datetime.date` |
+| `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` |
+| `TIME`, `TIMETZ` | `datetime.time` |
+| `INTERVAL` | `datetime.timedelta` |
+| `JSON`, `JSONB` | `dict` |
+| `UUID` | `uuid.UUID` |
+| Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list` |
+| Anything else (`BYTEA`, `BLOB`, `ENUM`, ...) | `str` |
+
+### Dialect notes
+
+- An array type needs an element type: `x::INT[]` is a `list`, but a bare
+  `x::ARRAY` is rejected and nothing is inferred. A fixed size must be an
+  integer literal (`INT[3]`, not `INT[n]`); the size itself is ignored.
+- MySQL has no `INT[]`; use `CAST(x AS UNSIGNED ARRAY)`.
+- In MySQL, `... UNSIGNED` becomes `U<type>` (`INT UNSIGNED` is `UINT`),
+  `FLOAT UNSIGNED` becomes `UDOUBLE`, and `INT3`/`MIDDLEINT` (`MEDIUMINT`) and
+  `INT8` (`BIGINT`) are aliases. `UNSIGNED` applies to `DECIMAL`/`DEC`, not to
+  `NUMERIC` or `FIXED`.
+- `SET(...)`, `SIGNED INTEGER` and `UNSIGNED INTEGER` are MySQL-only. In other
+  dialects they are rejected, and a schema `CREATE TABLE` that uses one is
+  skipped entirely, so `SELECT *` from that table cannot be expanded.
+
+See [Schema inference](schema-inference.md#dialects) for choosing a dialect.
+
+## Editing queries
+
+`sqlty rewrite` never replaces an existing wrapper, so after you change the
+SQL inside `SQL[T](...)`, `T` stays as it was. There are two ways to update
+it.
+
+### Edit in place
+
+Change the SQL inside the wrapper and run `sqlty check`. It reports
+[`stale-type`](../reference/rules.md#stale-type) when a `SQL[tuple[...]]` no
+longer matches the query, and the
+[row type rules](../reference/rules.md#row-type-rules) when a named
+[row type](row-types.md) no longer fits. Then update `T` by hand:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# check: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+```
+
+This works for every file, and it is the only safe workflow once a file has
+row types you wrote by hand.
+
+### Strip and rewrite
+
+For files whose wrappers are all `SQL[tuple[...]]`, let sqlty regenerate
+them:
+
+```bash
+sqlty strip queries.py     # SQL[T]("--sql\n...") -> "--sql\n..."
+# edit the SQL
+sqlty rewrite queries.py   # "--sql\n..." -> SQL[T]("--sql\n...")
+```
+
+Neither command changes the string contents, only the wrapper and the
+`from sqlty import SQL` import. For a file whose `--sql` strings are all
+plain, `strip(rewrite(x)) == x`.
+
+!!! warning "`strip` removes hand-written row types"
+    `strip` removes every wrapper, including `SQL[User]`, and the sqlty
+    import even if you wrote it yourself. The next `rewrite` produces
+    `SQL[tuple[...]]`, so `User` is lost. Do not strip files with row types.
+
+```python
+user = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# stripped: user = "--sql\nSELECT id::INTEGER FROM users"
+```
+
+## Import style
+
+`sqlty rewrite` writes `from sqlty import SQL` and `SQL[T](...)` by default.
+[`import-style`](../reference/configuration.md#import-style) changes both:
+
+```toml
+[tool.sqlty]
+import-style = "from sqlty import SQL as Q"
+```
+
+```python
+query = "--sql\nSELECT id::INTEGER FROM users"
+# rewritten-file: from sqlty import SQL as Q
+# rewritten-file: query = Q[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+```
+
+Example project:
+[`examples/05_import_style/`](https://github.com/jirikuncar/sqlty/tree/main/examples/05_import_style).

@@ -121,6 +121,7 @@ q = "--sql\nSELECT id::INTEGER FROM users"
 | `# stripped:` | Stripped source | `SQLRewriter.strip()` |
 | `# expanded:` | Star expansion | `SQLAnalyzer.expand_star()` |
 | `# error:` | Lint diagnostic | `Checker.check_query()` |
+| `# check:` | Every diagnostic for the block, warnings included | `check_source()` |
 | `# decoded:` | Magic codec output | `decode()` |
 | `# warning:` | Rewriter warning | `SQLRewriter.rewrite().warnings` |
 

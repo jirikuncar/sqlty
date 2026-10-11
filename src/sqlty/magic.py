@@ -43,7 +43,7 @@ For Global Setup:
 
     Then use '# coding: sqlty' in any file for automatic transformation.
 
-See docs/magic-codec.md for complete documentation.
+See docs/guide/magic-codec.md for complete documentation.
 """
 
 from __future__ import annotations

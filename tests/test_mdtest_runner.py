@@ -155,3 +155,40 @@ def test_decoded_drops_coding_cookie(tmp_path: Path) -> None:
     )
     (case,) = parse_mdtest_file(path)
     case.run()
+
+
+def test_check_lists_every_diagnostic_with_schema(tmp_path: Path) -> None:
+    # `# check:` runs check_source on the block with the section's schema and
+    # lists warnings as well as errors, one per line.
+    path = tmp_path / "sample.md"
+    path.write_text(
+        "## Check\n\n`schema.sql`:\n\n```sql\n"
+        "CREATE TABLE users (id INTEGER, name TEXT);\n"
+        '```\n\n```toml\n[tool.sqlty]\nschema = "schema.sql"\n```\n\n'
+        "```python\n"
+        'a = SQL[tuple[int, str]]("--sql\\nSELECT * FROM users")\n'
+        'b = "--sql\\nSELECT id FROM users"\n'
+        "# check:\n"
+        "```\n"
+    )
+    (case,) = parse_mdtest_file(path, update=True)
+    case.run()
+    assert path.read_text().endswith(
+        '# check: [select-star] "SELECT * used — expand to explicit column list"\n'
+        '# check: [stale-rewrite] "Source has --sql strings that aren\'t wrapped in SQL[T]"\n'
+        "```\n"
+    )
+    (case,) = parse_mdtest_file(path)
+    case.run()
+
+
+def test_empty_check_means_no_diagnostics(tmp_path: Path) -> None:
+    path = tmp_path / "sample.md"
+    path.write_text(
+        "## Clean\n\n```python\n"
+        'q = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")\n'
+        "# check:\n"
+        "```\n"
+    )
+    (case,) = parse_mdtest_file(path)
+    case.run()

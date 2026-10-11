@@ -26,13 +26,14 @@ AssertionKind = Literal[
     "stripped",
     "expanded",
     "error",
+    "check",
     "decoded",
     "warning",
 ]
 
 # Regex to match assertion comments in python blocks — alternatives must match AssertionKind.
 ASSERTION_RE = re.compile(
-    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|decoded|warning): ?(.*)$"
+    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|check|decoded|warning): ?(.*)$"
 )
 
 
@@ -124,6 +125,8 @@ class MDTestCase:
                 return self._expand_star()
             case "error":
                 return self._check_error()
+            case "check":
+                return self._check_source_errors(with_schema=True)
             case "decoded":
                 return self._decode()
             case "warning":
@@ -441,14 +444,25 @@ class MDTestCase:
             return f'[{d.rule}] "{d.message}"'
         return ""
 
-    def _check_source_errors(self) -> str:
-        """Run ``check_source`` on the Python block; one diagnostic per line."""
+    def _check_source_errors(self, *, with_schema: bool = False) -> str:
+        """Run ``check_source`` on the Python block; one diagnostic per line.
+
+        Every diagnostic is listed, whatever its severity. With
+        ``with_schema`` (the ``# check:`` assertion), the configured
+        ``schema`` file from the section is passed as ``schema_sql``.
+        """
         from sqlty.core import check_source
 
         sqlty_config = self._get_sqlty_config()
+        schema_sql = None
+        if with_schema:
+            schema_file = sqlty_config.get("schema")
+            if schema_file and schema_file in self.files:
+                schema_sql = self.files[schema_file]
         diagnostics = check_source(
             self._extract_source_lines(),
             dialect=sqlty_config.get("dialect", "postgres"),
+            schema_sql=schema_sql,
             rules=sqlty_config.get("rules"),
             import_style=sqlty_config.get("import-style"),
         )

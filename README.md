@@ -201,7 +201,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/magic-codec.md).
+Import `sqlty.magic` (or add a `.pth` file) to register the codec. See [magic codec docs](docs/guide/magic-codec.md).
 
 ## Untyped Queries
 
@@ -299,10 +299,10 @@ Browse `tests/mdtest/` to see behavior specified as readable markdown test suite
 
 ## Documentation
 
-- **[User Guide](docs/index.md)** — complete guide with examples
-- **[API Reference](docs/api.md)** — CLI, types, configuration, lint rules
-- **[Usage Patterns](docs/patterns.md)** — rewrite/strip, magic codec, schema inference
-- **[Advanced Usage](docs/advanced-usage.md)** — dialects, multiple schemas, pre-commit
+- **[Overview](docs/index.md)** — what sqlty does, with links to the guide
+- **[Reference](docs/reference/cli.md)** — CLI, configuration, lint rules, Python API, backends
+- **[Quickstart](docs/quickstart.md)** — rewrite/check/strip, pre-commit
+- **[Schema Inference](docs/guide/schema-inference.md)** — schemas and dialects
 
 ## Contributing
 

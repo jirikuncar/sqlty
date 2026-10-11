@@ -1,83 +1,48 @@
-# Motivation
+# Why SQLTy?
 
-## When to Use SQLTy
+## The problem
 
-**You write raw SQL in Python and want type safety.**
-
-If you use an ORM (SQLAlchemy, Django ORM), use its type system instead. SQLTy is for projects that use raw SQL strings — whether by choice, for performance, or because of legacy code.
-
-## The Problem
-
-Raw SQL queries in Python are untyped:
+Raw SQL in Python is untyped. The driver returns rows of `Any`, and nothing
+connects the columns a query selects to the code that reads them:
 
 ```python
-row = db.fetchone("SELECT id, name, created_at FROM users WHERE id = %s", (user_id,))
-# row is tuple[Any, ...] — no type information
-print(row[0])  # int? str? datetime? No way to know without reading the SQL
+row = cur.execute("SELECT id, name, created_at FROM users WHERE id = %s", (user_id,)).fetchone()
+row[2].isoformat()  # is column 2 a datetime? Only the SQL knows.
 ```
 
-Bugs hide in plain sight:
+When a column is renamed, retyped or reordered, every query and every
+consumer has to be found by hand. Mistakes surface at runtime.
 
-```python
-# Renamed 'name' to 'display_name' in the table, but forgot this query
-row = db.fetchone("SELECT id, name FROM users")
-# Runtime error — no static analysis caught it
-```
+## What sqlty does
 
-## How SQLTy Helps
-
-### 1. Type inference from SQL
-
-SQLTy parses your SQL and infers the Python types. The `# rewritten:` line shows the code after `sqlty rewrite .`:
+sqlty reads the SQL, infers the row type from casts or a schema, and puts it
+next to the query as `SQL[T]`, a `str` subclass:
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # rewritten: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-### 2. Structural validation of user types
+The query stays plain SQL that you can read, copy into a console and run.
+Type checkers see `T`; `sqlty check` keeps `T` and the SQL in sync, and
+validates your own row types against the columns.
 
-Define your own types and sqlty validates them against the query:
+## When to use something else
 
-```python
-class User(TypedDict):
-    id: int
-    name: str
+sqlty fits raw SQL written as string literals, with casts or a schema dump
+in the repository; [Use cases](use-cases.md) lists the typical situations.
+Use something else for:
 
-query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# sqlty check validates field count, types, and names
-```
+- **An ORM** (SQLAlchemy, Django): use its typing support.
+- **Dynamic SQL** built at runtime: sqlty only reads string literals.
+- **Runtime validation**: sqlty is static analysis. Use Pydantic to validate
+  rows as they arrive.
 
-### 3. Lint checks catch drift
+## How it compares
 
-When queries change but annotations don't, `sqlty check` catches it:
-
-```
-error[stale-type]: SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
-error[column-type-mismatch]: User.id is str but query column 'id' infers int
-```
-
-## Trade-offs
-
-### Good fit
-
-- Raw SQL queries (not ORM)
-- Codebase with many queries that drift over time
-- Team that values static analysis
-- Can add `::TYPE` casts to SQL or provide a schema dump
-
-### Use something else
-
-- **ORM users**: Use SQLAlchemy/Django type plugins
-- **Small projects**: Manual annotations may be simpler
-- **No SQL control**: SQLTy needs type casts or a schema file for inference
-- **Runtime validation needed**: SQLTy is static analysis, not runtime checks (use Pydantic for that)
-
-## How It Compares
-
-| Approach | When | Trade-off |
-|----------|------|-----------|
-| **ORM type plugins** | Using SQLAlchemy/Django | Tied to ORM |
-| **Pydantic validation** | Need runtime checks | Runtime overhead |
-| **Manual annotations** | Small codebase | Drifts from reality |
-| **SQLTy** | Raw SQL at scale | Needs type casts or schema |
+| Approach | Trade-off |
+|----------|-----------|
+| ORM types | Tied to the ORM and its query API |
+| Runtime validation (Pydantic) | Catches mismatches only when the code runs |
+| Hand-written annotations | Drift from the SQL silently |
+| sqlty | Needs casts or a schema; queries must be literals |

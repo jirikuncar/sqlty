@@ -10,14 +10,33 @@ site_dir = "site"
 # Abort `zensical build` on warnings (broken links/anchors are validated by default)
 strict = true
 nav = [
-  { "User Guide" = "index.md" },
-  { "Motivation" = "motivation.md" },
-  { "Installation" = "installation.md" },
-  { "Usage Patterns" = "patterns.md" },
-  { "Advanced Usage" = "advanced-usage.md" },
-  { "Magic Codec" = "magic-codec.md" },
-  { "Examples" = "examples.md" },
-  { "API Reference" = "api.md" },
+  { "Home" = "index.md" },
+  { "Getting started" = [
+    { "Installation" = "installation.md" },
+    { "Quickstart" = "quickstart.md" },
+    { "Why SQLTy?" = "motivation.md" },
+    { "Use cases" = "use-cases.md" },
+  ] },
+  { "Guide" = [
+    { "Writing queries" = "guide/writing-queries.md" },
+    { "Schema inference" = "guide/schema-inference.md" },
+    { "Untyped queries" = "guide/untyped.md" },
+    { "Row types" = "guide/row-types.md" },
+    { "psycopg" = "guide/psycopg.md" },
+    { "Generated stubs" = "guide/stubs.md" },
+    { "Magic codec" = "guide/magic-codec.md" },
+  ] },
+  { "Recipes" = [
+    { "Migration" = "recipes/migration.md" },
+    { "CI and pre-commit" = "recipes/ci.md" },
+  ] },
+  { "Reference" = [
+    { "CLI" = "reference/cli.md" },
+    { "Configuration" = "reference/configuration.md" },
+    { "Rules" = "reference/rules.md" },
+    { "Python API" = "reference/python-api.md" },
+    { "Backends" = "reference/backends.md" },
+  ] },
 ]
 
 [project.theme]
