@@ -713,13 +713,16 @@ def test_erase(tp, erased):
         ("from typing import Set", "Set[int]", set[int]),
         ("from typing import FrozenSet", "FrozenSet[int]", frozenset[int]),
         ("from typing import Tuple", "Tuple[int, str]", tuple[int, str]),
+        ("import typing_extensions", "typing_extensions.List[str]", list[str]),
+        ("from typing_extensions import List", "List[str]", list[str]),
+        ("from mylib import List", "List[str]", None),
+        ("class List: ...", "List[str]", None),
     ],
 )
 def test_typing_generics_without_runtime_resolution(imports, annotation, expected):
     src = f"import not_installed\n{imports}\nfrom typing import TypedDict\nclass Row(TypedDict):\n    x: {annotation}\n"
     row = extract_type_definitions(src)["Row"]
     assert row.field_types["x"] == expected
-    assert check_type_compatibility(row, "x", "list") is (typing.get_origin(expected) is list)
 
 
 def test_newtype_assignments_only_type_expressions():

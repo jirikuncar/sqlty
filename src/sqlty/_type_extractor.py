@@ -556,11 +556,9 @@ def _typing_aliases(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module in _TYPING_MODULES:
-            aliases |= {a.asname: a.name for a in node.names if a.asname}
+            aliases |= {a.asname or a.name: a.name for a in node.names}
         elif isinstance(node, ast.Import):
-            aliases |= {
-                a.asname: a.name for a in node.names if a.asname and a.name in _TYPING_MODULES
-            }
+            aliases |= {a.asname or a.name: a.name for a in node.names if a.name in _TYPING_MODULES}
     return aliases
 
 
@@ -746,14 +744,16 @@ _AST_TYPES: dict[str, typing.Any] = {
     "set": set,
     "frozenset": frozenset,
     "tuple": tuple,
+    "Any": typing.Any,
+    "Never": typing.Never,
+    "NoReturn": typing.Never,
+}
+_TYPING_GENERICS: dict[str, typing.Any] = {
     "List": list,
     "Dict": dict,
     "Set": set,
     "FrozenSet": frozenset,
     "Tuple": tuple,
-    "Any": typing.Any,
-    "Never": typing.Never,
-    "NoReturn": typing.Never,
 }
 
 
@@ -765,6 +765,9 @@ def _ast_type(
     ``aliases`` maps local names to ``typing`` names (see `_typing_aliases`), so
     ``A`` for ``from typing import Any as A`` and ``t.Any`` for
     ``import typing as t`` resolve; ``Annotated`` metadata is dropped.
+    ``typing`` generic aliases (``List``, ``Dict``, ``Set``, ``FrozenSet``,
+    ``Tuple``) resolve to their builtins only when imported from ``typing``
+    or ``typing_extensions``.
     ``newtypes`` maps names to their ``NewType`` assignments (see `_newtype_assignments`).
     """
     newtypes = newtypes or {}
@@ -775,10 +778,11 @@ def _ast_type(
         supertype = _ast_type(typing.cast(ast.Call, assign.value).args[1], aliases, others)
         return None if supertype is None else typing.NewType(node.id, supertype)  # ty: ignore[invalid-newtype]
     if isinstance(node, ast.Name):
-        return _AST_TYPES.get(aliases.get(node.id, node.id))
+        known = _AST_TYPES | _TYPING_GENERICS if node.id in aliases else _AST_TYPES
+        return known.get(aliases.get(node.id, node.id))
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
         module = aliases.get(node.value.id, node.value.id)
-        return _AST_TYPES.get(node.attr) if module in _TYPING_MODULES else None
+        return (_AST_TYPES | _TYPING_GENERICS).get(node.attr) if module in _TYPING_MODULES else None
     if isinstance(node, ast.Subscript) and _is_name(node.value, "Annotated", aliases):
         return _ast_type(
             node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice,
@@ -811,7 +815,7 @@ def _annotation_type(annotation: str) -> typing.Any:
     Only for annotations without their module's imports; ``typing.X`` resolves.
     """
     try:
-        return _ast_type(ast.parse(annotation, mode="eval").body, {})
+        return _ast_type(ast.parse(annotation, mode="eval").body, {n: n for n in _TYPING_GENERICS})
     except SyntaxError:
         return None
 
