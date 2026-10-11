@@ -119,7 +119,16 @@ rows and `ValueError` when the row has more than one column.
 ## `sqlty.core`
 
 ```python
-from sqlty.core import check_source, expand_star, infer_type, rewrite_source, strip_source
+from sqlty.core import (
+    analyze_select,
+    check_source,
+    expand_star,
+    fix_source,
+    infer_type,
+    returns_rows,
+    rewrite_source,
+    strip_source,
+)
 ```
 
 The functions behind the CLI, implemented by the Rust [engine](engine.md).

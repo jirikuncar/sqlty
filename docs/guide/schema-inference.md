@@ -78,7 +78,8 @@ per module or helper) or `@sqlty(schema=...)`; see
 
 The dialect decides how queries and the schema are parsed. Choose
 `postgres` (default), `sqlite` or `mysql` with `dialect` in `[tool.sqlty]` or
-`--dialect` on the command line, which overrides `pyproject.toml`.
+`--dialect` on the command line, which overrides `pyproject.toml`. Other
+[dialects](../reference/engine.md#dialects) can be set in `pyproject.toml`.
 
 ### SQLite
 

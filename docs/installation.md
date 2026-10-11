@@ -41,8 +41,8 @@ uv sync --all-groups
 
 sqlty's engine is a compiled Rust extension. Wheels are published for Linux
 (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
-Windows (x64 and arm64). Elsewhere, and from a git checkout, pip builds the
-sdist, which needs a [Rust toolchain](https://rustup.rs/). See
+Windows (x64 and arm64). Elsewhere pip builds from the sdist, and a git
+checkout builds from source; both need a [Rust toolchain](https://rustup.rs/). See
 [Engine](reference/engine.md).
 
 ## Verify

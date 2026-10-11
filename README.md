@@ -138,7 +138,7 @@ query = "--sql\nSELECT id, name, email FROM users"
 one. See the
 [rules reference](https://jirikuncar.github.io/sqlty/reference/rules/).
 
-## Backends
+## Engine
 
 SQL parsing, type inference and source rewriting run in a Rust engine
 ([sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs) via

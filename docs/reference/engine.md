@@ -37,7 +37,7 @@ What each dialect reads:
 | `%s`, `%b`, `%t`, `%(name)s` (psycopg, PyMySQL, mysqlclient) | yes | yes | yes |
 | `%%` (an escaped `%`) | yes | yes | yes |
 | `$1` | yes | yes | yes |
-| `?` | yes, where it isn't the JSONB operator | yes | yes |
+| `?` | yes, unless the query also uses a JSONB `?` operator | yes | yes |
 | `:name` | yes | yes | yes |
 
 The `%` forms are replaced before parsing, everywhere in the query, as
@@ -83,7 +83,9 @@ warm-up, release build), on a 4-core Linux x86_64 machine:
 | `infer_type` with a schema | 43 µs |
 | `expand_star` with a schema | 42 µs |
 | `rewrite_source`, 1 query | 105 µs |
+| `rewrite_source`, 3 queries | 122 µs |
 | `rewrite_source`, 20 queries | 343 µs |
+| `strip_source`, 1 query | 135 µs |
 | `strip_source`, 20 queries | 134 µs |
 | `check_source`, 4 queries | 754 µs |
 
