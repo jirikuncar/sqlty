@@ -64,12 +64,12 @@ untyped = "sentinel"
 ```
 
 ```python
-from sqlty import (
+from sqlty import (  # see (docs)
     SQL,  # the wrapper
     UNTYPED,
 )
 q = "--sql\nVALUES (1, 2)"
-# rewritten-file: from sqlty import (
+# rewritten-file: from sqlty import (  # see (docs)
 # rewritten-file:     SQL,  # the wrapper
 # rewritten-file:     UNTYPED,
 # rewritten-file: )
@@ -135,10 +135,14 @@ q = "--sql\nSELECT 1::INTEGER AS n"
 ### Text in strings and comments is no import
 
 ```python
-"""Run: from sqlty import SQL"""
+"""Example:
+from sqlty import UNTYPED
+"""
 # from sqlty import SQL
 q = "--sql\nSELECT 1::INTEGER AS n"
-# rewritten-file: """Run: from sqlty import SQL"""
+# rewritten-file: """Example:
+# rewritten-file: from sqlty import UNTYPED
+# rewritten-file: """
 # rewritten-file: from sqlty import SQL
 # rewritten-file: # from sqlty import SQL
 # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")

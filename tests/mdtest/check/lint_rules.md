@@ -153,3 +153,13 @@ from sqlty import SQL
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), "--sql\nSELECT 2::INTEGER"
 ```
+
+## Concatenated and `u` strings are reported on their first line
+
+```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = ("--sql\nSELECT 1::INTEGER "
+     "AS n")
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+r = u"--sql\nSELECT 2::INTEGER AS m"
+```
