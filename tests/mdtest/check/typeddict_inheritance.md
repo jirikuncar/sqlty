@@ -13,7 +13,7 @@ other types are given the benefit of the doubt. Only bases defined in the same
 file and spelled as bare names are checked.
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -26,11 +26,11 @@ from sqlty import SQL
 class Base(TypedDict, closed=True):
     id: int
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Base):
     name: str
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 ```
 
 ## Closed base — adding a NotRequired key
@@ -42,11 +42,11 @@ from sqlty import SQL
 class Base(TypedDict, closed=True):
     id: int
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Base):
     name: NotRequired[str]
 
 q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 ```
 
 ## Closed base — redeclaring a key and closed=True are allowed
@@ -74,11 +74,11 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=Never):
     id: int
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Base):
     name: str
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 ```
 
 ## Grandchild of an invalid subclass reports the subclass once
@@ -90,6 +90,7 @@ from sqlty import SQL
 class Base(TypedDict, closed=True):
     id: int
 
+# error: [typeddict-inheritance] "Middle cannot add key 'name' to closed base Base"
 class Middle(Base):
     name: str
 
@@ -98,7 +99,6 @@ class User(Middle):
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 r = SQL[Middle]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [typeddict-inheritance] "Middle cannot add key 'name' to closed base Base"
 ```
 
 ## Closed base reached through a pass-through subclass names the declaring base
@@ -113,11 +113,11 @@ class Base(TypedDict, closed=True):
 class Middle(Base):
     pass
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Middle):
     name: str
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 ```
 
 ## Multiple inheritance — keys from a sibling base
@@ -134,17 +134,17 @@ class Closed(TypedDict, closed=True):
 class Open(TypedDict):
     name: str
 
+# error: [typeddict-inheritance] "OpenFirst cannot add key 'name' to closed base Closed"
 class OpenFirst(Open, Closed):
     pass
 
+# error: [typeddict-inheritance] "ClosedFirst cannot add key 'email' to closed base Closed"
+# error: [typeddict-inheritance] "ClosedFirst cannot add key 'name' to closed base Closed"
 class ClosedFirst(Closed, Open):
     email: str
 
 q = SQL[OpenFirst]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 r = SQL[ClosedFirst]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
-# error: [typeddict-inheritance] "OpenFirst cannot add key 'name' to closed base Closed"
-# error: [typeddict-inheritance] "ClosedFirst cannot add key 'name' to closed base Closed"
-# error: [typeddict-inheritance] "ClosedFirst cannot add key 'email' to closed base Closed"
 ```
 
 ## Multiple inheritance — one message per key and declaring base
@@ -162,11 +162,11 @@ class Left(Base):
 class Right(Base):
     pass
 
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 class User(Left, Right):
     name: str
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
 ```
 
 ## Closed base — closed=False cannot reopen
@@ -179,12 +179,12 @@ class Base(TypedDict, closed=True):
     id: int
     name: NotRequired[str]
 
+# error: [typeddict-inheritance] "User cannot set closed=False: base Base is closed"
 class User(Base, closed=False):
     pass
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot set closed=False: base Base is closed"
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## Closed base — closed=False without runtime resolution
@@ -198,12 +198,12 @@ class Base(TypedDict, closed=True):
     id: int
     name: NotRequired[str]
 
+# error: [typeddict-inheritance] "User cannot set closed=False: base Base is closed"
 class User(Base, closed=False):
     pass
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot set closed=False: base Base is closed"
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## Closed base — extra_items cannot reopen
@@ -216,12 +216,12 @@ class Base(TypedDict, closed=True):
     id: int
     name: NotRequired[str]
 
+# error: [typeddict-inheritance] "User cannot set extra_items=str: base Base is closed"
 class User(Base, extra_items=str):
     pass
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# error: [typeddict-inheritance] "User cannot set extra_items=str: base Base is closed"
 # error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 
 ## extra_items base — closed=False cannot reopen
@@ -233,12 +233,12 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=int):
     id: int
 
+# error: [typeddict-inheritance] "User cannot set closed=False: base Base has extra_items"
 class User(Base, closed=False):
     pass
 
-q = SQL[User]("--sql\nSELECT id::INTEGER, ratio::FLOAT FROM users")
-# error: [typeddict-inheritance] "User cannot set closed=False: base Base has extra_items"
 # error: [column-type-mismatch] "User.ratio is extra_items int but query column 'ratio' infers float"
+q = SQL[User]("--sql\nSELECT id::INTEGER, ratio::FLOAT FROM users")
 ```
 
 ## Mutable extra_items base — new key must be NotRequired
@@ -250,11 +250,11 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=int):
     id: int
 
+# error: [typeddict-inheritance] "User.views must be NotRequired: base Base has extra_items int"
 class User(Base):
     views: int
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
-# error: [typeddict-inheritance] "User.views must be NotRequired: base Base has extra_items int"
 ```
 
 ## Mutable extra_items base — NotRequired key of the same type is allowed
@@ -282,11 +282,11 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=int | None):
     id: int
 
+# error: [typeddict-inheritance] "User.views is int but base Base has extra_items int | None"
 class User(Base):
     views: NotRequired[int]
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
-# error: [typeddict-inheritance] "User.views is int but base Base has extra_items int | None"
 ```
 
 ## Mutable extra_items base — cannot close or change extra_items
@@ -298,16 +298,16 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=int):
     id: int
 
+# error: [typeddict-inheritance] "Sealed cannot set closed=True: base Base has mutable extra_items int"
 class Sealed(Base, closed=True):
     pass
 
+# error: [typeddict-inheritance] "Flags cannot set extra_items=bool: base Base has mutable extra_items int"
 class Flags(Base, extra_items=bool):
     pass
 
 q = SQL[Sealed]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
 r = SQL[Flags]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
-# error: [typeddict-inheritance] "Sealed cannot set closed=True: base Base has mutable extra_items int"
-# error: [typeddict-inheritance] "Flags cannot set extra_items=bool: base Base has mutable extra_items int"
 ```
 
 ## Mutable extra_items base — cannot become read-only
@@ -319,11 +319,11 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=int):
     id: int
 
+# error: [typeddict-inheritance] "User cannot set extra_items=ReadOnly[int]: base Base has mutable extra_items int"
 class User(Base, extra_items=ReadOnly[int]):
     pass
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
-# error: [typeddict-inheritance] "User cannot set extra_items=ReadOnly[int]: base Base has mutable extra_items int"
 ```
 
 ## extra_items type checks without runtime resolution
@@ -338,24 +338,24 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=int | None):
     id: int
 
+# error: [typeddict-inheritance] "User.views is int but base Base has extra_items int | None"
 class User(Base):
     views: NotRequired[int]
 
+# error: [typeddict-inheritance] "Flags cannot set extra_items=bool: base Base has mutable extra_items int | None"
 class Flags(Base, extra_items=bool):
     pass
 
 class Scores(TypedDict, extra_items=ReadOnly[int | str]):
     id: int
 
+# error: [typeddict-inheritance] "Ranked.score is float but base Scores has read-only extra_items int | str"
 class Ranked(Scores):
     score: float
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, views::INTEGER FROM users")
 r = SQL[Flags]("--sql\nSELECT id::INTEGER FROM users")
 s = SQL[Ranked]("--sql\nSELECT id::INTEGER, score::FLOAT FROM users")
-# error: [typeddict-inheritance] "User.views is int but base Base has extra_items int | None"
-# error: [typeddict-inheritance] "Flags cannot set extra_items=bool: base Base has mutable extra_items int | None"
-# error: [typeddict-inheritance] "Ranked.score is float but base Scores has read-only extra_items int | str"
 ```
 
 ## Read-only extra_items base — undecidable types are not flagged
@@ -496,11 +496,11 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=ReadOnly[int | str]):
     id: int
 
+# error: [typeddict-inheritance] "User.score is float but base Base has read-only extra_items int | str"
 class User(Base):
     score: float
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, score::FLOAT FROM users")
-# error: [typeddict-inheritance] "User.score is float but base Base has read-only extra_items int | str"
 ```
 
 ## Read-only extra_items base — may narrow or close
@@ -532,11 +532,11 @@ from sqlty import SQL
 class Base(TypedDict, extra_items=ReadOnly[int]):
     id: int
 
+# error: [typeddict-inheritance] "User cannot set closed=False: base Base has extra_items"
 class User(Base, closed=False):
     pass
 
 q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
-# error: [typeddict-inheritance] "User cannot set closed=False: base Base has extra_items"
 ```
 
 ## Open base — subclasses may close, add keys and set closed=False
@@ -577,7 +577,7 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ## typeddict-inheritance is configurable
 
 ```toml
-[sqlty.rules]
+[tool.sqlty.rules]
 typeddict-inheritance = "ignore"
 ```
 

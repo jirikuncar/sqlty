@@ -15,17 +15,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT id, name, email FROM users
-```
-
-```python
-# inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str]
 ```
 
 ## Schema with explicit cast override
@@ -41,17 +38,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT id::FLOAT, name FROM users
-```
-
-```python
-# inferred: tuple[float, str]
+-- inferred: tuple[float, str]
 ```
 
 ## SUM infers type from schema
@@ -66,17 +60,14 @@ CREATE TABLE products (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT SUM(quantity) FROM products
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## SUM of float column from schema
@@ -91,17 +82,14 @@ CREATE TABLE products (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT SUM(price) FROM products
-```
-
-```python
-# inferred: tuple[float]
+-- inferred: tuple[float]
 ```
 
 ## SUM with explicit cast overrides schema
@@ -116,17 +104,14 @@ CREATE TABLE products (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT SUM(quantity::FLOAT) FROM products
-```
-
-```python
-# inferred: tuple[float]
+-- inferred: tuple[float]
 ```
 
 ## Multiple tables in schema — full table names
@@ -150,7 +135,7 @@ CREATE TABLE orders (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
@@ -159,10 +144,7 @@ schema = "schema.sql"
 SELECT users.id, users.name, orders.total, orders.created_at
 FROM users
 JOIN orders ON users.id = orders.user_id
-```
-
-```python
-# inferred: tuple[int, str, float, datetime.datetime]
+-- inferred: tuple[int, str, float, datetime.datetime]
 ```
 
 ## Schema with boolean and date types
@@ -178,32 +160,26 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT id, name, active, birth_date FROM users
-```
-
-```python
-# inferred: tuple[int, str, bool, datetime.date]
+-- inferred: tuple[int, str, bool, datetime.date]
 ```
 
 ## No schema — columns without casts default to str
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
 ```sql
 SELECT id, name FROM users
-```
-
-```python
-# inferred: tuple[str, str]
+-- inferred: tuple[str, str]
 ```
 
 ## SELECT * follows the schema's column order
@@ -214,16 +190,13 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10, 2));
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM users
-```
-
-```python
-# inferred: tuple[int, str, float]
+-- inferred: tuple[int, str, float]
 ```
 
 ## Qualified star and aliased columns resolve through table aliases
@@ -235,16 +208,13 @@ CREATE TABLE orders (id INTEGER, user_id INTEGER, placed TIMESTAMP);
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT u.*, o.placed FROM users u JOIN orders o ON o.user_id = u.id
-```
-
-```python
-# inferred: tuple[int, str, datetime.datetime]
+-- inferred: tuple[int, str, datetime.datetime]
 ```
 
 ## Unqualified columns search the joined tables in order
@@ -256,16 +226,13 @@ CREATE TABLE orders (id INTEGER, user_id INTEGER, placed TIMESTAMP);
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT name, placed FROM users JOIN orders ON user_id = users.id
-```
-
-```python
-# inferred: tuple[str, datetime.datetime]
+-- inferred: tuple[str, datetime.datetime]
 ```
 
 ## Star over a table missing from the schema stays one column
@@ -276,14 +243,11 @@ CREATE TABLE users (id INTEGER, name TEXT);
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM audit_log
-```
-
-```python
-# inferred: tuple[str]
+-- inferred: tuple[str]
 ```

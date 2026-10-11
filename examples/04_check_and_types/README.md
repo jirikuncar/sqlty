@@ -1,56 +1,12 @@
-# Check and User-Defined Types
+# User-Defined Row Types
 
-`sqlty check` validates annotations against queries. Use `sqlty rewrite` to generate tuple types, then optionally replace with your own types.
-
-## Workflow
-
-### 1. Generate tuple types
+Runnable project for [user-defined row types](../../docs/guide/row-types.md). `queries.py` annotates a query with a `TypedDict` that `sqlty check` validates.
 
 ```bash
-sqlty rewrite .
-```
-
-Produces `SQL[tuple[int, str]](...)` annotations.
-
-### 2. Replace with named types (optional)
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-    email: str
-
-query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
-```
-
-### 3. Check
-
-```bash
+cd examples/04_check_and_types
 sqlty check .
+sqlty strip . && sqlty rewrite .   # round trip, no diff
 ```
 
-`sqlty check` validates:
-- **Field count**: `User` has 3 fields and the query returns 3 columns
-- **Field types**: `id: int` matches `INTEGER`, `name: str` matches `TEXT`, etc.
-- **Field names**: `id` matches column `id`, `name` matches column `name`, etc.
-
-### Supported type forms
-
-All of these work with `SQL[T]` and `sqlty check`:
-
-- `TypedDict`
-- `NamedTuple`
-- `@dataclass`
-- Pydantic `BaseModel`
-
-### Check vs Rewrite
-
-| Command | Purpose |
-|---------|---------|
-| `sqlty rewrite .` | Transform `--sql` strings into `SQL[T](...)` |
-| `sqlty check .` | Validate existing annotations are correct |
-| `sqlty strip .` | Remove `SQL[T](...)`, revert to plain strings |
-| `sqlty rewrite --check .` | Exit 1 if files need rewriting (CI mode) |
+CI keeps it current: `tests/test_docs.py` fails if a query needs rewriting
+or a row type is stale.

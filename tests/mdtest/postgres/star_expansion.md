@@ -12,17 +12,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM users
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT, email::VARCHAR(255) FROM users
+-- expanded: SELECT id::INT, name::TEXT, email::VARCHAR(255) FROM users
 ```
 
 ## Qualified star — table prefix
@@ -36,27 +33,21 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT users.* FROM users
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT FROM users
+-- expanded: SELECT id::INT, name::TEXT FROM users
 ```
 
 ## No schema — returns None
 
 ```sql
 SELECT * FROM users
-```
-
-```python
-# expanded: None
+-- expanded: None
 ```
 
 ## No star — returns None
@@ -70,17 +61,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT id::INTEGER, name::TEXT FROM users
-```
-
-```python
-# expanded: None
+-- expanded: None
 ```
 
 ## Table alias with qualified star
@@ -94,17 +82,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT u.* FROM users u
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT FROM users u
+-- expanded: SELECT id::INT, name::TEXT FROM users u
 ```
 
 ## Multi-table star expansion
@@ -123,17 +108,14 @@ CREATE TABLE orders (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM users, orders
-```
-
-```python
-# expanded: SELECT id::INT, name::TEXT, order_id::INT, amount::DECIMAL FROM users, orders
+-- expanded: SELECT id::INT, name::TEXT, order_id::INT, amount::DECIMAL FROM users, orders
 ```
 
 ## Unknown table — returns None
@@ -147,17 +129,14 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT * FROM unknown_table
-```
-
-```python
-# expanded: None
+-- expanded: None
 ```
 
 ## Other projections are kept verbatim
@@ -171,15 +150,113 @@ CREATE TABLE users (
 ```
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 schema = "schema.sql"
 ```
 
 ```sql
 SELECT *, id::INTEGER + 1 AS next_id FROM users
+-- expanded: SELECT id::INT, name::TEXT, id::INTEGER + 1 AS next_id FROM users
 ```
 
-```python
-# expanded: SELECT id::INT, name::TEXT, id::INTEGER + 1 AS next_id FROM users
+## `expand_star`
+
+### Expands with schema
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```sql
+SELECT * FROM users
+-- expanded: SELECT id::INT, name::TEXT FROM users
+```
+
+### Non star returns none
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```sql
+SELECT id FROM users
+-- expanded: None
+```
+
+### Returns str or none
+
+```sql
+SELECT * FROM t
+-- expanded: None
+```
+
+## Former backend divergences
+
+### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...`
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);
+```
+
+```sql
+SELECT * FROM users
+-- expanded: SELECT id::INT, name::TEXT, score::DECIMAL(10, 2) FROM users
+```
+
+### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...` (2)
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);
+```
+
+```sql
+SELECT o.*, 1 AS one FROM orders o
+-- expanded: SELECT oid::INT, user_id::INT, placed::TIMESTAMPTZ, 1 AS one FROM orders o
+```
+
+### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...` (3)
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE orders (oid INT4, user_id INT, placed TIMESTAMP WITH TIME ZONE);
+```
+
+```sql
+SELECT * FROM users, audit_log
+-- expanded: None
 ```

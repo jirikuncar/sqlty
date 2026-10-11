@@ -1,7 +1,7 @@
 # PostgreSQL Advanced Queries
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -13,10 +13,7 @@ SELECT
     name::TEXT,
     ROW_NUMBER() OVER (ORDER BY created_at)::INTEGER
 FROM users
-```
-
-```python
-# inferred: tuple[int, str, int]
+-- inferred: tuple[int, str, int]
 ```
 
 ## Window function — running total
@@ -27,10 +24,7 @@ SELECT
     amount::FLOAT,
     SUM(amount) OVER (ORDER BY created_at)::FLOAT
 FROM transactions
-```
-
-```python
-# inferred: tuple[int, float, float]
+-- inferred: tuple[int, float, float]
 ```
 
 ## LATERAL join
@@ -49,10 +43,7 @@ CROSS JOIN LATERAL (
     ORDER BY created_at DESC
     LIMIT 1
 ) recent
-```
-
-```python
-# inferred: tuple[int, str, float, datetime.datetime]
+-- inferred: tuple[int, str, float, datetime.datetime]
 ```
 
 ## UNION
@@ -61,10 +52,7 @@ CROSS JOIN LATERAL (
 SELECT id::INTEGER, name::TEXT, 'user'::TEXT as type FROM users
 UNION
 SELECT id::INTEGER, name::TEXT, 'admin'::TEXT as type FROM admins
-```
-
-```python
-# inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str]
 ```
 
 ## UNION ALL
@@ -73,10 +61,7 @@ SELECT id::INTEGER, name::TEXT, 'admin'::TEXT as type FROM admins
 SELECT id::INTEGER, email::TEXT FROM users
 UNION ALL
 SELECT id::INTEGER, email::TEXT FROM archived_users
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## INTERSECT
@@ -85,10 +70,7 @@ SELECT id::INTEGER, email::TEXT FROM archived_users
 SELECT user_id::INTEGER FROM orders WHERE total > 100
 INTERSECT
 SELECT user_id::INTEGER FROM premium_users
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## EXCEPT
@@ -97,10 +79,7 @@ SELECT user_id::INTEGER FROM premium_users
 SELECT id::INTEGER FROM users
 EXCEPT
 SELECT user_id::INTEGER FROM banned_users
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## Complex real-world query — user dashboard
@@ -127,8 +106,5 @@ SELECT
 FROM users u
 LEFT JOIN user_stats s ON u.id = s.user_id
 ORDER BY s.total_spent DESC NULLS LAST
-```
-
-```python
-# inferred: tuple[int, str, str, datetime.datetime, int, float, datetime.datetime, bool]
+-- inferred: tuple[int, str, str, datetime.datetime, int, float, datetime.datetime, bool]
 ```

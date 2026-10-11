@@ -25,3 +25,21 @@ from sqlty import SQL
 q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID FROM users")
 # stripped: q = "--sql\nSELECT user_id::UUID FROM users"
 ```
+
+## Indented import-like lines are kept
+
+Only top-level imports are removed; docstring text is never modified.
+
+```python
+"""Usage:
+
+    from sqlty import SQL
+"""
+from sqlty import SQL
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# stripped: """Usage:
+# stripped:
+# stripped:     from sqlty import SQL
+# stripped: """
+# stripped: q = "--sql\nSELECT 1::INTEGER"
+```

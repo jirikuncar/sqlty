@@ -7,6 +7,7 @@
 //! - `select-star-no-schema`: `SELECT *` with no schema available
 //! - `inline-sql-comment`: `"--sql SELECT ..."` (space) makes query a SQL comment
 //! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
+//! - `fstring-skipped` / `tstring-skipped`: interpolated `--sql` strings are never rewritten
 
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ use regex::Regex;
 
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
+use crate::rewriter::{header_end, rewrite_source, skipped_string_rule};
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -108,6 +110,7 @@ pub fn check_source(
     schema: &Option<Schema>,
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
+    untyped: bool,
 ) -> Vec<Diagnostic> {
     let rule_config = RuleConfig::new(rules);
     let has_schema = schema.is_some();
@@ -124,13 +127,37 @@ pub fn check_source(
     let unwrapped_pat = unwrapped_sql_pattern();
     let inline_pat = inline_sql_comment_pattern();
 
-    for (i, line) in source.lines().enumerate() {
-        let line_num = i + 1;
-        let trimmed = line.trim();
+    let wrappable = if rule_config.is_enabled("stale-rewrite") {
+        wrappable_lines(source, dialect, schema, import_style, untyped)
+    } else {
+        Vec::new()
+    };
+
+    for (line_num, logical) in logical_lines(source, &wrapper_name) {
+        let trimmed = logical.as_str();
+
+        if let Some(rule) = skipped_string_rule(trimmed) {
+            if rule_config.is_enabled(rule) {
+                let kind = if rule == "tstring-skipped" {
+                    "t-string"
+                } else {
+                    "f-string"
+                };
+                diagnostics.push(Diagnostic {
+                    rule: rule.to_string(),
+                    message: format!(
+                        "{kind} with --sql prefix skipped ({kind}s cannot be statically rewritten)"
+                    ),
+                    severity: rule_config.severity(rule).to_string(),
+                    line: line_num,
+                });
+            }
+            continue;
+        }
 
         // Check for unwrapped --sql strings (stale-rewrite)
         if is_unwrapped_sql_string(trimmed, &wrapper_marker, &unwrapped_pat) {
-            if rule_config.is_enabled("stale-rewrite") {
+            if wrappable.contains(&line_num) && rule_config.is_enabled("stale-rewrite") {
                 diagnostics.push(Diagnostic {
                     rule: "stale-rewrite".to_string(),
                     message: "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
@@ -190,7 +217,7 @@ pub fn check_source(
                     let untyped = format!("{}[{}]", wrapper_name, untyped_name);
                     let message = match infer_from_sql_content(&sql_content, dialect, schema) {
                         Some(current) => format!(
-                            "{} can now be {}[{}]; strip and rewrite to update",
+                            "{} can now be {}[{}]; run sqlty check --fix",
                             untyped, wrapper_name, current
                         ),
                         None => format!(
@@ -238,6 +265,49 @@ fn has_inline_sql_comment(line: &str, pattern: &Regex) -> bool {
     pattern.is_match(line)
 }
 
+/// Lines holding a string that `rewrite` would wrap.
+///
+/// Rewrite only inserts imports at the header and wraps strings in place,
+/// so each other line keeps its position, shifted past the imports.
+fn wrappable_lines(
+    source: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    import_style: Option<&str>,
+    untyped: bool,
+) -> Vec<usize> {
+    let original: Vec<&str> = source.lines().collect();
+    let rewritten_source = rewrite_source(source, dialect, schema, import_style, untyped);
+    let rewritten: Vec<&str> = rewritten_source.lines().collect();
+    let added = rewritten.len() - original.len();
+    let head = source[..header_end(source)].matches('\n').count();
+    original
+        .iter()
+        .enumerate()
+        .filter(|(i, line)| rewritten[if *i < head { *i } else { i + added }] != **line)
+        .map(|(i, _)| i + 1)
+        .collect()
+}
+
+/// Stripped lines, with a wrapper split by a formatter joined onto its first line.
+fn logical_lines(source: &str, wrapper_name: &str) -> Vec<(usize, String)> {
+    let opener = Regex::new(&format!(r"{}\[.*\]\($", regex::escape(wrapper_name))).unwrap();
+    let lines: Vec<&str> = source.lines().map(str::trim).collect();
+    let mut result = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        if opener.is_match(lines[i]) && i + 2 < lines.len() && lines[i + 2].starts_with(')') {
+            let inner = lines[i + 1].trim_end_matches(',');
+            result.push((i + 1, format!("{}{}{}", lines[i], inner, lines[i + 2])));
+            i += 3;
+            continue;
+        }
+        result.push((i + 1, lines[i].to_string()));
+        i += 1;
+    }
+    result
+}
+
 /// Check if a line contains an unwrapped --sql string (not in wrapper).
 fn is_unwrapped_sql_string(line: &str, wrapper_marker: &str, pattern: &Regex) -> bool {
     if line.contains(wrapper_marker) {
@@ -269,16 +339,35 @@ mod tests {
 
     #[test]
     fn test_detects_stale_rewrite() {
-        let source = r#"q = "--sql SELECT 1::INTEGER""#;
-        let diags = check_source(source, "postgres", &None, None, None);
-        assert!(!diags.is_empty());
+        let source = r#"q = "--sql\nSELECT 1::INTEGER""#;
+        let diags = check_source(source, "postgres", &None, None, None, false);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].rule, "stale-rewrite");
+    }
+
+    #[test]
+    fn test_unwrappable_string_is_not_stale() {
+        for source in [
+            r#"q = "--sql SELECT 1::INTEGER""#,
+            r#"q = "--sql\nDROP TABLE t""#,
+        ] {
+            let diags = check_source(source, "postgres", &None, None, None, false);
+            assert!(diags.iter().all(|d| d.rule != "stale-rewrite"), "{source}");
+        }
+    }
+
+    #[test]
+    fn test_untyped_rows_are_stale_with_sentinel() {
+        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        assert!(check_source(source, "postgres", &None, None, None, false).is_empty());
+        let diags = check_source(source, "postgres", &None, None, None, true);
         assert_eq!(diags[0].rule, "stale-rewrite");
     }
 
     #[test]
     fn test_clean_no_stale() {
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, None);
+        let diags = check_source(source, "postgres", &None, None, None, false);
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
     }
@@ -286,7 +375,7 @@ mod tests {
     #[test]
     fn test_detects_stale_type() {
         let source = r#"q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM t")"#;
-        let diags = check_source(source, "postgres", &None, None, None);
+        let diags = check_source(source, "postgres", &None, None, None, false);
         let stale_types: Vec<_> = diags.iter().filter(|d| d.rule == "stale-type").collect();
         assert_eq!(stale_types.len(), 1);
         assert!(stale_types[0].message.contains("tuple[int]"));
@@ -297,7 +386,7 @@ mod tests {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
         let mut rules = HashMap::new();
         rules.insert("stale-rewrite".to_string(), "ignore".to_string());
-        let diags = check_source(source, "postgres", &None, Some(rules), None);
+        let diags = check_source(source, "postgres", &None, Some(rules), None, false);
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
     }
@@ -305,7 +394,7 @@ mod tests {
     #[test]
     fn test_detects_inline_sql_comment_unwrapped() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
-        let diags = check_source(source, "postgres", &None, None, None);
+        let diags = check_source(source, "postgres", &None, None, None, false);
         let inline: Vec<_> = diags
             .iter()
             .filter(|d| d.rule == "inline-sql-comment")
@@ -317,7 +406,7 @@ mod tests {
     #[test]
     fn test_no_inline_sql_comment_with_newline() {
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, None);
+        let diags = check_source(source, "postgres", &None, None, None, false);
         let inline: Vec<_> = diags
             .iter()
             .filter(|d| d.rule == "inline-sql-comment")
@@ -328,7 +417,7 @@ mod tests {
     #[test]
     fn test_detects_inline_sql_comment_wrapped() {
         let source = r#"q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, None);
+        let diags = check_source(source, "postgres", &None, None, None, false);
         let inline: Vec<_> = diags
             .iter()
             .filter(|d| d.rule == "inline-sql-comment")
@@ -341,7 +430,7 @@ mod tests {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
         let mut rules = HashMap::new();
         rules.insert("inline-sql-comment".to_string(), "ignore".to_string());
-        let diags = check_source(source, "postgres", &None, Some(rules), None);
+        let diags = check_source(source, "postgres", &None, Some(rules), None, false);
         let inline: Vec<_> = diags
             .iter()
             .filter(|d| d.rule == "inline-sql-comment")
@@ -358,6 +447,7 @@ mod tests {
             &None,
             None,
             Some("from sqlty import SQL as Q"),
+            false,
         );
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
@@ -366,7 +456,7 @@ mod tests {
     #[test]
     fn test_check_with_module_import_style() {
         let source = r#"q = sqlty.SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, Some("import sqlty"));
+        let diags = check_source(source, "postgres", &None, None, Some("import sqlty"), false);
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
     }
@@ -374,7 +464,7 @@ mod tests {
     #[test]
     fn test_untyped_query() {
         let source = r#"q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")"#;
-        let diags = check_source(source, "postgres", &None, None, None);
+        let diags = check_source(source, "postgres", &None, None, None, false);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].rule, "untyped-query");
         assert!(diags[0].message.contains("add casts"));
@@ -383,11 +473,11 @@ mod tests {
     #[test]
     fn test_untyped_query_now_inferable() {
         let source = r#"q = sqlty.SQL[sqlty.UNTYPED]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, Some("import sqlty"));
+        let diags = check_source(source, "postgres", &None, None, Some("import sqlty"), false);
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].message,
-            "sqlty.SQL[sqlty.UNTYPED] can now be sqlty.SQL[tuple[int]]; strip and rewrite to update"
+            "sqlty.SQL[sqlty.UNTYPED] can now be sqlty.SQL[tuple[int]]; run sqlty check --fix"
         );
     }
 }

@@ -86,13 +86,19 @@ class SQLTyConfig(TypedDict, total=False):
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
-    """Load SQLTy configuration from pyproject.toml.
+    """Load the ``[tool.sqlty]`` table of the nearest ``pyproject.toml`` that has one.
+
+    Walks up from ``project_root``, skipping ``pyproject.toml`` files without a
+    ``[tool.sqlty]`` table (like ruff), so a package's packaging-only
+    ``pyproject.toml`` does not hide the workspace config. The closest table
+    wins; tables are never merged.
 
     Args:
-        project_root: Root directory of the project. If None, searches from cwd upward.
+        project_root: Directory to start the upward search from; cwd if None.
 
     Returns:
-        Tuple of (configuration dictionary, directory containing pyproject.toml or None if not found)
+        Tuple of (configuration dictionary, directory containing that
+        pyproject.toml, or None if none was found or it failed to parse)
     """
     if project_root is None:
         project_root = Path.cwd()
@@ -104,24 +110,25 @@ def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
         if pyproject_path.exists():
             try:
                 config = _parse_pyproject(pyproject_path)
-                return config, current
             except Exception as e:
                 logging.getLogger(__name__).warning("Failed to parse %s: %s", pyproject_path, e)
                 return {}, None
+            if config is not None:
+                return config, current
         current = current.parent
 
-    # No pyproject.toml found
+    # No [tool.sqlty] table found
     return {}, None
 
 
-def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
+def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     """Parse pyproject.toml and extract [tool.sqlty] section.
 
     Args:
         pyproject_path: Path to pyproject.toml
 
     Returns:
-        Configuration dictionary
+        Configuration dictionary, or None if there is no [tool.sqlty] table
     """
     import tomllib
 
@@ -129,7 +136,9 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig:
         data: dict[str, Any] = tomllib.load(f)
 
     # Extract [tool.sqlty] section
-    tool_config: dict[str, Any] = data.get("tool", {}).get("sqlty", {})
+    tool_config: dict[str, Any] | None = data.get("tool", {}).get("sqlty")
+    if tool_config is None:
+        return None
 
     config: SQLTyConfig = {}
 

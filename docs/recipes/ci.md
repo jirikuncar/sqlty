@@ -58,8 +58,11 @@ repos:
 and leave the rewritten files for you to stage. Use `uv run sqlty ...` as the
 entry if sqlty lives in a uv-managed environment.
 
-The commands find `pyproject.toml` by walking up from the first path, so run
-them from the project root or pass paths inside it.
+Each file uses the nearest `pyproject.toml` above it that has a `[tool.sqlty]`
+table, so one command covers several projects with their own settings. In a
+monorepo, a package `pyproject.toml` without `[tool.sqlty]` is skipped and its
+files use the root config; one with its own table replaces the root config
+entirely (tables are not merged).
 
 ## Fail on unwrapped queries
 
