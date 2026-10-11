@@ -5,7 +5,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use once_cell::sync::Lazy;
-use regex::{Captures, Regex};
+use regex::Regex;
 
 use crate::analyzer::{expand_star, Schema};
 use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
@@ -13,6 +13,7 @@ use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, rewrite_source, splice, string_literals, ImportStyle,
 };
+use crate::tokens::{tokenize, wrapper_calls};
 
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
@@ -46,38 +47,50 @@ pub fn fix_source(
 
     let untyped_name = style.untyped_name();
     let mut introduced = BTreeSet::new();
-    let fixed = wrapper_pattern(&style)
-        .replace_all(&source, |caps: &Captures| {
-            let (annotated, literal) = (&caps["type"], &caps["inner"]);
+    let mut edits = Vec::new();
+    for call in wrapper_calls(&source, &tokenize(&source), &style.wrapper_name) {
+        let (Some(literals), Some(mut content)) = (&call.literals, call.content(&source)) else {
+            continue;
+        };
+        if !is_sqlty_managed(&content) {
+            continue;
+        }
+        let mut literal_edit = None;
+        if let ([span], Some(schema)) = (
+            literals.as_slice(),
+            schema.as_ref().filter(|_| enabled("select-star")),
+        ) {
+            let literal = &source[span.clone()];
             let quoted = literal.trim_start_matches(['u', 'U']);
             let prefix = &literal[..literal.len() - quoted.len()];
             let quote = QUOTES
                 .into_iter()
                 .find(|q| quoted.starts_with(q))
                 .unwrap_or("\"");
-            let mut content = extract_string_content(literal).to_string();
-            if !is_sqlty_managed(&content) {
-                return caps[0].to_string();
+            let expanded = expand_star_in(&content, quote, dialect, schema);
+            if expanded != content {
+                literal_edit = Some((
+                    span.start,
+                    span.end,
+                    format!("{prefix}{quote}{expanded}{quote}"),
+                ));
+                content = expanded;
             }
-            if let Some(schema) = schema.as_ref().filter(|_| enabled("select-star")) {
-                content = expand_star_in(&content, quote, dialect, schema);
-            }
-            let refresh = (annotated.starts_with("tuple[") && enabled("stale-type"))
-                || (annotated == untyped_name && enabled("untyped-query"));
-            let row_type = refresh
-                .then(|| infer_sql_content(&content, dialect, schema))
-                .flatten()
-                .filter(|inferred| !refines_tuple(annotated, inferred))
-                .unwrap_or_else(|| annotated.to_string());
-            if row_type != annotated {
-                introduced.insert(row_type.clone());
-            }
-            format!(
-                "{}[{row_type}]({}{prefix}{quote}{content}{quote}{}",
-                style.wrapper_name, &caps["space"], &caps["end"]
-            )
-        })
-        .into_owned();
+        }
+        let annotated = &source[call.annotation.clone()];
+        let refresh = (annotated.starts_with("tuple[") && enabled("stale-type"))
+            || (annotated == untyped_name && enabled("untyped-query"));
+        if let Some(row_type) = refresh
+            .then(|| infer_sql_content(&content, dialect, schema))
+            .flatten()
+            .filter(|inferred| inferred != annotated && !refines_tuple(annotated, inferred))
+        {
+            edits.push((call.annotation.start, call.annotation.end, row_type.clone()));
+            introduced.insert(row_type);
+        }
+        edits.extend(literal_edit);
+    }
+    let fixed = splice(&source, &edits);
     if fixed == source {
         return source;
     }
@@ -125,14 +138,6 @@ fn fix_mysql_markers(source: &str) -> String {
         })
         .collect();
     splice(source, &edits)
-}
-
-fn wrapper_pattern(style: &ImportStyle) -> Regex {
-    Regex::new(&format!(
-        r#"(?s){}\[(?P<type>[^\n]*?)\]\((?P<space>\s*)(?P<inner>[uU]?(?:""".*?"""|'''.*?'''|"[^"]*"|'[^']*'))(?P<end>\s*,?\s*\))"#,
-        regex::escape(&style.wrapper_name)
-    ))
-    .unwrap()
 }
 
 /// Replace `*` in the query part of a string literal, when that is safe to write back.
@@ -204,6 +209,18 @@ mod tests {
         assert_eq!(
             fix("from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT 1::INTEGER\")"),
             "from sqlty import SQL\nq = SQL[tuple[int]](\"--sql\\nSELECT 1::INTEGER\")"
+        );
+    }
+
+    #[test]
+    fn test_wrapper_argument_spans_to_closing_paren() {
+        assert_eq!(
+            fix("q = SQL[tuple[str]](\"--sql\\nSELECT 1::INTEGER \"\n  \"AS n\")"),
+            "q = SQL[tuple[int]](\"--sql\\nSELECT 1::INTEGER \"\n  \"AS n\")"
+        );
+        assert_eq!(
+            fix("q = SQL[tuple[str]](\"\"\"--sql\nSELECT 1::INTEGER AS n\"\"\"  # c\n)"),
+            "q = SQL[tuple[int]](\"\"\"--sql\nSELECT 1::INTEGER AS n\"\"\"  # c\n)"
         );
     }
 

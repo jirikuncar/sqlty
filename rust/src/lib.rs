@@ -4,6 +4,7 @@ mod analyzer;
 mod checker;
 mod fixer;
 mod rewriter;
+mod tokens;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

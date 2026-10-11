@@ -13,22 +13,12 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::analyzer::{infer_type, returns_rows, Schema};
+pub(crate) use crate::tokens::string_literals;
+use crate::tokens::{string_groups, tokenize, wrapper_calls, Kind};
 
 // ---------------------------------------------------------------------------
 // Regex patterns
 // ---------------------------------------------------------------------------
-
-/// A string literal starting at the beginning of the haystack; triple quotes first,
-/// backslash escapes skipped.
-static STRING_LITERAL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r#"^(?s:"""(?:\\.|[^\\])*?"""|'''(?:\\.|[^\\])*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')"#,
-    )
-    .unwrap()
-});
-
-/// A valid string prefix (`rb`, `f`, `u`, ...), possibly empty.
-static STRING_PREFIX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?i:[bft]r?|r[bft]?|u)?$").unwrap());
 
 static CODING: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
 
@@ -46,39 +36,6 @@ pub(crate) fn skipped_string_rule(line: &str) -> Option<&'static str> {
     } else {
         "fstring-skipped"
     })
-}
-
-/// Spans of plain string literals (no prefix but `u`), skipping comments.
-///
-/// Raw, bytes, f- and t-strings are scanned past, so their closing quote is not
-/// paired with the next opening one. A quote after letters that are no string
-/// prefix (`it's`) opens no literal. Mirrors `_SQL_STRING_PATTERN` in Python.
-pub(crate) fn string_literals(source: &str) -> Vec<(usize, usize)> {
-    let mut spans = Vec::new();
-    let mut pos = 0;
-    while let Some(offset) = source[pos..].find(['"', '\'', '#']) {
-        let start = pos + offset;
-        if source[start..].starts_with('#') {
-            pos = source[start..]
-                .find('\n')
-                .map_or(source.len(), |n| start + n);
-            continue;
-        }
-        let before = &source[..start];
-        let prefix = &before[before
-            .trim_end_matches(|c: char| c.is_alphanumeric() || c == '_')
-            .len()..];
-        pos = match STRING_LITERAL.find(&source[start..]) {
-            Some(m) if STRING_PREFIX.is_match(prefix) => {
-                if prefix.is_empty() || prefix.eq_ignore_ascii_case("u") {
-                    spans.push((start - prefix.len(), start + m.end()));
-                }
-                start + m.end()
-            }
-            _ => start + 1,
-        };
-    }
-    spans
 }
 
 // ---------------------------------------------------------------------------
@@ -142,18 +99,6 @@ impl ImportStyle {
     pub fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
     }
-
-    /// Regex matching `{wrapper_name}[T]("...")`; group `inner` is the string literal.
-    ///
-    /// `T` stays on one line; the string may sit on its own lines with a trailing
-    /// comma, as formatters lay out long calls.
-    fn wrapper_pattern(&self) -> Regex {
-        Regex::new(&format!(
-            r#"(?s){}\[[^\n]*?\]\(\s*(?P<inner>[uU]?(?:""".*?"""|'''.*?'''|"[^"]*"|'[^']*'))\s*,?\s*\)"#,
-            regex::escape(&self.wrapper_name)
-        ))
-        .unwrap()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -191,24 +136,27 @@ pub fn rewrite_source_with(
         .filter(|(_, line)| FSTRING_SQL.is_match(line))
         .map(|(i, _)| i + 1)
         .collect();
-    let wrapper_spans: Vec<(usize, usize)> = istyle
-        .wrapper_pattern()
-        .find_iter(source)
-        .map(|m| (m.start(), m.end()))
-        .collect();
+    let tokens = tokenize(source);
+    let calls = wrapper_calls(source, &tokens, &istyle.wrapper_name);
 
     let mut replacements = Vec::new();
     let mut needs_untyped_import = false;
-    for (start, end) in string_literals(source) {
-        if wrapper_spans
-            .iter()
-            .any(|&(ws, we)| ws <= start && end <= we)
+    for group in string_groups(&tokens) {
+        let (start, end) = (group[0].span.start, group[group.len() - 1].span.end);
+        if group.iter().any(|t| t.kind != Kind::Str { plain: true })
+            || calls
+                .iter()
+                .any(|call| call.span.start <= start && end <= call.span.end)
             || (!fstring_lines.is_empty() && fstring_lines.contains(&line_at(source, start)))
         {
             continue;
         }
         let literal = &source[start..end];
-        let content = extract_string_content(literal).trim();
+        let content: String = group
+            .iter()
+            .map(|t| extract_string_content(&source[t.span.clone()]))
+            .collect();
+        let content = content.trim();
         if after_marker(content).is_none() {
             continue;
         }
@@ -272,16 +220,17 @@ pub fn rewrite_source_with(
 /// Removes unused imports added by rewrite.
 pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
     let istyle = ImportStyle::or_default(import_style);
-    let replacements: Vec<(usize, usize, String)> = istyle
-        .wrapper_pattern()
-        .captures_iter(source)
-        .filter_map(|cap| {
-            let wrapper = cap.get(0)?;
-            let inner = cap.name("inner")?.as_str();
-            is_sqlty_managed(extract_string_content(inner))
-                .then(|| (wrapper.start(), wrapper.end(), inner.to_string()))
-        })
-        .collect();
+    let replacements: Vec<(usize, usize, String)> =
+        wrapper_calls(source, &tokenize(source), &istyle.wrapper_name)
+            .into_iter()
+            .filter(|call| call.strippable)
+            .filter_map(|call| {
+                let content = call.content(source)?;
+                let argument = call.argument(source)?;
+                is_sqlty_managed(&content)
+                    .then(|| (call.span.start, call.span.end, argument.to_string()))
+            })
+            .collect();
 
     if replacements.is_empty() {
         return source.to_string();
@@ -587,16 +536,6 @@ mod tests {
     }
 
     #[test]
-    fn test_string_literals_skip_past_prefixed_strings() {
-        let source = "# it's\nf = f\"a\" + br'\\'\"' + 'it\\'s' + u\"c\"\nh = \"b\"\n";
-        let spans: Vec<&str> = string_literals(source)
-            .into_iter()
-            .map(|(start, end)| &source[start..end])
-            .collect();
-        assert_eq!(spans, vec!["'it\\'s'", "u\"c\"", "\"b\""]);
-    }
-
-    #[test]
     fn test_rewrite_preserves_string_content() {
         // Rewriter never modifies string content — only adds SQL[T]() wrapper
         let result = rewrite_source(
@@ -646,6 +585,17 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
         let rewritten = rewrite_source(original, "postgres", &None, None, false);
         let stripped = strip_source(&rewritten, None);
         assert_eq!(stripped.trim(), original.trim());
+    }
+
+    #[test]
+    fn test_concatenated_strings_roundtrip() {
+        let source = "q = (\"--sql\\nSELECT 1::INTEGER \"  # c\n     'AS n')\n";
+        let rewritten = rewrite_source(source, "postgres", &None, None, false);
+        assert_eq!(
+            rewritten,
+            "from sqlty import SQL\nq = (SQL[tuple[int]](\"--sql\\nSELECT 1::INTEGER \"  # c\n     'AS n'))\n"
+        );
+        assert_eq!(strip_source(&rewritten, None), source);
     }
 
     #[test]

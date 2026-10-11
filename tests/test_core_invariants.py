@@ -7,6 +7,7 @@ checks invariants over all of that code, and what Markdown can't express
 
 from __future__ import annotations
 
+import ast
 import re
 import time
 from pathlib import Path
@@ -94,6 +95,18 @@ def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
         if d["rule"] in ("stale-rewrite", "stale-type")
     ]
     assert not stale
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_outputs_parse(source: str, options: dict) -> None:
+    """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid."""
+    try:
+        ast.parse(source)
+    except SyntaxError:
+        pytest.skip("source is not valid Python")
+    ast.parse(core.rewrite_source(source, **options))
+    ast.parse(core.strip_source(source, import_style=options["import_style"]))
+    ast.parse(core.fix_source(source, **options))
 
 
 def test_unknown_schema_column_raises() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import difflib
 import re
 from functools import cached_property
@@ -69,11 +70,11 @@ class Run:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
             case "rewritten":
-                return _without_imports(self._rewrite(text), self._imports).strip()
+                return _without_imports(_parses(text, self._rewrite(text)), self._imports).strip()
             case "rewritten-file":
-                return self._rewrite(text).strip()
+                return _parses(text, self._rewrite(text)).strip()
             case "fixed":
-                fixed = self._fix(text)
+                fixed = _parses(text, self._fix(text))
                 if (again := self._fix(fixed)) != fixed:
                     raise AssertionError(
                         f"check --fix is not idempotent; a second run gives:\n{again}"
@@ -170,6 +171,19 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
     return (value["rule"] in (None, rule)) and (
         value["message"] is None or value["message"] in message
     )
+
+
+def _parses(source: str, output: str) -> str:
+    """``output``, which must be valid Python when ``source`` is."""
+    try:
+        ast.parse(source)
+    except SyntaxError:
+        return output
+    try:
+        ast.parse(output)
+    except SyntaxError as error:
+        raise AssertionError(f"output is not valid Python ({error}):\n{output}") from error
+    return output
 
 
 def _without_imports(source: str, imports: set[str]) -> str:
