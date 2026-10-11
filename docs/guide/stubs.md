@@ -115,6 +115,25 @@ written. For a script run directly (`python db.py`), use the file name or
 Tests covering this flow:
 [`tests/generator/test_auto_generate.py`](https://github.com/jirikuncar/sqlty/blob/main/tests/generator/test_auto_generate.py).
 
+### Async helpers
+
+An `async def` helper gets `async def` overloads, so `await` is typed:
+
+```python
+@sqlty
+async def fetch(query: str) -> Any:
+    return await conn.fetch(query)
+```
+
+```python
+# db.pyi
+@overload
+async def fetch(query: Literal["SELECT 1::INTEGER AS n"]) -> SQL[tuple[int]]: ...
+```
+
+The query is recorded when the helper is called, before it is awaited. An
+async generator (an `async def` that yields) keeps plain `def` overloads.
+
 ## Schemas
 
 Each helper uses the first schema found, from most to least specific:

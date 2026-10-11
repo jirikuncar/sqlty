@@ -9,12 +9,15 @@ import ast
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import asttokens
 
 from ._collector import CallInfo
 from ._stub_ir import ImportStatement, OverloadSignature, RegistryDecorator, SourceSpan, StubFile
+
+if TYPE_CHECKING:
+    from ._registry import RegistryDetector
 
 
 class PyiToIRParser:
@@ -143,7 +146,7 @@ class PyiToIRParser:
                     export_name=func_name,
                     docstring="",
                     ast_node=overload_nodes[0],  # Use first node for AST reference
-                    is_async=isinstance(overload_nodes[0], ast.AsyncFunctionDef),
+                    is_async=all(isinstance(n, ast.AsyncFunctionDef) for n in overload_nodes),
                 )
 
                 for node in overload_nodes:
@@ -317,7 +320,7 @@ class CallInfoToIRParser:
     def __init__(
         self,
         function_name: str = "sql",
-        registry_detector: Any | None = None,
+        registry_detector: RegistryDetector | None = None,
         function_configs: list[Any] | None = None,
         untyped: bool = False,
     ) -> None:

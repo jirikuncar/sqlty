@@ -72,6 +72,9 @@ record each query it receives (its `query_param` argument, defaults applied, and
 `return_type_param` argument if configured) and passes all arguments through;
 an unregistered one triggers a warning.
 
+`async def` helpers are supported and get `async def` overloads. The query is
+recorded when the helper is called, before the coroutine is awaited.
+
 ## `sqlty.drivers.psycopg`
 
 Requires `sqlty[psycopg]`. See [psycopg](../guide/psycopg.md).

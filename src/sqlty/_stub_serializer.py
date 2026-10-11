@@ -235,7 +235,9 @@ class IRToASTSerializer:
         # compatible return type other than these two, and both sides are ast.unparse output.
         compatible = {fallback, UNTYPED_RE.sub("Any", fallback)} if fallback else set()
         for overload in overload_list:
-            func_node = self._serialize_function_overload(overload, registry.name)
+            func_node = self._serialize_function_overload(
+                overload, registry.name, is_async=registry.is_async
+            )
             if (
                 compatible
                 and func_node.returns
@@ -250,24 +252,24 @@ class IRToASTSerializer:
                 template_signature=template_sig,
                 return_type=registry.fallback_return_type,
                 query_param_name=overload_list[0].query_param_name if template_sig else "query",
+                is_async=registry.is_async,
             )
         )
 
-        if registry.is_async:
-            return [_as_async(node) for node in function_overloads]
         return function_overloads
 
     def _serialize_function_overload(
-        self, overload: OverloadSignature, function_name: str
-    ) -> ast.FunctionDef:
+        self, overload: OverloadSignature, function_name: str, is_async: bool = False
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef:
         """Serialize a function overload (without classmethod decorator).
 
         Args:
             overload: OverloadSignature to serialize
             function_name: Name of the function
+            is_async: Emit ``async def``
 
         Returns:
-            AST FunctionDef node
+            AST FunctionDef or AsyncFunctionDef node
         """
         import copy
 
@@ -344,7 +346,7 @@ class IRToASTSerializer:
                 defaults=[],
             )
 
-        return ast.FunctionDef(
+        return (ast.AsyncFunctionDef if is_async else ast.FunctionDef)(
             name=function_name,
             args=function_args,
             body=[ast.Expr(value=ast.Constant(value=...))],
@@ -359,7 +361,8 @@ class IRToASTSerializer:
         template_signature: ast.arguments | None = None,
         return_type: str | None = None,
         query_param_name: str = "query",
-    ) -> ast.FunctionDef:
+        is_async: bool = False,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef:
         """Serialize the generic fallback overload for a decorated/configured function.
 
         Args:
@@ -373,11 +376,14 @@ class IRToASTSerializer:
             return_type: Return annotation, e.g. ``SQL[UNTYPED]``; defaults to ``Any`` for
                          configured signatures and ``str`` otherwise.
             query_param_name: Parameter annotated ``str`` in a template signature.
+            is_async: Emit ``async def``
 
         Returns:
-            AST FunctionDef node for the fallback with @overload decorator
+            AST FunctionDef or AsyncFunctionDef node for the fallback with @overload decorator
         """
         import copy
+
+        node_class = ast.AsyncFunctionDef if is_async else ast.FunctionDef
 
         decorators: list[ast.expr] = [
             ast.Name(id="overload", ctx=ast.Load()),
@@ -395,7 +401,7 @@ class IRToASTSerializer:
             # Note: **params: Any should already have Any annotation, keep it
 
             # Use Any as the generic fallback return type for configured functions
-            return ast.FunctionDef(
+            return node_class(
                 name=function_name,
                 args=args,
                 body=[ast.Expr(value=ast.Constant(value=...))],
@@ -409,7 +415,7 @@ class IRToASTSerializer:
             # Which acts as a catch-all for string literals
             query_arg = ast.arg(arg="query", annotation=ast.Name(id="str", ctx=ast.Load()))
 
-            return ast.FunctionDef(
+            return node_class(
                 name=function_name,
                 args=ast.arguments(
                     posonlyargs=[],
@@ -423,21 +429,6 @@ class IRToASTSerializer:
                 returns=ast.parse(return_type or "str", mode="eval").body,
                 type_params=[],  # No type params for simpler stub
             )
-
-
-def _as_async(node: ast.stmt) -> ast.stmt:
-    """Turn a ``def`` overload into the matching ``async def``."""
-    if not isinstance(node, ast.FunctionDef):
-        return node
-    return ast.AsyncFunctionDef(
-        name=node.name,
-        args=node.args,
-        body=node.body,
-        decorator_list=node.decorator_list,
-        returns=node.returns,
-        type_comment=node.type_comment,
-        type_params=node.type_params,
-    )
 
 
 def _narrowed_type_param(return_type: str) -> ast.expr | None:

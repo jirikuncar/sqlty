@@ -48,18 +48,108 @@ async def main() -> None:
     assert_type(await fetch("SELECT 2"), str)
 """
 
+SYNC_STUB = STUB.replace("async def", "def")
+
+
+def _generator() -> TypeStubGenerator:
+    return TypeStubGenerator(function_configs=[{"import_path": "db.fetch", "query_param": "query"}])
+
 
 def test_generator(tmp_path: Path) -> None:
     source = tmp_path / "db.py"
     source.write_text(DB + CALL)
-    generator = TypeStubGenerator(
-        function_configs=[{"import_path": "db.fetch", "query_param": "query"}]
-    )
+    generator = _generator()
     stub = generator.generate_stub_file(source, mode="incremental,create")
     assert stub.read_text() == STUB
 
     generator.generate_stub_file(source, mode="incremental")
     assert stub.read_text() == STUB
+
+
+def test_incremental_switch(tmp_path: Path) -> None:
+    source = tmp_path / "db.py"
+    generator = _generator()
+    for db, expected in [(DB, STUB), (DB.replace("async def", "def"), SYNC_STUB), (DB, STUB)]:
+        source.write_text(db + CALL)
+        assert (
+            generator.generate_stub_file(source, mode="incremental,create").read_text() == expected
+        )
+
+
+def test_no_calls(tmp_path: Path) -> None:
+    source = tmp_path / "db.py"
+    source.write_text(DB)
+    stub = _generator().generate_stub_file(source, mode="incremental,create").read_text()
+    assert "async def fetch(query: str) -> str:" in stub
+
+
+def test_no_calls_two_helpers(tmp_path: Path) -> None:
+    source = tmp_path / "db.py"
+    source.write_text(DB + "\n\n" + DB.split("\n\n\n")[-1].replace("async def fetch", "def other"))
+    generator = TypeStubGenerator(
+        function_configs=[
+            {"import_path": "db.fetch", "query_param": "query"},
+            {"import_path": "db.other", "query_param": "query"},
+        ]
+    )
+    stub = generator.generate_stub_file(source, mode="incremental,create").read_text()
+    assert "async def fetch(query: str) -> str:" in stub
+    assert "\ndef other(query: str) -> str:" in stub
+
+
+@pytest.mark.parametrize(
+    "decorators",
+    [
+        "@sqlty(schema='schema.sql')",
+        "@other\n@sqlty",
+        "@sqlty\n@other",
+    ],
+)
+def test_decorators(tmp_path: Path, decorators: str) -> None:
+    (tmp_path / "schema.sql").write_text("CREATE TABLE t (id INTEGER);\n")
+    source = tmp_path / "db.py"
+    source.write_text("def other(fn): return fn\n\n" + DB.replace("@sqlty", decorators) + CALL)
+    assert _generator().generate_stub_file(source, mode="incremental,create").read_text() == STUB
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("    yield (1,)\n", SYNC_STUB),
+        ("    async def inner():\n        yield 1\n\n    return [(1,)]\n", STUB),
+    ],
+    ids=["async-generator", "nested-generator"],
+)
+def test_async_generator(tmp_path: Path, body: str, expected: str) -> None:
+    source = tmp_path / "db.py"
+    source.write_text(DB.replace("    return [(1,)]\n", body) + CALL)
+    assert (
+        _generator().generate_stub_file(source, mode="incremental,create").read_text() == expected
+    )
+
+
+def test_async_method_with_same_name(tmp_path: Path) -> None:
+    source = tmp_path / "db.py"
+    source.write_text(
+        DB.replace("async def", "def")
+        + "\n\nclass Repo:\n    async def fetch(self, query: str) -> Any:\n        return []\n\n"
+        + CALL
+    )
+    assert (
+        _generator().generate_stub_file(source, mode="incremental,create").read_text() == SYNC_STUB
+    )
+
+
+@pytest.mark.parametrize(("existing", "status"), [(SYNC_STUB, 1), (STUB, 0)])
+def test_check(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], existing: str, status: int
+) -> None:
+    source = tmp_path / "db.py"
+    source.write_text(DB + CALL)
+    (tmp_path / "db.pyi").write_text(existing)
+    assert _generator().check(source) == status
+    assert ("overloads should be async def" in capsys.readouterr().out) == bool(status)
+    assert (tmp_path / "db.pyi").read_text() == existing
 
 
 def test_runtime(tmp_path: Path) -> None:
@@ -83,10 +173,10 @@ def test_runtime(tmp_path: Path) -> None:
     "command", [["mypy", "--no-error-summary", "use.py"], ["ty", "check", "use.py"]]
 )
 def test_await_type_checks(tmp_path: Path, command: list[str]) -> None:
-    if not shutil.which(command[0]):
-        pytest.skip(f"{command[0]} not installed")
-    (tmp_path / "db.py").write_text(DB)
-    (tmp_path / "db.pyi").write_text(STUB)
+    assert shutil.which(command[0]), f"{command[0]} is a dev dependency"
+    source = tmp_path / "db.py"
+    source.write_text(DB + CALL)
+    _generator().generate_stub_file(source, mode="incremental,create")
     (tmp_path / "use.py").write_text(USE)
     result = subprocess.run(command, capture_output=True, text=True, cwd=tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr

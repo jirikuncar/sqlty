@@ -158,6 +158,12 @@ class TypeStubGenerator:
                         if len(changes["extra"]) > 3:
                             print(f"        ... and {len(changes['extra']) - 3} more")
 
+            for registry_name, registry in expected_ir.registries.items():
+                existing = existing_ir.registries.get(registry_name)
+                if existing and existing.is_async != registry.is_async:
+                    keyword = "async def" if registry.is_async else "def"
+                    print(f"    Registry '{registry_name}': overloads should be {keyword}")
+
         if self._verbose == 0:
             print("\nRun with --verbose to see detailed text diffs.")
 

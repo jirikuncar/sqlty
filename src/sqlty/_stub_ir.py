@@ -421,7 +421,7 @@ class StubFile:
     def has_same_overloads(self, other: StubFile) -> bool:
         """Check if two StubFiles have the same overloads per registry.
 
-        Compares only the semantic content (overloads) per registry,
+        Compares only the semantic content (overloads and ``async``) per registry,
         ignoring metadata like export names, base classes, etc.
 
         Args:
@@ -439,7 +439,10 @@ class StubFile:
             self_registry = self.registries[name]
             other_registry = other.registries[name]
 
-            if self_registry.signatures() != other_registry.signatures():
+            if (
+                self_registry.signatures() != other_registry.signatures()
+                or self_registry.is_async != other_registry.is_async
+            ):
                 return False
 
         return True
