@@ -67,7 +67,7 @@ class OverloadSignature:
     source_file: str | None = None
     source_line: int | None = None
     source_span: SourceSpan | None = None
-    ast_node: ast.FunctionDef | None = None
+    ast_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
     function_signature: ast.arguments | None = None  # Full signature for configured functions
     query_param_name: str = "query"  # Name of the query parameter to replace with Literal
     source_return_annotation: ast.expr | None = None  # Return annotation from source function
@@ -143,16 +143,18 @@ class RegistryDecorator:
         custom_imports: List of custom import statements from function config
         fallback_return_type: Return type of the catch-all ``(query: str)`` overload,
             e.g. ``SQL[UNTYPED]``; None keeps the legacy ``str``/``Any`` fallback
+        is_async: Whether the helper is ``async def``; its overloads are then ``async def``
     """
 
     name: str
     overloads: set[OverloadSignature] = field(default_factory=set)
     export_name: str = "sql"
     docstring: str = "Application-specific SQL query registry with type-safe overloads."
-    ast_node: ast.FunctionDef | None = None
+    ast_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
     is_function: bool = False
     custom_imports: list[str] = field(default_factory=list)
     fallback_return_type: str | None = None
+    is_async: bool = False
 
     def add_overload(self, overload: OverloadSignature) -> bool:
         """Add an overload to this registry.
@@ -286,6 +288,7 @@ class StubFile:
         """
         if registry.name in self.registries:
             self.registries[registry.name].fallback_return_type = registry.fallback_return_type
+            self.registries[registry.name].is_async = registry.is_async
         if mode == "incremental":
             if registry.name in self.registries:
                 self.registries[registry.name].update(registry)
@@ -418,7 +421,7 @@ class StubFile:
     def has_same_overloads(self, other: StubFile) -> bool:
         """Check if two StubFiles have the same overloads per registry.
 
-        Compares only the semantic content (overloads) per registry,
+        Compares only the semantic content (overloads and ``async``) per registry,
         ignoring metadata like export names, base classes, etc.
 
         Args:
@@ -436,7 +439,10 @@ class StubFile:
             self_registry = self.registries[name]
             other_registry = other.registries[name]
 
-            if self_registry.signatures() != other_registry.signatures():
+            if (
+                self_registry.signatures() != other_registry.signatures()
+                or self_registry.is_async != other_registry.is_async
+            ):
                 return False
 
         return True

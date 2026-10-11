@@ -188,6 +188,12 @@ class TypeStubGenerator:
                         if len(changes["extra"]) > 3:
                             print(f"        ... and {len(changes['extra']) - 3} more")
 
+            for registry_name, registry in expected_ir.registries.items():
+                existing = existing_ir.registries.get(registry_name)
+                if existing and existing.is_async != registry.is_async:
+                    keyword = "async def" if registry.is_async else "def"
+                    print(f"    Registry '{registry_name}': overloads should be {keyword}")
+
         if self._verbose == 0:
             print("\nRun with --verbose to see detailed text diffs.")
 
@@ -796,6 +802,7 @@ class TypeStubGenerator:
                         export_name=export_name,
                         overloads=set(),  # Empty set for minimal stub
                         fallback_return_type=self._call_parser().untyped_fallback(reg_class),
+                        is_async=self._registry_detector.is_async_function(source_path, reg_class),
                     )
                     minimal_stub_ir.add_registry(registry)
             else:
@@ -806,6 +813,7 @@ class TypeStubGenerator:
                     export_name=self.function_name,
                     overloads=set(),  # Empty set for minimal stub
                     fallback_return_type=self._call_parser().untyped_fallback(actual_class),
+                    is_async=self._registry_detector.is_async_function(source_path, actual_class),
                 )
                 minimal_stub_ir.add_registry(registry)
 
@@ -929,6 +937,9 @@ class TypeStubGenerator:
                         )
                         for registry in new_stub.registries.values():
                             registry.is_function = is_function
+                            registry.is_async = self._registry_detector.is_async_function(
+                                registry_file, cls_name
+                            )
                             all_new_registries.add_registry(registry)
 
                     # Merge with existing stub if it exists
