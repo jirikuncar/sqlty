@@ -139,26 +139,32 @@ def test_magic_pth_respects_sqlty_no_magic(site_dir: Path) -> None:
     assert result.stdout.split() == ["unknown", "False"]
 
 
+Q = 'q = "--sql\\nSELECT 1::INTEGER AS x"\n'
+DT = "q = \"--sql\\nSELECT NOW()::TIMESTAMP AS t, 'a'::UUID AS u\"\n"
+
+
 @pytest.mark.parametrize(
-    ("header", "shift"),
+    ("source", "shift"),
     [
-        pytest.param('#!/usr/bin/env python\n# coding: sqlty\n"""Doc."""\n', 0, id="docstring"),
-        pytest.param("# coding: sqlty\nfrom __future__ import annotations\n", 0, id="future"),
-        pytest.param("# coding: sqlty\nimport sys\nfrom sqlty import SQL\n", 0, id="import"),
-        pytest.param("# coding: sqlty\n\n@staticmethod\ndef f(): ...\n", 0, id="decorator"),
-        pytest.param("# coding: sqlty\ndef f(): ...\n", 1, id="def-after-cookie"),
+        pytest.param("# coding: sqlty\n" + Q, 0, id="no-docstring"),
+        pytest.param('# coding: sqlty\n"""Doc."""\n' + Q, 0, id="docstring"),
+        pytest.param("# coding: sqlty\nfrom __future__ import annotations\n" + Q, 0, id="future"),
+        pytest.param("#!/usr/bin/env python\n# coding: sqlty\n" + Q, 0, id="shebang"),
+        pytest.param("\n# coding: sqlty\n" + Q, 0, id="blank-before-cookie"),
+        pytest.param("# coding: sqlty\nimport sys\nfrom sqlty import SQL\n" + Q, 0, id="import"),
+        pytest.param("# coding: sqlty\n\n@staticmethod\ndef f(): ...\n" + Q, 0, id="decorator"),
+        pytest.param("# coding: sqlty\ndef f(): ...\n" + Q, 1, id="def-after-cookie"),
+        pytest.param("# coding: sqlty\n" + DT, 0, id="datetime-uuid"),
+        pytest.param('# coding: sqlty\r\n"""Doc."""\r\n' + DT.replace("\n", "\r\n"), 0, id="crlf"),
     ],
 )
-def test_magic_pth_runs_coded_script(site_dir: Path, header: str, shift: int) -> None:
+def test_magic_pth_runs_coded_script(site_dir: Path, source: str, shift: int) -> None:
     """``python script.py`` decodes from the end of the cookie line and drops the first line (#111)."""
     (site_dir / "sitecustomize.py").write_text(f"import site\nsite.addsitedir({str(site_dir)!r})\n")
+    newline = "\r\n" if "\r\n" in source else "\n"
+    source += f"import sys{newline}print(type(q).__name__, sys._getframe().f_lineno){newline}"
     script = site_dir / "script.py"
-    source = (
-        header + 'q = "--sql\\nSELECT 1::INTEGER AS x"\n'
-        "import sys\n"
-        "print(type(q).__name__, sys._getframe().f_lineno)\n"
-    )
-    script.write_text(source)
+    script.write_bytes(source.encode())
     environ = {k: v for k, v in os.environ.items() if k != "SQLTY_NO_MAGIC"}
     result = subprocess.run(
         [sys.executable, "-B", str(script)],

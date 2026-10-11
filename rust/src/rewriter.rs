@@ -840,6 +840,47 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     }
 
     #[test]
+    fn test_keep_lines_placement() {
+        let imp = "from sqlty import SQL";
+        for (header, expected) in [
+            ("# coding: sqlty\n", format!("# coding: sqlty\n{imp}; q = ")),
+            (
+                "\"\"\"Multi\nline.\n\"\"\"\n",
+                format!("\"\"\"Multi\nline.\n\"\"\"; {imp}\nq = "),
+            ),
+            (
+                "\n\"\"\"Doc.\"\"\"\nfrom __future__ import annotations\n",
+                format!("\n\"\"\"Doc.\"\"\"\nfrom __future__ import annotations; {imp}\nq = "),
+            ),
+            (
+                "\n  # c\nclass A: pass\n",
+                format!("\n{imp}    # c\nclass A: pass\nq = "),
+            ),
+            (
+                "\nmatch x:\n    case _: pass\n",
+                format!("\n{imp}\nmatch x:\n    case _: pass\nq = "),
+            ),
+            ("\nmatch = 1\n", format!("\n{imp}; match = 1\nq = ")),
+        ] {
+            let result = keep_lines(&format!("{header}{Q}"));
+            assert!(result.starts_with(&expected), "{result:?}");
+        }
+        let continued = keep_lines("\nq = \\\n    \"--sql\\nSELECT 1::INTEGER AS x\"\n");
+        assert!(
+            continued.starts_with(&format!("\n{imp}; q = \\\n    SQL[")),
+            "{continued:?}"
+        );
+    }
+
+    #[test]
+    fn test_keep_lines_datetime_uuid() {
+        let source = "\n\"\"\"Doc.\"\"\"\r\nq = \"--sql\\nSELECT NOW()::TIMESTAMP AS t, 'a'::UUID AS u\"\r\n";
+        assert!(keep_lines(source).starts_with(
+            "\n\"\"\"Doc.\"\"\"; import datetime; import uuid; from sqlty import SQL\r\nq = SQL[tuple[datetime.datetime, uuid.UUID]]("
+        ));
+    }
+
+    #[test]
     fn test_keep_lines_preserves_line_count() {
         for source in [
             format!("\n\"\"\"Doc.\"\"\"\n{Q}"),
