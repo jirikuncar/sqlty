@@ -28,13 +28,14 @@ usage: sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA] 
                      [paths ...]
 
 positional arguments:
-  paths                 Files or directories to process (default: current directory)
+  paths                 Files or directories (default: .); each file uses its nearest
+                        pyproject.toml
 
 options:
   -h, --help            show this help message and exit
   --dialect {postgres,sqlite,mysql}
-                        SQL dialect (default: postgres)
-  --schema SCHEMA       Path to schema .sql file for enhanced inference
+                        SQL dialect (default: [tool.sqlty] dialect, else postgres)
+  --schema SCHEMA       Schema .sql file for every path (default: [tool.sqlty] schema per project)
   -v, --verbose         Increase verbosity
   -q, --quiet           Suppress non-error output
   --check               Exit 1 if files need rewriting (don't modify files)
@@ -52,13 +53,14 @@ usage: sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA] [-
                    [paths ...]
 
 positional arguments:
-  paths                 Files or directories to process (default: current directory)
+  paths                 Files or directories (default: .); each file uses its nearest
+                        pyproject.toml
 
 options:
   -h, --help            show this help message and exit
   --dialect {postgres,sqlite,mysql}
-                        SQL dialect (default: postgres)
-  --schema SCHEMA       Path to schema .sql file for enhanced inference
+                        SQL dialect (default: [tool.sqlty] dialect, else postgres)
+  --schema SCHEMA       Schema .sql file for every path (default: [tool.sqlty] schema per project)
   -v, --verbose         Increase verbosity
   -q, --quiet           Suppress non-error output
   --check               Exit 1 if files contain SQL[T](...) wrappers
@@ -72,13 +74,14 @@ usage: sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA] [-
                    [paths ...]
 
 positional arguments:
-  paths                 Files or directories to process (default: current directory)
+  paths                 Files or directories (default: .); each file uses its nearest
+                        pyproject.toml
 
 options:
   -h, --help            show this help message and exit
   --dialect {postgres,sqlite,mysql}
-                        SQL dialect (default: postgres)
-  --schema SCHEMA       Path to schema .sql file for enhanced inference
+                        SQL dialect (default: [tool.sqlty] dialect, else postgres)
+  --schema SCHEMA       Schema .sql file for every path (default: [tool.sqlty] schema per project)
   -v, --verbose         Increase verbosity
   -q, --quiet           Suppress non-error output
   --fix                 Not implemented yet: reports issues without changing files

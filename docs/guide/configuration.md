@@ -1,7 +1,7 @@
 # Configuration
 
-sqlty reads `[tool.sqlty]` from the nearest `pyproject.toml` above the first
-path given on the command line. CLI flags override it. Runnable project:
+Each file uses `[tool.sqlty]` from its nearest `pyproject.toml`, so one
+command can cover several projects. CLI flags override it. Runnable project:
 [`examples/03_pyproject_config/`](../../examples/03_pyproject_config/).
 
 `pyproject.toml`:
@@ -104,6 +104,3 @@ repos:
         pass_filenames: false
         types: [python]
 ```
-
-Config is resolved once, from the first path: run one command per project
-directory when they have their own `pyproject.toml`.

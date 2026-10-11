@@ -19,13 +19,10 @@ repos:
         pass_filenames: false
         require_serial: true
         types: [file, python]
-      # one call per directory: [tool.sqlty] is resolved from the first path only;
       # magic_codec/ keeps plain --sql strings: the codec wraps them at import time
       - id: sqlty-examples
         name: sqlty rewrite + check examples
-        entry: >-
-          bash -c 'for d in examples/0*/; do
-          uv run sqlty rewrite -q "$d" && uv run sqlty check -q "$d" || exit 1; done'
+        entry: bash -c 'uv run sqlty rewrite -q examples/0*/ && uv run sqlty check -q examples/0*/'
         language: system
         pass_filenames: false
         require_serial: true
