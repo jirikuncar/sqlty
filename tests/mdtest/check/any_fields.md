@@ -3,8 +3,9 @@
 A field annotated `Any`, or a union containing `Any` or the inferred column
 type, accepts the column: `column-type-mismatch` checks that the column's
 values fit the field, not that the annotations are spelled the same.
-`int` columns also fit `float` fields. This holds whether field types are
-resolved at runtime or read from source (when an import is unavailable).
+`int` columns also fit `float` fields, but a narrower field such as `bool`
+does not fit an `int` column. This holds whether field types are resolved at
+runtime or read from source (when an import is unavailable).
 
 ```toml
 [sqlty]
@@ -55,10 +56,72 @@ from sqlty import SQL
 @dataclass
 class Row:
     id: int | str
+
+q = SQL[Row]("--sql\nSELECT id::INTEGER FROM users")
+# error:
+```
+
+## `int` columns fit `float` fields
+
+```python
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class Row:
     ratio: float
 
-q = SQL[Row]("--sql\nSELECT id::INTEGER, ratio::INTEGER FROM users")
+q = SQL[Row]("--sql\nSELECT ratio::INTEGER FROM users")
 # error:
+```
+
+## Qualified and aliased `Any` without runtime resolution
+
+```python
+import not_installed
+import typing
+import typing as t
+from typing import Annotated, NamedTuple
+from typing import Any as A
+from sqlty import SQL
+
+class Row(NamedTuple):
+    id: typing.Any
+    name: t.Any
+    score: A
+    views: Annotated[int, "count"]
+
+q = SQL[Row]("--sql\nSELECT id::INTEGER, name::TEXT, score::FLOAT, views::INTEGER FROM users")
+# error:
+```
+
+## Narrower fields mismatch
+
+A `bool` field can't hold every `INTEGER` value.
+
+```python
+from typing import NamedTuple
+from sqlty import SQL
+
+class Row(NamedTuple):
+    flag: bool
+
+q = SQL[Row]("--sql\nSELECT flag::INTEGER FROM users")
+# error: [column-type-mismatch] "Row.flag is bool but query column 'flag' infers int"
+```
+
+## Narrower fields mismatch without runtime resolution
+
+```python
+import not_installed
+from typing import NamedTuple
+from sqlty import SQL
+
+class Row(NamedTuple):
+    flag: bool
+
+q = SQL[Row]("--sql\nSELECT flag::INTEGER FROM users")
+# error: [column-type-mismatch] "Row.flag is bool but query column 'flag' infers int"
 ```
 
 ## Union without the column type still mismatches
@@ -104,4 +167,22 @@ SELECT id::INTEGER, name::TEXT FROM users
 
 ```python
 # error:
+```
+
+## Narrower annotation fields mismatch
+
+```toml
+[sqlty]
+dialect = "postgres"
+[sqlty.annotation]
+type = "User"
+fields = [["flag", "bool"]]
+```
+
+```sql
+SELECT flag::INTEGER FROM users
+```
+
+```python
+# error: [column-type-mismatch] "User.flag is bool but query column 'flag' infers int"
 ```

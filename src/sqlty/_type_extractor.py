@@ -35,7 +35,8 @@ class TypeInfo:
     ``required``, ``closed`` and ``extra_items`` describe TypedDict keys
     (PEP 655, PEP 728); other kinds have every field required and are open.
     For TypedDicts, ``extra_items_readonly`` and ``extra_items_type`` (the
-    resolved type, or None when unknown) complete ``extra_items``, ``owner``
+    resolved type, or None when unknown) complete ``extra_items``. ``field_types``
+    holds each field's type resolved from source (None when unknown), ``owner``
     names the class whose header set the openness, ``lineno`` is the class
     line, ``bases`` names its TypedDict bases defined in the same source and
     ``errors`` lists its PEP 728 inheritance violations.
@@ -52,6 +53,7 @@ class TypeInfo:
         "extra_items_hint",
         "extra_items_readonly",
         "extra_items_type",
+        "field_types",
         "owner",
         "lineno",
         "bases",
@@ -80,6 +82,7 @@ class TypeInfo:
         self.extra_items_hint = extra_items_hint
         self.extra_items_readonly = False
         self.extra_items_type: typing.Any = None
+        self.field_types: dict[str, typing.Any] = {}
         self.owner = name
         self.lineno = 0
         self.bases: list[str] = []
@@ -175,6 +178,7 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         info.lineno = node.lineno
         is_typeddict = kind == "TypedDict"
         nodes = list(_lineage(node, typeddict_nodes).values()) if is_typeddict else [node]
+        info.field_types = _ast_key_types(nodes, aliases)
         hints = None
         if (fields or is_typeddict) and (resolved := _resolve_class(nodes, import_stmts, source)):
             cls, namespace = resolved
@@ -187,7 +191,7 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
                 info.required = frozenset(getattr(cls, "__required_keys__", info.required))
                 own_type = _own_extra_type(cls, namespace) if own and own.extra_items else None
             else:
-                hints = _ast_key_types(nodes, aliases)
+                hints = info.field_types
                 own_type = _ast_type(own.extra_node, aliases) if own and own.extra_node else None
             header = _header_errors(info.name, keywords, own, own_type, parents)
             info.errors = list(dict.fromkeys(header + _key_errors(info, hints, parents)))
@@ -209,8 +213,9 @@ def check_type_compatibility(
     """Check if a user type's field can hold values of a SQL column type.
 
     Uses runtime type objects when available (``resolved_hints``), else the
-    annotation parsed from source; ``Any``, unions and ``int`` -> ``float``
-    promotion are understood. Annotations neither path can resolve fall back
+    types resolved from source (``field_types``). ``Any``, unions and the
+    ``int`` -> ``float`` promotion are accepted; narrower fields (``bool`` for
+    an ``int`` column) are not. Annotations neither path can resolve fall back
     to string comparison.
 
     Args:
@@ -223,27 +228,45 @@ def check_type_compatibility(
         True if types are compatible, False if they mismatch.
 
     Example:
-        >>> info = TypeInfo("Row", [("id", "int | Any"), ("name", "str")], "NamedTuple")
-        >>> check_type_compatibility(info, "id", "int"), check_type_compatibility(info, "name", "int")
+        >>> src = "import typing as t, not_installed\\nclass Row(t.NamedTuple):\\n id: int | t.Any\\n flag: bool"
+        >>> info = extract_type_definitions(src)["Row"]
+        >>> check_type_compatibility(info, "id", "str"), check_type_compatibility(info, "flag", "int")
         (True, False)
     """
-    if column_python_type is None:
-        return True  # Can't validate unknown SQL type
-
     declared = dict(user_type.fields)
     if column_name in declared:
         annotation = declared[column_name]
         hints = user_type.resolved_hints or {}
-        field = hints[column_name] if column_name in hints else _annotation_type(annotation)
+        field = (
+            hints[column_name] if column_name in hints else user_type.field_types.get(column_name)
+        )
     elif user_type.extra_items is not None:
         annotation = user_type.extra_items
         field = user_type.extra_items_hint or user_type.extra_items_type
     else:
-        return False
+        return column_python_type is None
+    return _accepts(field, annotation, column_python_type)
 
-    expected_type = PYTHON_TYPE_MAP.get(column_python_type)
-    if field is not None and expected_type is not None:
-        return bool(_is_subtype(expected_type, field)) or _types_compatible(field, expected_type)
+
+def field_accepts(annotation: str, column_python_type: str | None) -> bool:
+    """Check if a field annotated ``annotation`` can hold values of a SQL column type.
+
+    For annotations known only as strings, such as ``SQL[tuple[...]]`` items;
+    see `check_type_compatibility`.
+
+    Example:
+        >>> field_accepts("float", "int"), field_accepts("bool", "int"), field_accepts("Any", "str")
+        (True, False, True)
+    """
+    return _accepts(_annotation_type(annotation), annotation, column_python_type)
+
+
+def _accepts(field: typing.Any, annotation: str, column_python_type: str | None) -> bool:
+    if not column_python_type:
+        return True
+    fits = _is_subtype(PYTHON_TYPE_MAP.get(column_python_type), field)
+    if fits is not None:
+        return fits
     return _normalize_type_str(annotation) == column_python_type
 
 
@@ -433,23 +456,6 @@ def _type_repr(tp: typing.Any) -> str:
     return repr(tp).replace("typing.", "")
 
 
-def _types_compatible(field_type: type, expected_type: type) -> bool:
-    """Check if a field type is compatible with the expected SQL type.
-
-    Handles:
-    - Exact match: ``int`` == ``int``
-    - Subclass: ``bool`` is subclass of ``int``
-    - Union/Optional unwrapping done by caller
-    """
-    try:
-        if field_type is expected_type:
-            return True
-        return issubclass(field_type, expected_type)
-    except TypeError:
-        # issubclass fails for some generic types
-        return field_type is expected_type
-
-
 def _unwrap_optional(tp: type) -> type:
     """Unwrap Optional[X] / X | None to X.
 
@@ -472,6 +478,9 @@ def _unwrap_optional(tp: type) -> type:
 # ---------------------------------------------------------------------------
 
 
+_TYPING_MODULES = frozenset({"typing", "typing_extensions"})
+
+
 def _collect_imports(tree: ast.Module) -> list[str]:
     """Collect import statements from an AST as source strings."""
     imports: list[str] = []
@@ -482,14 +491,21 @@ def _collect_imports(tree: ast.Module) -> list[str]:
 
 
 def _typing_aliases(tree: ast.Module) -> dict[str, str]:
-    """Map local names imported from ``typing`` / ``typing_extensions`` to originals."""
-    return {
-        alias.asname: alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module in ("typing", "typing_extensions")
-        for alias in node.names
-        if alias.asname
-    }
+    """Map local names for ``typing`` / ``typing_extensions`` and their members to originals.
+
+    Example:
+        >>> _typing_aliases(ast.parse("import typing as t\\nfrom typing import Any as A"))
+        {'t': 'typing', 'A': 'Any'}
+    """
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in _TYPING_MODULES:
+            aliases |= {a.asname: a.name for a in node.names if a.asname}
+        elif isinstance(node, ast.Import):
+            aliases |= {
+                a.asname: a.name for a in node.names if a.asname and a.name in _TYPING_MODULES
+            }
+    return aliases
 
 
 def _classify_class(
@@ -675,11 +691,23 @@ _AST_TYPES: dict[str, typing.Any] = {
 
 
 def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
-    """Builtin scalars, ``Any``, ``Never`` and their unions from source; None if unknown."""
+    """Builtin scalars, ``Any``, ``Never`` and their unions from source; None if unknown.
+
+    ``aliases`` maps local names to ``typing`` names (see `_typing_aliases`), so
+    ``A`` for ``from typing import Any as A`` and ``t.Any`` for
+    ``import typing as t`` resolve; ``Annotated`` metadata is dropped.
+    """
     if isinstance(node, ast.Constant) and node.value is None:
         return type(None)
     if isinstance(node, ast.Name):
         return _AST_TYPES.get(aliases.get(node.id, node.id))
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        module = aliases.get(node.value.id, node.value.id)
+        return _AST_TYPES.get(node.attr) if module in _TYPING_MODULES else None
+    if isinstance(node, ast.Subscript) and _is_name(node.value, "Annotated", aliases):
+        return _ast_type(
+            node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice, aliases
+        )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         members = [node.left, node.right]
     elif isinstance(node, ast.Subscript) and _is_name(node.value, "Optional", aliases):
@@ -693,7 +721,10 @@ def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
 
 
 def _annotation_type(annotation: str) -> typing.Any:
-    """An annotation string as by ``_ast_type``; None if unknown."""
+    """Parse an annotation string into a type as `_ast_type` does; None if it can't be resolved.
+
+    Only for annotations without their module's imports; ``typing.X`` resolves.
+    """
     try:
         return _ast_type(ast.parse(annotation, mode="eval").body, {})
     except SyntaxError:

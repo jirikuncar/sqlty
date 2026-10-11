@@ -15,7 +15,7 @@ stale-type = "error"
 | Rule | Group | Default | Fixable | Reports |
 |------|-------|---------|---------|---------|
 | [`column-count-mismatch`](#column-count-mismatch) | Row type | error | no | Row type has a different number of fields than the query has columns |
-| [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field has a different type than its column |
+| [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field can't hold its column's values |
 | [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | Row type field name differs from its column name |
 | [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the keys of a closed or `extra_items` TypedDict |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
@@ -61,9 +61,12 @@ Fix: add or remove fields, or change the query.
 
 ### column-type-mismatch
 
-Default: error. A field's type differs from its column's inferred type. Also
-reported for extra columns that don't match a TypedDict's `extra_items`
-type.
+Default: error. A field can't hold the values of its column's inferred type.
+Also reported for extra columns that don't fit a TypedDict's `extra_items`
+type. A field typed `Any`, a union containing `Any` or the column type, or
+`float` for an `int` column is accepted; a narrower field, such as `bool` for
+an `int` column, is not. See
+[`tests/mdtest/check/any_fields.md`](https://github.com/jirikuncar/sqlty/blob/main/tests/mdtest/check/any_fields.md).
 
 ```python
 from typing import TypedDict

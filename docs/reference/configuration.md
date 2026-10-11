@@ -1,13 +1,21 @@
 # Configuration
 
 sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI resolves it per
-file: each `.py` file uses the nearest `pyproject.toml` found by walking up
-from its directory, so `sqlty rewrite app_a app_b` (or `sqlty check .` over a
-repository with nested projects) applies each project's schema, dialect,
-import style and rules to its own files. The magic codec searches from the
-current directory, and stub generation from the directory of the helper's
-module. Command-line flags override the file for every path. Unknown keys
-are ignored.
+file: each `.py` file uses the nearest `pyproject.toml` with a `[tool.sqlty]`
+table, found by walking up from its directory, so `sqlty rewrite app_a app_b`
+(or `sqlty check .` over a repository with nested projects) applies each
+project's schema, dialect, import style, rules and `untyped` mode to its own
+files. The magic codec searches from the current directory, and stub
+generation from the directory of the helper's module.
+
+In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
+package's packaging-only `pyproject.toml` does not hide the workspace's
+config. The closest table wins; settings are not merged with tables in
+parent directories. To change one setting for a nested project, give it its
+own complete `[tool.sqlty]` table.
+
+Command-line flags (`--dialect`, `--schema`, `--untyped`) override the table
+for every path. Unknown keys are ignored.
 
 ```toml
 [tool.sqlty]
@@ -39,8 +47,7 @@ query_param = "query"
 ## `dialect`
 
 SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`
-or `"mysql"`. CLI: `--dialect`. Because `postgres` is the flag's default, an
-explicit `--dialect postgres` does not override this key. See
+or `"mysql"`. CLI: `--dialect`, which overrides this key. See
 [Dialects](../guide/schema-inference.md#dialects).
 
 ## `schema`

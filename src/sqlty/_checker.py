@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from sqlty._lint import Diagnostic, RuleConfig
 from sqlty._sql_analyzer import ColumnInfo, SQLAnalyzer
-from sqlty._type_extractor import TypeInfo, check_type_compatibility
+from sqlty._type_extractor import field_accepts
 
 
 class Checker:
@@ -68,10 +68,9 @@ class Checker:
         if not self._rules.is_enabled("column-type-mismatch"):
             return []
 
-        info = TypeInfo(type_name, annotation_fields, "tuple")
         diagnostics: list[Diagnostic] = []
         for (field_name, field_type), col in zip(annotation_fields, columns, strict=False):
-            if not check_type_compatibility(info, field_name, col.python_type):
+            if not field_accepts(field_type, col.python_type):
                 diagnostics.append(
                     Diagnostic(
                         rule="column-type-mismatch",

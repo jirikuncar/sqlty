@@ -126,9 +126,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--dialect",
-        default="postgres",
         choices=["postgres", "sqlite", "mysql"],
-        help="SQL dialect (default: postgres)",
+        help="SQL dialect; overrides pyproject.toml (default: its dialect, else postgres)",
     )
     parser.add_argument(
         "--schema",
@@ -305,49 +304,39 @@ class _Settings(NamedTuple):
 def _files_with_settings(args: argparse.Namespace) -> list[tuple[Path, _Settings]]:
     """Pair each Python file under ``args.paths`` with the settings that apply to it.
 
-    Each file uses the ``[tool.sqlty]`` table of the ``pyproject.toml`` nearest
-    to it, so ``sqlty rewrite proj_a proj_b`` applies each project's schema,
-    dialect, import style and rules to its own files.
+    Each file uses the nearest ``[tool.sqlty]`` table found by walking up from
+    its directory (see `load_config`), so ``sqlty rewrite proj_a proj_b``
+    applies each project's schema, dialect, import style, rules and
+    ``untyped`` mode to its own files. ``--dialect``, ``--schema`` and
+    ``--untyped`` override every table.
     """
     from sqlty._config import load_config
 
-    resolved: dict[Path | None, _Settings] = {}
+    cli_schema = _load_schema(args.schema) if args.schema else None
+    by_dir: dict[Path, tuple[SQLTyConfig, Path | None]] = {}
+    by_config: dict[Path | None, _Settings] = {}
     result: list[tuple[Path, _Settings]] = []
     for path in _collect_python_files(args.paths):
-        config, config_dir = load_config(path.parent)
-        if config_dir not in resolved:
-            resolved[config_dir] = _resolve_config(args, config, config_dir)
-        result.append((path, resolved[config_dir]))
+        if path.parent not in by_dir:
+            by_dir[path.parent] = load_config(path.parent)
+        config, config_dir = by_dir[path.parent]
+        if config_dir not in by_config:
+            by_config[config_dir] = _Settings(
+                dialect=args.dialect or config.get("dialect", "postgres"),
+                schema_sql=cli_schema if args.schema else _config_schema(config, config_dir),
+                import_style=config.get("import_style"),
+                rules=config.get("rules"),
+                untyped=getattr(args, "untyped", None) or config.get("untyped", "skip"),
+            )
+        result.append((path, by_config[config_dir]))
     return result
 
 
-def _resolve_config(
-    args: argparse.Namespace, config: SQLTyConfig, config_dir: Path | None
-) -> _Settings:
-    """Merge a ``[tool.sqlty]`` table found in ``config_dir`` with CLI flags.
-
-    CLI flags (--dialect, --schema, --untyped) override pyproject.toml values;
-    a config ``schema`` is relative to ``config_dir``.
-    """
-    # Dialect: CLI flag overrides config (argparse default is "postgres")
-    dialect = args.dialect
-    if dialect == "postgres" and "dialect" in config:
-        # Only use config value if CLI wasn't explicitly set (still default)
-        dialect = config["dialect"]
-
-    schema_sql: str | None = None
-    if args.schema:
-        schema_sql = _load_schema(args.schema)
-    elif "schema" in config and config_dir is not None:
-        schema_sql = _load_schema(config_dir / config["schema"])
-
-    return _Settings(
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=config.get("import_style"),
-        rules=config.get("rules"),
-        untyped=getattr(args, "untyped", None) or config.get("untyped", "skip"),
-    )
+def _config_schema(config: SQLTyConfig, config_dir: Path | None) -> str | None:
+    """The ``schema`` of a ``[tool.sqlty]`` table, relative to its ``pyproject.toml``."""
+    if "schema" in config and config_dir is not None:
+        return _load_schema(config_dir / config["schema"])
+    return None
 
 
 def _load_schema(schema_path: Path) -> str | None:

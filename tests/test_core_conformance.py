@@ -938,12 +938,18 @@ q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
             ("Optional[Union[str, Any]]", True),
             ("int | str", True),
             ("float", True),
+            ("typing.Any", True),
+            ("t.Any", True),
+            ("A", True),
+            ("Annotated[int, 'id']", True),
             ("str | bytes", False),
+            ("bool", False),
         ],
     )
     def test_any_and_union_fields(self, imports: str, annotation: str, ok: bool):
         """A field accepts a column whose type fits it, resolved at runtime or from source."""
-        source = f"""{imports}from typing import Any, NamedTuple, Optional, Union
+        source = f"""{imports}import typing, typing as t
+from typing import Annotated, Any, Any as A, NamedTuple, Optional, Union
 from sqlty import SQL
 
 class Row(NamedTuple):

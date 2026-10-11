@@ -74,3 +74,62 @@ def test_cli_schema_overrides_every_config(cli: Cli, projects: dict[str, Path], 
     assert result.returncode == 0, result.stderr
     for name in ("plain", "schema"):
         assert "SQL[tuple[str, int]]" in (projects[name] / "queries.py").read_text()
+
+
+def test_rewrite_single_file_uses_its_config(cli: Cli, projects: dict[str, Path]):
+    result = cli(["rewrite", "../schema/queries.py"], {"cwd": projects["styled"]})
+    assert result.returncode == 0, result.stderr
+    assert (projects["schema"] / "queries.py").read_text() == EXPECTED["schema"]
+    assert (projects["styled"] / "queries.py").read_text() == QUERY
+
+
+def test_monorepo_package_without_sqlty_table_uses_root_config(cli: Cli, tmp_path: Path):
+    root = _project(tmp_path, "mono", 'schema = "schema.sql"\n')
+    package = root / "pkg"
+    package.mkdir()
+    (package / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
+    (package / "a.py").write_text(QUERY)
+    result = cli(["rewrite", root])
+    assert result.returncode == 0, result.stderr
+    assert (package / "a.py").read_text() == EXPECTED["schema"]
+    assert (root / "queries.py").read_text() == EXPECTED["schema"]
+
+
+BACKTICK = 'q = "--sql\\nSELECT `id` FROM users"\n'
+
+
+@pytest.mark.parametrize(
+    ("flags", "wrapped"),
+    [([], {"sqlite": True, "default": False}), (["--dialect", "postgres"], {"sqlite": False})],
+)
+def test_dialect_per_project(cli: Cli, tmp_path: Path, flags: list[str], wrapped: dict[str, bool]):
+    for name, config in (("sqlite", 'dialect = "sqlite"\n'), ("default", "")):
+        config += 'schema = "schema.sql"\n'
+        project = _project(tmp_path, name, config)
+        (project / "queries.py").write_text(BACKTICK)
+    result = cli(["rewrite", *flags, *(tmp_path / name for name in wrapped)])
+    assert result.returncode == 0, result.stderr
+    for name, expected in wrapped.items():
+        assert ("SQL[tuple[int]]" in (tmp_path / name / "queries.py").read_text()) is expected
+
+
+def test_untyped_per_project(cli: Cli, tmp_path: Path):
+    unknown = 'q = "--sql\\nVALUES (1, 2)"\n'
+    for name, config in (("sentinel", 'untyped = "sentinel"\n'), ("skip", "")):
+        (_project(tmp_path, name, config) / "queries.py").write_text(unknown)
+    assert cli(["rewrite", tmp_path]).returncode == 0
+    assert "SQL[UNTYPED]" in (tmp_path / "sentinel" / "queries.py").read_text()
+    assert (tmp_path / "skip" / "queries.py").read_text() == unknown
+
+
+def test_check_rules_per_project(cli: Cli, tmp_path: Path):
+    _project(
+        tmp_path, "strict", 'schema = "schema.sql"\n[tool.sqlty.rules]\nstale-rewrite = "error"\n'
+    )
+    _project(
+        tmp_path, "lenient", 'schema = "schema.sql"\n[tool.sqlty.rules]\nstale-rewrite = "ignore"\n'
+    )
+    result = cli(["check", tmp_path])
+    assert result.returncode == 1
+    assert "strict" in result.stdout and "stale-rewrite" in result.stdout
+    assert "lenient" not in result.stdout
