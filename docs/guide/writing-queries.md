@@ -1,12 +1,12 @@
 # Writing queries
 
-sqlty works on string literals that start with `--sql`. It infers a row type
+sqlty works on string literals that start with `--sql` (or `-- sql`). It infers a row type
 for each one and `sqlty rewrite` wraps the string in `SQL[T](...)`.
 
 ## The `--sql` prefix
 
 Put `--sql` on its own line, then the query. In a single-line string, use the
-`\n` escape:
+`\n` (or `\r\n`) escape:
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
@@ -28,6 +28,24 @@ Single quotes work the same way:
 ```python
 query = '--sql\nSELECT id::INTEGER FROM users'
 # rewritten: query = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
+```
+
+MySQL and MariaDB read `--` as a comment only before whitespace, so their
+servers reject `--sql`. Use `-- sql` there: it is a comment in every dialect,
+and sqlty reads it as the marker when only blanks or a `--` comment follow it
+on its line (`"-- sql SELECT ..."` is an ordinary comment and left alone). With
+`dialect = "mysql"`, `sqlty check` reports `--sql` in plain string literals as
+[`mysql-sql-marker`](../reference/rules.md#mysql-sql-marker) and `--fix`
+changes it.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+query = "-- sql\nSELECT CAST(id AS SIGNED) FROM users"
+# rewritten: query = SQL[tuple[int]]("-- sql\nSELECT CAST(id AS SIGNED) FROM users")
 ```
 
 ## Multi-line queries
@@ -109,8 +127,9 @@ query = f"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: query = f"--sql\nSELECT {column}::INTEGER FROM users"
 ```
 
-`sqlty check` reports such strings as
-[`stale-rewrite`](../reference/rules.md#stale-rewrite). Pass values as query
+`sqlty check` and `sqlty rewrite` report such strings as
+[`fstring-skipped`](../reference/rules.md#fstring-skipped) and
+[`tstring-skipped`](../reference/rules.md#tstring-skipped). Pass values as query
 parameters instead of interpolating them, and keep the query a plain literal.
 
 ## Type mapping

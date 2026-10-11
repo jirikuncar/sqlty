@@ -147,3 +147,35 @@ from sqlty import SQL
 q = SQL[tuple[int]](u"--sql\nSELECT id::INTEGER FROM users")
 # stripped: q = u"--sql\nSELECT id::INTEGER FROM users"
 ```
+
+## Escaped CRLF after the marker
+
+A marker line may end with an escaped `\r\n`, as with `\n`.
+
+```python
+a = "--sql\r\nSELECT 1 AS n"
+b = "--sql\nSELECT 1 AS n"
+# rewritten: a = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
+# rewritten: b = SQL[tuple[int]]("--sql\nSELECT 1 AS n")
+```
+
+## `SELECT *` without a schema stays unwrapped
+
+The columns of `*` are unknown, so there is no row type to write.
+
+```python
+q = "--sql\nSELECT * FROM users"
+# rewritten: q = "--sql\nSELECT * FROM users"
+```
+
+### With the sentinel
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+q = "--sql\nSELECT * FROM users"
+# rewritten: q = SQL[UNTYPED]("--sql\nSELECT * FROM users")
+```

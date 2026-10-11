@@ -102,3 +102,28 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
 
     with pytest.raises(SystemExit, match="Unsupported import-style: 'from x import SQL'"):
         SettingsResolver(args).for_file(tmp_path / "q.py")
+
+
+F_SKIPPED = "q.py:2: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+
+
+@pytest.mark.parametrize(
+    ("config", "flags", "expected"),
+    [
+        ("", ["--diff"], [F_SKIPPED, T_SKIPPED]),
+        ("", ["--check"], [F_SKIPPED, T_SKIPPED]),
+        ("", ["-q"], []),
+        ('[tool.sqlty.rules]\nfstring-skipped = "ignore"\n', [], [T_SKIPPED]),
+    ],
+)
+def test_rewrite_reports_skipped_strings(tmp_path, monkeypatch, capsys, config, flags, expected):
+    (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
+    (tmp_path / "q.py").write_text('x = 1\na = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x}"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", *flags, "q.py"])
+
+    out, err = capsys.readouterr()
+    assert err.splitlines() == expected
+    assert "skipped" not in out

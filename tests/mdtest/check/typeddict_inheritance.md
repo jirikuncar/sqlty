@@ -595,10 +595,10 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error:
 ```
 
-## Row type of a call without a one-line query
+## Row type of a multi-line query or a variable
 
-The class is still checked when the query spans lines or isn't a literal;
-only the column checks need the query.
+Triple-quoted queries get the column checks too; a variable has no query, so
+only the class is checked.
 
 ```python
 from typing import TypedDict
@@ -611,6 +611,7 @@ class Base(TypedDict, closed=True):
 class User(Base):
     name: str
 
+# error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 q = SQL[User]("""--sql
 SELECT id::INTEGER FROM users""")
 r = SQL[User](query)
