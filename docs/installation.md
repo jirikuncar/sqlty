@@ -36,8 +36,6 @@ uv sync --all-groups
 
 - `sqlty[psycopg]` installs psycopg 3 for the
   [psycopg helpers](guide/psycopg.md).
-- [isort](https://pycqa.github.io/isort/), if installed, places the imports the
-  [magic codec](guide/magic-codec.md) adds.
 
 ### Rust extension
 

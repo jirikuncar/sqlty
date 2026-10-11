@@ -114,9 +114,10 @@ print("Execution test passed!")
 
     assert transform_result.returncode == 0, f"Transform failed:\nstderr: {transform_result.stderr}"
 
-    # Write the transformed code to a new file
+    # Write the transformed code to a new file; it keeps the coding line, so
+    # drop it to run the file without the codec
     transformed_file = tmp_project_dir / "test_execution_transformed.py"
-    transformed_file.write_text(transform_result.stdout)
+    transformed_file.write_text(transform_result.stdout.replace("# coding: sqlty\n", "", 1))
 
     # Execute the transformed code
     exec_result = subprocess.run(

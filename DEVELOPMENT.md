@@ -207,8 +207,9 @@ How it works:
    `decode()` on the raw bytes.
 3. `decode()` tokenizes the source, infers a row type for each `--sql` string
    with `SQLRewriter`, wraps it in `SQL[T](...)` and adds the needed imports
-   (placed with isort when it is installed, otherwise prepended). On any
-   error it returns the source unchanged.
+   on an existing line (`_import_anchor`), never line 1: running a file as a
+   script decodes from the end of the coding cookie line and drops the first
+   decoded line. On any error it returns the source unchanged.
 4. Python compiles the transformed text.
 
 Python caches codec lookups, so registration must happen before the first

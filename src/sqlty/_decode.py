@@ -9,13 +9,13 @@ Direct Usage (No Side Effects):
 
     code = b'q = "--sql SELECT 1::INTEGER"'
     transformed, _ = decode(code)
-    # transformed: 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+    # transformed: 'from sqlty import SQL; q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
 
 The decode function automatically:
     - Transforms strings prefixed with '--sql' into SQL[T](...) calls
     - Infers return types from SQL type casts (::INTEGER, ::TEXT, etc.)
-    - Adds necessary imports (datetime, uuid, SQL) when needed
-    - Uses isort for proper import ordering
+    - Adds necessary imports (datetime, uuid, SQL) when needed, on an
+      existing line so line numbers match the file on disk
     - Leaves strings unchanged when inference fails (invalid SQL, DML
       without RETURNING, DDL, empty queries)
     - Never modifies string content — only adds/removes the SQL[T]() wrapper
@@ -23,11 +23,11 @@ The decode function automatically:
 Examples:
     Simple query:
         b'q = "--sql SELECT 1::INTEGER"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
+        → 'from sqlty import SQL; q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")'
 
     Multiple columns:
         b'q = "--sql SELECT id::INTEGER, name::TEXT"'
-        → 'from sqlty import SQL\\nq = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT")'
+        → 'from sqlty import SQL; q = SQL[tuple[int, str]]("--sql SELECT id::INTEGER, name::TEXT")'
 
     Invalid/non-result queries are left unchanged:
         b'q = "--sql UPDATE users SET name = 1"'
@@ -133,6 +133,62 @@ def _transform_sql_string(string_literal: str) -> str:
     return f"{istyle.wrapper_name}[{inferred_type}]({string_literal})"
 
 
+_COMPOUND = frozenset({"async", "class", "def", "for", "if", "try", "while", "with"})
+
+
+def _import_anchor(
+    new_tokens: list[tokenize.TokenInfo], tokens: list[tokenize.TokenInfo]
+) -> tuple[int, str]:
+    """Return the token to prefix with the added imports and the separator to use.
+
+    The imports go after the module docstring and ``from __future__`` imports,
+    in front of the first other statement, without adding a line, so line
+    numbers match the file on disk. Line 1 is never used: when Python runs a
+    file as a script, it decodes the bytes after the coding cookie line and
+    discards the first decoded line, which is the rest of the cookie line
+    (``fp_setreadl`` in CPython's ``Parser/tokenizer/file_tokenizer.c``).
+    A compound statement cannot follow ``;``, so the imports then take a blank
+    or comment line above it, or a new line as a last resort.
+    """
+    prev_row = 1
+    i = 0
+    first_statement = True
+    while True:
+        j = i
+        while tokens[j].type in (token.NL, token.COMMENT):
+            j += 1
+        k = j
+        while tokens[k].type not in (token.NEWLINE, token.ENDMARKER):
+            k += 1
+        stmt = [t for t in tokens[j:k] if t.type != token.COMMENT]
+        if not stmt:
+            return j, "\n"
+        docstring = first_statement and all(
+            t.type == token.STRING and new_tokens[n].string == t.string
+            for n, t in enumerate(tokens[j:k], j)
+            if t.type != token.COMMENT
+        )
+        future = [t.string for t in stmt[:2]] == ["from", "__future__"]
+        first_statement = False
+        if docstring or future:
+            prev_row = tokens[k].start[0]
+            i = k + 1
+            continue
+        first = stmt[0]
+        if not (
+            (first.type == token.NAME and first.string in _COMPOUND)
+            or first.string == "@"
+            or stmt[-1].string == ":"
+        ):
+            return j, "; "
+        row = first.start[0] - 1
+        if row > prev_row:
+            above = next(n for n in range(i, j) if tokens[n].start[0] == row)
+            if tokens[above].start[1] == 0:
+                return above, "" if tokens[above].type == token.NL else "  "
+        return j, "\n"
+
+
 def decode(b: Buffer, errors: str = "strict") -> tuple[str, int]:
     """Decode bytes into a string, transforming --sql prefixed strings.
 
@@ -189,47 +245,19 @@ def decode(b: Buffer, errors: str = "strict") -> tuple[str, int]:
             else:
                 new_tokens.append(tok)
 
-        # Reconstruct the source from tokens
+        imports = []
+        if needs_datetime:
+            imports.append("import datetime")
+        if needs_uuid:
+            imports.append("import uuid")
+        if needs_sql and not has_sql_import:
+            imports.append(istyle.import_line)
+        if imports:
+            index, sep = _import_anchor(new_tokens, tokens)
+            anchor = new_tokens[index]
+            new_tokens[index] = anchor._replace(string="; ".join(imports) + sep + anchor.string)
+
         result = tokenize.untokenize(new_tokens)
-
-        # Add necessary imports using isort for proper placement
-        if needs_datetime or needs_uuid or (needs_sql and not has_sql_import):
-            try:
-                from isort import code as isort_code
-
-                # Build the list of imports to add
-                add_imports = []
-                if needs_datetime:
-                    add_imports.append("datetime")
-                if needs_uuid:
-                    add_imports.append("uuid")
-
-                # Use isort to add imports in the correct location
-                result = isort_code(
-                    result,
-                    add_imports=add_imports,
-                    force_single_line=False,
-                    line_length=100,
-                )
-
-                # Add SQL import separately since it's a from import
-                if needs_sql and not has_sql_import:
-                    # Add the SQL import at the beginning (isort will position it correctly)
-                    result = istyle.import_line + "\n" + result
-                    # Run through isort again to properly position it
-                    result = isort_code(result, force_single_line=False, line_length=100)
-            except ImportError:
-                # Fallback to simple prepending if isort is not available
-                imports = []
-                if needs_datetime:
-                    imports.append("import datetime")
-                if needs_uuid:
-                    imports.append("import uuid")
-                if needs_sql and not has_sql_import:
-                    imports.append(istyle.import_line)
-                if imports:
-                    import_lines = "\n".join(imports) + "\n"
-                    result = import_lines + result
 
         return result, length
 

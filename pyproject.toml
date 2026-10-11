@@ -72,7 +72,6 @@ dev = [
     "ty>=0.0.85",
 ]
 cli = ["rich>=13.0.0"]
-magic = ["isort>=7.0.0"]
 psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]

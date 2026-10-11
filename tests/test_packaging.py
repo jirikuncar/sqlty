@@ -137,3 +137,25 @@ def test_magic_pth_respects_sqlty_no_magic(site_dir: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == ["unknown", "False"]
+
+
+def test_magic_pth_runs_coded_script(site_dir: Path) -> None:
+    """``python script.py`` decodes from the end of the cookie line and drops the first line (#111)."""
+    (site_dir / "sitecustomize.py").write_text(f"import site\nsite.addsitedir({str(site_dir)!r})\n")
+    script = site_dir / "script.py"
+    script.write_text(
+        '#!/usr/bin/env python\n# coding: sqlty\n"""Doc."""\n'
+        'q = "--sql\\nSELECT 1::INTEGER AS x"\n'
+        "import sys\n"
+        "print(type(q).__name__, sys._getframe().f_lineno)\n"
+    )
+    environ = {k: v for k, v in os.environ.items() if k != "SQLTY_NO_MAGIC"}
+    result = subprocess.run(
+        [sys.executable, "-B", str(script)],
+        capture_output=True,
+        text=True,
+        cwd=site_dir,
+        env=environ | {"PYTHONPATH": str(site_dir)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["SQL", "6"]
