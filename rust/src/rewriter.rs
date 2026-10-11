@@ -310,15 +310,25 @@ pub(crate) fn extract_string_content(literal: &str) -> &str {
 /// Line breaks that can end the marker line: escaped in source text, or real.
 const LINE_BREAKS: [&str; 4] = ["\\r\\n", "\\n", "\r\n", "\n"];
 
-/// String content after the sqlty marker: `--sql`, or `-- sql` before a line break,
-/// a form MySQL also reads as a comment.
+/// String content after the sqlty marker: `--sql`, or `-- sql` ending its line
+/// (see [`ends_marker_line`]), a form MySQL also reads as a comment.
 pub(crate) fn after_marker(content: &str) -> Option<&str> {
     let content = content.trim_start();
     if let Some(rest) = content.strip_prefix("--sql") {
         return Some(rest);
     }
     let rest = content.strip_prefix("-- sql")?;
-    starts_with_line_break(rest).then_some(rest)
+    ends_marker_line(rest).then_some(rest)
+}
+
+/// Whether the rest of a marker line is blank or a `--` comment, up to a line break.
+pub(crate) fn ends_marker_line(rest: &str) -> bool {
+    let Some(end) = LINE_BREAKS.iter().filter_map(|lb| rest.find(lb)).min() else {
+        return false;
+    };
+    let line = &rest[..end];
+    let text = line.trim_start_matches([' ', '\t']);
+    text.trim_end().is_empty() || (text.len() < line.len() && text.starts_with("--"))
 }
 
 pub(crate) fn starts_with_line_break(text: &str) -> bool {
@@ -735,6 +745,21 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
                 None,
                 "{content}"
             );
+        }
+    }
+
+    #[test]
+    fn test_ends_marker_line() {
+        for rest in ["\n", r"\n", r"\r\n", "  \n", " -- users\nSELECT 1"] {
+            assert!(ends_marker_line(rest), "{rest:?}");
+        }
+        for rest in [
+            "",
+            " query notes\nSELECT 1",
+            "-- users\nSELECT 1",
+            " SELECT 1",
+        ] {
+            assert!(!ends_marker_line(rest), "{rest:?}");
         }
     }
 }

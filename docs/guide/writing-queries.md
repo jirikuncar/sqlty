@@ -32,8 +32,8 @@ query = '--sql\nSELECT id::INTEGER FROM users'
 
 MySQL and MariaDB read `--` as a comment only before whitespace, so their
 servers reject `--sql`. Use `-- sql` there: it is a comment in every dialect,
-and sqlty reads it as the marker when a line break follows it directly
-(`"-- sql SELECT ..."` is an ordinary comment and left alone). With
+and sqlty reads it as the marker when only blanks or a `--` comment follow it
+on its line (`"-- sql SELECT ..."` is an ordinary comment and left alone). With
 `dialect = "mysql"`, `sqlty check` reports `--sql` in plain string literals as
 [`mysql-sql-marker`](../reference/rules.md#mysql-sql-marker) and `--fix`
 changes it.

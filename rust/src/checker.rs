@@ -17,15 +17,13 @@ use regex::Regex;
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, extract_string_content, header_end, line_at, rewrite_source, skipped_string_rule,
-    starts_with_line_break, string_literals, strip_line_break, ImportStyle,
+    after_marker, ends_marker_line, extract_string_content, header_end, line_at, rewrite_source,
+    skipped_string_rule, string_literals, strip_line_break, ImportStyle,
 };
 
-/// A string opening with the marker: `--sql` before whitespace or a line break, or
-/// `-- sql` before a line break (escaped, or the end of a triple-quoted line).
-static UNWRAPPED_SQL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"["'](?:--sql(?:\s|\\(?:r\\)?n|$)|-- sql(?:\\(?:r\\)?n|\s*$))"#).unwrap()
-});
+/// A string that may open with the marker; `rewrite` decides which ones it wraps.
+static UNWRAPPED_SQL: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"["'](?:--sql|-- sql)(?:\s|\\(?:r\\)?n|$)"#).unwrap());
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
 /// which makes the whole query a SQL comment. Each keyword needs what its statement
@@ -74,19 +72,21 @@ fn wrapped_contents(source: &str, wrapper_name: &str) -> HashMap<usize, String> 
     contents
 }
 
-/// Lines with a plain string opening with `--sql` and a line break, which MySQL
-/// and MariaDB reject: they read `--` as a comment only before whitespace.
+/// Lines of plain strings opening with a `--sql` marker line, which MySQL and
+/// MariaDB reject: they read `--` as a comment only before whitespace.
 fn mysql_marker_lines(source: &str) -> Vec<usize> {
-    string_literals(source)
+    let mut lines: Vec<usize> = string_literals(source)
         .into_iter()
         .filter(|&(start, end)| {
             extract_string_content(&source[start..end])
                 .trim_start()
                 .strip_prefix("--sql")
-                .is_some_and(starts_with_line_break)
+                .is_some_and(ends_marker_line)
         })
         .map(|(start, _)| line_at(source, start))
-        .collect()
+        .collect();
+    lines.dedup();
+    lines
 }
 
 /// Build a regex to extract the type annotation from `{wrapper_name}[T](...)`.
@@ -164,12 +164,19 @@ pub fn check_source(
     };
     let wrapped = wrapped_contents(source, &wrapper_name);
     let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
-    let mysql_markers =
-        if dialect.eq_ignore_ascii_case("mysql") && rule_config.is_enabled("mysql-sql-marker") {
+    if dialect.eq_ignore_ascii_case("mysql") && rule_config.is_enabled("mysql-sql-marker") {
+        diagnostics.extend(
             mysql_marker_lines(source)
-        } else {
-            Vec::new()
-        };
+                .into_iter()
+                .map(|line| Diagnostic {
+                    rule: "mysql-sql-marker".to_string(),
+                    message: r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#
+                        .to_string(),
+                    severity: rule_config.severity("mysql-sql-marker").to_string(),
+                    line,
+                }),
+        );
+    }
 
     let wrappable = if rule_config.is_enabled("stale-rewrite") {
         wrappable_lines(source, dialect, schema, import_style, untyped)
@@ -179,16 +186,6 @@ pub fn check_source(
 
     for (line_num, logical) in logical_lines(source, &wrapper_name) {
         let trimmed = logical.as_str();
-
-        if mysql_markers.contains(&line_num) {
-            diagnostics.push(Diagnostic {
-                rule: "mysql-sql-marker".to_string(),
-                message: r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#
-                    .to_string(),
-                severity: rule_config.severity("mysql-sql-marker").to_string(),
-                line: line_num,
-            });
-        }
 
         if let Some(rule) = skipped_string_rule(trimmed) {
             if rule_config.is_enabled(rule) {

@@ -143,3 +143,43 @@ a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
 # fixed:
 # fixed: a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
 ```
+
+## Formatter layout and trailing comments
+
+A wrapper split over lines by a formatter is reported on the string's line.
+The marker line may end with blanks or a `--` comment, in either spelling.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]](
+    "--sql\nSELECT CAST(1 AS SIGNED) AS n",  # error: [mysql-sql-marker]
+)
+# error: [mysql-sql-marker] "MySQL reads "--sql" as an expression, not a comment; use "-- sql""
+b = SQL[tuple[int]]("""--sql -- users
+SELECT CAST(1 AS SIGNED) AS n""")
+c = SQL[tuple[int]]("""-- sql -- users
+SELECT CAST(1 AS SIGNED) AS n""")
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]](
+    "--sql\nSELECT CAST(1 AS SIGNED) AS n",
+)
+b = """--sql -- users
+SELECT CAST(1 AS SIGNED) AS n"""
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]](
+# fixed:     "-- sql\nSELECT CAST(1 AS SIGNED) AS n",
+# fixed: )
+# fixed: b = SQL[tuple[int]]("""-- sql -- users
+# fixed: SELECT CAST(1 AS SIGNED) AS n""")
+```

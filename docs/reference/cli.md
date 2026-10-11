@@ -36,7 +36,8 @@ nearest `pyproject.toml` above it that has one; see
 Wrap `--sql` strings in `SQL[T](...)` with the inferred row type and add the
 imports the types need. Existing wrappers are left alone. f- and t-strings
 starting with `--sql` are reported on stderr (`fstring-skipped`,
-`tstring-skipped`) unless `-q` is given.
+`tstring-skipped`) unless `-q` is given or the rule is set to `ignore`; they
+never change the exit code.
 
 ```
 sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]

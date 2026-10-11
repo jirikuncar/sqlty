@@ -10,8 +10,8 @@ use regex::{Captures, Regex};
 use crate::analyzer::{expand_star, Schema};
 use crate::checker::{RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
-    extract_string_content, has_import, header_end, infer_sql_content, is_sqlty_managed,
-    rewrite_source, splice, starts_with_line_break, string_literals, ImportStyle,
+    ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
+    is_sqlty_managed, rewrite_source, splice, string_literals, ImportStyle,
 };
 
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
@@ -116,9 +116,9 @@ fn fix_mysql_markers(source: &str) -> String {
             let marked = content.trim_start();
             marked
                 .strip_prefix("--sql")
-                .is_some_and(starts_with_line_break)
+                .is_some_and(ends_marker_line)
                 .then(|| {
-                    let at = end - literal.len() + literal.find(marked).unwrap_or_default();
+                    let at = start + literal.find(marked).unwrap_or_default();
                     (at, at + "--sql".len(), "-- sql".to_string())
                 })
         })
