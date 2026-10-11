@@ -142,8 +142,17 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
-/// Schema: table name -> columns as `(name, canonical SQL type)` in declaration order.
-pub type Schema = HashMap<String, Vec<(String, String)>>;
+/// Schema: table name -> columns in declaration order.
+pub type Schema = HashMap<String, Vec<SchemaColumn>>;
+
+#[derive(Clone, Debug)]
+pub struct SchemaColumn {
+    /// Lowercased name, for lookups and result column names.
+    pub name: String,
+    /// The name as SQL spells it, quotes kept, for `SELECT *` expansion.
+    pub ident: String,
+    pub sql_type: String,
+}
 
 /// `(reference, table)` pairs for the tables a statement reads, in query order.
 type Scope = Vec<(String, String)>;
@@ -441,9 +450,13 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
                 .columns
                 .iter()
                 .filter(|col| col.data_type != DataType::Unspecified)
-                .map(|col| {
-                    let sql_type = canonical_type(&col.data_type, dialect);
-                    (col.name.value.to_lowercase(), sql_type)
+                .map(|col| SchemaColumn {
+                    name: col.name.value.to_lowercase(),
+                    ident: match col.name.quote_style {
+                        Some(_) => col.name.to_string(),
+                        None => col.name.value.to_lowercase(),
+                    },
+                    sql_type: canonical_type(&col.data_type, dialect),
                 })
                 .collect();
             (object_name(&create.name), columns)
@@ -753,10 +766,10 @@ impl Analyzer<'_> {
         match self.star_columns(reference, scope) {
             Some(columns) => columns
                 .into_iter()
-                .map(|(name, sql_type)| {
-                    let (python_type, sql_type) = from_sql_type(sql_type);
+                .map(|col| {
+                    let (python_type, sql_type) = from_sql_type(col.sql_type);
                     Column {
-                        name,
+                        name: col.name,
                         python_type,
                         sql_type,
                     }
@@ -767,11 +780,7 @@ impl Analyzer<'_> {
     }
 
     /// Expand `*` (all scope tables) or `t.*` from the schema, or `None` if unknown.
-    fn star_columns(
-        &self,
-        reference: Option<&str>,
-        scope: &Scope,
-    ) -> Option<Vec<(String, String)>> {
+    fn star_columns(&self, reference: Option<&str>, scope: &Scope) -> Option<Vec<SchemaColumn>> {
         let tables: Vec<String> = match reference {
             Some(reference) => vec![resolve(reference, scope)],
             None => scope.iter().map(|(_, table)| table.clone()).collect(),
@@ -792,8 +801,8 @@ impl Analyzer<'_> {
             self.schema
                 .get(table)?
                 .iter()
-                .find(|(name, _)| name == column)
-                .map(|(_, ty)| ty.clone())
+                .find(|col| col.name == column)
+                .map(|col| col.sql_type.clone())
         };
         match expr {
             Expr::Identifier(ident) => {
@@ -927,7 +936,11 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
             continue;
         };
         let columns = analyzer.star_columns(star.get(1).map(|m| m.as_str()), &scope)?;
-        items.extend(columns.iter().map(|(name, ty)| format!("{name}::{ty}")));
+        items.extend(
+            columns
+                .iter()
+                .map(|col| format!("{}::{}", col.ident, col.sql_type)),
+        );
         has_star = true;
     }
     has_star.then(|| {
@@ -1080,6 +1093,16 @@ mod tests {
             .into_iter()
             .map(|col| col.name)
             .collect()
+    }
+
+    #[test]
+    fn test_numbered_placeholders() {
+        assert_eq!(
+            numbered_placeholders(
+                "SELECT '?', \"a?\", b ?| c, d ?& e FROM t WHERE x = ? -- ?\nAND y = ?"
+            ),
+            "SELECT '?', \"a?\", b ?| c, d ?& e FROM t WHERE x = $1 -- ?\nAND y = $2"
+        );
     }
 
     #[test]
