@@ -148,6 +148,7 @@ class PyiToIRParser:
                 for node in overload_nodes:
                     overload = self._parse_overload_method(node)
                     if overload:
+                        overload.function_signature = node.args
                         registry.add_overload(overload)
 
                 stub.add_registry(registry)
@@ -469,41 +470,37 @@ class CallInfoToIRParser:
                 source_path = None
 
                 if function_name:
-                    # Find the matching config by function name
+                    # Match the config on its full ``module.function`` path (the module comes
+                    # from the config for collected calls, from the helper for runtime calls),
+                    # so same-named helpers in different modules do not collide.
+                    module = call.get("registry_source")
+                    source_file = call.get("file")
+                    candidates = {
+                        f"{module}.{function_name}",
+                        f"{module}.{call.get('registry_class')}",
+                    }
+                    if module == "__main__" and source_file:
+                        candidates.add(f"{Path(source_file).stem}.{function_name}")
+
                     for config in self.function_configs or []:
                         import_path = config.get("import_path", "")
-                        if not import_path:
-                            continue
-
-                        # Extract module path and function name from import_path
-                        # e.g., "db.execute_query" -> module="db", function="execute_query"
                         parts = import_path.split(".")
-                        if len(parts) >= 2:
-                            module_name = ".".join(parts[:-1])
-                            func_name = parts[-1]
-
-                            # Check if this is the right function
-                            if func_name == function_name:
-                                # Try to find the module file
-                                source_file = call.get("file")
-                                if source_file:
-                                    from pathlib import Path
-
-                                    # Try various paths to find the module
-                                    possible_paths = [
-                                        Path(source_file).parent / f"{module_name}.py",
-                                        Path(source_file).parent / f"{parts[-2]}.py"
-                                        if len(parts) > 2
-                                        else None,
-                                    ]
-
-                                    for p in possible_paths:
-                                        if p and p.exists():
-                                            source_path = p
-                                            break
-
-                                    if source_path:
-                                        break
+                        if import_path not in candidates or len(parts) < 2 or not source_file:
+                            continue
+                        # e.g., "db.execute_query" -> module="db", function="execute_query"
+                        module_name = ".".join(parts[:-1])
+                        possible_paths = [
+                            # Runtime calls point at the helper's own file
+                            Path(source_file) if call.get("registry_file") else None,
+                            Path(source_file).parent / f"{module_name}.py",
+                            Path(source_file).parent / f"{parts[-2]}.py"
+                            if len(parts) > 2
+                            else None,
+                            Path(source_file),
+                        ]
+                        source_path = next((p for p in possible_paths if p and p.exists()), None)
+                        if source_path:
+                            break
 
                 # If we found the source file and function name, extract signature and annotation
                 if source_path and function_name:
@@ -527,4 +524,7 @@ class CallInfoToIRParser:
             source_return_annotation=source_return_annotation,
             return_type_template=call.get("return_type_template"),
             self_type_template=call.get("self_type_template"),
+            return_type_param=call.get("return_type_param_name")
+            if call.get("return_type_param_value")
+            else None,
         )

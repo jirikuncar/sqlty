@@ -58,6 +58,8 @@ class OverloadSignature:
         source_return_annotation: Optional AST return annotation from source function
         return_type_template: Optional template for return type with {sqlty} placeholder
         self_type_template: Optional template for self parameter type with {sqlty} placeholder
+        return_type_param: Parameter whose argument gave ``return_type``; annotated
+            ``type[<return_type>] | None`` in the overload
     """
 
     query_literal: str
@@ -73,6 +75,7 @@ class OverloadSignature:
     self_type_template: str | None = (
         None  # Template for self parameter type with {sqlty} placeholder
     )
+    return_type_param: str | None = None
 
     @property
     def annotation(self) -> str:

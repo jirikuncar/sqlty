@@ -64,6 +64,16 @@ and gaps both share:
   `a::INT, b::UMEDIUMINT` while Rust skips the whole table (`None`). Pinned by
   the `xfail` test `TestParserParity::test_int3_unsigned_column`; needs an
   upstream sqlparser-rs fix (MySQL documents both as `MEDIUMINT` aliases).
+- **Placeholders.** Both backends replace psycopg's `%s`, `%b`, `%t` and
+  `%(name)s` with `NULL`, and `%%` with `%`, in every dialect. In PostgreSQL,
+  `?` is a placeholder only in Python; sqlparser-rs reads it as the JSON
+  operator.
+- **PostgreSQL `E'...'` backslash escapes.** `E'a\'b'` parses in Rust but not
+  in Python, so Python infers nothing for such a query.
+- **MySQL `--sql` marker at runtime.** Both backends type `--sql\nSELECT ...`
+  in MySQL, but MySQL and MariaDB servers reject it, since `--` is a comment
+  only when whitespace follows it. A MySQL-safe marker (`-- sql`, `/*sql*/`)
+  and a `check` warning for `--sql` in MySQL are planned.
 - **MySQL `ZEROFILL`.** `INT UNSIGNED ZEROFILL` columns make both backends skip
   the table.
 - **SQLite free-form type names.** SQLite accepts any type name and derives an

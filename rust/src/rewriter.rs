@@ -308,12 +308,11 @@ fn is_untyped(sql_content: &str, dialect: &str) -> bool {
     returns_rows(query, dialect)
 }
 
-/// Infer the row type of `--sql` string content, letting the SQL parser treat
-/// `--sql` as a comment.
+/// Infer the row type of `--sql` string content.
 ///
-/// - `--sql\nSELECT ...` → `\\n` becomes real newline; parser sees `--sql`
-///   as a comment and `SELECT ...` as the query.
-/// - `--sql SELECT ...` → entire line is a SQL comment → empty query → None.
+/// - `--sql\nSELECT ...` → `\\n` becomes a real newline, and
+///   `analyzer::parser_input` drops the marker line before parsing.
+/// - `--sql SELECT ...` → there is no newline, so nothing is left to parse → None.
 ///
 /// Inference errors (an unknown `SUM` column) count as uninferable.
 pub(crate) fn infer_sql_content(
