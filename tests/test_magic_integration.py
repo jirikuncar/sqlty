@@ -240,7 +240,7 @@ def test_decoded_coding_declaration_is_utf8():
 
     text, _ = decode(b'# coding: sqlty\nq = "--sql\\nSELECT 1::INTEGER"\n')
     assert text == (
-        '# coding: utf-8\nfrom sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+        '# coding: utf-8\nfrom sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
     )
 
 
@@ -248,11 +248,34 @@ def test_decoded_coding_declaration_on_line_two():
     from sqlty._decode import decode
 
     text, _ = decode(b'#!/usr/bin/env python\n# -*- coding: sqlty -*-\nq = "--sql\\nSELECT 1"\n')
-    assert text.splitlines()[:3] == [
+    assert text.splitlines() == [
         "#!/usr/bin/env python",
         "# -*- coding: utf-8 -*-",
-        "from sqlty import SQL",
+        'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1")',
     ]
+
+
+@pytest.mark.parametrize(
+    ("body", "first"),
+    [
+        ('"""Doc."""\n', '"""Doc."""; import datetime; from sqlty import SQL'),
+        (
+            "from __future__ import annotations\n",
+            "from __future__ import annotations; import datetime; from sqlty import SQL",
+        ),
+        ("\n@decorator\ndef f(): ...\n", "import datetime; from sqlty import SQL"),
+        ("import datetime\nx = 1\n", "from sqlty import SQL; import datetime"),
+    ],
+)
+def test_decode_script_mode_keeps_lines(body: str, first: str):
+    """Running a script decodes ``"\\n" + rest`` and drops the first line (#111)."""
+    from sqlty._decode import decode
+
+    source = "\n" + body + 'q = "--sql\\nSELECT NOW()::TIMESTAMP"\n'
+    text, _ = decode(source.encode())
+    assert text.count("\n") == source.count("\n")
+    assert text.splitlines()[:2] == ["", first]
+    assert "SQL[tuple[datetime.datetime]]" in text
 
 
 def test_decode_keeps_source_on_bad_import_style(monkeypatch: pytest.MonkeyPatch):

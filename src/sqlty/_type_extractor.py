@@ -8,7 +8,8 @@ variations, forward references, and inheritance correctly.
 Two-phase approach:
 1. **AST scan**: Find recognized class definitions (TypedDict, NamedTuple,
    dataclass, BaseModel) and collect the source needed to reconstruct them.
-2. **Runtime resolve**: ``exec()`` just the imports + class definition in a
+2. **Runtime resolve**: ``exec()`` just the imports, module-level
+   ``X = NewType("X", T)`` assignments and the class definition in a
    sandbox namespace, then use ``typing.get_type_hints()`` to get actual
    ``type`` objects for each field.
 
@@ -141,6 +142,7 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         return {}
 
     aliases = _typing_aliases(tree)
+    newtypes = _newtype_assignments(tree, aliases)
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
     # are recognized when their base is a TypedDict defined earlier
@@ -158,7 +160,9 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         return {}
 
     # Phase 2: Collect import statements needed for namespace
-    import_stmts = _collect_imports(tree)
+    import_stmts = _collect_imports(tree) + [
+        f"try:\n    {ast.unparse(node)}\nexcept Exception:\n    pass" for node in newtypes.values()
+    ]
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
@@ -178,7 +182,7 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         info.lineno = node.lineno
         is_typeddict = kind == "TypedDict"
         nodes = list(_lineage(node, typeddict_nodes).values()) if is_typeddict else [node]
-        info.field_types = _ast_key_types(nodes, aliases)
+        info.field_types = _ast_key_types(nodes, aliases, newtypes)
         hints = None
         if (fields or is_typeddict) and (resolved := _resolve_class(nodes, import_stmts, source)):
             cls, namespace = resolved
@@ -192,7 +196,9 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
                 own_type = _own_extra_type(cls, namespace) if own and own.extra_items else None
             else:
                 hints = info.field_types
-                own_type = _ast_type(own.extra_node, aliases) if own and own.extra_node else None
+                own_type = (
+                    _ast_type(own.extra_node, aliases, newtypes) if own and own.extra_node else None
+                )
             header = _header_errors(info.name, keywords, own, own_type, parents)
             info.errors = list(dict.fromkeys(header + _key_errors(info, hints, parents)))
             _set_openness(info, None if header else own, own_type, parents)
@@ -264,7 +270,7 @@ def field_accepts(annotation: str, column_python_type: str | None) -> bool:
 def _accepts(field: typing.Any, annotation: str, column_python_type: str | None) -> bool:
     if not column_python_type:
         return True
-    fits = _is_subtype(PYTHON_TYPE_MAP.get(column_python_type), field)
+    fits = _is_subtype(PYTHON_TYPE_MAP.get(column_python_type), _erase(field))
     if fits is not None:
         return fits
     return _normalize_type_str(annotation) == column_python_type
@@ -412,6 +418,21 @@ def _is_subtype(src: typing.Any, dst: typing.Any) -> bool | None:
     return result
 
 
+def _erase(tp: typing.Any) -> typing.Any:
+    """Unwrap ``NewType`` to its supertype and ``list[str]`` to ``list``, since inferred column types are bare.
+
+    Example:
+        >>> _erase(list[str] | typing.NewType("UserId", int))
+        list | int
+    """
+    while isinstance(tp, typing.NewType):
+        tp = tp.__supertype__
+    if len(members := _union_members(tp)) > 1:
+        return functools.reduce(operator.or_, map(_erase, members))
+    origin = typing.get_origin(tp)
+    return origin if isinstance(origin, type) else tp
+
+
 def _member_fits(src: typing.Any, targets: list[typing.Any]) -> bool | None:
     # ``typing.Any`` is a class on 3.11+, so it must be caught before ``issubclass``.
     if src is typing.Any or src in _NEVER:
@@ -488,6 +509,41 @@ def _collect_imports(tree: ast.Module) -> list[str]:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             imports.append(ast.unparse(node))
     return imports
+
+
+_TYPE_EXPR_NODES = (
+    ast.Name,
+    ast.Attribute,
+    ast.Subscript,
+    ast.Tuple,
+    ast.Constant,
+    ast.BinOp,
+    ast.BitOr,
+    ast.expr_context,
+)
+
+
+def _newtype_assignments(tree: ast.Module, aliases: dict[str, str]) -> dict[str, ast.Assign]:
+    """Module-level ``X = NewType("X", T)`` with ``T`` a type expression, by name.
+
+    Example:
+        >>> list(_newtype_assignments(ast.parse("U = NewType('U', int)\\nV = NewType('V', f())"), {}))
+        ['U']
+    """
+    return {
+        node.targets[0].id: node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Call)
+        and _is_name(node.value.func, "NewType", aliases)
+        and len(node.value.args) == 2
+        and not node.value.keywords
+        and isinstance(name := node.value.args[0], ast.Constant)
+        and name.value == node.targets[0].id
+        and all(isinstance(n, _TYPE_EXPR_NODES) for n in ast.walk(node.value.args[1]))
+    }
 
 
 def _typing_aliases(tree: ast.Module) -> dict[str, str]:
@@ -676,6 +732,7 @@ def _set_openness(
         info.owner = base.owner
 
 
+_GENERICS = (list, dict, set, frozenset, tuple)
 _AST_TYPES: dict[str, typing.Any] = {
     "int": int,
     "float": float,
@@ -684,21 +741,34 @@ _AST_TYPES: dict[str, typing.Any] = {
     "bytes": bytes,
     "bool": bool,
     "object": object,
+    "list": list,
+    "dict": dict,
+    "set": set,
+    "frozenset": frozenset,
+    "tuple": tuple,
     "Any": typing.Any,
     "Never": typing.Never,
     "NoReturn": typing.Never,
 }
 
 
-def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
-    """Builtin scalars, ``Any``, ``Never`` and their unions from source; None if unknown.
+def _ast_type(
+    node: ast.expr, aliases: dict[str, str], newtypes: dict[str, ast.Assign] | None = None
+) -> typing.Any:
+    """Builtin scalars and generics, ``Any``, ``Never``, NewTypes and their unions from source; None if unknown.
 
     ``aliases`` maps local names to ``typing`` names (see `_typing_aliases`), so
     ``A`` for ``from typing import Any as A`` and ``t.Any`` for
     ``import typing as t`` resolve; ``Annotated`` metadata is dropped.
+    ``newtypes`` maps names to their ``NewType`` assignments (see `_newtype_assignments`).
     """
+    newtypes = newtypes or {}
     if isinstance(node, ast.Constant) and node.value is None:
         return type(None)
+    if isinstance(node, ast.Name) and (assign := newtypes.get(node.id)):
+        others = {k: v for k, v in newtypes.items() if k != node.id}
+        supertype = _ast_type(typing.cast(ast.Call, assign.value).args[1], aliases, others)
+        return None if supertype is None else typing.NewType(node.id, supertype)  # ty: ignore[invalid-newtype]
     if isinstance(node, ast.Name):
         return _AST_TYPES.get(aliases.get(node.id, node.id))
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
@@ -706,7 +776,17 @@ def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
         return _AST_TYPES.get(node.attr) if module in _TYPING_MODULES else None
     if isinstance(node, ast.Subscript) and _is_name(node.value, "Annotated", aliases):
         return _ast_type(
-            node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice, aliases
+            node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice,
+            aliases,
+            newtypes,
+        )
+    if (
+        isinstance(node, ast.Subscript)
+        and (origin := _ast_type(node.value, aliases, newtypes)) in _GENERICS
+    ):
+        args = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        return types.GenericAlias(
+            origin, tuple(_ast_type(a, aliases, newtypes) or typing.Any for a in args)
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         members = [node.left, node.right]
@@ -716,7 +796,7 @@ def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
         members = list(node.slice.elts) if isinstance(node.slice, ast.Tuple) else [node.slice]
     else:
         return None
-    resolved = [_ast_type(m, aliases) for m in members]
+    resolved = [_ast_type(m, aliases, newtypes) for m in members]
     return None if None in resolved else functools.reduce(operator.or_, resolved)
 
 
@@ -731,10 +811,14 @@ def _annotation_type(annotation: str) -> typing.Any:
         return None
 
 
-def _ast_key_types(nodes: list[ast.ClassDef], aliases: dict[str, str]) -> dict[str, typing.Any]:
+def _ast_key_types(
+    nodes: list[ast.ClassDef], aliases: dict[str, str], newtypes: dict[str, ast.Assign]
+) -> dict[str, typing.Any]:
     """Key types of a TypedDict lineage (bases first) from source, as by ``_ast_type``."""
     return {
-        item.target.id: _ast_type(_unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases)
+        item.target.id: _ast_type(
+            _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes
+        )
         for node in nodes
         for item in node.body
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)

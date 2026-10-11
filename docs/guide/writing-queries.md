@@ -155,6 +155,10 @@ parameters instead of interpolating them, and keep the query a plain literal.
 
 ### Dialect notes
 
+- Array element types are not inferred: `FROM users` with a `TEXT[]` column
+  gives `tuple[int, list]`. Narrow it by hand to `list[str]`, in a row type or
+  in `SQL[tuple[...]]`, without triggering `column-type-mismatch` or
+  `stale-type`.
 - An array type needs an element type: `x::INT[]` is a `list`, but a bare
   `x::ARRAY` is rejected and nothing is inferred. A fixed size must be an
   integer literal (`INT[3]`, not `INT[n]`); the size itself is ignored.
@@ -191,8 +195,8 @@ q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FRO
 ```
 
 `sqlty check --fix` then writes the inferred `T` into every stale
-`SQL[tuple[...]]` and `SQL[UNTYPED]`; row types you wrote by hand are left for
-you to update:
+`SQL[tuple[...]]` and `SQL[UNTYPED]`, keeping generics you parametrised by
+hand (`list[str]`); row types you wrote by hand are left for you to update:
 
 ```python
 from sqlty import SQL

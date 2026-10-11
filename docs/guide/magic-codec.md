@@ -20,7 +20,10 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 The `# decoded:` line shows the code Python runs. The codec wraps strings as
 `sqlty rewrite` does and adds the imports the inferred types need
 (`from sqlty import SQL`, `import datetime`, `import uuid`) after the module
-docstring and `__future__` imports:
+docstring and `__future__` imports. They go on an existing line, so line
+numbers in tracebacks match the file on disk, unless a `def`, `class`,
+decorator or other compound statement directly follows the coding line; put a
+docstring, blank line or comment between them to keep the numbers the same:
 
 ```python
 # coding: sqlty
@@ -72,11 +75,8 @@ example to turn the hook off for one run:
 SQLTY_NO_MAGIC=1 python script.py
 ```
 
-Import the module, or run it with `python -m module`. Running a
-`# coding: sqlty` file directly as a script (`python script.py`) can fail with
-`NameError: name 'SQL' is not defined`, because Python drops the import the
-codec adds ([#111](https://github.com/jirikuncar/sqlty/issues/111)). Importing
-`SQL` and the types the queries need yourself avoids it.
+A `# coding: sqlty` file can be imported, run with `python -m module`, or run
+directly as a script (`python script.py`).
 
 ## Inspecting the output
 

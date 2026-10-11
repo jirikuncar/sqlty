@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 
 use crate::analyzer::{expand_star, Schema};
-use crate::checker::{RuleConfig, INLINE_SQL_COMMENT_CONTENT};
+use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, rewrite_source, splice, string_literals, ImportStyle,
@@ -67,6 +67,7 @@ pub fn fix_source(
             let row_type = refresh
                 .then(|| infer_sql_content(&content, dialect, schema))
                 .flatten()
+                .filter(|inferred| !refines_tuple(annotated, inferred))
                 .unwrap_or_else(|| annotated.to_string());
             if row_type != annotated {
                 introduced.insert(row_type.clone());

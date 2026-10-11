@@ -1,9 +1,9 @@
-"""The ``sqlty`` source codec: ``--sql`` strings become ``SQL[T](...)`` at import.
+"""The ``sqlty`` source codec: ``--sql`` strings become ``SQL[T](...)`` when imported or run.
 
 Modules opt in with a coding declaration on their first or second line::
 
     # coding: sqlty
-    q = "--sql\nSELECT 1::INTEGER"  # Python sees SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+    q = "--sql\\nSELECT 1::INTEGER"  # Python sees SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
 
 Importing this module registers the codec. The ``sqlty_magic.pth`` file that a
 non-editable install puts in ``site-packages`` registers a lookup at interpreter startup

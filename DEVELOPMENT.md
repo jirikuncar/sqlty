@@ -197,9 +197,15 @@ How it works:
    UTF-8 source without a codec lookup).
 2. When Python compiles a file declaring `# coding: sqlty`, it calls
    `decode()` on the raw bytes.
-3. `decode()` runs `rewrite_source`, as `sqlty rewrite` does, and turns the
-   `# coding: sqlty` declaration into `utf-8`. On any error it returns the
-   source unchanged.
+3. `decode()` runs `rewrite_source(..., keep_lines=True)`, which wraps strings
+   as `sqlty rewrite` does but joins the imports with `; ` onto an existing
+   line (`insert_inline` in `rust/src/rewriter.rs`), and turns the
+   `# coding: sqlty` declaration into `utf-8`. Running a file as a script
+   decodes from the end of the coding line and drops the first decoded line
+   (`fp_setreadl` in CPython's `Parser/tokenizer/file_tokenizer.c`), so
+   imports must not go on a line of their own at the top. A new line is added
+   only for a compound statement right after the coding line. On any error it
+   returns the source unchanged.
 4. Python compiles the transformed text.
 
 Python caches codec lookups, so registration must happen before the first

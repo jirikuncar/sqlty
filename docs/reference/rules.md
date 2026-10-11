@@ -24,7 +24,7 @@ stale-type = "error"
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
-| [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` differs from the inferred row type |
+| [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
@@ -65,7 +65,9 @@ Fix: add or remove fields, or change the query.
 Default: error. A field can't hold the values of its column's inferred type.
 Also reported for extra columns that don't fit a TypedDict's `extra_items`
 type. A field typed `Any`, a union containing `Any` or the column type, or
-`float` for an `int` column is accepted; a narrower field, such as `bool` for
+`float` for an `int` column is accepted, as is a `NewType` wherever its
+supertype is and a parametrised generic (`list[str]`, `dict[str, int]`) for a
+column that infers the bare `list` or `dict`; a narrower field, such as `bool` for
 an `int` column, is not; see `sqlty rule column-type-mismatch`.
 
 ```python
@@ -250,8 +252,9 @@ f- and t-strings and the `"--sql SELECT"` form are not.
 ### stale-type
 
 Default: warn. The `T` in `SQL[tuple[...]]` differs from the type sqlty infers
-now, for example after the query or the schema changed. Named row types are
-covered by the row type rules instead.
+now, for example after the query or the schema changed. An item that only
+parametrises an inferred bare generic (`list[str]` for `list`) is not stale.
+Named row types are covered by the row type rules instead.
 
 ```python
 from sqlty import SQL
@@ -260,7 +263,8 @@ from sqlty import SQL
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-Fix: `sqlty check --fix` writes the inferred `T`; see also
+Fix: `sqlty check --fix` writes the inferred `T`, keeping parametrised
+generics; see also
 [Editing queries](../guide/writing-queries.md#editing-queries).
 
 ### fstring-skipped

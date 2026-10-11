@@ -4,7 +4,9 @@ Default severity: **warn**
 
 ## What it does
 
-Flags `SQL[tuple[...]]` annotations that no longer match the query.
+Flags `SQL[tuple[...]]` annotations that no longer match the query. An item
+that only parametrises an inferred bare generic (`list[str]` for `list`) is
+more precise than inference and is not flagged.
 
 ## Why is this bad?
 
@@ -33,4 +35,15 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # fixed: from sqlty import SQL
 # fixed:
 # fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+Parametrised generics that refine the inferred type are kept by `--fix`:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 ```
