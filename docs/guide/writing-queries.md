@@ -233,8 +233,9 @@ sqlty rewrite queries.py   # "--sql\n..." -> SQL[T]("--sql\n...")
 
 Neither command changes the string contents, only the wrapper and the
 `from sqlty import SQL` import. For a file whose `--sql` strings are all
-plain, `strip(rewrite(x)) == x`, unless it already has a hand-written
-`from sqlty import SQL` line, which `strip` removes too.
+plain, `strip(rewrite(x)) == x`, unless it already has a hand-written import
+line that `strip` removes too: `from sqlty import SQL`,
+`from sqlty import UNTYPED`, or the configured `import-style` line.
 
 !!! warning "`strip` removes hand-written row types"
     `strip` removes every wrapper, including `SQL[User]`, and the sqlty
