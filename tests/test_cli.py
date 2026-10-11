@@ -104,12 +104,17 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
         SettingsResolver(args).for_file(tmp_path / "q.py")
 
 
+F_SKIPPED = "q.py:2: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+
+
 @pytest.mark.parametrize(
     ("config", "flags", "expected"),
     [
-        ("", [], ["q.py:2: [fstring-skipped]", "q.py:3: [tstring-skipped]"]),
+        ("", ["--diff"], [F_SKIPPED, T_SKIPPED]),
+        ("", ["--check"], [F_SKIPPED, T_SKIPPED]),
         ("", ["-q"], []),
-        ('[tool.sqlty.rules]\nfstring-skipped = "ignore"\n', [], ["q.py:3: [tstring-skipped]"]),
+        ('[tool.sqlty.rules]\nfstring-skipped = "ignore"\n', [], [T_SKIPPED]),
     ],
 )
 def test_rewrite_reports_skipped_strings(tmp_path, monkeypatch, capsys, config, flags, expected):
@@ -119,5 +124,6 @@ def test_rewrite_reports_skipped_strings(tmp_path, monkeypatch, capsys, config, 
 
     main(["rewrite", *flags, "q.py"])
 
-    err = capsys.readouterr().err.splitlines()
-    assert [line.split(" ", 2)[0] + " " + line.split(" ", 2)[1] for line in err] == expected
+    out, err = capsys.readouterr()
+    assert err.splitlines() == expected
+    assert "skipped" not in out

@@ -111,8 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Fix what can be fixed (stale-rewrite, stale-type, select-star with a schema, "
-        "untyped-query once inferable), then report the rest",
+        help="Fix what can be fixed (the rules `sqlty rule` marks fixable, e.g. stale-rewrite, "
+        "stale-type, select-star with a schema), then report the rest",
     )
 
     # --- rule ---

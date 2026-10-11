@@ -49,7 +49,7 @@ schema = "schema.sql"
 ```
 
 ```python
-# error: [mysql-sql-marker]
+# error: [mysql-sql-marker] "MySQL reads "--sql" as an expression, not a comment; use "-- sql""
 # error: [stale-type] "SQL[tuple[str, str]] should be SQL[tuple[int, str]]"
 a = SQL[tuple[str, str]]("--sql\nSELECT id, name FROM users")
 ```
@@ -116,4 +116,30 @@ c = f"--sql\nSELECT {a}"
 # fixed: b = SQL[tuple[int]]("""-- sql
 # fixed: SELECT CAST(1 AS SIGNED) AS n""")
 # fixed: c = f"--sql\nSELECT {a}"
+```
+
+## Rule set to ignore
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+
+[tool.sqlty.rules]
+mysql-sql-marker = "ignore"
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
 ```

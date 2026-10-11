@@ -4,7 +4,8 @@ Default severity: **warn**
 
 ## What it does
 
-With `dialect = "mysql"`, flags strings that open with the `--sql` marker.
+With `dialect = "mysql"`, flags plain string literals that open with the `--sql`
+marker (f-, t- and raw strings are not checked).
 
 ## Why is this bad?
 

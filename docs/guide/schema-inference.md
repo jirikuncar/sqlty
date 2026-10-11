@@ -140,10 +140,10 @@ CREATE TABLE `orders` (
 ```
 
 ```python
-orders = "--sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`"
-casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
-# rewritten: orders = SQL[tuple[int, float, int, str, str, dict, datetime.datetime]]("--sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
-# rewritten: casts = SQL[tuple[int, str]]("--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
+orders = "-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`"
+casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
+# rewritten: orders = SQL[tuple[int, float, int, str, str, dict, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
+# rewritten: casts = SQL[tuple[int, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 
 `TINYINT(1)` is an `int`, not a `bool`. See the

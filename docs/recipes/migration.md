@@ -1,6 +1,6 @@
 # Migration
 
-sqlty only acts on strings that start with `--sql`, so you can adopt it one
+sqlty only acts on strings that start with `--sql` (or `-- sql`), so you can adopt it one
 module, or one query, at a time. Unconverted code keeps working.
 
 ## Before and after
@@ -108,8 +108,8 @@ left:
 app/orders.py:12: [stale-rewrite] Source has --sql strings that aren't wrapped in SQL[T]
 ```
 
-Some of them are expected: statements without rows (`INSERT`, `UPDATE`,
-`DELETE` without `RETURNING`, DDL) are never wrapped.
+Statements without rows (`INSERT`, `UPDATE`, `DELETE` without `RETURNING`,
+DDL) are never wrapped, and so never reported.
 
 ### 4. Name important rows
 

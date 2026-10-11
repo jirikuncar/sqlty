@@ -211,8 +211,8 @@ string literals (not raw, f- or t-strings) that this rule reports;
 
 ### mysql-sql-marker
 
-Default: warn. With `dialect = "mysql"`, a string opens with the `--sql`
-marker. MySQL and MariaDB read `--` as a comment only when whitespace follows
+Default: warn. With `dialect = "mysql"`, a plain string literal opens with the
+`--sql` marker. MySQL and MariaDB read `--` as a comment only when whitespace follows
 it, so the server rejects the query with a syntax error (1064). `-- sql` is a
 comment in every dialect and sqlty reads it as the marker too.
 

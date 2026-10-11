@@ -15,7 +15,7 @@ correct.
 
 ## How it works
 
-Mark a raw SQL string with `--sql\n` and cast its columns. Running
+Mark a raw SQL string with `--sql\n` (`-- sql\n` for MySQL) and cast its columns. Running
 `sqlty rewrite .` wraps it with the inferred row type:
 
 ```python

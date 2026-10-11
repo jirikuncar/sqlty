@@ -106,3 +106,28 @@ a = "--sql\r\nSELECT 1 AS n"
 q = """--sql
 SELECT 1 AS n"""
 ```
+
+## Triple-quoted wrappers get select-star and untyped-query
+
+```python
+from sqlty import SQL, UNTYPED
+
+# error: [select-star-no-schema] "SELECT * used but no schema available"
+a = SQL[tuple[str]]("""--sql
+SELECT * FROM users""")
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
+b = SQL[UNTYPED]("""-- sql
+SELECT 1 AS n""")
+```
+
+## Escaped CRLF marker with the sentinel
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+q = "--sql\r\nVALUES (1, 2)"
+# rewritten: q = SQL[UNTYPED]("--sql\r\nVALUES (1, 2)")
+```

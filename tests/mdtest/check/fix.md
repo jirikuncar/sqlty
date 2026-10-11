@@ -424,3 +424,31 @@ q = "--sql\nSELECT id::INTEGER FROM users"
 # fixed: f = f"--sql\nSELECT id FROM {table}"
 # fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
+
+## Triple-quoted wrappers are fixed
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[str]]("""--sql
+SELECT 1 AS n""")
+b = SQL[tuple[str]]("""-- sql\nSELECT 1 AS n""")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]]("""--sql
+# fixed: SELECT 1 AS n""")
+# fixed: b = SQL[tuple[int]]("""-- sql\nSELECT 1 AS n""")
+```
+
+## Escaped CRLF marker is fixed
+
+```python
+from sqlty import SQL
+
+a = "--sql\r\nSELECT 1 AS n"
+b = SQL[tuple[str]]("--sql\r\nSELECT 1 AS n")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
+# fixed: b = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
+```

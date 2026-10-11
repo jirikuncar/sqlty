@@ -111,3 +111,10 @@ SELECT 1::INTEGER
 q = "--sql\nNOT VALID SQL"
 # decoded: q = "--sql\nNOT VALID SQL"
 ```
+
+## The `-- sql` marker
+
+```python
+q = "-- sql\nSELECT 1::INTEGER"
+# decoded: q = SQL[tuple[int]]("-- sql\nSELECT 1::INTEGER")
+```
