@@ -1,13 +1,17 @@
 # SQLTy
 
-> **Experimental.** APIs and configuration may change. Feedback welcome.
-
 [![Python 3.15+](https://img.shields.io/badge/python-3.15+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+Your SQL already knows its types. SQLTy tells Python.
+
+Type-safe raw SQL for Python. sqlty infers the row type of each query from
+its SQL, writes it into your source as `SQL[T]`, and checks that it stays
+correct.
+
 **Documentation: [jirikuncar.github.io/sqlty](https://jirikuncar.github.io/sqlty/)**
 
-Your SQL already knows its types. SQLTy tells Python.
+> **Experimental.** APIs and configuration may change. Feedback welcome.
 
 ## How it works
 
@@ -21,6 +25,9 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users
 # rewritten-file: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
 ```
 
+Comment lines such as `# rewritten-file:` show the result; the test suite
+checks them.
+
 Each cast becomes a Python type: `INTEGER` is `int`, `TEXT` is `str`,
 `TIMESTAMP` is `datetime.datetime` (see the
 [type mapping](https://jirikuncar.github.io/sqlty/guide/writing-queries/#type-mapping)).
@@ -33,8 +40,7 @@ does, and editors and type checkers now know its row type.
 pip install sqlty    # or: uv add sqlty
 ```
 
-`sqlty[psycopg]` adds psycopg 3 for the driver helpers. Wheels include a Rust
-extension; without it sqlty falls back to pure Python. See
+`sqlty[psycopg]` adds psycopg 3 for the driver helpers. See
 [Installation](https://jirikuncar.github.io/sqlty/installation/).
 
 ## Three commands
@@ -45,8 +51,10 @@ extension; without it sqlty falls back to pure Python. See
 | `sqlty check .` | Report drift, row type mismatches, `SELECT *` and unwrapped queries |
 | `sqlty strip .` | Remove the wrappers, back to plain `--sql` strings |
 
-The string itself is never modified, so `strip(rewrite(x)) == x`. Start with
-the [Quickstart](https://jirikuncar.github.io/sqlty/quickstart/); to change a
+`rewrite` and `strip` only add or remove the wrapper and its import; the
+string itself is never modified. For a file of plain `--sql` strings,
+`strip(rewrite(x)) == x`. Start with the
+[Quickstart](https://jirikuncar.github.io/sqlty/quickstart/); to change a
 typed query, see
 [Editing queries](https://jirikuncar.github.io/sqlty/guide/writing-queries/#editing-queries).
 
@@ -56,7 +64,8 @@ typed query, see
 
 Use `TypedDict`, `NamedTuple`, dataclasses or Pydantic models instead of
 tuples. `sqlty check` validates field count, types and names against the
-query. [Row types guide](https://jirikuncar.github.io/sqlty/guide/row-types/).
+query ([Row types guide](https://jirikuncar.github.io/sqlty/guide/row-types/)).
+Here `id` is declared as `str` on purpose, and the mismatch is reported:
 
 ```python
 from typing import TypedDict
@@ -70,17 +79,12 @@ query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # check: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 ```
 
-### psycopg
-
-`sqlty.drivers.psycopg.execute(conn, SQL[User](...))` picks the row factory
-from `T` and returns a `Cursor[User]`; `scalar` fetches one typed value.
-[psycopg guide](https://jirikuncar.github.io/sqlty/guide/psycopg/).
-
 ### Schema inference
 
-Point sqlty at your `CREATE TABLE` statements and the casts become optional.
-PostgreSQL, SQLite and MySQL are supported.
-[Schema inference guide](https://jirikuncar.github.io/sqlty/guide/schema-inference/).
+Point sqlty at your `CREATE TABLE` statements and the casts become optional
+([Schema inference guide](https://jirikuncar.github.io/sqlty/guide/schema-inference/)).
+PostgreSQL, SQLite and MySQL are supported; with MySQL, the Rust backend has a
+[known gap](https://jirikuncar.github.io/sqlty/reference/backends/#known-gaps).
 
 ```toml
 # pyproject.toml
@@ -91,7 +95,7 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email VARCHAR(255));
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email VARCHAR(255) NOT NULL);
 ```
 
 ```python
@@ -99,47 +103,22 @@ query = "--sql\nSELECT id, name, email FROM users"
 # rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
-### Magic codec
+### More
 
-Files that declare `# coding: sqlty` are rewritten as Python reads them, with
-no rewrite step. Register the codec first by importing `sqlty.magic`, or with
-a `.pth` file containing that import; installing the package does not
-register it. Type checkers read the file on disk, so commit rewritten code.
-[Magic codec guide](https://jirikuncar.github.io/sqlty/guide/magic-codec/).
-
-```python
-# coding: sqlty
-
-query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
-### Untyped queries
-
-Queries sqlty cannot type stay plain strings by default. With
-`untyped = "sentinel"` they become `SQL[UNTYPED]`, which type checkers refuse
-to treat as a concrete row and `sqlty check` reports until casts or a schema
-make the type known.
-[Untyped queries guide](https://jirikuncar.github.io/sqlty/guide/untyped/).
-
-```toml
-# pyproject.toml
-[tool.sqlty]
-untyped = "sentinel"
-```
-
-```python
-query = "--sql\nVALUES (1, 2)"
-# rewritten: query = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-```
-
-### Generated stubs
-
-If your code sends queries through a helper such as `sql("SELECT ...")`,
-decorate it with `@sqlty` and run your code with `SQLTY_AUTO_GENERATE=1`.
-sqlty writes a `.pyi` stub with one overload per query, so each call site gets
-its own return type.
-[Generated stubs guide](https://jirikuncar.github.io/sqlty/guide/stubs/).
+- **[psycopg](https://jirikuncar.github.io/sqlty/guide/psycopg/).**
+  `execute(conn, SQL[User](...))` returns a `Cursor[User]` with the matching
+  row factory; `scalar` fetches one typed value.
+- **[Magic codec](https://jirikuncar.github.io/sqlty/guide/magic-codec/).**
+  Files declaring `# coding: sqlty` are rewritten when imported, once the
+  codec is registered with `import sqlty.magic`.
+- **[Untyped queries](https://jirikuncar.github.io/sqlty/guide/untyped/).**
+  With `untyped = "sentinel"`, queries sqlty cannot type become
+  `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
+- **[Generated stubs](https://jirikuncar.github.io/sqlty/guide/stubs/).**
+  For a helper such as `sql("SELECT ...")`, decorate it with `@sqlty`,
+  register it under `[[tool.sqlty.functions]]` in `pyproject.toml`, and run
+  your code with `SQLTY_AUTO_GENERATE=1`. sqlty writes a `.pyi` stub with one
+  overload per query.
 
 ## Use cases
 
@@ -152,25 +131,21 @@ its own return type.
 
 ## Lint rules
 
-`sqlty check` has thirteen rules with configurable severity, among them
-`column-type-mismatch` (row type field differs from its column),
-`select-star-no-schema`, `stale-rewrite` (`--sql` string not wrapped) and
-`stale-type` (annotation differs from the inferred type). See the
-[rules reference](https://jirikuncar.github.io/sqlty/reference/rules/) and the
-[configuration reference](https://jirikuncar.github.io/sqlty/reference/configuration/).
+`sqlty check` runs a set of rules with configurable severity. See the
+[rules reference](https://jirikuncar.github.io/sqlty/reference/rules/).
 
 ## Backends
 
-Type inference runs in a Rust extension, with a pure-Python fallback held to
-the same tests. Rust parses SQL much faster; the backends have some
-[known gaps](https://jirikuncar.github.io/sqlty/reference/backends/#known-gaps).
-See [Backends](https://jirikuncar.github.io/sqlty/reference/backends/) for
-benchmarks and how to choose one.
+The CLI and `sqlty.core` use a Rust extension when available, with a
+pure-Python fallback held to the same tests. See
+[Backends](https://jirikuncar.github.io/sqlty/reference/backends/) for
+[benchmarks](https://jirikuncar.github.io/sqlty/reference/backends/#benchmarks)
+and how to choose one.
 
 ## Contributing
 
-See [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md) for setup, testing and contribution
-guidelines.
+See [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md)
+for setup, testing and contribution guidelines.
 
 ## License
 
