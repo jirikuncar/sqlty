@@ -82,7 +82,8 @@ query = "--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions"
 ```
 
 The rewriter adds `import datetime` and `import uuid` when the row type needs
-them.
+them. A name missing from an existing `from sqlty import ...` is appended to
+it rather than imported again.
 
 Literals, `COUNT(*)` and casts inside expressions are typed too. A column
 without a cast, schema entry or literal type becomes `str`, as does an

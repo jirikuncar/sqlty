@@ -131,3 +131,25 @@ untyped = "sentinel"
 q = "--sql\r\nVALUES (1, 2)"
 # rewritten: q = SQL[UNTYPED]("--sql\r\nVALUES (1, 2)")
 ```
+
+## Marker on the second line of a triple-quoted string
+
+`check` reports exactly the strings `rewrite` wraps.
+
+```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = """
+--sql
+SELECT 1::INTEGER AS n"""
+# rewritten: q = SQL[tuple[int]]("""
+# rewritten: --sql
+# rewritten: SELECT 1::INTEGER AS n""")
+```
+
+## Wrapped and unwrapped strings on one line
+
+```python
+from sqlty import SQL
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), "--sql\nSELECT 2::INTEGER"
+```

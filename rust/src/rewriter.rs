@@ -30,6 +30,14 @@ static STRING_LITERAL: Lazy<Regex> = Lazy::new(|| {
 /// A valid string prefix (`rb`, `f`, `u`, ...), possibly empty.
 static STRING_PREFIX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?i:[bft]r?|r[bft]?|u)?$").unwrap());
 
+/// A top-level `from sqlty import` statement; group `paren` or `names` holds the names.
+static SQLTY_FROM_IMPORT: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?m)^from[ \t]+sqlty[ \t]+import[ \t]*(?:\((?P<paren>[^)]*)\)|(?P<names>(?:[^\n#;\\]|\\\r?\n)*))",
+    )
+    .unwrap()
+});
+
 static CODING: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
 
 /// f-strings and t-strings (PEP 750) with a `--sql` prefix: interpolated, so never rewritten.
@@ -138,6 +146,13 @@ impl ImportStyle {
         }
     }
 
+    /// What a `from sqlty import` style imports (`SQL`, `SQL as Q`); `None` for a module import.
+    pub fn imported_name(&self) -> Option<String> {
+        self.import_line
+            .strip_prefix("from sqlty import ")
+            .map(str::to_string)
+    }
+
     /// Import line `UNTYPED` needs, or `None` when the module is imported.
     pub fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
@@ -185,64 +200,39 @@ pub fn rewrite_source_with(
     keep_lines: bool,
 ) -> String {
     let istyle = ImportStyle::or_default(import_style);
-    let fstring_lines: Vec<usize> = source
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| FSTRING_SQL.is_match(line))
-        .map(|(i, _)| i + 1)
-        .collect();
-    let wrapper_spans: Vec<(usize, usize)> = istyle
-        .wrapper_pattern()
-        .find_iter(source)
-        .map(|m| (m.start(), m.end()))
-        .collect();
-
-    let mut replacements = Vec::new();
-    let mut needs_untyped_import = false;
-    for (start, end) in string_literals(source) {
-        if wrapper_spans
-            .iter()
-            .any(|&(ws, we)| ws <= start && end <= we)
-            || (!fstring_lines.is_empty() && fstring_lines.contains(&line_at(source, start)))
-        {
-            continue;
-        }
-        let literal = &source[start..end];
-        let content = extract_string_content(literal).trim();
-        if after_marker(content).is_none() {
-            continue;
-        }
-        let type_str = match infer_sql_content(content, dialect, schema) {
-            Some(inferred) => inferred,
-            None if untyped && is_untyped(content, dialect) => {
-                needs_untyped_import = true;
-                istyle.untyped_name()
-            }
-            // Don't wrap when inference fails — SQL[Any] is never useful.
-            None => continue,
-        };
-        let replacement = format!("{}[{}]({})", istyle.wrapper_name, type_str, literal);
-        replacements.push((start, end, replacement));
-    }
-
+    let mut replacements = wraps(source, dialect, schema, &istyle, untyped);
     if replacements.is_empty() {
         return source.to_string();
     }
     let needs = |marker: &str| replacements.iter().any(|(_, _, r)| r.contains(marker));
-    let mut imports = Vec::new();
+    let mut imports: Vec<String> = Vec::new();
     if needs("datetime.") && !has_import(source, "import datetime") {
-        imports.push("import datetime");
+        imports.push("import datetime".to_string());
     }
     if needs("uuid.") && !has_import(source, "import uuid") {
-        imports.push("import uuid");
+        imports.push("import uuid".to_string());
     }
-    if !has_import(source, &istyle.import_line) {
-        imports.push(&istyle.import_line);
-    }
-    if let Some(line) = istyle.untyped_import() {
-        if needs_untyped_import && !has_import(source, line) {
-            imports.push(line);
+    let untyped_wrapper = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
+    let mut names = Vec::new();
+    match istyle.imported_name() {
+        Some(name) if !sqlty_binds(source, "SQL", &istyle.wrapper_name) => names.push(name),
+        None if !has_import(source, &istyle.import_line) => {
+            imports.push(istyle.import_line.clone())
         }
+        _ => {}
+    }
+    if istyle.untyped_import().is_some()
+        && needs(&untyped_wrapper)
+        && !sqlty_binds(source, "UNTYPED", "UNTYPED")
+    {
+        names.push("UNTYPED".to_string());
+    }
+    match sqlty_from_imports(source).first() {
+        Some(&(end, _)) if !names.is_empty() => {
+            replacements.push((end, end, format!(", {}", names.join(", "))));
+            replacements.sort_by_key(|r| r.0);
+        }
+        _ => imports.extend(names.iter().map(|name| format!("from sqlty import {name}"))),
     }
 
     let result = splice(source, &replacements);
@@ -265,6 +255,52 @@ pub fn rewrite_source_with(
         imports.join("\n"),
         &result[at..]
     )
+}
+
+/// `(start, end, wrapped)` for each string `rewrite` wraps, in source order.
+pub(crate) fn wraps(
+    source: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    istyle: &ImportStyle,
+    untyped: bool,
+) -> Vec<(usize, usize, String)> {
+    let fstring_lines: Vec<usize> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| FSTRING_SQL.is_match(line))
+        .map(|(i, _)| i + 1)
+        .collect();
+    let wrapper_spans: Vec<(usize, usize)> = istyle
+        .wrapper_pattern()
+        .find_iter(source)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+
+    let mut replacements = Vec::new();
+    for (start, end) in string_literals(source) {
+        if wrapper_spans
+            .iter()
+            .any(|&(ws, we)| ws <= start && end <= we)
+            || (!fstring_lines.is_empty() && fstring_lines.contains(&line_at(source, start)))
+        {
+            continue;
+        }
+        let literal = &source[start..end];
+        let content = extract_string_content(literal).trim();
+        if after_marker(content).is_none() {
+            continue;
+        }
+        let type_str = match infer_sql_content(content, dialect, schema) {
+            Some(inferred) => inferred,
+            None if untyped && is_untyped(content, dialect) => istyle.untyped_name(),
+            // Don't wrap when inference fails — SQL[Any] is never useful.
+            None => continue,
+        };
+        let replacement = format!("{}[{}]({})", istyle.wrapper_name, type_str, literal);
+        replacements.push((start, end, replacement));
+    }
+    replacements
 }
 
 /// Strip Python source: `SQL[T]("--sql\n...")` → `"--sql\n..."`.
@@ -412,6 +448,47 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
                 || (line == "import uuid" && !source.contains("uuid.")))
         })
         .collect()
+}
+
+/// Top-level `from sqlty import ...` statements, parenthesised or continued over lines:
+/// where each one's last name ends, and its `(name, binding)` pairs.
+fn sqlty_from_imports(source: &str) -> Vec<(usize, Vec<(String, String)>)> {
+    SQLTY_FROM_IMPORT
+        .captures_iter(source)
+        .filter_map(|caps| {
+            let names = caps.name("paren").or(caps.name("names"))?;
+            let (mut pairs, mut end, mut pos) = (Vec::new(), None, names.start());
+            for line in names.as_str().split_inclusive('\n') {
+                let code = line.split('#').next().unwrap_or_default();
+                for item in code.split(',') {
+                    match item
+                        .split(|c: char| c.is_whitespace() || c == '\\')
+                        .filter(|word| !word.is_empty())
+                        .collect::<Vec<_>>()[..]
+                    {
+                        [name] => pairs.push((name.to_string(), name.to_string())),
+                        [name, "as", alias] => pairs.push((name.to_string(), alias.to_string())),
+                        _ => {}
+                    }
+                }
+                let last =
+                    code.trim_end_matches(|c: char| c.is_whitespace() || c == ',' || c == '\\');
+                if !last.trim().is_empty() {
+                    end = Some(pos + last.len());
+                }
+                pos += line.len();
+            }
+            Some((end?, pairs))
+        })
+        .collect()
+}
+
+/// Whether a top-level `from sqlty import` binds `name` as `binding`.
+fn sqlty_binds(source: &str, name: &str, binding: &str) -> bool {
+    sqlty_from_imports(source)
+        .iter()
+        .flat_map(|(_, pairs)| pairs)
+        .any(|(n, b)| n == name && b == binding)
 }
 
 /// Check for a top-level import; indented lines (docstrings, blocks) don't count.
@@ -646,6 +723,43 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
         let rewritten = rewrite_source(original, "postgres", &None, None, false);
         let stripped = strip_source(&rewritten, None);
         assert_eq!(stripped.trim(), original.trim());
+    }
+
+    #[test]
+    fn test_sqlty_from_imports() {
+        let source = "from sqlty import SQL as Q, UNTYPED  # c\nfrom sqlty import (\n    A,  # x\n    B as C,\n)\n    from sqlty import D\n";
+        let imports = sqlty_from_imports(source);
+        let pairs = |items: &[(&str, &str)]| -> Vec<(String, String)> {
+            items
+                .iter()
+                .map(|(n, b)| (n.to_string(), b.to_string()))
+                .collect()
+        };
+        assert_eq!(imports.len(), 2);
+        assert_eq!(
+            &source[..imports[0].0],
+            "from sqlty import SQL as Q, UNTYPED"
+        );
+        assert_eq!(imports[0].1, pairs(&[("SQL", "Q"), ("UNTYPED", "UNTYPED")]));
+        assert!(source[..imports[1].0].ends_with("B as C"));
+        assert_eq!(imports[1].1, pairs(&[("A", "A"), ("B", "C")]));
+        assert!(sqlty_binds(source, "SQL", "Q"));
+        assert!(!sqlty_binds(source, "SQL", "SQL"));
+        assert!(!sqlty_binds(source, "D", "D"));
+    }
+
+    #[test]
+    fn test_existing_sqlty_import_extended() {
+        let source = "from sqlty import UNTYPED\nq = \"--sql\\nSELECT 1::INTEGER\"\n";
+        assert_eq!(
+            rewrite_source(source, "postgres", &None, None, false),
+            "from sqlty import UNTYPED, SQL\nq = SQL[tuple[int]](\"--sql\\nSELECT 1::INTEGER\")\n"
+        );
+        let both = "from sqlty import SQL, UNTYPED\nq = \"--sql\\nVALUES (1, 2)\"\n";
+        assert_eq!(
+            rewrite_source(both, "postgres", &None, None, true),
+            "from sqlty import SQL, UNTYPED\nq = SQL[UNTYPED](\"--sql\\nVALUES (1, 2)\")\n"
+        );
     }
 
     #[test]

@@ -39,6 +39,99 @@ q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
+## Existing sqlty imports are recognised
+
+`SQL` and `UNTYPED` count as imported in any `from sqlty import` list.
+
+### In a list
+
+```python
+from sqlty import SQL, UNTYPED
+q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
+r = "--sql\nSELECT 2::INTEGER AS m"
+# fixed: from sqlty import SQL, UNTYPED
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# fixed: r = SQL[tuple[int]]("--sql\nSELECT 2::INTEGER AS m")
+```
+
+### Parenthesised over lines
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+from sqlty import (
+    SQL,
+    UNTYPED,
+)
+q = "--sql\nVALUES (1, 2)"
+# rewritten-file: from sqlty import (
+# rewritten-file:     SQL,
+# rewritten-file:     UNTYPED,
+# rewritten-file: )
+# rewritten-file: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+```
+
+### Missing names extend the existing import
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+from sqlty import UNTYPED  # c
+q = "--sql\nVALUES (1, 2)"
+r = "--sql\nSELECT 1::INTEGER AS n"
+# rewritten-file: from sqlty import UNTYPED, SQL  # c
+# rewritten-file: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# rewritten-file: r = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
+### Parenthesised import is extended
+
+```python
+from sqlty import (
+    UNTYPED,
+)
+q = "--sql\nSELECT 1::INTEGER AS n"
+# rewritten-file: from sqlty import (
+# rewritten-file:     UNTYPED, SQL,
+# rewritten-file: )
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
+### Alias of another name
+
+`SQL as S` does not bind `SQL`.
+
+```python
+from sqlty import SQL as S
+q = "--sql\nSELECT 1::INTEGER AS n"
+# rewritten-file: from sqlty import SQL as S, SQL
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
+### Alias from the import style
+
+```toml
+[tool.sqlty]
+import-style = "from sqlty import SQL as Q"
+```
+
+```python
+from sqlty import (
+    SQL as Q,
+)
+q = "--sql\nSELECT 1::INTEGER AS n"
+# rewritten-file: from sqlty import (
+# rewritten-file:     SQL as Q,
+# rewritten-file: )
+# rewritten-file: q = Q[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
 ## Placement after the module header
 
 Imports go below the shebang, the coding cookie, the module docstring and

@@ -17,8 +17,8 @@ use regex::Regex;
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, header_end, line_at, rewrite_source,
-    skipped_string_rule, string_literals, strip_line_break, ImportStyle,
+    after_marker, ends_marker_line, extract_string_content, line_at, skipped_string_rule,
+    string_literals, strip_line_break, wraps, ImportStyle,
 };
 
 /// A string that may open with the marker; `rewrite` decides which ones it wraps.
@@ -178,11 +178,20 @@ pub fn check_source(
         );
     }
 
-    let wrappable = if rule_config.is_enabled("stale-rewrite") {
-        wrappable_lines(source, dialect, schema, import_style, untyped)
-    } else {
-        Vec::new()
-    };
+    if rule_config.is_enabled("stale-rewrite") {
+        let style = ImportStyle::or_default(import_style);
+        let mut lines: Vec<usize> = wraps(source, dialect, schema, &style, untyped)
+            .into_iter()
+            .map(|(start, _, _)| line_at(source, start))
+            .collect();
+        lines.dedup();
+        diagnostics.extend(lines.into_iter().map(|line| Diagnostic {
+            rule: "stale-rewrite".to_string(),
+            message: "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
+            severity: rule_config.severity("stale-rewrite").to_string(),
+            line,
+        }));
+    }
 
     for (line_num, logical) in logical_lines(source, &wrapper_name) {
         let trimmed = logical.as_str();
@@ -208,14 +217,6 @@ pub fn check_source(
 
         // Check for unwrapped --sql strings (stale-rewrite)
         if is_unwrapped_sql_string(trimmed, &wrapper_marker) {
-            if wrappable.contains(&line_num) && rule_config.is_enabled("stale-rewrite") {
-                diagnostics.push(Diagnostic {
-                    rule: "stale-rewrite".to_string(),
-                    message: "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
-                    severity: rule_config.severity("stale-rewrite").to_string(),
-                    line: line_num,
-                });
-            }
             // Also check for inline-sql-comment on unwrapped strings
             if rule_config.is_enabled("inline-sql-comment")
                 && INLINE_SQL_COMMENT_IN_LINE.is_match(trimmed)
@@ -311,6 +312,7 @@ pub fn check_source(
         }
     }
 
+    diagnostics.sort_by_key(|d| d.line);
     diagnostics
 }
 
@@ -333,30 +335,6 @@ pub fn wrapped_queries(
             });
             Some((line, annotated, query))
         })
-        .collect()
-}
-
-/// Lines holding a string that `rewrite` would wrap.
-///
-/// Rewrite only inserts imports at the header and wraps strings in place,
-/// so each other line keeps its position, shifted past the imports.
-fn wrappable_lines(
-    source: &str,
-    dialect: &str,
-    schema: &Option<Schema>,
-    import_style: Option<&str>,
-    untyped: bool,
-) -> Vec<usize> {
-    let original: Vec<&str> = source.lines().collect();
-    let rewritten_source = rewrite_source(source, dialect, schema, import_style, untyped);
-    let rewritten: Vec<&str> = rewritten_source.lines().collect();
-    let added = rewritten.len() - original.len();
-    let head = source[..header_end(source)].matches('\n').count();
-    original
-        .iter()
-        .enumerate()
-        .filter(|(i, line)| rewritten[if *i < head { *i } else { i + added }] != **line)
-        .map(|(i, _)| i + 1)
         .collect()
 }
 
@@ -448,6 +426,26 @@ mod tests {
         let diags = check_source(source, "postgres", &None, None, None, false);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].rule, "stale-rewrite");
+    }
+
+    #[test]
+    fn test_stale_rewrite_agrees_with_rewrite() {
+        for (source, line) in [
+            ("q = \"\"\"\n--sql\nSELECT 1::INTEGER AS n\"\"\"", 1),
+            (
+                "x = 1\nq = SQL[tuple[int]](\"--sql\\nSELECT 1\"), \"--sql\\nSELECT 2\"",
+                2,
+            ),
+            ("q = '  --sql\\nSELECT 1'", 1),
+        ] {
+            let diags = check_source(source, "postgres", &None, None, None, false);
+            let lines: Vec<usize> = diags
+                .iter()
+                .filter(|d| d.rule == "stale-rewrite")
+                .map(|d| d.line)
+                .collect();
+            assert_eq!(lines, vec![line], "{source}");
+        }
     }
 
     #[test]
