@@ -15,6 +15,8 @@ CLI command for stub generation.
 1. Decorate the helper with
    [`@sqlty`](../reference/python-api.md#sqlty_1). Pass `schema=` to infer
    types from a schema file; the path is relative to the helper's module.
+   An `async def` helper gets `async def` overloads, so
+   `await helper(...)` is typed.
 
     ```python
     # db.py
@@ -112,6 +114,25 @@ written. For a script run directly (`python db.py`), use the file name or
 
 Tests covering this flow:
 [`tests/generator/test_auto_generate.py`](https://github.com/jirikuncar/sqlty/blob/main/tests/generator/test_auto_generate.py).
+
+### Async helpers
+
+An `async def` helper gets `async def` overloads, so `await` is typed:
+
+```python
+@sqlty
+async def fetch(query: str) -> Any:
+    return await conn.fetch(query)
+```
+
+```python
+# db.pyi
+@overload
+async def fetch(query: Literal["SELECT 1::INTEGER AS n"]) -> SQL[tuple[int]]: ...
+```
+
+The query is recorded when the helper is called, before it is awaited. An
+async generator (an `async def` that yields) keeps plain `def` overloads.
 
 ## Schemas
 
@@ -308,7 +329,5 @@ See [Configuration](../reference/configuration.md#functions).
 
 - Only module-level functions are supported, not methods.
 - A call whose query argument is not a `str` is not recorded.
-- Overloads are written as plain `def`, so the stub of an `async` helper does
-  not type `await helper(...)`.
 - Stubs are written with `fcntl` file locks, so generation works on POSIX
   systems only.
