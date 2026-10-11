@@ -62,7 +62,7 @@ SELECT * FROM items
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
 variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
-in the expansion, as sqlglot spells them; the column type is still `str`.
+in the expansion; the column type is still `str`.
 Unmapped types such as `BIT` and spatial `POINT` are `str`.
 
 `schema.sql`:
@@ -149,4 +149,31 @@ dialect = "mysql"
 ```sql
 SELECT CAST(tags AS INT[]) FROM t
 -- inferred: None
+```
+
+## INT3, MIDDLEINT and ZEROFILL
+
+`INT3 UNSIGNED` and `MIDDLEINT UNSIGNED` are `UMEDIUMINT`. `ZEROFILL` implies
+`UNSIGNED`.
+
+`schema.sql`:
+```sql
+CREATE TABLE items (
+    a INT3 UNSIGNED,
+    b MIDDLEINT(8) UNSIGNED,
+    c INT(5) ZEROFILL,
+    d BIGINT UNSIGNED ZEROFILL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM items
+-- inferred: tuple[int, int, int, int]
+-- expanded: SELECT a::UMEDIUMINT, b::UMEDIUMINT(8), c::UINT(5), d::UBIGINT FROM items
 ```

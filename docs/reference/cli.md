@@ -117,4 +117,3 @@ Print `sqlty <version>` and exit. `sqlty --version` does the same.
 |----------|--------|
 | `SQLTY_AUTO_GENERATE=1` | Generate `.pyi` stubs for registered `@sqlty` helpers at runtime (`1`, `true`, `yes`); see [Generated stubs](../guide/stubs.md) |
 | `SQLTY_NO_MAGIC` | Any non-empty value (even `0`) stops `sqlty.magic` from registering the magic codec on import |
-| `SQLTY_LIB=py` / `SQLTY_LIB=rs` | Force the pure-Python or the Rust backend; see [Backends](backends.md) |

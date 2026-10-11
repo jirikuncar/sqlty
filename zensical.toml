@@ -35,7 +35,7 @@ nav = [
     { "Configuration" = "reference/configuration.md" },
     { "Rules" = "reference/rules.md" },
     { "Python API" = "reference/python-api.md" },
-    { "Backends" = "reference/backends.md" },
+    { "Engine" = "reference/engine.md" },
   ] },
 ]
 

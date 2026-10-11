@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["sqlglot>=27.29.0,<31", "asttokens>=3.0.0"]
+dependencies = ["asttokens>=3.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"
@@ -72,7 +72,6 @@ dev = [
     "ty>=0.0.85",
 ]
 cli = ["rich>=13.0.0"]
-magic = ["isort>=7.0.0"]
 psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]

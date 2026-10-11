@@ -17,9 +17,10 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-The `# decoded:` line shows the code Python runs. The codec adds the imports
-the inferred types need (`from sqlty import SQL`, `import datetime`,
-`import uuid`):
+The `# decoded:` line shows the code Python runs. The codec wraps strings as
+`sqlty rewrite` does and adds the imports the inferred types need
+(`from sqlty import SQL`, `import datetime`, `import uuid`) after the module
+docstring and `__future__` imports:
 
 ```python
 # coding: sqlty
@@ -84,6 +85,9 @@ Print the decoded source of a file without running it:
 ```bash
 python -m sqlty.magic queries.py
 ```
+
+The output declares `# coding: utf-8` instead of `sqlty`, so it runs without
+the codec.
 
 ## Configuration
 

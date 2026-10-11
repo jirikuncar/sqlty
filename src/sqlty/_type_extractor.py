@@ -99,7 +99,7 @@ class TypeInfo:
 
 # ---------------------------------------------------------------------------
 # Mapping from sqlty's python_type strings to actual Python types
-# (mirrors SQLAnalyzer.SQL_TO_PYTHON_TYPE but with real type objects)
+# (mirrors SQL_TO_PYTHON_TYPE in rust/src/analyzer.rs, with real type objects)
 # ---------------------------------------------------------------------------
 PYTHON_TYPE_MAP: dict[str, type] = {
     "int": int,

@@ -1,175 +1,56 @@
-"""Public core API — import-switching facade.
+"""The SQL engine behind the CLI, implemented in Rust (``sqlty._core``).
 
 Usage:
     from sqlty.core import infer_type, rewrite_source, strip_source, check_source
 
-Backend selection via ``SQLTY_LIB`` environment variable:
-
-- ``SQLTY_LIB=py``  — force the pure-Python backend (``_core_py``)
-- ``SQLTY_LIB=rs``  — force the Rust backend (``_core``); fails if not compiled
-- unset (default)   — auto: use Rust if available, otherwise Python
-
-Both implementations must satisfy the same API contract: every mdtest runs on
-each, and ``tests/test_core_invariants.py`` compares them.
-
-``check_source`` is wrapped to add Python-side user-defined type checking
-(TypedDict, NamedTuple, dataclass, Pydantic) on top of whichever backend
-is active, since type extraction requires Python's ``ast`` module.
+``check_source`` adds the checks of user-defined row types (TypedDict,
+NamedTuple, dataclass, Pydantic) on top of the engine's, since resolving them
+needs the Python runtime.
 """
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
+
+from sqlty._core import analyze_select as _analyze_select
+from sqlty._core import check_source as _check_source
+from sqlty._core import (
+    expand_star,
+    fix_source,
+    infer_type,
+    returns_rows,
+    rewrite_source,
+    strip_source,
+)
+from sqlty._core import wrapped_queries as _wrapped_queries
 
 if TYPE_CHECKING:
     from sqlty._lint import RuleConfig
-    from sqlty._sql_analyzer import ColumnInfo
     from sqlty._type_extractor import TypeInfo
 
-_SQLTY_LIB = os.environ.get("SQLTY_LIB")
 
-if _SQLTY_LIB == "py":
-    from sqlty._core_py import (
-        check_source as _backend_check_source,
-    )
-    from sqlty._core_py import (
-        expand_star,
-        infer_type,
-    )
-    from sqlty._core_py import (
-        rewrite_source as _backend_rewrite_source,
-    )
-    from sqlty._core_py import (
-        strip_source as _backend_strip_source,
-    )
-elif _SQLTY_LIB == "rs":
-    from sqlty._core import (
-        check_source as _backend_check_source,
-    )
-    from sqlty._core import (
-        expand_star,
-        infer_type,
-    )
-    from sqlty._core import (
-        rewrite_source as _backend_rewrite_source,
-    )
-    from sqlty._core import (
-        strip_source as _backend_strip_source,
-    )
-else:
-    try:
-        from sqlty._core import (
-            check_source as _backend_check_source,
-        )
-        from sqlty._core import (
-            expand_star,
-            infer_type,
-        )
-        from sqlty._core import (
-            rewrite_source as _backend_rewrite_source,
-        )
-        from sqlty._core import (
-            strip_source as _backend_strip_source,
-        )
-    except ImportError:
-        from sqlty._core_py import (
-            check_source as _backend_check_source,
-        )
-        from sqlty._core_py import (
-            expand_star,
-            infer_type,
-        )
-        from sqlty._core_py import (
-            rewrite_source as _backend_rewrite_source,
-        )
-        from sqlty._core_py import (
-            strip_source as _backend_strip_source,
-        )
+class ColumnInfo(NamedTuple):
+    """A result column; types are ``None`` when unknown."""
+
+    name: str
+    python_type: str | None
+    sql_type: str | None
 
 
-def rewrite_source(
-    source: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | None = None,
-    import_style: str | None = None,
-    untyped: bool = False,
-) -> str:
-    """Rewrite Python source: "--sql ..." -> SQL[T]("--sql ...").
-
-    Delegates to the active backend (Rust or Python).
-
-    Args:
-        source: Python source code
-        dialect: SQL dialect
-        schema_sql: Optional CREATE TABLE statements
-        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
-        untyped: Wrap row-returning queries of unknown row type as ``SQL[UNTYPED](...)``
+def analyze_select(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[ColumnInfo] | None:
+    """Result columns of a query, or ``None`` when it returns no rows or doesn't parse.
 
     Example:
-        >>> rewrite_source('q = "--sql\\\\nVALUES (1, 2)"', untyped=True)
-        'from sqlty import SQL\\nfrom sqlty import UNTYPED\\nq = SQL[UNTYPED]("--sql\\\\nVALUES (1, 2)")'
+        >>> analyze_select("SELECT id::INTEGER, COUNT(*) AS n FROM users")
+        [ColumnInfo(name='id', python_type='int', sql_type='INT'), ColumnInfo(name='n', python_type='int', sql_type='INTEGER')]
 
-    Returns:
-        Rewritten source code
+    Raises:
+        RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
-    return _backend_rewrite_source(
-        source,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        untyped=untyped,
-    )
-
-
-def fix_source(
-    source: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | None = None,
-    import_style: str | None = None,
-    untyped: bool = False,
-    rules: dict[str, str] | None = None,
-) -> str:
-    """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
-
-    - ``stale-rewrite``: wrap ``--sql`` strings, as ``rewrite_source`` does
-    - ``select-star``: with a schema, replace ``*`` by the cast column list
-    - ``stale-type``: update ``SQL[tuple[...]]`` to the inferred row type
-    - ``untyped-query``: replace ``SQL[UNTYPED]`` once the row type is inferable
-
-    User-defined row types (``SQL[User]``) are left alone.
-
-    Example:
-        >>> fix_source('from sqlty import SQL\\nq = SQL[tuple[str]]("--sql\\\\nSELECT 1::INTEGER")')
-        'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT 1::INTEGER")'
-    """
-    from sqlty._fixer import fix_source as fix
-
-    return fix(
-        source,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        untyped=untyped,
-        rules=rules,
-    )
-
-
-def strip_source(source: str, *, import_style: str | None = None) -> str:
-    """Strip Python source: SQL[T]("--sql ...") -> "--sql ...".
-
-    Delegates to the active backend (Rust or Python).
-
-    Args:
-        source: Python source code with SQL[T](...) wrappers
-        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
-
-    Returns:
-        Stripped source code
-    """
-    return _backend_strip_source(source, import_style=import_style)
+    columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
+    return None if columns is None else [ColumnInfo(*column) for column in columns]
 
 
 def check_source(
@@ -183,35 +64,20 @@ def check_source(
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
-    Delegates to the backend (Rust or Python) for base checks, then adds
-    user-defined type validation on top. When ``SQL[UserType](...)`` is
-    found and ``UserType`` is defined in the same source file, structural
-    checks (column count, type, name) replace the stale-type string
-    comparison.
-
-    Args:
-        source: Python source code
-        dialect: SQL dialect
-        schema_sql: Optional CREATE TABLE statements
-        rules: Rule severity overrides
-        import_style: Import style (e.g. ``"from sqlty import SQL as Q"``)
-        untyped: Report uninferable row queries as stale-rewrite, as rewrite wraps them
+    When ``SQL[UserType](...)`` names a type defined in the same source,
+    structural checks (column count, type, name, TypedDict keys) run instead
+    of ``stale-type``.
 
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
-    """
-    import re
 
-    from sqlty._core_py import _logical_lines
-    from sqlty._rewriter import ImportStyle
+    Raises:
+        ValueError: unsupported ``import_style``
+    """
+    from sqlty._lint import RuleConfig
     from sqlty._type_extractor import extract_type_definitions
 
-    istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
-    wrapper_name = istyle.wrapper_name
-    escaped_wrapper = re.escape(wrapper_name)
-
-    # Run the backend check_source (Rust or Python)
-    diagnostics = _backend_check_source(
+    diagnostics = _check_source(
         source,
         dialect=dialect,
         schema_sql=schema_sql,
@@ -219,93 +85,22 @@ def check_source(
         import_style=import_style,
         untyped=untyped,
     )
-
-    # Extract user-defined type definitions from source
-    type_defs = extract_type_definitions(source)
-
-    # Find all non-tuple {wrapper_name}[T](...) annotations — these need special handling
-    # because stale-type always fires for non-tuple types ("User" != "tuple[int, str]")
-    non_tuple_lines: set[int] = set()
-    for i, line in _logical_lines(source, wrapper_name):
-        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line)
-        if type_match:
-            annotated_type = type_match.group(1)
-            if not annotated_type.startswith("tuple["):
-                non_tuple_lines.add(i)
-
-    if not non_tuple_lines:
-        return diagnostics
-
-    # Filter out stale-type for all non-tuple annotations (they're either
-    # user-defined types with structural checks, or external types we can't validate)
-    filtered = [
-        d
-        for d in diagnostics
-        if not (d["rule"] == "stale-type" and d.get("line") in non_tuple_lines)
+    user_queries = [
+        (line, name, query)
+        for line, name, query in _wrapped_queries(source, import_style=import_style)
+        if not name.startswith("tuple[")
     ]
-
-    # Add structural checks for user-defined types found in source
-    if type_defs:
-        filtered = _enhance_with_user_type_checks(
-            filtered,
-            source,
-            type_defs,
-            non_tuple_lines,
-            dialect,
-            schema_sql,
-            rules,
-            wrapper_name=wrapper_name,
-        )
-
-    return filtered
-
-
-def _enhance_with_user_type_checks(
-    diagnostics: list[dict[str, str | int | None]],
-    source: str,
-    type_defs: dict[str, TypeInfo],
-    non_tuple_lines: set[int],
-    dialect: str,
-    schema_sql: str | None,
-    rules: dict[str, str] | None,
-    *,
-    wrapper_name: str = "SQL",
-) -> list[dict[str, str | int | None]]:
-    """Add structural type checks for user-defined types.
-
-    For each SQL[UserType](...) line where UserType is found in source,
-    runs the column-count, column-type, column-name and typeddict-key
-    mismatch checks using runtime-resolved type hints when available.
-    TypedDict row types and their same-source bases also get
-    ``typeddict-inheritance`` diagnostics on their class line (PEP 728).
-    """
-    import re
-
-    from sqlty._core_py import _logical_lines
-    from sqlty._lint import RuleConfig
-    from sqlty._sql_analyzer import SQLAnalyzer
-
-    escaped_wrapper = re.escape(wrapper_name)
-
-    # Build map of lines with user-type annotations found in source
-    user_type_lines: dict[int, tuple[str, TypeInfo]] = {}
-    for i, line in _logical_lines(source, wrapper_name):
-        if i not in non_tuple_lines:
-            continue
-        type_match = re.search(rf"{escaped_wrapper}\[(.+?)\]\(", line)
-        if type_match:
-            annotated_type = type_match.group(1)
-            if annotated_type in type_defs:
-                user_type_lines[i] = (annotated_type, type_defs[annotated_type])
-
-    if not user_type_lines:
+    if not user_queries:
+        return diagnostics
+    type_defs = extract_type_definitions(source)
+    user_queries = [q for q in user_queries if q[1] in type_defs]
+    if not user_queries:
         return diagnostics
 
     rule_config = RuleConfig(overrides=rules)
-
     if rule_config.is_enabled("typeddict-inheritance"):
         severity = rule_config.severity("typeddict-inheritance").value
-        for info in _typeddict_lineage([name for name, _ in user_type_lines.values()], type_defs):
+        for info in _typeddict_lineage([name for _, name, _ in user_queries], type_defs):
             diagnostics += [
                 {
                     "rule": "typeddict-inheritance",
@@ -316,62 +111,25 @@ def _enhance_with_user_type_checks(
                 for message in info.errors
             ]
 
-    # Create analyzer with schema if available
-    import os
-    import tempfile
-    from pathlib import Path
-
-    schema_path = None
-    fd = None
-    if schema_sql:
-        fd, tmp_name = tempfile.mkstemp(suffix=".sql")
-        tmp = Path(tmp_name)
-        tmp.write_text(schema_sql)
-        os.close(fd)
-        schema_path = tmp
-
-    try:
-        analyzer = SQLAnalyzer(dialect=dialect, schema_path=schema_path)
-
-        for i, stripped in _logical_lines(source, wrapper_name):
-            if i not in user_type_lines:
-                continue
-
-            type_name, type_info = user_type_lines[i]
-
-            # Extract SQL content from wrapper
-            sql_match = re.search(
-                rf'{escaped_wrapper}\[.*?\]\(\s*[uU]?["\'](.+?)["\']\s*\)', stripped, re.DOTALL
-            )
-            if not sql_match:
-                continue
-
-            sql_content = sql_match.group(1)
-            if not sql_content.startswith("--sql"):
-                continue
-
-            # Strip --sql prefix and analyze the query
-            sql_query = _strip_sql_prefix(sql_content)
-            columns = analyzer.analyze_select(sql_query)
-            if not columns:
-                continue
-
-            for rule, message in _structural_diagnostics(
-                type_name, type_info, columns, rule_config
-            ):
-                if rule_config.is_enabled(rule):
-                    diagnostics.append(
-                        {
-                            "rule": rule,
-                            "message": message,
-                            "severity": rule_config.severity(rule).value,
-                            "line": i,
-                        }
-                    )
-    finally:
-        if schema_path and schema_path.exists():
-            schema_path.unlink(missing_ok=True)
-
+    for line, name, query in user_queries:
+        if query is None:
+            continue
+        try:
+            columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
+        except RuntimeError:
+            continue
+        if not columns:
+            continue
+        for rule, message in _structural_diagnostics(name, type_defs[name], columns, rule_config):
+            if rule_config.is_enabled(rule):
+                diagnostics.append(
+                    {
+                        "rule": rule,
+                        "message": message,
+                        "severity": rule_config.severity(rule).value,
+                        "line": line,
+                    }
+                )
     return diagnostics
 
 
@@ -458,23 +216,14 @@ def _structural_diagnostics(
     )
 
 
-def _strip_sql_prefix(sql_content: str) -> str:
-    """Strip --sql prefix from SQL content to get the actual SQL query."""
-    if sql_content.startswith("--sql\\n"):
-        return sql_content[7:].strip()
-    if sql_content.startswith("--sql "):
-        return sql_content[6:].strip()
-    if sql_content.startswith("--sql\n"):
-        return sql_content[6:].strip()
-    if sql_content.startswith("--sql"):
-        return sql_content[5:].strip()
-    return sql_content
-
-
 __all__ = [
+    "ColumnInfo",
+    "analyze_select",
     "check_source",
     "expand_star",
+    "fix_source",
     "infer_type",
+    "returns_rows",
     "rewrite_source",
     "strip_source",
 ]
