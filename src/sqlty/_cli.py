@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- rewrite ---
     rewrite_parser = subparsers.add_parser(
         "rewrite",
-        help='Rewrite "--sql ..." strings into SQL[T]("--sql ...") calls',
+        help='Rewrite "--sql\\n..." strings into SQL[T]("--sql\\n...") calls',
     )
     _add_common_args(rewrite_parser)
     rewrite_parser.add_argument(
@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- strip ---
     strip_parser = subparsers.add_parser(
         "strip",
-        help='Strip SQL[T]("--sql ...") wrappers back to plain "--sql ..." strings',
+        help='Strip SQL[T]("--sql\\n...") wrappers back to plain strings',
     )
     _add_common_args(strip_parser)
     strip_parser.add_argument(

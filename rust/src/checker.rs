@@ -51,7 +51,7 @@ static INLINE_SQL_COMMENT_IN_LINE: Lazy<Regex> =
 pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
-/// Build a regex to extract SQL content from `{wrapper_name}[T]("--sql ...")`.
+/// Build a regex to extract SQL content from `{wrapper_name}[T]("--sql\n...")`.
 fn build_sql_content_pattern(wrapper_name: &str) -> Regex {
     let escaped = regex::escape(wrapper_name);
     Regex::new(&format!(
