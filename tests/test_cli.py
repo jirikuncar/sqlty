@@ -69,6 +69,7 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
         'star = SQL[tuple[int, str]]("--sql\\nSELECT * FROM users")\n'
         'new = "--sql\\nSELECT name FROM users"\n'
         'bad = "--sql SELECT id FROM users"\n'
+        'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
     )
     monkeypatch.chdir(tmp_path)
 
@@ -79,10 +80,11 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
         'stale = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
         'star = SQL[tuple[int, str]]("--sql\\nSELECT id::INT, name::TEXT FROM users")\n'
         'new = SQL[tuple[str]]("--sql\\nSELECT name FROM users")\n'
-        'bad = "--sql SELECT id FROM users"\n'
+        'bad = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+        'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
     )
     out = capsys.readouterr().out
-    assert out.startswith("q.py:5: [inline-sql-comment]")
+    assert out.startswith("q.py:6: [fstring-skipped]")
     assert "Fixed 1 file(s)" in out
 
 

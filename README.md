@@ -89,7 +89,7 @@ error[column-count-mismatch]: User has 3 fields but query returns 2 columns
 warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
 ```
 
-`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors:
+`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors.:
 
 ```python
 from typing import NotRequired, ReadOnly, TypedDict
@@ -104,6 +104,24 @@ query = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, ratio::FLOAT FROM
 ```
 
 Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.
+
+### TypedDict inheritance
+
+Subclasses must respect a base's openness (PEP 728). A closed base admits no new keys, `extra_items`, or `closed=False`. A base with mutable `extra_items` must be kept exactly: no `closed=True`, `extra_items=Never`, `ReadOnly` or other type, and new keys must be `NotRequired` and of that type. A base with `ReadOnly` `extra_items` may be narrowed or closed, and new keys must be assignable to it. Keys a sibling base brings in count as new. Violations are `typeddict-inheritance` errors on the subclass's `class` line; a rejected override keeps the base's openness. Only same-file bases spelled as bare names (not generic or imported) are checked, and types are compared only when the answer is certain (plain classes and their unions):
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Base(TypedDict, closed=True):
+    id: int
+
+# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
+class User(Base):
+    name: str
+
+query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
 
 ## psycopg3 Integration
 
@@ -178,8 +196,8 @@ Import-time transformation — no `sqlty rewrite` step needed:
 
 ```python
 # coding: sqlty
+
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: # coding: sqlty
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
@@ -214,9 +232,19 @@ and the catch-all `(query: str)` overload returns `SQL[UNTYPED]` (or the
 function's `return_type_template` applied to `UNTYPED`) instead of `str`, so
 a call missing from a stale stub is a type error rather than silently untyped.
 
+Typed overloads that overlap the `SQL[UNTYPED]` catch-all carry a per-line
+`# type: ignore[overload-overlap]`, so other overlaps in the stub are still
+reported. pyright reports only the first such overlap per catch-all, so with
+`reportUnnecessaryTypeIgnoreComment` enabled it flags the remaining ignores;
+with `enableTypeIgnoreComments = false` it reports the overlaps instead.
+Incremental stub updates add new overloads and replace existing ones whose
+return type changed (including hand edits), so switching `untyped` mode
+rewrites `SQL[Any]`/`SQL[UNTYPED]` overloads on the next update; until then
+a stub check reports them as stale.
+
 ## Lint Rules
 
-`sqlty check` runs [12 rules](docs/rules.md) and `sqlty check --fix` applies the
+`sqlty check` runs [13 rules](docs/reference/rules.md) and `sqlty check --fix` applies the
 fixable ones; `sqlty rule NAME` explains one.
 Configure severities in `pyproject.toml`:
 
@@ -258,10 +286,10 @@ This README and everything under `docs/` run the same way.
 
 ## Documentation
 
-- **[Documentation](docs/index.md)** — guide, rules and reference, all tested
-- **[Quick Start](docs/guide/quick-start.md)** — write, rewrite, check, strip
-- **[Configuration](docs/guide/configuration.md)** — `[tool.sqlty]`, dialects, severities, pre-commit
-- **[Lint Rules](docs/rules.md)** — one page per rule
+- **[Overview](docs/index.md)** — what sqlty does, with links to the guide
+- **[Reference](docs/reference/cli.md)** — CLI, configuration, lint rules, Python API, backends
+- **[Quickstart](docs/quickstart.md)** — rewrite/check/strip, pre-commit
+- **[Schema Inference](docs/guide/schema-inference.md)** — schemas and dialects
 
 ## Contributing
 

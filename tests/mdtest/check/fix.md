@@ -276,3 +276,15 @@ missing = UNTYPED
 # fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: missing = UNTYPED
 ```
+
+## Space after the marker becomes a newline
+
+```python
+q = "--sql SELECT id::INTEGER FROM users"
+r = r'--sql SELECT name::TEXT FROM users'
+s = f"--sql SELECT {column} FROM users"
+# fixed: from sqlty import SQL
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: r = r'--sql SELECT name::TEXT FROM users'
+# fixed: s = f"--sql SELECT {column} FROM users"
+```

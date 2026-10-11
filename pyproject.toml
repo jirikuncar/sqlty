@@ -28,11 +28,11 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["sqlglot>=27.29.0", "asttokens>=3.0.0"]
+dependencies = ["sqlglot>=27.29.0,<31", "asttokens>=3.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"
-Documentation = "https://github.com/jirikuncar/sqlty#readme"
+Documentation = "https://jirikuncar.github.io/sqlty/"
 Repository = "https://github.com/jirikuncar/sqlty"
 Changelog = "https://github.com/jirikuncar/sqlty/releases"
 Issues = "https://github.com/jirikuncar/sqlty/issues"

@@ -30,9 +30,6 @@ def _corpus(kind: str) -> list[Any]:
     params = []
     for md in [*MARKDOWN, ROOT / "README.md"]:
         for section in parse(md):
-            text = section.query if kind == "sql" else section.code.text
-            if not text:
-                continue
             settings = section.settings
             options = {
                 "dialect": settings.get("dialect", "postgres"),
@@ -40,7 +37,10 @@ def _corpus(kind: str) -> list[Any]:
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
             }
-            params.append(pytest.param(text, options, id=f"{md.relative_to(ROOT)}::{section.name}"))
+            units = [u for u in section.units if u.lang == kind]
+            for i, unit in enumerate(units):
+                name = f"{md.relative_to(ROOT)}::{section.name}" + (f"::{i}" if i else "")
+                params.append(pytest.param(unit.code.text, options, id=name))
     return params
 
 

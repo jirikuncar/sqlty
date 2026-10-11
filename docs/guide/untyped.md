@@ -1,60 +1,78 @@
-# Untyped Queries
+# Untyped queries
 
-Some queries return rows sqlty can't type: `VALUES`, unparseable SQL, unknown
-functions. By default rewrite leaves them as plain strings. With
-`untyped = "sentinel"` (or `sqlty rewrite --untyped sentinel`) they are
-wrapped as `SQL[UNTYPED](...)` instead.
-
-## Default: left as strings
+Some queries return rows whose type sqlty cannot infer: `VALUES` lists and
+`SELECT` statements sqlty cannot parse. By default `sqlty rewrite` leaves
+them as plain strings, so nothing marks them as untyped:
 
 ```python
-q = "--sql\nVALUES (1, 2)"
-# rewritten: q = "--sql\nVALUES (1, 2)"
+pairs = "--sql\nVALUES (1, 2)"
+# rewritten: pairs = "--sql\nVALUES (1, 2)"
 ```
 
-## Sentinel
+## The `UNTYPED` sentinel
+
+Set `untyped = "sentinel"` to wrap them as `SQL[UNTYPED](...)` instead:
 
 ```toml
 [tool.sqlty]
-untyped = "sentinel"
+untyped = "sentinel"  # or: sqlty rewrite --untyped sentinel
 ```
 
 ```python
-q = "--sql\nVALUES (1, 2)"
+pairs = "--sql\nVALUES (1, 2)"
+users = "--sql\nSELECT id::INTEGER FROM users"
 # rewritten-file: from sqlty import SQL
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# rewritten-file: pairs = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# rewritten-file: users = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
-
-### Statements without rows
-
-DDL and DML without `RETURNING` return no rows and stay unwrapped:
-
-```python
-ddl = "--sql\nCREATE TABLE t (id INTEGER)"
-# rewritten: ddl = "--sql\nCREATE TABLE t (id INTEGER)"
-```
-
-## Checking
 
 `UNTYPED` is a [PEP 661](https://peps.python.org/pep-0661/) sentinel, not
-`Any`: mypy, pyright and ty reject using its rows as a concrete type.
-`sqlty check` reports it until casts or a schema make the row type known, and
-says when that has happened:
+`Any`. mypy, pyright and ty reject using an `UNTYPED` row as a concrete type,
+so code that relies on the row's shape fails type checking until the query is
+typed.
+
+## Statements without rows
+
+Statements that return no rows stay plain strings in both modes: DML without
+`RETURNING`, DDL and transaction control. So does the `"--sql SELECT ..."`
+form, which is a SQL comment.
 
 ```python
-from sqlty import SQL, UNTYPED
-
-# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-unknown = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
-known = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
+purge = "--sql\nDELETE FROM users WHERE id = 1"
+table = "--sql\nCREATE TABLE users (id INTEGER)"
+deleted = "--sql\nDELETE FROM users RETURNING id::INTEGER"
+# rewritten: purge = "--sql\nDELETE FROM users WHERE id = 1"
+# rewritten: table = "--sql\nCREATE TABLE users (id INTEGER)"
+# rewritten: deleted = SQL[tuple[int]]("--sql\nDELETE FROM users RETURNING id::INTEGER")
 ```
+
+`sqlty check` reports these unwrapped strings as
+[`stale-rewrite`](../reference/rules.md#stale-rewrite) warnings, even though
+`rewrite` will not wrap them.
+
+## The `untyped-query` rule
+
+`sqlty check` reports every `SQL[UNTYPED]` query as
+[`untyped-query`](../reference/rules.md#untyped-query) (warning by default).
+Once casts or a schema make the type known, the message names it:
+
+```python
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+pairs = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+```
+
+```python
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
+users = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
+```
+
+`sqlty rewrite` does not replace an existing wrapper; `sqlty check --fix`
+does. See [Editing queries](writing-queries.md#editing-queries).
 
 ## Generated stubs
 
-The setting also applies to `.pyi` stubs generated for `@sqlty` functions
-(`SQLTY_AUTO_GENERATE=1`): uninferable queries get a `SQL[UNTYPED]` overload,
-and the catch-all `(query: str)` overload returns `SQL[UNTYPED]` (or the
-function's `return_type_template` applied to `UNTYPED`) instead of `str`, so
-a call missing from a stale stub is a type error rather than silently untyped.
+The same setting applies to the [`.pyi` stubs](stubs.md) generated for
+`@sqlty` helpers: uninferable queries get a `SQL[UNTYPED]` overload, and the
+catch-all `(query: str)` overload returns `SQL[UNTYPED]` instead of `str`.
+See [Generated stubs](stubs.md#untyped-calls).

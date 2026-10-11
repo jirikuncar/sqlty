@@ -162,8 +162,25 @@ def test_literate_blocks_concatenate(tmp_path: Path) -> None:
         "# rewritten:\n```\n",
     )
     (section,) = parse(path)
-    assert section.code.text == 'x = 1\nq = "--sql\\nSELECT 1::INTEGER"'
-    assert section.code.md_lines == [4, 10]
+    (unit,) = section.units
+    assert unit.code.text == 'x = 1\nq = "--sql\\nSELECT 1::INTEGER"'
+    assert unit.code.md_lines == [4, 10]
+
+
+def test_units_end_at_their_assertions(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "## A\n\n```py\nsetup = 1\n```\n\n```py\na = 1\n# stripped:\n```\n\n"
+        "```py\nafter = 1\n```\n\n```py\nb = 1\n# stripped:\n```\n\n"
+        "```sql\nSELECT 1\n-- inferred:\n```\n\n```sql\nSELECT 2\n-- inferred:\n```\n",
+    )
+    (section,) = parse(path)
+    assert [(u.lang, u.code.text) for u in section.units] == [
+        ("python", "setup = 1\na = 1"),
+        ("python", "after = 1\nb = 1"),
+        ("sql", "SELECT 1"),
+        ("sql", "SELECT 2"),
+    ]
 
 
 def test_config_and_files_are_inherited(tmp_path: Path) -> None:

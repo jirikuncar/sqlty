@@ -1,6 +1,6 @@
 # Configuration
 
-Runnable project for [configuration](../../docs/guide/configuration.md). `pyproject.toml` sets the dialect, the schema and rule severities.
+Runnable project for [configuration](../../docs/reference/configuration.md). `pyproject.toml` sets the dialect, the schema and rule severities.
 
 ```bash
 cd examples/03_pyproject_config

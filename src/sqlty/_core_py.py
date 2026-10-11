@@ -131,7 +131,8 @@ def check_source(
     - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
     - Interpolated strings (fstring-skipped, tstring-skipped) — f"--sql ..." is never rewritten
 
-    User-defined types (``SQL[UserType]``) are skipped here; ``sqlty.core.check_source``
+    User-defined types (``SQL[UserType]``: the ``column-*``, ``typeddict-key-mismatch``
+    and ``typeddict-inheritance`` rules) are skipped here; ``sqlty.core.check_source``
     validates them on top of either backend.
 
     Args:

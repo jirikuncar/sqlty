@@ -38,9 +38,18 @@ the conflict without rewriting remote history. No exceptions.
 uv run pre-commit run --all-files
 ```
 
-This runs mypy, ty, ruff (lint + format), trailing whitespace fixes, and other
-checks defined in `.pre-commit-config.yaml`. Fix all errors before creating
-a commit.
+Hooks defined in `.pre-commit-config.yaml`:
+
+- mypy and ty on `src/`
+- `sqlty check` on `examples/`; `sqlty rewrite` in place on `examples/`
+  (except `magic_codec/`)
+- `cargo fmt --check` on `rust/` (requires `cargo`)
+- ruff (lint + format) and uv-lock
+- standard file checks (trailing whitespace, YAML/TOML/JSON syntax, etc.)
+
+CI's Lint job additionally runs `make typecheck-examples` and `cargo clippy`,
+so a clean local pre-commit does not guarantee a green Lint job. Fix all
+errors before creating a commit.
 
 ## The `--sql\n` convention
 
@@ -73,7 +82,7 @@ Every new feature, bug fix, or behavior change **must** have an mdtest. The
 format follows [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md);
 the plugin is `tests/_mdtest/`, and `mdtest_paths` in `pyproject.toml` lists
 the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
-(user docs), `src/sqlty/rules/` (one page per lint rule, printed by
+(user docs, also the Zensical site), `src/sqlty/rules/` (one page per lint rule, printed by
 `sqlty rule NAME`). Every test runs through `sqlty.core` on each backend:
 `name[py]`, `name[rs]`.
 
@@ -98,7 +107,9 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 - Setup is inherited by nested headings, code is not: an unlabelled `toml`
   block is `[tool.sqlty]` config (unknown keys and rules are errors); a
   `` `schema.sql`: `` label before a block makes it a file.
-- Python blocks in one test concatenate; prose may sit between them.
+- Each block with assertions is checked on its own, together with the
+  assertion-free python blocks right before it (literate setup); later
+  blocks are not part of it. Prose may sit between blocks.
 - Other languages (`bash`, `text`, ...) and blocks tagged ```` ```python ignore ````
   are prose.
 - Directives: `<!-- mdtest:skip reason -->`, `<!-- mdtest:xfail reason -->`,
@@ -141,7 +152,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
 | `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
-| `# decoded:` | `python`, whole code | magic codec `decode()` without imports |
+| `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
 | `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 
 - Consecutive comments of one kind form a multi-line value.
@@ -195,9 +206,10 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 - README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency, round trip and backend agreement
   over every mdtest code block: new mdtests extend it automatically.
-- `docs/rules.md` and `docs/reference/cli.md` are generated; `tests/test_docs.py`
-  checks them, relative links, and that `examples/` need no rewrite. Regenerate
-  with `uv run pytest tests/test_docs.py --update-mdtest`.
+- `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
+  matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
+  relative links resolve, that `examples/` need no rewrite, and runs the
+  `>>>` examples in `docs/reference/python-api.md`.
 - Focus on **motivated examples** — show the problem first, then the solution.
 - Always show complete working code, not snippets.
 

@@ -1,6 +1,6 @@
 # Import Style
 
-Runnable project for [import style](../../docs/guide/import-style.md). `pyproject.toml` sets `import-style`, so queries are wrapped as `Q[T](...)`.
+Runnable project for [import style](../../docs/reference/configuration.md). `pyproject.toml` sets `import-style`, so queries are wrapped as `Q[T](...)`.
 
 ```bash
 cd examples/05_import_style

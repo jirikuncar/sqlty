@@ -13,6 +13,8 @@ from sqlty._lint import RuleConfig
 from sqlty._rewriter import ImportStyle, _has_import, _header_end, _is_sqlty_managed, _query
 
 _QUOTES = ('"""', "'''", '"', "'")
+# ``"--sql SELECT ..."`` opening a plain string literal; raw, f- and t-strings are left alone.
+_INLINE_SQL_COMMENT = re.compile(r"""(?<!\w)([uU]?(?:\"\"\"|'''|"|'))--sql (?=\S)""")
 
 
 def fix_source(
@@ -24,7 +26,8 @@ def fix_source(
     untyped: bool = False,
     rules: dict[str, str] | None = None,
 ) -> str:
-    """Fix ``stale-rewrite``, ``select-star``, ``stale-type`` and ``untyped-query``.
+    """Fix ``inline-sql-comment``, ``stale-rewrite``, ``select-star``, ``stale-type`` and
+    ``untyped-query``.
 
     Example:
         >>> fix_source('from sqlty import SQL\\nq = SQL[tuple[str]]("--sql\\\\nSELECT 1::INTEGER")')
@@ -34,6 +37,8 @@ def fix_source(
 
     enabled = RuleConfig(overrides=rules).is_enabled
     style = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
+    if enabled("inline-sql-comment"):
+        source = _INLINE_SQL_COMMENT.sub(r"\1--sql\\n", source)
     if enabled("stale-rewrite"):
         source = core.rewrite_source(
             source,

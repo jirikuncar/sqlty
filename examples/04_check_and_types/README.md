@@ -1,6 +1,6 @@
 # User-Defined Row Types
 
-Runnable project for [user-defined row types](../../docs/guide/user-types.md). `queries.py` annotates a query with a `TypedDict` that `sqlty check` validates.
+Runnable project for [user-defined row types](../../docs/guide/row-types.md). `queries.py` annotates a query with a `TypedDict` that `sqlty check` validates.
 
 ```bash
 cd examples/04_check_and_types

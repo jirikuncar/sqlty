@@ -3,7 +3,7 @@
 Each section with assertions is an item, run once per available backend
 when it touches ``sqlty.core``::
 
-    uv run pytest docs/guide/user-types.md
+    uv run pytest docs/guide/row-types.md
     uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch[rs]'
     uv run pytest tests/mdtest --update-mdtest
 """

@@ -1,57 +1,92 @@
-# Magic Codec
+# Magic codec
 
-The `sqlty` source codec rewrites `--sql` strings when a module is imported,
-so there is no `sqlty rewrite` step. Useful while prototyping; commit
-rewritten files for type checkers, which never run the codec. Runnable
-example: [`examples/magic_codec/`](../../examples/magic_codec/).
+The magic codec rewrites `--sql` strings when Python reads a source file, so
+the module runs with `SQL[T](...)` wrappers without a `sqlty rewrite` step.
+It is meant for scripts, notebooks and prototypes. For code you commit, run
+[`sqlty rewrite`](../quickstart.md) so type checkers see the types too: they
+read the file on disk, not the decoded source.
 
 ## Usage
 
-Declare the codec on the first or second line of the module:
+Declare the `sqlty` source encoding on the first or second line of the file:
 
 ```python
 # coding: sqlty
+
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: # coding: sqlty
 # decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-Installing sqlty adds `sqlty_magic.pth` to `site-packages`, which registers
-the codec at interpreter startup; sqlty itself is imported only when a file
-declares it. `SQLTY_NO_MAGIC=1` disables the
-registration. Files without the declaration are not transformed.
-
-## Imports
-
-`datetime` and `uuid` imports are added when the row type needs them:
+The `# decoded:` line shows the code Python runs. The codec adds the imports
+the inferred types need (`from sqlty import SQL`, `import datetime`,
+`import uuid`):
 
 ```python
 # coding: sqlty
-q = "--sql\nSELECT created_at::TIMESTAMP, user_id::UUID FROM events"
-# decoded: # coding: sqlty
-# decoded:
-# decoded:
-# decoded: q = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, user_id::UUID FROM events")
+
+query = "--sql\nSELECT created_at::TIMESTAMP, token::UUID FROM sessions"
+# decoded: query = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, token::UUID FROM sessions")
 ```
 
-## Untypeable strings stay strings
+Strings the rewriter would leave alone stay unchanged: invalid SQL, DML
+without `RETURNING`, DDL, empty queries and f-/t-strings.
 
 ```python
 # coding: sqlty
-ddl = "--sql\nCREATE TABLE t (id INTEGER)"
-plain = "SELECT 1"
-# decoded: # coding: sqlty
-# decoded: ddl = "--sql\nCREATE TABLE t (id INTEGER)"
-# decoded: plain = "SELECT 1"
+
+purge = "--sql\nDELETE FROM sessions WHERE expired"
+# decoded: purge = "--sql\nDELETE FROM sessions WHERE expired"
 ```
 
-## Without registration
+## Registering the codec
 
-`sqlty._decode.decode` transforms bytes without touching the codec registry,
-and `python -m sqlty.magic module.py` prints a module as Python sees it.
+Python looks up the `sqlty` encoding when it compiles the file, so the codec
+must be registered first. Importing `sqlty.magic` registers it:
 
 ```python
-from sqlty._decode import decode
+import sqlty.magic  # noqa: F401  registers the "sqlty" codec
 
-source, _ = decode(b'q = "--sql\\nSELECT 1::INTEGER"')
+import queries  # queries.py starts with "# coding: sqlty"
 ```
+
+To register it for every interpreter start, add a `.pth` file containing
+`import sqlty.magic` to your environment's site-packages. The repository ships
+one as
+[`sqlty_magic.pth`](https://github.com/jirikuncar/sqlty/blob/main/sqlty_magic.pth);
+installing the package does not add it for you. Find the directory with:
+
+```bash
+python -c "import site; print(site.getsitepackages())"
+```
+
+Without registration, a file declaring `# coding: sqlty` fails with
+`SyntaxError: unknown encoding: sqlty`. Files without the declaration are
+never transformed, even with the codec registered.
+
+Set `SQLTY_NO_MAGIC` to any non-empty value (even `0`) before `sqlty.magic`
+is imported to skip registration, for example to turn a `.pth` hook off for
+one run:
+
+```bash
+SQLTY_NO_MAGIC=1 python script.py
+```
+
+## Inspecting the output
+
+Print the decoded source of a file without running it:
+
+```bash
+python -m sqlty.magic queries.py
+```
+
+## Configuration
+
+The codec uses the PostgreSQL dialect and no schema, so cast every column;
+an uncast column is typed `str`. It reads only `import-style` from the
+`pyproject.toml` found from the current working directory (see
+[Configuration](../reference/configuration.md#import-style)).
+
+## Example
+
+[`examples/magic_codec/`](https://github.com/jirikuncar/sqlty/tree/main/examples/magic_codec)
+contains a runnable module that uses the codec.

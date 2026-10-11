@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.15"
 
 [[package]]
@@ -501,7 +501,7 @@ psycopg = [
 requires-dist = [
     { name = "asttokens", specifier = ">=3.0.0" },
     { name = "psycopg", marker = "extra == 'psycopg'", specifier = ">=3.2.12" },
-    { name = "sqlglot", specifier = ">=27.29.0" },
+    { name = "sqlglot", specifier = ">=27.29.0,<31" },
 ]
 provides-extras = ["psycopg"]
 

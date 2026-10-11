@@ -13,10 +13,11 @@ import pytest
 
 import sqlty.core as core
 
-from .parser import Assertion, Kind, Section
+from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
 
 BACKENDS = {"py": "sqlty._core_py", "rs": "sqlty._core"}
+_CODING = re.compile(r"\A#.*coding[:=].*\n?")
 _ERROR_VALUE = re.compile(r'^(?:\[(?P<rule>[\w-]+)\])?\s*(?:"(?P<message>.*)")?$')
 
 
@@ -49,11 +50,18 @@ class Run:
 
     def run(self) -> None:
         failures: list[str] = []
-        errors = [a for a in self.section.assertions if a.kind == "error"]
-        for assertion in self.section.assertions:
+        for unit in self.section.units:
+            failures.extend(self._run_unit(unit))
+        if failures:
+            raise MDTestFailure("\n\n".join(failures))
+
+    def _run_unit(self, unit: Unit) -> list[str]:
+        failures: list[str] = []
+        errors = [a for a in unit.assertions if a.kind == "error"]
+        for assertion in unit.assertions:
             if assertion.kind == "error":
                 continue
-            actual = self.compute(assertion.kind)
+            actual = self.compute(assertion.kind, unit)
             if actual == assertion.expected:
                 continue
             if self.updater:
@@ -61,36 +69,31 @@ class Run:
             else:
                 failures.append(self._mismatch(assertion, actual))
         if errors:
-            failures.extend(self._check(errors))
-        if failures:
-            raise MDTestFailure("\n\n".join(failures))
+            failures.extend(self._check(errors, unit))
+        return failures
 
-    def compute(self, kind: Kind) -> str:
-        code = self.section.code.text
+    def compute(self, kind: Kind, unit: Unit) -> str:
+        text = unit.code.text
         match kind:
             case "inferred":
-                query = self.section.query
-                return str(core.infer_type(query, dialect=self.dialect, schema_sql=self.schema_sql))
+                return str(core.infer_type(text, dialect=self.dialect, schema_sql=self.schema_sql))
             case "expanded":
-                query = self.section.query
-                return str(
-                    core.expand_star(query, dialect=self.dialect, schema_sql=self.schema_sql)
-                )
+                return str(core.expand_star(text, dialect=self.dialect, schema_sql=self.schema_sql))
             case "columns":
                 from sqlty._core_py import _make_analyzer
 
                 analyzer = _make_analyzer(self.dialect, self.schema_sql)
-                columns = analyzer.analyze_select(self.section.query)
+                columns = analyzer.analyze_select(text)
                 if columns is None:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
             case "rewritten":
-                return _without_imports(self._rewritten, self._imports).strip()
+                return _without_imports(self._rewrite(text), self._imports).strip()
             case "rewritten-file":
-                return self._rewritten.strip()
+                return self._rewrite(text).strip()
             case "fixed":
                 return core.fix_source(
-                    code,
+                    text,
                     dialect=self.dialect,
                     schema_sql=self.schema_sql,
                     import_style=self.import_style,
@@ -98,18 +101,18 @@ class Run:
                     rules=self.rules,
                 ).strip()
             case "stripped":
-                return core.strip_source(code, import_style=self.import_style).strip()
+                return core.strip_source(text, import_style=self.import_style).strip()
             case "decoded":
                 from sqlty._decode import decode
 
-                return _without_imports(decode(code.encode())[0], self._imports).strip()
+                decoded = _without_imports(decode(text.encode())[0], self._imports).strip()
+                return _CODING.sub("", decoded, count=1).strip()
             case "error":
                 raise AssertionError("errors are matched per line")
 
-    @cached_property
-    def _rewritten(self) -> str:
+    def _rewrite(self, text: str) -> str:
         return core.rewrite_source(
-            self.section.code.text,
+            text,
             dialect=self.dialect,
             schema_sql=self.schema_sql,
             import_style=self.import_style,
@@ -124,8 +127,8 @@ class Run:
         extra = {style.untyped_import} if style.untyped_import else set()
         return {"import datetime", "import uuid", style.import_line, *extra}
 
-    def _check(self, assertions: list[Assertion]) -> list[str]:
-        code = self.section.code
+    def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
+        code = unit.code
         diagnostics = [
             (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))
             for d in core.check_source(

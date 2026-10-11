@@ -1,6 +1,6 @@
 # Quick Start
 
-Runnable project for [quick start](../../docs/guide/quick-start.md). `queries.py` holds queries with `::TYPE` casts, already rewritten.
+Runnable project for [quick start](../../docs/quickstart.md). `queries.py` holds queries with `::TYPE` casts, already rewritten.
 
 ```bash
 cd examples/01_quick_start

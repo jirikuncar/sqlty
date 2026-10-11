@@ -3,6 +3,10 @@
 A heading opens a section; sections with assertions are tests. Setup
 (``toml`` config and labelled files) is inherited by nested sections, code
 never is.
+
+Each code block with assertions is a unit: a ``sql`` block on its own, a
+``python`` block together with the assertion-free python blocks right before
+it (literate setup). Blocks after it are not part of it.
 """
 
 from __future__ import annotations
@@ -88,6 +92,17 @@ class Code:
 
 
 @dataclass
+class Unit:
+    lang: Literal["python", "sql"]
+    lines: list[tuple[int, str]]  # (md line, text), assertion comments removed
+    assertions: list[Assertion]
+
+    @property
+    def code(self) -> Code:
+        return Code("\n".join(t for _, t in self.lines), [n for n, _ in self.lines])
+
+
+@dataclass
 class Section:
     path: Path
     titles: list[str]
@@ -96,31 +111,25 @@ class Section:
     config: dict[str, Any] = field(default_factory=dict)
     files: dict[str, str] = field(default_factory=dict)
     directives: dict[str, str] = field(default_factory=dict)
-    python: list[tuple[int, str]] = field(default_factory=list)
-    sql: list[tuple[int, str]] = field(default_factory=list)
-    sql_blocks: int = 0
-    assertions: list[Assertion] = field(default_factory=list)
+    units: list[Unit] = field(default_factory=list)
+    setup: list[tuple[int, str]] = field(default_factory=list)  # python awaiting a unit
 
     @property
     def name(self) -> str:
         return " - ".join(self.titles[1:] or self.titles)
 
     @property
+    def assertions(self) -> list[Assertion]:
+        return [a for unit in self.units for a in unit.assertions]
+
+    @property
     def has_code(self) -> bool:
-        return bool(self.python or self.sql)
+        return bool(self.units or self.setup)
 
     @property
     def settings(self) -> dict[str, Any]:
         settings: dict[str, Any] = self.config.get("tool", {}).get("sqlty", {})
         return settings
-
-    @property
-    def code(self) -> Code:
-        return Code("\n".join(t for _, t in self.python), [n for n, _ in self.python])
-
-    @property
-    def query(self) -> str:
-        return "\n".join(t for _, t in self.sql)
 
     @property
     def uses_backend(self) -> bool:
@@ -216,11 +225,12 @@ def _add_block(
     elif lang == "python":
         _add_python(section, body, start, fail)
     elif lang == "sql":
-        section.sql_blocks += 1
         _add_sql(section, body, start)
 
 
 def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> None:
+    lines: list[tuple[int, str]] = []
+    assertions: list[Assertion] = []
     pending: list[Assertion] = []
     for offset, text in enumerate(body):
         md = start + offset
@@ -229,13 +239,13 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
             assertion = Assertion(cast(Kind, kind), (value or "").rstrip(), md, indent=indent)
             if kind == "error":
                 pending.append(assertion)
-            _append(section.assertions, assertion)
+            _append(assertions, assertion)
             continue
         if _MISPLACED.match(text):
             raise fail(md, f"write `-- {text.split()[1]}` inside the sql block")
         if match := _TRAILING_ERROR.match(text):
             code, value = match.groups()
-            section.assertions.append(
+            assertions.append(
                 Assertion("error", (value or "").rstrip(), md, target=md, trailing=True)
             )
             text = code
@@ -243,18 +253,28 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
             for a in pending:
                 a.target = md
             pending.clear()
-        section.python.append((md, text))
+        lines.append((md, text))
     for a in pending:
         if a.expected:
             raise fail(a.line, "`# error:` has no code line below it")
+    if not assertions:
+        section.setup.extend(lines)
+        return
+    unit = Unit("python", [*section.setup, *lines], assertions)
+    if not any(text.strip() for _, text in unit.lines):
+        raise fail(start, "python assertions need code")
+    section.units.append(unit)
+    section.setup = []
 
 
 def _add_sql(section: Section, body: list[str], start: int) -> None:
+    lines: list[tuple[int, str]] = []
+    assertions: list[Assertion] = []
     for offset, text in enumerate(body):
         if match := _SQL_ASSERTION.match(text):
             indent, kind, value = match.groups()
             _append(
-                section.assertions,
+                assertions,
                 Assertion(
                     cast(Kind, kind),
                     (value or "").rstrip(),
@@ -264,7 +284,9 @@ def _add_sql(section: Section, body: list[str], start: int) -> None:
                 ),
             )
         else:
-            section.sql.append((start + offset, text))
+            lines.append((start + offset, text))
+    if assertions:
+        section.units.append(Unit("sql", lines, assertions))
 
 
 def _append(assertions: list[Assertion], new: Assertion) -> None:
@@ -302,11 +324,6 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
 
 
 def _validate(section: Section, fail: Fail) -> None:
-    kinds = {a.kind for a in section.assertions}
-    if kinds & set(SQL_KINDS) and section.sql_blocks != 1:
-        raise fail(section.line, "sql assertions need exactly one sql block")
-    if kinds & set(PY_KINDS) and not section.python:
-        raise fail(section.line, "python assertions need a python block")
     schema = section.settings.get("schema")
     if schema is not None and schema not in section.files:
         raise fail(section.line, f"schema {schema!r} has no `{schema}`: block")

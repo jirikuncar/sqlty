@@ -6,7 +6,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 
 - Python 3.15+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) (optional — for compiling the native extension)
+- [Rust toolchain](https://rustup.rs/) (needed for the native extension and the `cargo-fmt` pre-commit hook)
 
 ## Setup
 
@@ -24,11 +24,8 @@ SQLTy includes an optional Rust extension (`sqlty._core`) for faster type infere
 When not compiled, the pure-Python fallback (`sqlty._core_py`) is used automatically.
 
 ```bash
-# Install maturin
-pip install maturin
-
-# Build and install the Rust extension into your venv
-maturin develop
+# maturin is installed by `uv sync --all-groups`
+uv run maturin develop
 ```
 
 To verify the Rust extension is loaded:
@@ -50,8 +47,9 @@ This ensures code is formatted and checked before each commit.
 - **Standard checks**: AST validation, YAML/TOML/JSON syntax, merge conflicts, trailing whitespace
 - **Ruff**: Code formatting and linting with automatic fixes
 - **uv-lock**: Keeps the lockfile up to date
-- **mypy**: Type checking for the src directory
-- **sqlty-examples**: Verify example files
+- **mypy** and **ty**: Type checking for `src/`
+- **sqlty-check** / **sqlty-rewrite**: lint `examples/` and rewrite their `--sql` strings in place (`magic_codec/` excluded)
+- **cargo-fmt**: `cargo fmt --check` for the Rust backend (requires `cargo`)
 
 To manually run all pre-commit hooks:
 
@@ -61,20 +59,21 @@ uv run pre-commit run --all-files
 
 ## Running Tests
 
-SQLTy has three test layers:
+SQLTy has four test layers:
 
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
 | **Unit** | `tests/test_core_invariants.py`, `tests/generator/`, etc. | Invariants over the mdtest corpus, backend parity, stubs | `pytest` |
 | **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint — on both backends | `tests/_mdtest` plugin |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
+| **Docs** | `README.md`, `docs/**/*.md` | Code examples in user docs | `tests/test_docs.py` (mdtest engine) |
 
 ### Make targets
 
 ```bash
 make test           # Run all tests (unit + mdtest + e2e)
 make test-unit      # Unit tests only (no e2e, no mdtest)
-make test-mdtest    # Mdtest suite only
+make test-mdtest    # Mdtest suite + docs tests
 make test-e2e       # End-to-end tests only
 make test-coverage  # All tests with coverage report
 make update-mdtest  # Update mdtest assertions with actual values
@@ -186,6 +185,36 @@ Run Rust unit tests independently:
 cargo test --manifest-path rust/Cargo.toml
 ```
 
+### Magic codec internals
+
+User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).
+
+| File | Role |
+|------|------|
+| `src/sqlty/_decode.py` | Pure decode logic, no side effects; delegates inference to `SQLRewriter` |
+| `src/sqlty/_rewriter.py` | Source-level rewrite/strip engine shared with the CLI |
+| `src/sqlty/magic.py` | Codec registration (skipped when `SQLTY_NO_MAGIC` is set) and `python -m sqlty.magic` |
+| `sqlty_magic.pth` | `import sqlty.magic` hook for site-packages; not included in the wheel |
+| `tests/mdtest/codec/` | Snapshot tests for `decode()` |
+| `tests/test_magic*.py`, `tests/e2e/test_magic_codec_e2e.py` | Integration and end-to-end tests |
+
+How it works:
+
+1. Importing `sqlty.magic` registers a codec search function for `sqlty`
+   (and for UTF-8 aliases, which has no effect in practice: CPython decodes
+   UTF-8 source without a codec lookup).
+2. When Python compiles a file declaring `# coding: sqlty`, it calls
+   `decode()` on the raw bytes.
+3. `decode()` tokenizes the source, infers a row type for each `--sql` string
+   with `SQLRewriter`, wraps it in `SQL[T](...)` and adds the needed imports
+   (placed with isort when it is installed, otherwise prepended). On any
+   error it returns the source unchanged.
+4. Python compiles the transformed text.
+
+Python caches codec lookups, so registration must happen before the first
+file declaring `# coding: sqlty` is compiled. Use `sqlty._decode.decode`
+directly when you need the transformation without registering the codec.
+
 ### Test modules
 
 | Module | Purpose |
@@ -193,6 +222,23 @@ cargo test --manifest-path rust/Cargo.toml
 | `tests/_mdtest/` | mdtest plugin: parser, runner over `sqlty.core`, `--update-mdtest` |
 | `tests/conftest.py` | `core` fixture parametrised by backend |
 | `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
+
+## Documentation Site
+
+The site at <https://jirikuncar.github.io/sqlty/> is built from `docs/` with
+[Zensical](https://zensical.org/) (configured in `zensical.toml`). Zensical is
+not a project dependency; the Make targets run a pinned version via `uvx`.
+The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
+
+```bash
+make docs        # strict build into site/ (fails on broken links or anchors)
+make docs-serve  # live preview at http://localhost:8000/sqlty/
+```
+
+Add new pages to `nav` in `zensical.toml`. CI builds the site on pull requests
+touching the docs and deploys it to GitHub Pages on push to `main`. One-time
+setup: in the repository Settings > Pages, set Source to "GitHub Actions";
+otherwise the first deploy fails.
 
 ## Contributing
 
@@ -228,7 +274,7 @@ cargo test --manifest-path rust/Cargo.toml
 
 ## Getting Help
 
-- **Documentation**: See [docs/](docs/)
+- **Documentation**: <https://jirikuncar.github.io/sqlty/> (sources in [docs/](docs/))
 - **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/jirikuncar/sqlty/issues)
 
 ## License

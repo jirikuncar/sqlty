@@ -90,6 +90,34 @@ SELECT tags::INT[], metadata::JSON, extra::JSONB FROM t
 -- inferred: tuple[list, dict, dict]
 ```
 
+## Fixed-size array casts
+
+PostgreSQL reads `x::INT[3]` as a cast (the size is ignored), not as a subscript.
+
+```sql
+SELECT a::INT[3], b::TEXT[2][2], c::INT ARRAY[3] FROM t
+-- inferred: tuple[list, list, list]
+```
+
+## Bare ARRAY cast is invalid
+
+PostgreSQL needs an element type: `INT[]` or `INT ARRAY`, never plain `ARRAY`.
+
+```sql
+SELECT tags::ARRAY FROM t
+-- inferred: None
+```
+
+## MySQL-only types are invalid
+
+This file uses the default PostgreSQL dialect. Outside MySQL, `SET(...)` and
+`UNSIGNED INTEGER` are parse errors, so nothing is inferred.
+
+```sql
+SELECT CAST(flags AS SET('x', 'y')), CAST(n AS UNSIGNED INTEGER) FROM t
+-- inferred: None
+```
+
 ## All 27 types in one query
 
 Proves every mapped type is exercised:
