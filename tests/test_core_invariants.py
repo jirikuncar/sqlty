@@ -138,3 +138,12 @@ def test_infer_type_latency() -> None:
 def test_unsupported_import_style_raises(name: str) -> None:
     with pytest.raises(ValueError, match="Unsupported import-style: 'from x import SQL'"):
         getattr(core, name)('q = "--sql\\nSELECT 1"', import_style="from x import SQL")
+
+
+def test_user_type_check_skips_unknown_sum_column() -> None:
+    source = (
+        "from typing import NamedTuple\nfrom sqlty import SQL\n"
+        "class Row(NamedTuple):\n    total: float\n"
+        'q = SQL[Row]("--sql\\nSELECT SUM(nope) AS total FROM users")\n'
+    )
+    assert core.check_source(source, schema_sql="CREATE TABLE users (id INT);") == []

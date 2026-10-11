@@ -242,3 +242,22 @@ def test_decoded_coding_declaration_is_utf8():
     assert text == (
         '# coding: utf-8\nfrom sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
     )
+
+
+def test_decoded_coding_declaration_on_line_two():
+    from sqlty._decode import decode
+
+    text, _ = decode(b'#!/usr/bin/env python\n# -*- coding: sqlty -*-\nq = "--sql\\nSELECT 1"\n')
+    assert text.splitlines()[:3] == [
+        "#!/usr/bin/env python",
+        "# -*- coding: utf-8 -*-",
+        "from sqlty import SQL",
+    ]
+
+
+def test_decode_keeps_source_on_bad_import_style(monkeypatch: pytest.MonkeyPatch):
+    from sqlty import _decode
+
+    monkeypatch.setattr(_decode, "_import_style", lambda: "from x import SQL")
+    source = b'q = "--sql\\nSELECT 1"\n'
+    assert _decode.decode(source)[0] == source.decode()

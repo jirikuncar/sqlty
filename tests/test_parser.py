@@ -147,14 +147,36 @@ def _type_table() -> dict[str, str]:
 @pytest.mark.parametrize("dialect", ["postgres", "mysql", "sqlite"])
 @pytest.mark.parametrize(("sql_type", "python_type"), sorted(_type_table().items()))
 def test_type_names(sql_type: str, python_type: str, dialect: str):
-    """A mapped type name, cast or in a schema, is its Python type or not read at all."""
+    """A mapped type name, cast or in a schema, is its Python type.
+
+    A bare ``ARRAY`` needs an element type, so the cast doesn't parse and the
+    schema table is skipped.
+    """
     schema = f"CREATE TABLE t (c {sql_type});"
-    expected = {None, f"tuple[{python_type}]"}
-    assert core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect) in expected
-    assert core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema) in {
-        *expected,
-        "tuple[str]",
-    }
+    cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
+    column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
+    if sql_type == "ARRAY":
+        assert (cast, column) == (None, "tuple[str]")
+    else:
+        assert cast == column == f"tuple[{python_type}]"
+        expanded = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
+        assert expanded is not None and expanded.startswith("SELECT c::")
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT 1", True),
+        ("DELETE FROM t RETURNING id", True),
+        ("DELETE FROM t", False),
+        ("CREATE TABLE t (a INT)", False),
+        ("NOT VALID SQL", True),
+        ("", False),
+        ("SELECT id FROM t WHERE id = ?", True),
+    ],
+)
+def test_returns_rows(sql: str, expected: bool):
+    assert core.returns_rows(sql) is expected
 
 
 @pytest.mark.parametrize("imports", ["", "import not_installed\n"])

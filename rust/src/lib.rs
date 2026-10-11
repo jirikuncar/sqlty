@@ -6,6 +6,7 @@ mod fixer;
 mod rewriter;
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -15,8 +16,20 @@ use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 
+/// The last schema loaded, as `(schema_sql, dialect, schema)`: callers pass the same one per query.
+static LAST_SCHEMA: Mutex<Option<(String, String, analyzer::Schema)>> = Mutex::new(None);
+
 fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
-    schema_sql.map(|s| analyzer::load_schema(s, dialect))
+    let schema_sql = schema_sql?;
+    let mut last = LAST_SCHEMA.lock().unwrap_or_else(|e| e.into_inner());
+    match last.as_ref() {
+        Some((sql, d, schema)) if sql == schema_sql && d == dialect => Some(schema.clone()),
+        _ => {
+            let schema = analyzer::load_schema(schema_sql, dialect);
+            *last = Some((schema_sql.to_string(), dialect.to_string(), schema.clone()));
+            Some(schema)
+        }
+    }
 }
 
 fn check_import_style(import_style: Option<&str>) -> PyResult<()> {

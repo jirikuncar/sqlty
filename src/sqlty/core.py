@@ -114,7 +114,10 @@ def check_source(
     for line, name, query in user_queries:
         if query is None:
             continue
-        columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
+        try:
+            columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
+        except RuntimeError:
+            continue
         if not columns:
             continue
         for rule, message in _structural_diagnostics(name, type_defs[name], columns, rule_config):

@@ -216,30 +216,38 @@ static QMARK: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
 });
 
-/// MySQL type spellings sqlparser rejects: `INT3`/`MIDDLEINT` before `UNSIGNED`, and `ZEROFILL`.
+/// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`), then
+/// `INT3`/`MIDDLEINT` before `UNSIGNED`.
 static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
     [
         (
-            Regex::new(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)").unwrap(),
-            "MEDIUMINT$1$2",
+            Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
+            " UNSIGNED",
         ),
         (
-            Regex::new(r"(?i)(?:\s+UNSIGNED)?\s+ZEROFILL\b").unwrap(),
-            " UNSIGNED",
+            Regex::new(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)").unwrap(),
+            "MEDIUMINT$1$2",
         ),
     ]
 });
 
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let mut sql = sql.to_string();
-    if dialect == SqlDialect::MySql {
-        for (pattern, replacement) in MYSQL_TYPE_FIXES.iter() {
-            sql = pattern.replace_all(&sql, *replacement).into_owned();
-        }
-    }
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), &sql).ok()?;
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+}
+
+/// Parse schema DDL, with the MySQL column types sqlparser rejects respelled.
+fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    if dialect != SqlDialect::MySql {
+        return parse(sql, dialect);
+    }
+    let sql = MYSQL_TYPE_FIXES
+        .iter()
+        .fold(sql.to_string(), |sql, (pattern, replacement)| {
+            pattern.replace_all(&sql, *replacement).into_owned()
+        });
+    parse(&sql, dialect)
 }
 
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
@@ -423,7 +431,7 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     let dialect = SqlDialect::from_name(dialect);
     schema_sql
         .split(';')
-        .filter_map(|stmt| parse(stmt.trim(), dialect)?.into_iter().next())
+        .filter_map(|stmt| parse_ddl(stmt.trim(), dialect)?.into_iter().next())
         .filter_map(|stmt| match stmt {
             Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
             _ => None,
@@ -629,7 +637,7 @@ const NAMED_FUNCTIONS: [&str; 7] = [
     "JSONB_OBJECT_AGG",
 ];
 
-/// Name of an unaliased result column: a column's name, a literal's text, `*` for
+/// Name of an unaliased result column: a column's name, a (signed) literal's text, `*` for
 /// `COUNT(*)`, the function's name for a call sqlty can't type; empty for anything else.
 fn column_name(expr: &Expr) -> String {
     match expr {
@@ -638,7 +646,8 @@ fn column_name(expr: &Expr) -> String {
             .last()
             .map(|part| part.value.clone())
             .unwrap_or_default(),
-        Expr::Cast { expr, .. } | Expr::UnaryOp { expr, .. } => column_name(expr),
+        Expr::Cast { expr, .. } => column_name(expr),
+        Expr::UnaryOp { expr, .. } if matches!(**expr, Expr::Value(_)) => column_name(expr),
         Expr::Extract { field, .. } => field.to_string(),
         Expr::Value(value) => match &value.value {
             Value::Number(number, _) => number.clone(),
@@ -1032,6 +1041,82 @@ mod tests {
         );
         // Schema DDL is not a query: a `%s` there is not a placeholder.
         assert!(load_schema("CREATE TABLE t (a INT DEFAULT %s)", "postgres").is_empty());
+    }
+
+    fn names(sql: &str) -> Vec<String> {
+        names_in(sql, "postgres")
+    }
+
+    #[test]
+    fn test_unaliased_names() {
+        assert_eq!(
+            names("SELECT NOT active, -n, -1, n::INT, COUNT(*), lower(x), f(x) FROM t"),
+            ["", "", "1", "n", "*", "", "f"]
+        );
+    }
+
+    #[test]
+    fn test_mysql_column_types() {
+        let schema = Some(load_schema(
+            "CREATE TABLE t (a INT3 ZEROFILL, b INT ZEROFILL UNSIGNED, \
+             c INT SIGNED ZEROFILL, d MIDDLEINT(8) UNSIGNED)",
+            "mysql",
+        ));
+        assert_eq!(
+            expand_star("SELECT * FROM t", "mysql", &schema).as_deref(),
+            Some("SELECT a::UMEDIUMINT, b::UINT, c::UINT, d::UMEDIUMINT(8) FROM t")
+        );
+        assert_eq!(
+            names_in("SELECT 1 zerofill", "mysql"),
+            ["zerofill"],
+            "queries are not respelled"
+        );
+    }
+
+    fn names_in(sql: &str, dialect: &str) -> Vec<String> {
+        analyze_select(sql, dialect, &None)
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|col| col.name)
+            .collect()
+    }
+
+    #[test]
+    fn test_question_mark_placeholders() {
+        assert_eq!(
+            infer("SELECT a::INT FROM t WHERE id = ? AND b ?| array['x']").as_deref(),
+            Some("tuple[int]")
+        );
+        assert_eq!(
+            infer("SELECT a::INT FROM t WHERE b ? 'x'").as_deref(),
+            Some("tuple[int]")
+        );
+        assert_eq!(infer("SELECT a::INT FROM t WHERE b ? 'x' AND id = ?"), None);
+    }
+
+    #[test]
+    fn test_dialect_type_aliases() {
+        let expand = |columns: &str, dialect: &str| {
+            let schema = Some(load_schema(&format!("CREATE TABLE t ({columns})"), dialect));
+            expand_star("SELECT * FROM t", dialect, &schema)
+        };
+        assert_eq!(
+            expand("a INT64, b FLOAT64", "bigquery").as_deref(),
+            Some("SELECT a::BIGINT, b::DOUBLE FROM t")
+        );
+        assert_eq!(
+            expand("a Int8, b INT8", "clickhouse").as_deref(),
+            Some("SELECT a::TINYINT, b::TINYINT FROM t")
+        );
+        assert_eq!(
+            expand("a INT8", "postgres").as_deref(),
+            Some("SELECT a::BIGINT FROM t")
+        );
+        assert_eq!(
+            expand("a UNIQUEIDENTIFIER", "tsql").as_deref(),
+            Some("SELECT a::UUID FROM t")
+        );
     }
 
     #[test]

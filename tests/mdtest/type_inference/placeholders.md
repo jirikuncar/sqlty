@@ -150,3 +150,28 @@ SELECT id::INTEGER FROM users WHERE tags ? 'admin'
 SELECT id::INTEGER FROM users WHERE tags ?| array['a'] AND id = ?
 -- inferred: tuple[int]
 ```
+
+A query with both a JSONB `?` operator and a `?` placeholder can't be read
+either way, so it stays uninferred:
+
+```sql
+SELECT id::INTEGER FROM users WHERE tags ? 'admin' AND id = ?
+-- inferred: None
+```
+
+### With a schema
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT id, name FROM users WHERE id = ?
+-- inferred: tuple[int, str]
+```

@@ -118,6 +118,25 @@ SELECT * FROM t
 -- expanded: SELECT a::INT, b::TIMESTAMP, c::TIMESTAMPTZ, d::UUID, e::VARCHAR(10) FROM t
 ```
 
+### Oracle
+
+```toml
+[tool.sqlty]
+dialect = "oracle"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+```sql
+CREATE TABLE t (a NUMBER(10,2), b VARCHAR2(20), c CLOB, d DATE)
+```
+
+```sql
+SELECT * FROM t
+-- inferred: tuple[float, str, str, datetime.date]
+-- expanded: SELECT a::DECIMAL(10, 2), b::VARCHAR(20), c::TEXT, d::DATE FROM t
+```
+
 ### Unknown dialect
 
 ```toml
