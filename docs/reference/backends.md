@@ -1,6 +1,4 @@
-# Performance
-
-## Two backends
+# Backends
 
 sqlty's core operations (type inference, `SELECT *` expansion, rewrite,
 strip and check) have two implementations:
@@ -11,6 +9,8 @@ strip and check) have two implementations:
 - **Pure Python**: `sqlty._core_py`, parsing SQL with
   [sqlglot](https://sqlglot.com).
 
+## Choosing a backend
+
 `sqlty.core` uses the Rust extension when it can be imported and falls back to
 Python otherwise. Wheels built by maturin include the extension; building
 from source needs a Rust toolchain. Set `SQLTY_LIB` to force a backend:
@@ -20,38 +20,12 @@ SQLTY_LIB=py sqlty check .   # pure Python
 SQLTY_LIB=rs sqlty check .   # Rust; fails if the extension is missing
 ```
 
-The CLI (`rewrite`, `strip`, `check`) and the `sqlty.core` functions go
-through this switch. Row type validation in `check` (TypedDict, dataclass,
-...) runs in Python on top of either backend. The
-[magic codec](guide/magic-codec.md) and [stub generation](guide/stubs.md)
-always use the Python implementation, as do the tested examples in this
-documentation.
-
-## Benchmarks
-
-Median time per call from `benchmarks/bench_core.py` (500 iterations after
-warm-up), on a 4-core Linux x86_64 machine:
-
-| Operation | Python | Rust | Speedup |
-|-----------|-------:|-----:|--------:|
-| `infer_type`, 1 column | 177 us | 5 us | 32x |
-| `infer_type`, 4 columns | 613 us | 13 us | 45x |
-| `infer_type`, 10 columns with JOINs | 2152 us | 59 us | 36x |
-| `infer_type` with a schema | 3154 us | 54 us | 59x |
-| `expand_star` with a schema | 2896 us | 83 us | 35x |
-| `rewrite_source`, 1 query | 72 us | 135 us | 0.5x |
-| `rewrite_source`, 20 queries | 849 us | 144 us | 5.9x |
-| `strip_source`, 20 queries | 81 us | 278 us | 0.3x |
-| `check_source`, 4 queries | 804 us | 551 us | 1.5x |
-
-Parsing SQL is where Rust wins. Whole-file operations carry a fixed cost per
-call in the Rust backend, so for small files they are on par with Python or
-slower; `strip_source` is regex-only and faster in Python. Numbers vary
-between machines and runs. Reproduce them with:
-
-```bash
-uv run python benchmarks/bench_core.py
-```
+The CLI (`rewrite`, `strip`, `check`) and the
+[`sqlty.core`](python-api.md#sqltycore) functions go through this switch.
+Row type validation in `check` (TypedDict, dataclass, ...) runs in Python on
+top of either backend. The [magic codec](../guide/magic-codec.md) and
+[stub generation](../guide/stubs.md) always use the Python implementation,
+as do the tested examples in this documentation.
 
 ## Parity
 
@@ -66,15 +40,16 @@ assumed:
   (except the end-to-end tests).
 - Tests compare the SQL type tables of both backends to catch drift.
 
-### Known parity gaps
+## Known gaps
 
 Two Rust gaps affect common code. Set `SQLTY_LIB=py` to work around them:
 
 - **Query parameters.** The Rust backend infers nothing for a query that
   contains `%s` or `%(name)s` placeholders (the psycopg style), so
   `sqlty rewrite` leaves it unwrapped and `sqlty check` skips `stale-type`
-  for it. Row type checks still run. The Python backend handles these
-  placeholders for PostgreSQL, but not for MySQL.
+  for it. Row type checks such as `column-type-mismatch` still run. The
+  Python backend handles these placeholders for PostgreSQL, but not for
+  MySQL.
 - **MySQL.** MySQL requires whitespace after `--` for a comment, and the Rust
   parser follows that, so `--sql` followed by the query fails to parse with
   `dialect = "mysql"`: `rewrite` wraps nothing and `check` infers nothing.
@@ -90,3 +65,34 @@ In short:
   make both backends skip the table.
 - Rust reads dialects other than PostgreSQL, MySQL and SQLite as generic SQL;
   only those three are kept in parity.
+
+## Benchmarks
+
+Median time per call from `benchmarks/bench_core.py` (500 iterations after
+warm-up), on a 4-core Linux x86_64 machine:
+
+| Operation | Python | Rust | Speedup |
+|-----------|-------:|-----:|--------:|
+| `infer_type`, 1 column | 177 µs | 5 µs | 32x |
+| `infer_type`, 4 columns | 613 µs | 13 µs | 45x |
+| `infer_type`, 10 columns with JOINs | 2152 µs | 59 µs | 36x |
+| `infer_type` with a schema | 3154 µs | 54 µs | 59x |
+| `expand_star` with a schema | 2896 µs | 83 µs | 35x |
+| `rewrite_source`, 1 query | 72 µs | 135 µs | 0.5x |
+| `rewrite_source`, 20 queries | 849 µs | 144 µs | 5.9x |
+| `strip_source`, 20 queries | 81 µs | 278 µs | 0.3x |
+| `check_source`, 4 queries | 804 µs | 551 µs | 1.5x |
+
+Parsing SQL is where Rust wins. Whole-file operations carry a fixed cost per
+call in the Rust backend, so for small files they are on par with Python or
+slower; `strip_source` is regex-only and faster in Python. Numbers vary
+between machines and runs.
+
+To reproduce them from a checkout, build the extension in release mode
+first. A debug build from plain `maturin develop` is much slower than
+Python:
+
+```bash
+uv run maturin develop --release
+uv run python benchmarks/bench_core.py
+```

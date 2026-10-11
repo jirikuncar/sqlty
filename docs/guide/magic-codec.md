@@ -1,4 +1,4 @@
-# Magic Codec
+# Magic codec
 
 The magic codec rewrites `--sql` strings when Python reads a source file, so
 the module runs with `SQL[T](...)` wrappers without a `sqlty rewrite` step.
@@ -53,14 +53,19 @@ To register it for every interpreter start, add a `.pth` file containing
 `import sqlty.magic` to your environment's site-packages. The repository ships
 one as
 [`sqlty_magic.pth`](https://github.com/jirikuncar/sqlty/blob/main/sqlty_magic.pth);
-installing the package does not add it for you.
+installing the package does not add it for you. Find the directory with:
+
+```bash
+python -c "import site; print(site.getsitepackages())"
+```
 
 Without registration, a file declaring `# coding: sqlty` fails with
 `SyntaxError: unknown encoding: sqlty`. Files without the declaration are
 never transformed, even with the codec registered.
 
-Set `SQLTY_NO_MAGIC=1` before `sqlty.magic` is imported to skip registration,
-for example to turn a `.pth` hook off for one run:
+Set `SQLTY_NO_MAGIC` to any non-empty value (even `0`) before `sqlty.magic`
+is imported to skip registration, for example to turn a `.pth` hook off for
+one run:
 
 ```bash
 SQLTY_NO_MAGIC=1 python script.py
@@ -74,24 +79,12 @@ Print the decoded source of a file without running it:
 python -m sqlty.magic queries.py
 ```
 
-From Python, `sqlty._decode.decode` transforms source bytes without
-registering anything:
-
-```python
-from sqlty._decode import decode
-
-source, _ = decode(b'q = "--sql\\nSELECT 1::INTEGER"')
-print(source)
-# from sqlty import SQL
-#
-# q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
-```
-
 ## Configuration
 
 The codec uses the PostgreSQL dialect and no schema, so cast every column;
-an uncast column is typed `str`. It reads only `import-style` from the `pyproject.toml` found from the
-current working directory (see [Configuration](../reference/configuration.md#import-style)).
+an uncast column is typed `str`. It reads only `import-style` from the
+`pyproject.toml` found from the current working directory (see
+[Configuration](../reference/configuration.md#import-style)).
 
 ## Example
 

@@ -14,29 +14,29 @@ nav = [
   { "Getting started" = [
     { "Installation" = "installation.md" },
     { "Quickstart" = "quickstart.md" },
+    { "Why SQLTy?" = "motivation.md" },
+    { "Use cases" = "use-cases.md" },
   ] },
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },
     { "Schema inference" = "guide/schema-inference.md" },
+    { "Untyped queries" = "guide/untyped.md" },
     { "Row types" = "guide/row-types.md" },
     { "psycopg" = "guide/psycopg.md" },
-    { "Untyped queries" = "guide/untyped.md" },
     { "Generated stubs" = "guide/stubs.md" },
     { "Magic codec" = "guide/magic-codec.md" },
   ] },
   { "Recipes" = [
-    { "Use cases" = "use-cases.md" },
-    { "Migration" = "migration.md" },
-    { "CI and pre-commit" = "ci.md" },
+    { "Migration" = "recipes/migration.md" },
+    { "CI and pre-commit" = "recipes/ci.md" },
   ] },
   { "Reference" = [
     { "CLI" = "reference/cli.md" },
     { "Configuration" = "reference/configuration.md" },
     { "Rules" = "reference/rules.md" },
     { "Python API" = "reference/python-api.md" },
+    { "Backends" = "reference/backends.md" },
   ] },
-  { "Performance" = "performance.md" },
-  { "Why SQLTy?" = "motivation.md" },
 ]
 
 [project.theme]

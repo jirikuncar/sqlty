@@ -1,4 +1,4 @@
-# Untyped Queries
+# Untyped queries
 
 Some queries return rows whose type sqlty cannot infer: `VALUES` lists and
 `SELECT` statements sqlty cannot parse. By default `sqlty rewrite` leaves
@@ -59,16 +59,17 @@ Once casts or a schema make the type known, the message names it:
 
 ```python
 pairs = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+# check: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 ```
 
 ```python
 users = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
+# check: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
 ```
 
-`sqlty rewrite` does not replace an existing wrapper, so strip the file and
-rewrite it to pick up the new type.
+`sqlty rewrite` does not replace an existing wrapper. Replace `UNTYPED` by
+hand, or strip and rewrite a file without hand-written row types; see
+[Editing queries](writing-queries.md#editing-queries).
 
 ## Generated stubs
 

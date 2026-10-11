@@ -37,9 +37,12 @@ def row_form[T, D](query: SQL[T], default: D, /) -> TypeForm[T] | D: ...
 
 Returns the `T` an instance was built with, read from `__orig_class__`:
 
-```python
-row_form(SQL[tuple[int, str]]("--sql\nSELECT 1::INTEGER, 'a'::TEXT"))  # tuple[int, str]
-row_form(SQL("--sql\nSELECT 1::INTEGER"), None)  # None
+```pycon
+>>> from sqlty import SQL, row_form
+>>> row_form(SQL[tuple[int, str]]("--sql\nSELECT 1::INTEGER, 'a'::TEXT"))
+tuple[int, str]
+>>> print(row_form(SQL("--sql\nSELECT 1::INTEGER"), None))
+None
 ```
 
 Plain strings, `SQL("...")`, annotation-only `q: SQL[T] = "..."` and
@@ -115,16 +118,21 @@ from sqlty.core import check_source, expand_star, infer_type, rewrite_source, st
 ```
 
 The functions behind the CLI, backed by the Rust extension when it is
-available (see [Performance](../performance.md)). Use them to build your own
+available (see [Backends](backends.md)). Use them to build your own
 tooling:
 
-```python
-from sqlty.core import infer_type, rewrite_source, strip_source
-
-infer_type("SELECT id::INTEGER, name::TEXT FROM users")  # "tuple[int, str]"
-infer_type("SELECT id FROM users", schema_sql="CREATE TABLE users (id INTEGER);")  # "tuple[int]"
-source = rewrite_source('q = "--sql\\nSELECT 1::INTEGER"')
-strip_source(source)  # 'q = "--sql\\nSELECT 1::INTEGER"'
+```pycon
+>>> from sqlty.core import infer_type, rewrite_source, strip_source
+>>> infer_type("SELECT id::INTEGER, name::TEXT FROM users")
+'tuple[int, str]'
+>>> infer_type("SELECT id FROM users", schema_sql="CREATE TABLE users (id INTEGER);")
+'tuple[int]'
+>>> source = rewrite_source('q = "--sql\\nSELECT 1::INTEGER"')
+>>> print(source)
+from sqlty import SQL
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+>>> print(strip_source(source))
+q = "--sql\nSELECT 1::INTEGER"
 ```
 
 | Function | Returns |

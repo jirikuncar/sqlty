@@ -57,7 +57,8 @@ orders = "db/orders.sql"
 ```
 
 The table is parsed, but no command uses it yet. Use [`schema`](#schema) for
-the CLI and `@sqlty(schema=...)` for [generated stubs](../guide/stubs.md#schemas).
+the CLI and `@sqlty(schema=...)` for
+[generated stubs](../guide/stubs.md#schemas).
 
 ## `rules`
 

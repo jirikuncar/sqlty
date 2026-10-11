@@ -34,7 +34,8 @@ uv sync --all-groups
 
 ### Optional dependencies
 
-- `sqlty[psycopg]` installs psycopg 3 for the [psycopg helpers](guide/psycopg.md).
+- `sqlty[psycopg]` installs psycopg 3 for the
+  [psycopg helpers](guide/psycopg.md).
 - [isort](https://pycqa.github.io/isort/), if installed, places the imports the
   [magic codec](guide/magic-codec.md) adds.
 
@@ -44,7 +45,7 @@ Wheels include the Rust extension that speeds up type inference. Building from
 source, for example from a git checkout, needs a
 [Rust toolchain](https://rustup.rs/) because maturin compiles the extension.
 If the extension cannot be imported, sqlty falls back to pure Python. See
-[Performance](performance.md).
+[Backends](reference/backends.md).
 
 ## Verify
 
@@ -53,17 +54,9 @@ sqlty version
 sqlty --help
 ```
 
-## Development Dependencies
-
-For contributing or running tests:
-
-```bash
-uv sync --all-groups
-```
-
-Includes the dev tooling (pytest, mypy, ty, pyright, ruff, pre-commit, maturin) and the `cli`, `magic` and `psycopg` groups.
-
-## Next Steps
+## Next steps
 
 - [Quickstart](quickstart.md)
 - [Use cases](use-cases.md)
+- Contributing: [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md)
+  covers the development setup and tests.

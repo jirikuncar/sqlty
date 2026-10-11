@@ -1,4 +1,4 @@
-# Generated Stubs
+# Generated stubs
 
 If your code sends queries through a helper function, such as
 `sql("SELECT ...")` or `fetch_all("SELECT ...")`, sqlty can type the helper
@@ -12,8 +12,9 @@ CLI command for stub generation.
 
 ## Set up a helper
 
-1. Decorate the helper with `@sqlty`. Pass `schema=` to infer types from a
-   schema file; the path is relative to the helper's module.
+1. Decorate the helper with
+   [`@sqlty`](../reference/python-api.md#sqlty_1). Pass `schema=` to infer
+   types from a schema file; the path is relative to the helper's module.
 
     ```python
     # db.py
@@ -93,8 +94,13 @@ Tests covering this flow:
 ## Schemas
 
 `@sqlty(schema="schema.sql")` is the only schema source for stub generation.
-Without it, columns need casts. The `schema` key of `[tool.sqlty]` and of
-`[[tool.sqlty.functions]]` are not used for stubs.
+Without it, an uncast column is silently typed `str`:
+`sql("SELECT id, name FROM users")` gets `SQL[tuple[str, str]]`, with no
+warning. Cast the columns or pass a schema. The `schema` key of
+`[tool.sqlty]` and of `[[tool.sqlty.functions]]` are not used for stubs.
+
+On each run, generation logs `Using schema from <path> (__schema_path__)`
+as a warning (on stderr by default) for every helper with a schema.
 
 ## Return types
 
@@ -110,8 +116,9 @@ return_type_template = "list[{sqlty}]"
 
 A call `fetch_all("SELECT COUNT(*)::INTEGER FROM users")` then gets the
 overload `-> list[tuple[int]]`. The template is written into the stub as is,
-and runtime generation adds only the imports for `SQL`, `datetime`, `uuid`
-and `UNTYPED`, so use names the stub can resolve without other imports.
+and runtime generation adds only the imports for `SQL`, `datetime`, `uuid`,
+`UNTYPED` and `typing.Any`, so use names the stub can resolve without other
+imports.
 
 A query sqlty cannot type gets an `SQL[Any]` overload (the template applied
 to `Any`), and a warning naming the query is logged.

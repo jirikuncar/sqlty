@@ -1,4 +1,4 @@
-# Writing Queries
+# Writing queries
 
 sqlty works on string literals that start with `--sql`. It infers a row type
 for each one and `sqlty rewrite` wraps the string in `SQL[T](...)`.
@@ -148,6 +148,55 @@ parameters instead of interpolating them, and keep the query a plain literal.
   skipped entirely, so `SELECT *` from that table cannot be expanded.
 
 See [Schema inference](schema-inference.md#dialects) for choosing a dialect.
+
+## Editing queries
+
+`sqlty rewrite` never replaces an existing wrapper, so after you change the
+SQL inside `SQL[T](...)`, `T` stays as it was. There are two ways to update
+it.
+
+### Edit in place
+
+Change the SQL inside the wrapper and run `sqlty check`. It reports
+[`stale-type`](../reference/rules.md#stale-type) when a `SQL[tuple[...]]` no
+longer matches the query, and the
+[row type rules](../reference/rules.md#row-type-rules) when a named
+[row type](row-types.md) no longer fits. Then update `T` by hand:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# check: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+```
+
+This works for every file, and it is the only safe workflow once a file has
+row types you wrote by hand.
+
+### Strip and rewrite
+
+For files whose wrappers are all `SQL[tuple[...]]`, let sqlty regenerate
+them:
+
+```bash
+sqlty strip queries.py     # SQL[T]("--sql\n...") -> "--sql\n..."
+# edit the SQL
+sqlty rewrite queries.py   # "--sql\n..." -> SQL[T]("--sql\n...")
+```
+
+Neither command changes the string contents, only the wrapper and the
+`from sqlty import SQL` import. For a file whose `--sql` strings are all
+plain, `strip(rewrite(x)) == x`.
+
+!!! warning "`strip` removes hand-written row types"
+    `strip` removes every wrapper, including `SQL[User]`, and the sqlty
+    import even if you wrote it yourself. The next `rewrite` produces
+    `SQL[tuple[...]]`, so `User` is lost. Do not strip files with row types.
+
+```python
+user = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# stripped: user = "--sql\nSELECT id::INTEGER FROM users"
+```
 
 ## Import style
 

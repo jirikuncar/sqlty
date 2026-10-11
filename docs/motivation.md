@@ -27,16 +27,11 @@ The query stays plain SQL that you can read, copy into a console and run.
 Type checkers see `T`; `sqlty check` keeps `T` and the SQL in sync, and
 validates your own row types against the columns.
 
-## When to use it
+## When to use something else
 
-Good fit:
-
-- Raw SQL queries, by choice, for performance or in legacy code.
-- Many queries that drift as the schema changes.
-- A team that runs type checkers and wants SQL covered too.
-- You can add `::TYPE` casts or keep a schema dump in the repository.
-
-Use something else:
+sqlty fits raw SQL written as string literals, with casts or a schema dump
+in the repository; [Use cases](use-cases.md) lists the typical situations.
+Use something else for:
 
 - **An ORM** (SQLAlchemy, Django): use its typing support.
 - **Dynamic SQL** built at runtime: sqlty only reads string literals.

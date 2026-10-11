@@ -1,8 +1,9 @@
-# CI and Pre-commit
+# CI and pre-commit
 
 Run sqlty where it blocks bad queries: before a commit and on every pull
-request. All commands exit with 1 when they find a problem, so any CI system
-can use them.
+request. `sqlty rewrite --check` and `sqlty strip --check` exit 1 when files
+would change; `sqlty check` exits 1 when a rule with severity `error` fires.
+Any CI system can use them.
 
 ## Pre-commit
 
@@ -47,14 +48,14 @@ Would rewrite queries.py
 
 `--diff` prints the changes as a unified diff instead. Add `--untyped
 sentinel` (or set `untyped = "sentinel"`) to also require wrapping queries
-whose row type is unknown; see [Untyped queries](guide/untyped.md).
+whose row type is unknown; see [Untyped queries](../guide/untyped.md).
 
 ## Fail on drift and mismatches
 
 `sqlty check` exits with 1 only when a rule with severity `error` fires.
 By default that covers row type mismatches and `SELECT *` without a schema;
-drift ([`stale-type`](reference/rules.md#stale-type)) and unwrapped strings
-([`stale-rewrite`](reference/rules.md#stale-rewrite)) are warnings. Promote
+drift ([`stale-type`](../reference/rules.md#stale-type)) and unwrapped strings
+([`stale-rewrite`](../reference/rules.md#stale-rewrite)) are warnings. Promote
 the rules you want to enforce:
 
 ```toml
@@ -94,7 +95,7 @@ jobs:
 
 ## Generated stubs
 
-There is no command that checks [generated stubs](guide/stubs.md). To keep
+There is no command that checks [generated stubs](../guide/stubs.md). To keep
 them current, run the test suite with `SQLTY_AUTO_GENERATE=1` and fail if a
 stub changed:
 
@@ -106,5 +107,5 @@ git diff --exit-code -- '*.pyi'
 ## Keeping sources stripped
 
 If you commit plain `--sql` strings and rely on the
-[magic codec](guide/magic-codec.md) instead, `sqlty strip --check .` exits
+[magic codec](../guide/magic-codec.md) instead, `sqlty strip --check .` exits
 with 1 when a file contains `SQL[T](...)` wrappers.

@@ -109,6 +109,7 @@ SQLTy uses a snapshot-based markdown test framework inspired by [ty's mdtest](ht
 | `# stripped:` | Source stripping via `SQLRewriter.strip()` |
 | `# expanded:` | Star expansion via `SQLAnalyzer.expand_star()` |
 | `# error:` | Lint diagnostics via `Checker.check_query()` |
+| `# check:` | Every `check_source()` diagnostic for the Python block, warnings included |
 | `# decoded:` | Magic codec via `decode()` |
 
 **Writing a new test:** Add a heading + code blocks to the appropriate `.md` file. Use `make update-mdtest` to fill in expected values automatically.

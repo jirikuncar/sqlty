@@ -11,6 +11,9 @@ Install the optional dependency:
 pip install "sqlty[psycopg]"
 ```
 
+Full signatures are in the
+[Python API reference](../reference/python-api.md#sqltydriverspsycopg).
+
 ## `execute`
 
 `execute(conn, query, params=None)` runs `query: SQL[T]` and returns a
@@ -38,13 +41,10 @@ with psycopg.connect("dbname=app") as conn:
 `sqlty check` makes sure `User` matches the columns before the code runs
 (see [Row types](row-types.md)); psycopg builds `User` objects at runtime.
 
-!!! warning "Placeholders and the Rust backend"
-    The Rust backend does not infer types for queries containing `%s` or
-    `%(name)s`, so `sqlty rewrite` leaves them unwrapped and `sqlty check`
-    does not report `stale-type` for them. Row type checks such as
-    `column-type-mismatch` still run. Set `SQLTY_LIB=py` to use the Python
-    backend, which handles these placeholders; see
-    [known parity gaps](../performance.md#known-parity-gaps).
+!!! warning "Placeholders need the Python backend"
+    The default Rust backend leaves queries with `%s` or `%(name)s`
+    unwrapped. Run sqlty with `SQLTY_LIB=py`; see
+    [Backends](../reference/backends.md#known-gaps).
 
 The row factory is chosen from the query's runtime row type
 ([`row_form`](row-types.md#the-row-type-at-runtime)):

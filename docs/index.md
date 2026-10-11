@@ -63,25 +63,60 @@ string itself is never modified. For a file of plain `--sql` strings,
   `sql("SELECT ...")` with a generated `.pyi` overload per query.
 - **[Lint rules](reference/rules.md).** Thirteen rules with configurable
   severity.
-- **[Rust backend](performance.md).** Type inference in Rust, with a
+- **[Rust backend](reference/backends.md).** Type inference in Rust, with a
   pure-Python fallback held to the same tests.
 
-## Use cases
+## Which features to use
 
-- [Catch schema drift in CI](use-cases.md#catch-schema-drift-in-ci)
-- [Raw SQL without an ORM](use-cases.md#raw-sql-without-an-orm)
-- [Incremental adoption](use-cases.md#incremental-adoption)
-- [Scripts and notebooks](use-cases.md#scripts-and-notebooks)
-- [Typed data-access helpers](use-cases.md#typed-data-access-helpers)
-- [Guardrails for AI-generated SQL](use-cases.md#guardrails-for-ai-generated-sql)
+| Approach | Best for |
+|----------|----------|
+| [Rewrite and check](quickstart.md) | Committed code, CI, teams |
+| [Row types](guide/row-types.md) | Named fields, domain objects |
+| [Schema inference](guide/schema-inference.md) | Projects with `CREATE TABLE` schemas |
+| [Magic codec](guide/magic-codec.md) | Scripts and prototypes |
+| [psycopg helpers](guide/psycopg.md) | psycopg 3 code that wants typed rows at runtime |
+| [Generated stubs](guide/stubs.md) | Code that sends queries through helper functions |
+
+They combine: a schema plus row types plus the psycopg helpers is the most
+complete setup. [Use cases](use-cases.md) describes the situations sqlty is
+built for.
 
 ## Next steps
 
 1. [Install sqlty](installation.md).
 2. Follow the [Quickstart](quickstart.md).
-3. Adding sqlty to an existing project? Read [Migration](migration.md) and
-   [CI](ci.md).
+3. Adding sqlty to an existing project? Read [Migration](recipes/migration.md)
+   and [CI and pre-commit](recipes/ci.md).
 
 New to the idea? Start with [Why SQLTy?](motivation.md). Contributing,
 testing and architecture are covered in
 [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md).
+
+## Example projects
+
+Each directory in
+[`examples/`](https://github.com/jirikuncar/sqlty/tree/main/examples) has a
+README:
+
+- [`01_quick_start/`](https://github.com/jirikuncar/sqlty/tree/main/examples/01_quick_start):
+  rewrite, check and strip on cast queries.
+- [`02_schema_inference/`](https://github.com/jirikuncar/sqlty/tree/main/examples/02_schema_inference):
+  types from a schema passed with `--schema`.
+- [`03_pyproject_config/`](https://github.com/jirikuncar/sqlty/tree/main/examples/03_pyproject_config):
+  schema, dialect and rules in `pyproject.toml`.
+- [`04_check_and_types/`](https://github.com/jirikuncar/sqlty/tree/main/examples/04_check_and_types):
+  row types validated by `sqlty check`.
+- [`05_import_style/`](https://github.com/jirikuncar/sqlty/tree/main/examples/05_import_style):
+  a custom `import-style`.
+- [`magic_codec/`](https://github.com/jirikuncar/sqlty/tree/main/examples/magic_codec):
+  the magic codec.
+
+Run them from a checkout:
+
+```bash
+git clone https://github.com/jirikuncar/sqlty.git
+cd sqlty && uv sync --all-groups
+uv run sqlty check examples/01_quick_start/
+uv run sqlty check --schema examples/02_schema_inference/schema.sql examples/02_schema_inference/
+uv run python -m sqlty.magic examples/magic_codec/demo.py  # print the decoded source
+```

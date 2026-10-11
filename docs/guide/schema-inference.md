@@ -1,4 +1,4 @@
-# Schema Inference
+# Schema inference
 
 With a schema file, sqlty reads column types from `CREATE TABLE` statements,
 so queries need no casts. Point it at a schema dump, a migrations snapshot or
@@ -112,7 +112,7 @@ stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
 
 SQLite accepts free-form type names such as `UNSIGNED BIG INT`; sqlty does
 not, and skips a table that uses one (see
-[Performance](../performance.md#known-parity-gaps)).
+[Backends](../reference/backends.md#known-gaps)).
 
 ### MySQL
 
@@ -147,10 +147,9 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 ```
 
 !!! warning "MySQL needs the Python backend"
-    The Rust backend cannot parse MySQL queries that start with `--sql`, so
-    the CLI wraps and checks nothing for `dialect = "mysql"`. Run sqlty with
-    `SQLTY_LIB=py` for MySQL projects; see
-    [known parity gaps](../performance.md#known-parity-gaps).
+    The default Rust backend wraps and checks nothing for
+    `dialect = "mysql"`. Run sqlty with `SQLTY_LIB=py`; see
+    [Backends](../reference/backends.md#known-gaps).
 
 `TINYINT(1)` is an `int`, not a `bool`. See the
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.

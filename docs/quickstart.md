@@ -56,28 +56,7 @@ Warnings leave the exit code at 0; errors such as a
 [row type](guide/row-types.md) mismatch exit with 1. The
 [rules reference](reference/rules.md) lists every diagnostic.
 
-## 4. Edit with strip and rewrite
-
-To change a query, strip the wrappers, edit, and rewrite:
-
-```bash
-sqlty strip .     # SQL[T]("--sql\n...") -> "--sql\n..."
-# edit the SQL
-sqlty rewrite .   # "--sql\n..." -> SQL[T]("--sql\n...")
-```
-
-```python
-user_query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# stripped: user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-```
-
-Neither command changes the string contents, only the wrapper and the
-`from sqlty import SQL` import. For a file whose `--sql` strings are all
-plain, `strip(rewrite(x)) == x`. `strip` removes every wrapper, including a
-hand-written `SQL[User]`, and the sqlty import even if it was there before;
-see [Migration](migration.md#pitfalls).
-
-## 5. Name the columns
+## 4. Name the columns
 
 Replace `tuple[...]` with a `TypedDict`, `NamedTuple`, dataclass or Pydantic
 model, and `sqlty check` validates field count, types and names:
@@ -91,35 +70,31 @@ class User(TypedDict):
     name: str
 
 user_query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error:
+# check:
 ```
 
+The empty `# check:` line means `sqlty check` reports nothing for this file.
 See [Row types](guide/row-types.md).
+
+## 5. Edit queries
+
+`sqlty rewrite` does not touch existing wrappers. After you change a query:
+
+- **Edit in place.** Change the SQL inside `SQL[T](...)` and let
+  `sqlty check` report a stale `T`, as in step 3. Use this for files with
+  row types like `User`.
+- **Strip and rewrite.** For files that only have `SQL[tuple[...]]`, run
+  `sqlty strip`, edit, and `sqlty rewrite` to regenerate every type.
+
+!!! warning
+    `sqlty strip` also removes hand-written row types such as `SQL[User]`.
+    See [Editing queries](guide/writing-queries.md#editing-queries).
 
 ## 6. Run it before every commit
 
-Add sqlty to [pre-commit](https://pre-commit.com) as local hooks:
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: sqlty-rewrite
-        name: sqlty rewrite
-        entry: sqlty rewrite .
-        language: system
-        pass_filenames: false
-        types: [python]
-      - id: sqlty-check
-        name: sqlty check
-        entry: sqlty check .
-        language: system
-        pass_filenames: false
-        types: [python]
-```
-
-[CI](ci.md) shows how to fail a build on unwrapped or stale queries.
+Add `sqlty rewrite` and `sqlty check` as
+[pre-commit hooks](recipes/ci.md#pre-commit). [CI and pre-commit](recipes/ci.md)
+also shows how to fail a build on unwrapped or stale queries.
 
 ## Next steps
 
@@ -127,3 +102,4 @@ repos:
   [`examples/01_quick_start/`](https://github.com/jirikuncar/sqlty/tree/main/examples/01_quick_start).
 - [psycopg](guide/psycopg.md): typed rows from `SQL[T]` at runtime.
 - [Use cases](use-cases.md): where sqlty fits.
+- [Example projects](index.md#example-projects): all runnable examples.

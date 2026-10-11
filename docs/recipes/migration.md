@@ -1,4 +1,4 @@
-# Migrating an Existing Codebase
+# Migration
 
 sqlty only acts on strings that start with `--sql`, so you can adopt it one
 module, or one query, at a time. Unconverted code keeps working.
@@ -13,8 +13,8 @@ def get_user(conn, user_id):
     return row  # tuple[Any, ...] | None: nothing says what the columns are
 ```
 
-The same query after migration, with a [schema](guide/schema-inference.md)
-and a [row type](guide/row-types.md):
+The same query after migration, with a [schema](../guide/schema-inference.md)
+and a [row type](../guide/row-types.md):
 
 ```python
 from dataclasses import dataclass
@@ -75,6 +75,12 @@ query = "--sql\nSELECT id, name, created_at FROM users WHERE id = %s"
 # rewritten: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
 ```
 
+!!! warning "`%s` placeholders need the Python backend"
+    The default Rust backend leaves queries with `%s` or `%(name)s`
+    placeholders unwrapped, so `sqlty rewrite` does nothing for this one.
+    Run sqlty with `SQLTY_LIB=py` until the gap is fixed; see
+    [Backends](../reference/backends.md#known-gaps).
+
 Without a schema, an uncast column is typed `str`, which is wrong for most
 of them.
 
@@ -89,8 +95,8 @@ untyped = "sentinel"
 ```
 
 `sqlty check` then reports each one as
-[`untyped-query`](reference/rules.md#untyped-query) until you add casts or
-schema entries. See [Untyped queries](guide/untyped.md).
+[`untyped-query`](../reference/rules.md#untyped-query) until you add casts or
+schema entries. See [Untyped queries](../guide/untyped.md).
 
 ### 3. Prefix queries, one module at a time
 
@@ -101,7 +107,7 @@ sqlty rewrite app/users.py
 ```
 
 `sqlty check` lists prefixed strings that are still unwrapped as
-[`stale-rewrite`](reference/rules.md#stale-rewrite), so you can see what is
+[`stale-rewrite`](../reference/rules.md#stale-rewrite), so you can see what is
 left:
 
 ```
@@ -119,38 +125,21 @@ with the queries whose rows are passed around the most.
 ### 5. Enforce
 
 Run `sqlty rewrite --check` and `sqlty check` in [CI](ci.md), and promote
-[`stale-type`](reference/rules.md#stale-type) to an error once the codebase
+[`stale-type`](../reference/rules.md#stale-type) to an error once the codebase
 is clean.
 
 ## Editing typed queries
 
-Two workflows work:
-
-- **Strip and rewrite.** `sqlty strip`, edit the SQL, `sqlty rewrite`.
-  Simple, but `strip` also removes hand-written row types (see below).
-- **Edit in place.** Change the SQL inside `SQL[T](...)` and let
-  `sqlty check` tell you when `T` is stale. Use this for files with row types.
-
-## Which approach?
-
-| Approach | Best for |
-|----------|----------|
-| [Rewrite and strip](quickstart.md) | Committed code, CI, teams |
-| [Row types](guide/row-types.md) | Named fields, domain objects |
-| [Schema inference](guide/schema-inference.md) | Projects with `CREATE TABLE` schemas |
-| [Magic codec](guide/magic-codec.md) | Scripts and prototypes |
-| [psycopg helpers](guide/psycopg.md) | psycopg 3 code that wants typed rows at runtime |
-| [Generated stubs](guide/stubs.md) | Code that sends queries through helper functions |
-
-They combine: a schema plus row types plus the psycopg helpers is the most
-complete setup.
+Once a module has row types, edit its queries in place and let `sqlty check`
+report a stale `T`; do not strip it. See
+[Editing queries](../guide/writing-queries.md#editing-queries).
 
 ## Pitfalls
 
 **`--sql` followed by a space.** `"--sql SELECT ..."` is a SQL comment: the
 query is empty to sqlty and the string is never wrapped. Use a newline.
 `sqlty check` reports it as
-[`inline-sql-comment`](reference/rules.md#inline-sql-comment).
+[`inline-sql-comment`](../reference/rules.md#inline-sql-comment).
 
 ```python
 wrong = "--sql SELECT id::INTEGER FROM users"
@@ -160,32 +149,26 @@ right = "--sql\nSELECT id::INTEGER FROM users"
 ```
 
 **`strip` removes hand-written row types.** It turns `SQL[User](...)` back
-into a plain string, and the next `rewrite` produces `SQL[tuple[...]]`. It
-also removes `from sqlty import SQL` even when you added it yourself. Do not
-strip files that use row types.
-
-```python
-user = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
-# stripped: user = "--sql\nSELECT id::INTEGER FROM users"
-```
+into a plain string; see
+[Editing queries](../guide/writing-queries.md#editing-queries).
 
 **Interpolated queries.** f-strings and t-strings cannot be rewritten. Pass
 values as parameters (`%s`) instead.
 
 **String operations drop the runtime type.** `query + " LIMIT 1"` is a plain
-`str`, so [`row_form`](guide/row-types.md#the-row-type-at-runtime) and
+`str`, so [`row_form`](../guide/row-types.md#the-row-type-at-runtime) and
 `execute` no longer know `T`. Put the complete query in the literal.
 
 **Nullable columns.** Row types are never `T | None`. Annotate the field in
 a row type if the column can be `NULL`.
 
-**Query parameters with the Rust backend.** The default Rust backend does
-not infer queries containing `%s` or `%(name)s`, and cannot parse `--sql`
-queries in the MySQL dialect. Run sqlty with `SQLTY_LIB=py` until this is fixed; see
-[known parity gaps](performance.md#known-parity-gaps).
+**Rust backend gaps.** The default Rust backend does not infer queries
+containing `%s` or `%(name)s`, and cannot parse `--sql` queries in the MySQL
+dialect. Run sqlty with `SQLTY_LIB=py` until this is fixed; see
+[Backends](../reference/backends.md#known-gaps).
 
 **Explicit `--dialect postgres`.** It does not override a `dialect` set in
-`pyproject.toml`; see [Schema inference](guide/schema-inference.md#dialects).
+`pyproject.toml`; see [Schema inference](../guide/schema-inference.md#dialects).
 
 Related issue:
 [#19 Create migration tool for existing codebases](https://github.com/jirikuncar/sqlty/issues/19).

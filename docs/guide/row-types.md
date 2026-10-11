@@ -1,4 +1,4 @@
-# Row Types
+# Row types
 
 `sqlty rewrite` writes `SQL[tuple[...]]`. You can replace the tuple with a
 named row type, and `sqlty check` validates it against the query columns.
@@ -10,6 +10,8 @@ Supported forms are `TypedDict`, `NamedTuple`, `@dataclass` and Pydantic
 ```python
 from dataclasses import dataclass
 from typing import NamedTuple, TypedDict
+
+from pydantic import BaseModel
 from sqlty import SQL
 
 class UserDict(TypedDict):
@@ -25,26 +27,38 @@ class User:
     id: int
     name: str
 
+class UserModel(BaseModel):
+    id: int
+    name: str
+
 a = SQL[UserDict]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 b = SQL[UserTuple]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 c = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error:
+d = SQL[UserModel]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# check:
 ```
 
-An empty `# error:` means `sqlty check` reports nothing.
+`# check:` lines list every diagnostic `sqlty check` reports for the block,
+warnings included; an empty `# check:` means it reports nothing.
 
-`sqlty rewrite` leaves an existing `SQL[User](...)` alone, but
-[`sqlty strip`](../reference/cli.md#sqlty-strip) removes it like any other
-wrapper. Do not run `strip` on files whose row types you wrote by hand.
+!!! warning "Do not strip files with row types"
+    `sqlty strip` turns `SQL[User](...)` back into a plain string, and the
+    next `rewrite` writes `SQL[tuple[...]]`. Edit such files in place; see
+    [Editing queries](writing-queries.md#editing-queries).
 
 ## What is checked
 
 Fields are matched to columns by position, in this order:
 
-1. Field count ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch), error).
-2. Field types ([`column-type-mismatch`](../reference/rules.md#column-type-mismatch), error).
+1. Field count
+   ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
+   error).
+2. Field types
+   ([`column-type-mismatch`](../reference/rules.md#column-type-mismatch),
+   error).
 3. Field names against column names or aliases
-   ([`column-name-mismatch`](../reference/rules.md#column-name-mismatch), warning).
+   ([`column-name-mismatch`](../reference/rules.md#column-name-mismatch),
+   warning).
 
 ```python
 from typing import TypedDict
@@ -64,9 +78,9 @@ class Short(TypedDict):
 a = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 b = SQL[Account]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 c = SQL[Short]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
-# error: [column-name-mismatch] "Account.user_id doesn't match query column 'id'"
-# error: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
+# check: [column-type-mismatch] "User.id is str but query column 'id' infers int"
+# check: [column-name-mismatch] "Account.user_id doesn't match query column 'id'"
+# check: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
 ```
 
 Annotations are resolved with Python's typing machinery when the module can
@@ -85,7 +99,7 @@ class Event(NamedTuple):
     token: UUID
 
 q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP, token::UUID FROM events")
-# error:
+# check:
 ```
 
 ## TypedDict qualifiers
@@ -104,7 +118,7 @@ class User(TypedDict):
 
 ok = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 short = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
-# error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
+# check: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 ```
 
 ## Closed TypedDicts
@@ -128,8 +142,8 @@ class User(TypedDict, closed=True):
 reordered = SQL[User]("--sql\nSELECT name::TEXT, id::INTEGER FROM users")
 extra = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, phone::TEXT FROM users")
 missing = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
-# error: [typeddict-key-mismatch] "User has no key for query column 'phone'"
-# error: [typeddict-key-mismatch] "User.name is required but missing from query"
+# check: [typeddict-key-mismatch] "User has no key for query column 'phone'"
+# check: [typeddict-key-mismatch] "User.name is required but missing from query"
 ```
 
 With `extra_items=T`, extra columns are allowed and must have type `T`:
@@ -143,7 +157,7 @@ class Metrics(TypedDict, extra_items=ReadOnly[int]):
 
 counts = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, clicks::INTEGER FROM stats")
 ratio = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
-# error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
+# check: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
 ```
 
 ## TypedDict inheritance
@@ -182,8 +196,8 @@ class Bad(Counters):
 a = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 b = SQL[Page]("--sql\nSELECT id::INTEGER, views::INTEGER FROM pages")
 c = SQL[Bad]("--sql\nSELECT id::INTEGER, clicks::INTEGER FROM pages")
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
-# error: [typeddict-inheritance] "Bad.clicks must be NotRequired: base Counters has extra_items int"
+# check: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
+# check: [typeddict-inheritance] "Bad.clicks must be NotRequired: base Counters has extra_items int"
 ```
 
 A rejected override keeps the base's openness, so the subclass's keys are
@@ -194,7 +208,8 @@ to `complex` promotion).
 
 ## The row type at runtime
 
-`SQL[T](...)` records `T` on the instance. `row_form` returns it:
+`SQL[T](...)` records `T` on the instance.
+[`row_form`](../reference/python-api.md#row_formquery-default) returns it:
 
 ```python
 from sqlty import SQL, row_form
@@ -214,8 +229,8 @@ operations such as `query + " LIMIT 1"` do not: `row_form` raises
 
 - The row type must be defined in the same file as the `SQL[T](...)` call.
   Imported row types are skipped silently.
-- A column with neither a cast nor a schema type is not compared with its
-  field type.
+- A column with neither a cast nor a schema type is typed `str` by
+  `rewrite`, but `check` does not compare it with the field type.
 - Validation is static. Nothing checks rows at runtime; use Pydantic if you
   need that.
 

@@ -1,4 +1,4 @@
-# Use Cases
+# Use cases
 
 ## Catch schema drift in CI
 
@@ -10,7 +10,7 @@ no longer match: [`stale-type`](reference/rules.md#stale-type) for
 [row types](guide/row-types.md).
 
 Start with [Schema inference](guide/schema-inference.md), then
-[CI](ci.md) to run the check on every pull request.
+[CI](recipes/ci.md) to run the check on every pull request.
 
 ## Raw SQL without an ORM
 
@@ -29,7 +29,7 @@ strings that start with `--sql`, so you can convert one module at a time.
 `sqlty check` lists prefixed strings not yet wrapped, and
 `untyped = "sentinel"` marks the queries that still need casts or a schema.
 
-Start with [Migration](migration.md).
+Start with [Migration](recipes/migration.md).
 
 ## Scripts and notebooks
 
@@ -54,9 +54,10 @@ Code assistants write plausible SQL whose result does not match the code
 that consumes it. Make them use the `--sql` prefix, and run `sqlty rewrite`
 and `sqlty check` as a pre-commit hook or CI step. A query whose columns do
 not match the declared row type, or a `SELECT *` without a schema, fails
-before review; [`rewrite --check`](ci.md#fail-on-unwrapped-queries) also
-fails on queries left unwrapped. The
-[CLI reference](reference/cli.md) and [rules](reference/rules.md) are written
-so an agent can follow them.
+before review; [`rewrite --check`](recipes/ci.md#fail-on-unwrapped-queries) also
+fails on queries left unwrapped. An agent gets the same feedback as a
+person: one `file:line: [rule] message` line per problem and a non-zero exit
+code (see the [CLI reference](reference/cli.md) and
+[rules](reference/rules.md)).
 
-Start with [CI](ci.md).
+Start with [CI](recipes/ci.md).
