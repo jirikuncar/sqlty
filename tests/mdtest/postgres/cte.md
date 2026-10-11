@@ -1,7 +1,7 @@
 # PostgreSQL Common Table Expressions (CTEs)
 
 ```toml
-[sqlty]
+[tool.sqlty]
 dialect = "postgres"
 ```
 
@@ -12,10 +12,7 @@ WITH active_users AS (
     SELECT id, name FROM users WHERE active = true
 )
 SELECT id::INTEGER, name::TEXT FROM active_users
-```
-
-```python
-# inferred: tuple[int, str]
+-- inferred: tuple[int, str]
 ```
 
 ## Multiple CTEs
@@ -36,10 +33,7 @@ SELECT
     COALESCE(o.order_count, 0)::INTEGER
 FROM active_users u
 LEFT JOIN user_orders o ON u.id = o.user_id
-```
-
-```python
-# inferred: tuple[int, str, int]
+-- inferred: tuple[int, str, int]
 ```
 
 ## WITH RECURSIVE — tree traversal
@@ -59,10 +53,7 @@ WITH RECURSIVE category_tree AS (
 SELECT id::INTEGER, name::TEXT, depth::INTEGER
 FROM category_tree
 ORDER BY depth, name
-```
-
-```python
-# inferred: tuple[int, str, int]
+-- inferred: tuple[int, str, int]
 ```
 
 ## WITH RECURSIVE — generate series equivalent
@@ -74,10 +65,7 @@ WITH RECURSIVE counter AS (
     SELECT (n + 1)::INTEGER FROM counter WHERE n < 100
 )
 SELECT n::INTEGER FROM counter
-```
-
-```python
-# inferred: tuple[int]
+-- inferred: tuple[int]
 ```
 
 ## CTE with INSERT RETURNING (writable CTE)
@@ -92,10 +80,7 @@ WITH new_user AS (
     RETURNING id, name, email
 )
 SELECT id::INTEGER, name::TEXT, email::TEXT FROM new_user
-```
-
-```python
-# inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str]
 ```
 
 ## CTE with DELETE RETURNING (writable CTE)
@@ -109,8 +94,5 @@ WITH deleted_users AS (
     RETURNING id, name, email
 )
 SELECT id::INTEGER, name::TEXT, email::TEXT FROM deleted_users
-```
-
-```python
-# inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str]
 ```

@@ -27,14 +27,18 @@ assert row_form(q) is UNTYPED
 ## Round trip: rewrite then strip
 
 ```toml
-[sqlty]
+[tool.sqlty]
 untyped = "sentinel"
 ```
+
+### Rewrite
 
 ```python
 q = "--sql\nVALUES (1, 2)"
 # rewritten: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ```
+
+### Strip
 
 ```python
 q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
@@ -44,7 +48,7 @@ q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ## Strip with module import
 
 ```toml
-[sqlty]
+[tool.sqlty]
 import-style = "import sqlty"
 ```
 

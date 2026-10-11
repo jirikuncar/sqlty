@@ -58,18 +58,17 @@ deleted = "--sql\nDELETE FROM users RETURNING id::INTEGER"
 Once casts or a schema make the type known, the message names it:
 
 ```python
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 pairs = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-# check: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
 ```
 
 ```python
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 users = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
-# check: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
 ```
 
-`sqlty rewrite` does not replace an existing wrapper. Replace `UNTYPED` by
-hand, or strip and rewrite a file without hand-written row types; see
-[Editing queries](writing-queries.md#editing-queries).
+`sqlty rewrite` does not replace an existing wrapper; `sqlty check --fix`
+does. See [Editing queries](writing-queries.md#editing-queries).
 
 ## Generated stubs
 

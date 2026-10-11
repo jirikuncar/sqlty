@@ -44,10 +44,6 @@ Custom `SQL[T]` wrappers without `--sql` prefix are never touched:
 ```python
 q = SQL[User]("SELECT id, name FROM users")
 # rewritten: q = SQL[User]("SELECT id, name FROM users")
-```
-
-```python
-q = SQL[User]("SELECT id, name FROM users")
 # stripped: q = SQL[User]("SELECT id, name FROM users")
 ```
 
@@ -70,12 +66,16 @@ q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 
 ## Triple-quoted multiline round-trip: rewrite then strip
 
+### Rewrite
+
 ```python
 q = """--sql
 SELECT id::INTEGER FROM users"""
 # rewritten: q = SQL[tuple[int]]("""--sql
 # rewritten: SELECT id::INTEGER FROM users""")
 ```
+
+### Strip
 
 ```python
 q = SQL[tuple[int]]("""--sql
