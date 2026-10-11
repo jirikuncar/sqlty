@@ -11,7 +11,7 @@ use crate::analyzer::{expand_star, Schema};
 use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
-    is_sqlty_managed, rewrite_source, splice, string_literals, ImportStyle,
+    is_sqlty_managed, line_ending, rewrite_source, splice, string_literals, ImportStyle,
 };
 use crate::tokens::{tokenize, wrapper_calls};
 
@@ -191,7 +191,13 @@ fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<St
     }
     if !missing.is_empty() {
         let at = header_end(&source);
-        source = format!("{}{}\n{}", &source[..at], missing.join("\n"), &source[at..]);
+        let eol = line_ending(&source, at);
+        source = format!(
+            "{}{}{eol}{}",
+            &source[..at],
+            missing.join(eol),
+            &source[at..]
+        );
     }
     source
 }
@@ -243,6 +249,14 @@ mod tests {
         assert_eq!(
             fix("from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT now()\")"),
             "import datetime\nfrom sqlty import SQL\nq = SQL[tuple[datetime.datetime]](\"--sql\\nSELECT now()\")"
+        );
+    }
+
+    #[test]
+    fn test_datetime_import_uses_crlf() {
+        assert_eq!(
+            fix("from sqlty import SQL\r\nq = SQL[tuple[str]](\"--sql\\nSELECT now()\")\r\n"),
+            "import datetime\r\nfrom sqlty import SQL\r\nq = SQL[tuple[datetime.datetime]](\"--sql\\nSELECT now()\")\r\n"
         );
     }
 

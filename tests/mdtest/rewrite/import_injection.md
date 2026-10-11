@@ -208,3 +208,37 @@ q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file:     from sqlty import SQL
 # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
+
+## Import after a compound statement on one line is not top-level
+
+After `;` on a line that starts a compound statement, the import is part of
+its body.
+
+```python
+from typing import TYPE_CHECKING
+if TYPE_CHECKING: pass; from sqlty import SQL
+q = "--sql\nSELECT 1::INTEGER AS n"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: from typing import TYPE_CHECKING
+# rewritten-file: if TYPE_CHECKING: pass; from sqlty import SQL
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# stripped: from typing import TYPE_CHECKING
+# stripped: if TYPE_CHECKING: pass; from sqlty import SQL
+# stripped: q = "--sql\nSELECT 1::INTEGER AS n"
+```
+
+## Added imports use the file's line ending
+
+In a file with CRLF line endings, `rewrite` and `check --fix` end added
+import lines with CRLF too. `tests/test_core_invariants.py` runs every
+example in these docs with CRLF line endings as well.
+
+```python
+"""Events."""
+from sqlty import SQL
+q = SQL[tuple[str]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
+# fixed: """Events."""
+# fixed: import datetime
+# fixed: from sqlty import SQL
+# fixed: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
+```
