@@ -1,12 +1,11 @@
-"""The ``sqlty`` codec's decoder, without registering the codec.
+r"""The ``sqlty`` codec's decoder, without registering the codec.
 
 ``decode`` turns source bytes into text with ``--sql`` strings wrapped as
-``SQL[T](...)``, as ``sqlty rewrite`` does, and adds the imports they need::
+``SQL[T](...)``, as ``sqlty rewrite`` does, and adds the imports they need:
 
-    from sqlty._decode import decode
-
-    decode(b'q = "--sql\\nSELECT 1::INTEGER"')[0]
-    # 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
+    >>> from sqlty._decode import decode
+    >>> decode(b'q = "--sql\\nSELECT 1::INTEGER"')[0]
+    'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
 Strings whose row type can't be inferred (invalid SQL, DML without
 RETURNING, DDL, empty queries) are left as they are. The ``# coding: sqlty``

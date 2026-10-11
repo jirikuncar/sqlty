@@ -52,7 +52,7 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
 
 ## Known gaps
 
-- **Multi-line queries in row type checks.** `SQL[User]("""--sql ...""")` over
+- **Multi-line queries in row type checks.** `SQL[User]("""--sql\nSELECT ...""")` over
   several lines gets no column checks against `User`; `typeddict-inheritance`
   still runs.
 - **SQLite free-form type names.** SQLite accepts any type name and derives an
