@@ -23,7 +23,9 @@ uv run pre-commit run --all-files  # all hooks (run before every commit)
   `--sql SELECT ...` with a space is a SQL comment — the parser sees an
   empty query and the string is not wrapped. `rewrite`/`strip` never
   modify string content, only the `SQL[T]()` wrapper, so
-  `strip(rewrite(x)) == x`. `check --fix` is the exception: its
+  `strip(rewrite(x)) == x`, unless the file already has an import line
+  `strip` removes (`from sqlty import SQL`/`UNTYPED`, or the `import-style`
+  line). `check --fix` is the exception: its
   `inline-sql-comment`, `select-star` and `mysql-sql-marker` fixes edit content.
   `-- sql\n` is an alternative marker that MySQL also reads as a comment.
 - **Every new feature gets an mdtest** in `tests/mdtest/`. Use `make update-mdtest`
