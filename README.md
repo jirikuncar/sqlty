@@ -1,26 +1,22 @@
 # SQLTy
 
-> **Experimental** — APIs may change. Feedback welcome!
-
-Type-safe SQL queries for Python. Infer types from SQL, rewrite source, lint annotations.
-
 [![Python 3.15+](https://img.shields.io/badge/python-3.15+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Powered by [sqlglot](https://sqlglot.com)** for SQL parsing across PostgreSQL, MySQL, and SQLite.
+Your SQL already knows its types. SQLTy tells Python.
 
-## The Problem
+Type-safe raw SQL for Python. sqlty infers the row type of each query from
+its SQL, writes it into your source as `SQL[T]`, and checks that it stays
+correct.
 
-You write raw SQL in Python. The query returns columns, but Python has no idea what types they are:
+**Documentation: [jirikuncar.github.io/sqlty](https://jirikuncar.github.io/sqlty/)**
 
-```python
-query = "SELECT id, name, created_at FROM users"
-# What does this return? tuple[int, str, datetime]? Who knows.
-```
+> **Experimental.** APIs and configuration may change. Feedback welcome.
 
-## The Solution
+## How it works
 
-Mark your SQL strings with `--sql\n`, add type casts, and run `sqlty rewrite .`:
+Mark a raw SQL string with `--sql\n` and cast its columns. Running
+`sqlty rewrite .` wraps it with the inferred row type:
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
@@ -29,143 +25,66 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users
 # rewritten-file: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
 ```
 
-`SQL[T]` is a `str` subclass — it works everywhere a string works, but now your types are visible to editors, type checkers, and linters.
+Comment lines such as `# rewritten-file:` show the result; the test suite
+checks them.
+
+Each cast becomes a Python type: `INTEGER` is `int`, `TEXT` is `str`,
+`TIMESTAMP` is `datetime.datetime`, `BYTEA` is `bytes` (see the
+[type mapping](https://jirikuncar.github.io/sqlty/guide/writing-queries/#type-mapping)).
+`SQL[T]` is a `str` subclass, so the query still works anywhere a string
+does, and editors and type checkers now know its row type.
 
 ## Install
 
 ```bash
-pip install sqlty
-# or
-uv add sqlty
+pip install sqlty    # or: uv add sqlty
 ```
 
-## Quick Start
+`sqlty[psycopg]` adds psycopg 3 for the driver helpers. See
+[Installation](https://jirikuncar.github.io/sqlty/installation/).
 
-### 1. Rewrite — add type annotations
+## Three commands
 
-```bash
-sqlty rewrite .          # "--sql\n..." → SQL[T]("--sql\n...")
-```
+| Command | What it does |
+|---------|--------------|
+| `sqlty rewrite .` | Wrap `--sql` strings in `SQL[T](...)` with the inferred type |
+| `sqlty check .` | Report drift, row type mismatches, `SELECT *` and unwrapped queries |
+| `sqlty strip .` | Remove the wrappers, back to plain `--sql` strings |
 
-### 2. Check — lint for type issues
+`rewrite` and `strip` only add or remove the wrapper and its import; the
+string itself is never modified. For a file of plain `--sql` strings,
+`strip(rewrite(x)) == x`. Start with the
+[Quickstart](https://jirikuncar.github.io/sqlty/quickstart/); to change a
+typed query, see
+[Editing queries](https://jirikuncar.github.io/sqlty/guide/writing-queries/#editing-queries).
 
-```bash
-sqlty check .            # catch mismatches, SELECT *, stale types
-```
+## Features
 
-### 3. Strip — remove annotations (to edit SQL)
+### Row types
 
-```bash
-sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
-```
-
-| Command | What it does | Analogy |
-|---------|-------------|---------|
-| `sqlty rewrite .` | Add type annotations to `--sql` strings | `ruff format` |
-| `sqlty strip .` | Remove annotations back to plain strings | undo rewrite |
-| `sqlty check .` | Lint: type mismatches, SELECT *, stale types | `ruff check` |
-
-## User-Defined Types
-
-Beyond `tuple[...]`, sqlty validates `TypedDict`, `NamedTuple`, `dataclass`, and Pydantic `BaseModel` types against query columns:
+Use `TypedDict`, `NamedTuple`, dataclasses or Pydantic models instead of
+tuples. `sqlty check` validates field count, types and names against the
+query ([Row types guide](https://jirikuncar.github.io/sqlty/guide/row-types/)).
+Here `id` is declared as `str` on purpose, and the mismatch is reported:
 
 ```python
 from typing import TypedDict
 from sqlty import SQL
 
 class User(TypedDict):
-    id: int
+    id: str
     name: str
 
-# sqlty check validates: field count, types, and names match the query
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-Mismatches produce clear diagnostics:
+### Schema inference
 
-```
-error[column-type-mismatch]: User.id is str but query column 'id' infers int
-error[column-count-mismatch]: User has 3 fields but query returns 2 columns
-warn[column-name-mismatch]: User.user_id doesn't match query column 'id'
-```
-
-`ReadOnly`, `Required` and `NotRequired` are looked through. Closed TypedDicts (PEP 728: `closed=True`, `extra_items=Never`, or a subclass of either) match columns by key: `NotRequired` keys may be absent, and extra columns are allowed only through `extra_items`, whose type they must match. Undeclared columns and missing required keys are `typeddict-key-mismatch` errors.:
-
-```python
-from typing import NotRequired, ReadOnly, TypedDict
-from sqlty import SQL
-
-class Metrics(TypedDict, extra_items=int):
-    day: ReadOnly[str]
-    note: NotRequired[str]
-
-# error: [column-type-mismatch] "Metrics.ratio is extra_items int but query column 'ratio' infers float"
-query = SQL[Metrics]("--sql\nSELECT day::TEXT, views::INTEGER, ratio::FLOAT FROM stats")
-```
-
-Runtime type resolution handles import variations correctly — `from datetime import datetime` matches `TIMESTAMP` columns even though the AST name is just `datetime`.
-
-### TypedDict inheritance
-
-Subclasses must respect a base's openness (PEP 728). A closed base admits no new keys, `extra_items`, or `closed=False`. A base with mutable `extra_items` must be kept exactly: no `closed=True`, `extra_items=Never`, `ReadOnly` or other type, and new keys must be `NotRequired` and of that type. A base with `ReadOnly` `extra_items` may be narrowed or closed, and new keys must be assignable to it. Keys a sibling base brings in count as new. Violations are `typeddict-inheritance` errors on the subclass's `class` line; a rejected override keeps the base's openness. Only same-file bases spelled as bare names (not generic or imported) are checked, and types are compared only when the answer is certain (plain classes and their unions):
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class Base(TypedDict, closed=True):
-    id: int
-
-# error: [typeddict-inheritance] "User cannot add key 'name' to closed base Base"
-class User(Base):
-    name: str
-
-query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
-## psycopg3 Integration
-
-`SQL[T]` is a `str` subclass, so it works anywhere psycopg3 takes a query. `sqlty.drivers.psycopg.execute` goes further: it picks the row factory from `T`, so rows come back as `T` both at runtime and for the type checker:
-
-```python
-import psycopg
-from dataclasses import dataclass
-from sqlty import SQL
-from sqlty.drivers.psycopg import execute
-
-@dataclass
-class User:
-    id: int
-    name: str
-    email: str
-
-# sqlty check: validates (int, str, str) matches User fields at dev time
-query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users")
-
-with psycopg.connect("dbname=mydb") as conn:
-    users = execute(conn, query).fetchall()  # list[User]
-```
-
-| `T` | Row factory |
-|-----|-------------|
-| `tuple[...]` | `tuple_row` |
-| `TypedDict`, `dict[...]` | `dict_row` |
-| dataclass, `NamedTuple`, Pydantic model | `class_row(T)` |
-
-`sqlty.row_form(query)` returns `T` itself, and `row_factory(T)` the matching psycopg factory for use with your own cursors. Only queries built as `SQL[T](...)` carry `T` at runtime; `execute` falls back to tuples otherwise.
-
-`scalar` fetches a single value, typed from `SQL[tuple[T]]` or from any type expression, unions and `Literal` included (PEP 747 `TypeForm`). No row raises `LookupError`, so `None` always means SQL `NULL`:
-
-```python
-email = scalar(conn, SQL[tuple[str | None]]("--sql\nSELECT email::TEXT FROM users WHERE id = %s"), (1,))  # str | None
-role = scalar(conn, "--sql\nSELECT role::TEXT FROM users LIMIT 1", Literal["admin", "user"])
-```
-
-**Without sqlty**, if the SQL drifts from the Python type (column added, type changed, name mismatch), you get a runtime error. **With sqlty**, `sqlty check` catches the mismatch before the code runs.
-
-## Schema-Based Inference
-
-Skip explicit `::TYPE` casts by providing a schema file:
+Point sqlty at your `CREATE TABLE` statements and the casts become optional
+([Schema inference guide](https://jirikuncar.github.io/sqlty/guide/schema-inference/)).
+PostgreSQL, SQLite and MySQL are supported; with MySQL, the Rust backend has a
+[known gap](https://jirikuncar.github.io/sqlty/reference/backends/#known-gaps).
 
 ```toml
 # pyproject.toml
@@ -176,125 +95,61 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email VARCHAR(255)
-);
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email VARCHAR(255) NOT NULL);
 ```
-
-No casts needed — types inferred from schema:
 
 ```python
 query = "--sql\nSELECT id, name, email FROM users"
 # rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
-## Magic Codec
+### More
 
-Import-time transformation — no `sqlty rewrite` step needed:
+- **[psycopg](https://jirikuncar.github.io/sqlty/guide/psycopg/).**
+  `execute(conn, SQL[User](...))` returns a `Cursor[User]` with the matching
+  row factory; `scalar` fetches one typed value.
+- **[Magic codec](https://jirikuncar.github.io/sqlty/guide/magic-codec/).**
+  Files declaring `# coding: sqlty` are rewritten when imported. The wheel
+  installs a `.pth` file that registers the codec at startup; with an
+  editable or source install, register it with `import sqlty.magic`.
+- **[Untyped queries](https://jirikuncar.github.io/sqlty/guide/untyped/).**
+  With `untyped = "sentinel"`, queries sqlty cannot type become
+  `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
+- **[Generated stubs](https://jirikuncar.github.io/sqlty/guide/stubs/).**
+  For a helper such as `sql("SELECT ...")`, decorate it with `@sqlty`,
+  register it under `[[tool.sqlty.functions]]` in `pyproject.toml`, and run
+  your code with `SQLTY_AUTO_GENERATE=1`. sqlty writes a `.pyi` stub with one
+  overload per query.
 
-```python
-# coding: sqlty
+## Use cases
 
-query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# decoded: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
+- [Catch schema drift in CI](https://jirikuncar.github.io/sqlty/use-cases/#catch-schema-drift-in-ci)
+- [Raw SQL without an ORM](https://jirikuncar.github.io/sqlty/use-cases/#raw-sql-without-an-orm)
+- [Incremental adoption](https://jirikuncar.github.io/sqlty/use-cases/#incremental-adoption)
+- [Scripts and notebooks](https://jirikuncar.github.io/sqlty/use-cases/#scripts-and-notebooks)
+- [Typed data-access helpers](https://jirikuncar.github.io/sqlty/use-cases/#typed-data-access-helpers)
+- [Guardrails for AI-generated SQL](https://jirikuncar.github.io/sqlty/use-cases/#guardrails-for-ai-generated-sql)
 
-The codec is registered automatically when sqlty is installed. See [magic codec docs](docs/guide/magic-codec.md).
+## Lint rules
 
-## Untyped Queries
+`sqlty check` runs a set of rules with configurable severity;
+`sqlty check --fix` applies the fixable ones and `sqlty rule NAME` explains
+one. See the
+[rules reference](https://jirikuncar.github.io/sqlty/reference/rules/).
 
-Queries that return rows sqlty can't type (`VALUES`, unparseable SQL) are
-left as plain strings by default. Opt in to mark them explicitly with the
-`UNTYPED` sentinel instead:
+## Backends
 
-```toml
-# pyproject.toml
-[tool.sqlty]
-untyped = "sentinel"  # or: sqlty rewrite --untyped sentinel
-```
-
-```python
-query = "--sql\nVALUES (1, 2)"
-# rewritten: query = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-```
-
-`UNTYPED` is a [PEP 661](https://peps.python.org/pep-0661/) sentinel, not
-`Any`: mypy, pyright and ty reject using its rows as a concrete type, and
-`sqlty check` reports it as `untyped-query` until casts or a schema make the
-row type known. Statements that return no rows (DDL, DML without `RETURNING`)
-stay unwrapped.
-
-The same setting applies to `.pyi` stubs generated for `@sqlty` functions
-(`SQLTY_AUTO_GENERATE=1`): uninferable queries get a `SQL[UNTYPED]` overload,
-and the catch-all `(query: str)` overload returns `SQL[UNTYPED]` (or the
-function's `return_type_template` applied to `UNTYPED`) instead of `str`, so
-a call missing from a stale stub is a type error rather than silently untyped.
-
-Typed overloads that overlap the `SQL[UNTYPED]` catch-all carry a per-line
-`# type: ignore[overload-overlap]`, so other overlaps in the stub are still
-reported. pyright reports only the first such overlap per catch-all, so with
-`reportUnnecessaryTypeIgnoreComment` enabled it flags the remaining ignores;
-with `enableTypeIgnoreComments = false` it reports the overlaps instead.
-Incremental stub updates add new overloads and replace existing ones whose
-return type changed (including hand edits), so switching `untyped` mode
-rewrites `SQL[Any]`/`SQL[UNTYPED]` overloads on the next update; until then
-a stub check reports them as stale.
-
-## Lint Rules
-
-`sqlty check` runs [13 rules](docs/reference/rules.md) and `sqlty check --fix` applies the
-fixable ones; `sqlty rule NAME` explains one.
-Configure severities in `pyproject.toml`:
-
-```toml
-[tool.sqlty.rules]
-select-star = "ignore"
-column-name-mismatch = "error"
-```
-
-## Benchmarks
-
-Optional Rust extension (PyO3/maturin) accelerates all core operations. Pure-Python fallback used automatically when not available.
-
-| Benchmark | Python | Rust | Speedup |
-|-----------|-------:|-----:|--------:|
-| `infer_type`: 1 column | 120 us | 5 us | **24x** |
-| `infer_type`: 4 columns | 340 us | 12 us | **28x** |
-| `rewrite_source`: 3 queries | 600 us | 25 us | **24x** |
-| `check_source`: 4 queries | 415 us | 24 us | **17x** |
-
-**Geometric mean: ~15x** (Linux x86_64). `strip_source` is regex-only, so both backends perform similarly.
-
-```bash
-uv run python benchmarks/bench_core.py
-```
-
-## Testing
-
-Markdown-based test framework (mdtest) inspired by [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md):
-
-```bash
-make test            # all tests
-make test-mdtest     # mdtests only
-make test-unit       # unit tests only
-```
-
-Browse `tests/mdtest/` to see behavior specified as readable markdown test suites.
-This README and everything under `docs/` run the same way.
-
-## Documentation
-
-- **[Overview](docs/index.md)** — what sqlty does, with links to the guide
-- **[Reference](docs/reference/cli.md)** — CLI, configuration, lint rules, Python API, backends
-- **[Quickstart](docs/quickstart.md)** — rewrite/check/strip, pre-commit
-- **[Schema Inference](docs/guide/schema-inference.md)** — schemas and dialects
+The CLI and `sqlty.core` use a Rust extension when available, with a
+pure-Python fallback held to the same tests. See
+[Backends](https://jirikuncar.github.io/sqlty/reference/backends/) for
+[benchmarks](https://jirikuncar.github.io/sqlty/reference/backends/#benchmarks)
+and how to choose one.
 
 ## Contributing
 
-See **[DEVELOPMENT.md](DEVELOPMENT.md)** for setup, testing, and contribution guidelines.
+See [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md)
+for setup, testing and contribution guidelines.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/jirikuncar/sqlty/blob/main/LICENSE).
