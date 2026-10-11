@@ -44,17 +44,12 @@ The `%` forms are replaced before parsing, everywhere in the query, as
 psycopg does: write `'a%%'` for a literal `%` in a string.
 
 !!! warning "MySQL servers reject the `--sql` marker"
-    sqlty infers MySQL queries, `%s` included, but the `--sql` marker line is
-    part of the string the driver sends. MySQL and MariaDB read `--` as a
-    comment only when whitespace follows it, so a query that starts with
-    `--sql\n` fails at runtime with a syntax error (1064). See
-    [Schema inference](../guide/schema-inference.md#mysql).
+    The marker line is part of the string the driver sends, and MySQL and
+    MariaDB read `--` as a comment only before whitespace. Use `-- sql`
+    instead; see [`mysql-sql-marker`](rules.md#mysql-sql-marker).
 
 ## Known gaps
 
-- **Multi-line queries in row type checks.** `SQL[User]("""--sql\nSELECT ...""")` over
-  several lines gets no column checks against `User`; `typeddict-inheritance`
-  still runs.
 - **SQLite free-form type names.** SQLite accepts any type name and derives an
   affinity (sqlite.org/datatype3.html section 3.1), but `UNSIGNED BIG INT`,
   `VARYING CHARACTER(255)` or `NATIVE CHARACTER(70)` make sqlty skip the

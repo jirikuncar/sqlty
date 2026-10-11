@@ -77,3 +77,57 @@ q = "--sql DELETE FROM users"
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
 r = u"--sql select id::INTEGER from users"
 ```
+
+## Triple-quoted wrappers are checked
+
+```python
+from sqlty import SQL
+
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+a = SQL[tuple[str]]("--sql\nSELECT 1 AS n")
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+b = SQL[tuple[str]]("""--sql
+SELECT 1 AS n""")
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+c = SQL[tuple[str]]("""--sql\nSELECT 1 AS n""")
+```
+
+## Unwrapped string with an escaped CRLF marker
+
+```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+a = "--sql\r\nSELECT 1 AS n"
+```
+
+## Unwrapped triple-quoted string is stale
+
+```python
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = """--sql
+SELECT 1 AS n"""
+```
+
+## Triple-quoted wrappers get select-star and untyped-query
+
+```python
+from sqlty import SQL, UNTYPED
+
+# error: [select-star-no-schema] "SELECT * used but no schema available"
+a = SQL[tuple[str]]("""--sql
+SELECT * FROM users""")
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
+b = SQL[UNTYPED]("""-- sql
+SELECT 1 AS n""")
+```
+
+## Escaped CRLF marker with the sentinel
+
+```toml
+[tool.sqlty]
+untyped = "sentinel"
+```
+
+```python
+q = "--sql\r\nVALUES (1, 2)"
+# rewritten: q = SQL[UNTYPED]("--sql\r\nVALUES (1, 2)")
+```

@@ -47,9 +47,9 @@ deleted = "--sql\nDELETE FROM users RETURNING id::INTEGER"
 # rewritten: deleted = SQL[tuple[int]]("--sql\nDELETE FROM users RETURNING id::INTEGER")
 ```
 
-`sqlty check` reports these unwrapped strings as
-[`stale-rewrite`](../reference/rules.md#stale-rewrite) warnings, even though
-`rewrite` will not wrap them.
+`sqlty check` reports nothing for them:
+[`stale-rewrite`](../reference/rules.md#stale-rewrite) covers only strings
+that `rewrite` would wrap.
 
 ## The `untyped-query` rule
 

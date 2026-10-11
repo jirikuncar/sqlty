@@ -111,8 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Fix what can be fixed (stale-rewrite, stale-type, select-star with a schema, "
-        "untyped-query once inferable), then report the rest",
+        help="Fix what can be fixed (the rules `sqlty rule` marks fixable, e.g. stale-rewrite, "
+        "stale-type, select-star with a schema), then report the rest",
     )
 
     # --- rule ---
@@ -152,10 +152,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 # --- Command implementations ---
 
+_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped")
+
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
-    """Rewrite command: transform --sql strings into SQL[T](...) calls."""
-    from sqlty.core import rewrite_source
+    """Rewrite command: transform --sql strings into SQL[T](...) calls.
+
+    f- and t-strings starting with ``--sql`` are never rewritten; they are
+    reported on stderr (``fstring-skipped``, ``tstring-skipped``) unless ``-q``.
+    """
+    from sqlty._lint import RULES
+    from sqlty.core import check_source, rewrite_source
 
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
@@ -175,6 +182,15 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             import_style=settings.import_style,
             untyped=settings.untyped,
         )
+        if not args.quiet:
+            skipped_only = dict.fromkeys(RULES, "ignore") | {
+                rule: (settings.rules or {}).get(rule, RULES[rule].default_severity.value)
+                for rule in _SKIPPED_STRING_RULES
+            }
+            for diag in check_source(
+                original, import_style=settings.import_style, rules=skipped_only
+            ):
+                print(f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}", file=sys.stderr)
 
         if rewritten == original:
             continue

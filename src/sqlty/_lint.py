@@ -108,6 +108,12 @@ RULES: dict[str, LintRule] = {
         fixable=True,
         description="SQL[tuple[...]] type doesn't match current schema (drift)",
     ),
+    "mysql-sql-marker": LintRule(
+        name="mysql-sql-marker",
+        default_severity=Severity.WARN,
+        fixable=True,
+        description='MySQL rejects the "--sql" marker; use "-- sql"',
+    ),
     "inline-sql-comment": LintRule(
         name="inline-sql-comment",
         default_severity=Severity.WARN,

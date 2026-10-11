@@ -22,6 +22,7 @@ stale-type = "error"
 | [`select-star-no-schema`](#select-star-no-schema) | Query | error | no | `SELECT *` with no schema to expand it |
 | [`select-star`](#select-star) | Query | warn | yes | `SELECT *` |
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
+| [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
@@ -209,6 +210,28 @@ DDL such as `CREATE TABLE`, `TRUNCATE`, `MERGE INTO` or `EXPLAIN`. Text such as
 Fix: `sqlty check --fix` replaces the space after `--sql` with `\n` in plain
 string literals (not raw, f- or t-strings) that this rule reports;
 `sqlty rewrite` never changes string contents.
+
+### mysql-sql-marker
+
+Default: warn. With `dialect = "mysql"`, a plain string literal opens with the
+`--sql` marker. MySQL and MariaDB read `--` as a comment only when whitespace follows
+it, so the server rejects the query with a syntax error (1064). `-- sql` is a
+comment in every dialect and sqlty reads it as the marker too.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+from sqlty import SQL
+
+# error: [mysql-sql-marker] "MySQL reads "--sql" as an expression, not a comment; use "-- sql""
+q = SQL[tuple[int]]("--sql\nSELECT CAST(id AS SIGNED) FROM users")
+```
+
+Fix: `sqlty check --fix` replaces `--sql` with `-- sql` in plain string
+literals, wrapped or not.
 
 ## Rewrite rules
 

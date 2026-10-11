@@ -107,9 +107,8 @@ stale-type = "error"
 untyped-query = "error"
 ```
 
-`stale-rewrite` also fires for `--sql` strings that `rewrite` never wraps
-(statements without rows, f-strings), so prefer `rewrite --check` over
-promoting it.
+`stale-rewrite` reports exactly the strings `rewrite` would wrap, so promoting
+it to `error` is equivalent to `rewrite --check`.
 
 Keep the schema file current, for example by regenerating it from the
 database in the same pull request as the migration
