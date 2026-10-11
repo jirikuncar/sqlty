@@ -19,6 +19,7 @@ class CallInfo(TypedDict, total=False):
     file: str
     registry_source: str | None  # Track which module/registry this call belongs to
     registry_class: str | None  # Track which specific registry class (e.g., "RegistryA")
+    registry_file: str | None  # File defining the helper (runtime calls only)
     start_offset: int | None  # Starting byte offset in source file
     end_offset: int | None  # Ending byte offset in source file
     start_col: int | None  # Starting column number (0-indexed)

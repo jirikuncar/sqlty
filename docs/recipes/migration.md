@@ -156,8 +156,5 @@ values as parameters (`%s`) instead.
 **Nullable columns.** Row types are never `T | None`. Annotate the field in
 a row type if the column can be `NULL`.
 
-**Explicit `--dialect postgres`.** It does not override a `dialect` set in
-`pyproject.toml`; see [Schema inference](../guide/schema-inference.md#dialects).
-
 Related issue:
 [#19 Create migration tool for existing codebases](https://github.com/jirikuncar/sqlty/issues/19).

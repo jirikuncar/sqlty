@@ -1,16 +1,17 @@
 import logging
+import shlex
 
 
 def formatter(command: str, text: str, filename: str) -> str:
     """Format generated stub content by piping it through an external command.
 
     The configured format command must use the {filename} placeholder, which will be
-    replaced with the provided filename. The command is executed with the stub content
+    replaced with the provided filename (shell-quoted). The command is executed with the stub content
     provided on stdin, and the formatted content is read from stdout.
 
     If the formatter fails, the original text is returned unchanged.
     """
-    cmd = command.format(filename=filename)
+    cmd = command.format(filename=shlex.quote(filename))
     try:
         import subprocess as sp
 

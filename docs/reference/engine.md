@@ -27,9 +27,28 @@ spelled the PostgreSQL way, so `INT64` expands to `BIGINT` and `NUMBER` to
 others work on a best-effort basis. The `--dialect` CLI flag accepts the
 first three; set others with `dialect` in `pyproject.toml`.
 
-Query parameters are values of unknown type: psycopg's `%s` and `%(name)s`
-in every dialect, and `$1`, `:name` or `?` where the dialect reads them. In
-PostgreSQL, `?` is a placeholder only where it isn't the JSONB operator.
+## Placeholders
+
+A placeholder is a value of unknown type, so it does not stop inference.
+What each dialect reads:
+
+| Placeholder | PostgreSQL | MySQL | SQLite |
+|---|---|---|---|
+| `%s`, `%b`, `%t`, `%(name)s` (psycopg, PyMySQL, mysqlclient) | yes | yes | yes |
+| `%%` (an escaped `%`) | yes | yes | yes |
+| `$1` | yes | yes | yes |
+| `?` | yes, where it isn't the JSONB operator | yes | yes |
+| `:name` | yes | yes | yes |
+
+The `%` forms are replaced before parsing, everywhere in the query, as
+psycopg does: write `'a%%'` for a literal `%` in a string.
+
+!!! warning "MySQL servers reject the `--sql` marker"
+    sqlty infers MySQL queries, `%s` included, but the `--sql` marker line is
+    part of the string the driver sends. MySQL and MariaDB read `--` as a
+    comment only when whitespace follows it, so a query that starts with
+    `--sql\n` fails at runtime with a syntax error (1064). See
+    [Schema inference](../guide/schema-inference.md#mysql).
 
 ## Known gaps
 

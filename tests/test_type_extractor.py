@@ -13,6 +13,7 @@ from sqlty._type_extractor import (
     _is_subtype,
     check_type_compatibility,
     extract_type_definitions,
+    field_accepts,
     parse_tuple_annotation,
 )
 
@@ -651,3 +652,21 @@ class TestTypedDictInheritance:
 def test_subtype_and_consistency(src, dst, subtype, consistent):
     assert _is_subtype(src, dst) is subtype
     assert _consistent(src, dst) is consistent
+
+
+@pytest.mark.parametrize(
+    ("annotation", "column", "ok"),
+    [
+        ("Any", "int", True),
+        ("int | Any", "int", True),
+        ("Optional[Union[str, Any]]", "int", True),
+        ("int | str", "int", True),
+        ("float", "int", True),
+        ("str | bytes", "int", False),
+        ("bool", "int", False),
+        ("str", None, True),
+    ],
+)
+def test_field_accepts(annotation: str, column: str | None, ok: bool):
+    """String-only annotations (``SQL[tuple[...]]`` items) use the same subtype check."""
+    assert field_accepts(annotation, column) is ok

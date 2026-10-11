@@ -32,3 +32,23 @@ q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP FROM events")
 
 `from datetime import datetime` and `datetime.datetime` are equivalent: types
 are resolved, not compared by spelling.
+
+A field passes when it can hold every value of its column: `Any`, a union
+containing `Any` or the column type, and `float` for an `int` column are
+accepted. A narrower field, such as `bool` for an `INTEGER` column, is not.
+
+```python
+from typing import Any, NamedTuple
+
+from sqlty import SQL
+
+
+class Row(NamedTuple):
+    id: Any
+    total: float | None
+    active: bool
+
+
+# error: [column-type-mismatch] "Row.active is bool but query column 'active' infers int"
+q = SQL[Row]("--sql\nSELECT id::INTEGER, total::INTEGER, active::INTEGER FROM orders")
+```

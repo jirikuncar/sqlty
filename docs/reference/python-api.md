@@ -60,12 +60,17 @@ def sql(query: str) -> SQL[Any]: ...
 ```
 
 Marks a helper function for [stub generation](../guide/stubs.md). `schema`
-is a path relative to the module and is used to infer types for the stub.
+is a path relative to the module and is used to infer types for the stub,
+unless the helper's `[[tool.sqlty.functions]]` entry or a
+`[tool.sqlty.schemas]` `"module.function"` key sets one (see
+[Schemas](../guide/stubs.md#schemas)).
 Decorating a function twice raises `TypeError`.
 
 Without `SQLTY_AUTO_GENERATE`, the decorator returns the function unchanged.
 With it, a function registered in `[[tool.sqlty.functions]]` is wrapped to
-record each query it receives, and an unregistered one triggers a warning.
+record each query it receives (its `query_param` argument, defaults applied, and the
+`return_type_param` argument if configured) and passes all arguments through;
+an unregistered one triggers a warning.
 
 ## `sqlty.drivers.psycopg`
 

@@ -100,6 +100,42 @@ class TestParser:
         assert core.rewrite_source(source, untyped=True) == source
 
 
+class TestQueryInput:
+    """The ``--sql`` marker and driver placeholders are read alike before parsing."""
+
+    SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);"
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect", "expected"),
+        [
+            ("--sql\r\nSELECT id, name FROM users", "mysql", "tuple[int, str]"),
+            ("  --sql\nSELECT id, name FROM users", "mysql", "tuple[int, str]"),
+            ("--sql SELECT id FROM users", "mysql", None),
+            ("SELECT id FROM users WHERE name = %b AND id = %(n)t", "postgres", "tuple[int]"),
+            ("SELECT id FROM users WHERE id = %(a-b)s", "postgres", "tuple[int]"),
+            ("SELECT id, 5 %% 2 FROM users WHERE name LIKE 'a%%'", "postgres", "tuple[int, str]"),
+            (
+                "SELECT $$it's %s$$::TEXT, id FROM users WHERE id = %s",
+                "postgres",
+                "tuple[str, int]",
+            ),
+            (
+                "SELECT E'it''s %s'::TEXT, id FROM users WHERE id = %s",
+                "postgres",
+                "tuple[str, int]",
+            ),
+            ("SELECT id FROM users WHERE id = %s", "sqlite", "tuple[int]"),
+        ],
+    )
+    def test_infer_type(self, sql: str, dialect: str, expected: str | None):
+        assert core.infer_type(sql, dialect=dialect, schema_sql=self.SCHEMA) == expected
+
+    def test_schema_is_not_a_query(self):
+        """Placeholders are not replaced in schema DDL, where MySQL rejects them."""
+        schema = "CREATE TABLE t (a INT DEFAULT %s);"
+        assert core.expand_star("SELECT * FROM t", dialect="mysql", schema_sql=schema) is None
+
+
 def _type_table() -> dict[str, str]:
     source = (Path(__file__).resolve().parent.parent / "rust/src/analyzer.rs").read_text()
     table = source[

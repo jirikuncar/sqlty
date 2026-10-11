@@ -13,8 +13,8 @@ sqlty strip .     # SQL[T]("--sql\n...") -> "--sql\n..."
 
 Each command takes files or directories (default: the current directory) and
 processes every `.py` file under them. Each file uses `[tool.sqlty]` from the
-nearest `pyproject.toml` above it; see [Configuration](configuration.md).
-Command-line flags override it.
+nearest `pyproject.toml` above it that has one; see
+[Configuration](configuration.md). Command-line flags override it.
 
 ## Common options
 
@@ -23,7 +23,7 @@ Command-line flags override it.
 | Option | Description |
 |--------|-------------|
 | `paths ...` | Files or directories to process (default: `.`) |
-| `--dialect {postgres,sqlite,mysql}` | SQL dialect; overrides `dialect` in `pyproject.toml` (default: `postgres`) |
+| `--dialect {postgres,sqlite,mysql}` | SQL dialect; overrides `dialect` in `pyproject.toml` (default: that key, else `postgres`) |
 | `--schema SCHEMA` | Schema `.sql` file; overrides `schema` in `pyproject.toml` |
 | `-v`, `--verbose` | Print each file `rewrite` or `strip` changes |
 | `-q`, `--quiet` | Suppress non-error output |

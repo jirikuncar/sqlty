@@ -61,6 +61,10 @@ The Rust `check_source` does not yet perform user-type extraction. Currently han
   sqlty skip the table silently. A follow-up could map such columns by the
   affinity rules (contains `INT` -> `int`; `CHAR`/`CLOB`/`TEXT` -> `str`;
   `REAL`/`FLOA`/`DOUB` -> `float`) and warn when a schema table is skipped.
+- **MySQL `--sql` marker at runtime.** sqlty types `--sql\nSELECT ...` in
+  MySQL, but MySQL and MariaDB servers reject it, since `--` is a comment
+  only when whitespace follows it. A MySQL-safe marker (`-- sql`, `/*sql*/`)
+  and a `check` warning for `--sql` in MySQL are planned.
 - **Other dialects.** Dialects beyond PostgreSQL, MySQL and SQLite use
   sqlparser-rs's parser with a handful of canonical type names; they have no
   mdtest suite of their own.

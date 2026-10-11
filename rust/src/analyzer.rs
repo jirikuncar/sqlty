@@ -205,11 +205,11 @@ impl SqlDialect {
     }
 }
 
-/// A leading `--sql` marker line: MySQL only reads `-- ` (with a space) as a comment.
+/// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
 static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
-/// DB-API placeholders (`%s`, `%(name)s`) and the `%%` escape, which sqlparser can't read.
-static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%\(\w+\)s|%s").unwrap());
+/// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
+static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
 static QMARK: Lazy<Regex> = Lazy::new(|| {
@@ -231,32 +231,42 @@ static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
 });
 
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
-///
-/// Placeholders parse as `NULL`, a value of unknown type, and `%%` as `%`. In PostgreSQL,
-/// where `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
-/// the query doesn't parse as written.
 fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let mut sql = SQL_MARKER.replace(sql, "").into_owned();
-    sql = PLACEHOLDER
-        .replace_all(&sql, |caps: &Captures| match &caps[0] {
-            "%%" => "%",
-            _ => "NULL",
-        })
-        .into_owned();
+    let mut sql = sql.to_string();
     if dialect == SqlDialect::MySql {
         for (pattern, replacement) in MYSQL_TYPE_FIXES.iter() {
             sql = pattern.replace_all(&sql, *replacement).into_owned();
         }
     }
-    let parser = dialect.parser_dialect();
-    let stmts = match Parser::parse_sql(parser.as_ref(), &sql) {
-        Ok(stmts) => stmts,
-        Err(_) if dialect == SqlDialect::Postgres && sql.contains('?') => {
-            Parser::parse_sql(parser.as_ref(), &numbered_placeholders(&sql)).ok()?
-        }
-        Err(_) => return None,
-    };
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), &sql).ok()?;
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+}
+
+/// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
+/// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
+/// the query doesn't parse as written.
+fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    let sql = parser_input(sql);
+    parse(&sql, dialect).or_else(|| {
+        (dialect == SqlDialect::Postgres && sql.contains('?'))
+            .then(|| parse(&numbered_placeholders(&sql), dialect))
+            .flatten()
+    })
+}
+
+/// `sql` as sqlparser should read it, in every dialect: the `--sql` marker line is
+/// dropped (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
+/// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
+/// literals and comments are not skipped; any query this mangles fails to parse
+/// and stays uninferred rather than mistyped.
+fn parser_input(sql: &str) -> String {
+    let sql = SQL_MARKER.replace(sql, "");
+    PLACEHOLDER
+        .replace_all(&sql, |caps: &Captures| match &caps[0] {
+            "%%" => "%",
+            _ => "NULL",
+        })
+        .into_owned()
 }
 
 fn numbered_placeholders(sql: &str) -> String {
@@ -304,7 +314,7 @@ fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
 }
 
 fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
-    parse(sql, dialect)?.into_iter().next()
+    parse_query(sql, dialect)?.into_iter().next()
 }
 
 /// Canonical spelling of a SQL type, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
@@ -413,7 +423,7 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     let dialect = SqlDialect::from_name(dialect);
     schema_sql
         .split(';')
-        .filter_map(|stmt| parse_first(stmt.trim(), dialect))
+        .filter_map(|stmt| parse(stmt.trim(), dialect)?.into_iter().next())
         .filter_map(|stmt| match stmt {
             Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
             _ => None,
@@ -465,7 +475,7 @@ pub fn analyze_select(
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 pub fn returns_rows(sql: &str, dialect: &str) -> bool {
-    match parse(sql, SqlDialect::from_name(dialect)) {
+    match parse_query(sql, SqlDialect::from_name(dialect)) {
         None => true,
         Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
@@ -1004,6 +1014,24 @@ mod tests {
                 .as_deref(),
             Some("tuple[int, float, list]")
         );
+    }
+
+    #[test]
+    fn test_parser_input() {
+        assert_eq!(
+            parser_input("  --sql\r\nSELECT %s, %(id)s, %b, %(a-b)t, '%s', 5 %% 2"),
+            "SELECT NULL, NULL, NULL, NULL, 'NULL', 5 % 2"
+        );
+        assert_eq!(parser_input("--sql SELECT 1"), "");
+        assert_eq!(parser_input("SELECT %d, %%(a)s"), "SELECT %d, %(a)s");
+        assert_eq!(
+            infer_type("--sql\nSELECT 1 AS x", "mysql", &None)
+                .unwrap()
+                .as_deref(),
+            Some("tuple[int]")
+        );
+        // Schema DDL is not a query: a `%s` there is not a placeholder.
+        assert!(load_schema("CREATE TABLE t (a INT DEFAULT %s)", "postgres").is_empty());
     }
 
     #[test]

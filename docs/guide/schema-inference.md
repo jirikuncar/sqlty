@@ -61,24 +61,24 @@ Nullability is not tracked: `email` above is `str`, not `str | None`.
 1. `--schema PATH` on the command line, relative to the current directory.
 2. `schema` in `[tool.sqlty]`, relative to the directory of `pyproject.toml`.
 
-Each file uses the nearest `pyproject.toml` above it. A schema file that does not exist is reported as a warning and
+Each file uses the nearest `pyproject.toml` above it that has a `[tool.sqlty]`
+table. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
-`@sqlty` helpers takes its schema from `@sqlty(schema=...)`; see
+`@sqlty` helpers runs at runtime, so there is no `--schema`: it reads `schema`
+from `[tool.sqlty]` in the `pyproject.toml` nearest the file of the first
+recorded helper (not one per file, as above). A helper can override it with
+`schema` in its `[[tool.sqlty.functions]]` entry,
+[`[tool.sqlty.schemas]`](../reference/configuration.md#schemas) (schemas
+per module or helper) or `@sqlty(schema=...)`; see
 [Generated stubs](stubs.md#schemas).
-
-`[tool.sqlty.schemas]` (named schemas) is read from `pyproject.toml` but not
-used by any command yet; see
-[Configuration](../reference/configuration.md#schemas).
 
 ## Dialects
 
 The dialect decides how queries and the schema are parsed. Choose
 `postgres` (default), `sqlite` or `mysql` with `dialect` in `[tool.sqlty]` or
-`--dialect` on the command line. When `pyproject.toml` sets a dialect, an
-explicit `--dialect postgres` does not override it, because `postgres` is
-also the flag's default; any other value does.
+`--dialect` on the command line, which overrides `pyproject.toml`.
 
 ### SQLite
 
@@ -147,6 +147,16 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 
 `TINYINT(1)` is an `int`, not a `bool`. See the
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.
+
+!!! warning "MySQL servers reject `--sql` queries"
+    The `--sql` marker line is part of the query: `SQL[T]` is a `str`, and
+    PyMySQL and mysqlclient send it to the server unchanged. MySQL and
+    MariaDB read `--` as a comment only when whitespace follows it, so
+    `--sql\nSELECT ...` fails at runtime with a syntax error (1064), even
+    though sqlty types it. Until sqlty accepts a MySQL-safe marker, drop the
+    marker line before executing, e.g. `cur.execute(query.partition("\n")[2])`.
+    Placeholders (`%s`, `%(name)s`) are inferred in every dialect; see
+    [Engine](../reference/engine.md#placeholders).
 
 ## Example projects
 
