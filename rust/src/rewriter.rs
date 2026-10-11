@@ -351,7 +351,7 @@ fn has_import(source: &str, import_str: &str) -> bool {
 }
 
 /// Offset where imports go: after shebang, coding cookie, docstring and `__future__`.
-fn header_end(source: &str) -> usize {
+pub(crate) fn header_end(source: &str) -> usize {
     let line_end_at = |from: usize| {
         source[from..]
             .find('\n')

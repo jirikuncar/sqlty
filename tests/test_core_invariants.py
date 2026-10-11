@@ -73,6 +73,33 @@ def test_strip_undoes_rewrite(core: types.ModuleType, source: str, options: dict
     assert core.strip_source(rewritten, import_style=style) == source
 
 
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_fix_is_idempotent(core: types.ModuleType, source: str, options: dict) -> None:
+    import sqlty.core
+
+    once = sqlty.core.fix_source(source, **options)
+    assert sqlty.core.fix_source(once, **options) == once
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_fix_leaves_nothing_stale(core: types.ModuleType, source: str, options: dict) -> None:
+    """After ``--fix`` only unfixable diagnostics remain: unwrapped or stale queries can't."""
+    import sqlty.core
+
+    fixed = sqlty.core.fix_source(source, **options)
+    stale = [
+        d
+        for d in core.check_source(
+            fixed,
+            dialect=options["dialect"],
+            schema_sql=options["schema_sql"],
+            import_style=options["import_style"],
+        )
+        if d["rule"] in ("stale-rewrite", "stale-type")
+    ]
+    assert not stale
+
+
 def _outcome(call: Any, backend: types.ModuleType) -> Any:
     try:
         return call(backend)

@@ -15,7 +15,7 @@ use regex::Regex;
 
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
-use crate::rewriter::skipped_string_rule;
+use crate::rewriter::{header_end, rewrite_source, skipped_string_rule};
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -125,6 +125,8 @@ pub fn check_source(
     let unwrapped_pat = unwrapped_sql_pattern();
     let inline_pat = inline_sql_comment_pattern();
 
+    let wrappable = wrappable_lines(source, dialect, schema, import_style);
+
     for (line_num, logical) in logical_lines(source, &wrapper_name) {
         let trimmed = logical.as_str();
 
@@ -149,7 +151,7 @@ pub fn check_source(
 
         // Check for unwrapped --sql strings (stale-rewrite)
         if is_unwrapped_sql_string(trimmed, &wrapper_marker, &unwrapped_pat) {
-            if rule_config.is_enabled("stale-rewrite") {
+            if wrappable.contains(&line_num) && rule_config.is_enabled("stale-rewrite") {
                 diagnostics.push(Diagnostic {
                     rule: "stale-rewrite".to_string(),
                     message: "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
@@ -209,7 +211,7 @@ pub fn check_source(
                     let untyped = format!("{}[{}]", wrapper_name, untyped_name);
                     let message = match infer_from_sql_content(&sql_content, dialect, schema) {
                         Some(current) => format!(
-                            "{} can now be {}[{}]; strip and rewrite to update",
+                            "{} can now be {}[{}]; run sqlty check --fix",
                             untyped, wrapper_name, current
                         ),
                         None => format!(
@@ -255,6 +257,29 @@ pub fn check_source(
 /// Check if a line has `"--sql SELECT ..."` (space after --sql, not \n).
 fn has_inline_sql_comment(line: &str, pattern: &Regex) -> bool {
     pattern.is_match(line)
+}
+
+/// Lines holding a string that `rewrite` would wrap.
+///
+/// Rewrite only inserts imports at the header and wraps strings in place,
+/// so each other line keeps its position, shifted past the imports.
+fn wrappable_lines(
+    source: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    import_style: Option<&str>,
+) -> Vec<usize> {
+    let original: Vec<&str> = source.lines().collect();
+    let rewritten_source = rewrite_source(source, dialect, schema, import_style, false);
+    let rewritten: Vec<&str> = rewritten_source.lines().collect();
+    let added = rewritten.len() - original.len();
+    let head = source[..header_end(source)].matches('\n').count();
+    original
+        .iter()
+        .enumerate()
+        .filter(|(i, line)| rewritten[if *i < head { *i } else { i + added }] != **line)
+        .map(|(i, _)| i + 1)
+        .collect()
 }
 
 /// Stripped lines, with a wrapper split by a formatter joined onto its first line.
@@ -425,7 +450,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].message,
-            "sqlty.SQL[sqlty.UNTYPED] can now be sqlty.SQL[tuple[int]]; strip and rewrite to update"
+            "sqlty.SQL[sqlty.UNTYPED] can now be sqlty.SQL[tuple[int]]; run sqlty check --fix"
         );
     }
 }

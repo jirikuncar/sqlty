@@ -88,6 +88,15 @@ class Run:
                 return _without_imports(self._rewritten, self._imports).strip()
             case "rewritten-file":
                 return self._rewritten.strip()
+            case "fixed":
+                return core.fix_source(
+                    code,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    import_style=self.import_style,
+                    untyped=self.untyped,
+                    rules=self.rules,
+                ).strip()
             case "stripped":
                 return core.strip_source(code, import_style=self.import_style).strip()
             case "decoded":

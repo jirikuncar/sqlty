@@ -21,11 +21,19 @@ Kind = Literal[
     "rewritten",
     "rewritten-file",
     "stripped",
+    "fixed",
     "error",
     "decoded",
 ]
 SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns")
-PY_KINDS: tuple[Kind, ...] = ("rewritten", "rewritten-file", "stripped", "error", "decoded")
+PY_KINDS: tuple[Kind, ...] = (
+    "rewritten",
+    "rewritten-file",
+    "stripped",
+    "fixed",
+    "error",
+    "decoded",
+)
 BACKEND_KINDS = frozenset(get_args(Kind)) - {"decoded", "columns"}
 DIRECTIVES = frozenset({"skip", "xfail", "backend"})
 CONFIG_KEYS = frozenset(

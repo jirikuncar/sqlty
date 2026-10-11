@@ -111,7 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Not implemented yet: reports issues without changing files",
+        help="Fix what can be fixed (stale-rewrite, stale-type, select-star with a schema, "
+        "untyped-query once inferable), then report the rest",
     )
 
     # --- rule ---
@@ -239,7 +240,7 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
-    from sqlty.core import check_source
+    from sqlty.core import check_source, fix_source
 
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
@@ -248,15 +249,28 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
-    if args.fix:
-        logger.warning("--fix is not implemented yet; no files are changed")
-
     total_errors = 0
     total_warnings = 0
+    total_fixed = 0
 
     for path in files:
         source = path.read_text(encoding="utf-8")
         settings = resolver.for_file(path)
+        if args.fix:
+            fixed = fix_source(
+                source,
+                dialect=settings.dialect,
+                schema_sql=settings.schema_sql,
+                import_style=settings.import_style,
+                untyped=settings.untyped,
+                rules=settings.rules,
+            )
+            if fixed != source:
+                path.write_text(fixed, encoding="utf-8")
+                source = fixed
+                total_fixed += 1
+                if args.verbose:
+                    print(f"Fixed {path}")
         diagnostics = check_source(
             source,
             dialect=settings.dialect,
@@ -279,6 +293,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             if not args.quiet:
                 print(f"{path}:{line}: [{rule}] {message}")
 
+    if total_fixed and not args.quiet:
+        print(f"Fixed {total_fixed} file(s)")
     if not args.quiet and (total_errors or total_warnings):
         parts = []
         if total_errors:

@@ -20,5 +20,17 @@ from sqlty import SQL
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-Run `sqlty strip` and `sqlty rewrite` on the file. User-defined row types are
-checked by the `column-*` rules instead.
+User-defined row types are checked by the `column-*` rules instead.
+
+## Fix
+
+`sqlty check --fix .` writes the inferred type:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```

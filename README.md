@@ -216,7 +216,8 @@ a call missing from a stale stub is a type error rather than silently untyped.
 
 ## Lint Rules
 
-`sqlty check` runs [12 rules](docs/rules.md); `sqlty rule NAME` explains one.
+`sqlty check` runs [12 rules](docs/rules.md) and `sqlty check --fix` applies the
+fixable ones; `sqlty rule NAME` explains one.
 Configure severities in `pyproject.toml`:
 
 ```toml

@@ -123,6 +123,40 @@ def rewrite_source(
     )
 
 
+def fix_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    rules: dict[str, str] | None = None,
+) -> str:
+    """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
+
+    - ``stale-rewrite``: wrap ``--sql`` strings, as ``rewrite_source`` does
+    - ``select-star``: with a schema, replace ``*`` by the cast column list
+    - ``stale-type``: update ``SQL[tuple[...]]`` to the inferred row type
+    - ``untyped-query``: replace ``SQL[UNTYPED]`` once the row type is inferable
+
+    User-defined row types (``SQL[User]``) are left alone.
+
+    Example:
+        >>> fix_source('from sqlty import SQL\\nq = SQL[tuple[str]]("--sql\\\\nSELECT 1::INTEGER")')
+        'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\\\nSELECT 1::INTEGER")'
+    """
+    from sqlty._fixer import fix_source as fix
+
+    return fix(
+        source,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        untyped=untyped,
+        rules=rules,
+    )
+
+
 def strip_source(source: str, *, import_style: str | None = None) -> str:
     """Strip Python source: SQL[T]("--sql ...") -> "--sql ...".
 

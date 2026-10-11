@@ -27,7 +27,7 @@ import re
 
 from sqlty._checker import Checker
 from sqlty._lint import RuleConfig
-from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, skipped_string_rule
+from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, _header_end, skipped_string_rule
 from sqlty._sql_analyzer import SQLAnalyzer
 
 
@@ -156,6 +156,7 @@ def check_source(
     untyped_name = istyle.untyped_name
 
     diagnostics: list[dict[str, str | int | None]] = []
+    wrappable = _wrappable_lines(source, rewriter)
 
     for i, line_stripped in _logical_lines(source, wrapper_name):
         if skipped := skipped_string_rule(line_stripped):
@@ -172,7 +173,7 @@ def check_source(
 
         # Check for unwrapped --sql strings (stale-rewrite)
         if _is_unwrapped_sql_string(line_stripped, wrapper_name):
-            if rule_config.is_enabled("stale-rewrite"):
+            if i in wrappable and rule_config.is_enabled("stale-rewrite"):
                 diagnostics.append(
                     {
                         "rule": "stale-rewrite",
@@ -233,7 +234,7 @@ def check_source(
             message = (
                 f"{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
                 if current_type == "Any"
-                else f"{untyped} can now be {wrapper_name}[{current_type}]; strip and rewrite to update"
+                else f"{untyped} can now be {wrapper_name}[{current_type}]; run sqlty check --fix"
             )
             diagnostics.append(
                 {
@@ -322,6 +323,25 @@ def _has_inline_sql_comment(line: str) -> bool:
     ``"--sql\\nSELECT ..."`` where the actual SQL starts on the next line.
     """
     return bool(re.search(r"""["']--sql [^\\]""", line))
+
+
+def _wrappable_lines(source: str, rewriter: SQLRewriter) -> set[int]:
+    """Lines holding a string that ``rewrite`` would wrap.
+
+    Rewrite only inserts imports at the header and wraps strings in place,
+    so each other line keeps its position, shifted past the imports.
+
+    Example:
+        >>> _wrappable_lines('a = "--sql\\\\nSELECT 1::INTEGER"\\nb = "--sql\\\\nDROP TABLE t"', SQLRewriter())
+        {1}
+    """
+    original = source.splitlines()
+    rewritten = rewriter.rewrite(source).source.splitlines()
+    added = len(rewritten) - len(original)
+    head = source[: _header_end(source)].count("\n")
+    return {
+        i + 1 for i, line in enumerate(original) if rewritten[i if i < head else i + added] != line
+    }
 
 
 def _logical_lines(source: str, wrapper_name: str) -> list[tuple[int, str]]:

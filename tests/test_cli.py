@@ -58,3 +58,29 @@ def test_dialect_flag_overrides_config(tmp_path, flag, expected) -> None:
     )
 
     assert SettingsResolver(args).for_file(tmp_path / "q.py").dialect == expected
+
+
+def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, name TEXT);")
+    (tmp_path / "q.py").write_text(
+        "from sqlty import SQL\n"
+        'stale = SQL[tuple[str]]("--sql\\nSELECT id FROM users")\n'
+        'star = SQL[tuple[int, str]]("--sql\\nSELECT * FROM users")\n'
+        'new = "--sql\\nSELECT name FROM users"\n'
+        'bad = "--sql SELECT id FROM users"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "--fix", "."])
+
+    assert (tmp_path / "q.py").read_text() == (
+        "from sqlty import SQL\n"
+        'stale = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+        'star = SQL[tuple[int, str]]("--sql\\nSELECT id::INT, name::TEXT FROM users")\n'
+        'new = SQL[tuple[str]]("--sql\\nSELECT name FROM users")\n'
+        'bad = "--sql SELECT id FROM users"\n'
+    )
+    out = capsys.readouterr().out
+    assert out.startswith("q.py:5: [inline-sql-comment]")
+    assert "Fixed 1 file(s)" in out

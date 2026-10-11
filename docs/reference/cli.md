@@ -84,7 +84,8 @@ options:
   --schema SCHEMA       Schema .sql file for every path (default: [tool.sqlty] schema per project)
   -v, --verbose         Increase verbosity
   -q, --quiet           Suppress non-error output
-  --fix                 Not implemented yet: reports issues without changing files
+  --fix                 Fix what can be fixed (stale-rewrite, stale-type, select-star with a
+                        schema, untyped-query once inferable), then report the rest
 ```
 
 ## `sqlty rule`

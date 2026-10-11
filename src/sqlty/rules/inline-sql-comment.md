@@ -17,7 +17,6 @@ statement.
 
 ```python
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 

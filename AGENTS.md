@@ -140,6 +140,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
+| `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports |
 | `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 
@@ -248,6 +249,7 @@ src/sqlty/
 ├── core.py              # Public API: try Rust _core, fall back to _core_py
 ├── _core_py.py          # Pure-Python: infer_type, rewrite_source, strip_source, check_source
 ├── _rewriter.py         # SQLRewriter: whole-source regex rewrite/strip
+├── _fixer.py           # fix_source: sqlty check --fix, built on sqlty.core
 ├── _sql_analyzer.py     # SQL parsing + type inference (sqlglot)
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _checker.py          # Column validation, SELECT * detection

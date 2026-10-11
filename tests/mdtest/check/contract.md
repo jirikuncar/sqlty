@@ -6,7 +6,6 @@
 
 ```python
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql SELECT 1::INTEGER"
 ```
 
@@ -82,7 +81,7 @@ inline-sql-comment = "ignore"
 ```
 
 ```python
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+# error:
 q = "--sql SELECT 1::INTEGER"
 ```
 
@@ -102,7 +101,7 @@ CREATE TABLE users (id INTEGER);
 ```
 
 ```python
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 q = SQL[UNTYPED]("--sql\nSELECT id FROM users")
 ```
 
@@ -401,7 +400,6 @@ q = SQL[tuple[str]]("--sql\nselect * FROM users")
 
 ```python
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 
@@ -493,6 +491,6 @@ inline-sql-comment = "ignore"
 ```
 
 ```python
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+# error:
 q = "--sql SELECT id::INTEGER FROM users"
 ```

@@ -18,4 +18,16 @@ type.
 q = "--sql\nSELECT id::INTEGER FROM users"
 ```
 
-Run `sqlty rewrite .`.
+## Fix
+
+`sqlty rewrite .` or `sqlty check --fix .`:
+
+```python
+q = "--sql\nSELECT id::INTEGER FROM users"
+# fixed: from sqlty import SQL
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+```
+
+Strings rewrite can't type (DDL, DML without `RETURNING`, invalid SQL) are
+not flagged; see [untyped queries](../../../docs/guide/untyped.md) to wrap
+them anyway.

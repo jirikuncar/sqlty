@@ -66,7 +66,6 @@ the query is empty, so nothing is inferred.
 
 ```python
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql SELECT id::INTEGER FROM users"
 # rewritten: q = "--sql SELECT id::INTEGER FROM users"
 ```
@@ -78,6 +77,7 @@ sqlty rewrite .           # "--sql\n..." -> SQL[T]("--sql\n...")
 sqlty rewrite --check .   # exit 1 if files need rewriting (CI)
 sqlty rewrite --diff .    # show the diff, change nothing
 sqlty check .             # lint; exit 1 on errors
+sqlty check --fix .       # rewrite, refresh stale types, expand SELECT *
 sqlty strip .             # SQL[T]("--sql\n...") -> "--sql\n..."
 ```
 

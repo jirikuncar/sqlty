@@ -14,7 +14,7 @@ q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ## Inferable query suggests the row type
 
 ```python
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; strip and rewrite to update"
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 q = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
 ```
 

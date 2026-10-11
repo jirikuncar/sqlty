@@ -58,7 +58,7 @@ mixed = "--sql\nSELECT id::TEXT, name FROM users"
 
 The row type covers every column of the table. `sqlty check` still flags the
 star, since a schema change would silently change the row;
-`sqlty.core.expand_star()` returns the explicit column list.
+`sqlty check --fix` writes the explicit column list.
 
 ```sql
 SELECT * FROM users

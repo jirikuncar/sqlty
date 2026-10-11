@@ -119,7 +119,7 @@ RULES: dict[str, LintRule] = {
     "untyped-query": LintRule(
         name="untyped-query",
         default_severity=Severity.WARN,
-        fixable=False,
+        fixable=True,
         description="SQL[UNTYPED] query has no inferable row type; add casts or a schema",
     ),
 }

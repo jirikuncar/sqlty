@@ -44,6 +44,7 @@ takes `dialect="postgres"` and, where types are inferred, `schema_sql` with
 | `expand_star(sql)` | the query with `*` replaced by cast columns, or `None` |
 | `rewrite_source(source, *, import_style=None, untyped=False)` | source with queries wrapped |
 | `strip_source(source, *, import_style=None)` | source with wrappers removed |
+| `fix_source(source, *, import_style=None, untyped=False, rules=None)` | source with `sqlty check --fix` applied |
 | `check_source(source, *, rules=None, import_style=None)` | diagnostics: `rule`, `message`, `severity`, `line` |
 
 The [guide](../guide/quick-start.md) and [rules](../rules.md) pages are
