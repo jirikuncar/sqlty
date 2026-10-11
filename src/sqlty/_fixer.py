@@ -19,6 +19,7 @@ from sqlty._rewriter import (
     _query,
     is_plain_literal,
 )
+from sqlty._type_extractor import refines_tuple
 
 _QUOTES = ('"""', "'''", '"', "'")
 
@@ -76,6 +77,8 @@ def fix_source(
             annotated == style.untyped_name and enabled("untyped-query")
         )
         row_type = (infer(content) if refresh else None) or annotated
+        if refines_tuple(annotated, row_type):
+            row_type = annotated
         if row_type != annotated:
             introduced.add(row_type)
         literal = f"{prefix}{quote}{content}{quote}"

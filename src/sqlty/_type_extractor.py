@@ -141,6 +141,10 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         return {}
 
     aliases = _typing_aliases(tree)
+    newtypes = _newtype_assignments(tree, aliases)
+    for name, supertype, _ in newtypes:
+        if isinstance(supertype, ast.Name):
+            aliases[name] = aliases.get(supertype.id, supertype.id)
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
     # are recognized when their base is a TypedDict defined earlier
@@ -158,7 +162,9 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         return {}
 
     # Phase 2: Collect import statements needed for namespace
-    import_stmts = _collect_imports(tree)
+    import_stmts = _collect_imports(tree) + [
+        f"try:\n    {stmt}\nexcept Exception:\n    pass" for _, _, stmt in newtypes
+    ]
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
@@ -294,6 +300,26 @@ def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
     return [(f"_{i}", t.strip()) for i, t in enumerate(parts)]
 
 
+def refines_tuple(annotated: str, inferred: str) -> bool:
+    """Whether ``tuple[...]`` ``annotated`` is ``inferred`` with some bare generics parametrised.
+
+    Such an annotation is more precise than inference, so it is not stale.
+
+    Example:
+        >>> refines_tuple("tuple[int, list[str]]", "tuple[int, list]")
+        True
+        >>> refines_tuple("tuple[str, list[str]]", "tuple[int, list]")
+        False
+    """
+    ours, theirs = parse_tuple_annotation(annotated), parse_tuple_annotation(inferred)
+    if ours is None or theirs is None or len(ours) != len(theirs):
+        return False
+    return all(
+        a == i or (i.isidentifier() and a.startswith(f"{i}["))
+        for (_, a), (_, i) in zip(ours, theirs, strict=True)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Runtime type resolution
 # ---------------------------------------------------------------------------
@@ -412,10 +438,24 @@ def _is_subtype(src: typing.Any, dst: typing.Any) -> bool | None:
     return result
 
 
+def _erase(tp: typing.Any) -> typing.Any:
+    """A ``NewType``'s supertype and a generic's class, as a bare SQL column type can't be told apart.
+
+    Example:
+        >>> _erase(list[str]), _erase(typing.NewType("UserId", int))
+        (<class 'list'>, <class 'int'>)
+    """
+    while isinstance(tp, typing.NewType):
+        tp = tp.__supertype__
+    origin = typing.get_origin(tp)
+    return origin if isinstance(origin, type) else tp
+
+
 def _member_fits(src: typing.Any, targets: list[typing.Any]) -> bool | None:
     # ``typing.Any`` is a class on 3.11+, so it must be caught before ``issubclass``.
     if src is typing.Any or src in _NEVER:
         return True
+    targets = [_erase(d) for d in targets]
     if any(src == d or d in (typing.Any, object) for d in targets):
         return True
     if not _is_plain(src):
@@ -488,6 +528,27 @@ def _collect_imports(tree: ast.Module) -> list[str]:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             imports.append(ast.unparse(node))
     return imports
+
+
+def _newtype_assignments(
+    tree: ast.Module, aliases: dict[str, str]
+) -> list[tuple[str, ast.expr, str]]:
+    """Module-level ``X = NewType("X", T)`` as ``(name, T, source)`` triples.
+
+    Example:
+        >>> [(n, ast.unparse(t)) for n, t, _ in _newtype_assignments(ast.parse("U = NewType('U', int)"), {})]
+        [('U', 'int')]
+    """
+    return [
+        (node.targets[0].id, node.value.args[1], ast.unparse(node))
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Call)
+        and _is_name(node.value.func, "NewType", aliases)
+        and len(node.value.args) == 2
+    ]
 
 
 def _typing_aliases(tree: ast.Module) -> dict[str, str]:
@@ -676,6 +737,7 @@ def _set_openness(
         info.owner = base.owner
 
 
+_GENERICS = (list, dict, set, frozenset, tuple)
 _AST_TYPES: dict[str, typing.Any] = {
     "int": int,
     "float": float,
@@ -684,6 +746,11 @@ _AST_TYPES: dict[str, typing.Any] = {
     "bytes": bytes,
     "bool": bool,
     "object": object,
+    "list": list,
+    "dict": dict,
+    "set": set,
+    "frozenset": frozenset,
+    "tuple": tuple,
     "Any": typing.Any,
     "Never": typing.Never,
     "NoReturn": typing.Never,
@@ -691,7 +758,7 @@ _AST_TYPES: dict[str, typing.Any] = {
 
 
 def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
-    """Builtin scalars, ``Any``, ``Never`` and their unions from source; None if unknown.
+    """Builtin scalars and generics, ``Any``, ``Never`` and their unions from source; None if unknown.
 
     ``aliases`` maps local names to ``typing`` names (see `_typing_aliases`), so
     ``A`` for ``from typing import Any as A`` and ``t.Any`` for
@@ -708,6 +775,9 @@ def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
         return _ast_type(
             node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice, aliases
         )
+    if isinstance(node, ast.Subscript) and (origin := _ast_type(node.value, aliases)) in _GENERICS:
+        args = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        return types.GenericAlias(origin, tuple(_ast_type(a, aliases) or typing.Any for a in args))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         members = [node.left, node.right]
     elif isinstance(node, ast.Subscript) and _is_name(node.value, "Optional", aliases):

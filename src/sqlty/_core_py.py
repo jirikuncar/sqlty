@@ -29,6 +29,7 @@ from sqlty._checker import Checker
 from sqlty._lint import INLINE_SQL_COMMENT, RuleConfig
 from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, _header_end, skipped_string_rule
 from sqlty._sql_analyzer import SQLAnalyzer
+from sqlty._type_extractor import refines_tuple
 
 
 def infer_type(
@@ -253,7 +254,7 @@ def check_source(
         if annotated_type and annotated_type.startswith("tuple["):
             if rule_config.is_enabled("stale-type"):
                 current_type = rewriter._infer_type(sql_content)
-                if current_type not in ("Any", annotated_type):
+                if current_type != "Any" and not refines_tuple(annotated_type, current_type):
                     diagnostics.append(
                         {
                             "rule": "stale-type",
