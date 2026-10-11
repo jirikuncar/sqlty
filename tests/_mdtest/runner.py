@@ -80,13 +80,12 @@ class Run:
             case "expanded":
                 return str(core.expand_star(text, dialect=self.dialect, schema_sql=self.schema_sql))
             case "columns":
-                from sqlty._core_py import _make_analyzer
+                from sqlty._core import analyze_select
 
-                analyzer = _make_analyzer(self.dialect, self.schema_sql)
-                columns = analyzer.analyze_select(text)
+                columns = analyze_select(text, dialect=self.dialect, schema_sql=self.schema_sql)
                 if columns is None:
                     return "None"
-                return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
+                return "\n".join(f"{name}: {py} ({sql})" for name, py, sql in columns)
             case "rewritten":
                 return _without_imports(self._rewrite(text), self._imports).strip()
             case "rewritten-file":

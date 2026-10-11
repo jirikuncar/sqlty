@@ -233,3 +233,12 @@ def test_decode_accepts_buffer_types():
     expected = decode(src)
     assert decode(bytearray(src)) == expected
     assert decode(memoryview(src)) == expected
+
+
+def test_decoded_coding_declaration_is_utf8():
+    from sqlty._decode import decode
+
+    text, _ = decode(b'# coding: sqlty\nq = "--sql\\nSELECT 1::INTEGER"\n')
+    assert text == (
+        '# coding: utf-8\nfrom sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+    )
