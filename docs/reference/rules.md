@@ -27,6 +27,7 @@ stale-type = "error"
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
+| [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 
 `sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
@@ -187,10 +188,11 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
 
 Fix: `sqlty check --fix` replaces `*` with the cast column list from the
-schema, unless the string holds escapes or quotes or the query reads from more
-than one table (`JOIN` or `FROM a, b`), because the expansion drops table
-qualifiers. A `*` the schema cannot resolve (a subquery, a CTE, a `USING` or
-`NATURAL` join) gets no inferred type, so its annotation is kept.
+schema, unless the string holds escapes or quotes, the query is split over
+several concatenated strings, or it reads from more than one table (`JOIN` or
+`FROM a, b`), because the expansion drops table qualifiers. A `*` the schema
+cannot resolve (a subquery, a CTE, a `USING` or `NATURAL` join) gets no
+inferred type, so its annotation is kept.
 
 ### inline-sql-comment
 
@@ -237,8 +239,10 @@ literals, wrapped or not.
 
 ### stale-rewrite
 
-Default: warn. A string starting with `--sql` is not wrapped in
-`SQL[T](...)`.
+Default: warn. A `--sql` string that `rewrite` would wrap is not wrapped in
+`SQL[T](...)`. The marker may follow whitespace or a line break, as in a
+triple-quoted string that opens on its own line; implicitly concatenated
+strings are one query.
 
 ```python
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
@@ -247,7 +251,8 @@ q = "--sql\nSELECT id::INTEGER FROM users"
 
 Fix: `sqlty rewrite` or `sqlty check --fix`. Only strings `rewrite` would wrap
 are reported: statements without rows, uninferable queries in `skip` mode,
-f- and t-strings and the `"--sql SELECT"` form are not.
+the `"--sql SELECT"` form, and strings that are not plain literals
+(f-, t-, raw or bytes strings, alone or in a concatenation) are not.
 
 ### stale-type
 
@@ -288,6 +293,23 @@ Default: warn. Same as `fstring-skipped`, for t-strings
 # error: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
 q = t"--sql\nSELECT {column}::INTEGER FROM users"
 ```
+
+A concatenation that holds an f- or t-string anywhere is reported the same way.
+
+### unchecked-query
+
+Default: warn. A `--sql` query that is not plain string literals: a raw or
+bytes string (alone or in a concatenation), or a `SQL[T](...)` argument with
+anything but string literals. sqlty neither checks nor rewrites it.
+
+```python
+from sqlty import SQL
+
+# error: [unchecked-query] "--sql query is not plain string literals, so it is not checked or rewritten"
+q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM " + table)
+```
+
+Fix: write the query as one plain literal, or implicitly concatenated ones.
 
 ### untyped-query
 

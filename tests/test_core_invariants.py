@@ -7,7 +7,8 @@ checks invariants over all of that code, and what Markdown can't express
 
 from __future__ import annotations
 
-import re
+import ast
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ import pytest
 
 import sqlty.core as core
 from tests._mdtest.parser import parse
+from tests._mdtest.runner import comments, string_constants
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN = [
@@ -61,10 +63,16 @@ def test_strip_is_idempotent(source: str, options: dict) -> None:
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
 def test_strip_undoes_rewrite(source: str, options: dict) -> None:
-    """``strip(rewrite(x)) == x`` for sources without sqlty wrappers or imports."""
+    """``strip(rewrite(x)) == x`` for sources that ``strip`` leaves alone.
+
+    Other sqlty imports may be there: rewrite adds what is missing on lines of
+    its own, which strip removes again. Strip also removes the lines it would
+    add when they were written by hand, so those sources are skipped.
+    """
     style = options["import_style"]
+    own_lines = {style or "from sqlty import SQL", "from sqlty import UNTYPED"}
     if (
-        re.search(r"^(from|import) sqlty", source, re.M)
+        own_lines & {line.strip() for line in source.splitlines()}
         or core.strip_source(source, import_style=style) != source
     ):
         pytest.skip("source already uses sqlty")
@@ -96,9 +104,96 @@ def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
     assert not stale
 
 
+def _check_outputs(source: str, options: dict) -> None:
+    """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid and every
+    comment, rewrite and strip keep every string as it is, and ``check --fix`` is idempotent."""
+    expected, kept = string_constants(source), comments(source)
+    rewritten = core.rewrite_source(source, **options)
+    assert (string_constants(rewritten), comments(rewritten)) == (expected, kept), rewritten
+    stripped = core.strip_source(source, import_style=options["import_style"])
+    assert (string_constants(stripped), comments(stripped)) == (expected, kept), stripped
+    fixed = core.fix_source(source, **options)
+    ast.parse(fixed)
+    assert comments(fixed) == kept, fixed
+    assert core.fix_source(fixed, **options) == fixed
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_outputs_parse(source: str, options: dict) -> None:
+    _check_outputs(source, options)
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_crlf_outputs(source: str, options: dict) -> None:
+    """With CRLF line endings, every command gives the LF result with CRLF line endings."""
+    crlf = source.replace("\n", "\r\n")
+    _check_outputs(crlf, options)
+    lf = lambda text: text.replace("\r\n", "\n")  # noqa: E731
+    style = options["import_style"]
+    assert lf(core.rewrite_source(crlf, **options)) == core.rewrite_source(source, **options)
+    assert lf(core.strip_source(crlf, import_style=style)) == core.strip_source(
+        source, import_style=style
+    )
+    assert lf(core.fix_source(crlf, **options)) == core.fix_source(source, **options)
+
+
+_FRAGMENTS = [
+    'x = f"{"("}"\n',
+    'y = 1 if"(" else 2\n',
+    'def f():\n    return"("\n',
+    '"""Doc."""\n',
+    "# it's a (comment\n",
+    'a = "--sql\\nSELECT 1::INTEGER AS n"\n',
+    "b = ('--sql\\nSELECT 1::INTEGER '  # c\n     'AS n')\n",
+    'c = "--sql\\nSELECT 1::INTEGER " \\\r\n    "AS n"\n',
+    "d = SQL[tuple[str]](\n    '--sql\\nSELECT 1::INTEGER '\n    'AS n'\n)\n",
+    'e = SQL[tuple[str]]("""--sql\nSELECT 1::INTEGER AS n"""  # c\n)\n',
+    'g = SQL[tuple[int]]("--sql\\nSELECT 1 AS n -- \\"(\\"")\n',
+    'h = SQL[T]("--sql\\nSELECT 1" + x), mod.SQL[T]("--sql\\nSELECT 1")\n',
+    'i = (f"--sql\\nSELECT {x} "\n     "AS n")\n',
+    "j = r'--sql\\nSELECT 1::INTEGER'\n",
+    "k = [\n    SQL[tuple[int]]('--sql\\nSELECT 1::INTEGER', ),\n]\n",
+    'l = t"{x:{"("}}"\n',
+    "m = '--sql\\nVALUES (1, 2)'\n",
+    'n = f"""{x:\n}"""\n',
+    'o = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER",  # c\n)\n',
+    'p = mod.SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")\n',
+    '"""Example: SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER AS n")"""\n',
+    'r = (a\n@ b, "--sql\\nSELECT 1::INTEGER "\n"AS n")\n',
+]
+
+
+def test_fuzz_fragments() -> None:
+    """Random sequences of tricky fragments: outputs stay valid and keep their strings."""
+    rng = random.Random(127)
+    checked = 0
+    for _ in range(1500):
+        source = "".join(rng.choices(_FRAGMENTS, k=rng.randint(1, 5)))
+        try:
+            ast.parse(source)
+        except SyntaxError:
+            continue
+        options = {
+            "dialect": "postgres",
+            "schema_sql": None,
+            "import_style": None,
+            "untyped": rng.random() < 0.5,
+        }
+        _check_outputs(source, options)
+        checked += 1
+    assert checked > 1000
+
+
 def test_unknown_schema_column_raises() -> None:
     with pytest.raises(RuntimeError, match="Column 'nope' not found in table 'users'"):
         core.infer_type("SELECT SUM(nope) FROM users", schema_sql="CREATE TABLE users (id INT);")
+
+
+def test_crlf_continuation() -> None:
+    source = 'q = "--sql\\nSELECT 1::INTEGER " \\\r\n    "AS n"\r\n'
+    for output in (core.rewrite_source(source), core.fix_source(source)):
+        assert 'SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER " \\\r\n    "AS n")' in output
+        ast.parse(output)
 
 
 def test_crlf_is_kept() -> None:

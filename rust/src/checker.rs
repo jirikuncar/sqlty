@@ -8,6 +8,7 @@
 //! - `inline-sql-comment`: `"--sql SELECT ..."` (space) makes query a SQL comment
 //! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
 //! - `fstring-skipped` / `tstring-skipped`: interpolated `--sql` strings are never rewritten
+//! - `unchecked-query`: a `--sql` string that is not plain literals (raw, bytes, `SQL[T](q + x)`)
 
 use std::collections::HashMap;
 
@@ -17,13 +18,11 @@ use regex::Regex;
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, line_at, skipped_string_rule,
-    string_literals, strip_line_break, wraps, ImportStyle,
+    after_marker, ends_marker_line, extract_string_content, line_at, skipped_rule, string_literals,
+    strip_line_break, wraps, ImportStyle,
 };
-
-/// A string that may open with the marker; `rewrite` decides which ones it wraps.
-static UNWRAPPED_SQL: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"["'](?:--sql|-- sql)(?:\s|\\(?:r\\)?n|$)"#).unwrap());
+use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
+use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
 /// which makes the whole query a SQL comment. Each keyword needs what its statement
@@ -45,32 +44,9 @@ const INLINE_SQL_COMMENT: &str = concat!(
     r")"
 );
 
-/// A string on a line opening with `INLINE_SQL_COMMENT`.
-static INLINE_SQL_COMMENT_IN_LINE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(&format!(r#"["']{INLINE_SQL_COMMENT}"#)).unwrap());
-
 /// String content starting with `INLINE_SQL_COMMENT`.
 pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
-
-/// Marked string contents of `{wrapper_name}[T]("...")` calls, by the line each
-/// call starts on. A triple-quoted string may span lines.
-fn wrapped_contents(source: &str, wrapper_name: &str) -> HashMap<usize, String> {
-    let pattern = Regex::new(&format!(
-        r#"(?s){}\[[^\n]*?\]\(\s*(?P<inner>[uU]?(?:""".*?"""|'''.*?'''|"[^"\n]*"|'[^'\n]*'))\s*,?\s*\)"#,
-        regex::escape(wrapper_name)
-    ))
-    .unwrap();
-    let mut contents = HashMap::new();
-    for caps in pattern.captures_iter(source) {
-        let content = extract_string_content(&caps["inner"]);
-        if after_marker(content).is_some() {
-            let line = line_at(source, caps.get(0).map_or(0, |m| m.start()));
-            contents.entry(line).or_insert_with(|| content.to_string());
-        }
-    }
-    contents
-}
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
 /// MariaDB reject: they read `--` as a comment only before whitespace.
@@ -87,12 +63,6 @@ fn mysql_marker_lines(source: &str) -> Vec<usize> {
         .collect();
     lines.dedup();
     lines
-}
-
-/// Build a regex to extract the type annotation from `{wrapper_name}[T](...)`.
-fn build_type_annotation_pattern(wrapper_name: &str) -> Regex {
-    let escaped = regex::escape(wrapper_name);
-    Regex::new(&format!(r"{}\[(.+?)\]\(", escaped)).unwrap()
 }
 
 /// A diagnostic result from checking source code.
@@ -155,165 +125,150 @@ pub fn check_source(
     let rule_config = RuleConfig::new(rules);
     let has_schema = schema.is_some();
     let mut diagnostics = Vec::new();
-
-    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
-    let wrapper_marker = format!("{}[", wrapper_name);
-    let untyped_name = match wrapper_name.rsplit_once('.') {
-        Some((module, _)) => format!("{}.UNTYPED", module),
-        None => "UNTYPED".to_string(),
+    let mut report = |rule: &str, message: String, line: usize| {
+        if rule_config.is_enabled(rule) {
+            diagnostics.push(Diagnostic {
+                rule: rule.to_string(),
+                message,
+                severity: rule_config.severity(rule).to_string(),
+                line,
+            });
+        }
     };
-    let wrapped = wrapped_contents(source, &wrapper_name);
-    let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
-    if dialect.eq_ignore_ascii_case("mysql") && rule_config.is_enabled("mysql-sql-marker") {
-        diagnostics.extend(
-            mysql_marker_lines(source)
-                .into_iter()
-                .map(|line| Diagnostic {
-                    rule: "mysql-sql-marker".to_string(),
-                    message: r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#
-                        .to_string(),
-                    severity: rule_config.severity("mysql-sql-marker").to_string(),
-                    line,
-                }),
-        );
+
+    let style = ImportStyle::or_default(import_style);
+    let (wrapper_name, untyped_name) = (style.wrapper_name.clone(), style.untyped_name());
+    if dialect.eq_ignore_ascii_case("mysql") {
+        for line in mysql_marker_lines(source) {
+            report(
+                "mysql-sql-marker",
+                r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#.to_string(),
+                line,
+            );
+        }
     }
 
     if rule_config.is_enabled("stale-rewrite") {
-        let style = ImportStyle::or_default(import_style);
-        let mut lines: Vec<usize> = wraps(source, dialect, schema, &style, untyped)
-            .into_iter()
-            .map(|(start, _, _)| line_at(source, start))
-            .collect();
-        lines.dedup();
-        diagnostics.extend(lines.into_iter().map(|line| Diagnostic {
-            rule: "stale-rewrite".to_string(),
-            message: "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
-            severity: rule_config.severity("stale-rewrite").to_string(),
-            line,
-        }));
+        for (start, _, _) in wraps(source, dialect, schema, &style, untyped) {
+            report(
+                "stale-rewrite",
+                "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
+                line_at(source, start),
+            );
+        }
     }
 
-    for (line_num, logical) in logical_lines(source, &wrapper_name) {
-        let trimmed = logical.as_str();
+    let tokens = tokenize(source);
+    let calls = wrapper_calls(source, &tokens, &wrapper_name);
+    for group in string_groups(source, &tokens) {
+        let first = &tokens[group[0]];
+        let line = line_at(source, first.span.start);
+        if let Some(rule) = skipped_rule(source, &tokens, &group) {
+            report(rule, skipped_message(rule), line);
+            continue;
+        }
+        let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
+        if !calls
+            .iter()
+            .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
+            && INLINE_SQL_COMMENT_CONTENT.is_match(&content(source, &spans))
+        {
+            report("inline-sql-comment", INLINE_MESSAGE.to_string(), line);
+        }
+    }
 
-        if let Some(rule) = skipped_string_rule(trimmed) {
-            if rule_config.is_enabled(rule) {
-                let kind = if rule == "tstring-skipped" {
-                    "t-string"
-                } else {
-                    "f-string"
-                };
-                diagnostics.push(Diagnostic {
-                    rule: rule.to_string(),
-                    message: format!(
-                        "{kind} with --sql prefix skipped ({kind}s cannot be statically rewritten)"
-                    ),
-                    severity: rule_config.severity(rule).to_string(),
-                    line: line_num,
-                });
+    for call in &calls {
+        let line_num = line_at(source, call.span.start);
+        let Some(sql_content) = call.content(source) else {
+            let interpolated = call.strings.iter().any(|span| {
+                source[span.clone()]
+                    .split(['"', '\''])
+                    .next()
+                    .is_some_and(|prefix| prefix.contains(['f', 'F', 't', 'T']))
+            });
+            if !interpolated && after_marker(&content(source, &call.strings)).is_some() {
+                report(
+                    "unchecked-query",
+                    skipped_message("unchecked-query"),
+                    line_num,
+                );
             }
+            continue;
+        };
+        if after_marker(&sql_content).is_none() {
+            continue;
+        }
+        if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
+            report("inline-sql-comment", INLINE_MESSAGE.to_string(), line_num);
+        }
+
+        let upper = sql_content.to_uppercase();
+        if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
+            if has_schema {
+                report(
+                    "select-star",
+                    "SELECT * used — expand to explicit column list (joins need a manual edit)"
+                        .to_string(),
+                    line_num,
+                );
+            } else {
+                report(
+                    "select-star-no-schema",
+                    "SELECT * used but no schema available".to_string(),
+                    line_num,
+                );
+            }
+        }
+
+        let annotated = &source[call.annotation.clone()];
+        if annotated == untyped_name {
+            let untyped = format!("{}[{}]", wrapper_name, untyped_name);
+            // A `*` the schema cannot resolve infers no type, so none is guessed.
+            let message = match infer_from_sql_content(&sql_content, dialect, schema) {
+                Some(current) => format!(
+                    "{} can now be {}[{}]; run sqlty check --fix",
+                    untyped, wrapper_name, current
+                ),
+                None => format!(
+                    "{} has no inferable row type; add casts (e.g. id::INTEGER) or a schema",
+                    untyped
+                ),
+            };
+            report("untyped-query", message, line_num);
             continue;
         }
 
-        // Check for unwrapped --sql strings (stale-rewrite)
-        if is_unwrapped_sql_string(trimmed, &wrapper_marker) {
-            // Also check for inline-sql-comment on unwrapped strings
-            if rule_config.is_enabled("inline-sql-comment")
-                && INLINE_SQL_COMMENT_IN_LINE.is_match(trimmed)
-            {
-                diagnostics.push(Diagnostic {
-                    rule: "inline-sql-comment".to_string(),
-                    message: r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#.to_string(),
-                    severity: rule_config.severity("inline-sql-comment").to_string(),
-                    line: line_num,
-                });
-            }
-            continue;
-        }
-
-        // Check for SQL[T](...) wrappers
-        if let Some(sql_content) = wrapped.get(&line_num).cloned() {
-            // Check inline-sql-comment on wrapped strings
-            if rule_config.is_enabled("inline-sql-comment")
-                && INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content)
-            {
-                diagnostics.push(Diagnostic {
-                    rule: "inline-sql-comment".to_string(),
-                    message: r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#.to_string(),
-                    severity: rule_config.severity("inline-sql-comment").to_string(),
-                    line: line_num,
-                });
-            }
-
-            // Check SELECT *
-            let upper = sql_content.to_uppercase();
-            if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
-                if has_schema && rule_config.is_enabled("select-star") {
-                    diagnostics.push(Diagnostic {
-                        rule: "select-star".to_string(),
-                        message: "SELECT * used — expand to explicit column list (joins need a manual edit)".to_string(),
-                        severity: rule_config.severity("select-star").to_string(),
-                        line: line_num,
-                    });
-                } else if !has_schema && rule_config.is_enabled("select-star-no-schema") {
-                    diagnostics.push(Diagnostic {
-                        rule: "select-star-no-schema".to_string(),
-                        message: "SELECT * used but no schema available".to_string(),
-                        severity: rule_config.severity("select-star-no-schema").to_string(),
-                        line: line_num,
-                    });
-                }
-            }
-
-            let annotated = extract_type_from_wrapper(trimmed, &type_annotation_pat);
-            if annotated.as_deref() == Some(untyped_name.as_str()) {
-                if rule_config.is_enabled("untyped-query") {
-                    let untyped = format!("{}[{}]", wrapper_name, untyped_name);
-                    // A `*` the schema cannot resolve infers no type, so none is guessed.
-                    let message = match infer_from_sql_content(&sql_content, dialect, schema) {
-                        Some(current) => format!(
-                            "{} can now be {}[{}]; run sqlty check --fix",
-                            untyped, wrapper_name, current
-                        ),
-                        None => format!(
-                            "{} has no inferable row type; add casts (e.g. id::INTEGER) or a schema",
-                            untyped
-                        ),
-                    };
-                    diagnostics.push(Diagnostic {
-                        rule: "untyped-query".to_string(),
-                        message,
-                        severity: rule_config.severity("untyped-query").to_string(),
-                        line: line_num,
-                    });
-                }
-                continue;
-            }
-
-            // Check stale types
-            if rule_config.is_enabled("stale-type") {
-                if let Some(annotated_type) = annotated.filter(|ty| ty.starts_with("tuple[")) {
-                    let current_type = infer_from_sql_content(&sql_content, dialect, schema);
-                    if let Some(ref current) = current_type {
-                        if !refines_tuple(&annotated_type, current) {
-                            diagnostics.push(Diagnostic {
-                                rule: "stale-type".to_string(),
-                                message: format!(
-                                    "SQL[{}] should be SQL[{}]",
-                                    annotated_type, current
-                                ),
-                                severity: rule_config.severity("stale-type").to_string(),
-                                line: line_num,
-                            });
-                        }
-                    }
+        if annotated.starts_with("tuple[") && rule_config.is_enabled("stale-type") {
+            if let Some(current) = infer_from_sql_content(&sql_content, dialect, schema) {
+                if !refines_tuple(annotated, &current) {
+                    report(
+                        "stale-type",
+                        format!("SQL[{}] should be SQL[{}]", annotated, current),
+                        line_num,
+                    );
                 }
             }
         }
     }
 
     diagnostics.sort_by_key(|d| d.line);
+    diagnostics.dedup_by(|a, b| a.line == b.line && a.rule == b.rule && a.message == b.message);
     diagnostics
+}
+
+const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#;
+
+fn skipped_message(rule: &str) -> String {
+    match rule {
+        "tstring-skipped" => {
+            "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+        }
+        "fstring-skipped" => {
+            "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+        }
+        _ => "--sql query is not plain string literals, so it is not checked or rewritten",
+    }
+    .to_string()
 }
 
 /// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
@@ -323,43 +278,20 @@ pub fn wrapped_queries(
     import_style: Option<&str>,
 ) -> Vec<(usize, String, Option<String>)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
-    let wrapped = wrapped_contents(source, &wrapper_name);
-    let type_annotation_pat = build_type_annotation_pattern(&wrapper_name);
-    logical_lines(source, &wrapper_name)
+    wrapper_calls(source, &tokenize(source), &wrapper_name)
         .into_iter()
-        .filter_map(|(line, logical)| {
-            let annotated = extract_type_from_wrapper(&logical, &type_annotation_pat)?;
-            let query = wrapped.get(&line).and_then(|content| {
-                let rest = after_marker(content)?;
+        .map(|call| {
+            let query = call.content(source).and_then(|content| {
+                let rest = after_marker(&content)?;
                 Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
             });
-            Some((line, annotated, query))
+            (
+                line_at(source, call.span.start),
+                source[call.annotation.clone()].to_string(),
+                query,
+            )
         })
         .collect()
-}
-
-/// Stripped lines, with a wrapper split by a formatter joined onto its first line.
-fn logical_lines(source: &str, wrapper_name: &str) -> Vec<(usize, String)> {
-    let opener = Regex::new(&format!(r"{}\[.*\]\($", regex::escape(wrapper_name))).unwrap();
-    let lines: Vec<&str> = source.lines().map(str::trim).collect();
-    let mut result = Vec::with_capacity(lines.len());
-    let mut i = 0;
-    while i < lines.len() {
-        if opener.is_match(lines[i]) && i + 2 < lines.len() && lines[i + 2].starts_with(')') {
-            let inner = lines[i + 1].trim_end_matches(',');
-            result.push((i + 1, format!("{}{}{}", lines[i], inner, lines[i + 2])));
-            i += 3;
-            continue;
-        }
-        result.push((i + 1, lines[i].to_string()));
-        i += 1;
-    }
-    result
-}
-
-/// Check if a line contains an unwrapped --sql string (not in wrapper).
-fn is_unwrapped_sql_string(line: &str, wrapper_marker: &str) -> bool {
-    !line.contains(wrapper_marker) && UNWRAPPED_SQL.is_match(line)
 }
 
 /// Whether `annotated` is `inferred` or parametrises some of its bare generics
@@ -408,12 +340,6 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
         }
         _ => false,
     }
-}
-
-/// Extract the type annotation from wrapper pattern.
-fn extract_type_from_wrapper(line: &str, pattern: &Regex) -> Option<String> {
-    let cap = pattern.captures(line)?;
-    Some(cap.get(1)?.as_str().to_string())
 }
 
 #[cfg(test)]
@@ -617,7 +543,36 @@ mod tests {
     }
 
     #[test]
-    fn test_wrapped_contents_span_lines() {
+    fn test_skipped_and_unchecked_queries() {
+        let source = "a = (\"--sql\\nSELECT 1 \"\n     f\"AS n{x}\")\nb = SQL[T](\"--sql\\nSELECT 1\" + x)\nc = r\"--sql\\nSELECT 1\"\n";
+        let diags: Vec<(String, usize)> =
+            check_source(source, "postgres", &None, None, None, false)
+                .into_iter()
+                .map(|d| (d.rule, d.line))
+                .collect();
+        assert_eq!(
+            diags,
+            vec![
+                ("fstring-skipped".to_string(), 1),
+                ("unchecked-query".to_string(), 3),
+                ("unchecked-query".to_string(), 4),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_every_wrapper_on_a_line() {
+        let source = "a, b = SQL[tuple[int]](\"--sql\\nSELECT 1\"), SQL[tuple[int]](\"--sql\\nSELECT 'x'::TEXT\")";
+        let diags = check_source(source, "postgres", &None, None, None, false);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].message,
+            "SQL[tuple[int]] should be SQL[tuple[str]]"
+        );
+    }
+
+    #[test]
+    fn test_wrapper_calls_span_lines() {
         let source = r#"q = SQL[tuple[str]]("""--sql
 SELECT 1""")
 r = SQL[T](
@@ -625,9 +580,17 @@ r = SQL[T](
 )
 s = SQL[T]("plain")
 "#;
-        let contents = wrapped_contents(source, "SQL");
-        assert_eq!(contents[&1], "--sql\nSELECT 1");
-        assert_eq!(contents[&3], r"-- sql\nSELECT 2");
-        assert_eq!(contents.len(), 2);
+        let queries: Vec<(usize, Option<String>)> = wrapped_queries(source, None)
+            .into_iter()
+            .map(|(line, _, query)| (line, query))
+            .collect();
+        assert_eq!(
+            queries,
+            vec![
+                (1, Some("SELECT 1".to_string())),
+                (3, Some("SELECT 2".to_string())),
+                (6, None),
+            ]
+        );
     }
 }

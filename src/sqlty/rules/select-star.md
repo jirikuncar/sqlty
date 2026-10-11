@@ -46,6 +46,7 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
-Queries with escapes or quotes inside the string, and queries that read from
-more than one table (`JOIN` or `FROM a, b`; the expansion drops table
-qualifiers), are left for you to edit. `select-star` is still reported for them.
+Queries with escapes or quotes inside the string, queries split over several
+concatenated strings, and queries that read from more than one table (`JOIN`
+or `FROM a, b`; the expansion drops table qualifiers), are left for you to
+edit. `select-star` is still reported for them.

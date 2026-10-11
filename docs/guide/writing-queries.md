@@ -66,6 +66,15 @@ WHERE active
 # rewritten-file: """)
 ```
 
+Implicitly concatenated strings are one query, wrapped as a whole:
+
+```python
+query = ("--sql\nSELECT id::INTEGER, email::TEXT "
+         "FROM users")
+# rewritten: query = (SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, email::TEXT "
+# rewritten:          "FROM users"))
+```
+
 The rewriter never changes the string itself, only the wrapper around it.
 
 ## Casts declare column types
@@ -82,8 +91,9 @@ query = "--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions"
 ```
 
 The rewriter adds `import datetime` and `import uuid` when the row type needs
-them. A name missing from an existing `from sqlty import ...` is appended to
-it rather than imported again.
+them. `SQL` and `UNTYPED` already imported by any top-level
+`from sqlty import ...` (a list, parentheses, `*`) are not imported again; a
+missing one gets a line of its own.
 
 Literals, `COUNT(*)` and casts inside expressions are typed too. A column
 without a cast, schema entry or literal type becomes `str`, as does an
@@ -223,7 +233,8 @@ sqlty rewrite queries.py   # "--sql\n..." -> SQL[T]("--sql\n...")
 
 Neither command changes the string contents, only the wrapper and the
 `from sqlty import SQL` import. For a file whose `--sql` strings are all
-plain, `strip(rewrite(x)) == x`.
+plain, `strip(rewrite(x)) == x`, unless it already has a hand-written
+`from sqlty import SQL` line, which `strip` removes too.
 
 !!! warning "`strip` removes hand-written row types"
     `strip` removes every wrapper, including `SQL[User]`, and the sqlty
