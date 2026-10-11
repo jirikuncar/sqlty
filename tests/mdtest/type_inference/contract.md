@@ -114,7 +114,7 @@ SELECT id FROM users
 -- inferred: tuple[str]
 ```
 
-## Former backend divergences
+## Regression cases
 
 ### `DELETE FROM t RETURNING id::INTEGER`
 

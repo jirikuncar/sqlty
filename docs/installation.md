@@ -3,6 +3,8 @@
 ## Requirements
 
 - Python 3.15+
+- A [Rust toolchain](https://rustup.rs/) only when no wheel matches your
+  platform, or when installing from a git checkout
 
 ## Install
 

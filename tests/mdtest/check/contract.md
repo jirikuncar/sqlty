@@ -361,7 +361,7 @@ q = SQL[Token]("--sql\nSELECT token_id::UUID FROM tokens")
 # error:
 ```
 
-## Former backend divergences
+## Regression cases
 
 ### Check skips user type annotations
 

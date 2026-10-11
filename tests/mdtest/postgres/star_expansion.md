@@ -205,7 +205,7 @@ SELECT * FROM t
 -- expanded: None
 ```
 
-## Former backend divergences
+## Regression cases
 
 ### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...`
 

@@ -62,7 +62,7 @@ SELECT * FROM items
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
 variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
-in the expansion, as sqlglot spells them; the column type is still `str`.
+in the expansion; the column type is still `str`.
 Unmapped types such as `BIT` and spatial `POINT` are `str`.
 
 `schema.sql`:
