@@ -23,7 +23,9 @@ uv run pre-commit run --all-files  # all hooks (run before every commit)
   `--sql SELECT ...` with a space is a SQL comment — the parser sees an
   empty query and the string is not wrapped. The rewriter never modifies
   string content — it only adds/removes the `SQL[T]()` wrapper,
-  guaranteeing `strip(rewrite(x)) == x`.
+  guaranteeing `strip(rewrite(x)) == x`. `check --fix` may edit string
+  content only for `inline-sql-comment` and `select-star`; `rewrite` and
+  `strip` keep `strip(rewrite(x)) == x`.
 - **Every new feature gets an mdtest** in `tests/mdtest/`. Use `make update-mdtest`
   to fill expected values.
 - **README.md and docs/ are tested** — they are mdtest files, collected by the

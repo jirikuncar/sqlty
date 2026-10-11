@@ -9,12 +9,18 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
+from sqlty._checker import has_select_star
 from sqlty._lint import RuleConfig
-from sqlty._rewriter import ImportStyle, _has_import, _header_end, _is_sqlty_managed, _query
+from sqlty._rewriter import (
+    _SQL_STRING_PATTERN,
+    ImportStyle,
+    _has_import,
+    _header_end,
+    _is_sqlty_managed,
+    _query,
+)
 
 _QUOTES = ('"""', "'''", '"', "'")
-# ``"--sql SELECT ..."`` opening a plain string literal; raw, f- and t-strings are left alone.
-_INLINE_SQL_COMMENT = re.compile(r"""(?<!\w)([uU]?(?:\"\"\"|'''|"|'))--sql (?=\S)""")
 
 
 def fix_source(
@@ -38,7 +44,7 @@ def fix_source(
     enabled = RuleConfig(overrides=rules).is_enabled
     style = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
     if enabled("inline-sql-comment"):
-        source = _INLINE_SQL_COMMENT.sub(r"\1--sql\\n", source)
+        source = _fix_inline_sql_comments(source, dialect)
     if enabled("stale-rewrite"):
         source = core.rewrite_source(
             source,
@@ -64,8 +70,11 @@ def fix_source(
             return match[0]
         if schema_sql and enabled("select-star"):
             content = _expand_star(content, quote, core.expand_star, dialect, schema_sql)
-        refresh = (annotated.startswith("tuple[") and enabled("stale-type")) or (
-            annotated == style.untyped_name and enabled("untyped-query")
+        # Without a schema, the row type of ``*`` is a guess: check reports no stale-type.
+        guessed = not schema_sql and has_select_star(content)
+        refresh = not guessed and (
+            (annotated.startswith("tuple[") and enabled("stale-type"))
+            or (annotated == style.untyped_name and enabled("untyped-query"))
         )
         row_type = (infer(content) if refresh else None) or annotated
         if row_type != annotated:
@@ -101,7 +110,8 @@ def _expand_star(
     if match is None:
         return content
     prefix, query = match.groups()
-    if "*" not in query or "\\" in query or quote[0] in query:
+    # Expansion drops table qualifiers, so with joins it could write ambiguous columns.
+    if "*" not in query or "\\" in query or quote[0] in query or _has_join(query, dialect):
         return content
     try:
         expanded = expand_star(query, dialect=dialect, schema_sql=schema_sql)
@@ -111,6 +121,55 @@ def _expand_star(
     if expanded is None or "\\" in expanded or quote[0] in expanded or multiline:
         return content
     return prefix + expanded
+
+
+def _fix_inline_sql_comments(source: str, dialect: str) -> str:
+    """``"--sql SELECT ..."`` to ``"--sql\\nSELECT ..."``, only when the rest is a SQL statement.
+
+    This and ``select-star`` are the only fixes that change string content, so a
+    string such as ``"--sql flag enables it"`` is left alone.
+    """
+    replacements: list[tuple[int, int]] = []
+    for match in _SQL_STRING_PATTERN.finditer(source):
+        literal = match["str"]
+        quote = next(q for q in _QUOTES if literal.startswith(q))
+        content = literal[len(quote) : -len(quote)]
+        if match["prefixed"] is not None or not re.match(r"--sql \S", content):
+            continue
+        if _is_statement(content[len("--sql ") :], dialect):
+            at = match.start("str") + len(quote) + len("--sql")
+            replacements.append((at, at + 1))
+    for start, end in reversed(replacements):
+        source = source[:start] + "\\n" + source[end:]
+    return source
+
+
+def _is_statement(sql: str, dialect: str) -> bool:
+    """Whether ``sql`` parses as a SQL statement, not as prose or a bare expression."""
+    from sqlglot import exp
+
+    from sqlty._sql_analyzer import _parse_one
+
+    try:
+        statement = _parse_one(sql, dialect)
+    except Exception:
+        return False
+    statements = (
+        exp.Query | exp.DML | exp.DDL | exp.Values | exp.Drop | exp.Alter | exp.TruncateTable
+    )
+    return isinstance(statement, statements)
+
+
+def _has_join(sql: str, dialect: str) -> bool:
+    """Whether ``sql`` reads from more than one source (``JOIN`` or ``FROM a, b``)."""
+    from sqlglot import exp
+
+    from sqlty._sql_analyzer import _parse_one
+
+    try:
+        return _parse_one(sql, dialect).find(exp.Join) is not None
+    except Exception:
+        return True
 
 
 def _fix_imports(source: str, style: ImportStyle, introduced: set[str]) -> str:

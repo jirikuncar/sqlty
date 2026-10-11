@@ -93,3 +93,22 @@ empty query, so the string is not wrapped:
 q = "--sql SELECT id::INTEGER FROM users"
 # rewritten: q = "--sql SELECT id::INTEGER FROM users"
 ```
+
+## Strings after an f-string or t-string are still wrapped
+
+The scan moves past prefixed literals, so their closing quote is not paired
+with the next string's opening quote.
+
+```python
+table = "users"
+f = f"--sql\nSELECT id FROM {table}"
+t = t'--sql\nSELECT id FROM {table}'
+q = "--sql\nSELECT id::INTEGER FROM users"
+r = '--sql\nSELECT name::TEXT FROM users'
+# rewritten-file: from sqlty import SQL
+# rewritten-file: table = "users"
+# rewritten-file: f = f"--sql\nSELECT id FROM {table}"
+# rewritten-file: t = t'--sql\nSELECT id FROM {table}'
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: r = SQL[tuple[str]]('--sql\nSELECT name::TEXT FROM users')
+```

@@ -121,8 +121,7 @@ class Checker:
             sql: The SQL query string
             has_schema: Whether a schema is available for expansion
         """
-        # Simple check: does the SQL contain SELECT *
-        if "SELECT *" not in sql.upper() and "SELECT\n*" not in sql.upper():
+        if not has_select_star(sql):
             return None
 
         if not has_schema:
@@ -185,3 +184,9 @@ class Checker:
                     )
 
         return diagnostics
+
+
+def has_select_star(sql: str) -> bool:
+    """Whether ``sql`` contains ``SELECT *`` (a plain text check, as both backends do)."""
+    upper = sql.upper()
+    return "SELECT *" in upper or "SELECT\n*" in upper

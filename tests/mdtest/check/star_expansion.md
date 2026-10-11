@@ -8,6 +8,17 @@ from sqlty import SQL
 q = SQL[tuple[str]]("--sql\nSELECT * FROM users")
 ```
 
+## Star with no schema reports no stale type
+
+Without a schema the columns of `*` are unknown, so the annotation is not
+compared with a guessed type.
+
+```python
+from sqlty import SQL
+# error: [select-star-no-schema] "SELECT * used but no schema available"
+q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
+```
+
 ## Star with schema produces warning
 
 `schema.sql`:

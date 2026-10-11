@@ -288,3 +288,62 @@ s = f"--sql SELECT {column} FROM users"
 # fixed: r = r'--sql SELECT name::TEXT FROM users'
 # fixed: s = f"--sql SELECT {column} FROM users"
 ```
+
+## Space after the marker in a non-SQL string is kept
+
+Only a string whose rest parses as a SQL statement is changed.
+
+```python
+msg = "--sql flag enables it"
+# fixed: msg = "--sql flag enables it"
+```
+
+## Star without a schema keeps its type
+
+The row type of `*` is unknown without a schema, so it is not refreshed.
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
+```
+
+## Star with a join is not expanded
+
+Expansion drops table qualifiers, which would make joined columns ambiguous.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER);
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+```
+
+## Plain string after an f-string is wrapped
+
+```python
+table = "users"
+f = f"--sql\nSELECT id FROM {table}"
+q = "--sql\nSELECT id::INTEGER FROM users"
+# fixed: from sqlty import SQL
+# fixed: table = "users"
+# fixed: f = f"--sql\nSELECT id FROM {table}"
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+```

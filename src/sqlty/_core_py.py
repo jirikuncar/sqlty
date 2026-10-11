@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from sqlty._checker import Checker
+from sqlty._checker import Checker, has_select_star
 from sqlty._lint import RuleConfig
 from sqlty._rewriter import SKIPPED_STRING_MESSAGES, SQLRewriter, _header_end, skipped_string_rule
 from sqlty._sql_analyzer import SQLAnalyzer
@@ -233,8 +233,10 @@ def check_source(
         # User-defined types (TypedDict, NamedTuple, etc.) are handled by
         # core.py's wrapper using runtime type resolution.
         annotated_type = _extract_type_from_wrapper(line_stripped, wrapper_name)
+        # Without a schema, ``*`` has no known columns, so its inferred type is a guess.
+        guessed = not has_schema and has_select_star(sql_content)
         if annotated_type == untyped_name and rule_config.is_enabled("untyped-query"):
-            current_type = rewriter._infer_type(sql_content)
+            current_type = "Any" if guessed else rewriter._infer_type(sql_content)
             sentinel = f"{wrapper_name}[{untyped_name}]"
             message = (
                 f"{sentinel} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
@@ -250,7 +252,7 @@ def check_source(
                 }
             )
         if annotated_type and annotated_type.startswith("tuple["):
-            if rule_config.is_enabled("stale-type"):
+            if rule_config.is_enabled("stale-type") and not guessed:
                 current_type = rewriter._infer_type(sql_content)
                 if current_type not in ("Any", annotated_type):
                     diagnostics.append(

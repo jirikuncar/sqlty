@@ -42,20 +42,19 @@ pub(crate) fn skipped_string_rule(line: &str) -> Option<&'static str> {
 
 /// Spans of string literals not prefixed by a letter (`f"..."`, `r"..."` are skipped).
 ///
-/// Equivalent to `re.finditer` with the lookbehind `(?<![a-zA-Z])`, which the
-/// `regex` crate lacks.
+/// Prefixed literals are still scanned past, so their closing quote is not
+/// paired with the next opening one; mirrors `_SQL_STRING_PATTERN` in Python.
 fn string_literals(source: &str) -> Vec<(usize, usize)> {
     let bytes = source.as_bytes();
     let mut spans = Vec::new();
     let mut pos = 0;
     while let Some(offset) = source[pos..].find(['"', '\'']) {
         let start = pos + offset;
-        let literal = (start == 0 || !bytes[start - 1].is_ascii_alphabetic())
-            .then(|| STRING_LITERAL.find(&source[start..]))
-            .flatten();
-        pos = match literal {
+        pos = match STRING_LITERAL.find(&source[start..]) {
             Some(m) => {
-                spans.push((start, start + m.end()));
+                if start == 0 || !bytes[start - 1].is_ascii_alphabetic() {
+                    spans.push((start, start + m.end()));
+                }
                 start + m.end()
             }
             None => start + 1,
@@ -441,6 +440,16 @@ mod tests {
         );
         assert!(result.contains("SQL[tuple[int]]"));
         assert!(result.contains("from sqlty import SQL"));
+    }
+
+    #[test]
+    fn test_string_literals_skip_past_prefixed_strings() {
+        let source = "f = f\"a\"\nh = \"b\"\n";
+        let spans: Vec<&str> = string_literals(source)
+            .into_iter()
+            .map(|(start, end)| &source[start..end])
+            .collect();
+        assert_eq!(spans, vec!["\"b\""]);
     }
 
     #[test]

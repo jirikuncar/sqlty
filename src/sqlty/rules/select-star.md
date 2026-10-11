@@ -46,4 +46,5 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
-Queries with escapes or quotes inside the string are left for you to edit.
+Queries with escapes or quotes inside the string, and queries with joins (the
+expansion drops table qualifiers), are left for you to edit.

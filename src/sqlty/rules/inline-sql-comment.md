@@ -20,4 +20,6 @@ statement.
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 
-Use `"--sql\nSELECT ..."`.
+Use `"--sql\nSELECT ..."`. `sqlty check --fix` makes that change when the
+rest of the string parses as a SQL statement, so text such as
+`"--sql flag enables it"` is left alone.

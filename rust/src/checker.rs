@@ -193,7 +193,10 @@ pub fn check_source(
 
             // Check SELECT *
             let upper = sql_content.to_uppercase();
-            if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
+            let has_star = upper.contains("SELECT *") || upper.contains("SELECT\n*");
+            // Without a schema, `*` has no known columns, so its inferred type is a guess.
+            let guessed = has_star && !has_schema;
+            if has_star {
                 if has_schema && rule_config.is_enabled("select-star") {
                     diagnostics.push(Diagnostic {
                         rule: "select-star".to_string(),
@@ -215,7 +218,12 @@ pub fn check_source(
             if annotated.as_deref() == Some(untyped_name.as_str()) {
                 if rule_config.is_enabled("untyped-query") {
                     let untyped = format!("{}[{}]", wrapper_name, untyped_name);
-                    let message = match infer_from_sql_content(&sql_content, dialect, schema) {
+                    let current = if guessed {
+                        None
+                    } else {
+                        infer_from_sql_content(&sql_content, dialect, schema)
+                    };
+                    let message = match current {
                         Some(current) => format!(
                             "{} can now be {}[{}]; run sqlty check --fix",
                             untyped, wrapper_name, current
@@ -236,7 +244,7 @@ pub fn check_source(
             }
 
             // Check stale types
-            if rule_config.is_enabled("stale-type") {
+            if rule_config.is_enabled("stale-type") && !guessed {
                 if let Some(annotated_type) = annotated.filter(|ty| ty.starts_with("tuple[")) {
                     let current_type = infer_from_sql_content(&sql_content, dialect, schema);
                     if let Some(ref current) = current_type {

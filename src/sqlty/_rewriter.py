@@ -213,6 +213,8 @@ class SQLRewriter:
         replacements: list[tuple[int, int, str]] = []
         for match in _SQL_STRING_PATTERN.finditer(source):
             start, end = match.start(), match.end()
+            if match["prefixed"] is not None:
+                continue
 
             # Skip matches inside existing wrappers
             if any(ws <= start and end <= we for ws, we in wrapper_spans):
@@ -336,9 +338,11 @@ class SQLRewriter:
 # Match string literals that might contain --sql.
 # Handles: """...""", '''...''', "...", '...'
 # Triple-quoted alternatives come first so they match before single-quoted.
-# Negative lookbehind ensures we skip prefixed strings (f"...", r"...", b"...", etc.)
+# Prefixed strings (f"...", r"...", b"...", etc.) are matched too, so the scan
+# moves past them instead of pairing their closing quote with the next opening
+# one; group ``prefixed`` is set for them and callers skip those matches.
 _SQL_STRING_PATTERN = re.compile(
-    r"(?<![a-zA-Z])(?P<str>"
+    r"(?:(?<=[a-zA-Z])(?P<prefixed>)|(?<![a-zA-Z]))(?P<str>"
     r'""".*?"""'  # triple-double-quoted
     r"|'''.*?'''"  # triple-single-quoted
     r'|"[^"]*"'  # double-quoted

@@ -152,7 +152,6 @@ Default: error. `SELECT *` without a schema: sqlty cannot know the columns.
 
 ```python
 # error: [select-star-no-schema] "SELECT * used but no schema available"
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
 ```
 

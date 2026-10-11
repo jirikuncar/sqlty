@@ -69,6 +69,8 @@ q = "--sql SELECT id::INTEGER FROM users"
 
 The rewriter never modifies string content — it only adds/removes the
 `SQL[T]()` wrapper.  This guarantees `strip(rewrite(source)) == source`.
+`check --fix` may edit string content only for `inline-sql-comment` and
+`select-star`; `rewrite` and `strip` still keep that guarantee.
 For triple-quoted multiline strings, use a real newline:
 
 ```python

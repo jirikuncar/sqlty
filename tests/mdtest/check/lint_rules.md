@@ -54,3 +54,13 @@ A `--sql SELECT ...` space form is a SQL comment with no row type; only
 # error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
 q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ```
+
+## String after an f-string is reported as stale
+
+```python
+table = "users"
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+f = f"--sql\nSELECT id FROM {table}"
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = "--sql\nSELECT id::INTEGER FROM users"
+```
