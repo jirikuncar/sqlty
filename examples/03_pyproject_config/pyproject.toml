@@ -5,7 +5,7 @@ dialect = "postgres"
 # Schema file for type inference without explicit casts
 schema = "schema.sql"
 
-# Run a formatter after rewriting
+# Formatter for generated .pyi stubs
 # format-command = "ruff format --stdin-filename {filename} -"
 
 [tool.sqlty.rules]

@@ -66,12 +66,13 @@ table. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
-`@sqlty` helpers takes its schema from `@sqlty(schema=...)`; see
+`@sqlty` helpers runs at runtime, so there is no `--schema`: it reads `schema`
+from `[tool.sqlty]` in the `pyproject.toml` nearest the file of the first
+recorded helper (not one per file, as above). A helper can override it with
+`schema` in its `[[tool.sqlty.functions]]` entry,
+[`[tool.sqlty.schemas]`](../reference/configuration.md#schemas) (schemas
+per module or helper) or `@sqlty(schema=...)`; see
 [Generated stubs](stubs.md#schemas).
-
-`[tool.sqlty.schemas]` (named schemas) is read from `pyproject.toml` but not
-used by any command yet; see
-[Configuration](../reference/configuration.md#schemas).
 
 ## Dialects
 
@@ -144,13 +145,18 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: casts = SQL[tuple[int, str]]("--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 
-!!! warning "MySQL needs the Python backend"
-    The default Rust backend wraps and checks nothing for
-    `dialect = "mysql"`. Run sqlty with `SQLTY_LIB=py`; see
-    [Backends](../reference/backends.md#known-gaps).
-
 `TINYINT(1)` is an `int`, not a `bool`. See the
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.
+
+!!! warning "MySQL servers reject `--sql` queries"
+    The `--sql` marker line is part of the query: `SQL[T]` is a `str`, and
+    PyMySQL and mysqlclient send it to the server unchanged. MySQL and
+    MariaDB read `--` as a comment only when whitespace follows it, so
+    `--sql\nSELECT ...` fails at runtime with a syntax error (1064), even
+    though sqlty types it. Until sqlty accepts a MySQL-safe marker, drop the
+    marker line before executing, e.g. `cur.execute(query.partition("\n")[2])`.
+    Placeholders (`%s`, `%(name)s`) are inferred in every dialect; see
+    [Backends](../reference/backends.md#placeholders).
 
 ## Example projects
 

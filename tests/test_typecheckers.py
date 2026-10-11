@@ -6,6 +6,7 @@ zero errors. The reveal_type() calls verify the inferred types match.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -209,3 +210,67 @@ def test_untyped_stub_overlap_scoped(
     errors = [line for line in result.stdout.splitlines() if marker in line]
     assert len(errors) == expected, result.stdout
     assert all(f"queries.pyi:{other}:" in error for error in errors), result.stdout
+
+
+# --- a runtime stub for a helper with a defaulted query parameter ---
+
+DEFAULT_HELPER = """from sqlty import sqlty
+
+
+@sqlty
+def kw(conn: object, q: str = "SELECT 1::INTEGER") -> object:
+    return q
+
+
+@sqlty
+def ko(conn: object, *, q: str = "SELECT 1::INTEGER") -> object:
+    return q
+"""
+
+DEFAULT_CALLS = """from sqlty import SQL
+from queries import ko, kw
+
+a: SQL[tuple[int]] = kw("c")
+b: SQL[tuple[str]] = kw("c", "SELECT 'a'::TEXT")
+c: SQL[tuple[int]] = ko("c")
+d: SQL[tuple[str]] = ko("c", q="SELECT 'a'::TEXT")
+"""
+
+
+@pytest.mark.parametrize(
+    ("checker", "command", "marker"),
+    [
+        ("mypy", ["mypy", "--no-error-summary"], ": error:"),
+        ("pyright", ["pyright", "--pythonpath", sys.executable], "- error:"),
+        ("ty", ["ty", "check", "--python", sys.prefix], "error["),
+    ],
+    ids=["mypy", "pyright", "ty"],
+)
+def test_runtime_stub_query_default(
+    tmp_path: Path, checker: str, command: list[str], marker: str
+) -> None:
+    """Literal overloads of a defaulted query parameter are valid and resolve omitted queries."""
+    if not shutil.which(checker):
+        pytest.skip(f"{checker} not installed")
+    (tmp_path / "pyproject.toml").write_text(
+        "".join(
+            f'[[tool.sqlty.functions]]\nimport_path = "queries.{name}"\nquery_param = "q"\n\n'
+            for name in ["kw", "ko"]
+        )
+    )
+    (tmp_path / "queries.py").write_text(DEFAULT_HELPER)
+    (tmp_path / "app.py").write_text(DEFAULT_CALLS)
+    generated = subprocess.run(
+        [sys.executable, "app.py"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={**os.environ, "SQLTY_AUTO_GENERATE": "1"},
+    )
+    assert generated.returncode == 0, generated.stderr
+
+    result = subprocess.run(
+        [*command, "app.py", "queries.pyi"], capture_output=True, text=True, cwd=tmp_path
+    )
+    errors = [line for line in result.stdout.splitlines() if marker in line]
+    assert not errors, result.stdout + (tmp_path / "queries.pyi").read_text()
