@@ -1,5 +1,6 @@
 """Docs agree with the code: rule pages and table match ``RULES``, examples are
-rewritten, links resolve, and ``>>>`` examples in the Python API page run.
+rewritten, links resolve, and ``>>>`` examples in the Python API page and in
+``sqlty`` docstrings run.
 
 Code blocks with assertions are mdtests, collected by ``tests/_mdtest``.
 """
@@ -7,11 +8,14 @@ Code blocks with assertions are mdtests, collected by ``tests/_mdtest``.
 from __future__ import annotations
 
 import doctest
+import importlib
+import pkgutil
 import re
 from pathlib import Path
 
 import pytest
 
+import sqlty
 from sqlty._config import load_config
 from sqlty._lint import RULES
 from sqlty.core import check_source, rewrite_source
@@ -19,6 +23,11 @@ from sqlty.core import check_source, rewrite_source
 ROOT = Path(__file__).resolve().parent.parent
 RULE_DOCS = ROOT / "src" / "sqlty" / "rules"
 EXAMPLES = sorted(p for p in (ROOT / "examples").glob("0*") if p.is_dir())
+MODULES = sorted(
+    m.name
+    for m in pkgutil.walk_packages(sqlty.__path__, "sqlty.")
+    if not m.name.endswith("__main__") and m.name != "sqlty._core"
+)
 
 
 def test_rules_table() -> None:
@@ -39,6 +48,15 @@ def test_python_api_doctest() -> None:
     test = doctest.DocTestParser().get_doctest(text, {}, path.name, str(path), 0)
     result = doctest.DocTestRunner(optionflags=doctest.ELLIPSIS).run(test)
     assert result.attempted > 0
+    assert result.failed == 0
+
+
+@pytest.mark.parametrize("name", ["sqlty", "sqlty.drivers.psycopg", *MODULES])
+def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``>>>`` examples in docstrings match what the code returns."""
+    monkeypatch.chdir(ROOT)
+    module = importlib.import_module(name)
+    result = doctest.testmod(module, optionflags=doctest.ELLIPSIS)
     assert result.failed == 0
 
 
