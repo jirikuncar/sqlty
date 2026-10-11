@@ -66,12 +66,11 @@ command line. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for
-`@sqlty` helpers takes its schema from `@sqlty(schema=...)`; see
+`@sqlty` helpers also reads `schema`, and a helper can override it with
+`schema` in its `[[tool.sqlty.functions]]` entry,
+[`[tool.sqlty.schemas]`](../reference/configuration.md#schemas) (schemas
+per module or helper) or `@sqlty(schema=...)`; see
 [Generated stubs](stubs.md#schemas).
-
-`[tool.sqlty.schemas]` (named schemas) is read from `pyproject.toml` but not
-used by any command yet; see
-[Configuration](../reference/configuration.md#schemas).
 
 ## Dialects
 

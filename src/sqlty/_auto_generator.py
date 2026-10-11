@@ -11,7 +11,12 @@ from typing import Any
 from sqlty._runtime_registry import get_runtime_registry
 
 
-def auto_generate_stub(fn: Callable[[str], Any], query: str) -> None:
+def auto_generate_stub(
+    fn: Callable[..., Any],
+    query: str,
+    return_type: object = None,
+    return_type_param: str | None = None,
+) -> None:
     """Generate or update a stub file for the module that defines `fn`.
 
     This function is intended to be called by @sqlty decorator
@@ -45,4 +50,6 @@ def auto_generate_stub(fn: Callable[[str], Any], query: str) -> None:
         fully_qualified_name=fully_qualified_name,
         registry_file=registry_file,
         module_name=module_name,
+        return_type=return_type,
+        return_type_param=return_type_param,
     )

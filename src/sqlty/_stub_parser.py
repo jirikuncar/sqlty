@@ -148,6 +148,7 @@ class PyiToIRParser:
                 for node in overload_nodes:
                     overload = self._parse_overload_method(node)
                     if overload:
+                        overload.function_signature = node.args
                         registry.add_overload(overload)
 
                 stub.add_registry(registry)
@@ -495,6 +496,7 @@ class CallInfoToIRParser:
                                         Path(source_file).parent / f"{parts[-2]}.py"
                                         if len(parts) > 2
                                         else None,
+                                        Path(source_file),
                                     ]
 
                                     for p in possible_paths:
@@ -527,4 +529,7 @@ class CallInfoToIRParser:
             source_return_annotation=source_return_annotation,
             return_type_template=call.get("return_type_template"),
             self_type_template=call.get("self_type_template"),
+            return_type_param=call.get("return_type_param_name")
+            if call.get("return_type_param_value")
+            else None,
         )

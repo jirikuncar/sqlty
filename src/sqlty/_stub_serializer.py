@@ -289,36 +289,19 @@ class IRToASTSerializer:
             query_param_name = overload.query_param_name
             param_found = False
 
-            # Also replace return_tp parameter type if present
-            # The return_tp should be constrained to type[<inferred_type>]
-            return_tp_annotation = None
-            if overload.return_type:
-                # Extract base type from return type (remove | None suffix if present)
-                base_type = overload.return_type.replace(" | None", "").strip()
-                # Also handle list[...] and tuple[...] wrappers
-                # For list[int], we want type[int], not type[list[int]]
-                if base_type.startswith("list[") and base_type.endswith("]"):
-                    base_type = base_type[5:-1]  # Extract the inner type
-                elif base_type.startswith("tuple[") and base_type.endswith("]"):
-                    base_type = base_type[6:-1]  # Extract the inner type
-
-                # Create type[<base_type>] | None annotation
-                return_tp_annotation = ast.BinOp(
-                    left=ast.Subscript(
-                        value=ast.Name(id="type", ctx=ast.Load()),
-                        slice=ast.Name(id=base_type, ctx=ast.Load()),
-                        ctx=ast.Load(),
-                    ),
-                    op=ast.BitOr(),
-                    right=ast.Constant(value=None),
-                )
+            return_tp_name = overload.return_type_param
+            return_tp_annotation = (
+                ast.parse(f"type[{overload.return_type}] | None", mode="eval").body
+                if return_tp_name
+                else None
+            )
 
             # Check in regular args
             for arg in args.args:
                 if arg.arg == query_param_name:
                     arg.annotation = literal_annotation
                     param_found = True
-                elif arg.arg == "return_tp" and return_tp_annotation:
+                elif arg.arg == return_tp_name and return_tp_annotation:
                     # Replace return_tp type with specific type constraint
                     arg.annotation = return_tp_annotation
                 elif arg.arg == "self" and overload.self_type_template:
@@ -336,7 +319,7 @@ class IRToASTSerializer:
                     if arg.arg == query_param_name:
                         arg.annotation = literal_annotation
                         param_found = True
-                    elif arg.arg == "return_tp" and return_tp_annotation:
+                    elif arg.arg == return_tp_name and return_tp_annotation:
                         arg.annotation = return_tp_annotation
 
             # Check in positional-only args if not found
@@ -344,7 +327,7 @@ class IRToASTSerializer:
                 for arg in args.posonlyargs:
                     if arg.arg == query_param_name:
                         arg.annotation = literal_annotation
-                    elif arg.arg == "return_tp" and return_tp_annotation:
+                    elif arg.arg == return_tp_name and return_tp_annotation:
                         arg.annotation = return_tp_annotation
 
             function_args = args

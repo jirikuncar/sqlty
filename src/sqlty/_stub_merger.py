@@ -5,6 +5,7 @@ Compatibility layer using IR-based implementation internally.
 
 import re
 from pathlib import Path
+from typing import Any
 
 from ._collector import CallInfo
 from ._stub_ir import StubFile
@@ -34,10 +35,21 @@ def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
 class StubMerger:
     """Merge new query overloads into existing stub files using IR-based approach."""
 
-    def __init__(self, function_name: str = "sql", untyped: bool = False):
+    def __init__(
+        self,
+        function_name: str = "sql",
+        untyped: bool = False,
+        registry_detector: Any | None = None,
+        function_configs: list[Any] | None = None,
+    ):
         self.function_name = function_name
         self._pyi_parser = PyiToIRParser(function_name)
-        self._call_parser = CallInfoToIRParser(function_name, untyped=untyped)
+        self._call_parser = CallInfoToIRParser(
+            function_name,
+            registry_detector=registry_detector,
+            function_configs=function_configs,
+            untyped=untyped,
+        )
         self._serializer = IRToTextSerializer(function_name)
 
     def merge_stub_incremental(

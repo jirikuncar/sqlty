@@ -12,7 +12,7 @@ import logging
 import threading
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ class RuntimeCallRegistry:
         fully_qualified_name: str | None = None,
         registry_file: str | None = None,
         module_name: str | None = None,
+        return_type: object = None,
+        return_type_param: str | None = None,
     ) -> None:
         """Register a sql() call from runtime.
 
@@ -47,6 +49,9 @@ class RuntimeCallRegistry:
             fully_qualified_name: Fully qualified name of the registry class (module.ClassName)
             registry_file: Path to the file where the registry class is defined
             module_name: Name of the module where the call was made
+            return_type: Argument passed to the configured ``return_type_param``, used as
+                the overload's type instead of inferring it (None infers)
+            return_type_param: Name of that parameter
         """
         # Get the caller's frame to determine source location
         frame = inspect.currentframe()
@@ -101,6 +106,11 @@ class RuntimeCallRegistry:
                 "registry_file": registry_file,
                 "return_type": None,  # Will be inferred during generation
             }
+            if return_type is not None and return_type_param:
+                annotation, imports = type_expression(return_type)
+                call_info["return_type_param_name"] = return_type_param
+                call_info["return_type_param_value"] = annotation
+                call_info["imports"] = imports
 
             with self._lock:
                 self._calls[source_path].append(call_info)
@@ -135,20 +145,26 @@ class RuntimeCallRegistry:
             logger.warning("Failed to import generator: %s", e)
             return
 
-        # Load configuration from pyproject.toml
         # Use the first source file's directory as a starting point for config search
         source_paths = list(self._calls.keys())
-        if source_paths:
-            config, _ = load_config(source_paths[0].parent)
-        else:
-            config, _ = load_config()
+        config, config_dir = load_config(source_paths[0].parent if source_paths else None)
+        root = config_dir or Path.cwd()
 
-        # Extract function configs and other settings from config
-        function_configs = config.get("functions", [])
-        sql_dialect = config.get("dialect", "postgres")
+        schema_mappings: dict[str | None, Path] = {
+            name: root / path for name, path in config.get("schemas", {}).items()
+        }
+        if "schema" in config:
+            schema_mappings[None] = root / config["schema"]
+
+        function_configs = [fc.copy() for fc in config.get("functions", [])]
+        for fc in function_configs:
+            if "schema" in fc:
+                fc["schema"] = str(root / fc["schema"])
 
         generator = TypeStubGenerator(
-            sql_dialect=sql_dialect,
+            sql_dialect=config.get("dialect", "postgres"),
+            schema_mappings=schema_mappings,
+            format_command=config.get("format_command"),
             function_configs=function_configs,
             untyped=config.get("untyped", "skip"),
         )
@@ -237,8 +253,7 @@ class RuntimeCallRegistry:
                             export_name=export_name,
                         )
 
-                        # Write the merged stub file
-                        stub_path.write_text(stub_content, encoding="utf-8")
+                        self._write_stub(stub_path, stub_content, generator)
 
                         logger.info(
                             "Generated merged stub for %s (%d functions, %d calls)",
@@ -269,8 +284,7 @@ class RuntimeCallRegistry:
                                 export_name=export_name,
                             )
 
-                            # Write the stub file
-                            stub_path.write_text(stub_content, encoding="utf-8")
+                            self._write_stub(stub_path, stub_content, generator)
 
                             logger.info(
                                 "Generated stub for %s (%s.sql, %d calls)",
@@ -286,6 +300,14 @@ class RuntimeCallRegistry:
             # Clean up lock file
             with contextlib.suppress(Exception):
                 lock_path.unlink()
+
+    @staticmethod
+    def _write_stub(stub_path: Path, content: str, generator: Any) -> None:
+        if command := generator._format_command:
+            from sqlty._formatter import formatter
+
+            content = formatter(command, content, str(stub_path))
+        stub_path.write_text(content, encoding="utf-8")
 
     def _enrich_calls_with_config(self, calls: list[dict[str, Any]], generator: Any) -> None:
         """Enrich runtime calls with configuration information.
@@ -325,6 +347,7 @@ class RuntimeCallRegistry:
                 # Match by function name (last part of import_path)
                 if config_func_name == registry_class:
                     # Enrich the call with configuration
+                    call["function_name"] = registry_class
                     call["query_param_name"] = config.get("query_param", "query")
                     call["return_type_template"] = config.get(
                         "return_type_template", "SQL[{sqlty}]"
@@ -332,16 +355,41 @@ class RuntimeCallRegistry:
                     call["self_type_template"] = config.get("self_type_template")
                     call["schema_path"] = config.get("schema")
 
-                    # Add default imports if using SQL[...] template
-                    if "SQL[" in call.get("return_type_template", ""):
-                        imports = call.get("imports", [])
-                        if not imports:
-                            imports = []
-                        if "from sqlty import SQL" not in imports:
-                            imports.append("from sqlty import SQL")
-                        call["imports"] = imports
+                    imports = [*config.get("imports", []), *call.get("imports", [])]
+                    if "SQL[" in call["return_type_template"]:
+                        imports.append("from sqlty import SQL")
+                    call["imports"] = list(dict.fromkeys(imports))
 
                     break
+
+
+def type_expression(tp: object) -> tuple[str, list[str]]:
+    """Stub annotation for a runtime type, and the imports it needs.
+
+    Example:
+        >>> import datetime
+        >>> type_expression(int)
+        ('int', [])
+        >>> type_expression(list[datetime.date])
+        ('list[datetime.date]', ['import datetime'])
+        >>> type_expression("MyRow")
+        ('MyRow', [])
+    """
+    if isinstance(tp, str):
+        return tp, []
+    args = get_args(tp)
+    if isinstance(tp, type) and not args:
+        module = tp.__module__
+        if module == "builtins":
+            return tp.__qualname__, []
+        return f"{module}.{tp.__qualname__}", [f"import {module}"]
+    imports: list[str] = []
+    for arg in args:
+        imports.extend(type_expression(arg)[1])
+    text = repr(tp)
+    if text.startswith("typing."):
+        imports.append("import typing")
+    return text, list(dict.fromkeys(imports))
 
 
 # Global singleton registry instance

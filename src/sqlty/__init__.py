@@ -129,7 +129,7 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
             from sqlty._config import load_config
 
             # Get the module and file path of the decorated function
-            is_registered = False
+            func_config = None
             try:
                 module = inspect.getmodule(fn)
                 if module:
@@ -145,25 +145,22 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                         # Expected format: [tool.sqlty.functions] with import_path
                         functions = config.get("functions", [])
                         expected_import_path = f"{module_name}.{function_name}"
+                        candidates = [expected_import_path]
+                        # When a script is run directly (python script.py), also accept its basename
+                        if module_name == "__main__":
+                            candidates.append(f"{Path(file_path).stem}.{function_name}")
 
-                        is_registered = any(
-                            func_config["import_path"] == expected_import_path
-                            for func_config in functions
+                        func_config = next(
+                            (
+                                fc
+                                for path in candidates
+                                for fc in functions
+                                if fc["import_path"] == path
+                            ),
+                            None,
                         )
 
-                        # If not registered and module is __main__, also check using file basename
-                        # This handles the case when a script is run directly (python script.py)
-                        if not is_registered and module_name == "__main__":
-                            file_basename = Path(file_path).stem
-                            fallback_import_path = f"{file_basename}.{function_name}"
-                            is_registered = any(
-                                func_config["import_path"] == fallback_import_path
-                                for func_config in functions
-                            )
-                            if is_registered:
-                                expected_import_path = fallback_import_path
-
-                        if not is_registered:
+                        if func_config is None:
                             warnings.warn(
                                 f"Function {expected_import_path} is decorated with @sqlty but not "
                                 f"registered in pyproject.toml under [tool.sqlty.functions]. "
@@ -178,14 +175,26 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                 pass
 
             # Enable runtime stub generation for registered functions
-            if is_registered:
-                call = functools.partial(auto_generate_stub, fn)  # type: ignore
+            if func_config is not None:
+                signature = inspect.signature(cast(Any, fn))
+                query_param = func_config["query_param"]
+                return_type_param = func_config.get("return_type_param")
 
                 @functools.wraps(fn)  # type: ignore
-                def wrapper(query: str) -> Any:
-                    # TODO use query_param name from config or inspect signature and allow automatic detection for only one param
-                    call(query)
-                    return fn(query)  # type: ignore
+                def wrapper(*args: Any, **kwargs: Any) -> Any:
+                    try:
+                        arguments = signature.bind(*args, **kwargs).arguments
+                    except TypeError:
+                        arguments = {}
+                    query = arguments.get(query_param)
+                    if isinstance(query, str):
+                        auto_generate_stub(
+                            cast(Any, fn),
+                            query,
+                            arguments.get(return_type_param) if return_type_param else None,
+                            return_type_param,
+                        )
+                    return fn(*args, **kwargs)  # type: ignore
 
                 # Copy over the attributes to the wrapper
                 wrapper.__sqlty__ = True  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]

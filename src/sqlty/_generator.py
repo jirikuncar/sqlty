@@ -70,8 +70,13 @@ class TypeStubGenerator:
         self._function_configs = function_configs or []
         self._untyped = untyped == "sentinel"
 
-        self._stub_merger = StubMerger(function_name=self.function_name, untyped=self._untyped)
         self._registry_detector = RegistryDetector(function_configs=self._function_configs)
+        self._stub_merger = StubMerger(
+            function_name=self.function_name,
+            untyped=self._untyped,
+            registry_detector=self._registry_detector,
+            function_configs=self._function_configs,
+        )
 
         # Track files that have differences (for check mode)
         self._files_with_differences: list[tuple[Path, StubFile, StubFile]] = []
@@ -258,9 +263,9 @@ class TypeStubGenerator:
         """Get the appropriate SQLAnalyzer for a registry.
 
         Priority:
-        1. Registry-specific schema from schema_mappings (supports fully qualified names)
-        2. Global CLI schema from schema_mappings[None]
-        3. __schema_path__ from registry class
+        1. Registry-specific schema from schema_mappings (module or ``module.function`` key)
+        2. __schema_path__ from the decorated function (``@sqlty(schema=...)``)
+        3. Global schema from schema_mappings[None] (``schema`` in ``[tool.sqlty]``)
 
         Args:
             registry_name: Name of the registry module (e.g., 'user_queries')
@@ -315,12 +320,7 @@ class TypeStubGenerator:
                         schema_to_use = self.schema_mappings[fqn]
                         schema_source = f"mapping for '{fqn}'"
 
-        # Priority 2: Default CLI schema provided via schema_mappings[None]
-        if schema_to_use is None and None in self.schema_mappings:
-            schema_to_use = self.schema_mappings[None]
-            schema_source = "CLI --schema"
-
-        # Priority 3: __schema_path__ from registry class (only if no CLI schema)
+        # Priority 2: __schema_path__ from registry class
         if schema_to_use is None:
             # Determine which class name to use for schema lookup:
             # - If registry_name exists, we've resolved class_name above (may differ from registry_class)
@@ -332,6 +332,11 @@ class TypeStubGenerator:
             if detected_schema:
                 schema_to_use = detected_schema
                 schema_source = "__schema_path__"
+
+        # Priority 3: global schema provided via schema_mappings[None]
+        if schema_to_use is None and None in self.schema_mappings:
+            schema_to_use = self.schema_mappings[None]
+            schema_source = "global schema"
 
         # Create analyzer
         analyzer = SQLAnalyzer(dialect=self.sql_dialect, schema_path=schema_to_use)
@@ -346,6 +351,18 @@ class TypeStubGenerator:
             )
 
         return analyzer
+
+    def _get_analyzer_for_schema(self, schema_path: Path) -> SQLAnalyzer:
+        """Analyzer for the ``schema`` of a ``[[tool.sqlty.functions]]`` entry."""
+        cache_key = f"schema::{schema_path}"
+        if cache_key not in self._analyzer_cache:
+            logging.getLogger(__name__).warning(
+                "Using schema from %s (function config)", schema_path
+            )
+            self._analyzer_cache[cache_key] = SQLAnalyzer(
+                dialect=self.sql_dialect, schema_path=schema_path
+            )
+        return self._analyzer_cache[cache_key]
 
     # Delegation methods for backward compatibility with tests
     def _get_registry_names(self, module_path: Path) -> list[str]:
@@ -552,8 +569,12 @@ class TypeStubGenerator:
             registry_name = call.get("registry_source")
             registry_class = call.get("registry_class")
 
-            # Get the appropriate analyzer for this registry
-            analyzer = self._get_analyzer_for_registry(registry_name, module_path, registry_class)
+            if schema_path := call.get("schema_path"):
+                analyzer = self._get_analyzer_for_schema(Path(schema_path))
+            else:
+                analyzer = self._get_analyzer_for_registry(
+                    registry_name, module_path, registry_class
+                )
 
             sql_type = analyzer.generate_return_type(literal)
             if sql_type:

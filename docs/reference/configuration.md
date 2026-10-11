@@ -25,12 +25,12 @@ query_param = "query"
 | Key | Used by |
 |-----|---------|
 | [`dialect`](#dialect) | `rewrite`, `check`, stub generation |
-| [`schema`](#schema) | `rewrite`, `check` |
-| [`schemas`](#schemas) | Not used yet |
+| [`schema`](#schema) | `rewrite`, `check`, stub generation |
+| [`schemas`](#schemas) | Stub generation |
 | [`rules`](#rules) | `check` |
 | [`import-style`](#import-style) | `rewrite`, `strip`, `check`, magic codec |
 | [`untyped`](#untyped) | `rewrite`, stub generation |
-| [`format-command`](#format-command) | Not used yet |
+| [`format-command`](#format-command) | Stub generation |
 | [`functions`](#functions) | Stub generation, `python -m sqlty.registries` |
 
 ## `dialect`
@@ -45,20 +45,24 @@ explicit `--dialect postgres` does not override this key. See
 Path to a `.sql` file with `CREATE TABLE` statements, relative to the
 directory of `pyproject.toml`. CLI: `--schema` (relative to the current
 directory). See [Schema inference](../guide/schema-inference.md).
+Stub generation uses it for helpers that have no more specific schema; see
+[Generated stubs](../guide/stubs.md#schemas).
 
 ## `schemas`
 
-A table of named schema files:
+Schema files for [stub generation](../guide/stubs.md#schemas), keyed by the
+module that defines the helper (`"db"`) or by module and function
+(`"db.sql"`). Paths are relative to the directory of `pyproject.toml`.
 
 ```toml
 [tool.sqlty.schemas]
-users = "db/users.sql"
-orders = "db/orders.sql"
+db = "db/schema.sql"                       # every helper in db.py
+"analytics.query" = "db/analytics.sql"    # only analytics.query
 ```
 
-The table is parsed, but no command uses it yet. Use [`schema`](#schema) for
-the CLI and `@sqlty(schema=...)` for
-[generated stubs](../guide/stubs.md#schemas).
+Keys use the module name the helper has at runtime, so a helper in a script
+run directly is under `__main__`. `rewrite` and `check` do not read this
+table.
 
 ## `rules`
 
@@ -106,9 +110,10 @@ stdin:
 format-command = "ruff format --stdin-filename {filename} -"
 ```
 
-The key is parsed, but no command applies it yet: neither `sqlty rewrite`
-nor stub generation runs the formatter. Run your formatter after sqlty
-instead.
+Stub generation pipes each `.pyi` file it writes through the command,
+with `{filename}` replaced by the stub path. If the command fails, the
+unformatted stub is written and a warning is logged. `sqlty rewrite` does not
+run the formatter; run yours after it.
 
 ## `functions`
 
@@ -127,9 +132,9 @@ return_type_template = "list[{sqlty}]"
 | `import_path` | yes | Module path and function name, e.g. `"app.db.sql"`. Use `"__main__.sql"` or the file name for a script run directly |
 | `query_param` | yes | Name of the parameter that holds the query |
 | `return_type_template` | no | Return type of each overload, with `{sqlty}` for the inferred row type. Default: `"SQL[{sqlty}]"` |
-| `imports` | no | Import lines for the stub (a string or a list). Not applied by runtime generation |
-| `schema` | no | Schema path. Not used for stubs; use `@sqlty(schema=...)` |
-| `return_type_param` | no | Parameter whose argument is used as the return type instead of inferring it. Not applied by runtime generation |
+| `imports` | no | Import lines added to the stub (a string or a list), for names used in `return_type_template` |
+| `schema` | no | Schema path for this helper, relative to the directory of `pyproject.toml`. Overrides every other [schema source](../guide/stubs.md#schemas) |
+| `return_type_param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it |
 | `self_type_template` | no | Reserved for methods, which are not supported |
 
 Entries without `import_path` or `query_param` are skipped with a warning.

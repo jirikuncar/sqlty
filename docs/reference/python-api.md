@@ -65,7 +65,9 @@ Decorating a function twice raises `TypeError`.
 
 Without `SQLTY_AUTO_GENERATE`, the decorator returns the function unchanged.
 With it, a function registered in `[[tool.sqlty.functions]]` is wrapped to
-record each query it receives, and an unregistered one triggers a warning.
+record each query it receives (its `query_param` argument, and the
+`return_type_param` argument if configured) and passes all arguments through;
+an unregistered one triggers a warning.
 
 ## `sqlty.drivers.psycopg`
 

@@ -29,7 +29,9 @@ CLI command for stub generation.
     ```
 
 2. Register it in `pyproject.toml`. `import_path` is the module path plus the
-   function name; `query_param` names the parameter that holds the query.
+   function name; `query_param` names the parameter that holds the query,
+   which may be passed by position or keyword. Other arguments are passed
+   through unchanged.
 
     ```toml
     [[tool.sqlty.functions]]
@@ -93,14 +95,35 @@ Tests covering this flow:
 
 ## Schemas
 
-`@sqlty(schema="schema.sql")` is the only schema source for stub generation.
-Without it, an uncast column is silently typed `str`:
-`sql("SELECT id, name FROM users")` gets `SQL[tuple[str, str]]`, with no
-warning. Cast the columns or pass a schema. The `schema` key of
-`[tool.sqlty]` and of `[[tool.sqlty.functions]]` are not used for stubs.
+Each helper uses the first schema found, from most to least specific:
 
-On each run, generation logs `Using schema from <path> (__schema_path__)`
-as a warning (on stderr by default) for every helper with a schema.
+1. `schema` in its `[[tool.sqlty.functions]]` entry.
+2. [`[tool.sqlty.schemas]`](../reference/configuration.md#schemas): the
+   `module.function` key, then the `module` key.
+3. `@sqlty(schema="schema.sql")`, relative to the helper's module.
+4. `schema` in `[tool.sqlty]`.
+
+Paths in `pyproject.toml` are relative to its directory.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.schemas]
+analytics = "db/analytics.sql"
+
+[[tool.sqlty.functions]]
+import_path = "db.sql"
+query_param = "query"
+schema = "db/schema.sql"
+```
+
+Without a schema, an uncast column is silently typed `str`:
+`sql("SELECT id, name FROM users")` gets `SQL[tuple[str, str]]`, with no
+warning. Cast the columns or configure a schema.
+
+On each run, generation logs `Using schema from <path> (<source>)` as a
+warning (on stderr by default) for every helper with a schema.
 
 ## Return types
 
@@ -115,10 +138,54 @@ return_type_template = "list[{sqlty}]"
 ```
 
 A call `fetch_all("SELECT COUNT(*)::INTEGER FROM users")` then gets the
-overload `-> list[tuple[int]]`. The template is written into the stub as is,
-and runtime generation adds only the imports for `SQL`, `datetime`, `uuid`,
-`UNTYPED` and `typing.Any`, so use names the stub can resolve without other
-imports.
+overload `-> list[tuple[int]]`. The template is written into the stub as is.
+Generation adds the imports for `SQL`, `datetime`, `uuid`, `decimal`,
+`UNTYPED` and `typing.Any`; list any other names the template uses in
+`imports`:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.fetch_all"
+query_param = "query"
+return_type_template = "Sequence[{sqlty}]"
+imports = ["from collections.abc import Sequence"]
+```
+
+### Return type parameter
+
+A helper that takes the row type as an argument names it in
+`return_type_param`:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "db.sql"
+query_param = "query"
+return_type_param = "return_tp"
+```
+
+```python
+# db.py
+@sqlty
+def sql(query: str, return_tp: object = None) -> SQL[Any]:
+    return SQL(query)
+
+
+# app.py
+count = sql("SELECT COUNT(*) FROM users", return_tp=int)
+```
+
+The argument replaces the inferred row type of that call, and the parameter
+is narrowed to it in the overload:
+
+```python
+@overload
+def sql(query: Literal['SELECT COUNT(*) FROM users'], return_tp: type[int] | None=None) -> SQL[int]:
+    ...
+```
+
+Calls that omit it, or pass `None`, are inferred as usual. Classes outside
+`builtins` are written with their module, such as `datetime.date`, and the
+module is imported; a string argument is written as is.
 
 A query sqlty cannot type gets an `SQL[Any]` overload (the template applied
 to `Any`), and a warning naming the query is logged.
@@ -173,25 +240,36 @@ Each run updates the existing stub incrementally:
 Only calls that execute during the run are recorded. Run your test suite with
 `SQLTY_AUTO_GENERATE=1` to cover the most queries.
 
+## Formatting
+
+With [`format-command`](../reference/configuration.md#format-command) in
+`[tool.sqlty]`, each stub is piped through the formatter before it is
+written:
+
+```toml
+[tool.sqlty]
+format-command = "ruff format --stdin-filename {filename} -"
+```
+
 ## Configuration keys
 
 | Key in `[[tool.sqlty.functions]]` | Used by runtime generation |
 |------|------|
-| `import_path` (required) | Yes: matches the decorated function |
-| `query_param` (required) | Required to register; the query is the first argument |
-| `return_type_template` | Yes |
-| `imports` | No |
-| `schema` | No; use `@sqlty(schema=...)` |
-| `return_type_param` | No |
-| `self_type_template` | No; methods are not supported |
+| `import_path` (required) | Matches the decorated function |
+| `query_param` (required) | The argument recorded as the query, by position or keyword |
+| `return_type_template` | Return type of each overload |
+| `imports` | Added to the stub |
+| `schema` | [Schema](#schemas) for this helper |
+| `return_type_param` | [Row type](#return-type-parameter) given by the caller |
+| `self_type_template` | Not used; methods are not supported |
 
+Tests:
+[`tests/generator/test_runtime_config.py`](https://github.com/jirikuncar/sqlty/blob/main/tests/generator/test_runtime_config.py).
 See [Configuration](../reference/configuration.md#functions).
 
 ## Limitations
 
-- With `SQLTY_AUTO_GENERATE=1`, the decorator wraps a registered helper in a
-  function that takes exactly one argument, `query`. Helpers with more
-  parameters fail when called.
 - Only module-level functions are supported, not methods.
+- A call whose query argument is not a `str` is not recorded.
 - Stubs are written with `fcntl` file locks, so generation works on POSIX
   systems only.
