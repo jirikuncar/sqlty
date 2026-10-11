@@ -172,6 +172,18 @@ pub fn rewrite_source(
     import_style: Option<&str>,
     untyped: bool,
 ) -> String {
+    rewrite_source_with(source, dialect, schema, import_style, untyped, false)
+}
+
+/// [`rewrite_source`]; with `keep_lines`, imports go on existing lines (see [`insert_inline`]).
+pub fn rewrite_source_with(
+    source: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    import_style: Option<&str>,
+    untyped: bool,
+    keep_lines: bool,
+) -> String {
     let istyle = ImportStyle::or_default(import_style);
     let fstring_lines: Vec<usize> = source
         .lines()
@@ -236,6 +248,9 @@ pub fn rewrite_source(
     let result = splice(source, &replacements);
     if imports.is_empty() {
         return result;
+    }
+    if keep_lines {
+        return insert_inline(&result, &imports.join("; "));
     }
     let at = header_end(&result);
     let sep = if at > 0 && !result[..at].ends_with('\n') {
@@ -374,12 +389,18 @@ pub(crate) fn has_import(source: &str, import_str: &str) -> bool {
 
 /// Offset where imports go: after shebang, coding cookie, docstring and `__future__`.
 pub(crate) fn header_end(source: &str) -> usize {
+    header(source).0
+}
+
+/// [`header_end`], and where the code of the header's last statement ends, if it has one.
+fn header(source: &str) -> (usize, Option<usize>) {
     let line_end_at = |from: usize| {
         source[from..]
             .find('\n')
             .map_or(source.len(), |i| from + i + 1)
     };
     let (mut pos, mut end, mut lineno) = (0, 0, 0);
+    let mut stmt = None;
     let mut docstring = true;
     while pos < source.len() {
         let mut line_end = line_end_at(pos);
@@ -393,10 +414,11 @@ pub(crate) fn header_end(source: &str) -> usize {
             continue;
         }
         if docstring {
-            if let Some(close) = docstring_end(source, pos) {
+            if let Some((close, close_line_end)) = docstring_end(source, pos) {
                 docstring = false;
-                pos = close;
-                end = close;
+                stmt = Some(close);
+                pos = close_line_end;
+                end = close_line_end;
                 continue;
             }
         }
@@ -409,14 +431,79 @@ pub(crate) fn header_end(source: &str) -> usize {
                 .find(')')
                 .map_or(source.len(), |i| line_end_at(pos + i));
         }
+        let last = source[..line_end].trim_end_matches(['\n', '\r']);
+        let last_start = last.rfind('\n').map_or(0, |i| i + 1);
+        let code = last[last_start..].split('#').next().unwrap_or_default();
+        stmt = Some(last_start + code.trim_end().len());
         pos = line_end;
         end = line_end;
     }
-    end
+    (end, stmt)
 }
 
-/// End of the line closing a string-literal statement starting at `pos`.
-fn docstring_end(source: &str, pos: usize) -> Option<usize> {
+/// Add `imports` (`; `-joined) to `source` without adding a line, so line numbers stay the same.
+///
+/// CPython decodes a script from the end of its coding line and drops the first decoded line,
+/// so imports never go on a line of their own above the first statement. They are appended to
+/// the docstring or last `__future__` import, else put in front of the first statement, else
+/// (a compound statement) on a blank or comment line above it after line 1. Only a compound
+/// statement right after the shebang and coding lines gets a new line.
+fn insert_inline(source: &str, imports: &str) -> String {
+    let (mut pos, stmt) = header(source);
+    if let Some(end) = stmt {
+        return format!("{}; {}{}", &source[..end], imports, &source[end..]);
+    }
+    let first_line_end = source.find('\n').map_or(source.len(), |i| i + 1);
+    let mut spare = None;
+    while pos < source.len() {
+        let line_end = source[pos..]
+            .find('\n')
+            .map_or(source.len(), |i| pos + i + 1);
+        let line = source[pos..line_end].trim();
+        if !line.is_empty() && !line.starts_with('#') {
+            break;
+        }
+        if pos >= first_line_end && spare.is_none() {
+            spare = Some((pos, if line.is_empty() { "" } else { "  " }));
+        }
+        pos = line_end;
+    }
+    let line = source[pos..].lines().next().unwrap_or_default();
+    if let Some(close) =
+        string_end(source, pos).filter(|&c| source[c..].trim_start().starts_with(';'))
+    {
+        return format!("{}; {}{}", &source[..close], imports, &source[close..]);
+    }
+    let (at, text) = match spare {
+        _ if !is_compound(line) => (pos, format!("{imports}; ")),
+        Some((at, sep)) => (at, format!("{imports}{sep}")),
+        None => (pos, format!("{imports}\n")),
+    };
+    format!("{}{}{}", &source[..at], text, &source[at..])
+}
+
+/// Whether a statement starting with `line` can't follow `; `.
+fn is_compound(line: &str) -> bool {
+    let word = line
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .next()
+        .unwrap_or_default();
+    line.starts_with('@')
+        || matches!(
+            word,
+            "def" | "class" | "if" | "for" | "while" | "with" | "try" | "async"
+        )
+        || (word == "match"
+            && line
+                .split('#')
+                .next()
+                .unwrap_or_default()
+                .trim_end()
+                .ends_with(':'))
+}
+
+/// End of a string literal starting at `pos`, after its closing quote.
+fn string_end(source: &str, pos: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut i = pos;
     if matches!(bytes.get(i), Some(b'r' | b'R' | b'u' | b'U')) {
@@ -429,20 +516,25 @@ fn docstring_end(source: &str, pos: usize) -> Option<usize> {
     while i < bytes.len() {
         match bytes[i] {
             b'\\' => i += 2,
-            _ if bytes[i..].starts_with(quote.as_bytes()) => break,
+            _ if bytes[i..].starts_with(quote.as_bytes()) => return Some(i + quote.len()),
             b'\n' if quote.len() == 1 => return None,
             _ => i += 1,
         }
     }
-    if i >= bytes.len() {
-        return None;
-    }
-    let rest_end = source[i..].find('\n').map_or(source.len(), |n| i + n);
-    let rest = source[i + quote.len()..rest_end].trim();
+    None
+}
+
+/// End of a string-literal statement starting at `pos`, and of the line closing it.
+fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
+    let close = string_end(source, pos)?;
+    let rest_end = source[close..]
+        .find('\n')
+        .map_or(source.len(), |n| close + n);
+    let rest = source[close..rest_end].trim();
     if !rest.is_empty() && !rest.starts_with('#') {
         return None;
     }
-    Some((rest_end + 1).min(source.len()))
+    Some((close, (rest_end + 1).min(source.len())))
 }
 
 #[cfg(test)]
@@ -689,5 +781,118 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             rewrite_source(source, "postgres", &None, None, false),
             source
         );
+    }
+
+    fn keep_lines(source: &str) -> String {
+        rewrite_source_with(source, "postgres", &None, None, false, true)
+    }
+
+    const Q: &str = "q = \"--sql\\nSELECT 1::INTEGER AS x\"\n";
+
+    #[test]
+    fn test_keep_lines_script_mode_docstring() {
+        let source = format!("\n\"\"\"Doc.\"\"\"  # c\n{Q}");
+        assert_eq!(
+            keep_lines(&source),
+            "\n\"\"\"Doc.\"\"\"; from sqlty import SQL  # c\nq = SQL[tuple[int]](\"--sql\\nSELECT 1::INTEGER AS x\")\n"
+        );
+    }
+
+    #[test]
+    fn test_keep_lines_shebang_cookie_simple_statement() {
+        let source = format!("#!/usr/bin/env python\n# coding: sqlty\n{Q}");
+        let result = keep_lines(&source);
+        assert!(result.starts_with(
+            "#!/usr/bin/env python\n# coding: sqlty\nfrom sqlty import SQL; q = SQL["
+        ));
+        assert!(keep_lines(&format!("\n{Q}")).starts_with("\nfrom sqlty import SQL; q = SQL["));
+    }
+
+    #[test]
+    fn test_keep_lines_future() {
+        let source = format!("\nfrom __future__ import (\n    annotations,\n)  # c\n{Q}");
+        assert!(keep_lines(&source).starts_with(
+            "\nfrom __future__ import (\n    annotations,\n); from sqlty import SQL  # c\n"
+        ));
+    }
+
+    #[test]
+    fn test_keep_lines_compound_statement() {
+        let def = format!("\ndef f():\n    pass\n{Q}");
+        assert!(keep_lines(&def).starts_with("\nfrom sqlty import SQL\ndef f():\n"));
+        let blank = format!("\n\n@decorator\ndef f():\n    pass\n{Q}");
+        assert!(keep_lines(&blank).starts_with("\nfrom sqlty import SQL\n@decorator\n"));
+        let comment = format!("\n# c\nif x: y\n{Q}");
+        assert!(keep_lines(&comment).starts_with("\nfrom sqlty import SQL  # c\nif x: y\n"));
+        let doc = format!("\n\"\"\"Doc.\"\"\"\nclass A: pass\n{Q}");
+        assert!(keep_lines(&doc).starts_with("\n\"\"\"Doc.\"\"\"; from sqlty import SQL\nclass A"));
+    }
+
+    #[test]
+    fn test_keep_lines_docstring_semicolon_and_existing_import() {
+        let doc = format!("\n\"\"\"Doc.\"\"\"; x = 1\n{Q}");
+        assert!(keep_lines(&doc).starts_with("\n\"\"\"Doc.\"\"\"; from sqlty import SQL; x = 1\n"));
+        let existing = format!("\nfrom sqlty import SQL\n{Q}");
+        assert_eq!(
+            keep_lines(&existing),
+            rewrite_source(&existing, "postgres", &None, None, false)
+        );
+    }
+
+    #[test]
+    fn test_keep_lines_placement() {
+        let imp = "from sqlty import SQL";
+        for (header, expected) in [
+            ("# coding: sqlty\n", format!("# coding: sqlty\n{imp}; q = ")),
+            (
+                "\"\"\"Multi\nline.\n\"\"\"\n",
+                format!("\"\"\"Multi\nline.\n\"\"\"; {imp}\nq = "),
+            ),
+            (
+                "\n\"\"\"Doc.\"\"\"\nfrom __future__ import annotations\n",
+                format!("\n\"\"\"Doc.\"\"\"\nfrom __future__ import annotations; {imp}\nq = "),
+            ),
+            (
+                "\n  # c\nclass A: pass\n",
+                format!("\n{imp}    # c\nclass A: pass\nq = "),
+            ),
+            (
+                "\nmatch x:\n    case _: pass\n",
+                format!("\n{imp}\nmatch x:\n    case _: pass\nq = "),
+            ),
+            ("\nmatch = 1\n", format!("\n{imp}; match = 1\nq = ")),
+        ] {
+            let result = keep_lines(&format!("{header}{Q}"));
+            assert!(result.starts_with(&expected), "{result:?}");
+        }
+        let continued = keep_lines("\nq = \\\n    \"--sql\\nSELECT 1::INTEGER AS x\"\n");
+        assert!(
+            continued.starts_with(&format!("\n{imp}; q = \\\n    SQL[")),
+            "{continued:?}"
+        );
+    }
+
+    #[test]
+    fn test_keep_lines_datetime_uuid() {
+        let source = "\n\"\"\"Doc.\"\"\"\r\nq = \"--sql\\nSELECT NOW()::TIMESTAMP AS t, 'a'::UUID AS u\"\r\n";
+        assert!(keep_lines(source).starts_with(
+            "\n\"\"\"Doc.\"\"\"; import datetime; import uuid; from sqlty import SQL\r\nq = SQL[tuple[datetime.datetime, uuid.UUID]]("
+        ));
+    }
+
+    #[test]
+    fn test_keep_lines_preserves_line_count() {
+        for source in [
+            format!("\n\"\"\"Doc.\"\"\"\n{Q}"),
+            format!("\nfrom __future__ import annotations\n{Q}"),
+            format!("\n\n@decorator\ndef f():\n    pass\n{Q}"),
+            format!("\nimport os\n{Q}"),
+            format!("\n\"\"\"Doc.\"\"\"\r\n{Q}").replace('\n', "\r\n"),
+        ] {
+            let result = keep_lines(&source);
+            assert!(result.contains("SQL[tuple[int]]"), "{result}");
+            assert_eq!(result.lines().count(), source.lines().count(), "{result}");
+            assert_eq!(result.lines().next(), source.lines().next(), "{result}");
+        }
     }
 }
