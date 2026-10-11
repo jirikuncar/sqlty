@@ -93,25 +93,29 @@ fn returns_rows(sql: &str, dialect: &str) -> bool {
 ///
 /// Adds necessary imports (SQL, datetime, uuid) at the top.
 /// Never modifies string content — only adds the SQL[T]() wrapper.
+/// With keep_lines, the imports are joined with "; " onto existing lines so
+/// line numbers stay the same (used by the `sqlty` codec).
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false))]
 fn rewrite_source(
     source: &str,
     dialect: &str,
     schema_sql: Option<&str>,
     import_style: Option<&str>,
     untyped: bool,
+    keep_lines: bool,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
-    Ok(rewriter::rewrite_source(
+    Ok(rewriter::rewrite_source_with(
         source,
         dialect,
         &schema(schema_sql, dialect),
         import_style,
         untyped,
+        keep_lines,
     ))
 }
 

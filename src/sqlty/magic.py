@@ -1,4 +1,4 @@
-"""The ``sqlty`` source codec: ``--sql`` strings become ``SQL[T](...)`` at import.
+"""The ``sqlty`` source codec: ``--sql`` strings become ``SQL[T](...)`` when imported or run.
 
 Modules opt in with a coding declaration on their first or second line::
 

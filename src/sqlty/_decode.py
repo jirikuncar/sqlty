@@ -6,10 +6,17 @@
     from sqlty._decode import decode
 
     decode(b'q = "--sql\\nSELECT 1::INTEGER"')[0]
-    # 'from sqlty import SQL\\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
+    # 'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
 Strings whose row type can't be inferred (invalid SQL, DML without
-RETURNING, DDL, empty queries) are left as they are. The ``# coding: sqlty``
+RETURNING, DDL, empty queries) are left as they are. The imports are joined
+with ``;`` onto an existing line (after the docstring or ``__future__``
+imports, else before the first statement) rather than a new line above
+the code: when CPython runs a file as a script, it decodes from the end of the
+coding line and drops the first decoded line (#111). Line numbers match the file
+on disk, except when a compound statement (``def``, ``class``, ``@``, ``if``,
+...) comes right after the coding line, with no docstring, blank or comment
+line in between; then one line is added. The ``# coding: sqlty``
 declaration becomes ``utf-8``, so the decoded text runs without the codec.
 ``import-style`` comes from ``[tool.sqlty]`` in pyproject.toml; on any error the
 source is returned unchanged. Import ``sqlty.magic`` to register the codec.
@@ -50,7 +57,7 @@ def decode(b: Buffer, errors: str = "strict") -> tuple[str, int]:
     try:
         from sqlty.core import rewrite_source
 
-        decoded = rewrite_source(source, import_style=_import_style())
+        decoded = rewrite_source(source, import_style=_import_style(), keep_lines=True)
         return _CODING.sub(r"\1utf-8", decoded, count=1), length
     except Exception:
         return source, length
