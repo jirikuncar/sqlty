@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     import argparse
+
+    from sqlty._config import SQLTyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -142,26 +144,23 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
     """Rewrite command: transform --sql strings into SQL[T](...) calls."""
-    from sqlty._config import load_config
     from sqlty.core import rewrite_source
 
-    dialect, schema_sql, import_style = _resolve_config(args)
-    untyped = args.untyped or load_config(args.paths[0])[0].get("untyped", "skip")
-    files = _collect_python_files(args.paths)
+    files = _files_with_settings(args)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
         return
 
     changed = 0
-    for path in files:
+    for path, settings in files:
         original = path.read_text(encoding="utf-8")
         rewritten = rewrite_source(
             original,
-            dialect=dialect,
-            schema_sql=schema_sql,
-            import_style=import_style,
-            untyped=untyped == "sentinel",
+            dialect=settings.dialect,
+            schema_sql=settings.schema_sql,
+            import_style=settings.import_style,
+            untyped=settings.untyped == "sentinel",
         )
 
         if rewritten == original:
@@ -191,17 +190,16 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
-    _, _, import_style = _resolve_config(args)
-    files = _collect_python_files(args.paths)
+    files = _files_with_settings(args)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
         return
 
     changed = 0
-    for path in files:
+    for path, settings in files:
         original = path.read_text(encoding="utf-8")
-        stripped = strip_source(original, import_style=import_style)
+        stripped = strip_source(original, import_style=settings.import_style)
 
         if stripped == original:
             continue
@@ -230,23 +228,23 @@ def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
     from sqlty.core import check_source
 
-    dialect, schema_sql, import_style = _resolve_config(args)
-    files = _collect_python_files(args.paths)
+    files = _files_with_settings(args)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
         return
 
-    # Load rule config from pyproject.toml [tool.sqlty.rules]
-    rules = _load_rules(args.paths[0] if args.paths else None)
-
     total_errors = 0
     total_warnings = 0
 
-    for path in files:
+    for path, settings in files:
         source = path.read_text(encoding="utf-8")
         diagnostics = check_source(
-            source, dialect=dialect, schema_sql=schema_sql, rules=rules, import_style=import_style
+            source,
+            dialect=settings.dialect,
+            schema_sql=settings.schema_sql,
+            rules=settings.rules,
+            import_style=settings.import_style,
         )
 
         for diag in diagnostics:
@@ -296,37 +294,60 @@ def _collect_python_files(paths: list[Path]) -> list[Path]:
     return files
 
 
-def _resolve_config(args: argparse.Namespace) -> tuple[str, str | None, str | None]:
-    """Resolve dialect, schema, and import-style from pyproject.toml [tool.sqlty] merged with CLI args.
+class _Settings(NamedTuple):
+    dialect: str
+    schema_sql: str | None
+    import_style: str | None
+    rules: dict[str, str] | None
+    untyped: str
 
-    CLI flags (--dialect, --schema) override pyproject.toml values.
 
-    Returns:
-        Tuple of (dialect, schema_sql content or None, import_style or None)
+def _files_with_settings(args: argparse.Namespace) -> list[tuple[Path, _Settings]]:
+    """Pair each Python file under ``args.paths`` with the settings that apply to it.
+
+    Each file uses the ``[tool.sqlty]`` table of the ``pyproject.toml`` nearest
+    to it, so ``sqlty rewrite proj_a proj_b`` applies each project's schema,
+    dialect, import style and rules to its own files.
     """
     from sqlty._config import load_config
 
-    search_path = args.paths[0] if args.paths else None
-    config, config_dir = load_config(search_path)
+    resolved: dict[Path | None, _Settings] = {}
+    result: list[tuple[Path, _Settings]] = []
+    for path in _collect_python_files(args.paths):
+        config, config_dir = load_config(path.parent)
+        if config_dir not in resolved:
+            resolved[config_dir] = _resolve_config(args, config, config_dir)
+        result.append((path, resolved[config_dir]))
+    return result
 
+
+def _resolve_config(
+    args: argparse.Namespace, config: SQLTyConfig, config_dir: Path | None
+) -> _Settings:
+    """Merge a ``[tool.sqlty]`` table found in ``config_dir`` with CLI flags.
+
+    CLI flags (--dialect, --schema, --untyped) override pyproject.toml values;
+    a config ``schema`` is relative to ``config_dir``.
+    """
     # Dialect: CLI flag overrides config (argparse default is "postgres")
     dialect = args.dialect
     if dialect == "postgres" and "dialect" in config:
         # Only use config value if CLI wasn't explicitly set (still default)
         dialect = config["dialect"]
 
-    # Schema: CLI --schema flag overrides config
     schema_sql: str | None = None
     if args.schema:
         schema_sql = _load_schema(args.schema)
     elif "schema" in config and config_dir is not None:
-        schema_path = config_dir / config["schema"]
-        schema_sql = _load_schema(schema_path)
+        schema_sql = _load_schema(config_dir / config["schema"])
 
-    # Import style from config
-    import_style: str | None = config.get("import_style")
-
-    return dialect, schema_sql, import_style
+    return _Settings(
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=config.get("import_style"),
+        rules=config.get("rules"),
+        untyped=getattr(args, "untyped", None) or config.get("untyped", "skip"),
+    )
 
 
 def _load_schema(schema_path: Path) -> str | None:
@@ -335,14 +356,6 @@ def _load_schema(schema_path: Path) -> str | None:
         return schema_path.read_text(encoding="utf-8")
     logger.warning("Schema file not found: %s", schema_path)
     return None
-
-
-def _load_rules(search_path: Path | None) -> dict[str, str] | None:
-    """Load rule configuration from pyproject.toml [tool.sqlty.rules]."""
-    from sqlty._config import load_config
-
-    config, _ = load_config(search_path)
-    return config.get("rules")
 
 
 def _print_diff(path: Path, original: str, modified: str) -> None:

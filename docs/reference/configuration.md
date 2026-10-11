@@ -1,10 +1,13 @@
 # Configuration
 
-sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI uses the first
-`pyproject.toml` found by walking up from the first path argument; the magic
-codec searches from the current directory, and stub generation from the
-directory of the helper's module. Command-line flags override the file.
-Unknown keys are ignored.
+sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI resolves it per
+file: each `.py` file uses the nearest `pyproject.toml` found by walking up
+from its directory, so `sqlty rewrite app_a app_b` (or `sqlty check .` over a
+repository with nested projects) applies each project's schema, dialect,
+import style and rules to its own files. The magic codec searches from the
+current directory, and stub generation from the directory of the helper's
+module. Command-line flags override the file for every path. Unknown keys
+are ignored.
 
 ```toml
 [tool.sqlty]

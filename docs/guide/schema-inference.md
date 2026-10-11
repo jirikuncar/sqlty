@@ -61,8 +61,8 @@ Nullability is not tracked: `email` above is `str`, not `str | None`.
 1. `--schema PATH` on the command line, relative to the current directory.
 2. `schema` in `[tool.sqlty]`, relative to the directory of `pyproject.toml`.
 
-`pyproject.toml` is found by walking up from the first path given on the
-command line. A schema file that does not exist is reported as a warning and
+`pyproject.toml` is the nearest one above each file, so files in different
+projects use their own schemas. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema. Stub generation for

@@ -12,7 +12,7 @@ sqlty strip .     # SQL[T]("--sql\n...") -> "--sql\n..."
 
 Each command takes files or directories (default: the current directory) and
 processes every `.py` file under them. Settings come from `[tool.sqlty]` in
-the first `pyproject.toml` found by walking up from the first path; see
+the nearest `pyproject.toml` above each file; see
 [Configuration](configuration.md). Command-line flags override it.
 
 ## Common options

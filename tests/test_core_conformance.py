@@ -929,6 +929,33 @@ q = SQL[Token]("--sql\\nSELECT token_id::UUID FROM tokens")
         type_diags = [d for d in diags if d["rule"].startswith("column-")]
         assert len(type_diags) == 0
 
+    @pytest.mark.parametrize("imports", ["", "import not_installed\n"])
+    @pytest.mark.parametrize(
+        ("annotation", "ok"),
+        [
+            ("Any", True),
+            ("int | Any", True),
+            ("Optional[Union[str, Any]]", True),
+            ("int | str", True),
+            ("float", True),
+            ("str | bytes", False),
+        ],
+    )
+    def test_any_and_union_fields(self, imports: str, annotation: str, ok: bool):
+        """A field accepts a column whose type fits it, resolved at runtime or from source."""
+        source = f"""{imports}from typing import Any, NamedTuple, Optional, Union
+from sqlty import SQL
+
+class Row(NamedTuple):
+    id: {annotation}
+
+q = SQL[Row]("--sql\\nSELECT id FROM users")
+"""
+        diags = self._check(source, schema_sql="CREATE TABLE users (id INTEGER PRIMARY KEY);")
+        assert [d["message"] for d in diags if d["rule"] == "column-type-mismatch"] == (
+            [] if ok else [f"Row.id is {annotation} but query column 'id' infers int"]
+        )
+
 
 # ---------------------------------------------------------------------------
 # Performance baselines (lightweight, no external deps)

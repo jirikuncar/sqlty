@@ -206,10 +206,12 @@ def check_type_compatibility(
     column_name: str,
     column_python_type: str | None,
 ) -> bool:
-    """Check if a user type's field is compatible with a SQL column type.
+    """Check if a user type's field can hold values of a SQL column type.
 
-    Uses runtime type objects when available (``resolved_hints``), falling
-    back to string comparison.
+    Uses runtime type objects when available (``resolved_hints``), else the
+    annotation parsed from source; ``Any``, unions and ``int`` -> ``float``
+    promotion are understood. Annotations neither path can resolve fall back
+    to string comparison.
 
     Args:
         user_type: The user-defined type info.
@@ -219,27 +221,30 @@ def check_type_compatibility(
 
     Returns:
         True if types are compatible, False if they mismatch.
+
+    Example:
+        >>> info = TypeInfo("Row", [("id", "int | Any"), ("name", "str")], "NamedTuple")
+        >>> check_type_compatibility(info, "id", "int"), check_type_compatibility(info, "name", "int")
+        (True, False)
     """
     if column_python_type is None:
         return True  # Can't validate unknown SQL type
 
-    expected_type = PYTHON_TYPE_MAP.get(column_python_type)
     declared = dict(user_type.fields)
+    if column_name in declared:
+        annotation = declared[column_name]
+        hints = user_type.resolved_hints or {}
+        field = hints[column_name] if column_name in hints else _annotation_type(annotation)
+    elif user_type.extra_items is not None:
+        annotation = user_type.extra_items
+        field = user_type.extra_items_hint or user_type.extra_items_type
+    else:
+        return False
 
-    if column_name not in declared:
-        if user_type.extra_items is None:
-            return False
-        if user_type.extra_items_hint is not None and expected_type is not None:
-            return _types_compatible(user_type.extra_items_hint, expected_type)
-        return user_type.extra_items == column_python_type
-
-    # Runtime path: use resolved type hints
-    if user_type.resolved_hints and column_name in user_type.resolved_hints:
-        if expected_type is not None:
-            return _types_compatible(user_type.resolved_hints[column_name], expected_type)
-
-    # Fallback: string comparison (from AST fields)
-    return _normalize_type_str(declared[column_name]) == column_python_type
+    expected_type = PYTHON_TYPE_MAP.get(column_python_type)
+    if field is not None and expected_type is not None:
+        return bool(_is_subtype(expected_type, field)) or _types_compatible(field, expected_type)
+    return _normalize_type_str(annotation) == column_python_type
 
 
 def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
@@ -685,6 +690,14 @@ def _ast_type(node: ast.expr, aliases: dict[str, str]) -> typing.Any:
         return None
     resolved = [_ast_type(m, aliases) for m in members]
     return None if None in resolved else functools.reduce(operator.or_, resolved)
+
+
+def _annotation_type(annotation: str) -> typing.Any:
+    """An annotation string as by ``_ast_type``; None if unknown."""
+    try:
+        return _ast_type(ast.parse(annotation, mode="eval").body, {})
+    except SyntaxError:
+        return None
 
 
 def _ast_key_types(nodes: list[ast.ClassDef], aliases: dict[str, str]) -> dict[str, typing.Any]:
