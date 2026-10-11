@@ -48,6 +48,28 @@ q = SQL[Row]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 # error:
 ```
 
+## `typing` generic aliases without runtime resolution
+
+```python
+import not_installed
+import typing
+import typing as t
+from typing import Dict, List as L, Optional, TypedDict
+from sqlty import SQL
+
+class Row(TypedDict):
+    a: t.List[str]
+    b: typing.List[str]
+    c: Optional[L[int]]
+
+class Bad(TypedDict):
+    tags: Dict[str, str]
+
+q = SQL[Row]("--sql\nSELECT a::TEXT[], b::TEXT[], c::INTEGER[] FROM users")
+# error: [column-type-mismatch] "Bad.tags is Dict[str, str] but query column 'tags' infers list"
+r = SQL[Bad]("--sql\nSELECT tags::TEXT[] FROM users")
+```
+
 ## Mismatched `list[...]` and `NewType` fields
 
 ```python
