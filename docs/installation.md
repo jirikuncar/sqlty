@@ -36,16 +36,14 @@ uv sync --all-groups
 
 - `sqlty[psycopg]` installs psycopg 3 for the
   [psycopg helpers](guide/psycopg.md).
-- [isort](https://pycqa.github.io/isort/), if installed, places the imports the
-  [magic codec](guide/magic-codec.md) adds.
 
 ### Rust extension
 
-Wheels include the Rust extension that speeds up type inference. Building from
-source, for example from a git checkout, needs a
-[Rust toolchain](https://rustup.rs/) because maturin compiles the extension.
-If the extension cannot be imported, sqlty falls back to pure Python. See
-[Backends](reference/backends.md).
+sqlty's engine is a compiled Rust extension. Wheels are published for Linux
+(x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
+Windows (x64 and arm64). Elsewhere, and from a git checkout, pip builds the
+sdist, which needs a [Rust toolchain](https://rustup.rs/). See
+[Engine](reference/engine.md).
 
 ## Verify
 

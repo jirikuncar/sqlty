@@ -58,8 +58,8 @@ string itself is never modified. For a file of plain `--sql` strings,
   `sql("SELECT ...")` with a generated `.pyi` overload per query.
 - **[Lint rules](reference/rules.md).** Thirteen rules with configurable
   severity.
-- **[Rust backend](reference/backends.md).** Type inference in Rust, with a
-  pure-Python fallback held to the same tests.
+- **[Rust engine](reference/engine.md).** SQL parsing, type inference and
+  source rewriting in Rust, exposed to Python with PyO3.
 
 ## Which features to use
 

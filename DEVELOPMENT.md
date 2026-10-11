@@ -6,7 +6,7 @@ This guide covers development setup, workflows, and contribution guidelines for 
 
 - Python 3.15+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) (needed for the native extension and the `cargo-fmt` pre-commit hook)
+- [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the `cargo-fmt` pre-commit hook)
 
 ## Setup
 
@@ -18,20 +18,14 @@ uv sync --all-groups
 
 This will install all dependencies and development tools defined in `pyproject.toml`.
 
-### Build the Rust Extension (optional)
+### Build the Rust Extension
 
-SQLTy includes an optional Rust extension (`sqlty._core`) for faster type inference.
-When not compiled, the pure-Python fallback (`sqlty._core_py`) is used automatically.
+sqlty's engine is the Rust extension `sqlty._core`; nothing works without it.
+`uv sync` builds it; rebuild after changing `rust/`:
 
 ```bash
 # maturin is installed by `uv sync --all-groups`
 uv run maturin develop
-```
-
-To verify the Rust extension is loaded:
-
-```bash
-python -c "from sqlty._core import infer_type; print('Rust backend active')"
 ```
 
 ### Install Pre-commit Hooks
@@ -49,7 +43,7 @@ This ensures code is formatted and checked before each commit.
 - **uv-lock**: Keeps the lockfile up to date
 - **mypy** and **ty**: Type checking for `src/`
 - **sqlty-check** / **sqlty-rewrite**: lint `examples/` and rewrite their `--sql` strings in place (`magic_codec/` excluded)
-- **cargo-fmt**: `cargo fmt --check` for the Rust backend (requires `cargo`)
+- **cargo-fmt**: `cargo fmt --check` for the Rust engine (requires `cargo`)
 
 To manually run all pre-commit hooks:
 
@@ -63,8 +57,8 @@ SQLTy has four test layers:
 
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
-| **Unit** | `tests/test_core_invariants.py`, `tests/generator/`, etc. | Invariants over the mdtest corpus, backend parity, stubs | `pytest` |
-| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint — on both backends | `tests/_mdtest` plugin |
+| **Unit** | `tests/test_core_invariants.py`, `tests/generator/`, etc. | Invariants over the mdtest corpus, parser cases, stubs | `pytest` |
+| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint | `tests/_mdtest` plugin |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
 | **Docs** | `README.md`, `docs/**/*.md` | Code examples in user docs | `tests/test_docs.py` (mdtest engine) |
 
@@ -77,7 +71,7 @@ make test-mdtest    # Mdtest suite + docs tests
 make test-e2e       # End-to-end tests only
 make test-coverage  # All tests with coverage report
 make update-mdtest  # Update mdtest assertions with actual values
-make bench          # Python vs Rust backend benchmarks
+make bench          # sqlty.core benchmarks
 ```
 
 ### Using pytest directly
@@ -152,31 +146,30 @@ uv run ruff check --fix .
 
 | Module | Purpose |
 |--------|---------|
-| `core.py` | Public API: try Rust `_core`, fall back to Python `_core_py` |
-| `_core_py.py` | Pure-Python computation functions (FFI boundary fallback) |
+| `core.py` | Public API over the Rust `_core`, plus user-defined row type checks |
 | `_core.pyi` | Type stubs for the Rust extension module |
 | `_cli.py` | ruff-style CLI: `rewrite`, `strip`, `check`, `version` |
-| `_sql_analyzer.py` | SQL parsing, type inference, star expansion (sqlglot-based) |
-| `_rewriter.py` | Source-level rewrite/strip (`"--sql ..."` <-> `SQL[T](...)`) |
-| `_lint.py` | 7 lint rules with ty-style severity (error/warn/ignore) |
-| `_checker.py` | Column count/type/name validation, SELECT * detection |
+| `_lint.py` | Lint rules and their severity (error/warn/ignore) |
+| `_type_extractor.py` | Row types (TypedDict, dataclass, ...) for structural checks |
 | `_decode.py` | Magic codec decoder (bytes -> string transformation) |
 | `magic.py` | Codec registration for Python import system |
 
 ### Rust extension (`rust/`)
 
-The Rust extension reimplements the core computation functions using
-[sqlparser-rs](https://github.com/sqlparser-rs/sqlparser-rs) and PyO3.
+The engine parses SQL with
+[sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs) and is exposed
+to Python with PyO3.
 It follows [maturin's recommended mixed Python/Rust project layout](https://www.maturin.rs/project_layout.html).
 
 ```
 rust/
 ├── Cargo.toml        # Crate config (pyo3, sqlparser, regex)
 └── src/
-    ├── lib.rs        # PyO3 module entry — exposes 5 functions as sqlty._core
-    ├── analyzer.rs   # SQL type inference via sqlparser-rs
-    ├── rewriter.rs   # Python source rewrite/strip via regex
-    └── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *)
+    ├── lib.rs        # PyO3 module entry: the sqlty._core functions
+    ├── analyzer.rs   # SQL parsing, type inference, schemas, SELECT * expansion
+    ├── rewriter.rs   # Python source rewrite/strip, import-style
+    ├── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *, ...)
+    └── fixer.rs      # check --fix
 ```
 
 Run Rust unit tests independently:
@@ -191,8 +184,7 @@ User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).
 
 | File | Role |
 |------|------|
-| `src/sqlty/_decode.py` | Pure decode logic, no side effects; delegates inference to `SQLRewriter` |
-| `src/sqlty/_rewriter.py` | Source-level rewrite/strip engine shared with the CLI |
+| `src/sqlty/_decode.py` | Pure decode logic, no side effects; wraps strings with `rewrite_source` |
 | `src/sqlty/magic.py` | Codec registration (skipped when `SQLTY_NO_MAGIC` is set) and `python -m sqlty.magic` |
 | `sqlty_magic.pth` | `import sqlty.magic` hook for site-packages; not included in the wheel |
 | `tests/mdtest/codec/` | Snapshot tests for `decode()` |
@@ -205,10 +197,9 @@ How it works:
    UTF-8 source without a codec lookup).
 2. When Python compiles a file declaring `# coding: sqlty`, it calls
    `decode()` on the raw bytes.
-3. `decode()` tokenizes the source, infers a row type for each `--sql` string
-   with `SQLRewriter`, wraps it in `SQL[T](...)` and adds the needed imports
-   (placed with isort when it is installed, otherwise prepended). On any
-   error it returns the source unchanged.
+3. `decode()` runs `rewrite_source`, as `sqlty rewrite` does, and turns the
+   `# coding: sqlty` declaration into `utf-8`. On any error it returns the
+   source unchanged.
 4. Python compiles the transformed text.
 
 Python caches codec lookups, so registration must happen before the first
@@ -220,7 +211,6 @@ directly when you need the transformation without registering the codec.
 | Module | Purpose |
 |--------|---------|
 | `tests/_mdtest/` | mdtest plugin: parser, runner over `sqlty.core`, `--update-mdtest` |
-| `tests/conftest.py` | `core` fixture parametrised by backend |
 | `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
 
 ## Documentation Site

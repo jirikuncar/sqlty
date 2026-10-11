@@ -117,9 +117,8 @@ rows and `ValueError` when the row has more than one column.
 from sqlty.core import check_source, expand_star, infer_type, rewrite_source, strip_source
 ```
 
-The functions behind the CLI, backed by the Rust extension when it is
-available (see [Backends](backends.md)). Use them to build your own
-tooling:
+The functions behind the CLI, implemented by the Rust [engine](engine.md).
+Use them to build your own tooling:
 
 ```pycon
 >>> from sqlty.core import infer_type, rewrite_source, strip_source
@@ -138,6 +137,8 @@ q = "--sql\nSELECT 1::INTEGER"
 | Function | Returns |
 |----------|---------|
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
+| `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
+| `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |
 | `strip_source(source, *, import_style=None)` | Stripped source |

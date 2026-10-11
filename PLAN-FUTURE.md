@@ -49,34 +49,20 @@ SELECT json_build_object('id', id::INTEGER, 'name', name::TEXT)
 
 ## Rust Core — User-Type Checking
 
-The Rust `check_source` does not yet perform user-type extraction. Currently handled by a Python wrapper in `core.py` that adds structural checks on top of the Rust backend.
+The Rust `check_source` does not yet perform user-type extraction. Currently handled by a Python wrapper in `core.py` that adds structural checks on top of the Rust engine.
 
 ---
 
-## Backend Parity Gaps
+## Engine Gaps
 
-Known differences between the Python (sqlglot) and Rust (sqlparser-rs) backends,
-and gaps both share:
-
-- **MySQL `INT3 UNSIGNED` / `MIDDLEINT UNSIGNED`.** sqlparser-rs has no `INT3` or
-  `MIDDLEINT` keyword, so the trailing `UNSIGNED` is a parse error. For
-  `CREATE TABLE t (a INT, b INT3 UNSIGNED)`, Python expands `SELECT *` to
-  `a::INT, b::UMEDIUMINT` while Rust skips the whole table (`None`). Pinned by
-  the `xfail` test `TestParserParity::test_int3_unsigned_column`; needs an
-  upstream sqlparser-rs fix (MySQL documents both as `MEDIUMINT` aliases).
-- **MySQL `ZEROFILL`.** `INT UNSIGNED ZEROFILL` columns make both backends skip
-  the table.
 - **SQLite free-form type names.** SQLite accepts any type name and derives an
   affinity (sqlite.org/datatype3.html section 3.1), but `UNSIGNED BIG INT`,
-  `VARYING CHARACTER(255)`, `NATIVE CHARACTER(70)` or `anything goes` make both
-  backends skip the table silently. A follow-up could map such columns by the
+  `VARYING CHARACTER(255)`, `NATIVE CHARACTER(70)` or `anything goes` make
+  sqlty skip the table silently. A follow-up could map such columns by the
   affinity rules (contains `INT` -> `int`; `CHAR`/`CLOB`/`TEXT` -> `str`;
   `REAL`/`FLOA`/`DOUB` -> `float`) and warn when a schema table is skipped.
-- **Other dialects.** Rust reads any dialect other than PostgreSQL, MySQL and
-  SQLite as generic SQL, while Python passes the name to sqlglot. Only the
-  three named dialects are kept in parity.
-- **Duplicated type tables.** Type aliases and SQL -> Python mappings are kept by
-  hand in `SQL_TO_PYTHON_TYPE` (both backends), Rust's `canonical_type` and the
-  sqlglot tokenizer overrides in `_sql_analyzer.py`. `test_type_tables_agree`
-  and `test_type_names_agree` catch drift; loading them from one shared data
-  file would remove it.
+- **Other dialects.** Dialects beyond PostgreSQL, MySQL and SQLite use
+  sqlparser-rs's parser with a handful of canonical type names; they have no
+  mdtest suite of their own.
+- **Two type tables.** SQL -> Python types live in Rust's `SQL_TO_PYTHON_TYPE`
+  and, as runtime types for row type checks, in `_type_extractor.py`.

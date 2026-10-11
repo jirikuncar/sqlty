@@ -7,7 +7,7 @@ Type-safe SQL queries for Python. Infer types from SQL, rewrite source, lint ann
 [![Python 3.15+](https://img.shields.io/badge/python-3.15+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Powered by [sqlglot](https://sqlglot.com)** for SQL parsing across PostgreSQL, MySQL, and SQLite.
+**Powered by a Rust engine** ([sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs) via [PyO3](https://pyo3.rs)) for SQL parsing across PostgreSQL, MySQL, SQLite and other dialects.
 
 ## The Problem
 
@@ -256,16 +256,15 @@ column-name-mismatch = "error"
 
 ## Benchmarks
 
-Optional Rust extension (PyO3/maturin) accelerates all core operations. Pure-Python fallback used automatically when not available.
+The engine is a compiled Rust extension (PyO3/maturin); wheels cover Linux,
+macOS and Windows. Median time per call, release build, Linux x86_64:
 
-| Benchmark | Python | Rust | Speedup |
-|-----------|-------:|-----:|--------:|
-| `infer_type`: 1 column | 120 us | 5 us | **24x** |
-| `infer_type`: 4 columns | 340 us | 12 us | **28x** |
-| `rewrite_source`: 3 queries | 600 us | 25 us | **24x** |
-| `check_source`: 4 queries | 415 us | 24 us | **17x** |
-
-**Geometric mean: ~15x** (Linux x86_64). `strip_source` is regex-only, so both backends perform similarly.
+| Benchmark | Time |
+|-----------|-----:|
+| `infer_type`: 1 column | 5 us |
+| `infer_type`: 4 columns | 12 us |
+| `rewrite_source`: 3 queries | 122 us |
+| `check_source`: 4 queries | 754 us |
 
 ```bash
 uv run python benchmarks/bench_core.py
@@ -287,7 +286,7 @@ This README and everything under `docs/` run the same way.
 ## Documentation
 
 - **[Overview](docs/index.md)** — what sqlty does, with links to the guide
-- **[Reference](docs/reference/cli.md)** — CLI, configuration, lint rules, Python API, backends
+- **[Reference](docs/reference/cli.md)** — CLI, configuration, lint rules, Python API, engine
 - **[Quickstart](docs/quickstart.md)** — rewrite/check/strip, pre-commit
 - **[Schema Inference](docs/guide/schema-inference.md)** — schemas and dialects
 

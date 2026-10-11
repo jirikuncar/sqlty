@@ -111,7 +111,7 @@ stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
 
 SQLite accepts free-form type names such as `UNSIGNED BIG INT`; sqlty does
 not, and skips a table that uses one (see
-[Backends](../reference/backends.md#known-gaps)).
+[Engine](../reference/engine.md#known-gaps)).
 
 ### MySQL
 
@@ -144,11 +144,6 @@ casts = "--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: orders = SQL[tuple[int, float, int, str, str, dict, datetime.datetime]]("--sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
 # rewritten: casts = SQL[tuple[int, str]]("--sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
-
-!!! warning "MySQL needs the Python backend"
-    The default Rust backend wraps and checks nothing for
-    `dialect = "mysql"`. Run sqlty with `SQLTY_LIB=py`; see
-    [Backends](../reference/backends.md#known-gaps).
 
 `TINYINT(1)` is an `int`, not a `bool`. See the
 [dialect notes](writing-queries.md#dialect-notes) for MySQL-specific types.
