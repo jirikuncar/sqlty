@@ -92,7 +92,10 @@ SELECT u.* FROM users u
 -- expanded: SELECT id::INT, name::TEXT FROM users u
 ```
 
-## Multi-table star expansion
+## Multi-table star is not expanded
+
+Expansion drops table qualifiers, so a query reading from more than one
+table (`JOIN` or `FROM a, b`) is left alone.
 
 `schema.sql`:
 ```sql
@@ -115,7 +118,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM users, orders
--- expanded: SELECT id::INT, name::TEXT, order_id::INT, amount::DECIMAL FROM users, orders
+-- expanded: None
 ```
 
 ## Unknown table — returns None

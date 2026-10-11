@@ -288,3 +288,139 @@ s = f"--sql SELECT {column} FROM users"
 # fixed: r = r'--sql SELECT name::TEXT FROM users'
 # fixed: s = f"--sql SELECT {column} FROM users"
 ```
+
+## Space after the marker in a non-SQL string is kept
+
+Only a string that `inline-sql-comment` reports is changed: the word after the
+marker must start a statement (`SELECT` with a column, `DELETE FROM`,
+`UPDATE t SET`, ...).
+
+```python
+msg = "--sql flag enables it"
+todo = "--sql delete me later"
+bare = "--sql select"
+note = "--sql UPDATE stuff"
+# fixed: msg = "--sql flag enables it"
+# fixed: todo = "--sql delete me later"
+# fixed: bare = "--sql select"
+# fixed: note = "--sql UPDATE stuff"
+```
+
+## Space after the marker in a `u` string becomes a newline
+
+A `u` prefix does not change a string, so it is fixed and wrapped like a plain one.
+
+```python
+q = u"--sql SELECT id::INTEGER FROM users"
+# fixed: from sqlty import SQL
+# fixed: q = SQL[tuple[int]](u"--sql\nSELECT id::INTEGER FROM users")
+```
+
+## Apostrophes in comments and escaped quotes open no string
+
+```python
+# it's a helper
+a = 'it\'s'
+q = "--sql SELECT id::INTEGER FROM users"
+b = br'\'"'
+r = "--sql\nSELECT name::TEXT FROM users"
+# that's all
+# fixed: from sqlty import SQL
+# fixed: # it's a helper
+# fixed: a = 'it\'s'
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: b = br'\'"'
+# fixed: r = SQL[tuple[str]]("--sql\nSELECT name::TEXT FROM users")
+# fixed: # that's all
+```
+
+## Star without a schema keeps its type
+
+The row type of `*` is unknown without a schema, so it is not refreshed.
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
+r = SQL[tuple[int, int]]("--sql\nSELECT id, * FROM users")
+s = SQL[tuple[int]]("--sql\nSELECT u.* FROM users u")
+t = SQL[tuple[int]]("--sql\nselect  * from users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT * FROM users")
+# fixed: r = SQL[tuple[int, int]]("--sql\nSELECT id, * FROM users")
+# fixed: s = SQL[tuple[int]]("--sql\nSELECT u.* FROM users u")
+# fixed: t = SQL[tuple[int]]("--sql\nselect  * from users")
+```
+
+## Star the schema cannot resolve keeps its type
+
+A subquery or CTE has no schema entry, and `USING` merges the joined `id`
+columns, so these annotations are kept.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER);
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT * FROM (SELECT id FROM users) s")
+r = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT * FROM c")
+s = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM users JOIN orders USING (id)")
+t = SQL[tuple[int, int, str]]("--sql\nSELECT id, * FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT * FROM (SELECT id FROM users) s")
+# fixed: r = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT * FROM c")
+# fixed: s = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM users JOIN orders USING (id)")
+# fixed: t = SQL[tuple[int, int, str]]("--sql\nSELECT id, id::INT, name::TEXT FROM users")
+```
+
+## Star with a join is not expanded
+
+Expansion drops table qualifiers, which would make joined columns ambiguous.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER);
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+```
+
+## Plain string after an f-string is wrapped
+
+A prefixed literal is skipped as a whole, so the next plain string is paired
+and wrapped correctly.
+
+```python
+table = "users"
+f = f"--sql\nSELECT id FROM {table}"
+q = "--sql\nSELECT id::INTEGER FROM users"
+# fixed: from sqlty import SQL
+# fixed: table = "users"
+# fixed: f = f"--sql\nSELECT id FROM {table}"
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+```

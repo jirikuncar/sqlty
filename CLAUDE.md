@@ -21,9 +21,10 @@ uv run pre-commit run --all-files  # all hooks (run before every commit)
   Fix all errors before creating a commit.
 - **Use `--sql\n`** (newline escape), not `--sql ` (space).
   `--sql SELECT ...` with a space is a SQL comment — the parser sees an
-  empty query and the string is not wrapped. The rewriter never modifies
-  string content — it only adds/removes the `SQL[T]()` wrapper,
-  guaranteeing `strip(rewrite(x)) == x`.
+  empty query and the string is not wrapped. `rewrite`/`strip` never
+  modify string content, only the `SQL[T]()` wrapper, so
+  `strip(rewrite(x)) == x`. `check --fix` is the exception: its
+  `inline-sql-comment` and `select-star` fixes edit content.
 - **Every new feature gets an mdtest** in `tests/mdtest/`. Use `make update-mdtest`
   to fill expected values.
 - **README.md and docs/ are tested** — they are mdtest files, collected by the

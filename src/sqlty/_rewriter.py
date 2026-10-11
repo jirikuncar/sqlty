@@ -97,12 +97,12 @@ class ImportStyle:
         escaped = re.escape(self.wrapper_name)
         return re.compile(
             rf"(?P<wrapper>{escaped}\[[^\n]*?\]\(\s*"
-            r"(?P<inner>"
+            r"(?P<inner>[uU]?(?:"
             r'""".*?"""'
             r"|'''.*?'''"
             r'|"[^"]*"'
             r"|'[^']*'"
-            r")\s*,?\s*\))",
+            r"))\s*,?\s*\))",
             re.DOTALL,
         )
 
@@ -213,6 +213,8 @@ class SQLRewriter:
         replacements: list[tuple[int, int, str]] = []
         for match in _SQL_STRING_PATTERN.finditer(source):
             start, end = match.start(), match.end()
+            if not is_plain_literal(match):
+                continue
 
             # Skip matches inside existing wrappers
             if any(ws <= start and end <= we for ws, we in wrapper_spans):
@@ -222,7 +224,7 @@ class SQLRewriter:
             if fstring_lines and _line_at(source, start) in fstring_lines:
                 continue
 
-            string_literal = match.group("str")
+            string_literal = match.group("prefix") + match.group("str")
             content = _extract_string_content(string_literal)
             if content is None or not content.strip().startswith("--sql"):
                 continue
@@ -236,7 +238,7 @@ class SQLRewriter:
                 needs_untyped_import = True
 
             replacement = f"{wrapper_name}[{inferred}]({string_literal})"
-            replacements.append((match.start("str"), match.end("str"), replacement))
+            replacements.append((start, end, replacement))
 
             needs_sql_import = True
             if "datetime." in replacement:
@@ -333,19 +335,33 @@ class SQLRewriter:
 
 # --- Regex patterns ---
 
-# Match string literals that might contain --sql.
-# Handles: """...""", '''...''', "...", '...'
+# Scan Python source for comments and string literals, left to right.
+# Handles: """...""", '''...''', "...", '...', with backslash escapes.
 # Triple-quoted alternatives come first so they match before single-quoted.
-# Negative lookbehind ensures we skip prefixed strings (f"...", r"...", b"...", etc.)
+# A comment is matched as a whole (group ``str`` unset), so an apostrophe in it
+# opens no string. A string prefix (``rb``, ``f``, ``u``, ...) must start at a
+# token boundary; prefixed literals are matched too, so the scan moves past
+# them, and ``is_plain_literal`` tells callers which to use. Mirrors
+# ``string_literals`` in ``rust/src/rewriter.rs``.
 _SQL_STRING_PATTERN = re.compile(
-    r"(?<![a-zA-Z])(?P<str>"
-    r'""".*?"""'  # triple-double-quoted
-    r"|'''.*?'''"  # triple-single-quoted
-    r'|"[^"]*"'  # double-quoted
-    r"|'[^']*'"  # single-quoted
+    r"#[^\n]*"  # comment
+    r"|(?<!\w)(?P<prefix>(?i:[bft]r?|r[bft]?|u)?)(?P<str>"
+    r'"""(?:\\.|[^\\])*?"""'  # triple-double-quoted
+    r"|'''(?:\\.|[^\\])*?'''"  # triple-single-quoted
+    r'|"(?:\\.|[^"\\\n])*"'  # double-quoted
+    r"|'(?:\\.|[^'\\\n])*'"  # single-quoted
     r")",
     re.DOTALL,
 )
+
+
+def is_plain_literal(match: re.Match[str]) -> bool:
+    """Whether a ``_SQL_STRING_PATTERN`` match is a string with no prefix but ``u``.
+
+    Raw, bytes, f- and t-strings are not plain: sqlty never rewrites them.
+    """
+    return match["str"] is not None and match["prefix"].lower() in ("", "u")
+
 
 # Match f-strings and t-strings (PEP 750, Python 3.14+) that contain --sql
 # (for emitting warnings). Both use interpolation so cannot be statically rewritten.
@@ -377,7 +393,8 @@ def _query(sql_content: str) -> str:
 
 
 def _extract_string_content(string_literal: str) -> str | None:
-    """Extract the content from a quoted string literal."""
+    """Extract the content from a quoted string literal (a ``u`` prefix is allowed)."""
+    string_literal = string_literal.removeprefix("u").removeprefix("U")
     if string_literal.startswith('"""') or string_literal.startswith("'''"):
         return string_literal[3:-3]
     if string_literal.startswith('"') or string_literal.startswith("'"):

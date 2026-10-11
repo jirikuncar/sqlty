@@ -12,9 +12,9 @@ use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
-    FunctionArguments, ObjectName, OutputClause, Query, Select, SelectItem,
-    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject, TableWithJoins,
-    Value,
+    FunctionArguments, Join, JoinConstraint, JoinOperator, ObjectName, OutputClause, Query, Select,
+    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement, TableFactor, TableObject,
+    TableWithJoins, Value,
 };
 use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -353,12 +353,14 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
     let empty = Schema::new();
+    let dialect = SqlDialect::from_name(dialect);
+    let Some(stmt) = parse_first(sql, dialect) else {
+        return Ok(None);
+    };
     let analyzer = Analyzer {
         schema: schema.as_ref().unwrap_or(&empty),
-        dialect: SqlDialect::from_name(dialect),
-    };
-    let Some(stmt) = parse_first(sql, analyzer.dialect) else {
-        return Ok(None);
+        dialect,
+        ctes: cte_names(&stmt),
     };
     let types = analyzer.statement_columns(&stmt)?;
     Ok(types.map(|types| {
@@ -455,6 +457,69 @@ fn select_scope(from: &[TableWithJoins]) -> Scope {
         .collect()
 }
 
+/// Sources of a SELECT: each FROM relation followed by its joins (`FROM a, b` counts two).
+fn relations(from: &[TableWithJoins]) -> impl Iterator<Item = &TableFactor> {
+    from.iter().flat_map(|table| {
+        std::iter::once(&table.relation).chain(table.joins.iter().map(|join| &join.relation))
+    })
+}
+
+/// The name a relation is referred to by: its alias, else its table name.
+fn relation_name(factor: &TableFactor) -> Option<String> {
+    let alias = match factor {
+        TableFactor::Table { name, alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || object_name(name),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::Derived { alias, .. } => alias.as_ref(),
+        _ => None,
+    };
+    alias.map(|alias| alias.name.value.to_lowercase())
+}
+
+/// Whether a join merges same-named columns (`USING`, `NATURAL`), so `*` does not list them all.
+fn merges_columns(join: &Join) -> bool {
+    use JoinOperator::*;
+    let constraint = match &join.join_operator {
+        Join(c)
+        | Inner(c)
+        | Left(c)
+        | LeftOuter(c)
+        | Right(c)
+        | RightOuter(c)
+        | FullOuter(c)
+        | CrossJoin(c)
+        | Semi(c)
+        | LeftSemi(c)
+        | RightSemi(c)
+        | Anti(c)
+        | LeftAnti(c)
+        | RightAnti(c)
+        | StraightJoin(c)
+        | AsOf { constraint: c, .. } => c,
+        _ => return false,
+    };
+    matches!(
+        constraint,
+        JoinConstraint::Using(_) | JoinConstraint::Natural
+    )
+}
+
+/// Lowercased names of the top-level CTEs of a statement.
+fn cte_names(stmt: &Statement) -> Vec<String> {
+    match stmt {
+        Statement::Query(query) => query
+            .with
+            .iter()
+            .flat_map(|with| &with.cte_tables)
+            .map(|cte| cte.alias.name.value.to_lowercase())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// The table an alias (or table name) refers to.
 fn resolve(reference: &str, scope: &Scope) -> String {
     let reference = reference.to_lowercase();
@@ -488,6 +553,7 @@ fn first_arg(args: &FunctionArguments) -> Option<&Expr> {
 struct Analyzer<'a> {
     schema: &'a Schema,
     dialect: SqlDialect,
+    ctes: Vec<String>,
 }
 
 impl Analyzer<'_> {
@@ -495,7 +561,9 @@ impl Analyzer<'_> {
         match stmt {
             Statement::Query(query) => self.query_columns(query),
             _ => match returning(stmt) {
-                Some(items) => self.projection(items, &dml_scope(stmt)).map(non_empty),
+                Some(items) => Ok(self
+                    .projection(items, &dml_scope(stmt), None)?
+                    .and_then(non_empty)),
                 None => Ok(None),
             },
         }
@@ -508,16 +576,27 @@ impl Analyzer<'_> {
             | SetExpr::Delete(stmt)
             | SetExpr::Merge(stmt) => self.statement_columns(stmt),
             body => match leftmost_select(body) {
-                Some(select) => self
-                    .projection(&select.projection, &select_scope(&select.from))
-                    .map(non_empty),
+                Some(select) => Ok(self
+                    .projection(
+                        &select.projection,
+                        &select_scope(&select.from),
+                        Some(&select.from),
+                    )?
+                    .and_then(non_empty)),
                 None => Ok(None),
             },
         }
     }
 
     /// One type per result column; a star may yield several.
-    fn projection(&self, items: &[SelectItem], scope: &Scope) -> Inferred<Vec<Ty>> {
+    ///
+    /// `None` when a star cannot be resolved from the schema: the row type is unknown.
+    fn projection(
+        &self,
+        items: &[SelectItem],
+        scope: &Scope,
+        from: Option<&[TableWithJoins]>,
+    ) -> Inferred<Option<Vec<Ty>>> {
         let mut types = Vec::new();
         for item in items {
             let star = match item {
@@ -527,19 +606,43 @@ impl Analyzer<'_> {
                     types.push(self.expr(expr, scope)?);
                     continue;
                 }
-                SelectItem::Wildcard(_) => self.star_columns(None, scope),
+                SelectItem::Wildcard(_) => None,
                 SelectItem::QualifiedWildcard(
                     SelectItemQualifiedWildcardKind::ObjectName(name),
                     _,
-                ) => self.star_columns(Some(&object_name(name)), scope),
-                SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => None,
+                ) => Some(object_name(name)),
+                SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
+                    return Ok(None)
+                }
             };
-            match star {
-                Some(columns) => types.extend(columns.iter().map(|(_, ty)| Some(python_type(ty)))),
-                None => types.push(None),
-            }
+            let resolvable = from.is_none_or(|from| self.star_resolvable(from, star.as_deref()));
+            let Some(columns) = resolvable
+                .then(|| self.star_columns(star.as_deref(), scope))
+                .flatten()
+            else {
+                return Ok(None);
+            };
+            types.extend(columns.iter().map(|(_, ty)| Some(python_type(ty))));
         }
-        Ok(types)
+        Ok(Some(types))
+    }
+
+    /// Whether `*` (or `t.*`) reads only plain tables, so the schema gives its columns.
+    ///
+    /// Subqueries and CTEs have no schema entry, and `USING`/`NATURAL` joins merge
+    /// columns, so their stars are unresolved. Mirrors `_star_resolvable` in Python.
+    fn star_resolvable(&self, from: &[TableWithJoins], reference: Option<&str>) -> bool {
+        if reference.is_none() && from.iter().flat_map(|t| &t.joins).any(merges_columns) {
+            return false;
+        }
+        let reference = reference.map(str::to_lowercase);
+        let mut matched = relations(from)
+            .filter(|factor| reference.is_none() || relation_name(factor) == reference)
+            .peekable();
+        matched.peek().is_some()
+            && matched.all(|factor| {
+                matches!(factor, TableFactor::Table { name, .. } if !self.ctes.contains(&object_name(name)))
+            })
     }
 
     /// Expand `*` (all scope tables) or `t.*` from the schema, or `None` if unknown.
@@ -606,9 +709,8 @@ impl Analyzer<'_> {
                 Some(select) if !select.projection.is_empty() => {
                     let scope = select_scope(&select.from);
                     Ok(self
-                        .projection(&select.projection[..1], &scope)?
-                        .into_iter()
-                        .next()
+                        .projection(&select.projection[..1], &scope, Some(&select.from))?
+                        .and_then(|types| types.into_iter().next())
                         .flatten())
                 }
                 _ => Ok(None),
@@ -674,14 +776,23 @@ fn non_empty(types: Vec<Ty>) -> Option<Vec<Ty>> {
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
 pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
     let schema = schema.as_ref().filter(|schema| !schema.is_empty())?;
+    let dialect = SqlDialect::from_name(dialect);
+    let stmt = parse_first(sql, dialect)?;
     let analyzer = Analyzer {
         schema,
-        dialect: SqlDialect::from_name(dialect),
+        dialect,
+        ctes: cte_names(&stmt),
     };
-    let Statement::Query(query) = parse_first(sql, analyzer.dialect)? else {
+    let Statement::Query(query) = &stmt else {
         return None;
     };
-    let scope = select_scope(&leftmost_select(&query.body)?.from);
+    let select = leftmost_select(&query.body)?;
+    // Expansion drops table qualifiers, so with more than one source it could
+    // write ambiguous columns.
+    if relations(&select.from).count() != 1 {
+        return None;
+    }
+    let scope = select_scope(&select.from);
 
     let upper = sql.to_ascii_uppercase();
     let select_idx = top_level(&upper, "SELECT", 0)?;
@@ -694,7 +805,11 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
             items.push(item.to_string());
             continue;
         };
-        let columns = analyzer.star_columns(star.get(1).map(|m| m.as_str()), &scope)?;
+        let reference = star.get(1).map(|m| m.as_str());
+        if !analyzer.star_resolvable(&select.from, reference) {
+            return None;
+        }
+        let columns = analyzer.star_columns(reference, &scope)?;
         items.extend(columns.iter().map(|(name, ty)| format!("{name}::{ty}")));
         has_star = true;
     }
