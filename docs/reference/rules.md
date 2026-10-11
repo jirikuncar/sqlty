@@ -20,7 +20,7 @@ stale-type = "error"
 | [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the keys of a closed or `extra_items` TypedDict |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
 | [`select-star-no-schema`](#select-star-no-schema) | Query | error | no | `SELECT *` with no schema to expand it |
-| [`select-star`](#select-star) | Query | warn | yes | `SELECT *` |
+| [`select-star`](#select-star) | Query | warn | postgres | `SELECT *` |
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` differs from the inferred row type |
@@ -28,8 +28,11 @@ stale-type = "error"
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | no | `SQL[UNTYPED]` query |
 
-"Fixable" means the fix is mechanical, as described under each rule.
-`sqlty check --fix` does not apply fixes yet.
+`sqlty check --fix` applies the fixes of fixable rules that are not
+`ignore`d, writes the files, and reports only the diagnostics that remain.
+`select-star` is fixed only for the postgres dialect, because the expanded
+columns use `::` casts. `# fixed:` lines in the examples below show the file
+`--fix` writes.
 
 The examples below show what `sqlty check` reports for each block. `# check:`
 lines list every diagnostic, warnings included; an empty `# check:` means
@@ -182,7 +185,17 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # check: [select-star] "SELECT * used — expand to explicit column list"
 ```
 
-Fix: replace `*` with the column list.
+Fix: replace `*` with the column list. `--fix` does this from the schema,
+casting each column to its declared type:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
+```
 
 ### inline-sql-comment
 
@@ -196,7 +209,14 @@ q = "--sql SELECT id::INTEGER FROM users"
 ```
 
 Such a string is also reported as `stale-rewrite`. Fix: replace the space
-after `--sql` with `\n`; `sqlty rewrite` does not change string contents.
+after `--sql` with `\n`; `sqlty rewrite` does not change string contents,
+`--fix` does, then wraps the string:
+
+```python
+q = "--sql SELECT id::INTEGER FROM users"
+# fixed: from sqlty import SQL
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+```
 
 ## Rewrite rules
 
@@ -210,9 +230,11 @@ q = "--sql\nSELECT id::INTEGER FROM users"
 # check: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 ```
 
-Fix: run `sqlty rewrite`. The rule also fires for strings `rewrite` leaves
-alone: statements without rows, uninferable queries in `skip` mode, f- and
-t-strings, and the `"--sql SELECT"` form. Use `sqlty rewrite --check` to
+Fix: run `sqlty rewrite` or `sqlty check --fix`. The rule also fires for
+strings `rewrite` leaves alone: statements without rows, uninferable queries
+in `skip` mode, and the `"--sql SELECT"` form. f- and t-strings are reported
+as [`fstring-skipped`](#fstring-skipped) and
+[`tstring-skipped`](#tstring-skipped) instead. Use `sqlty rewrite --check` to
 fail only on strings that would change (see [CI](../recipes/ci.md)).
 
 ### stale-type
@@ -228,22 +250,31 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # check: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 ```
 
-Fix: edit `T`, or strip and rewrite the file; see
+Fix: edit `T`, run `sqlty check --fix`, or strip and rewrite the file; see
 [Editing queries](../guide/writing-queries.md#editing-queries).
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
 
 ### fstring-skipped
 
 Default: warn. An f-string starting with `--sql` is skipped by the rewriter,
-because its content is only known at runtime. The rewriter API returns it
-as a warning:
+because its content is only known at runtime. `sqlty check` reports it
+instead of `stale-rewrite`, and `sqlty rewrite` prints it to stderr unless
+`-q` is given:
 
 ```python
 q = f"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: f-string with --sql prefix skipped (f-strings cannot be statically rewritten) [fstring-skipped]
+# check: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
 ```
 
-The CLI does not print this warning; `sqlty check` reports the string as
-`stale-rewrite`. Fix: use query parameters instead of interpolation.
+Fix: use query parameters instead of interpolation.
 
 ### tstring-skipped
 
@@ -252,7 +283,7 @@ Default: warn. Same as `fstring-skipped`, for t-strings
 
 ```python
 q = t"--sql\nSELECT {column}::INTEGER FROM users"
-# warning: line 1: t-string with --sql prefix skipped (t-strings cannot be statically rewritten) [tstring-skipped]
+# check: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
 ```
 
 ### untyped-query

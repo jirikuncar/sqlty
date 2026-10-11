@@ -122,8 +122,32 @@ fn check_source<'py>(
     import_style: Option<&str>,
 ) -> Bound<'py, PyList> {
     let schema = schema_sql.map(|s| analyzer::load_schema(s, dialect));
-    let diagnostics = checker::check_source(source, dialect, &schema, rules, import_style);
+    diagnostics_to_list(
+        py,
+        checker::check_source(source, dialect, &schema, rules, import_style),
+    )
+}
 
+/// Report f- and t-strings starting with `--sql`, which rewrite cannot wrap.
+///
+/// Args:
+///     source: Python source code
+///     rules: Rule severity overrides (e.g., {"fstring-skipped": "error"})
+///
+/// Returns:
+///     fstring-skipped / tstring-skipped diagnostics, one per line,
+///     as dicts with keys: rule, message, severity, line
+#[pyfunction]
+#[pyo3(signature = (source, *, rules = None))]
+fn skipped_strings<'py>(
+    py: Python<'py>,
+    source: &str,
+    rules: Option<HashMap<String, String>>,
+) -> Bound<'py, PyList> {
+    diagnostics_to_list(py, checker::skipped_strings(source, rules))
+}
+
+fn diagnostics_to_list(py: Python<'_>, diagnostics: Vec<checker::Diagnostic>) -> Bound<'_, PyList> {
     let list = PyList::empty(py);
     for diag in diagnostics {
         let dict = PyDict::new(py);
@@ -133,7 +157,6 @@ fn check_source<'py>(
         dict.set_item("line", diag.line).unwrap();
         list.append(dict).unwrap();
     }
-
     list
 }
 
@@ -145,5 +168,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
+    m.add_function(wrap_pyfunction!(skipped_strings, m)?)?;
     Ok(())
 }

@@ -68,8 +68,15 @@ untyped-query = "error"
 ```
 
 `stale-rewrite` also fires for `--sql` strings that `rewrite` never wraps
-(statements without rows, f-strings), so prefer `rewrite --check` over
-promoting it.
+(statements without rows, uninferable queries), so prefer `rewrite --check`
+over promoting it. f- and t-strings are reported as
+[`fstring-skipped`](../reference/rules.md#fstring-skipped) and
+[`tstring-skipped`](../reference/rules.md#tstring-skipped); promote those to
+fail on interpolated queries.
+
+Locally, `sqlty check --fix` applies the fixable changes (wrapping, stale
+types, `SELECT *` expansion) before you commit; CI then only needs
+`sqlty check`.
 
 Keep the schema file current, for example by regenerating it from the
 database in the same pull request as the migration

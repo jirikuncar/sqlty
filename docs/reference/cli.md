@@ -47,6 +47,16 @@ sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 | `--diff` | Print a unified diff instead of modifying files |
 | `--untyped {skip,sentinel}` | Row-returning queries of unknown row type: leave unwrapped (`skip`, default) or wrap as `SQL[UNTYPED](...)` (`sentinel`). Overrides `untyped` in `pyproject.toml` |
 
+f- and t-strings starting with `--sql` are never wrapped. Unless `-q` is
+given, `rewrite` prints them to stderr as
+[`fstring-skipped`](rules.md#fstring-skipped) or
+[`tstring-skipped`](rules.md#tstring-skipped), with the severity set in
+`[tool.sqlty.rules]` (`ignore` hides them):
+
+```
+queries.py:5: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
+```
+
 Exit code: 0, or 1 with `--check` when files would change.
 
 ## `sqlty strip`
@@ -85,11 +95,17 @@ sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 
 | Option | Description |
 |--------|-------------|
-| `--fix` | Accepted, but currently does not change files |
+| `--fix` | Apply the fixes of [fixable rules](rules.md) that are not `ignore`d, write the files, then report only the diagnostics that remain. Prints `Fixed <n> file(s)`, and `Fixed <file>` per file with `-v` |
 
 Rule severities come from `[tool.sqlty.rules]`; see [Rules](rules.md).
 
-Exit code: 1 if any diagnostic has severity `error`, otherwise 0.
+`--fix` wraps `--sql` strings as `rewrite` does (honoring `untyped`),
+updates stale `SQL[tuple[...]]` types, expands `SELECT *` from the schema
+(postgres only), and turns `"--sql SELECT ..."` into `"--sql\nSELECT ..."`.
+Row types such as `SQL[User]`, f-strings and t-strings are left alone.
+
+Exit code: 1 if any diagnostic has severity `error` (with `--fix`, any that
+remains), otherwise 0.
 
 ## `sqlty version`
 

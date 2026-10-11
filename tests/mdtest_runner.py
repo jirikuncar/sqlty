@@ -27,13 +27,14 @@ AssertionKind = Literal[
     "expanded",
     "error",
     "check",
+    "fixed",
     "decoded",
     "warning",
 ]
 
 # Regex to match assertion comments in python blocks — alternatives must match AssertionKind.
 ASSERTION_RE = re.compile(
-    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|check|decoded|warning): ?(.*)$"
+    r"^#\s+(inferred|rewritten|rewritten-file|stripped|expanded|error|check|fixed|decoded|warning): ?(.*)$"
 )
 
 
@@ -127,6 +128,8 @@ class MDTestCase:
                 return self._check_error()
             case "check":
                 return self._check_source_errors(with_schema=True)
+            case "fixed":
+                return self._fix()
             case "decoded":
                 return self._decode()
             case "warning":
@@ -467,6 +470,21 @@ class MDTestCase:
             import_style=sqlty_config.get("import-style"),
         )
         return "\n".join(f'[{d["rule"]}] "{d["message"]}"' for d in diagnostics)
+
+    def _fix(self) -> str:
+        """Run ``fix_source`` (``sqlty check --fix``) on the Python block, imports included."""
+        from sqlty.core import fix_source
+
+        sqlty_config = self._get_sqlty_config()
+        schema_file = sqlty_config.get("schema")
+        return fix_source(
+            self._extract_source_lines(),
+            dialect=sqlty_config.get("dialect", "postgres"),
+            schema_sql=self.files.get(schema_file) if schema_file else None,
+            rules=sqlty_config.get("rules"),
+            import_style=sqlty_config.get("import-style"),
+            untyped=sqlty_config.get("untyped") == "sentinel",
+        ).strip()
 
 
 def _strip_import_lines(

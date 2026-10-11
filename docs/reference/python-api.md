@@ -114,7 +114,15 @@ rows and `ValueError` when the row has more than one column.
 ## `sqlty.core`
 
 ```python
-from sqlty.core import check_source, expand_star, infer_type, rewrite_source, strip_source
+from sqlty.core import (
+    check_source,
+    expand_star,
+    fix_source,
+    infer_type,
+    rewrite_source,
+    skipped_strings,
+    strip_source,
+)
 ```
 
 The functions behind the CLI, backed by the Rust extension when it is
@@ -142,3 +150,5 @@ q = "--sql\nSELECT 1::INTEGER"
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |
 | `strip_source(source, *, import_style=None)` | Stripped source |
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: dicts with `rule`, `message`, `severity`, `line` |
+| `fix_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None, untyped=False)` | Source with the fixes of `sqlty check --fix` applied |
+| `skipped_strings(source, *, rules=None)` | `fstring-skipped` / `tstring-skipped` diagnostics, as `check_source` returns them |

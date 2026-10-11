@@ -1,7 +1,7 @@
 """Public core API — import-switching facade.
 
 Usage:
-    from sqlty.core import infer_type, rewrite_source, strip_source, check_source
+    from sqlty.core import infer_type, rewrite_source, strip_source, check_source, fix_source
 
 Backend selection via ``SQLTY_LIB`` environment variable:
 
@@ -36,6 +36,7 @@ if _SQLTY_LIB == "py":
     from sqlty._core_py import (
         expand_star,
         infer_type,
+        skipped_strings,
     )
     from sqlty._core_py import (
         rewrite_source as _backend_rewrite_source,
@@ -50,6 +51,7 @@ elif _SQLTY_LIB == "rs":
     from sqlty._core import (
         expand_star,
         infer_type,
+        skipped_strings,
     )
     from sqlty._core import (
         rewrite_source as _backend_rewrite_source,
@@ -65,6 +67,7 @@ else:
         from sqlty._core import (
             expand_star,
             infer_type,
+            skipped_strings,
         )
         from sqlty._core import (
             rewrite_source as _backend_rewrite_source,
@@ -79,6 +82,7 @@ else:
         from sqlty._core_py import (
             expand_star,
             infer_type,
+            skipped_strings,
         )
         from sqlty._core_py import (
             rewrite_source as _backend_rewrite_source,
@@ -216,6 +220,130 @@ def check_source(
         )
 
     return filtered
+
+
+def fix_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    rules: dict[str, str] | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+) -> str:
+    """Apply the fixes of the fixable rules that are not ignored.
+
+    Fixes, in this order:
+
+    - ``inline-sql-comment``: ``"--sql SELECT ..."`` becomes ``"--sql\\nSELECT ..."``
+    - ``select-star``: ``*`` in a wrapped query becomes the schema's columns
+      with casts (``id::INT``); postgres only, since other dialects lack ``::``
+    - ``stale-type``: ``SQL[tuple[...]]`` gets the inferred row type
+    - ``stale-rewrite``: unwrapped ``--sql`` strings are wrapped, as by
+      ``rewrite_source`` (``untyped`` is passed on)
+
+    Run ``check_source`` on the result to get the diagnostics that remain.
+
+    Example:
+        >>> print(fix_source('from sqlty import SQL\\nq = SQL[tuple[str]]("--sql\\\\nSELECT 1::INTEGER")'))
+        from sqlty import SQL
+        q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
+
+    Returns:
+        Fixed source code
+    """
+    import re
+
+    from sqlty._lint import RuleConfig
+    from sqlty._rewriter import _SQL_STRING_PATTERN, ImportStyle, _has_import, skipped_string
+
+    config = RuleConfig(overrides=rules)
+    istyle = ImportStyle.parse(import_style) if import_style else ImportStyle.default()
+
+    if config.is_enabled("inline-sql-comment"):
+        skipped = {i for i, line in enumerate(source.splitlines(), 1) if skipped_string(line)}
+
+        def fix_comment(match: re.Match[str]) -> str:
+            literal = match.group(0)
+            quote = literal[:3] if literal[:3] in ('"""', "'''") else literal[0]
+            if not literal.startswith(f"{quote}--sql ") or (
+                match.string.count("\n", 0, match.start()) + 1 in skipped
+            ):
+                return literal
+            return f"{quote}--sql\\n{literal[len(quote) + 6 :]}"
+
+        source = _SQL_STRING_PATTERN.sub(fix_comment, source)
+
+    type_pattern = re.compile(rf"{re.escape(istyle.wrapper_name)}\[(.*?)\]\(")
+    new_types: list[str] = []
+
+    def fix_wrapper(match: re.Match[str]) -> str:
+        literal = match.group("inner")
+        quote = literal[:3] if literal[:3] in ('"""', "'''") else literal[0]
+        content = literal[len(quote) : -len(quote)]
+        if not content.startswith("--sql"):
+            return match.group(0)
+        if dialect == "postgres" and schema_sql and config.is_enabled("select-star"):
+            content = _expand_star_content(content, quote, schema_sql) or content
+        head = match.string[match.start() : match.start("inner")]
+        tail = match.string[match.end("inner") : match.end()]
+        annotated = type_pattern.match(head)
+        if (
+            annotated
+            and annotated.group(1).startswith("tuple[")
+            and config.is_enabled("stale-type")
+        ):
+            inferred = _infer_content(content, dialect, schema_sql)
+            if inferred and inferred != annotated.group(1):
+                head = f"{istyle.wrapper_name}[{inferred}]({head[annotated.end() :]}"
+                new_types.append(inferred)
+        return f"{head}{quote}{content}{quote}{tail}"
+
+    source = istyle.make_wrapper_pattern().sub(fix_wrapper, source)
+    for module in ("datetime", "uuid"):
+        if any(f"{module}." in t for t in new_types) and not _has_import(
+            source, f"import {module}"
+        ):
+            source = f"import {module}\n{source}"
+
+    if config.is_enabled("stale-rewrite"):
+        source = rewrite_source(
+            source,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+            untyped=untyped,
+        )
+    return source
+
+
+def _expand_star_content(content: str, quote: str, schema_sql: str) -> str | None:
+    """``content`` with ``SELECT *`` expanded, keeping its ``--sql`` prefix and escapes."""
+    import re
+
+    prefix = re.match(r"--sql(\\n|\r?\n)", content)
+    if prefix is None:
+        return None
+    query = content[prefix.end() :]
+    escaped = len(quote) == 1
+    expanded = expand_star(query.replace("\\n", "\n") if escaped else query, schema_sql=schema_sql)
+    if expanded is None:
+        return None
+    if escaped:
+        expanded = expanded.replace("\n", "\\n")
+    if quote in expanded or expanded.endswith(quote[0]):
+        return None
+    return f"{prefix.group(0)}{expanded}"
+
+
+def _infer_content(content: str, dialect: str, schema_sql: str | None) -> str | None:
+    """Row type of a ``--sql`` string's content, as ``check_source`` infers it."""
+    if content.startswith("--sql\\n"):
+        content = content.replace("\\n", "\n", 1)
+    try:
+        return infer_type(content, dialect=dialect, schema_sql=schema_sql)
+    except RuntimeError:
+        return None
 
 
 def _enhance_with_user_type_checks(
@@ -433,6 +561,8 @@ __all__ = [
     "check_source",
     "expand_star",
     "infer_type",
+    "fix_source",
     "rewrite_source",
+    "skipped_strings",
     "strip_source",
 ]

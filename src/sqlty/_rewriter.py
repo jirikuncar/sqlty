@@ -195,15 +195,10 @@ class SQLRewriter:
         # --- Pass 1: detect f/t-strings (line-by-line, for warnings) ---
         fstring_lines: set[int] = set()
         for line_num, line in enumerate(source.splitlines(), start=1):
-            if _FSTRING_SQL_PATTERN.search(line):
+            if skipped := skipped_string(line):
                 fstring_lines.add(line_num)
-                is_tstring = bool(re.search(r"""[tT]\s*["']""", line))
-                kind = "t-string" if is_tstring else "f-string"
-                rule = "tstring-skipped" if is_tstring else "fstring-skipped"
-                warnings.append(
-                    f"line {line_num}: {kind} with --sql prefix skipped "
-                    f"({kind}s cannot be statically rewritten) [{rule}]"
-                )
+                rule, message = skipped
+                warnings.append(f"line {line_num}: {message} [{rule}]")
 
         # --- Pass 2: whole-source rewrite ---
         has_sql_import = _has_import(source, import_line)
@@ -357,9 +352,23 @@ _SQL_STRING_PATTERN = re.compile(
 # Match f-strings and t-strings (PEP 750, Python 3.14+) that contain --sql
 # (for emitting warnings). Both use interpolation so cannot be statically rewritten.
 _FSTRING_SQL_PATTERN = re.compile(
-    r"""[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b"""
-    r"""|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"""
+    r"""(?P<prefix>[fFtT][rRbBuU]*|[rRbBuU]*[fFtT])(?:"{3}|'{3}|"|')--sql\b"""
 )
+
+
+def skipped_string(line: str) -> tuple[str, str] | None:
+    """``(rule, message)`` for an f- or t-string starting with ``--sql`` on *line*.
+
+    Example:
+        >>> skipped_string('q = t"--sql\\nSELECT {x}"')[0]
+        'tstring-skipped'
+    """
+    match = _FSTRING_SQL_PATTERN.search(line)
+    if match is None:
+        return None
+    kind = "t-string" if re.search("[tT]", match.group("prefix")) else "f-string"
+    rule = f"{kind[0]}string-skipped"
+    return rule, f"{kind} with --sql prefix skipped ({kind}s cannot be statically rewritten)"
 
 
 def _query(sql_content: str) -> str:

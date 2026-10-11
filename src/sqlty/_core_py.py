@@ -27,7 +27,7 @@ import re
 
 from sqlty._checker import Checker
 from sqlty._lint import RuleConfig
-from sqlty._rewriter import SQLRewriter
+from sqlty._rewriter import SQLRewriter, skipped_string
 from sqlty._sql_analyzer import SQLAnalyzer
 
 
@@ -113,6 +113,44 @@ def expand_star(
     return analyzer.expand_star(sql)
 
 
+def skipped_strings(
+    source: str,
+    *,
+    rules: dict[str, str] | None = None,
+) -> list[dict[str, str | int | None]]:
+    """Report f- and t-strings starting with ``--sql``, which rewrite cannot wrap.
+
+    Args:
+        source: Python source code
+        rules: Rule severity overrides (e.g., {"fstring-skipped": "error"})
+
+    Returns:
+        ``fstring-skipped`` / ``tstring-skipped`` diagnostics, one per line,
+        as dicts with keys: rule, message, severity, line
+    """
+    rule_config = RuleConfig(overrides=rules)
+    return [
+        diag
+        for i, line in enumerate(source.splitlines(), 1)
+        if (diag := _skipped_diagnostic(line, i, rule_config))
+    ]
+
+
+def _skipped_diagnostic(
+    line: str, line_num: int, rule_config: RuleConfig
+) -> dict[str, str | int | None] | None:
+    skipped = skipped_string(line)
+    if skipped is None or not rule_config.is_enabled(skipped[0]):
+        return None
+    rule, message = skipped
+    return {
+        "rule": rule,
+        "message": message,
+        "severity": rule_config.severity(rule).value,
+        "line": line_num,
+    }
+
+
 def check_source(
     source: str,
     *,
@@ -126,6 +164,8 @@ def check_source(
     Scans source for SQL[T]("--sql ...") patterns and validates:
     - SELECT * usage (select-star, select-star-no-schema)
     - Stale rewrites (stale-rewrite) — --sql strings not yet wrapped
+    - f- and t-strings (fstring-skipped, tstring-skipped) — never wrapped, so
+      reported instead of stale-rewrite
     - Stale types (stale-type) — SQL[T] doesn't match current inference
     - Unknown row types (untyped-query) — SQL[UNTYPED] left by ``rewrite --untyped sentinel``
     - User-defined types (column-count-mismatch, column-type-mismatch,
@@ -165,10 +205,13 @@ def check_source(
 
     for i, line in enumerate(source.splitlines(), 1):
         line_stripped = line.strip()
+        is_skipped = skipped_string(line) is not None
+        if skipped := _skipped_diagnostic(line, i, rule_config):
+            diagnostics.append(skipped)
 
         # Check for unwrapped --sql strings (stale-rewrite)
         if _is_unwrapped_sql_string(line_stripped, wrapper_name):
-            if rule_config.is_enabled("stale-rewrite"):
+            if not is_skipped and rule_config.is_enabled("stale-rewrite"):
                 diagnostics.append(
                     {
                         "rule": "stale-rewrite",

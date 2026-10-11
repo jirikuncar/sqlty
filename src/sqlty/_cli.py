@@ -84,7 +84,9 @@ def main(argv: list[str] | None = None) -> None:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Auto-fix fixable issues (expand SELECT *, update stale types)",
+        help="Fix what can be fixed, then report what remains: wrap --sql strings, "
+        "update stale SQL[tuple[...]] types, expand SELECT * (postgres, with a schema), "
+        'turn "--sql SELECT" into "--sql\\nSELECT"',
     )
 
     # --- version ---
@@ -141,11 +143,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
-    """Rewrite command: transform --sql strings into SQL[T](...) calls."""
+    """Rewrite command: transform --sql strings into SQL[T](...) calls.
+
+    f- and t-strings starting with --sql are never wrapped; they are reported
+    on stderr as fstring-skipped / tstring-skipped unless -q is given.
+    """
     from sqlty._config import load_config
-    from sqlty.core import rewrite_source
+    from sqlty.core import rewrite_source, skipped_strings
 
     dialect, schema_sql, import_style = _resolve_config(args)
+    rules = _load_rules(args.paths[0] if args.paths else None)
     untyped = args.untyped or load_config(args.paths[0])[0].get("untyped", "skip")
     files = _collect_python_files(args.paths)
 
@@ -156,6 +163,9 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     changed = 0
     for path in files:
         original = path.read_text(encoding="utf-8")
+        if not args.quiet:
+            for diag in skipped_strings(original, rules=rules):
+                print(_format_diagnostic(path, diag), file=sys.stderr)
         rewritten = rewrite_source(
             original,
             dialect=dialect,
@@ -227,10 +237,16 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 
 def _cmd_check(args: argparse.Namespace) -> None:
-    """Check command: lint SQL type annotations."""
-    from sqlty.core import check_source
+    """Check command: lint SQL type annotations.
+
+    With --fix, files are fixed in place first (see ``sqlty.core.fix_source``)
+    and only the diagnostics that remain are reported and counted.
+    """
+    from sqlty._config import load_config
+    from sqlty.core import check_source, fix_source
 
     dialect, schema_sql, import_style = _resolve_config(args)
+    untyped = load_config(args.paths[0])[0].get("untyped", "skip") == "sentinel"
     files = _collect_python_files(args.paths)
 
     if not files and not args.quiet:
@@ -242,27 +258,41 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     total_errors = 0
     total_warnings = 0
+    fixed = 0
 
     for path in files:
         source = path.read_text(encoding="utf-8")
+        if args.fix:
+            fixed_source = fix_source(
+                source,
+                dialect=dialect,
+                schema_sql=schema_sql,
+                rules=rules,
+                import_style=import_style,
+                untyped=untyped,
+            )
+            if fixed_source != source:
+                path.write_text(fixed_source, encoding="utf-8")
+                source = fixed_source
+                fixed += 1
+                if args.verbose:
+                    print(f"Fixed {path}")
         diagnostics = check_source(
             source, dialect=dialect, schema_sql=schema_sql, rules=rules, import_style=import_style
         )
 
         for diag in diagnostics:
             severity = diag["severity"]
-            line = diag.get("line", "")
-            rule = diag["rule"]
-            message = diag["message"]
-
             if severity == "error":
                 total_errors += 1
             elif severity == "warn":
                 total_warnings += 1
 
             if not args.quiet:
-                print(f"{path}:{line}: [{rule}] {message}")
+                print(_format_diagnostic(path, diag))
 
+    if not args.quiet and fixed:
+        print(f"Fixed {fixed} file(s)")
     if not args.quiet and (total_errors or total_warnings):
         parts = []
         if total_errors:
@@ -343,6 +373,10 @@ def _load_rules(search_path: Path | None) -> dict[str, str] | None:
 
     config, _ = load_config(search_path)
     return config.get("rules")
+
+
+def _format_diagnostic(path: Path, diag: dict[str, str | int | None]) -> str:
+    return f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}"
 
 
 def _print_diff(path: Path, original: str, modified: str) -> None:

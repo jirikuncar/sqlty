@@ -33,3 +33,8 @@ def check_source(
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
 ) -> list[dict[str, str | int | None]]: ...
+def skipped_strings(
+    source: str,
+    *,
+    rules: dict[str, str] | None = None,
+) -> list[dict[str, str | int | None]]: ...

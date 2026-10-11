@@ -7,13 +7,14 @@
 //! - `select-star-no-schema`: `SELECT *` with no schema available
 //! - `inline-sql-comment`: `"--sql SELECT ..."` (space) makes query a SQL comment
 //! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
+//! - `fstring-skipped` / `tstring-skipped`: f-/t-string with `--sql`, which rewrite never wraps
 
 use std::collections::HashMap;
 
 use regex::Regex;
 
 use crate::analyzer::Schema;
-use crate::rewriter::infer_sql_content as infer_from_sql_content;
+use crate::rewriter::{infer_sql_content as infer_from_sql_content, skipped_string};
 
 /// Pattern to detect unwrapped --sql strings.
 fn unwrapped_sql_pattern() -> Regex {
@@ -75,6 +76,8 @@ impl RuleConfig {
             "typeddict-inheritance" => "error",
             "inline-sql-comment" => "warn",
             "untyped-query" => "warn",
+            "fstring-skipped" => "warn",
+            "tstring-skipped" => "warn",
             _ => "warn",
         }
     }
@@ -99,6 +102,27 @@ fn parse_wrapper_name(import_style: Option<&str>) -> String {
         }
         Some(_) => "SQL".to_string(),
     }
+}
+
+/// `fstring-skipped` / `tstring-skipped` diagnostic for `line`, if enabled.
+fn skipped_diagnostic(line: &str, line_num: usize, rule_config: &RuleConfig) -> Option<Diagnostic> {
+    let (rule, message) = skipped_string(line)?;
+    rule_config.is_enabled(rule).then(|| Diagnostic {
+        rule: rule.to_string(),
+        message: message.to_string(),
+        severity: rule_config.severity(rule).to_string(),
+        line: line_num,
+    })
+}
+
+/// Report f- and t-strings starting with `--sql`, one diagnostic per line.
+pub fn skipped_strings(source: &str, rules: Option<HashMap<String, String>>) -> Vec<Diagnostic> {
+    let rule_config = RuleConfig::new(rules);
+    source
+        .lines()
+        .enumerate()
+        .filter_map(|(i, line)| skipped_diagnostic(line, i + 1, &rule_config))
+        .collect()
 }
 
 /// Check Python source code for SQL type issues.
@@ -127,10 +151,12 @@ pub fn check_source(
     for (i, line) in source.lines().enumerate() {
         let line_num = i + 1;
         let trimmed = line.trim();
+        let is_skipped = skipped_string(line).is_some();
+        diagnostics.extend(skipped_diagnostic(line, line_num, &rule_config));
 
         // Check for unwrapped --sql strings (stale-rewrite)
         if is_unwrapped_sql_string(trimmed, &wrapper_marker, &unwrapped_pat) {
-            if rule_config.is_enabled("stale-rewrite") {
+            if !is_skipped && rule_config.is_enabled("stale-rewrite") {
                 diagnostics.push(Diagnostic {
                     rule: "stale-rewrite".to_string(),
                     message: "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
@@ -369,6 +395,22 @@ mod tests {
         let diags = check_source(source, "postgres", &None, None, Some("import sqlty"));
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
+    }
+
+    #[test]
+    fn test_skipped_strings_replace_stale_rewrite() {
+        let source = "a = f\"--sql\\nSELECT {x}\"\nb = t\"--sql\\nSELECT {x}\"";
+        let rules: Vec<_> = check_source(source, "postgres", &None, None, None)
+            .into_iter()
+            .map(|d| (d.rule, d.line))
+            .collect();
+        assert_eq!(
+            rules,
+            [
+                ("fstring-skipped".to_string(), 1),
+                ("tstring-skipped".to_string(), 2)
+            ]
+        );
     }
 
     #[test]

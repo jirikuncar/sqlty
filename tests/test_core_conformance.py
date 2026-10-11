@@ -502,6 +502,70 @@ class TestCheckSource:
 
 
 # ---------------------------------------------------------------------------
+# skipped_strings
+# ---------------------------------------------------------------------------
+
+FSTRING_MESSAGE = "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+TSTRING_MESSAGE = "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+
+
+class TestSkippedStrings:
+    """Contract: skipped_strings(source, *, rules) -> list[dict], one per f-/t-string line."""
+
+    @pytest.mark.parametrize(
+        ("literal", "rule"),
+        [
+            ('f"--sql\\nSELECT {x}"', "fstring-skipped"),
+            ('rf"--sql\\nSELECT {x}"', "fstring-skipped"),
+            ('F"""--sql\nSELECT {x}"""', "fstring-skipped"),
+            ("f\"--sql\\nSELECT 'x' FROM {t}\"", "fstring-skipped"),
+            ('t"--sql\\nSELECT {x}"', "tstring-skipped"),
+            ("Tr'--sql\\nSELECT {x}'", "tstring-skipped"),
+        ],
+    )
+    def test_rule(self, core: types.ModuleType, literal: str, rule: str):
+        diags = core.skipped_strings(f"x = 1\nq = {literal}")
+        assert [(d["rule"], d["line"], d["severity"]) for d in diags] == [(rule, 2, "warn")]
+
+    def test_message(self, core: types.ModuleType):
+        source = 'a = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x}"'
+        assert [d["message"] for d in core.skipped_strings(source)] == [
+            FSTRING_MESSAGE,
+            TSTRING_MESSAGE,
+        ]
+
+    def test_plain_strings_ignored(self, core: types.ModuleType):
+        source = (
+            'a = "--sql\\nSELECT 1"\nb = f"SELECT {x}"\nc = SQL[tuple[int]]("--sql\\nSELECT 1")'
+        )
+        assert core.skipped_strings(source) == []
+
+    def test_rule_overrides(self, core: types.ModuleType):
+        source = 'a = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x}"'
+        diags = core.skipped_strings(
+            source, rules={"fstring-skipped": "error", "tstring-skipped": "ignore"}
+        )
+        assert [(d["rule"], d["severity"]) for d in diags] == [("fstring-skipped", "error")]
+
+    def test_check_source_reports_them_instead_of_stale_rewrite(self, core: types.ModuleType):
+        source = 'a = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x}"\nc = "--sql\\nSELECT 1"'
+        diags = core.check_source(source)
+        assert [(d["rule"], d["line"]) for d in diags] == [
+            ("fstring-skipped", 1),
+            ("tstring-skipped", 2),
+            ("stale-rewrite", 3),
+        ]
+
+    def test_check_source_ignored_skip_is_not_stale_rewrite(self, core: types.ModuleType):
+        source = 'q = f"--sql\\nSELECT {x}"'
+        assert core.check_source(source, rules={"fstring-skipped": "ignore"}) == []
+
+    def test_check_source_keeps_inline_sql_comment(self, core: types.ModuleType):
+        diags = core.check_source('q = f"--sql SELECT {x}"')
+        assert [d["rule"] for d in diags] == ["fstring-skipped", "inline-sql-comment"]
+
+
+# ---------------------------------------------------------------------------
 # UNTYPED sentinel
 # ---------------------------------------------------------------------------
 
@@ -1062,6 +1126,7 @@ def test_backend_parity(kind: str, text: str, options: dict):
             "check_source": lambda m: m.check_source(
                 text, dialect=dialect, schema_sql=schema_sql, import_style=import_style
             ),
+            "skipped_strings": lambda m: m.skipped_strings(text),
         }
     for name, call in calls.items():
         assert _outcome(call, rs) == _outcome(call, py), name

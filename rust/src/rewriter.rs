@@ -24,9 +24,24 @@ static STRING_LITERAL: Lazy<Regex> =
 
 /// f-strings and t-strings (PEP 750) with a `--sql` prefix: interpolated, so never rewritten.
 static FSTRING_SQL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"[fFtT][rRbBuU]*(?:"{3}|'{3}|"|')--sql\b|[rRbBuU]*[fFtT](?:"{3}|'{3}|"|')--sql\b"#)
-        .unwrap()
+    Regex::new(r#"(?P<prefix>[fFtT][rRbBuU]*|[rRbBuU]*[fFtT])(?:"{3}|'{3}|"|')--sql\b"#).unwrap()
 });
+
+/// `(rule, message)` for an f- or t-string starting with `--sql` on `line`.
+pub fn skipped_string(line: &str) -> Option<(&'static str, &'static str)> {
+    let prefix = FSTRING_SQL.captures(line)?.name("prefix")?.as_str();
+    Some(if prefix.contains(['t', 'T']) {
+        (
+            "tstring-skipped",
+            "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)",
+        )
+    } else {
+        (
+            "fstring-skipped",
+            "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)",
+        )
+    })
+}
 
 /// Spans of string literals not prefixed by a letter (`f"..."`, `r"..."` are skipped).
 ///
