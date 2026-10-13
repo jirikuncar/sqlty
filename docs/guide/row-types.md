@@ -222,6 +222,27 @@ bad = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 field's names unknown: it is not reported as missing, and `extra="forbid"` no
 longer reports columns without a field.
 
+## Defaults in `Annotated`
+
+A field whose `Annotated` metadata holds `Field(default=...)` or
+`Field(default_factory=...)` (Pydantic, or a dataclass `field(...)` with a
+default) is optional for every row type, TypedDict included, as is common when
+rows are validated by `TypeAdapter(Row)` after psycopg builds them. A bare
+`Field()` or `Field(...)` stays required.
+
+```python
+from typing import Annotated, TypedDict
+from pydantic import Field
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    tags: Annotated[list[str], Field(default_factory=list)]
+
+# error:
+query = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+```
+
 ## TypedDict qualifiers
 
 `ReadOnly`, `Required` and `NotRequired` are looked through before types are
