@@ -24,15 +24,20 @@ from __future__ import annotations
 
 import annotationlib
 import ast
+import contextlib
 import datetime
 import functools
 import operator
+import re
 import textwrap
 import types
 import typing
 import uuid
 
 from sqlty._source import ParsedSource
+
+if typing.TYPE_CHECKING:
+    from sqlty._helpers import HelperIndex
 
 
 class TypeInfo:
@@ -122,7 +127,9 @@ PYTHON_TYPE_MAP: dict[str, type] = {
 }
 
 
-def extract_type_definitions(source: str | ParsedSource) -> dict[str, TypeInfo]:
+def extract_type_definitions(
+    source: str | ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
+) -> dict[str, TypeInfo]:
     """Extract type definitions from Python source code.
 
     Finds class definitions that are:
@@ -135,8 +142,14 @@ def extract_type_definitions(source: str | ParsedSource) -> dict[str, TypeInfo]:
     using ``typing.get_type_hints()``. Falls back to AST string extraction
     if runtime resolution fails (e.g. missing dependencies).
 
+    Names imported from modules of ``helpers`` (a ``HelperIndex``) are read
+    from those modules' source, never imported; ``module`` is the name of
+    ``source``, for relative imports.
+
     Args:
         source: Python source code, or a ``ParsedSource`` whose tree is reused.
+        helpers: modules of the checked paths.
+        module: dotted name of ``source``.
 
     Returns:
         Dictionary mapping type name to TypeInfo.
@@ -163,7 +176,7 @@ def extract_type_definitions(source: str | ParsedSource) -> dict[str, TypeInfo]:
         return {}
 
     # Phase 2: Collect the guarded imports and aliases needed for the namespace
-    import_stmts = _namespace_statements(tree, set(newtypes))
+    import_stmts = _namespace_statements(tree, set(newtypes), helpers, module)
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
@@ -188,7 +201,7 @@ def extract_type_definitions(source: str | ParsedSource) -> dict[str, TypeInfo]:
         info.field_types = _ast_key_types(nodes, aliases, newtypes)
         hints = None
         if (fields or is_typeddict) and (
-            resolved := _resolve_class(nodes, import_stmts, parsed.text)
+            resolved := _resolve_class(nodes, import_stmts, parsed.text, helpers)
         ):
             cls, namespace = resolved
             hints = _type_hints(cls, namespace)
@@ -338,27 +351,86 @@ def _guard(statement: ast.stmt, names: list[str]) -> str:
     return f"try:\n{body}\nexcept Exception:\n{fallback}"
 
 
-def _namespace_statements(tree: ast.Module, newtypes: set[str]) -> list[str]:
+class _Import(typing.NamedTuple):
+    """A module-level import. ``module`` is set when it names a module of the checked paths.
+
+    ``name`` is the imported member, or ``None`` when the import binds the module itself.
+    """
+
+    local: str
+    code: str
+    module: str | None = None
+    name: str | None = None
+
+
+_Statement = str | _Import
+
+
+def _absolute(package: str | None, level: int, name: str | None) -> str | None:
+    """Absolute name of ``from <level dots><name> import ...`` inside ``package``.
+
+    Example:
+        >>> _absolute("pkg.sub", 1, "ids"), _absolute("pkg.sub", 2, None), _absolute(None, 1, "a")
+        ('pkg.sub.ids', 'pkg', 'a')
+        >>> _absolute("pkg", 3, "a")
+    """
+    parts = package.split(".") if package else []
+    if level - 1 > len(parts):
+        return None
+    parts = parts[: len(parts) - (level - 1)]
+    return ".".join([*parts, *([name] if name else [])]) or None
+
+
+def _namespace_statements(
+    tree: ast.Module,
+    newtypes: set[str],
+    index: HelperIndex | None = None,
+    module: str | None = None,
+) -> list[_Statement]:
     """Guarded source, in file order, of the module-level imports and type aliases.
 
     A name that cannot be imported or evaluated is bound to the unknown
-    placeholder, so one failure does not hide the other names.
+    placeholder, so one failure does not hide the other names. An import of a
+    module in ``index`` is an `_Import` naming it, to be read from its source
+    instead. ``module`` is the dotted name of ``tree`` (``pkg.__init__`` for a
+    package), for relative imports.
 
     Example:
-        >>> _namespace_statements(ast.parse("import a.b\\nX = int\\nY = f()"), set())[0].splitlines()[:2]
+        >>> _namespace_statements(ast.parse("import a.b\\nX = int\\nY = f()"), set())[0].code.splitlines()[:2]
         ['try:', '    import a.b']
     """
-    statements: list[str] = []
+    package = None
+    if module is not None:
+        package = (
+            module.removesuffix(".__init__")
+            if module.endswith(".__init__")
+            else module.rpartition(".")[0]
+        )
+    statements: list[_Statement] = []
     for node in tree.body:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 bound = alias.asname or alias.name.split(".")[0]
-                statements.append(_guard(ast.Import(names=[alias]), [bound]))
+                code = _guard(ast.Import(names=[alias]), [bound])
+                target = alias.name if alias.asname else bound
+                checked = index is not None and target in index.prefixes
+                statements.append(_Import(bound, code, target if checked else None))
         elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
+            base = _absolute(package, node.level, node.module) if node.level else node.module
             for alias in node.names:
                 if alias.name != "*":
                     from_ = ast.ImportFrom(node.module, [alias], node.level)
-                    statements.append(_guard(from_, [alias.asname or alias.name]))
+                    local = alias.asname or alias.name
+                    checked = (
+                        index is not None
+                        and base is not None
+                        and (base in index.prefixes or f"{base}.{alias.name}" in index.prefixes)
+                    )
+                    statements.append(
+                        _Import(
+                            local, _guard(from_, [local]), base if checked else None, alias.name
+                        )
+                    )
         elif isinstance(node, ast.TypeAlias) and isinstance(node.name, ast.Name):
             statements.append(_guard(node, [node.name.id]))
         elif (
@@ -382,16 +454,117 @@ def _namespace_statements(tree: ast.Module, newtypes: set[str]) -> list[str]:
     return statements
 
 
+class _ModuleProxy:
+    """A module of the checked paths, whose attributes are read from its source."""
+
+    def __init__(self, index: HelperIndex, name: str) -> None:
+        self._index = index
+        self._name = name
+
+    def __getattr__(self, attr: str) -> object:
+        if attr.startswith("__"):
+            raise AttributeError(attr)
+        return _lookup(self._index, self._name, attr)
+
+
+def _lookup(index: HelperIndex, module: str, name: str) -> object:
+    """``module.name`` from the source of ``module``, the unknown placeholder if not found."""
+    if module in index.sources:
+        namespace, pending = _module_namespace(index, module)
+        if name in namespace:
+            return namespace[name]
+        if (imported := pending.pop(name, None)) is not None:
+            namespace[name] = value = _import_value(index, imported)
+            return value
+    if f"{module}.{name}" in index.prefixes:
+        return _ModuleProxy(index, f"{module}.{name}")
+    return _Unknown()
+
+
+def _import_value(index: HelperIndex, imported: _Import) -> object:
+    assert imported.module is not None
+    if imported.name is None:
+        return _ModuleProxy(index, imported.module)
+    return _lookup(index, imported.module, imported.name)
+
+
+def _identifiers(statements: typing.Iterable[str]) -> set[str]:
+    return set(re.findall(r"\w+", "\n".join(statements)))
+
+
+def _populate(
+    index: HelperIndex | None,
+    namespace: dict[str, object],
+    statements: list[_Statement],
+    wanted: set[str],
+    skip: bool,
+) -> dict[str, _Import]:
+    """Run ``statements`` in order in ``namespace``.
+
+    Imports of checked modules are bound from source when their name is in
+    ``wanted``. The others are dropped if ``skip`` is set, else returned to be
+    bound on demand.
+    """
+    pending: dict[str, _Import] = {}
+    code: list[str] = []
+
+    def flush() -> None:
+        if code:
+            compiled = compile("\n".join(code), "<sqlty-type-check>", "exec", dont_inherit=True)
+            exec(compiled, namespace)  # noqa: S102
+            code.clear()
+
+    for statement in statements:
+        if isinstance(statement, str):
+            code.append(statement)
+        elif index is None or statement.module is None:
+            code.append(statement.code)
+        elif statement.local in wanted:
+            flush()
+            namespace[statement.local] = _import_value(index, statement)
+        elif not skip:
+            pending[statement.local] = statement
+    flush()
+    return pending
+
+
+def _module_namespace(
+    index: HelperIndex, module: str
+) -> tuple[dict[str, object], dict[str, _Import]]:
+    """Names of the type-defining statements of ``module``, read from its source once.
+
+    Imports of other checked modules are bound on first use. The result is
+    cached in ``index``; a module being built (an import cycle) is seen as
+    far as it got.
+    """
+    if module in index.namespaces:
+        return index.namespaces[module]
+    namespace: dict[str, object] = {"__builtins__": __builtins__, _UNKNOWN_NAME: _Unknown()}
+    pending: dict[str, _Import] = {}
+    index.namespaces[module] = namespace, pending
+    if (tree := index.sources[module].tree) is None:
+        return namespace, pending
+    newtypes = _newtype_assignments(tree, index.sources[module].typing_aliases)
+    name = f"{module}.__init__" if module in index.packages else module
+    statements = _namespace_statements(tree, set(newtypes), index, name)
+    wanted = _identifiers(s for s in statements if isinstance(s, str))
+    with contextlib.suppress(Exception):
+        pending |= _populate(index, namespace, statements, wanted, skip=False)
+    return namespace, pending
+
+
 def _resolve_class(
     nodes: list[ast.ClassDef],
-    import_stmts: list[str],
+    import_stmts: list[_Statement],
     full_source: str,
+    index: HelperIndex | None = None,
 ) -> tuple[type, dict[str, object]] | None:
     """Try to build the last of ``nodes`` at runtime, returning it with its namespace.
 
     Executes just the necessary imports and aliases + the class definitions
     (bases first) in a sandboxed namespace. Returns None if the classes
-    cannot be built.
+    cannot be built. Names imported from modules of ``index`` are read from
+    their source, and only those the classes use.
     """
     class_sources = [
         segment for node in nodes if (segment := ast.get_source_segment(full_source, node))
@@ -406,16 +579,14 @@ def _resolve_class(
         "uuid": uuid,
         _UNKNOWN_NAME: _Unknown(),
     }
-
-    # Add typing imports based on kind
-    exec_lines = [*import_stmts, *class_sources]
-    exec_source = "\n".join(exec_lines)
+    wanted = _identifiers([*class_sources, *(s for s in import_stmts if isinstance(s, str))])
 
     try:
+        _populate(index, namespace, import_stmts, wanted, skip=True)
         # dont_inherit=True prevents this module's `from __future__ import
         # annotations` from turning the exec'd class annotations into
         # ForwardRef strings — we need real type objects for get_type_hints.
-        code = compile(exec_source, "<sqlty-type-check>", "exec", dont_inherit=True)
+        code = compile("\n".join(class_sources), "<sqlty-type-check>", "exec", dont_inherit=True)
         exec(code, namespace)  # noqa: S102
     except Exception:
         return None

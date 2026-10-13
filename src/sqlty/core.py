@@ -97,7 +97,9 @@ def check_source(
     type passed to the ``type[T]`` parameter of the same helper. Helpers
     defined in ``source`` count; for those of other modules pass ``helpers``
     (a ``HelperIndex``) and the ``module`` name of ``source``, which resolves
-    relative imports.
+    relative imports. The same index resolves row type fields annotated with a
+    type imported from another module of the index (``NewType``, ``Literal``
+    and ``type`` aliases, ``X = int``), read from its source and never imported.
 
     A ``# sqlty: ignore`` comment on a diagnostic's line drops it; ``# sqlty:
     ignore[rule-a, rule-b]`` drops only those rules. ``unused-ignore`` reports
@@ -127,7 +129,7 @@ def check_source(
         import_style=import_style,
         untyped=untyped,
         helpers=helpers,
-        module=module,
+        module=module or parsed.module,
     )
     return _apply_suppressions(parsed, diagnostics, rules)
 
@@ -181,7 +183,9 @@ def _check_diagnostics(
             )
 
     named = [(call.line, ast.unparse(call.row), call.query) for call in calls if call.row]
-    type_defs = extract_type_definitions(parsed) if queries or named else {}
+    type_defs = (
+        extract_type_definitions(parsed, helpers, module) if queries or named else {}
+    )
     user_queries = [q for q in [*queries, *named] if q[1] in type_defs]
 
     if rule_config.is_enabled("typeddict-inheritance"):

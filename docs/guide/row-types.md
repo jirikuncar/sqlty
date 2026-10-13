@@ -167,6 +167,33 @@ q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP, token::UUID FR
 # error:
 ```
 
+### Types from other modules
+
+`sqlty check` also resolves a field annotated with a name imported from
+another module of the checked paths, such as the shared `NewType` ID types of
+an application. The module is read from its source and never imported: its
+module-level `X = NewType("X", T)`, `X = Literal[...]`, `type X = ...`,
+`X: TypeAlias = ...` and plain `X = <type expression>` are followed through
+any number of further imports, aliases and `__init__.py` re-exports, and
+import cycles are cut. `from pkg.ids import UserId [as U]`,
+`import pkg.ids as ids` (`ids.UserId`) and relative imports all work.
+
+```text
+# pkg/ids.py
+UserId = NewType("UserId", int)
+
+# app.py
+class User(TypedDict):
+    id: UserId   # accepted for an int column, reported for a text column
+```
+
+A module is parsed only when a row type names something from it, and only once
+per run. A name from a module outside the checked paths, or one that is not a
+type definition, stays unknown and is never reported. From Python, pass a
+`HelperIndex` filled with the modules (`index.add("pkg.ids", source)`) and the
+`module` name of the checked source as `check_source(..., helpers=index,
+module=...)`.
+
 ## TypedDict qualifiers
 
 `ReadOnly`, `Required` and `NotRequired` are looked through before types are

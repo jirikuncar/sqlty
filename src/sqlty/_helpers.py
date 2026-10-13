@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from sqlty._source import ParsedSource
 
@@ -150,11 +150,25 @@ class HelperIndex:
 
     def __init__(self) -> None:
         self.modules: dict[str, dict[str, Helper]] = {}
+        self.sources: dict[str, ParsedSource] = {}
+        self.packages: set[str] = set()
+        self.prefixes: set[str] = set()
+        self.namespaces: dict[str, tuple[dict[str, object], dict[str, Any]]] = {}
         self._pattern: re.Pattern[str] | None = None
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
-        """Index the helpers of ``source`` as module ``module``; whether it has any."""
+        """Index the helpers of ``source`` as module ``module``; whether it has any.
+
+        The parsed source is kept, so annotations naming types of ``module`` can be
+        resolved without importing it or parsing it again.
+        """
         parsed = ParsedSource.of(source)
+        self.sources[module] = parsed
+        if parsed.module is not None and parsed.module.endswith(".__init__"):
+            self.packages.add(module)
+        parts = module.split(".")
+        self.prefixes.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
+        self.namespaces.pop(module, None)
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
         self.modules.setdefault(module, {}).update(found)
