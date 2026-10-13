@@ -81,6 +81,50 @@ def fetch_all[T](query: t.Annotated[t.LiteralString, sy.SQL], form: type[T], /) 
 ids = fetch_all("SELECT name FROM users", int)
 ```
 
+## Methods
+
+Methods are marked the same way. `self` and `cls` are not counted when the
+arguments are bound. A call is checked when the receiver is evident: the class
+(`Db.fetch_one(...)`, for static and class methods), `self` inside the class,
+a variable assigned `Db(...)` or annotated `db: Db` in the same scope (or the
+module), and `self.db` when the class body annotates it or `__init__` assigns
+`Db(...)`. Other receivers, and inherited methods, are skipped.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def fetch_all[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+    @staticmethod
+    def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+db = Db()
+# error: [column-type-mismatch]
+ids = db.fetch_all("SELECT name FROM users", int)
+# error: [column-type-mismatch]
+one = Db.fetch_one("SELECT name FROM users", int)
+```
+
+## Helpers you cannot annotate
+
+A helper whose signature you cannot edit (a library, generated code) is
+registered in `pyproject.toml` instead, with the entry that
+[stub generation](stubs.md) also reads:
+
+```toml
+[[tool.sqlty.functions]]
+import_path = "pkg.db.fetch_all"   # or "pkg.db.Db.fetch_all" for a method
+query_param = "query"
+return_type_param = "form"
+```
+
+`query_param` names the parameter that holds the query and `return_type_param`
+the one holding the row type. When `pkg.db` is among the checked paths, both are
+looked up in the definition, so calls may pass them by position; otherwise
+they are checked only when passed by keyword (`fetch_all(query="...", form=int)`).
+
 ## Helpers in other modules
 
 `sqlty check` indexes the helpers of every file it is given before checking
@@ -90,8 +134,9 @@ resolved by its module name: `from pkg.db import fetch_all [as fa]`,
 Only files that mention `Annotated` and `SQL` are parsed for the index.
 
 Pass the directory that holds the helper together with the code that calls it
-(`sqlty check .`, not just the calling file). Methods (`self`, `cls`) and
-helpers re-exported through another module are not followed.
+(`sqlty check .`, not just the calling file). A helper re-exported by a package
+`__init__` (`from .db import fetch_all`) is found through the package too:
+`from pkg import fetch_all` reaches it.
 
 From Python, `sqlty.core.check_source(source, helpers=index, module="pkg.app")`
 takes a `sqlty.core.HelperIndex` filled with `index.add("pkg.db", db_source)`.

@@ -82,20 +82,70 @@ class _Scan(ast.NodeVisitor):
         self.scopes: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef] = []
         self.stores: dict[str, list[ast.Name]] = {}
         self.values: dict[int, ast.expr] = {}
+        self.stacks: dict[int, _Stack] = {}
+        self.types: dict[tuple[int | None, str], str | None] = {}
+        self._stack: _Stack = ()
         self._depth = 0
 
     def visit(self, node: ast.AST) -> None:
+        outer = self._stack
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not isinstance(node, ast.ClassDef):
+                self._parameters(node)
+            self._stack = (*outer, node)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            self._typed(node)
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             self.imports.append((self._depth, node))
         elif isinstance(node, ast.ClassDef):
             self.classes.append((self._depth, node))
         elif isinstance(node, ast.Call):
             self.calls.append((self._depth, node))
+            self.stacks[id(node)] = self._stack
         elif self.bindings:
             self._bind(node)
         self._depth += 1
         self.generic_visit(node)
         self._depth -= 1
+        self._stack = outer
+
+    def _note(self, key: tuple[int | None, str], type_name: str | None) -> None:
+        """Remember the class a name or ``self`` attribute holds; ``None`` once it is ambiguous."""
+        known = self.types.get(key, type_name)
+        self.types[key] = type_name if known == type_name else None
+
+    def _parameters(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        args = node.args
+        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+            self._note((id(node), arg.arg), _class_name(arg.annotation))
+
+    def _typed(self, node: ast.Assign | ast.AnnAssign) -> None:
+        """Record ``name = Cls(...)`` and ``name: Cls`` in the current scope.
+
+        Also ``self.attr`` the same way inside a method, keyed by the class.
+        """
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            type_name = _class_name(node.value.func) if isinstance(node.value, ast.Call) else None
+        else:
+            targets = [node.target]
+            type_name = _class_name(node.annotation)
+            if type_name is None and isinstance(node.value, ast.Call):
+                type_name = _class_name(node.value.func)
+        scope = self._stack[-1] if self._stack else None
+        for target in targets:
+            if isinstance(target, ast.Name):
+                self._note((id(scope) if scope is not None else None, target.id), type_name)
+            elif (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and len(self._stack) > 1
+                and isinstance(self._stack[-2], ast.ClassDef)
+                and isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and scope.args.args
+                and scope.args.args[0].arg == target.value.id
+            ):
+                self._note((id(self._stack[-2]), f".{target.attr}"), type_name)
 
     def _bind(self, node: ast.AST) -> None:
         """Record what binds a name or opens a scope, for the psycopg composition scan."""
@@ -110,6 +160,30 @@ class _Scan(ast.NodeVisitor):
                 self.values[id(node.target)] = node.value
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
             self.scopes.append(node)
+
+
+_Stack = tuple[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef, ...]
+
+
+def _class_name(node: ast.expr | None) -> str | None:
+    """The dotted name an annotation or a called expression spells, if it is a plain one.
+
+    Example:
+        >>> _class_name(ast.parse("m.Db", mode="eval").body)
+        'm.Db'
+        >>> _class_name(ast.Constant("Db"))
+        'Db'
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        text = node.value.strip()
+        return text if re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*", text) else None
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        return ".".join([node.id, *reversed(parts)])
+    return None
 
 
 def _breadth_first[T](found: list[tuple[int, T]]) -> list[T]:
@@ -176,6 +250,36 @@ class ParsedSource:
         """Module-level function definitions."""
         body = self.tree.body if self.tree is not None else []
         return [n for n in body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+    @functools.cached_property
+    def methods(self) -> list[tuple[ast.ClassDef, ast.FunctionDef | ast.AsyncFunctionDef]]:
+        """Functions defined directly in a class body, with their class."""
+        return [
+            (cls, node)
+            for cls in self.classes
+            for node in cls.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+
+    def scopes_of(self, call: ast.Call) -> _Stack:
+        """The functions and classes enclosing ``call``, outermost first."""
+        return self._scan.stacks.get(id(call), ())
+
+    def type_of(self, stack: _Stack, name: str, attribute: bool = False) -> str | None:
+        """The class a variable holds, from ``name = Cls(...)`` or ``name: Cls`` in scope.
+
+        ``stack`` is ``scopes_of(call)``. With ``attribute``, ``name`` is an attribute of
+        ``self`` and the class of the innermost enclosing method is searched instead.
+        """
+        types = self._scan.types
+        if attribute:
+            cls = next((s for s in reversed(stack) if isinstance(s, ast.ClassDef)), None)
+            return types.get((id(cls), f".{name}")) if cls is not None else None
+        for scope in [*(s for s in reversed(stack) if not isinstance(s, ast.ClassDef)), None]:
+            key = (id(scope) if scope is not None else None, name)
+            if key in types:
+                return types[key]
+        return None
 
     @functools.cached_property
     def typing_aliases(self) -> dict[str, str]:

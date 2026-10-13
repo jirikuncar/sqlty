@@ -30,7 +30,9 @@ class Helper:
 
     ``positional`` lists the parameters a call may bind by position, ``keywords``
     those it may bind by name. ``row`` is ``None`` when no ``type[T]`` parameter
-    shares ``T`` with the return type.
+    shares ``T`` with the return type. A method is named ``Class.method`` and its
+    ``self`` / ``cls`` is not listed; ``kind`` is ``instance`` for a method that is
+    only callable on an instance (a call through the class would shift the arguments).
     """
 
     name: str
@@ -38,6 +40,7 @@ class Helper:
     keywords: frozenset[str]
     query: str
     row: str | None
+    kind: str = "function"
 
 
 class HelperCall(NamedTuple):
@@ -104,22 +107,61 @@ def _row_param(args: ast.arguments, returns: ast.expr | None) -> str | None:
     return None
 
 
-def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
-    """Module-level functions with a marked query parameter, by name.
+def _kind(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    """``static``, ``class`` or ``instance`` for a method, by its decorators."""
+    names = {_dotted(d) for d in node.decorator_list}
+    if "staticmethod" in names:
+        return "static"
+    return "class" if "classmethod" in names else "instance"
 
-    Methods are not indexed.
+
+def _definitions(
+    parsed: ParsedSource,
+) -> list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, str]]:
+    """Module-level functions and methods as ``(name, node, kind)``; methods are ``Class.name``."""
+    return [
+        *((node.name, node, "function") for node in parsed.functions),
+        *((f"{cls.name}.{node.name}", node, _kind(node)) for cls, node in parsed.methods),
+    ]
+
+
+def _helper(
+    name: str,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    kind: str,
+    query: str,
+    row: str | None,
+) -> Helper:
+    args = node.args
+    positional = [*args.posonlyargs, *args.args]
+    keywords = [*args.args, *args.kwonlyargs]
+    if kind in ("instance", "class") and positional:
+        keywords = [a for a in keywords if a is not positional[0]]
+        positional = positional[1:]
+    return Helper(
+        name=name,
+        positional=tuple(a.arg for a in positional),
+        keywords=frozenset(a.arg for a in keywords),
+        query=query,
+        row=row,
+        kind=kind,
+    )
+
+
+def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
+    """Functions and methods with a marked query parameter, by name (``Class.method``).
 
     Example:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
         >>> index_functions(src)["f"]
-        Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t')
+        Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function')
     """
     parsed = ParsedSource.of(source)
     annotated, marker = parsed.marker_names
     if not annotated or not marker:
         return {}
     found: dict[str, Helper] = {}
-    for node in parsed.functions:
+    for name, node, kind in _definitions(parsed):
         args = node.args
         query = next(
             (
@@ -129,15 +171,8 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
             ),
             None,
         )
-        if query is None:
-            continue
-        found[node.name] = Helper(
-            name=node.name,
-            positional=tuple(a.arg for a in [*args.posonlyargs, *args.args]),
-            keywords=frozenset(a.arg for a in [*args.args, *args.kwonlyargs]),
-            query=query,
-            row=_row_param(args, node.returns),
-        )
+        if query is not None:
+            found[name] = _helper(name, node, kind, query, _row_param(args, node.returns))
     return found
 
 
@@ -160,6 +195,18 @@ class HelperIndex:
         self.namespaces: dict[str, tuple[dict[str, object], dict[str, Any]]] = {}
         self.type_modules: frozenset[str] = frozenset()
         self._pattern: re.Pattern[str] | None = None
+        self._exports: dict[str, dict[str, tuple[str, str]]] = {}
+
+    def fork(self) -> HelperIndex:
+        """A copy whose later ``register`` calls do not reach this index; sources are shared."""
+        other = HelperIndex()
+        other.modules = {module: dict(found) for module, found in self.modules.items()}
+        other.sources = self.sources
+        other.packages = set(self.packages)
+        other.prefixes = set(self.prefixes)
+        other.type_modules = self.type_modules
+        other._exports = self._exports
+        return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
         """Index the helpers of ``source`` as module ``module``; whether it has any.
@@ -174,16 +221,64 @@ class HelperIndex:
         parts = module.split(".")
         self.prefixes.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
         self.namespaces.pop(module, None)
+        self._exports.pop(module, None)
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
         self.modules.setdefault(module, {}).update(found)
         self._pattern = None
         return True
 
+    def register(self, import_path: str, query: str, row: str | None = None) -> None:
+        """Register ``import_path`` (``pkg.mod.func`` or ``pkg.mod.Class.method``) as a helper.
+
+        Used for ``[[tool.sqlty.functions]]``: the function needs no marked parameter. Its
+        positional parameters are read from the definition when ``pkg.mod`` is indexed;
+        otherwise ``query`` and ``row`` can only be passed by keyword.
+
+        Example:
+            >>> index = HelperIndex()
+            >>> index.register("db.run", "sql", "form")
+            >>> index.modules["db"]["run"].keywords == {"sql", "form"}
+            True
+        """
+        parts = import_path.split(".")
+        known = [i for i in range(len(parts) - 1, 0, -1) if ".".join(parts[:i]) in self.sources]
+        for i in known[:1] or [i for i in (len(parts) - 1, len(parts) - 2) if i > 0]:
+            module, name = ".".join(parts[:i]), ".".join(parts[i:])
+            parsed = self.sources.get(module)
+            definition = next(
+                (d for d in _definitions(parsed) if d[0] == name) if parsed else iter(()), None
+            )
+            if definition is not None:
+                helper = _helper(name, definition[1], definition[2], query, row)
+            else:
+                helper = Helper(name, (), frozenset(filter(None, [query, row])), query, row)
+            self.modules.setdefault(module, {})[name] = helper
+        self._pattern = None
+
+    def get(self, module: str, name: str, _depth: int = 0) -> Helper | None:
+        """The helper ``name`` of ``module``, following names the module re-exports.
+
+        ``name`` may be ``Class.method``; a package ``__init__`` doing
+        ``from .db import fetch_all`` exposes ``fetch_all`` as ``module.fetch_all``.
+        """
+        if (found := self.modules.get(module, {}).get(name)) is not None:
+            return found
+        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+            return None
+        if (exports := self._exports.get(module)) is None:
+            exports = self._exports[module] = _imports(parsed, parsed.module or module)[0]
+        head, dot, rest = name.partition(".")
+        if (target := exports.get(head)) is None:
+            return None
+        return self.get(target[0], target[1] + dot + rest, _depth + 1)
+
     def mentions(self, source: str) -> bool:
         """Whether ``source`` contains the name of some helper, so it may call one."""
         if self._pattern is None:
-            names = {name for helpers in self.modules.values() for name in helpers}
+            names = {
+                name.rpartition(".")[2] for helpers in self.modules.values() for name in helpers
+            }
             self._pattern = re.compile("|".join(map(re.escape, sorted(names))) or r"(?!)")
         return self._pattern.search(source) is not None
 
@@ -268,30 +363,68 @@ def find_helper_calls(
     functions, modules = (
         _imports(parsed, module if module is not None else parsed.module) if imported else ({}, {})
     )
-    registry = helpers.modules if helpers is not None else {}
 
-    def resolve(func: ast.expr) -> Helper | None:
+    def lookup(module_name: str, name: str) -> Helper | None:
+        return helpers.get(module_name, name) if helpers is not None else None
+
+    def module_of(prefix: str) -> str:
+        head, _, rest = prefix.partition(".")
+        mod = modules.get(head)
+        return (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
+
+    def method_of(cls: str, name: str) -> Helper | None:
+        """The method ``name`` of the class spelled ``cls`` in this file."""
+        prefix, _, cls_name = cls.rpartition(".")
+        if prefix:
+            return lookup(module_of(prefix), f"{cls_name}.{name}")
+        if (found := own.get(f"{cls}.{name}")) is not None:
+            return found
+        if cls in functions:
+            module_name, original = functions[cls]
+            return lookup(module_name, f"{original}.{name}")
+        return None
+
+    def resolve(call: ast.Call) -> Helper | None:
+        func = call.func
         if isinstance(func, ast.Name):
             if func.id in own:
                 return own[func.id]
             if func.id in functions:
-                module_name, name = functions[func.id]
-                return registry.get(module_name, {}).get(name)
+                return lookup(*functions[func.id])
         elif isinstance(func, ast.Attribute) and (prefix := _dotted(func.value)):
-            head, _, rest = prefix.partition(".")
-            mod = modules.get(head)
-            if mod is not None:
-                mod = f"{mod}.{rest}" if rest else mod
-                return registry.get(mod, {}).get(func.attr)
-            return registry.get(prefix, {}).get(func.attr)
+            if (found := lookup(module_of(prefix), func.attr)) is not None:
+                return found
+            if (found := method_of(prefix, func.attr)) is not None:
+                return found if found.kind != "instance" else None
+            if (cls := receiver_class(call, func.value)) is not None:
+                return method_of(cls, func.attr)
         return None
+
+    def receiver_class(call: ast.Call, receiver: ast.expr) -> str | None:
+        """The class of ``self``, or of a variable or ``self`` attribute with an evident type."""
+        stack = parsed.scopes_of(call)
+        base = receiver.value if isinstance(receiver, ast.Attribute) else receiver
+        if not isinstance(base, ast.Name):
+            return None
+        for outer, inner in zip(reversed(stack[:-1]), reversed(stack[1:]), strict=True):
+            if (
+                isinstance(outer, ast.ClassDef)
+                and not isinstance(inner, ast.ClassDef)
+                and inner.args.args
+                and inner.args.args[0].arg == base.id
+                and _kind(inner) != "static"
+            ):
+                if isinstance(receiver, ast.Attribute):
+                    return parsed.type_of(stack, receiver.attr, attribute=True)
+                return outer.name
+        return parsed.type_of(stack, base.id) if base is receiver else None
 
     aliases = parsed.typing_aliases
     calls = []
     scan = parsed.psycopg if composed else None
     pending: list[tuple[ast.Call, Helper, ast.expr]] = []
     for node in parsed.calls:
-        if (helper := resolve(node.func)) is None:
+        if (helper := resolve(node)) is None:
             continue
         query = _argument(helper, node, helper.query)
         if isinstance(query, ast.Constant) and isinstance(query.value, str):

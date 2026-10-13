@@ -196,3 +196,23 @@ def test_type_modules_config_reaches_the_resolver(tmp_path) -> None:
     settings = SettingsResolver(args).for_file(tmp_path / "q.py")
 
     assert settings.type_modules == ("app", "lib.types")
+
+
+def test_configured_functions_apply_to_their_own_project(tmp_path, monkeypatch, capsys) -> None:
+    """``[[tool.sqlty.functions]]`` of one project do not check another project's files."""
+    call = 'from lib import run\n\nrun(q="--sql\\nSELECT 1::INTEGER AS n", row=tuple[str])\n'
+    function = '[[tool.sqlty.functions]]\nimport_path = "lib.run"\nquery_param = "q"\n'
+    for name, config in (("a", function + 'return_type_param = "row"\n'), ("b", "")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "pyproject.toml").write_text(
+            f'[tool.sqlty.rules]\nstale-rewrite = "ignore"\n\n[tool.sqlty]\n{config}'
+        )
+        (tmp_path / name / "q.py").write_text(call)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "a/q.py", "b/q.py"])
+
+    out = capsys.readouterr().out
+    assert "a/q.py" in out
+    assert "b/q.py" not in out

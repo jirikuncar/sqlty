@@ -290,6 +290,17 @@ def _cmd_check(args: argparse.Namespace) -> None:
     for path, parsed in sources.items():
         for name in modules[path]:
             helpers.add(name, parsed)
+    configured: dict[tuple[tuple[str, str, str | None], ...], HelperIndex] = {}
+
+    def helpers_for(settings: Settings) -> HelperIndex:
+        """The index for files governed by ``settings``: its own ``functions`` only."""
+        if not settings.functions:
+            return helpers
+        if settings.functions not in configured:
+            configured[settings.functions] = index = helpers.fork()
+            for import_path, query_param, return_param in settings.functions:
+                index.register(import_path, query_param, return_param)
+        return configured[settings.functions]
 
     total_errors = 0
     total_warnings = 0
@@ -299,6 +310,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     for path in files:
         parsed = sources[path]
         settings = resolver.for_file(path)
+        file_helpers = helpers_for(settings)
         if args.fix:
             fixed = fix_source(
                 parsed,
@@ -321,7 +333,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             rules=settings.rules,
             import_style=settings.import_style,
             untyped=settings.untyped,
-            helpers=helpers,
+            helpers=file_helpers,
             type_modules=settings.type_modules,
         )
         if args.statistics:
@@ -330,7 +342,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 dialect=settings.dialect,
                 schema_sql=settings.schema_sql,
                 import_style=settings.import_style,
-                helpers=helpers,
+                helpers=file_helpers,
             )
 
         for diag in diagnostics:
@@ -463,6 +475,7 @@ class Settings:
     untyped: bool = False
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
+    functions: tuple[tuple[str, str, str | None], ...] = ()
 
 
 class SettingsResolver:
@@ -525,6 +538,10 @@ class SettingsResolver:
             untyped=untyped == "sentinel",
             rules=config.get("rules"),
             type_modules=tuple(config.get("type_modules", ())),
+            functions=tuple(
+                (f["import_path"], f["query_param"], f.get("return_type_param"))
+                for f in config.get("functions", [])
+            ),
         )
 
 

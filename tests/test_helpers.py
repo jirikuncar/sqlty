@@ -109,3 +109,94 @@ def test_ignore_comment_suppresses_helper_diagnostics() -> None:
         check_source(DB + call + "  # sqlty: ignore[column-type-mismatch]\n", schema_sql=SCHEMA)
         == []
     )
+
+
+METHODS = """\
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def fetch_all[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+    @classmethod
+    def fetch_one[T](cls, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+"""
+BAD = '("SELECT name FROM users", int)\n'
+
+
+def test_method_receivers(project, capsys):
+    """Class, instance, annotation, `self` and `self.attr` receivers all bind the arguments."""
+    (project / "pkg" / "methods.py").write_text(METHODS)
+    import_db = "from pkg.methods import Db\n"
+    sources = {
+        "assigned.py": import_db + "db = Db()\ndb.fetch_all" + BAD,
+        "annotated.py": import_db + "def f(db: Db):\n    db.fetch_all" + BAD,
+        "classmethod.py": import_db + "Db.fetch_one" + BAD,
+        "dotted.py": "import pkg.methods as m\ndb: m.Db = m.Db()\ndb.fetch_all" + BAD,
+        "local.py": METHODS + "def f():\n    db = Db()\n    db.fetch_all" + BAD,
+        "inside.py": METHODS + "    def run(self):\n        self.fetch_all" + BAD,
+        "attribute.py": import_db
+        + "class Repo:\n    def __init__(self):\n        self.db = Db()\n"
+        + "    def run(self):\n        self.db.fetch_all"
+        + BAD,
+        "unbound.py": import_db + "Db.fetch_all" + BAD,
+        "reassigned.py": import_db + "db = Db()\ndb = other()\ndb.fetch_all" + BAD,
+        "unrelated.py": "class Other:\n    def fetch_all(self, q, t): ...\n"
+        + "o = Other()\no.fetch_all"
+        + BAD,
+    }
+    for name, source in sources.items():
+        (project / name).write_text(source)
+    with pytest.raises(SystemExit):
+        main(["check", "."])
+    found = [n for n, rule in rules(capsys.readouterr().out) if rule == "column-type-mismatch"]
+    assert sorted(found) == [
+        "annotated.py",
+        "assigned.py",
+        "attribute.py",
+        "classmethod.py",
+        "dotted.py",
+        "inside.py",
+        "local.py",
+    ]
+
+
+def test_package_reexports(project, capsys):
+    (project / "pkg" / "__init__.py").write_text("from .db import fetch_all\n")
+    (project / "use.py").write_text("from pkg import fetch_all\nfetch_all" + BAD)
+    (project / "via_module.py").write_text("import pkg\npkg.fetch_all" + BAD)
+    with pytest.raises(SystemExit):
+        main(["check", "."])
+    assert sorted(rules(capsys.readouterr().out)) == [
+        ("use.py", "column-type-mismatch"),
+        ("via_module.py", "column-type-mismatch"),
+    ]
+
+
+def test_configured_functions(project, capsys):
+    """`[[tool.sqlty.functions]]` registers helpers without annotations."""
+    entries = "".join(
+        f'[[tool.sqlty.functions]]\nimport_path = "{path}"\nquery_param = "sql"\n'
+        'return_type_param = "form"\n'
+        for path in ("pkg.plain.run", "pkg.plain.Db.get", "lib.run")
+    )
+    (project / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n' + entries)
+    (project / "pkg" / "plain.py").write_text(
+        "def run(sql, form): ...\nclass Db:\n    def get(self, sql, form): ...\n"
+    )
+    (project / "positional.py").write_text("from pkg.plain import run\nrun" + BAD)
+    (project / "method.py").write_text(
+        "from pkg.plain import Db\nDb().get(form=int, sql='SELECT name FROM users')\n"
+    )
+    (project / "instance.py").write_text("from pkg.plain import Db\ndb = Db()\ndb.get" + BAD)
+    (project / "library.py").write_text(
+        "from lib import run\nrun(sql='SELECT name FROM users', form=int)\n"
+    )
+    (project / "library_positional.py").write_text("from lib import run\nrun" + BAD)
+    with pytest.raises(SystemExit):
+        main(["check", "."])
+    assert sorted(rules(capsys.readouterr().out)) == [
+        ("instance.py", "column-type-mismatch"),
+        ("library.py", "column-type-mismatch"),
+        ("positional.py", "column-type-mismatch"),
+    ]
