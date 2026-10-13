@@ -245,3 +245,14 @@ def test_user_type_check_skips_unknown_sum_column() -> None:
         'q = SQL[Row]("--sql\\nSELECT SUM(nope) AS total FROM users")\n'
     )
     assert core.check_source(source, schema_sql="CREATE TABLE users (id INT);") == []
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_fix_suppression_follows_inserted_import(newline: str) -> None:
+    source = (
+        '"""Doc."""\nr = "--sql\\nSELECT id FROM t"\n'
+        'q = "--sql\\nSELECT * FROM t"  # sqlty: ignore[select-star]\n'
+    ).replace("\n", newline)
+    fixed = core.fix_source(source, schema_sql="CREATE TABLE t (id INT);")
+    assert fixed.count("from sqlty import SQL") == 1
+    assert f'SELECT * FROM t")  # sqlty: ignore[select-star]{newline}' in fixed

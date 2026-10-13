@@ -9,6 +9,8 @@
 //! The rewriter never modifies string content — it only adds/removes
 //! the `SQL[T]()` wrapper.  This guarantees `strip(rewrite(x)) == x`.
 
+use std::collections::HashMap;
+
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -119,6 +121,7 @@ impl ImportStyle {
 /// Adds necessary imports (SQL and the [`TYPE_MODULES`] row types use) at the top.
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
 /// With `untyped`, row-returning queries of unknown row type become `SQL[UNTYPED](...)`.
+#[cfg(test)]
 pub fn rewrite_source(
     source: &str,
     dialect: &str,
@@ -138,8 +141,29 @@ pub fn rewrite_source_with(
     untyped: bool,
     keep_lines: bool,
 ) -> String {
+    rewrite_source_skipping(
+        source,
+        dialect,
+        schema,
+        import_style,
+        untyped,
+        keep_lines,
+        &|_| false,
+    )
+}
+
+/// [`rewrite_source_with`], leaving alone the strings that start on a line `skip` accepts.
+pub fn rewrite_source_skipping(
+    source: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+    import_style: Option<&str>,
+    untyped: bool,
+    keep_lines: bool,
+    skip: &dyn Fn(usize) -> bool,
+) -> String {
     let istyle = ImportStyle::or_default(import_style);
-    let replacements = wraps(source, dialect, schema, &istyle, untyped);
+    let replacements = wraps(source, dialect, schema, &istyle, untyped, skip);
     let needs_untyped_import = replacements.iter().any(|(_, _, r)| {
         r.starts_with(&format!(
             "{}[{}](",
@@ -236,6 +260,7 @@ pub(crate) fn wraps(
     schema: &Option<Schema>,
     istyle: &ImportStyle,
     untyped: bool,
+    skip: &dyn Fn(usize) -> bool,
 ) -> Vec<(usize, usize, String)> {
     let tokens = tokenize(source);
     let calls = wrapper_calls(source, &tokens, &istyle.wrapper_name);
@@ -267,6 +292,7 @@ pub(crate) fn wraps(
                 .iter()
                 .any(|call| call.span.start <= start && end <= call.span.end)
             || (!interpolated.is_empty() && interpolated.contains(&lines.line_at(start)))
+            || skip(lines.line_at(start))
         {
             continue;
         }
@@ -343,6 +369,18 @@ pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> S
     }
     result.push_str(&source[pos..]);
     result
+}
+
+/// Rules suppressed by `# sqlty: ignore` comments, by line: `None` suppresses every rule.
+pub(crate) type Suppressed = HashMap<usize, Option<Vec<String>>>;
+
+/// Whether a comment on `line` suppresses `rule`.
+pub(crate) fn suppresses(suppressed: &Suppressed, line: usize, rule: &str) -> bool {
+    suppressed.get(&line).is_some_and(|rules| {
+        rules
+            .as_ref()
+            .is_none_or(|rules| rules.iter().any(|r| r == rule))
+    })
 }
 
 /// Newline offsets of a source, so line lookups are a binary search.

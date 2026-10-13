@@ -45,7 +45,8 @@ A comment on the line a diagnostic is reported on drops it:
 
 The comment is read with Python's tokenizer, so a `#` inside a string does
 not start one. For a statement that spans lines, put the comment on the line
-the diagnostic names. `sqlty check --fix` keeps the comment.
+the diagnostic names. `sqlty check --fix` keeps the comment and does not apply
+a fix for a rule the comment suppresses.
 
 ```python
 from typing import TypedDict

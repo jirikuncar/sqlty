@@ -209,10 +209,13 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
+/// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
+/// (`None` for all); fixes of those rules on that line are not applied.
+///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
 fn fix_source(
     source: &str,
     dialect: &str,
@@ -220,6 +223,7 @@ fn fix_source(
     import_style: Option<&str>,
     untyped: bool,
     rules: Option<HashMap<String, String>>,
+    suppressed: Option<rewriter::Suppressed>,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
     Ok(fixer::fix_source(
@@ -229,6 +233,7 @@ fn fix_source(
         import_style,
         untyped,
         rules,
+        suppressed.unwrap_or_default(),
     ))
 }
 

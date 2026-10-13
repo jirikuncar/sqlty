@@ -20,12 +20,12 @@ from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
 from sqlty._core import (
     expand_star,
-    fix_source,
     infer_type,
     returns_rows,
     rewrite_source,
     strip_source,
 )
+from sqlty._core import fix_source as _fix_source
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
@@ -93,6 +93,44 @@ def schema_skipped_objects(schema_sql: str, *, dialect: str = "postgres") -> lis
         [('view', 'v')]
     """
     return _schema_skipped_objects(schema_sql, dialect=dialect)
+
+
+def fix_source(
+    source: str | ParsedSource,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    rules: dict[str, str] | None = None,
+) -> str:
+    """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
+
+    A fix for a rule is not applied to a query whose reported line carries
+    ``# sqlty: ignore`` or ``# sqlty: ignore[rule]`` naming that rule, so a
+    suppressed ``select-star`` is not expanded. Other rules on the line are fixed.
+
+    Example:
+        >>> fix_source('q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]')
+        'q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]'
+
+    Raises:
+        ValueError: unsupported ``import_style``
+    """
+    parsed = ParsedSource.of(source)
+    return _fix_source(
+        parsed.text,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        untyped=untyped,
+        rules=rules,
+        suppressed={
+            line: None if ignore.rules is None else list(ignore.rules)
+            for line, ignore in parsed.ignores.items()
+        }
+        or None,
+    )
 
 
 def check_source(

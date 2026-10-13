@@ -301,7 +301,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         settings = resolver.for_file(path)
         if args.fix:
             fixed = fix_source(
-                parsed.text,
+                parsed,
                 dialect=settings.dialect,
                 schema_sql=settings.schema_sql,
                 import_style=settings.import_style,

@@ -135,5 +135,5 @@ from sqlty import SQL
 q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")  # sqlty: ignore[inline-sql-comment]
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[inline-sql-comment]
+# fixed: q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")  # sqlty: ignore[inline-sql-comment]
 ```

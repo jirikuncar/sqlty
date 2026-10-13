@@ -152,7 +152,7 @@ pub fn check_source(
     }
 
     if rule_config.is_enabled("stale-rewrite") {
-        for (start, _, _) in wraps(source, dialect, schema, &style, untyped) {
+        for (start, _, _) in wraps(source, dialect, schema, &style, untyped, &|_| false) {
             report(
                 "stale-rewrite",
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),

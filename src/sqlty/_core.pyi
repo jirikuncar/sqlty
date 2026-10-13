@@ -32,6 +32,7 @@ def fix_source(
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
+    suppressed: dict[int, list[str] | None] | None = None,
 ) -> str: ...
 def expand_star(
     sql: str,
