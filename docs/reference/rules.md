@@ -29,9 +29,36 @@ stale-type = "error"
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
+| [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
 
 `sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
 rule's page.
+
+## Inline suppression
+
+A comment on the line a diagnostic is reported on drops it:
+
+- `# sqlty: ignore` drops every diagnostic on that line.
+- `# sqlty: ignore[rule-a, rule-b]` drops only the listed rules. A name that
+  matches no diagnostic on the line drops nothing, so the diagnostic stays.
+
+The comment is read with Python's tokenizer, so a `#` inside a string does
+not start one. For a statement that spans lines, put the comment on the line
+the diagnostic names. `sqlty check --fix` keeps the comment.
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: str
+
+# error:
+q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[column-type-mismatch]
+```
+
+Enable [`unused-ignore`](#unused-ignore) to report comments that suppress
+nothing, so accepted cases do not outlive their reason.
 
 The examples below show what `sqlty check` reports for each block. `# error:`
 lines sit above the line they report on, warnings included; a bare `# error:`
@@ -152,6 +179,20 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 Fix: see [TypedDict inheritance](../guide/row-types.md#typeddict-inheritance)
 for what a subclass may do.
+
+## Suppression rules
+
+### unused-ignore
+
+Default: ignore. A `# sqlty: ignore` comment that suppresses no diagnostic on
+its line, or a rule listed in one that suppresses nothing. Off by default;
+enable it with `unused-ignore = "warn"`. It reports, for example:
+
+```text
+'# sqlty: ignore[select-star]' suppresses no diagnostic
+```
+
+Fix: remove the comment, or correct the rule name.
 
 ## Query rules
 

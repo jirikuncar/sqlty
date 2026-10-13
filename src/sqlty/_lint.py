@@ -22,6 +22,7 @@ Configuration via pyproject.toml:
     tstring-skipped = "warn"            # default
     unchecked-query = "warn"            # default
     untyped-query = "warn"              # default
+    unused-ignore = "ignore"            # default
 """
 
 from __future__ import annotations
@@ -144,6 +145,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=True,
         description="SQL[UNTYPED] query has no inferable row type; add casts or a schema",
+    ),
+    "unused-ignore": LintRule(
+        name="unused-ignore",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="# sqlty: ignore comment, or rule in one, that suppresses no diagnostic",
     ),
 }
 

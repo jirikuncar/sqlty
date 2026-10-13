@@ -10,6 +10,10 @@ needs the Python runtime.
 
 from __future__ import annotations
 
+import io
+import re
+import tokenize
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_select as _analyze_select
@@ -82,12 +86,42 @@ def check_source(
     structural checks (column count, type, name, TypedDict keys) run instead
     of ``stale-type``.
 
+    A ``# sqlty: ignore`` comment on a diagnostic's line drops it; ``# sqlty:
+    ignore[rule-a, rule-b]`` drops only those rules. ``unused-ignore`` reports
+    comments that dropped nothing. Comments are found with ``tokenize``, so a
+    ``#`` inside a string is not one.
+
+    Example:
+        >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
+        []
+
     Returns:
         List of diagnostic dicts with keys: rule, message, severity, line
 
     Raises:
         ValueError: unsupported ``import_style``
     """
+    diagnostics = _check_diagnostics(
+        source,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
+    )
+    return _apply_suppressions(source, diagnostics, rules)
+
+
+def _check_diagnostics(
+    source: str,
+    *,
+    dialect: str,
+    schema_sql: str | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+) -> list[dict[str, str | int | None]]:
+    """Every diagnostic before inline suppression."""
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import extract_type_definitions
 
@@ -145,6 +179,79 @@ def check_source(
                     }
                 )
     return diagnostics
+
+
+_IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
+
+
+@dataclass(frozen=True)
+class _Ignore:
+    """A ``# sqlty: ignore`` comment; ``rules`` is ``None`` for a bare one."""
+
+    line: int
+    rules: tuple[str, ...] | None
+
+
+def _ignore_comments(source: str) -> dict[int, _Ignore]:
+    """``# sqlty: ignore`` comments by line, read from COMMENT tokens only."""
+    found: dict[int, _Ignore] = {}
+    tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+    try:
+        for tok in tokens:
+            if tok.type != tokenize.COMMENT or (match := _IGNORE_RE.match(tok.string)) is None:
+                continue
+            names = match.group(1)
+            rules = (
+                None if names is None else tuple(n.strip() for n in names.split(",") if n.strip())
+            )
+            found[tok.start[0]] = _Ignore(tok.start[0], rules)
+    except tokenize.TokenError, SyntaxError:
+        pass
+    return found
+
+
+def _apply_suppressions(
+    source: str,
+    diagnostics: list[dict[str, str | int | None]],
+    rules: dict[str, str] | None,
+) -> list[dict[str, str | int | None]]:
+    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
+    from sqlty._lint import RuleConfig
+
+    ignores = _ignore_comments(source)
+    if not ignores:
+        return diagnostics
+
+    kept: list[dict[str, str | int | None]] = []
+    used: set[tuple[int, str | None]] = set()
+    for diag in diagnostics:
+        line = diag["line"]
+        ignore = ignores.get(line) if isinstance(line, int) else None
+        if ignore is None or (ignore.rules is not None and diag["rule"] not in ignore.rules):
+            kept.append(diag)
+        else:
+            used.add((ignore.line, None if ignore.rules is None else str(diag["rule"])))
+
+    rule_config = RuleConfig(overrides=rules)
+    if rule_config.is_enabled("unused-ignore"):
+        severity = rule_config.severity("unused-ignore").value
+        for ignore in ignores.values():
+            unused: list[str | None]
+            if ignore.rules is None:
+                unused = [None] if (ignore.line, None) not in used else []
+            else:
+                unused = [name for name in ignore.rules if (ignore.line, name) not in used]
+            for name in unused:
+                written = "# sqlty: ignore" if name is None else f"# sqlty: ignore[{name}]"
+                kept.append(
+                    {
+                        "rule": "unused-ignore",
+                        "message": f"'{written}' suppresses no diagnostic",
+                        "severity": severity,
+                        "line": ignore.line,
+                    }
+                )
+    return kept
 
 
 def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list[TypeInfo]:
