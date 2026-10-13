@@ -299,13 +299,13 @@ Alias columns that a row type matches by name.
 
 ```sql
 SELECT NULLIF(a::INTEGER, 0), my_fn(b), COUNT(*), count(c), LOWER(d), json_build_object('k', 1), NOT e, -f, -1 FROM t
--- columns: NULLIF: None (None)
+-- columns: NULLIF: int (INT)
 -- columns: my_fn: None (None)
 -- columns: *: int (INTEGER)
 -- columns: : int (INTEGER)
--- columns: : str (None)
--- columns: json_build_object: dict (None)
+-- columns: : str (TEXT)
+-- columns: json_build_object: dict (JSON)
 -- columns: : bool (BOOLEAN)
 -- columns: : None (None)
--- columns: 1: None (None)
+-- columns: 1: int (None)
 ```

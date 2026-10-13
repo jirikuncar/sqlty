@@ -99,7 +99,8 @@ Literals, `COUNT(*)` and casts inside expressions are typed too. A column
 without a cast, schema entry or literal type becomes `str`, as does an
 expression sqlty cannot type, such as arithmetic on such a column. Predicates
 are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
-wider type. Cast the whole expression when the default is wrong:
+wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
+`greatest`, `unnest` and the advisory locks are typed too. Cast the whole expression when the default is wrong:
 
 ```python
 query = "--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t"

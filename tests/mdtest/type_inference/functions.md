@@ -46,7 +46,7 @@ SELECT WEIRD_FUNC(x, y) FROM z
 
 ```sql
 SELECT EXTRACT(YEAR FROM created_at) FROM events
--- inferred: tuple[str]
+-- inferred: tuple[float]
 ```
 
 ## NOW() function to hit line 115
