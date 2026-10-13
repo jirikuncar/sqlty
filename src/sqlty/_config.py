@@ -1,8 +1,11 @@
 """Configuration loading from pyproject.toml."""
 
+import glob
 import logging
 from pathlib import Path
 from typing import Any, TypedDict, cast
+
+SchemaSpec = str | list[str]
 
 
 class FunctionConfig(TypedDict, total=False):
@@ -27,7 +30,7 @@ class FunctionConfig(TypedDict, total=False):
     )
     query_param: str  # Name of the parameter containing the SQL query (required)
     return_type_param: str  # Name of the parameter specifying the return type (optional)
-    schema: str  # Path to SQL schema file for type inference (optional)
+    schema: SchemaSpec  # Schema file, directory or glob, or a list of them (optional)
     return_type_template: str  # Template for return type with {sqlty} placeholder (optional)
     self_type_template: (
         str  # TODO: Template for self parameter - currently not supported for methods (optional)
@@ -47,7 +50,7 @@ class FunctionConfigComplete(_FunctionConfigRequired, total=False):
     """Complete FunctionConfig with optional fields."""
 
     return_type_param: str
-    schema: str
+    schema: SchemaSpec
     return_type_template: str
     self_type_template: str
     imports: list[str]
@@ -76,13 +79,47 @@ class SQLTyConfig(TypedDict, total=False):
     """
 
     dialect: str
-    schema: str  # Path to schema .sql file
-    schemas: dict[str, str]  # registry_name -> schema_path
+    schema: SchemaSpec  # Schema file, directory or glob, or a list of them
+    schemas: dict[str, SchemaSpec]  # registry_name -> schema entries
     rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
+
+
+def _schema_spec(value: Any) -> SchemaSpec:
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return str(value)
+
+
+def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
+    """List the schema files named by ``spec``, in order.
+
+    ``spec`` is a path or a list of paths; each entry is a file, a directory
+    (every ``*.sql`` under it, recursively) or a glob (``*``, ``?``, ``[``;
+    ``**`` recurses), relative to ``base``. Directory and glob matches are sorted
+    by path; repeated files are listed once. A plain path is kept even if it
+    does not exist, so callers report it; a glob that matches nothing is logged.
+    """
+    entries = [spec] if isinstance(spec, (str, Path)) else spec
+    files: dict[Path, None] = {}
+    for entry in entries:
+        path = base / entry
+        if glob.has_magic(str(entry)):
+            matches = [
+                base / m for m in sorted(glob.glob(str(entry), root_dir=base, recursive=True))
+            ]
+            found = [m for m in matches if m.is_file()]
+            if not found:
+                logging.getLogger(__name__).warning("Schema pattern matches no files: %s", entry)
+        elif path.is_dir():
+            found = sorted(p for p in path.rglob("*.sql") if p.is_file())
+        else:
+            found = [path]
+        files.update(dict.fromkeys(found))
+    return list(files)
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
@@ -148,11 +185,11 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
 
     if "schemas" in tool_config and isinstance(tool_config["schemas"], dict):
         # Convert all values to strings
-        config["schemas"] = {k: str(v) for k, v in tool_config["schemas"].items()}
+        config["schemas"] = {k: _schema_spec(v) for k, v in tool_config["schemas"].items()}
 
     # Single schema path (top-level convenience key)
     if "schema" in tool_config:
-        config["schema"] = str(tool_config["schema"])
+        config["schema"] = _schema_spec(tool_config["schema"])
 
     # Rule severity overrides: [tool.sqlty.rules]
     if "rules" in tool_config and isinstance(tool_config["rules"], dict):
@@ -195,7 +232,7 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
 
             # Optional schema field
             if "schema" in func_config:
-                function_dict["schema"] = str(func_config["schema"])
+                function_dict["schema"] = _schema_spec(func_config["schema"])
 
             # Optional return_type_template field
             if "return_type_template" in func_config:

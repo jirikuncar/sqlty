@@ -28,7 +28,7 @@ class Run:
         self.updater = updater
         settings = section.settings
         self.dialect: str = settings.get("dialect", "postgres")
-        self.schema_sql: str | None = section.files.get(settings.get("schema", ""))
+        self.schema_sql: str | None = section.schema_sql
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.rules: dict[str, str] | None = settings.get("rules")

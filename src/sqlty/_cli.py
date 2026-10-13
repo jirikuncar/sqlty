@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import argparse
 
+    from sqlty._config import SchemaSpec
+
 logger = logging.getLogger(__name__)
 
 
@@ -143,8 +145,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--schema",
-        type=Path,
-        help="Schema .sql file for every path (default: [tool.sqlty] schema per project)",
+        action="append",
+        help="Schema .sql file, directory or glob for every path; repeat for several "
+        "(default: [tool.sqlty] schema per project)",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
@@ -383,7 +386,7 @@ class SettingsResolver:
 
     def __init__(self, args: argparse.Namespace) -> None:
         self._args = args
-        self._schema_sql = _load_schema(args.schema) if args.schema else None
+        self._schema_sql = _load_schema(args.schema, Path.cwd()) if args.schema else None
         self._by_dir: dict[Path, Settings] = {}
 
     def for_file(self, path: Path) -> Settings:
@@ -400,7 +403,7 @@ class SettingsResolver:
         args = self._args
         schema_sql = self._schema_sql
         if schema_sql is None and "schema" in config and config_dir is not None:
-            schema_sql = _load_schema(config_dir / config["schema"])
+            schema_sql = _load_schema(config["schema"], config_dir)
         untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
         if untyped not in ("skip", "sentinel"):
             raise SystemExit(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
@@ -421,12 +424,17 @@ class SettingsResolver:
         )
 
 
-def _load_schema(schema_path: Path) -> str | None:
-    """Load schema SQL from a file path."""
-    if schema_path.exists():
-        return schema_path.read_text(encoding="utf-8")
-    logger.warning("Schema file not found: %s", schema_path)
-    return None
+def _load_schema(spec: SchemaSpec, base: Path) -> str | None:
+    """Concatenate the schema files named by ``spec``; None if none can be read."""
+    from sqlty._config import expand_schema
+
+    parts: list[str] = []
+    for path in expand_schema(spec, base):
+        if path.is_file():
+            parts.append(path.read_text(encoding="utf-8"))
+        else:
+            logger.warning("Schema file not found: %s", path)
+    return "\n".join(parts) if parts else None
 
 
 def _print_diff(path: Path, original: str, modified: str) -> None:

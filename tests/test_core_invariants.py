@@ -34,7 +34,7 @@ def _corpus(kind: str) -> list[Any]:
             settings = section.settings
             options = {
                 "dialect": settings.get("dialect", "postgres"),
-                "schema_sql": section.files.get(settings.get("schema", "")),
+                "schema_sql": section.schema_sql,
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
             }

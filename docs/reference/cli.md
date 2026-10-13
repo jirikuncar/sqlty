@@ -24,7 +24,7 @@ nearest `pyproject.toml` above it that has one; see
 |--------|-------------|
 | `paths ...` | Files or directories to process (default: `.`) |
 | `--dialect {postgres,sqlite,mysql}` | SQL dialect; overrides `dialect` in `pyproject.toml` (default: that key, else `postgres`) |
-| `--schema SCHEMA` | Schema `.sql` file; overrides `schema` in `pyproject.toml` |
+| `--schema SCHEMA` | Schema `.sql` file, directory or glob; repeat for several, joined in order. Overrides `schema` in `pyproject.toml` |
 | `-v`, `--verbose` | Print each file `rewrite` or `strip` changes |
 | `-q`, `--quiet` | Suppress non-error output |
 | `-h`, `--help` | Show help and exit |

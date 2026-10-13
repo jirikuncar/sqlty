@@ -48,11 +48,19 @@ SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
 
 ## `schema`
 
-Path to a `.sql` file with `CREATE TABLE` statements, relative to the
-directory of `pyproject.toml`. CLI: `--schema` (relative to the current
-directory). See [Schema inference](../guide/schema-inference.md).
+A `.sql` file with `CREATE TABLE` statements, or a list of them, relative to
+the directory of `pyproject.toml`. Each entry is a file, a directory (every
+`*.sql` below it) or a glob (`tables/*.sql`, `**/*.sql`). The files are joined
+in the order of the list; directory and glob matches are sorted by path, and a
+file named twice is read once. CLI: `--schema`, repeatable (relative to the
+current directory). See [Schema inference](../guide/schema-inference.md).
 Stub generation uses it for helpers that have no more specific schema; see
 [Generated stubs](../guide/stubs.md#schemas).
+
+```toml
+[tool.sqlty]
+schema = ["extensions.sql", "tables/"]
+```
 
 ## `schemas`
 
