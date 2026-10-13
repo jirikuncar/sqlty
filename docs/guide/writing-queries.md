@@ -109,6 +109,10 @@ query = "--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t"
 # rewritten: query = SQL[tuple[int, int, str, int, str]]("--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t")
 ```
 
+An unaliased column is named as PostgreSQL names it: the column (also under a
+cast), the function (`count`, `max`, `now`), a keyword such as `case` or
+`exists`, else `?column?`. Alias columns that a row type matches by name.
+
 Row types are never optional: a nullable column is typed as its base type.
 Annotate a [row type](row-types.md) with `T | None` when you need it.
 

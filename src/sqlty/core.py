@@ -59,7 +59,7 @@ def analyze_select(
 
     Example:
         >>> analyze_select("SELECT id::INTEGER, COUNT(*) AS n FROM users")
-        [ColumnInfo(name='id', python_type='int', sql_type='INT'), ColumnInfo(name='n', python_type='int', sql_type='INTEGER')]
+        [ColumnInfo(name='id', python_type='int', sql_type='INT'), ColumnInfo(name='n', python_type='int', sql_type='BIGINT')]
 
     Raises:
         RuntimeError: ``SUM(column)`` names a column missing from a schema table.

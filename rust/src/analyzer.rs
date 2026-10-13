@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable, FunctionArg,
-    FunctionArgExpr, FunctionArguments, Join, JoinConstraint, JoinOperator, ObjectName,
+    FunctionArgExpr, FunctionArguments, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
     OutputClause, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
     TableAlias, TableFactor, TableObject, TableWithJoins, UnaryOperator,
     UserDefinedTypeRepresentation, Value,
@@ -1398,57 +1398,89 @@ fn from_sql_type(sql_type: String) -> Typed {
     (Some(python_type(&sql_type)), Some(sql_type))
 }
 
-/// Functions whose result type is known, besides those in [`COMMON_FUNCTIONS`].
-const TYPED_FUNCTIONS: [&str; 5] = ["COUNT", "AVG", "SUM", "MIN", "MAX"];
+/// PostgreSQL's name for an unquoted identifier is lowercase.
+fn ident_name(ident: &Ident) -> String {
+    match ident.quote_style {
+        Some(_) => ident.value.clone(),
+        None => ident.value.to_lowercase(),
+    }
+}
 
-/// Typed functions whose unaliased column is still named after the function.
-const NAMED_FUNCTIONS: [&str; 7] = [
-    "OCTET_LENGTH",
-    "JSON_BUILD_OBJECT",
-    "JSONB_BUILD_OBJECT",
-    "TO_JSON",
-    "TO_JSONB",
-    "JSONB_AGG",
-    "JSONB_OBJECT_AGG",
-];
-
-/// Name of an unaliased result column: a column's name, a (signed) literal's text, `*` for
-/// `COUNT(*)`, the function's name for a call sqlty can't type; empty for anything else.
+/// Name of an unaliased result column, as PostgreSQL picks it: a column's name (also under
+/// a cast), a function's name, a few keywords (`case`, `exists`, `array`, ...), and
+/// `?column?` for anything else.
 fn column_name(expr: &Expr) -> String {
+    let name = figure_name(expr);
+    if name.is_empty() {
+        "?column?".to_string()
+    } else {
+        name
+    }
+}
+
+/// [`column_name`], empty when PostgreSQL gives the column no name of its own.
+fn figure_name(expr: &Expr) -> String {
     match expr {
-        Expr::Identifier(ident) => ident.value.clone(),
-        Expr::CompoundIdentifier(parts) => parts
+        Expr::Identifier(ident) => ident_name(ident),
+        Expr::CompoundIdentifier(parts) => parts.last().map(ident_name).unwrap_or_default(),
+        Expr::Cast {
+            expr, data_type, ..
+        } => Some(figure_name(expr))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| type_column_name(data_type)),
+        Expr::Nested(expr) | Expr::Collate { expr, .. } => figure_name(expr),
+        Expr::Function(func) => func
+            .name
+            .0
             .last()
-            .map(|part| part.value.clone())
+            .and_then(|part| part.as_ident())
+            .map(ident_name)
             .unwrap_or_default(),
-        Expr::Cast { expr, .. } => column_name(expr),
-        Expr::UnaryOp { expr, .. } if matches!(**expr, Expr::Value(_)) => column_name(expr),
-        Expr::Extract { field, .. } => field.to_string(),
-        Expr::Value(value) => match &value.value {
-            Value::Number(number, _) => number.clone(),
-            Value::Null => "NULL".to_string(),
-            Value::Boolean(_) | Value::Placeholder(_) => String::new(),
-            other => other.clone().into_string().unwrap_or_default(),
-        },
-        Expr::Function(func) => {
-            let name = func.name.to_string().to_uppercase();
-            let star = matches!(&func.args, FunctionArguments::List(list)
-                if matches!(list.args.first(), Some(FunctionArg::Unnamed(FunctionArgExpr::Wildcard))));
-            let typed = TYPED_FUNCTIONS.contains(&name.as_str())
-                || FUNCTION_TYPES.contains_key(name.as_str());
-            if name == "COUNT" && star {
-                "*".to_string()
-            } else if typed && !NAMED_FUNCTIONS.contains(&name.as_str()) {
-                String::new()
-            } else {
-                func.name
-                    .0
-                    .last()
-                    .and_then(|part| part.as_ident())
-                    .map(|ident| ident.value.clone())
-                    .unwrap_or_default()
-            }
-        }
+        Expr::Extract { .. } => "extract".to_string(),
+        Expr::Case { .. } => "case".to_string(),
+        Expr::Exists { .. } => "exists".to_string(),
+        Expr::Array(_) => "array".to_string(),
+        Expr::Trim { .. } => "btrim".to_string(),
+        Expr::Substring { .. } => "substring".to_string(),
+        Expr::Position { .. } => "position".to_string(),
+        Expr::Overlay { .. } => "overlay".to_string(),
+        Expr::AtTimeZone { .. } => "timezone".to_string(),
+        Expr::Interval(_) => "interval".to_string(),
+        Expr::TypedString(typed) => type_column_name(&typed.data_type),
+        Expr::Subquery(query) => scalar_subquery_name(query),
+        _ => String::new(),
+    }
+}
+
+/// The name PostgreSQL gives `value::type` when `value` has none: the type's own name.
+fn type_column_name(data_type: &DataType) -> String {
+    let text = data_type.to_string().to_lowercase();
+    let base = text.split(['(', '[']).next().unwrap_or_default().trim();
+    match base {
+        "int" | "integer" => "int4",
+        "bigint" => "int8",
+        "smallint" => "int2",
+        "boolean" => "bool",
+        "real" => "float4",
+        "double precision" | "double" => "float8",
+        "character varying" => "varchar",
+        "character" | "char" => "bpchar",
+        "decimal" => "numeric",
+        "float" => "float8",
+        "timestamp" | "timestamp without time zone" => "timestamp",
+        "timestamp with time zone" => "timestamptz",
+        "time without time zone" => "time",
+        "time with time zone" => "timetz",
+        other => other.rsplit('.').next().unwrap_or(other),
+    }
+    .to_string()
+}
+
+/// A scalar subquery is named after its single column.
+fn scalar_subquery_name(query: &Query) -> String {
+    match leftmost_select(&query.body).and_then(|select| select.projection.first()) {
+        Some(SelectItem::UnnamedExpr(expr)) => figure_name(expr),
+        Some(SelectItem::ExprWithAlias { alias, .. }) => alias.value.clone(),
         _ => String::new(),
     }
 }
@@ -1825,7 +1857,7 @@ impl<'a> Analyzer<'a> {
                 let args = positional_args(&func.args);
                 let arg = args.first().copied();
                 match name.as_str() {
-                    "COUNT" => Ok((Some("int".to_string()), Some("INTEGER".to_string()))),
+                    "COUNT" => Ok(from_sql_type("BIGINT".to_string())),
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
