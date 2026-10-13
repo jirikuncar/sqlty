@@ -243,7 +243,37 @@ class ParsedSource:
         Collected in the same pass as ``imports``, and only when the text mentions ``psycopg``.
         """
         scan = self._scan
-        return PsycopgScan(self.imports, scan.scopes, scan.stores, scan.values)
+        return PsycopgScan(self.imports, scan.scopes, scan.stores, scan.values, self)
+
+    @functools.cached_property
+    def constants(self) -> dict[str, ast.expr | None]:
+        """Module-level names to the value of their one assignment.
+
+        A name bound more than once, or by an import, ``def``, ``class`` or augmented
+        assignment, maps to ``None``. Only top-level statements are read.
+
+        Example:
+            >>> sorted(ParsedSource("A = 'x'\\nB = 1\\nB = 2\\ndef C(): ...").constants)
+            ['A', 'B', 'C']
+            >>> ParsedSource("A = 'x'\\nB = 1\\nB = 2").constants['B'] is None
+            True
+        """
+        found: dict[str, ast.expr | None] = {}
+        for node in self.tree.body if self.tree is not None else []:
+            bound: dict[str, ast.expr | None] = {}
+            if isinstance(node, ast.Assign) and all(isinstance(t, ast.Name) for t in node.targets):
+                bound = {t.id: node.value for t in node.targets if isinstance(t, ast.Name)}
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                bound = {node.target.id: node.value}
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                bound = {node.target.id: None}
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound = {node.name: None}
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                bound = {(a.asname or a.name).partition(".")[0]: None for a in node.names}
+            for name, value in bound.items():
+                found[name] = None if name in found else value
+        return found
 
     @functools.cached_property
     def functions(self) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:

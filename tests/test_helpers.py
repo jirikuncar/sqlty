@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 
 from sqlty._cli import main
@@ -200,3 +202,59 @@ def test_configured_functions(project, capsys):
         ("library.py", "column-type-mismatch"),
         ("positional.py", "column-type-mismatch"),
     ]
+
+
+COMPOSED_DB = """\
+from typing import Annotated, LiteralString
+from psycopg import sql
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: type[T], /) -> list[T]: ...
+"""
+
+
+def test_compositions_use_fragments_of_other_modules(project, capsys, monkeypatch):
+    """Names imported from checked modules resolve to their one literal binding."""
+    pytest.importorskip("psycopg")
+    parses: list[str] = []
+    real = ast.parse
+    monkeypatch.setattr(ast, "parse", lambda s, *a, **k: parses.append(s) or real(s, *a, **k))
+    (project / "pkg" / "db.py").write_text(COMPOSED_DB)
+    (project / "pkg" / "columns.py").write_text(
+        'from psycopg import sql\nUSER_COLUMNS = sql.SQL("id, name")\n'
+        "LOOKED_UP = USER_COLUMNS\n"
+        "DYNAMIC = sql.Identifier(input())\nTWICE = sql.SQL('id')\nTWICE = sql.SQL('name')\n"
+    )
+    (project / "pkg" / "__init__.py").write_text("from .columns import USER_COLUMNS as EXPORTED\n")
+    head = "from psycopg import sql\nfrom pkg.db import fetch_all\n"
+    query = 'fetch_all(sql.SQL("SELECT {} FROM users").format(%s), tuple[int, int])\n'
+    sources = {
+        "imported.py": head + "from pkg.columns import USER_COLUMNS\n" + query % "USER_COLUMNS",
+        "relative.py": head + "from pkg import columns as c\n" + query % "c.USER_COLUMNS",
+        "module.py": head + "import pkg.columns\n" + query % "pkg.columns.LOOKED_UP",
+        "reexported.py": head + "from pkg import EXPORTED\n" + query % "EXPORTED",
+        "dynamic.py": head
+        + "from pkg.columns import DYNAMIC, TWICE\n"
+        + query % "DYNAMIC"
+        + query % "TWICE",
+        "shadowed.py": head
+        + "from pkg.columns import USER_COLUMNS\ndef f(USER_COLUMNS):\n    "
+        + query % "USER_COLUMNS",
+        "unknown.py": head + "from elsewhere import USER_COLUMNS\n" + query % "USER_COLUMNS",
+    }
+    for name, source in sources.items():
+        (project / name).write_text(source)
+    with pytest.raises(SystemExit):
+        main(["check", "."])
+    assert sorted(rules(capsys.readouterr().out)) == [
+        ("dynamic.py", "unchecked-query"),
+        ("dynamic.py", "unchecked-query"),
+        ("imported.py", "column-type-mismatch"),
+        ("module.py", "column-type-mismatch"),
+        ("reexported.py", "column-type-mismatch"),
+        ("relative.py", "column-type-mismatch"),
+        ("shadowed.py", "unchecked-query"),
+        ("unknown.py", "unchecked-query"),
+    ]
+    columns = (project / "pkg" / "columns.py").read_text()
+    assert parses.count(columns) == 1

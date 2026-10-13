@@ -12,7 +12,13 @@ Usage:
 from __future__ import annotations
 
 import ast
-from typing import Any, Final
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from sqlty._source import ParsedSource
+
+Resolver = Callable[["ParsedSource", str], "tuple[ParsedSource, ast.expr] | None"]
 
 _CLASSES = frozenset({"SQL", "Identifier", "Literal", "Placeholder", "Composed"})
 _METHODS = frozenset({"format", "join"})
@@ -70,7 +76,9 @@ class PsycopgScan:
         scopes: list[_Scope],
         stores: dict[str, list[ast.Name]],
         values: dict[int, ast.expr],
+        source: ParsedSource | None = None,
     ) -> None:
+        self.source = source
         self.imports = imports
         self.scopes = scopes
         self.stores = stores
@@ -78,17 +86,19 @@ class PsycopgScan:
         self._table: dict[str, str] | None = None
         self._sql: Any = None
 
-    def render(self, expr: ast.expr) -> str | None:
+    def render(self, expr: ast.expr, resolve: Resolver | None = None) -> str | None:
         """The SQL of a psycopg composition, ``UNCHECKED`` when a part is dynamic.
 
         ``None`` when ``expr`` is no psycopg composition or psycopg is missing.
+        ``resolve(source, dotted)`` finds the module-level value of a name imported
+        from another module, as ``(its source, expression)``.
         """
         try:
             from psycopg import sql
         except ImportError:
             return None
         self._sql = sql
-        run = _Run(self)
+        run = _Run(self, sql, resolve)
         try:
             value = run.value(expr)
             if not isinstance(value, sql.Composable):
@@ -140,6 +150,16 @@ class PsycopgScan:
             return None
         return None
 
+    def is_parameter(self, name: ast.Name) -> bool:
+        """Whether ``name`` is a parameter of an enclosing function."""
+        pos = (name.lineno, name.col_offset)
+        return any(
+            not isinstance(scope, ast.ClassDef)
+            and _span(scope)[0] <= pos < _span(scope)[1]
+            and name.id in _params(scope)
+            for scope in self.scopes
+        )
+
     def _owner(self, store: ast.Name) -> _Scope | None:
         """The innermost function or class containing ``store``, ``None`` for the module."""
         pos = (store.lineno, store.col_offset)
@@ -154,11 +174,33 @@ class PsycopgScan:
 class _Run:
     """One evaluation of an expression."""
 
-    def __init__(self, scan: PsycopgScan) -> None:
+    def __init__(self, scan: PsycopgScan, sql: Any, resolve: Resolver | None) -> None:
         self.scan = scan
-        self.sql = scan._sql
+        self.sql = sql
+        self.resolve = resolve
         self.seen = False
         self.depth = 0
+
+    def _imported(self, node: ast.expr) -> Any:
+        """The value of a name or ``module.NAME`` bound in another checked module."""
+        source = self.scan.source
+        dotted = _dotted(node)
+        if (
+            self.resolve is None
+            or source is None
+            or dotted is None
+            or (isinstance(node, ast.Name) and (node.id in self.scan.stores))
+            or (isinstance(node, ast.Name) and self.scan.is_parameter(node))
+            or (found := self.resolve(source, dotted)) is None
+        ):
+            raise _Dynamic
+        parsed, expr = found
+        inner = _Run(parsed.psycopg, self.sql, self.resolve)
+        inner.depth = self.depth
+        try:
+            return inner.value(expr)
+        finally:
+            self.seen = self.seen or inner.seen
 
     def value(self, node: ast.expr) -> Any:
         self.depth += 1
@@ -174,8 +216,10 @@ class _Run:
             return node.value
         if isinstance(node, ast.Name):
             if (target := self.scan.binding(node)) is None:
-                raise _Dynamic
+                return self._imported(node)
             return self.value(target)
+        if isinstance(node, ast.Attribute):
+            return self._imported(node)
         if isinstance(node, (ast.List, ast.Tuple)):
             if any(isinstance(item, ast.Starred) for item in node.elts):
                 raise _Dynamic

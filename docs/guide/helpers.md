@@ -178,6 +178,12 @@ query = sql.SQL("SELECT {cols} FROM {table} WHERE id = {id}").format(
 rows = fetch_all(query, tuple[int, int])
 ```
 
+A name imported from another checked module (`from .columns import
+USER_COLUMNS`, or `columns.USER_COLUMNS` after `import pkg.columns as columns`)
+resolves the same way when that module binds it once at module level to a
+literal string or a composition built only from literals. Each module is parsed
+once, however many files import from it.
+
 A part that is not a literal (`sql.Identifier(column)` with a variable) makes
 the query `unchecked-query`. Without psycopg installed these calls are skipped.
 

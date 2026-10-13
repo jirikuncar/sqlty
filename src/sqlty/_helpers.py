@@ -215,6 +215,8 @@ class HelperIndex:
         resolved without importing it or parsing it again.
         """
         parsed = ParsedSource.of(source)
+        if parsed.module is None:
+            parsed.module = module
         self.sources[module] = parsed
         if parsed.module is not None and parsed.module.endswith(".__init__"):
             self.packages.add(module)
@@ -256,6 +258,11 @@ class HelperIndex:
             self.modules.setdefault(module, {})[name] = helper
         self._pattern = None
 
+    def _reexports(self, module: str, parsed: ParsedSource) -> dict[str, tuple[str, str]]:
+        if (exports := self._exports.get(module)) is None:
+            exports = self._exports[module] = _imports(parsed, parsed.module or module)[0]
+        return exports
+
     def get(self, module: str, name: str, _depth: int = 0) -> Helper | None:
         """The helper ``name`` of ``module``, following names the module re-exports.
 
@@ -266,12 +273,36 @@ class HelperIndex:
             return found
         if _depth > 8 or (parsed := self.sources.get(module)) is None:
             return None
-        if (exports := self._exports.get(module)) is None:
-            exports = self._exports[module] = _imports(parsed, parsed.module or module)[0]
+        exports = self._reexports(module, parsed)
         head, dot, rest = name.partition(".")
         if (target := exports.get(head)) is None:
             return None
         return self.get(target[0], target[1] + dot + rest, _depth + 1)
+
+    def fragment(self, parsed: ParsedSource, dotted: str) -> tuple[ParsedSource, ast.expr] | None:
+        """The value of ``NAME`` or ``module.NAME`` imported by ``parsed`` from a checked module.
+
+        Only a module-level name assigned once counts; re-exports are followed.
+        """
+        functions, modules = _imports(parsed, parsed.module)
+        prefix, _, name = dotted.rpartition(".")
+        if not prefix:
+            return self._constant(*functions[name]) if name in functions else None
+        head, _, rest = prefix.partition(".")
+        mod = modules.get(head)
+        return self._constant(
+            (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix, name
+        )
+
+    def _constant(
+        self, module: str, name: str, _depth: int = 0
+    ) -> tuple[ParsedSource, ast.expr] | None:
+        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+            return None
+        if (value := parsed.constants.get(name)) is not None:
+            return parsed, value
+        exports = self._reexports(module, parsed)
+        return self._constant(*exports[name], _depth + 1) if name in exports else None
 
     def mentions(self, source: str) -> bool:
         """Whether ``source`` contains the name of some helper, so it may call one."""
@@ -419,6 +450,13 @@ def find_helper_calls(
                 return outer.name
         return parsed.type_of(stack, base.id) if base is receiver else None
 
+    def resolve_fragment(source: ParsedSource, dotted: str) -> tuple[ParsedSource, ast.expr] | None:
+        if helpers is None:
+            return None
+        if source.module is None:
+            source.module = module
+        return helpers.fragment(source, dotted)
+
     aliases = parsed.typing_aliases
     calls = []
     scan = parsed.psycopg if composed else None
@@ -435,7 +473,7 @@ def find_helper_calls(
             pending.append((node, helper, query))
     for node, helper, query in pending:
         assert scan is not None
-        if (text := scan.render(query)) is not None:
+        if (text := scan.render(query, resolve_fragment)) is not None:
             row = _argument(helper, node, helper.row)
             calls.append(HelperCall(node.lineno, None if text == UNCHECKED else text, row, aliases))
     return sorted(calls, key=lambda call: call.line)
