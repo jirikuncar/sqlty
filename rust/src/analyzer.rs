@@ -816,6 +816,27 @@ pub fn analyze_select(
     analyzer.statement_columns(&stmt)
 }
 
+/// Why `sql` does not parse in `dialect`, as sqlparser words it; `None` when it parses
+/// (empty SQL included).
+pub fn parse_error(sql: &str, dialect: &str) -> Option<String> {
+    let dialect = SqlDialect::from_name(dialect);
+    if parse_query(sql, dialect).is_some() {
+        return None;
+    }
+    let input = parser_input(sql, dialect);
+    Some(
+        match Parser::parse_sql(dialect.parser_dialect().as_ref(), &input) {
+            Ok(_) => "unsupported in this dialect".to_string(),
+            Err(err) => {
+                let text = err.to_string();
+                text.strip_prefix("sql parser error: ")
+                    .unwrap_or(&text)
+                    .to_string()
+            }
+        },
+    )
+}
+
 /// Whether `sql` yields rows: a query, DML with RETURNING, or unparseable SQL.
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.

@@ -433,14 +433,21 @@ pub(crate) fn infer_sql_content(
     dialect: &str,
     schema: &Option<Schema>,
 ) -> Option<String> {
-    let rest = after_marker(sql_content)?;
-    let rest = match rest.strip_prefix("\\r\\n").or(rest.strip_prefix("\\n")) {
-        Some(query) => format!("\n{query}"),
-        None => rest.to_string(),
-    };
-    infer_type(&format!("--sql{rest}"), dialect, schema)
+    infer_type(&marked_query(sql_content)?, dialect, schema)
         .ok()
         .flatten()
+}
+
+/// Marked string content as the analyzer reads it: the `--sql` marker, with an escaped
+/// line break after it made real. `None` when the content has no marker.
+pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
+    let rest = after_marker(sql_content)?;
+    Some(
+        match rest.strip_prefix("\\r\\n").or(rest.strip_prefix("\\n")) {
+            Some(query) => format!("--sql\n{query}"),
+            None => format!("--sql{rest}"),
+        },
+    )
 }
 
 /// Remove sqlty/datetime/typing/uuid imports that are no longer referenced.

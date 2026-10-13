@@ -117,6 +117,16 @@ fn schema_skipped_tables(schema_sql: &str, dialect: &str) -> Vec<String> {
     cached_schema(schema_sql, dialect).1
 }
 
+/// Why a query does not parse, as sqlparser words it; None when it parses (or is empty).
+///
+/// Example:
+///     parse_error("SELECT id FROM", dialect="postgres")  # "Expected: ..., found: EOF ..."
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres"))]
+fn parse_error(sql: &str, dialect: &str) -> Option<String> {
+    analyzer::parse_error(sql, dialect)
+}
+
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
@@ -260,11 +270,31 @@ fn wrapped_queries(
     Ok(checker::wrapped_queries(source, import_style))
 }
 
+/// Each query `check` sees, for `sqlty check --statistics`: `(line, kind, text)`.
+///
+/// `kind` is `"query"` with the `--sql` text (marker included), or the rule that
+/// skips the string (`fstring-skipped`, `tstring-skipped`, `unchecked-query`), with
+/// empty text. Queries passed to an `Annotated[LiteralString, SQL]` helper are not
+/// included, except those carrying the marker.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, import_style = None))]
+fn query_sites(source: &str, import_style: Option<&str>) -> PyResult<Vec<(usize, String, String)>> {
+    check_import_style(import_style)?;
+    Ok(checker::query_sites(source, import_style)
+        .into_iter()
+        .map(|(line, kind, text)| (line, kind.to_string(), text))
+        .collect())
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
@@ -272,5 +302,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     Ok(())
 }

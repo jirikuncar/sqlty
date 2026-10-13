@@ -144,3 +144,28 @@ def test_unparseable_schema_table_is_reported_once(tmp_path, monkeypatch, caplog
     assert [r.getMessage() for r in caplog.records if "could not be parsed" in r.getMessage()] == [
         "Schema table public.bad could not be parsed; its columns are unknown"
     ]
+
+
+def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
+    """``--statistics`` ends with one line counting queries by how far sqlty types them."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunparsed-query = "warn"\n'
+    )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, name TEXT);")
+    (tmp_path / "q.py").write_text(
+        "from sqlty import SQL\n"
+        'typed = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+        'partial = "--sql\\nSELECT id, nope FROM users"\n'
+        'broken = "--sql\\nSELECT xmlelement(name foo)"\n'
+        'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
+        'ddl = "--sql\\nCREATE TABLE t (a INT)"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "--statistics", "."])
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)"
+    )
+
+    main(["check", "--statistics", "-q", "."])
+    assert capsys.readouterr().out == ""

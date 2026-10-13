@@ -90,13 +90,28 @@ Found 1 warning(s)
 
 ```
 sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
-            [-v] [-q] [--fix]
+            [-v] [-q] [--fix] [--statistics]
             [paths ...]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--fix` | Apply the [fixable rules](rules.md), write the files, then report what remains |
+| `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
+
+With `--statistics`, the last line counts the queries of the checked files:
+
+```
+Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)
+```
+
+A query is typed when every column of its row type is known, and partially
+typed when some column's type is not (`SELECT *` with no schema, an unknown
+column). Unparsed queries are those the parser rejects, whether or not
+[`unparsed-query`](rules.md#unparsed-query) is enabled. Skipped strings are
+f-, t- and raw strings, and other `--sql` strings that are not plain literals,
+counted by the rule that reports them. Queries that return no rows are not
+counted.
 
 Rule severities come from `[tool.sqlty.rules]`; see [Rules](rules.md).
 

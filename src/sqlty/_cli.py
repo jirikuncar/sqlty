@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
+    from collections import Counter
 
     from sqlty._config import SchemaSpec
 
@@ -116,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fix what can be fixed (the rules `sqlty rule` marks fixable, e.g. stale-rewrite, "
         "stale-type, select-star with a schema), then report the rest",
+    )
+    check_parser.add_argument(
+        "--statistics",
+        action="store_true",
+        help="After the diagnostics, count queries typed, partially typed, unparsed and skipped",
     )
 
     # --- rule ---
@@ -260,8 +266,10 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
+    from collections import Counter
+
     from sqlty._source import ParsedSource
-    from sqlty.core import HelperIndex, check_source, fix_source
+    from sqlty.core import HelperIndex, check_source, fix_source, query_statistics
 
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
@@ -286,6 +294,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     total_errors = 0
     total_warnings = 0
     total_fixed = 0
+    statistics: Counter[str] = Counter()
 
     for path in files:
         parsed = sources[path]
@@ -314,6 +323,14 @@ def _cmd_check(args: argparse.Namespace) -> None:
             untyped=settings.untyped,
             helpers=helpers,
         )
+        if args.statistics:
+            statistics += query_statistics(
+                parsed,
+                dialect=settings.dialect,
+                schema_sql=settings.schema_sql,
+                import_style=settings.import_style,
+                helpers=helpers,
+            )
 
         for diag in diagnostics:
             severity = diag["severity"]
@@ -338,9 +355,22 @@ def _cmd_check(args: argparse.Namespace) -> None:
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
         print(f"Found {', '.join(parts)}")
+    if args.statistics and not args.quiet:
+        print(_format_statistics(statistics))
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _format_statistics(counts: Counter[str]) -> str:
+    """One line of query counts; skipped strings are broken down by rule."""
+    skipped = {rule: counts[rule] for rule in _SKIPPED_STRING_RULES if counts[rule]}
+    detail = ", ".join(f"{rule}: {count}" for rule, count in skipped.items())
+    return (
+        f"Queries: {counts['typed']} typed, {counts['partially typed']} partially typed, "
+        f"{counts['unparsed']} unparsed, {sum(skipped.values())} skipped"
+        + (f" ({detail})" if detail else "")
+    )
 
 
 def _cmd_rule(name: str | None) -> None:

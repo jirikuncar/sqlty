@@ -11,7 +11,9 @@ needs the Python runtime.
 from __future__ import annotations
 
 import ast
+import re
 import typing
+from collections import Counter
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_select as _analyze_select
@@ -24,6 +26,8 @@ from sqlty._core import (
     rewrite_source,
     strip_source,
 )
+from sqlty._core import parse_error as _parse_error
+from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
@@ -36,6 +40,8 @@ if TYPE_CHECKING:
 
 
 _CONTAINERS = (dict, list, set, frozenset, tuple)
+# The `--sql` marker that opens a query string, as the engine reads it.
+_MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
 class ColumnInfo(NamedTuple):
@@ -212,6 +218,14 @@ def _check_diagnostics(
             else:
                 report("select-star-no-schema", "SELECT * used but no schema available", call.line)
 
+    for call in calls if rule_config.is_enabled("unparsed-query") else []:
+        if (
+            call.query is not None
+            and not _MARKER.match(call.query)
+            and (error := _parse_error(call.query, dialect=dialect))
+        ):
+            report("unparsed-query", f"query does not parse: {error}", call.line)
+
     for line, name, query in user_queries:
         if (columns := _columns(query, dialect, schema_sql)) is None:
             continue
@@ -226,6 +240,58 @@ def _check_diagnostics(
         for rule, message in _value_diagnostics(call, columns):
             report(rule, message, call.line)
     return diagnostics
+
+
+def query_statistics(
+    source: str | ParsedSource,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> Counter[str]:
+    """How the queries of ``source`` fare, as ``sqlty check --statistics`` counts them.
+
+    Counts ``typed`` queries, ``partially typed`` ones (a column's type is
+    unknown), ``unparsed`` ones, and skipped strings by rule
+    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``). Queries
+    that return no rows are not counted.
+
+    Example:
+        >>> query_statistics('q = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")')
+        Counter({'typed': 1})
+    """
+    parsed = ParsedSource.of(source, module)
+    counts: Counter[str] = Counter()
+    for _, kind, text in _query_sites(parsed.text, import_style=import_style):
+        if kind != "query":
+            counts[kind] += 1
+        elif outcome := _outcome(text, dialect, schema_sql):
+            counts[outcome] += 1
+    for call in find_helper_calls(parsed, helpers, module):
+        if call.query is None:
+            counts["unchecked-query"] += 1
+        elif not _MARKER.match(call.query) and (
+            outcome := _outcome(call.query, dialect, schema_sql)
+        ):
+            counts[outcome] += 1
+    return counts
+
+
+def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
+    """``typed``, ``partially typed`` or ``unparsed``; ``None`` when ``query`` returns no rows."""
+    if _parse_error(query, dialect=dialect) is not None:
+        return "unparsed"
+    if not returns_rows(query, dialect=dialect):
+        return None
+    try:
+        columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
+    except RuntimeError:
+        columns = None
+    if columns is not None and all(column.python_type is not None for column in columns):
+        return "typed"
+    return "partially typed"
 
 
 def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[ColumnInfo] | None:

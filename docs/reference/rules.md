@@ -23,6 +23,7 @@ stale-type = "error"
 | [`select-star`](#select-star) | Query | warn | yes | `SELECT *` |
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
+| [`unparsed-query`](#unparsed-query) | Query | ignore | no | Query that does not parse, so sqlty cannot check it |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
@@ -279,6 +280,28 @@ q = SQL[tuple[int]]("--sql\nSELECT CAST(id AS SIGNED) FROM users")
 
 Fix: `sqlty check --fix` replaces `--sql` with `-- sql` in plain string
 literals, wrapped or not.
+
+### unparsed-query
+
+Default: ignore. A query that does not parse in the configured dialect: a
+`--sql` string, the argument of `SQL[T](...)`, or a string passed to an
+`Annotated[LiteralString, SQL]` parameter. The message quotes sqlparser's
+error. Enable it with `unparsed-query = "warn"`:
+
+```toml
+[tool.sqlty.rules]
+unparsed-query = "warn"
+```
+
+```python
+from sqlty import SQL
+
+# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
+q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
+```
+
+Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
+counts such queries as unparsed whether or not the rule is enabled.
 
 ## Rewrite rules
 

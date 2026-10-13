@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::analyzer::Schema;
+use crate::analyzer::{parse_error, Schema};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, skipped_rule, string_literals,
-    strip_line_break, wraps, ImportStyle, LineIndex,
+    after_marker, ends_marker_line, extract_string_content, marked_query, skipped_rule,
+    string_literals, strip_line_break, wraps, ImportStyle, LineIndex,
 };
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
 use std::ops::Range;
@@ -103,6 +103,7 @@ impl RuleConfig {
             "typeddict-inheritance" => "error",
             "inline-sql-comment" => "warn",
             "untyped-query" => "warn",
+            "unparsed-query" => "ignore",
             _ => "warn",
         }
     }
@@ -123,6 +124,7 @@ pub fn check_source(
     untyped: bool,
 ) -> Vec<Diagnostic> {
     let rule_config = RuleConfig::new(rules);
+    let unparsed_enabled = rule_config.is_enabled("unparsed-query");
     let has_schema = schema.is_some();
     let mut diagnostics = Vec::new();
     let mut report = |rule: &str, message: String, line: usize| {
@@ -169,12 +171,21 @@ pub fn check_source(
             continue;
         }
         let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
-        if !calls
+        if calls
             .iter()
             .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
-            && INLINE_SQL_COMMENT_CONTENT.is_match(&content(source, &spans))
         {
+            continue;
+        }
+        let sql_content = content(source, &spans);
+        if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
             report("inline-sql-comment", INLINE_MESSAGE.to_string(), line);
+        }
+        if let Some(error) = marked_query(&sql_content)
+            .filter(|_| unparsed_enabled)
+            .and_then(|sql| parse_error(&sql, dialect))
+        {
+            report("unparsed-query", unparsed_message(&error), line);
         }
     }
 
@@ -201,6 +212,12 @@ pub fn check_source(
         }
         if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
             report("inline-sql-comment", INLINE_MESSAGE.to_string(), line_num);
+        }
+        if let Some(error) = marked_query(&sql_content)
+            .filter(|_| unparsed_enabled)
+            .and_then(|sql| parse_error(&sql, dialect))
+        {
+            report("unparsed-query", unparsed_message(&error), line_num);
         }
 
         let upper = sql_content.to_uppercase();
@@ -270,6 +287,60 @@ fn skipped_message(rule: &str) -> String {
         _ => "--sql query is not plain string literals, so it is not checked or rewritten",
     }
     .to_string()
+}
+
+/// Message of `unparsed-query`, given sqlparser's error (see `analyzer::parse_error`).
+pub(crate) fn unparsed_message(error: &str) -> String {
+    format!("query does not parse: {error}")
+}
+
+/// Each query `sqlty check` sees, as `(line, kind, text)` for `--statistics`: `kind` is
+/// `query` with the marked text, or the rule that skips the string (text empty).
+pub fn query_sites(source: &str, import_style: Option<&str>) -> Vec<(usize, &'static str, String)> {
+    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
+    let lines = LineIndex::new(source);
+    let tokens = tokenize(source);
+    let calls = wrapper_calls(source, &tokens, &wrapper_name);
+    let mut sites = Vec::new();
+    let mut skipped: Vec<Range<usize>> = Vec::new();
+    for group in string_groups(source, &tokens) {
+        let first = &tokens[group[0]];
+        let line = lines.line_at(first.span.start);
+        if let Some(rule) = skipped_rule(source, &tokens, &group) {
+            let last = &tokens[group[group.len() - 1]];
+            skipped.push(first.span.start..last.span.end);
+            sites.push((line, rule, String::new()));
+            continue;
+        }
+        if calls
+            .iter()
+            .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
+        {
+            continue;
+        }
+        let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
+        if let Some(sql) = marked_query(&content(source, &spans)) {
+            sites.push((line, "query", sql));
+        }
+    }
+    for call in &calls {
+        let line = lines.line_at(call.span.start);
+        match call.content(source) {
+            Some(text) => {
+                if let Some(sql) = marked_query(&text) {
+                    sites.push((line, "query", sql));
+                }
+            }
+            None if after_marker(&content(source, &call.strings)).is_some()
+                && !skipped.iter().any(|span| call.span.contains(&span.start)) =>
+            {
+                sites.push((line, "unchecked-query", String::new()));
+            }
+            None => {}
+        }
+    }
+    sites.sort_by_key(|site| site.0);
+    sites
 }
 
 /// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
