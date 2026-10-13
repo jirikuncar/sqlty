@@ -1002,9 +1002,9 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_untyped_wraps_unparseable() {
-        let source = r#"q = "--sql\nSELECT FROM users""#;
+        let source = r#"q = "--sql\nSELECT id FROM""#;
         let result = rewrite_source(source, "postgres", &None, None, true);
-        assert!(result.ends_with(r#"q = SQL[UNTYPED]("--sql\nSELECT FROM users")"#));
+        assert!(result.ends_with(r#"q = SQL[UNTYPED]("--sql\nSELECT id FROM")"#));
     }
 
     #[test]

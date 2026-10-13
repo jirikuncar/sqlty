@@ -51,6 +51,18 @@ RETURNING id::INTEGER
 -- inferred: tuple[int]
 ```
 
+## INSERT ON CONFLICT with an index predicate
+
+The conflict target can name a partial unique index: `WHERE` before `DO` is dropped.
+
+```sql
+INSERT INTO users (email, name)
+VALUES ('alice@example.com', 'Alice')
+ON CONFLICT (email) WHERE name <> ')DO(' DO NOTHING
+RETURNING id::INTEGER
+-- inferred: tuple[int]
+```
+
 ## UPDATE RETURNING single column
 
 ```sql

@@ -89,10 +89,10 @@ untyped = "sentinel"
 ```
 
 ```python
-q = "--sql\nSELECT FROM users"
+q = "--sql\nSELECT id FROM"
 # rewritten-file: from sqlty import SQL
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT FROM users")
+# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT id FROM")
 ```
 
 ## Sentinel: inferable queries keep their row type

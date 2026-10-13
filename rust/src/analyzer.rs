@@ -349,9 +349,10 @@ fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
 fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = SQL_MARKER.replace(sql, "");
     let sql = if dialect == SqlDialect::Postgres {
+        let sql = drop_conflict_predicate(&sql);
         POSTGRES_LOCK_FIXES
             .iter()
-            .fold(sql.into_owned(), |sql, (pattern, replacement)| {
+            .fold(sql, |sql, (pattern, replacement)| {
                 pattern.replace_all(&sql, *replacement).into_owned()
             })
     } else {
@@ -363,6 +364,106 @@ fn parser_input(sql: &str, dialect: SqlDialect) -> String {
             _ => "NULL",
         })
         .into_owned()
+}
+
+/// Drops the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO ...`, the
+/// partial unique index that arbitrates the conflict; it does not change the result columns.
+fn drop_conflict_predicate(sql: &str) -> String {
+    static CONFLICT_TARGET: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
+    static WHERE_CLAUSE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
+    let mut out = String::with_capacity(sql.len());
+    let mut last = 0;
+    for target in CONFLICT_TARGET.find_iter(sql) {
+        if target.start() < last {
+            continue;
+        }
+        let Some(close) = closing_paren(sql, target.end()) else {
+            break;
+        };
+        let Some(clause) = WHERE_CLAUSE.find(&sql[close + 1..]) else {
+            continue;
+        };
+        let Some(end) = do_keyword(sql, close + 1 + clause.end()) else {
+            continue;
+        };
+        out.push_str(&sql[last..=close]);
+        out.push(' ');
+        last = end;
+    }
+    out.push_str(&sql[last..]);
+    out
+}
+
+/// Byte index of the `)` closing the parenthesis that ends just before `start`.
+fn closing_paren(sql: &str, start: usize) -> Option<usize> {
+    let bytes = sql.as_bytes();
+    let (mut depth, mut i) = (1, start);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' | b'"' => i = quoted_end(bytes, i),
+            b'(' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Byte index of the first `DO` word at or after `start` outside parentheses and quotes.
+fn do_keyword(sql: &str, start: usize) -> Option<usize> {
+    let bytes = sql.as_bytes();
+    let (mut depth, mut i) = (0, start);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' | b'"' => {
+                i = quoted_end(bytes, i);
+                continue;
+            }
+            b'(' => depth += 1,
+            b')' if depth == 0 => return None,
+            b')' => depth -= 1,
+            _ if depth == 0
+                && bytes
+                    .get(i..i + 2)
+                    .is_some_and(|w| w.eq_ignore_ascii_case(b"DO"))
+                && (i == 0 || !is_word(bytes[i - 1]))
+                && bytes.get(i + 2).is_none_or(|&b| !is_word(b)) =>
+            {
+                return Some(i)
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Index just past the quoted string or identifier that opens at `start`; a doubled quote
+/// stays inside it.
+fn quoted_end(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == quote {
+            if bytes.get(i + 1) != Some(&quote) {
+                return i + 1;
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    bytes.len()
 }
 
 fn numbered_placeholders(sql: &str) -> String {
@@ -688,7 +789,11 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred
             .iter()
             .map(|col| col.python_type.as_deref().unwrap_or("str"))
             .collect();
-        format!("tuple[{}]", types.join(", "))
+        if types.is_empty() {
+            "tuple[()]".to_string()
+        } else {
+            format!("tuple[{}]", types.join(", "))
+        }
     }))
 }
 
@@ -1054,7 +1159,7 @@ impl<'a> Analyzer<'a> {
                     let (analyzer, scope) = self.scope_of(&select.from)?;
                     analyzer
                         .projection(&select.projection, &scope, Some(&select.from))
-                        .map(non_empty)
+                        .map(Some)
                 }
                 None => Ok(None),
             },
@@ -1502,6 +1607,22 @@ mod tests {
             Some("tuple[int]")
         );
         assert_eq!(infer("INSERT INTO t SELECT a::INTEGER FROM u"), None);
+        assert_eq!(
+            infer(
+                "INSERT INTO t (a) VALUES (1) ON CONFLICT (a) WHERE b = 'x' DO NOTHING RETURNING a::INTEGER"
+            )
+            .as_deref(),
+            Some("tuple[int]")
+        );
+    }
+
+    #[test]
+    fn test_empty_target_list() {
+        assert_eq!(
+            infer("SELECT FROM t FOR UPDATE").as_deref(),
+            Some("tuple[()]")
+        );
+        assert_eq!(infer("SELECT FROM t").as_deref(), Some("tuple[()]"));
     }
 
     #[test]
@@ -1546,6 +1667,17 @@ mod tests {
         assert_eq!(
             parser_input("SELECT 1 FOR NO KEY UPDATE OF a, b", SqlDialect::MySql),
             "SELECT 1 FOR NO KEY UPDATE OF a, b"
+        );
+        assert_eq!(
+            parser_input(
+                "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) WHERE c = ')DO(' OR d = 'x''DO' DO NOTHING",
+                SqlDialect::Postgres
+            ),
+            "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) DO NOTHING"
+        );
+        assert_eq!(
+            parser_input("SELECT 1 ON CONFLICT (a) WHERE b", SqlDialect::Postgres),
+            "SELECT 1 ON CONFLICT (a) WHERE b"
         );
         assert_eq!(
             infer_type("--sql\nSELECT 1 AS x", "mysql", &None)
