@@ -491,7 +491,7 @@ def _structural_diagnostics(
     by_name = info.kind != "NamedTuple"
     ignores_extra = info.kind == "BaseModel"
     unit = "keys" if info.kind == "TypedDict" else "fields"
-    lo = len(info.required) if by_name else len(fields)
+    lo = len(info.required - info.opaque) if by_name else len(fields)
     hi = len(columns) if info.extra_items or ignores_extra else len(fields)
     if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
         expected = f"{len(fields)} fields"
@@ -526,14 +526,21 @@ def _structural_diagnostics(
             if field != col.name
         ]
 
-    admits_extra = info.extra_items or ignores_extra
-    known = [col for col in columns if col.name in declared or info.extra_items]
-    unknown = [col for col in columns if col.name not in declared and not admits_extra]
+    admits_extra = info.extra_items or (ignores_extra and not info.forbid) or info.opaque
+    owners = [(col, info.field_for(col.name)) for col in columns]
+    known = [(col, field or col.name) for col, field in owners if field or info.extra_items]
+    unknown = [col for col, field in owners if field is None and not admits_extra]
     names = {col.name for col in columns}
-    missing = [key for key, _ in fields if key in info.required and key not in names]
+    missing = [
+        info.column_names(key)[0]
+        for key, _ in fields
+        if key in info.required
+        and key not in info.opaque
+        and not names.intersection(info.column_names(key))
+    ]
     noun = "key" if info.kind == "TypedDict" else "field"
     return (
-        [d for col in known for d in type_mismatch(col.name, col)]
+        [d for col, field in known for d in type_mismatch(field, col)]
         + [
             ("typeddict-key-mismatch", f"{type_name} has no {noun} for query column '{col.name}'")
             for col in unknown

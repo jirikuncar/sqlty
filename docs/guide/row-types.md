@@ -195,6 +195,33 @@ type definition, stays unknown and is never reported. From Python, pass a
 `module` name of the checked source as `check_source(..., helpers=index,
 module=...)`.
 
+## Pydantic aliases and extra columns
+
+A Pydantic model validates a row by alias, so a column is matched to a field by
+its `Field(alias="id")` or `Field(validation_alias="id")` string (also inside
+`Annotated`). With `populate_by_name=True` either the alias or the field name
+fills the field. `ConfigDict(extra="forbid")` (or `class Config: extra =
+"forbid"`) makes a column without a field an error, like a TypedDict. Aliases
+and the config are read from the class source, so Pydantic need not be
+installed.
+
+```python
+from pydantic import BaseModel, ConfigDict, Field
+from sqlty import SQL
+
+class User(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: int = Field(alias="id")
+
+ok = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# error: [typeddict-key-mismatch] "User has no field for query column 'name'"
+bad = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+`AliasChoices`, `AliasPath`, a non-literal alias and `alias_generator` make a
+field's names unknown: it is not reported as missing, and `extra="forbid"` no
+longer reports columns without a field.
+
 ## TypedDict qualifiers
 
 `ReadOnly`, `Required` and `NotRequired` are looked through before types are

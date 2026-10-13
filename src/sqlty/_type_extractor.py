@@ -52,7 +52,11 @@ class TypeInfo:
     holds each field's type resolved from source (None when unknown), ``owner``
     names the class whose header set the openness, ``lineno`` is the class
     line, ``bases`` names its TypedDict bases defined in the same source and
-    ``errors`` lists its PEP 728 inheritance violations.
+    ``errors`` lists its PEP 728 inheritance violations. For Pydantic models,
+    ``columns`` maps each accepted column name (field name or validation alias)
+    to its field, ``opaque`` names the fields whose validation names are not
+    statically known (``AliasChoices``, ``alias_generator``) and ``forbid``
+    is ``extra="forbid"``.
     """
 
     __slots__ = (
@@ -71,6 +75,9 @@ class TypeInfo:
         "lineno",
         "bases",
         "errors",
+        "columns",
+        "opaque",
+        "forbid",
     )
 
     def __init__(
@@ -100,6 +107,21 @@ class TypeInfo:
         self.lineno = 0
         self.bases: list[str] = []
         self.errors: list[str] = []
+        self.columns: dict[str, str] = {}
+        self.opaque: frozenset[str] = frozenset()
+        self.forbid = False
+
+    def field_for(self, column: str) -> str | None:
+        """The field a query column fills, by name (a Pydantic alias counts); None if none does."""
+        if self.kind == "BaseModel":
+            return self.columns.get(column)
+        return column if column in dict(self.fields) else None
+
+    def column_names(self, field: str) -> list[str]:
+        """The query column names that fill ``field``, the Pydantic alias first."""
+        if self.kind == "BaseModel":
+            return [c for c, f in self.columns.items() if f == field]
+        return [field]
 
     @property
     def keyed(self) -> bool:
@@ -219,10 +241,14 @@ def extract_type_definitions(
             {k for p in parents for k in p.required} - dict(own_fields).keys() | own_required
         )
 
-        info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
-        info.lineno = node.lineno
         is_typeddict = kind == "TypedDict"
         nodes = list(_lineage(node, typeddict_nodes).values()) if is_typeddict else [node]
+        defaulted = {name for n in nodes for name in _metadata_defaults(n, aliases)}
+        required -= defaulted
+        info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
+        info.lineno = node.lineno
+        if kind == "BaseModel":
+            _set_pydantic_names(info, node)
         info.field_types = _ast_key_types(nodes, aliases, newtypes)
         hints = None
         if (fields or is_typeddict) and (
@@ -236,6 +262,7 @@ def extract_type_definitions(
             own = _own_openness(keywords, aliases)
             if hints is not None:
                 info.required = frozenset(getattr(cls, "__required_keys__", info.required))
+                info.required -= defaulted
                 own_type = _own_extra_type(cls, namespace) if own and own.extra_items else None
             else:
                 hints = info.field_types
@@ -1151,6 +1178,8 @@ def _extract_fields_from_ast(
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
             annotation, is_required = _unwrap_qualifiers_ast(item.annotation, aliases or {})
             fields.append((item.target.id, _normalize_type_str(ast.unparse(annotation))))
+            if _metadata_has_default(item.annotation, aliases or {}):
+                continue
             if defaults_optional:
                 if not _has_default(item.value):
                     required.add(item.target.id)
@@ -1175,6 +1204,133 @@ def _has_default(value: ast.expr | None) -> bool:
         first = value.args[0] if value.args else None
         return first is not None and not (isinstance(first, ast.Constant) and first.value is ...)
     return True
+
+
+def _field_calls(annotation: ast.expr, aliases: dict[str, str]) -> list[ast.Call]:
+    """``Field(...)`` / ``field(...)`` calls in the ``Annotated`` metadata of ``annotation``.
+
+    Example:
+        >>> a = ast.parse("NotRequired[Annotated[list[str], Field(default_factory=list), 1]]", mode="eval").body
+        >>> [ast.unparse(c) for c in _field_calls(a, {})]
+        ['Field(default_factory=list)']
+    """
+    calls: list[ast.Call] = []
+    while isinstance(annotation, ast.Subscript):
+        name = _get_name(annotation.value)
+        name = aliases.get(name, name) if name else None
+        if name == "Annotated" and isinstance(annotation.slice, ast.Tuple):
+            elts = annotation.slice.elts
+            calls += [
+                m
+                for m in elts[1:]
+                if isinstance(m, ast.Call) and _get_name(m.func) in ("field", "Field")
+            ]
+            annotation = elts[0]
+        elif name in _QUALIFIERS:
+            annotation = annotation.slice
+        else:
+            break
+    return calls
+
+
+def _metadata_has_default(annotation: ast.expr, aliases: dict[str, str]) -> bool:
+    """Whether ``Annotated`` metadata of ``annotation`` declares a default (any row kind)."""
+    return any(_has_default(call) for call in _field_calls(annotation, aliases))
+
+
+def _metadata_defaults(node: ast.ClassDef, aliases: dict[str, str]) -> list[str]:
+    """Names of the fields of ``node`` whose ``Annotated`` metadata declares a default."""
+    return [
+        item.target.id
+        for item in node.body
+        if isinstance(item, ast.AnnAssign)
+        and isinstance(item.target, ast.Name)
+        and _metadata_has_default(item.annotation, aliases)
+    ]
+
+
+def _config_options(node: ast.ClassDef) -> dict[str, ast.expr]:
+    """Pydantic config of ``node``: ``model_config = ConfigDict(...)`` / ``{...}`` or ``class Config``."""
+    options: dict[str, ast.expr] = {}
+
+    def read(value: ast.expr | None) -> None:
+        if isinstance(value, ast.Call):
+            options.update({k.arg: k.value for k in value.keywords if k.arg})
+        elif isinstance(value, ast.Dict):
+            options.update(
+                {
+                    k.value: v
+                    for k, v in zip(value.keys, value.values, strict=True)
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                }
+            )
+
+    for item in node.body:
+        if (
+            isinstance(item, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "model_config" for t in item.targets)
+            or (
+                isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and item.target.id == "model_config"
+            )
+        ):
+            read(item.value)
+        elif isinstance(item, ast.ClassDef) and item.name == "Config":
+            for stmt in item.body:
+                if isinstance(stmt, ast.Assign):
+                    options.update(
+                        {t.id: stmt.value for t in stmt.targets if isinstance(t, ast.Name)}
+                    )
+    return options
+
+
+def _is_true(node: ast.expr | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value is True
+
+
+def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
+    """Read validation aliases and ``extra="forbid"`` from the class source.
+
+    A field is matched by its ``alias`` / ``validation_alias`` string (either
+    that or its name with ``populate_by_name=True``). ``AliasChoices``,
+    ``AliasPath``, non-literal aliases and ``alias_generator`` leave the
+    field's names unknown (``opaque``).
+    """
+    options = _config_options(node)
+    extra = options.get("extra")
+    info.forbid = (isinstance(extra, ast.Constant) and extra.value == "forbid") or (
+        isinstance(extra, ast.Attribute) and extra.attr == "forbid"
+    )
+    by_name = _is_true(options.get("populate_by_name")) or _is_true(options.get("validate_by_name"))
+    generated = "alias_generator" in options and not (
+        isinstance(options["alias_generator"], ast.Constant)
+        and options["alias_generator"].value is None
+    )
+    columns: dict[str, str] = {}
+    opaque: set[str] = set()
+    for item in node.body:
+        if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
+            continue
+        name = item.target.id
+        calls = _field_calls(item.annotation, {})
+        if isinstance(item.value, ast.Call) and _get_name(item.value.func) == "Field":
+            calls.append(item.value)
+        keywords = {k.arg: k.value for call in calls for k in call.keywords if k.arg}
+        spec = keywords.get("validation_alias", keywords.get("alias"))
+        if spec is None:
+            if generated:
+                opaque.add(name)
+            else:
+                columns[name] = name
+        elif isinstance(spec, ast.Constant) and isinstance(spec.value, str):
+            columns[spec.value] = name
+            if by_name:
+                columns.setdefault(name, name)
+        else:
+            opaque.add(name)
+    info.columns = columns
+    info.opaque = frozenset(opaque)
 
 
 def _unwrap_qualifiers_ast(
