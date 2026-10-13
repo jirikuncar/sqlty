@@ -97,6 +97,28 @@ SELECT status, discount FROM open_orders
 -- inferred: tuple[typing.Literal['pending', 'paid'], int]
 ```
 
+## Arrays of enums and domains
+
+The element type resolves through the enum or domain, also after a subscript.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE order_status AS ENUM ('pending', 'paid');
+CREATE DOMAIN short_text AS varchar(20);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, history order_status[] NOT NULL, labels short_text[]);
+```
+
+```sql
+SELECT history, labels FROM orders
+-- inferred: tuple[list[typing.Literal['pending', 'paid']], list[str]]
+```
+
+```sql
+SELECT history[1], labels[1] FROM orders
+-- inferred: tuple[typing.Literal['pending', 'paid'], str]
+```
+
 ## Rewrite imports typing
 
 ```python

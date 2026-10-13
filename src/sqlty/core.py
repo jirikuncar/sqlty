@@ -28,6 +28,7 @@ from sqlty._core import (
 )
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
@@ -79,6 +80,19 @@ def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list
         ['bad']
     """
     return _schema_skipped_tables(schema_sql, dialect=dialect)
+
+
+def schema_skipped_objects(schema_sql: str, *, dialect: str = "postgres") -> list[tuple[str, str]]:
+    """``(kind, name)`` of schema tables and views that can't be parsed, so their columns are unknown.
+
+    ``kind`` is ``"table"`` or ``"view"``. Unparseable tables are retried without
+    their constraints first, as in :func:`schema_skipped_tables`.
+
+    Example:
+        >>> schema_skipped_objects("CREATE TABLE ok (id INT); CREATE VIEW v AS SELECT id FROM (")
+        [('view', 'v')]
+    """
+    return _schema_skipped_objects(schema_sql, dialect=dialect)
 
 
 def check_source(
@@ -499,6 +513,7 @@ __all__ = [
     "infer_type",
     "returns_rows",
     "rewrite_source",
+    "schema_skipped_objects",
     "schema_skipped_tables",
     "strip_source",
 ]

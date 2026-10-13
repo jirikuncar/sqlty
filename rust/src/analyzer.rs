@@ -524,6 +524,9 @@ impl SchemaColumn {
     }
 }
 
+/// `(kind, name)` of a schema table or view that could not be parsed.
+pub type SkippedObject = (&'static str, String);
+
 /// A domain or enum: the SQL type its columns show (a domain's base type, an enum's
 /// own name) and the Python type when that is a `Literal` of the enum's labels.
 #[derive(Clone, Debug)]
@@ -1099,10 +1102,10 @@ fn type_defs(statements: &[ddl::Statement], dialect: SqlDialect) -> HashMap<Stri
     defs
 }
 
-/// [`load_schema`], and the names of the tables that could not be parsed even
-/// without their constraints. Domains and enums load first, then tables, then each
+/// [`load_schema`], and the `(kind, name)` of the tables that could not be parsed even
+/// without their constraints and of the views that could not be parsed. Domains and enums load first, then tables, then each
 /// view in order, so a view may read the views before it.
-pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<String>) {
+pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<SkippedObject>) {
     let dialect = SqlDialect::from_name(dialect);
     let mut skipped = Vec::new();
     let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
@@ -1118,7 +1121,7 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
             let parsed = parse_ddl(&stmt.sql(), dialect)
                 .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect));
             if parsed.is_none() {
-                skipped.push(stmt.table_name());
+                skipped.push(("table", stmt.table_name()));
             }
             parsed?.into_iter().next()
         })
@@ -1179,6 +1182,7 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
         let Some(Statement::CreateView(view)) =
             parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
         else {
+            skipped.push(("view", stmt.view_name()));
             continue;
         };
         let analyzer = Analyzer {

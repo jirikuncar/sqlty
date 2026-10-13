@@ -171,3 +171,19 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
 
     main(["check", "--statistics", "-q", "."])
     assert capsys.readouterr().out == ""
+
+
+def test_unparseable_schema_view_is_reported(tmp_path, monkeypatch, caplog) -> None:
+    """A view the parser rejects is named in a warning, like a table."""
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE ok (id INTEGER);\nCREATE VIEW public.bad (a) AS SELECT id FROM (;"
+    )
+    (tmp_path / "a.py").write_text('q = "--sql\\nSELECT id FROM ok"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "a.py"])
+
+    assert [r.getMessage() for r in caplog.records if "could not be parsed" in r.getMessage()] == [
+        "Schema view public.bad could not be parsed; its columns are unknown"
+    ]

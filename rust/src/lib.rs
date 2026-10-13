@@ -18,14 +18,22 @@ use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 
-type CachedSchema = (String, String, analyzer::Schema, Vec<String>);
+type CachedSchema = (
+    String,
+    String,
+    analyzer::Schema,
+    Vec<analyzer::SkippedObject>,
+);
 
 /// Most recently used first. Callers pass the same few schemas call after call, and
 /// parsing a large one costs about a millisecond, so keep the last few parsed.
 static SCHEMAS: Mutex<Vec<CachedSchema>> = Mutex::new(Vec::new());
 const SCHEMAS_KEPT: usize = 8;
 
-fn cached_schema(schema_sql: &str, dialect: &str) -> (analyzer::Schema, Vec<String>) {
+fn cached_schema(
+    schema_sql: &str,
+    dialect: &str,
+) -> (analyzer::Schema, Vec<analyzer::SkippedObject>) {
     let mut cache = SCHEMAS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(at) = cache
         .iter()
@@ -114,7 +122,27 @@ fn analyze_select(
 #[pyfunction]
 #[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
 fn schema_skipped_tables(schema_sql: &str, dialect: &str) -> Vec<String> {
-    cached_schema(schema_sql, dialect).1
+    skipped_objects(schema_sql, dialect, Some("table"))
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect()
+}
+
+/// `(kind, name)` of the schema tables and views that could not be parsed, `kind` being
+/// `"table"` or `"view"`; their columns are unknown to inference.
+#[pyfunction]
+#[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
+fn schema_skipped_objects(schema_sql: &str, dialect: &str) -> Vec<(String, String)> {
+    skipped_objects(schema_sql, dialect, None)
+}
+
+fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(String, String)> {
+    cached_schema(schema_sql, dialect)
+        .1
+        .into_iter()
+        .filter(|(kind, _)| only.is_none_or(|only| only == *kind))
+        .map(|(kind, name)| (kind.to_string(), name))
+        .collect()
 }
 
 /// Why a query does not parse, as sqlparser words it; None when it parses (or is empty).
@@ -294,6 +322,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
+    m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;

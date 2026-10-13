@@ -219,17 +219,26 @@ impl Statement<'_> {
 
     /// The table name as written, e.g. `public.users`.
     pub fn table_name(&self) -> String {
+        self.name_after("table", |p| is_punct(p, "("))
+    }
+
+    /// The view name as written, e.g. `public.recent`.
+    pub fn view_name(&self) -> String {
+        self.name_after("view", |p| is_punct(p, "(") || is_word(p, "as"))
+    }
+
+    fn name_after(&self, keyword: &str, ends: impl Fn(&Piece) -> bool) -> String {
         let start = self
             .0
             .iter()
-            .position(|p| is_word(p, "table"))
+            .position(|p| is_word(p, keyword))
             .map_or(0, |at| at + 1);
         let end = self
             .0
             .iter()
-            .position(|p| is_punct(p, "("))
-            .unwrap_or(self.0.len())
-            .max(start);
+            .skip(start)
+            .position(ends)
+            .map_or(self.0.len(), |at| start + at);
         let name = render(&self.0[start..end]);
         let name = name.trim();
         let prefix = "if not exists";
