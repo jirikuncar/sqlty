@@ -194,8 +194,9 @@ Fix: `sqlty check --fix` replaces `*` with the cast column list from the
 schema, unless the string holds escapes or quotes, the query is split over
 several concatenated strings, or it reads from more than one table (`JOIN` or
 `FROM a, b`), because the expansion drops table qualifiers. A `*` the schema
-cannot resolve (a subquery, a CTE, a `USING` or `NATURAL` join) gets no
-inferred type, so its annotation is kept.
+cannot resolve (a `USING` or `NATURAL` join) gets no inferred type, so its
+annotation is kept. A `*` over a subquery or CTE is typed from that query's
+columns but not expanded by `--fix`.
 
 ### inline-sql-comment
 

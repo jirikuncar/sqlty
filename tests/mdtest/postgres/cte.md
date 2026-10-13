@@ -70,9 +70,6 @@ SELECT n::INTEGER FROM counter
 
 ## CTE with INSERT RETURNING (writable CTE)
 
-Known limitation: the analyzer finds the CTE's inner RETURNING clause (untyped)
-before the outer SELECT (typed), so types come from the RETURNING not the SELECT.
-
 ```sql
 WITH new_user AS (
     INSERT INTO users (name, email)
@@ -84,8 +81,6 @@ SELECT id::INTEGER, name::TEXT, email::TEXT FROM new_user
 ```
 
 ## CTE with DELETE RETURNING (writable CTE)
-
-Same limitation as above — inner RETURNING wins over outer SELECT casts.
 
 ```sql
 WITH deleted_users AS (
