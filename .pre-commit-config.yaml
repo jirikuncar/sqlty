@@ -34,6 +34,12 @@ repos:
         language: system
         pass_filenames: false
         types: [rust]
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --manifest-path rust/Cargo.toml -q
+        language: system
+        pass_filenames: false
+        files: ^rust/
 
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -44,6 +44,7 @@ This ensures code is formatted and checked before each commit.
 - **mypy** and **ty**: Type checking for `src/`
 - **sqlty-check** / **sqlty-rewrite**: lint `examples/` and rewrite their `--sql` strings in place (`magic_codec/` excluded)
 - **cargo-fmt**: `cargo fmt --check` for the Rust engine (requires `cargo`)
+- **cargo-test**: `cargo test` for the Rust engine, run when files under `rust/` change or with `--all-files` (requires `cargo`)
 
 To manually run all pre-commit hooks:
 
