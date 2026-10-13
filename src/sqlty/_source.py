@@ -42,6 +42,8 @@ import re
 import tokenize
 from dataclasses import dataclass
 
+from sqlty._psycopg import PsycopgScan
+
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
 _IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
 
@@ -57,10 +59,14 @@ class _Ignore:
 class _Scan(ast.NodeVisitor):
     """Collects the nodes consumers need in one traversal, in ``ast.walk`` order."""
 
-    def __init__(self) -> None:
+    def __init__(self, bindings: bool = False) -> None:
         self.imports: list[tuple[int, ast.Import | ast.ImportFrom]] = []
         self.classes: list[tuple[int, ast.ClassDef]] = []
         self.calls: list[tuple[int, ast.Call]] = []
+        self.bindings = bindings
+        self.scopes: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef] = []
+        self.stores: dict[str, list[ast.Name]] = {}
+        self.values: dict[int, ast.expr] = {}
         self._depth = 0
 
     def visit(self, node: ast.AST) -> None:
@@ -70,9 +76,25 @@ class _Scan(ast.NodeVisitor):
             self.classes.append((self._depth, node))
         elif isinstance(node, ast.Call):
             self.calls.append((self._depth, node))
+        elif self.bindings:
+            self._bind(node)
         self._depth += 1
         self.generic_visit(node)
         self._depth -= 1
+
+    def _bind(self, node: ast.AST) -> None:
+        """Record what binds a name or opens a scope, for the psycopg composition scan."""
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Store):
+                self.stores.setdefault(node.id, []).append(node)
+        elif isinstance(node, ast.Assign):
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                self.values[id(node.targets[0])] = node.value
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.value is not None:
+                self.values[id(node.target)] = node.value
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            self.scopes.append(node)
 
 
 def _breadth_first[T](found: list[tuple[int, T]]) -> list[T]:
@@ -105,7 +127,7 @@ class ParsedSource:
 
     @functools.cached_property
     def _scan(self) -> _Scan:
-        scan = _Scan()
+        scan = _Scan(bindings="psycopg" in self.text)
         if self.tree is not None:
             scan.visit(self.tree)
         return scan
@@ -124,6 +146,15 @@ class ParsedSource:
     def calls(self) -> list[ast.Call]:
         """Every call expression."""
         return _breadth_first(self._scan.calls)
+
+    @functools.cached_property
+    def psycopg(self) -> PsycopgScan:
+        """What ``psycopg.sql`` compositions need: imports, scopes and single assignments.
+
+        Collected in the same pass as ``imports``, and only when the text mentions ``psycopg``.
+        """
+        scan = self._scan
+        return PsycopgScan(self.imports, scan.scopes, scan.stores, scan.values)
 
     @functools.cached_property
     def functions(self) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:

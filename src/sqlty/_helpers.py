@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
+from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
 
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
@@ -40,10 +41,13 @@ class Helper:
 
 
 class HelperCall(NamedTuple):
-    """A call passing a string literal to a helper's query parameter."""
+    """A call passing a query to a helper's query parameter.
+
+    ``query`` is ``None`` for a psycopg composition with a part that is not a literal.
+    """
 
     line: int
-    query: str
+    query: str | None
     row: ast.expr | None
     typing_aliases: dict[str, str]
 
@@ -254,6 +258,7 @@ def find_helper_calls(
     parsed = ParsedSource.of(source, module)
     local = parsed.may_define_helpers
     imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
+    composed = "psycopg" in parsed.text
     if not (local or imported):
         return []
     own = index_functions(parsed) if local else {}
@@ -282,13 +287,21 @@ def find_helper_calls(
 
     aliases = parsed.typing_aliases
     calls = []
+    scan = parsed.psycopg if composed else None
+    pending: list[tuple[ast.Call, Helper, ast.expr]] = []
     for node in parsed.calls:
         if (helper := resolve(node.func)) is None:
             continue
         query = _argument(helper, node, helper.query)
-        if not (isinstance(query, ast.Constant) and isinstance(query.value, str)):
-            continue
-        calls.append(
-            HelperCall(node.lineno, query.value, _argument(helper, node, helper.row), aliases)
-        )
+        if isinstance(query, ast.Constant) and isinstance(query.value, str):
+            calls.append(
+                HelperCall(node.lineno, query.value, _argument(helper, node, helper.row), aliases)
+            )
+        elif scan is not None and query is not None:
+            pending.append((node, helper, query))
+    for node, helper, query in pending:
+        assert scan is not None
+        if (text := scan.render(query)) is not None:
+            row = _argument(helper, node, helper.row)
+            calls.append(HelperCall(node.lineno, None if text == UNCHECKED else text, row, aliases))
     return sorted(calls, key=lambda call: call.line)

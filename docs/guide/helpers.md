@@ -97,3 +97,44 @@ From Python, `sqlty.core.check_source(source, helpers=index, module="pkg.app")`
 takes a `sqlty.core.HelperIndex` filled with `index.add("pkg.db", db_source)`.
 
 `sqlty rewrite` and `sqlty strip` never touch these calls.
+
+## psycopg `sql.SQL` queries
+
+With `psycopg` installed (`sqlty[psycopg]`), a `psycopg.sql` composition passed
+to the query parameter is checked too, so helpers annotated
+`Annotated[LiteralString | sql.Composable, SQL]` cover queries with dynamic
+identifiers. `sql.SQL(...)`, `.format(...)`, `.join(...)`, `sql.Composed([...])`,
+`sql.Identifier`, `sql.Placeholder` and `sql.Literal` are recognised through
+any import form (`from psycopg import sql`, `from psycopg.sql import SQL as
+PgSQL`, `import psycopg.sql`).
+
+When every part is a literal, sqlty rebuilds the object from the source with
+the real `psycopg.sql` classes (your code is never run) and renders it with
+`as_string(None)`, which needs no connection since psycopg 3.2. A name bound
+once in the same function or module is followed, so shared fragments and
+module-level constants work. `sql.Literal(x)` renders as `NULL`, like a
+placeholder, whatever `x` is.
+
+```python
+from typing import Annotated, LiteralString
+from psycopg import sql
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: type[T], /) -> list[T]: ...
+
+USERS = sql.Identifier("users")
+query = sql.SQL("SELECT {cols} FROM {table} WHERE id = {id}").format(
+    cols=sql.SQL(", ").join([sql.Identifier("id"), sql.Identifier("name")]),
+    table=USERS,
+    id=sql.Placeholder("id"),
+)
+
+# error: [column-type-mismatch]
+rows = fetch_all(query, tuple[int, int])
+```
+
+A part that is not a literal (`sql.Identifier(column)` with a variable) makes
+the query `unchecked-query`. Without psycopg installed these calls are skipped.
+
+A `--sql` marker inside `sql.SQL("--sql\n...")` is fine; `rewrite` never wraps
+a string inside `sql.SQL(...)` and `stale-rewrite` does not report it.

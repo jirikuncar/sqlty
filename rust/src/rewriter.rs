@@ -213,8 +213,20 @@ pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
 
 /// `(start, end, wrapped)` for each string group `rewrite` wraps, in source order.
 ///
+/// Whether the string at token `first` opens the argument of a call named `SQL`
+/// or ending in it (`sql.SQL(`, `PgSQL(`): a psycopg query, not for a wrapper.
+fn in_composed_sql(source: &str, tokens: &[Token], first: usize) -> bool {
+    let call =
+        |i: usize| tokens[i].kind == Kind::Name && source[tokens[i].span.clone()].ends_with("SQL");
+    first >= 2
+        && tokens[first - 1].kind == Kind::Op
+        && &source[tokens[first - 1].span.clone()] == "("
+        && call(first - 2)
+}
+
 /// A group is a string or implicitly concatenated strings. Rewrite skips groups in
-/// a wrapper call (`mod.SQL[...]` included), groups with a prefixed string, and
+/// a wrapper call (`mod.SQL[...]` included), the argument of a psycopg `SQL(...)`,
+/// groups with a prefixed string, and
 /// every group on a line that holds an f- or t-string `--sql` group.
 pub(crate) fn wraps(
     source: &str,
@@ -238,8 +250,12 @@ pub(crate) fn wraps(
         .map(|group| lines.line_at(tokens[group[0]].span.start))
         .collect();
 
+    let psycopg = source.contains("psycopg");
     let mut replacements = Vec::new();
     for group in groups {
+        if psycopg && in_composed_sql(source, &tokens, group[0]) {
+            continue;
+        }
         let (start, end) = (
             tokens[group[0]].span.start,
             tokens[group[group.len() - 1]].span.end,

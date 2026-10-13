@@ -157,7 +157,8 @@ def _check_diagnostics(
         import_style=import_style,
         untyped=untyped,
     )
-    calls = find_helper_calls(parsed, helpers, module)
+    found = find_helper_calls(parsed, helpers, module)
+    calls = [call for call in found if call.query is not None]
     queries = [
         (line, name, query)
         for line, name, query in (
@@ -167,7 +168,7 @@ def _check_diagnostics(
         )
         if not name.startswith("tuple[")
     ]
-    if not (queries or calls):
+    if not (queries or found):
         return diagnostics
     rule_config = RuleConfig(overrides=rules)
 
@@ -182,10 +183,16 @@ def _check_diagnostics(
                 }
             )
 
+    for call in found:
+        if call.query is None:
+            report(
+                "unchecked-query",
+                "psycopg query is not built from literals only, so it is not checked",
+                call.line,
+            )
+
     named = [(call.line, ast.unparse(call.row), call.query) for call in calls if call.row]
-    type_defs = (
-        extract_type_definitions(parsed, helpers, module) if queries or named else {}
-    )
+    type_defs = extract_type_definitions(parsed, helpers, module) if queries or named else {}
     user_queries = [q for q in [*queries, *named] if q[1] in type_defs]
 
     if rule_config.is_enabled("typeddict-inheritance"):
@@ -194,7 +201,7 @@ def _check_diagnostics(
                 report("typeddict-inheritance", message, info.lineno)
 
     for call in calls:
-        upper = call.query.upper()
+        upper = (call.query or "").upper()
         if "SELECT *" in upper or "SELECT\n*" in upper:
             if schema_sql is not None:
                 report(
