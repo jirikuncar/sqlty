@@ -1,7 +1,9 @@
 """Configuration loading from pyproject.toml."""
 
+import copy
 import glob
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
@@ -146,16 +148,26 @@ def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
         pyproject_path = current / "pyproject.toml"
         if pyproject_path.exists():
             try:
-                config = _parse_pyproject(pyproject_path)
+                config = _parse_pyproject_cached(pyproject_path, pyproject_path.stat().st_mtime_ns)
             except Exception as e:
                 logging.getLogger(__name__).warning("Failed to parse %s: %s", pyproject_path, e)
                 return {}, None
             if config is not None:
-                return config, current
+                return copy.deepcopy(config), current
         current = current.parent
 
     # No [tool.sqlty] table found
     return {}, None
+
+
+@lru_cache(maxsize=256)
+def _parse_pyproject_cached(pyproject_path: Path, mtime_ns: int) -> SQLTyConfig | None:
+    """Parse ``pyproject_path`` once per (path, mtime_ns); an edit changes the mtime and re-parses.
+
+    The mtime is part of the key so long-running processes see edits. Failures
+    are not cached.
+    """
+    return _parse_pyproject(pyproject_path)
 
 
 def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
