@@ -22,6 +22,7 @@ from sqlty._core import (
     rewrite_source,
     strip_source,
 )
+from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 
 if TYPE_CHECKING:
@@ -51,6 +52,19 @@ def analyze_select(
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
+
+
+def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list[str]:
+    """Names of schema tables that can't be parsed, so their columns are unknown.
+
+    A table is retried without its constraints and ``CHECK`` / ``REFERENCES``
+    clauses first; only tables that still fail are listed.
+
+    Example:
+        >>> schema_skipped_tables("CREATE TABLE ok (id INT); CREATE TABLE bad (id INT DEFAULT %s)")
+        ['bad']
+    """
+    return _schema_skipped_tables(schema_sql, dialect=dialect)
 
 
 def check_source(
@@ -232,5 +246,6 @@ __all__ = [
     "infer_type",
     "returns_rows",
     "rewrite_source",
+    "schema_skipped_tables",
     "strip_source",
 ]

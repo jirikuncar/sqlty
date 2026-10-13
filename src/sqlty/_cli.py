@@ -388,6 +388,16 @@ class SettingsResolver:
         self._args = args
         self._schema_sql = _load_schema(args.schema, Path.cwd()) if args.schema else None
         self._by_dir: dict[Path, Settings] = {}
+        self._warned: set[tuple[str, str]] = set()
+
+    def _warn_skipped_tables(self, schema_sql: str | None, dialect: str) -> None:
+        from sqlty.core import schema_skipped_tables
+
+        if schema_sql is None or (schema_sql, dialect) in self._warned:
+            return
+        self._warned.add((schema_sql, dialect))
+        for table in schema_skipped_tables(schema_sql, dialect=dialect):
+            logger.warning("Schema table %s could not be parsed; its columns are unknown", table)
 
     def for_file(self, path: Path) -> Settings:
         directory = path.parent.resolve()
@@ -415,8 +425,10 @@ class SettingsResolver:
                 f"{config_dir}/pyproject.toml: {exc}; use 'from sqlty import SQL [as Q]' "
                 "or 'import sqlty [as sy]'"
             ) from None
+        dialect = args.dialect or config.get("dialect", "postgres")
+        self._warn_skipped_tables(schema_sql, dialect)
         return Settings(
-            dialect=args.dialect or config.get("dialect", "postgres"),
+            dialect=dialect,
             schema_sql=schema_sql,
             import_style=import_style,
             untyped=untyped == "sentinel",

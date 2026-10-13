@@ -127,3 +127,20 @@ def test_rewrite_reports_skipped_strings(tmp_path, monkeypatch, capsys, config, 
     out, err = capsys.readouterr()
     assert err.splitlines() == expected
     assert "skipped" not in out
+
+
+def test_unparseable_schema_table_is_reported_once(tmp_path, monkeypatch, caplog) -> None:
+    """A table the parser rejects even without its constraints is named in a warning."""
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE ok (id INTEGER CHECK (id > 0));\nCREATE TABLE public.bad (id INTEGER DEFAULT %s);"
+    )
+    for name in ("a.py", "b.py"):
+        (tmp_path / name).write_text('q = "--sql\\nSELECT id FROM ok"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "a.py", "b.py"])
+
+    assert [r.getMessage() for r in caplog.records if "could not be parsed" in r.getMessage()] == [
+        "Schema table public.bad could not be parsed; its columns are unknown"
+    ]

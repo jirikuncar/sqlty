@@ -2,6 +2,7 @@
 
 mod analyzer;
 mod checker;
+mod ddl;
 mod fixer;
 mod rewriter;
 mod tokens;
@@ -17,27 +18,33 @@ use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 
-type CachedSchema = (String, String, analyzer::Schema);
+type CachedSchema = (String, String, analyzer::Schema, Vec<String>);
 
 /// Most recently used first. Callers pass the same few schemas call after call, and
 /// parsing a large one costs about a millisecond, so keep the last few parsed.
 static SCHEMAS: Mutex<Vec<CachedSchema>> = Mutex::new(Vec::new());
 const SCHEMAS_KEPT: usize = 8;
 
-fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
-    let schema_sql = schema_sql?;
+fn cached_schema(schema_sql: &str, dialect: &str) -> (analyzer::Schema, Vec<String>) {
     let mut cache = SCHEMAS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(at) = cache
         .iter()
-        .position(|(sql, d, _)| sql == schema_sql && d == dialect)
+        .position(|(sql, d, ..)| sql == schema_sql && d == dialect)
     {
         cache[..=at].rotate_right(1);
     } else {
-        let schema = analyzer::load_schema(schema_sql, dialect);
-        cache.insert(0, (schema_sql.to_string(), dialect.to_string(), schema));
+        let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+        cache.insert(
+            0,
+            (schema_sql.to_string(), dialect.to_string(), schema, skipped),
+        );
         cache.truncate(SCHEMAS_KEPT);
     }
-    Some(cache[0].2.clone())
+    (cache[0].2.clone(), cache[0].3.clone())
+}
+
+fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
+    Some(cached_schema(schema_sql?, dialect).0)
 }
 
 /// The schema, unless `source` cannot hold a query: every query, wrapper and
@@ -100,6 +107,14 @@ fn analyze_select(
             .map(|col| (col.name, col.python_type, col.sql_type))
             .collect()
     }))
+}
+
+/// Names of the schema tables that could not be parsed, even without their
+/// constraints; their columns are unknown to inference.
+#[pyfunction]
+#[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
+fn schema_skipped_tables(schema_sql: &str, dialect: &str) -> Vec<String> {
+    cached_schema(schema_sql, dialect).1
 }
 
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -249,6 +264,7 @@ fn wrapped_queries(
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use crate::ddl;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
@@ -469,11 +470,27 @@ fn object_name(name: &ObjectName) -> String {
 }
 
 /// Load schema from CREATE TABLE SQL statements.
+#[cfg(test)]
 pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
+    load_schema_with_skipped(schema_sql, dialect).0
+}
+
+/// [`load_schema`], and the names of the tables that could not be parsed even
+/// without their constraints.
+pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<String>) {
     let dialect = SqlDialect::from_name(dialect);
-    let tables = schema_sql
-        .split(';')
-        .filter_map(|stmt| parse_ddl(stmt.trim(), dialect)?.into_iter().next())
+    let mut skipped = Vec::new();
+    let tables = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql)
+        .into_iter()
+        .filter(ddl::Statement::is_create_table)
+        .filter_map(|stmt| {
+            let parsed = parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect));
+            if parsed.is_none() {
+                skipped.push(stmt.table_name());
+            }
+            parsed?.into_iter().next()
+        })
         .filter_map(|stmt| match stmt {
             Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
             _ => None,
@@ -495,7 +512,7 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
             (object_name(&create.name), columns)
         })
         .collect();
-    Arc::new(tables)
+    (Arc::new(tables), skipped)
 }
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
