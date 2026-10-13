@@ -68,13 +68,13 @@ RULES: dict[str, LintRule] = {
         name="column-name-mismatch",
         default_severity=Severity.WARN,
         fixable=False,
-        description="Annotated type field name doesn't match query column alias",
+        description="Annotated NamedTuple field name doesn't match query column alias",
     ),
     "typeddict-key-mismatch": LintRule(
         name="typeddict-key-mismatch",
         default_severity=Severity.ERROR,
         fixable=False,
-        description="Query columns don't fit the keys of a closed or extra_items TypedDict",
+        description="Query columns don't fit the fields of a TypedDict, dataclass or Pydantic model",
     ),
     "typeddict-inheritance": LintRule(
         name="typeddict-inheritance",

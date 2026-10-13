@@ -4,8 +4,10 @@ Default severity: **warn**
 
 ## What it does
 
-Checks that the fields of a user-defined row type are named like the query
-columns, in order.
+Checks that the fields of a `NamedTuple` are named like the query columns,
+in order. `NamedTuple` is matched by position; TypedDicts, dataclasses and
+Pydantic models are matched by name (see
+[`typeddict-key-mismatch`](typeddict-key-mismatch.md)).
 
 ## Why is this bad?
 
@@ -15,13 +17,12 @@ positional mismatch usually means two columns were swapped.
 ## Example
 
 ```python
-from dataclasses import dataclass
+from typing import NamedTuple
 
 from sqlty import SQL
 
 
-@dataclass
-class User:
+class User(NamedTuple):
     name: str
     email: str
 

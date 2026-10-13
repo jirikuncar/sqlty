@@ -153,14 +153,14 @@ class User(TypedDict):
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
-### TypedDict with wrong field name is detected
+### NamedTuple with wrong field name is detected
 
 ```python
 
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     user_id: int
     username: str
 

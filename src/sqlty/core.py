@@ -154,24 +154,29 @@ def _structural_diagnostics(
 ) -> list[tuple[str, str]]:
     """Compare a user type with query columns, returning ``(rule, message)`` pairs.
 
-    Fields match columns by position. Closed TypedDicts and those with
-    ``extra_items`` match by key instead: ``NotRequired`` keys may be absent,
-    and only ``extra_items`` admits undeclared columns (type-checked against it);
-    key-set violations are ``typeddict-key-mismatch``.
+    TypedDicts, dataclasses and Pydantic models match columns to fields by
+    name, as ``dict_row`` and ``class_row`` pass them: fields with a default
+    (``NotRequired`` keys) may be absent, and a column without a field is a
+    violation, except that Pydantic models ignore it and only ``extra_items``
+    admits it (type-checked against it). Key-set violations are
+    ``typeddict-key-mismatch``. NamedTuples match by position.
     A reported count mismatch suppresses the per-column checks.
     """
     from sqlty._type_extractor import check_type_compatibility
 
     fields = info.fields
     declared = dict(fields)
-    lo = len(info.required) if info.keyed else len(fields)
-    hi = len(fields) if not info.extra_items else len(columns)
+    by_name = info.kind != "NamedTuple"
+    ignores_extra = info.kind == "BaseModel"
+    unit = "keys" if info.kind == "TypedDict" else "fields"
+    lo = len(info.required) if by_name else len(fields)
+    hi = len(columns) if info.extra_items or ignores_extra else len(fields)
     if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
         expected = f"{len(fields)} fields"
-        if info.extra_items:
-            expected = f"{lo} required keys"
+        if info.extra_items or ignores_extra:
+            expected = f"{lo} required {unit}"
         elif lo < hi:
-            expected = f"{lo} required and {hi} total keys"
+            expected = f"{lo} required and {hi} total {unit}"
         return [
             (
                 "column-count-mismatch",
@@ -191,7 +196,7 @@ def _structural_diagnostics(
             )
         ]
 
-    if not info.keyed:
+    if not by_name:
         pairs = list(zip(fields, columns, strict=False))
         return [d for (field, _), col in pairs for d in type_mismatch(field, col)] + [
             ("column-name-mismatch", f"{type_name}.{field} doesn't match query column '{col.name}'")
@@ -199,14 +204,16 @@ def _structural_diagnostics(
             if field != col.name
         ]
 
+    admits_extra = info.extra_items or ignores_extra
     known = [col for col in columns if col.name in declared or info.extra_items]
-    unknown = [col for col in columns if col.name not in declared and not info.extra_items]
+    unknown = [col for col in columns if col.name not in declared and not admits_extra]
     names = {col.name for col in columns}
     missing = [key for key, _ in fields if key in info.required and key not in names]
+    noun = "key" if info.kind == "TypedDict" else "field"
     return (
         [d for col in known for d in type_mismatch(col.name, col)]
         + [
-            ("typeddict-key-mismatch", f"{type_name} has no key for query column '{col.name}'")
+            ("typeddict-key-mismatch", f"{type_name} has no {noun} for query column '{col.name}'")
             for col in unknown
         ]
         + [

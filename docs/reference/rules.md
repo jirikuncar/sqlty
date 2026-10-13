@@ -16,8 +16,8 @@ stale-type = "error"
 |------|-------|---------|---------|---------|
 | [`column-count-mismatch`](#column-count-mismatch) | Row type | error | no | Row type has a different number of fields than the query has columns |
 | [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field can't hold its column's values |
-| [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | Row type field name differs from its column name |
-| [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the keys of a closed or `extra_items` TypedDict |
+| [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | `NamedTuple` field name differs from its column name |
+| [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the fields of a TypedDict, dataclass or Pydantic model |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
 | [`select-star-no-schema`](#select-star-no-schema) | Query | error | no | `SELECT *` with no schema to expand it |
 | [`select-star`](#select-star) | Query | warn | yes | `SELECT *` |
@@ -87,15 +87,16 @@ Fix: change the field type or the cast.
 
 ### column-name-mismatch
 
-Default: warn. A field name differs from its column name or alias. Fields
-are matched by position, so the row would still be built, with misleading
-names.
+Default: warn. A `NamedTuple` field name differs from its column name or
+alias. `NamedTuple` fields are matched by position, so the row would still
+be built, with misleading names. TypedDicts, dataclasses and Pydantic models
+are matched by name instead; see `typeddict-key-mismatch`.
 
 ```python
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     user_id: int
     name: str
 
@@ -107,8 +108,10 @@ Fix: rename the field or alias the column (`id AS user_id`).
 
 ### typeddict-key-mismatch
 
-Default: error. A closed TypedDict, or one with `extra_items`, is matched by
-key. The query has a column with no key, or lacks a required key.
+Default: error. TypedDicts, dataclasses and Pydantic models are matched to
+columns by name. The query has a column with no field (a Pydantic model
+ignores it, and `extra_items` admits it), or lacks a required field. A
+field with a default, or a `NotRequired` key, may be missing.
 
 ```python
 from typing import TypedDict

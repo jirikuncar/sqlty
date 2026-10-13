@@ -48,7 +48,61 @@ included; a bare `# error:` means it reports nothing.
 
 ## What is checked
 
-Fields are matched to columns by position, in this order:
+`TypedDict`, `@dataclass` and Pydantic `BaseModel` fields are matched to
+columns by name, as psycopg's `dict_row`, `class_row` and `kwargs_row` pass
+them, so the order of fields and columns does not matter:
+
+1. Field count
+   ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
+   error), counting only required fields as the minimum.
+2. Field types
+   ([`column-type-mismatch`](../reference/rules.md#column-type-mismatch),
+   error).
+3. Columns without a field and required fields without a column
+   ([`typeddict-key-mismatch`](../reference/rules.md#typeddict-key-mismatch),
+   error).
+
+A field with a default, and a `NotRequired` key, may be missing from the
+query. A column without a field is an error for a TypedDict and a dataclass;
+a Pydantic model ignores it, as `extra="ignore"` is its default.
+
+```python
+from dataclasses import dataclass
+from typing import TypedDict
+
+from pydantic import BaseModel
+from sqlty import SQL
+
+class User(TypedDict):
+    name: str
+    id: int
+
+@dataclass
+class Account:
+    id: int
+    name: str
+    email: str | None = None
+
+class Profile(BaseModel):
+    id: int
+
+class Short(TypedDict):
+    id: int
+
+class Typed(TypedDict):
+    id: str
+    name: str
+
+reordered = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+optional = SQL[Account]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+ignored = SQL[Profile]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
+c = SQL[Short]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-type-mismatch] "Typed.id is str but query column 'id' infers int"
+a = SQL[Typed]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+`NamedTuple` fields are matched by position, in this order:
 
 1. Field count
    ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
@@ -61,18 +115,18 @@ Fields are matched to columns by position, in this order:
    warning).
 
 ```python
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     id: str
     name: str
 
-class Account(TypedDict):
+class Account(NamedTuple):
     user_id: int
     name: str
 
-class Short(TypedDict):
+class Short(NamedTuple):
     id: int
 
 # error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
@@ -116,8 +170,7 @@ q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP, token::UUID FR
 ## TypedDict qualifiers
 
 `ReadOnly`, `Required` and `NotRequired` are looked through before types are
-compared. An open TypedDict is still matched by position, so a `NotRequired`
-key needs a column:
+compared. A `NotRequired` key may be missing from the query:
 
 ```python
 from typing import NotRequired, ReadOnly, TypedDict
@@ -128,16 +181,16 @@ class User(TypedDict):
     name: NotRequired[str]
 
 ok = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 short = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# error:
 ```
 
 ## Closed TypedDicts
 
-A closed TypedDict ([PEP 728](https://peps.python.org/pep-0728/):
-`closed=True`, `extra_items=Never`, or a subclass of either) is matched by
-key instead of position. `NotRequired` keys may be missing and column order
-does not matter. Undeclared columns and missing required keys are
+Open and closed TypedDicts ([PEP 728](https://peps.python.org/pep-0728/):
+`closed=True`, `extra_items=Never`, or a subclass of either) are both matched
+by key; `closed=True` states the intent, and `extra_items=T` (below) is what
+admits extra columns. Undeclared columns and missing required keys are
 [`typeddict-key-mismatch`](../reference/rules.md#typeddict-key-mismatch)
 errors:
 

@@ -4,15 +4,17 @@ Default severity: **error**
 
 ## What it does
 
-For closed TypedDicts ([PEP 728](https://peps.python.org/pep-0728/):
-`closed=True`, `extra_items=...`, or a subclass of one), matches query
-columns to keys by name: every required key must be selected, and columns
-without a key are allowed only through `extra_items`.
+Matches query columns to the fields of a TypedDict, dataclass or Pydantic
+model by name, as `dict_row` and `class_row` do: every required field must be
+selected, and columns without a field are allowed only through
+[PEP 728](https://peps.python.org/pep-0728/) `extra_items=...` (a Pydantic
+model ignores them). `NotRequired` keys and fields with a default may be
+missing.
 
 ## Why is this bad?
 
-A closed TypedDict promises exactly its keys; a row with other keys
-violates that promise.
+A row factory that passes columns by name fails on a missing required field
+and on a column the type does not declare.
 
 ## Example
 

@@ -171,7 +171,9 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
     for node, kind in recognized:
         keywords = {k.arg: k.value for k in node.keywords if k.arg}
         total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
-        own_fields, own_required = _extract_fields_from_ast(node, aliases, total=total)
+        own_fields, own_required = _extract_fields_from_ast(
+            node, aliases, total=total, defaults_optional=kind in ("dataclass", "BaseModel")
+        )
         parents = [typeddicts[n] for n in _base_names(node) if n in typeddicts]
         inherited = {k: v for p in parents for k, v in p.fields}
         fields = list((inherited | dict(own_fields)).items())
@@ -953,11 +955,13 @@ def _extract_fields_from_ast(
     aliases: dict[str, str] | None = None,
     *,
     total: bool = True,
+    defaults_optional: bool = False,
 ) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """Extract annotated fields as (name, type_str) pairs plus required names.
 
     Qualifiers are stripped from the type strings. This is the fallback
-    when runtime resolution is not available.
+    when runtime resolution is not available. With ``defaults_optional``
+    (dataclasses, Pydantic models) a field with a default is not required.
     """
     fields: list[tuple[str, str]] = []
     required: set[str] = set()
@@ -965,9 +969,30 @@ def _extract_fields_from_ast(
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
             annotation, is_required = _unwrap_qualifiers_ast(item.annotation, aliases or {})
             fields.append((item.target.id, _normalize_type_str(ast.unparse(annotation))))
-            if total if is_required is None else is_required:
+            if defaults_optional:
+                if not _has_default(item.value):
+                    required.add(item.target.id)
+            elif total if is_required is None else is_required:
                 required.add(item.target.id)
     return fields, frozenset(required)
+
+
+def _has_default(value: ast.expr | None) -> bool:
+    """Whether a dataclass / Pydantic field assigned ``value`` has a default.
+
+    Example:
+        >>> [_has_default(ast.parse(s, mode="eval").body) for s in ("1", "field(default_factory=list)", "Field(...)", "field()", "Field(0)")]
+        [True, True, False, False, True]
+    """
+    if value is None:
+        return False
+    if isinstance(value, ast.Call) and _get_name(value.func) in ("field", "Field"):
+        defaults = {"default", "default_factory", "factory"}
+        if any(k.arg in defaults for k in value.keywords):
+            return True
+        first = value.args[0] if value.args else None
+        return first is not None and not (isinstance(first, ast.Constant) and first.value is ...)
+    return True
 
 
 def _unwrap_qualifiers_ast(

@@ -77,8 +77,10 @@ class UserRow(TypedDict):
     user_id: int
     username: str
 
-# error: [column-name-mismatch] "UserRow.user_id doesn't match query column 'id'"
-# error: [column-name-mismatch] "UserRow.username doesn't match query column 'name'"
+# error: [typeddict-key-mismatch] "UserRow has no key for query column 'id'"
+# error: [typeddict-key-mismatch] "UserRow has no key for query column 'name'"
+# error: [typeddict-key-mismatch] "UserRow.user_id is required but missing from query"
+# error: [typeddict-key-mismatch] "UserRow.username is required but missing from query"
 q = SQL[UserRow]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
