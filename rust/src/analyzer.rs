@@ -13,10 +13,10 @@ use crate::ddl;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
-    visit_expressions, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable, FunctionArg,
-    FunctionArgExpr, FunctionArguments, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
-    OutputClause, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
-    TableAlias, TableFactor, TableObject, TableWithJoins, UnaryOperator,
+    visit_expressions, AccessExpr, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable,
+    FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Join, JoinConstraint, JoinOperator,
+    ObjectName, OutputClause, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr,
+    Statement, Subscript, TableAlias, TableFactor, TableObject, TableWithJoins, UnaryOperator,
     UserDefinedTypeRepresentation, Value,
 };
 use sqlparser::dialect::{
@@ -488,6 +488,8 @@ pub struct SchemaData {
     views: HashMap<String, Vec<Column>>,
     /// Domain and enum type names -> the types their columns have.
     types: HashMap<String, UserType>,
+    /// Composite type names -> their fields in declaration order.
+    composites: HashMap<String, Vec<SchemaColumn>>,
 }
 
 pub type Schema = Arc<SchemaData>;
@@ -534,6 +536,7 @@ struct UserType {
 enum TypeDef {
     Domain(DataType),
     Enum(Vec<String>),
+    Composite(Vec<(Ident, DataType)>),
 }
 
 /// `(reference, table)` pairs for the tables a statement reads, in query order.
@@ -1007,6 +1010,10 @@ fn resolve_user_type(
             sql_type: name.to_uppercase(),
             python_type: (!labels.is_empty()).then(|| literal_of(labels)),
         }),
+        TypeDef::Composite(_) => Some(UserType {
+            sql_type: name.to_uppercase(),
+            python_type: None,
+        }),
         TypeDef::Domain(base) => Some(
             custom_name(base)
                 .filter(|_| depth < 16)
@@ -1025,6 +1032,27 @@ fn resolve_type(
     types: &HashMap<String, UserType>,
     dialect: SqlDialect,
 ) -> (String, Option<String>) {
+    if let DataType::Array(
+        ArrayElemTypeDef::AngleBracket(inner)
+        | ArrayElemTypeDef::Parenthesis(inner)
+        | ArrayElemTypeDef::Qualified(inner, _)
+        | ArrayElemTypeDef::SquareBracket(inner, _),
+    ) = dt
+    {
+        let (sql, python) = resolve_type(inner, types, dialect);
+        let size = match dt {
+            DataType::Array(
+                ArrayElemTypeDef::SquareBracket(_, Some(size))
+                | ArrayElemTypeDef::Qualified(_, Some(size)),
+            ) => format!("[{size}]"),
+            _ => String::new(),
+        };
+        let python = python.or_else(|| python_type(&sql, dialect));
+        return (
+            format!("ARRAY<{sql}>{size}"),
+            python.map(|ty| format!("list[{ty}]")),
+        );
+    }
     match custom_name(dt).and_then(|name| types.get(&name)) {
         Some(user) => (user.sql_type.clone(), user.python_type.clone()),
         None => (canonical_type(dt, dialect), None),
@@ -1046,14 +1074,26 @@ fn type_defs(statements: &[ddl::Statement], dialect: SqlDialect) -> HashMap<Stri
                 defs.insert(name, TypeDef::Domain(base));
             }
         } else if stmt.creates("type") {
-            if let Some(Statement::CreateType {
+            let Some(Statement::CreateType {
                 name,
-                representation: Some(UserDefinedTypeRepresentation::Enum { labels }),
+                representation: Some(representation),
             }) = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
-            {
-                let labels = labels.into_iter().map(|label| label.value).collect();
-                defs.insert(object_name(&name), TypeDef::Enum(labels));
-            }
+            else {
+                continue;
+            };
+            let def = match representation {
+                UserDefinedTypeRepresentation::Enum { labels } => {
+                    TypeDef::Enum(labels.into_iter().map(|label| label.value).collect())
+                }
+                UserDefinedTypeRepresentation::Composite { attributes } => TypeDef::Composite(
+                    attributes
+                        .into_iter()
+                        .map(|attr| (attr.name, attr.data_type))
+                        .collect(),
+                ),
+                _ => continue,
+            };
+            defs.insert(object_name(&name), def);
         }
     }
     defs
@@ -1107,10 +1147,33 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
             (object_name(&create.name), columns)
         })
         .collect();
+    let composites = defs
+        .iter()
+        .filter_map(|(name, def)| match def {
+            TypeDef::Composite(fields) => Some((name.clone(), fields)),
+            _ => None,
+        })
+        .map(|(name, fields)| {
+            let fields = fields
+                .iter()
+                .map(|(field, data_type)| {
+                    let (sql_type, python_type) = resolve_type(data_type, &types, dialect);
+                    SchemaColumn {
+                        name: field.value.to_lowercase(),
+                        ident: field.value.to_lowercase(),
+                        sql_type,
+                        python_type,
+                    }
+                })
+                .collect();
+            (name, fields)
+        })
+        .collect();
     let mut data = SchemaData {
         tables,
         views: HashMap::new(),
         types,
+        composites,
     };
     for stmt in statements.iter().filter(|stmt| stmt.creates("view")) {
         let Some(Statement::CreateView(view)) =
@@ -1466,6 +1529,14 @@ fn figure_name(expr: &Expr) -> String {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| type_column_name(data_type)),
         Expr::Nested(expr) | Expr::Collate { expr, .. } => figure_name(expr),
+        Expr::CompoundFieldAccess { root, access_chain } => access_chain
+            .iter()
+            .rev()
+            .find_map(|access| match access {
+                AccessExpr::Dot(Expr::Identifier(field)) => Some(ident_name(field)),
+                _ => None,
+            })
+            .unwrap_or_else(|| figure_name(root)),
         Expr::Function(func) => func
             .name
             .0
@@ -1804,6 +1875,31 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The element type of an array type; an enum element keeps its `Literal`.
+    fn element_typed(&self, array: Option<&str>) -> Typed {
+        let Some(elem) = array.and_then(array_element) else {
+            return (None, None);
+        };
+        match self.schema.types.get(&elem.to_lowercase()) {
+            Some(user) if user.python_type.is_some() => {
+                (user.python_type.clone(), Some(elem.to_string()))
+            }
+            _ => from_sql_type(elem.to_string(), self.dialect),
+        }
+    }
+
+    /// The type of `field` in the composite type `composite`, when the schema declares it.
+    fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Typed {
+        composite
+            .and_then(|name| self.schema.composites.get(&name.to_lowercase()))
+            .and_then(|fields| {
+                fields
+                    .iter()
+                    .find(|col| col.name == field.value.to_lowercase())
+            })
+            .map_or((None, None), |col| col.typed(self.dialect))
+    }
+
     fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => {
@@ -1815,6 +1911,55 @@ impl<'a> Analyzer<'a> {
                 })
             }
             Expr::Nested(inner) => self.expr(inner, scope),
+            Expr::Array(array) => {
+                let mut common: Option<String> = None;
+                for elem in &array.elem {
+                    if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
+                        continue;
+                    }
+                    let typed = self.expr(elem, scope)?;
+                    let Some(elem) = typed
+                        .1
+                        .clone()
+                        .or_else(|| operand_type(&typed).map(String::from))
+                        .or_else(|| (typed.0.as_deref() == Some("str")).then(|| "TEXT".into()))
+                    else {
+                        return Ok((None, None));
+                    };
+                    let elem = array_element(&elem).unwrap_or(&elem).to_string();
+                    if common.get_or_insert_with(|| elem.clone()) != &elem {
+                        return Ok((None, None));
+                    }
+                }
+                Ok(common.map_or((None, None), |elem| {
+                    from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
+                }))
+            }
+            Expr::CompoundFieldAccess { root, access_chain } => {
+                let (mut typed, chain) = match (root.as_ref(), access_chain.as_slice()) {
+                    (
+                        Expr::Identifier(table),
+                        [AccessExpr::Dot(Expr::Identifier(column)), rest @ ..],
+                    ) => {
+                        let column = Expr::CompoundIdentifier(vec![table.clone(), column.clone()]);
+                        (self.expr(&column, scope)?, rest)
+                    }
+                    _ => (self.expr(root, scope)?, access_chain.as_slice()),
+                };
+                for access in chain {
+                    typed = match access {
+                        AccessExpr::Subscript(Subscript::Index { .. }) => {
+                            self.element_typed(typed.1.as_deref())
+                        }
+                        AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
+                        AccessExpr::Dot(Expr::Identifier(field)) => {
+                            self.field_typed(typed.1.as_deref(), field)
+                        }
+                        AccessExpr::Dot(_) => typed,
+                    };
+                }
+                Ok(typed)
+            }
             Expr::UnaryOp {
                 op: UnaryOperator::Minus | UnaryOperator::Plus,
                 expr: inner,
@@ -1936,13 +2081,7 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok((None, None))
             }
-            Returns::Elem(i) => Ok(arg(i)?
-                .1
-                .as_deref()
-                .and_then(array_element)
-                .map_or((None, None), |elem| {
-                    from_sql_type(elem.to_string(), self.dialect)
-                })),
+            Returns::Elem(i) => Ok(self.element_typed(arg(i)?.1.as_deref())),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
                 let elem = typed

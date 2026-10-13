@@ -114,8 +114,9 @@ typed = "--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t
 ```
 
 An unaliased column is named as PostgreSQL names it: the column (also under a
-cast), the function (`count`, `max`, `now`), a keyword such as `case` or
-`exists`, else `?column?`. Alias columns that a row type matches by name.
+cast), the function (`count`, `max`, `now`), the array of a subscript (`tags[1]`
+is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, else
+`?column?`. Alias columns that a row type matches by name.
 
 Row types are never optional: a nullable column is typed as its base type.
 Annotate a [row type](row-types.md) with `T | None` when you need it.

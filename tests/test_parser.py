@@ -21,7 +21,7 @@ class TestParser:
                 "postgres",
                 "tuple[list[int], list[list[str]], list[int]]",
             ),
-            ("SELECT (x::INT[])[1] FROM t", "postgres", None),
+            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[int]"),
             ("SELECT x::INT[y] FROM t", "postgres", None),
             ("SELECT x::INT[1+1] FROM t", "postgres", None),
             ("SELECT x::INT ARRAY, y::TEXT FROM t", "postgres", "tuple[list[int], str]"),
