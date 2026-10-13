@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
@@ -142,8 +143,8 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
-/// Schema: table name -> columns in declaration order.
-pub type Schema = HashMap<String, Vec<SchemaColumn>>;
+/// Schema: table name -> columns in declaration order; shared, so caching it is cheap.
+pub type Schema = Arc<HashMap<String, Vec<SchemaColumn>>>;
 
 #[derive(Clone, Debug)]
 pub struct SchemaColumn {
@@ -470,7 +471,7 @@ fn object_name(name: &ObjectName) -> String {
 /// Load schema from CREATE TABLE SQL statements.
 pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     let dialect = SqlDialect::from_name(dialect);
-    schema_sql
+    let tables = schema_sql
         .split(';')
         .filter_map(|stmt| parse_ddl(stmt.trim(), dialect)?.into_iter().next())
         .filter_map(|stmt| match stmt {
@@ -493,7 +494,8 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
                 .collect();
             (object_name(&create.name), columns)
         })
-        .collect()
+        .collect();
+    Arc::new(tables)
 }
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
@@ -516,7 +518,7 @@ pub fn analyze_select(
     dialect: &str,
     schema: &Option<Schema>,
 ) -> Inferred<Option<Vec<Column>>> {
-    let empty = Schema::new();
+    let empty = Schema::default();
     let dialect = SqlDialect::from_name(dialect);
     let Some(stmt) = parse_first(sql, dialect) else {
         return Ok(None);

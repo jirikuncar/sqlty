@@ -17,19 +17,40 @@ use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 
-/// The last schema loaded, as `(schema_sql, dialect, schema)`: callers pass the same one per query.
-static LAST_SCHEMA: Mutex<Option<(String, String, analyzer::Schema)>> = Mutex::new(None);
+type CachedSchema = (String, String, analyzer::Schema);
+
+/// Most recently used first. Callers pass the same few schemas call after call, and
+/// parsing a large one costs about a millisecond, so keep the last few parsed.
+static SCHEMAS: Mutex<Vec<CachedSchema>> = Mutex::new(Vec::new());
+const SCHEMAS_KEPT: usize = 8;
 
 fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
     let schema_sql = schema_sql?;
-    let mut last = LAST_SCHEMA.lock().unwrap_or_else(|e| e.into_inner());
-    match last.as_ref() {
-        Some((sql, d, schema)) if sql == schema_sql && d == dialect => Some(schema.clone()),
-        _ => {
-            let schema = analyzer::load_schema(schema_sql, dialect);
-            *last = Some((schema_sql.to_string(), dialect.to_string(), schema.clone()));
-            Some(schema)
-        }
+    let mut cache = SCHEMAS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = cache
+        .iter()
+        .position(|(sql, d, _)| sql == schema_sql && d == dialect)
+    {
+        cache[..=at].rotate_right(1);
+    } else {
+        let schema = analyzer::load_schema(schema_sql, dialect);
+        cache.insert(0, (schema_sql.to_string(), dialect.to_string(), schema));
+        cache.truncate(SCHEMAS_KEPT);
+    }
+    Some(cache[0].2.clone())
+}
+
+/// The schema, unless `source` cannot hold a query: every query, wrapper and
+/// diagnostic involves the text `sql` (`--sql`, `SQL[...]`), in any case.
+fn schema_for(source: &str, schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
+    if source
+        .as_bytes()
+        .windows(3)
+        .any(|w| w.eq_ignore_ascii_case(b"sql"))
+    {
+        schema(schema_sql, dialect)
+    } else {
+        None
     }
 }
 
@@ -113,7 +134,7 @@ fn rewrite_source(
     Ok(rewriter::rewrite_source_with(
         source,
         dialect,
-        &schema(schema_sql, dialect),
+        &schema_for(source, schema_sql, dialect),
         import_style,
         untyped,
         keep_lines,
@@ -151,7 +172,7 @@ fn fix_source(
     Ok(fixer::fix_source(
         source,
         dialect,
-        &schema(schema_sql, dialect),
+        &schema_for(source, schema_sql, dialect),
         import_style,
         untyped,
         rules,
@@ -190,7 +211,7 @@ fn check_source<'py>(
     let diagnostics = checker::check_source(
         source,
         dialect,
-        &schema(schema_sql, dialect),
+        &schema_for(source, schema_sql, dialect),
         rules,
         import_style,
         untyped,
