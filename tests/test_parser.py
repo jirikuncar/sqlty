@@ -113,7 +113,7 @@ class TestQueryInput:
             ("--sql SELECT id FROM users", "mysql", None),
             ("SELECT id FROM users WHERE name = %b AND id = %(n)t", "postgres", "tuple[int]"),
             ("SELECT id FROM users WHERE id = %(a-b)s", "postgres", "tuple[int]"),
-            ("SELECT id, 5 %% 2 FROM users WHERE name LIKE 'a%%'", "postgres", "tuple[int, str]"),
+            ("SELECT id, 5 %% 2 FROM users WHERE name LIKE 'a%%'", "postgres", "tuple[int, int]"),
             (
                 "SELECT $$it's %s$$::TEXT, id FROM users WHERE id = %s",
                 "postgres",

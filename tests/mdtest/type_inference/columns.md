@@ -305,7 +305,7 @@ SELECT NULLIF(a::INTEGER, 0), my_fn(b), COUNT(*), count(c), LOWER(d), json_build
 -- columns: : int (INTEGER)
 -- columns: : str (None)
 -- columns: json_build_object: dict (None)
--- columns: : None (None)
+-- columns: : bool (BOOLEAN)
 -- columns: : None (None)
 -- columns: 1: None (None)
 ```

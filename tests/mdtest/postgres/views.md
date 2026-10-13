@@ -133,7 +133,7 @@ CREATE VIEW opaque AS SELECT * FROM not_in_schema;
 SELECT id, name, next_id, missing_column FROM mixed
 -- columns: id: int (INT)
 -- columns: name: str (TEXT)
--- columns: next_id: None (None)
+-- columns: next_id: int (INT)
 -- columns: missing_column: None (None)
 ```
 

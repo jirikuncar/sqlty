@@ -13,10 +13,11 @@ use crate::ddl;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
-    visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
-    FunctionArguments, Join, JoinConstraint, JoinOperator, ObjectName, OutputClause, Query, Select,
-    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableFactor,
-    TableObject, TableWithJoins, UserDefinedTypeRepresentation, Value,
+    visit_expressions, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable, FunctionArg,
+    FunctionArgExpr, FunctionArguments, Join, JoinConstraint, JoinOperator, ObjectName,
+    OutputClause, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
+    TableAlias, TableFactor, TableObject, TableWithJoins, UnaryOperator,
+    UserDefinedTypeRepresentation, Value,
 };
 use sqlparser::dialect::{
     dialect_from_str, ClickHouseDialect, GenericDialect, MySqlDialect, PostgreSqlDialect,
@@ -1413,7 +1414,33 @@ impl<'a> Analyzer<'a> {
                 Value::Null | Value::Placeholder(_) => Ok((None, None)),
                 _ => known("str"),
             },
-            Expr::Exists { .. } | Expr::InSubquery { .. } => known("bool"),
+            Expr::Exists { .. }
+            | Expr::InSubquery { .. }
+            | Expr::InList { .. }
+            | Expr::InUnnest { .. }
+            | Expr::Between { .. }
+            | Expr::Like { .. }
+            | Expr::ILike { .. }
+            | Expr::SimilarTo { .. }
+            | Expr::RLike { .. }
+            | Expr::AnyOp { .. }
+            | Expr::AllOp { .. }
+            | Expr::IsNull(_)
+            | Expr::IsNotNull(_)
+            | Expr::IsTrue(_)
+            | Expr::IsNotTrue(_)
+            | Expr::IsFalse(_)
+            | Expr::IsNotFalse(_)
+            | Expr::IsUnknown(_)
+            | Expr::IsNotUnknown(_)
+            | Expr::IsDistinctFrom(..)
+            | Expr::IsNotDistinctFrom(..)
+            | Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                ..
+            } => Ok(from_sql_type("BOOLEAN".to_string())),
+            Expr::Interval(_) => Ok(from_sql_type("INTERVAL".to_string())),
+            Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => match leftmost_select(&query.body) {
@@ -1459,6 +1486,57 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Result type of `left op right`: predicates are `BOOLEAN`, text and JSON operators
+    /// give `TEXT` or `JSONB`, arithmetic promotes its operands.
+    fn binary_op(
+        &self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        use BinaryOperator::*;
+        let sql = |name: &str| Ok(from_sql_type(name.to_string()));
+        match op {
+            Gt | Lt | GtEq | LtEq | Spaceship | Eq | NotEq | And | Or | Xor | Match | Regexp
+            | Glob | PGOverlap | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
+            | PGRegexNotIMatch | PGLikeMatch | PGILikeMatch | PGNotLikeMatch | PGNotILikeMatch
+            | PGStartsWith | AtAt | AtArrow | ArrowAt | AtQuestion | Question | QuestionAnd
+            | QuestionPipe | Overlaps => sql("BOOLEAN"),
+            LongArrow | HashLongArrow => sql("TEXT"),
+            Arrow | HashArrow | HashMinus if self.dialect == SqlDialect::Postgres => {
+                let json = self.expr(left, scope)?.1.is_some_and(|ty| ty == "JSON");
+                sql(if json && *op != HashMinus {
+                    "JSON"
+                } else {
+                    "JSONB"
+                })
+            }
+            StringConcat if self.dialect != SqlDialect::MySql => {
+                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+                if l.1.as_deref() == Some("JSONB") || r.1.as_deref() == Some("JSONB") {
+                    sql("JSONB")
+                } else if is_text(&l) || is_text(&r) {
+                    sql("TEXT")
+                } else {
+                    Ok((None, None))
+                }
+            }
+            Plus | Minus | Multiply | Divide | Modulo => {
+                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+                let mysql_division = self.dialect == SqlDialect::MySql && *op == Divide;
+                let wild = |expr: &Expr| matches!(expr, Expr::Value(v) if matches!(v.value, Value::Null | Value::Placeholder(_)));
+                let (l, r) = match (wild(left), wild(right)) {
+                    (true, false) => (r.clone(), r),
+                    (false, true) => (l.clone(), l),
+                    _ => (l, r),
+                };
+                Ok(arithmetic(op, &l, &r, mysql_division).map_or((None, None), from_sql_type))
+            }
+            _ => Ok((None, None)),
+        }
+    }
+
     /// SUM/MIN/MAX take their argument's type; SUM falls back to `NUMERIC`.
     fn aggregate(&self, name: &str, arg: Option<&Expr>, scope: &Scope) -> Inferred<Typed> {
         let typed = arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope))?;
@@ -1485,6 +1563,87 @@ impl<'a> Analyzer<'a> {
             ));
         }
         numeric()
+    }
+}
+
+fn type_base(sql_type: &str) -> &str {
+    sql_type.split(['(', '<']).next().unwrap_or_default().trim()
+}
+
+/// The SQL type of an operand; literals know only their Python type.
+fn operand_type(typed: &Typed) -> Option<&str> {
+    match (typed.1.as_deref(), typed.0.as_deref()) {
+        (Some(sql_type), _) => Some(type_base(sql_type)),
+        (None, Some("int")) => Some("INT"),
+        (None, Some("float")) => Some("DOUBLE"),
+        _ => None,
+    }
+}
+
+fn is_text(typed: &Typed) -> bool {
+    match &typed.1 {
+        Some(sql_type) => matches!(type_base(sql_type), "TEXT" | "VARCHAR" | "CHAR"),
+        None => typed.0.as_deref() == Some("str"),
+    }
+}
+
+/// Numeric types in promotion order, with the canonical name of each rank.
+const NUMERIC_RANKS: [&[&str]; 6] = [
+    &["SMALLINT", "TINYINT"],
+    &["INT", "MEDIUMINT"],
+    &["BIGINT"],
+    &["DECIMAL", "NUMERIC"],
+    &["FLOAT", "REAL"],
+    &["DOUBLE"],
+];
+
+fn numeric_rank(sql_type: &str) -> Option<usize> {
+    NUMERIC_RANKS
+        .iter()
+        .position(|names| names.contains(&sql_type))
+}
+
+/// Result type of `left op right` for numbers (promoted to the wider type), and for dates,
+/// timestamps and intervals; a placeholder or `NULL` operand takes the other's type.
+fn arithmetic(
+    op: &BinaryOperator,
+    left: &Typed,
+    right: &Typed,
+    mysql_division: bool,
+) -> Option<String> {
+    use BinaryOperator::*;
+    let (l, r) = (operand_type(left), operand_type(right));
+    let temporal = |ty: Option<&str>| matches!(ty, Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ"));
+    match (l, r) {
+        (Some(a), Some(b)) if numeric_rank(a).is_some() && numeric_rank(b).is_some() => {
+            let rank = numeric_rank(a)?.max(numeric_rank(b)?);
+            let rank = if mysql_division { rank.max(3) } else { rank };
+            Some(NUMERIC_RANKS[rank][0].to_string())
+        }
+        (Some(a), Some("INTERVAL")) if temporal(Some(a)) && matches!(op, Plus | Minus) => {
+            Some(if a == "DATE" { "TIMESTAMP" } else { a }.to_string())
+        }
+        (Some("INTERVAL"), Some(b)) if temporal(Some(b)) && *op == Plus => {
+            Some(if b == "DATE" { "TIMESTAMP" } else { b }.to_string())
+        }
+        (Some("DATE"), Some("INT" | "SMALLINT")) if matches!(op, Plus | Minus) => {
+            Some("DATE".to_string())
+        }
+        (Some(a), Some(b))
+            if *op == Minus && a == b && matches!(a, "TIMESTAMP" | "TIMESTAMPTZ") =>
+        {
+            Some("INTERVAL".to_string())
+        }
+        (Some("DATE"), Some("DATE")) if *op == Minus => Some("INT".to_string()),
+        (Some("INTERVAL"), Some("INTERVAL")) if matches!(op, Plus | Minus) => {
+            Some("INTERVAL".to_string())
+        }
+        (Some("INTERVAL"), Some(n)) | (Some(n), Some("INTERVAL"))
+            if *op == Multiply && numeric_rank(n).is_some() =>
+        {
+            Some("INTERVAL".to_string())
+        }
+        _ => None,
     }
 }
 

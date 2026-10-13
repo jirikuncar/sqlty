@@ -97,12 +97,13 @@ missing one gets a line of its own.
 
 Literals, `COUNT(*)` and casts inside expressions are typed too. A column
 without a cast, schema entry or literal type becomes `str`, as does an
-expression sqlty cannot type, such as arithmetic. Cast the whole expression
-when the default is wrong:
+expression sqlty cannot type, such as arithmetic on such a column. Predicates
+are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
+wider type. Cast the whole expression when the default is wrong:
 
 ```python
-query = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, (x::INTEGER + 1)::INTEGER, name FROM t"
-# rewritten: query = SQL[tuple[int, int, str, int, str]]("--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, (x::INTEGER + 1)::INTEGER, name FROM t")
+query = "--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t"
+# rewritten: query = SQL[tuple[int, int, str, int, str]]("--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t")
 ```
 
 Row types are never optional: a nullable column is typed as its base type.
