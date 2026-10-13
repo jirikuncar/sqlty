@@ -50,11 +50,11 @@ FROM products
 -- inferred: tuple[int, str, float, bool, int]
 ```
 
-## No explicit casts defaults to str
+## No explicit casts leaves the row type unknown
 
 ```sql
 SELECT id, name FROM users
--- inferred: tuple[str, str]
+-- inferred: None
 ```
 
 ## Single column returns single-element tuple

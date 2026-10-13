@@ -12,11 +12,11 @@ SELECT id::INTEGER, name::TEXT, email::VARCHAR FROM users
 -- inferred: tuple[int, str, str]
 ```
 
-## SELECT without casts defaults to str
+## SELECT without casts has no row type
 
 ```sql
 SELECT id, name, email FROM users
--- inferred: tuple[str, str, str]
+-- inferred: None
 ```
 
 ## SELECT with WHERE clause

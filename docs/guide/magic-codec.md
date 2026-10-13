@@ -92,7 +92,7 @@ the codec.
 ## Configuration
 
 The codec uses the PostgreSQL dialect and no schema, so cast every column;
-an uncast column is typed `str`. It reads only `import-style` from the
+a query with an uncast column is not typed. It reads only `import-style` from the
 `pyproject.toml` found from the current working directory (see
 [Configuration](../reference/configuration.md#import-style)).
 

@@ -7,7 +7,7 @@ Aliases never change the type.
 
 ```sql
 SELECT 1, 1.5, 'text', TRUE, NULL
--- inferred: tuple[int, decimal.Decimal, str, bool, str]
+-- inferred: None
 ```
 
 ## Aliased aggregates

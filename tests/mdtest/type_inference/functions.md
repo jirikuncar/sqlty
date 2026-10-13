@@ -11,7 +11,7 @@ SELECT SUM(amount) FROM orders
 
 ```sql
 SELECT AVG(score) FROM tests
--- inferred: tuple[decimal.Decimal]
+-- inferred: None
 ```
 
 ## TRIM function is recognized
@@ -32,14 +32,14 @@ SELECT CONCAT(first_name, ' ', last_name) FROM users
 
 ```sql
 SELECT MY_CUSTOM_FUNCTION(data) FROM table_name
--- inferred: tuple[str]
+-- inferred: None
 ```
 
 ## Unknown function inference returns None (2)
 
 ```sql
 SELECT WEIRD_FUNC(x, y) FROM z
--- inferred: tuple[str]
+-- inferred: None
 ```
 
 ## Unknown function inference returns None (3)

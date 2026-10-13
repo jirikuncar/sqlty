@@ -111,7 +111,7 @@ SELECT id, name FROM users
 
 ```sql
 SELECT id FROM users
--- inferred: tuple[str]
+-- inferred: None
 ```
 
 ## Regression cases
@@ -183,7 +183,7 @@ SELECT a::INTEGER FROM t UNION SELECT b FROM u UNION SELECT c FROM v
 
 ```sql
 SELECT 1, 1.5, 'a', TRUE, NULL
--- inferred: tuple[int, decimal.Decimal, str, bool, str]
+-- inferred: None
 ```
 
 ### `SELECT COUNT(*) AS n, SUM(x) AS s FROM t`

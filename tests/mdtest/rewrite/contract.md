@@ -144,12 +144,11 @@ q = "--sql\nUPDATE users SET x=1 RETURNING id::INTEGER"
 # rewritten-file: q = SQL[tuple[int]]("--sql\nUPDATE users SET x=1 RETURNING id::INTEGER")
 ```
 
-### SELECT without casts still wraps — type defaults to tuple[str, ...]
+### SELECT without casts is not wrapped — the row type is unknown
 
 ```python
 q = "--sql\nSELECT id, name FROM users"
-# rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[str, str]]("--sql\nSELECT id, name FROM users")
+# rewritten-file: q = "--sql\nSELECT id, name FROM users"
 ```
 
 ### --sql SELECT ... with space is a SQL comment — parser sees empty query

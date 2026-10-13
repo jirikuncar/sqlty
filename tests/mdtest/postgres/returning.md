@@ -198,7 +198,7 @@ MERGE INTO users u USING staged s ON u.id = s.id
 WHEN MATCHED THEN UPDATE SET name = s.name
 WHEN NOT MATCHED THEN INSERT (id, name) VALUES (s.id, s.name)
 RETURNING merge_action(), u.id::INTEGER, u.name::TEXT
--- inferred: tuple[str, int, str]
+-- inferred: None
 ```
 
 ## MERGE without RETURNING returns None

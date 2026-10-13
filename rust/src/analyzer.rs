@@ -62,6 +62,7 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("CHAR", "str"),
         ("STRING", "str"),
         ("NAME", "str"),
+        ("ENUM", "str"),
         ("CITEXT", "str"),
         ("BPCHAR", "str"),
         ("XML", "str"),
@@ -943,7 +944,7 @@ fn decimal_type(dialect: SqlDialect) -> &'static str {
     }
 }
 
-/// Map a canonical SQL type to a Python type string; unknown types are `str`.
+/// Map a canonical SQL type to a Python type string; unknown types are `None`.
 /// `ARRAY<T>` is `list[T]` (bare `list` when `T` is unknown).
 fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     if let Some(inner) = sql_type.strip_prefix("ARRAY<") {
@@ -957,7 +958,7 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     match base {
         "ARRAY" => Some("list".to_string()),
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
-        _ => Some(SQL_TO_PYTHON_TYPE.get(base).unwrap_or(&"str").to_string()),
+        _ => SQL_TO_PYTHON_TYPE.get(base).map(|ty| ty.to_string()),
     }
 }
 
@@ -1137,18 +1138,18 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
     let columns = analyze_select(sql, dialect, schema)?;
-    // A `*` the schema cannot resolve leaves the row type unknown.
-    let columns = columns.filter(|columns| !columns.iter().any(Column::is_unknown_star));
-    Ok(columns.map(|columns| {
-        let types: Vec<&str> = columns
+    // A column of unknown type, `*` the schema cannot resolve included, leaves the row type unknown.
+    Ok(columns.and_then(|columns| {
+        let types: Option<Vec<&str>> = columns
             .iter()
-            .map(|col| col.python_type.as_deref().unwrap_or("str"))
+            .map(|col| col.python_type.as_deref())
             .collect();
-        if types.is_empty() {
+        let types = types?;
+        Some(if types.is_empty() {
             "tuple[()]".to_string()
         } else {
             format!("tuple[{}]", types.join(", "))
-        }
+        })
     }))
 }
 
@@ -1956,7 +1957,8 @@ impl<'a> Analyzer<'a> {
                 let typed = arg(0)?;
                 match typed.1.as_deref().and_then(range_element) {
                     Some(elem) => sql(elem),
-                    None => sql("TEXT"),
+                    None if typed.0.is_some() => sql("TEXT"),
+                    None => Ok((None, None)),
                 }
             }
             Returns::Mean => {
@@ -1964,7 +1966,8 @@ impl<'a> Analyzer<'a> {
                 match operand_type(&typed) {
                     Some("DOUBLE" | "FLOAT") => sql("DOUBLE"),
                     Some("INTERVAL") => sql("INTERVAL"),
-                    _ => sql("DECIMAL"),
+                    Some(_) => sql("DECIMAL"),
+                    None => Ok((None, None)),
                 }
             }
             Returns::Real | Returns::Scaled => {
@@ -2538,8 +2541,8 @@ mod tests {
             Some("tuple[int]")
         );
         assert_eq!(
-            infer("WITH users AS (SELECT 1 AS other) SELECT id FROM users").as_deref(),
-            Some("tuple[str]")
+            infer("WITH users AS (SELECT 1 AS other) SELECT id FROM users"),
+            None
         );
     }
 }

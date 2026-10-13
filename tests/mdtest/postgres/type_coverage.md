@@ -136,9 +136,9 @@ FROM t
 -- inferred: tuple[int, int, int, int, int, float, float, float, decimal.Decimal, decimal.Decimal, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list[int], typing.Any, typing.Any, uuid.UUID]
 ```
 
-## Unknown type defaults to str
+## Unknown type leaves the row type unknown
 
 ```sql
 SELECT value::CUSTOM_TYPE FROM t
--- inferred: tuple[str]
+-- inferred: None
 ```

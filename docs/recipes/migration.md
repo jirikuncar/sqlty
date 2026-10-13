@@ -75,8 +75,8 @@ query = "--sql\nSELECT id, name, created_at FROM users WHERE id = %s"
 # rewritten: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
 ```
 
-Without a schema, an uncast column is typed `str`, which is wrong for most
-of them.
+Without a schema, an uncast column has no known type, so the query is left
+as it is (see the next step).
 
 ### 2. Mark untyped queries
 

@@ -42,7 +42,7 @@ SELECT 5 %% 2, 'a%%'::TEXT
 
 ```sql
 SELECT %s::INTEGER, %s
--- inferred: tuple[int, str]
+-- inferred: None
 ```
 
 ## Placeholder text in strings

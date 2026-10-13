@@ -40,7 +40,7 @@ def projects(tmp_path: Path) -> dict[str, Path]:
 
 
 EXPECTED = {
-    "plain": 'from sqlty import SQL\nq = SQL[tuple[str, str]]("--sql\\nSELECT id, name FROM users")\n',
+    "plain": QUERY,
     "schema": 'from sqlty import SQL\nq = SQL[tuple[int, str]]("--sql\\nSELECT id, name FROM users")\n',
     "styled": 'from sqlty import SQL as Q\nq = Q[tuple[int, str]]("--sql\\nSELECT id, name FROM users")\n',
 }

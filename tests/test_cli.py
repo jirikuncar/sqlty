@@ -34,7 +34,9 @@ def test_each_file_uses_its_nearest_config(tmp_path, monkeypatch, capsys) -> Non
     for name, config in (("a", 'schema = "schema.sql"'), ("b", 'import-style = "import sqlty"')):
         (tmp_path / name).mkdir()
         (tmp_path / name / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}\n")
-        (tmp_path / name / "q.py").write_text(source)
+        (tmp_path / name / "q.py").write_text(
+            source.replace("id FROM", "id::INTEGER FROM", 1) if name == "b" else source
+        )
     (tmp_path / "a" / "schema.sql").write_text("CREATE TABLE users (id INTEGER);")
     monkeypatch.chdir(tmp_path)
 
@@ -44,7 +46,7 @@ def test_each_file_uses_its_nearest_config(tmp_path, monkeypatch, capsys) -> Non
         'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
     )
     assert (tmp_path / "b" / "q.py").read_text() == (
-        'import sqlty\nq = sqlty.SQL[tuple[str]]("--sql\\nSELECT id FROM users")\n'
+        'import sqlty\nq = sqlty.SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")\n'
     )
     main(["check", "a", "b"])
     assert capsys.readouterr().out == ""

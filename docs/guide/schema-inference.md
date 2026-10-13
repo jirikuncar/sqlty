@@ -176,7 +176,8 @@ not, and skips a table that uses one (see
 ### MySQL
 
 MySQL schemas may quote identifiers with backticks and use `UNSIGNED`,
-`ENUM`, `SET` and `JSON` columns:
+`ENUM`, `SET` and `JSON` columns. `SET` has no known Python type, so a query
+that selects one is not typed:
 
 ```toml
 [tool.sqlty]
@@ -199,10 +200,12 @@ CREATE TABLE `orders` (
 ```
 
 ```python
-orders = "-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`"
+orders = "-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`"
+with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: import decimal
-# rewritten: orders = SQL[tuple[int, decimal.Decimal, int, str, str, typing.Any, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
+# rewritten: orders = SQL[tuple[int, decimal.Decimal, int, str, typing.Any, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
+# rewritten: with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 # rewritten: casts = SQL[tuple[int, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 

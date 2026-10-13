@@ -96,17 +96,21 @@ The rewriter adds `import datetime`, `import uuid`, `import decimal`,
 parentheses, `*`) are not imported again; a missing one gets a line of its own.
 
 Literals, `COUNT(*)` and casts inside expressions are typed too. A column
-without a cast, schema entry or literal type becomes `str`, as does an
-expression sqlty cannot type, such as arithmetic on such a column. Predicates
-are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
+without a cast, schema entry or literal type, a column of a type sqlty does not
+know, and an expression it cannot type, such as arithmetic or `NULL`, make the
+row type unknown: the string is left as it is (`SQL[UNTYPED]` with
+[`untyped = "sentinel"`](untyped.md)) and `sqlty check` skips the column.
+Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
 wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
 `greatest`, `unnest` and the advisory locks are typed too; `COALESCE`,
 `GREATEST` and `LEAST` take the first argument of known type, skipping `NULL`
-and placeholders. Cast the whole expression when the default is wrong:
+and placeholders. Cast the whole expression to type it:
 
 ```python
-query = "--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t"
-# rewritten: query = SQL[tuple[int, int, str, int, str]]("--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t")
+unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
+typed = "--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t"
+# rewritten: unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
+# rewritten: typed = SQL[tuple[int, int, int, str]]("--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t")
 ```
 
 An unaliased column is named as PostgreSQL names it: the column (also under a
@@ -172,9 +176,9 @@ parameters instead of interpolating them, and keep the query a plain literal.
 | `UUID` | `uuid.UUID` |
 | `BYTEA`, `BLOB`, `BINARY`, `VARBINARY` | `bytes` |
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
-| `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `TSVECTOR`, `TSQUERY` | `str` |
+| `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
-| Anything else (`ENUM`, `SET`, ...) | `str` |
+| Anything else (`SET`, `POINT`, custom types, ...) | unknown: the row type is unknown |
 
 ### Dialect notes
 

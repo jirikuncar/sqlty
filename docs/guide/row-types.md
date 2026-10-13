@@ -321,8 +321,10 @@ operations such as `query + " LIMIT 1"` do not: `row_form` raises
 
 - The row type must be defined in the same file as the `SQL[T](...)` call.
   Imported row types are skipped silently.
-- A column with neither a cast nor a schema type is typed `str` by
-  `rewrite`, but `check` does not compare it with the field type.
+- A column with neither a cast nor a schema type has an unknown type: the
+  query is not wrapped by `rewrite` (`SQL[UNTYPED]` with
+  [`untyped = "sentinel"`](untyped.md)), and `check` does not compare the
+  column with the field type.
 - Validation is static. Nothing checks rows at runtime; use Pydantic if you
   need that.
 

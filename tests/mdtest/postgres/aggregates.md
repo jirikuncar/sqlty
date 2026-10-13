@@ -30,7 +30,7 @@ SELECT SUM(amount) FROM orders
 
 ```sql
 SELECT AVG(score) FROM tests
--- inferred: tuple[decimal.Decimal]
+-- inferred: None
 ```
 
 ## SUM with explicit cast

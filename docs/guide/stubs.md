@@ -163,9 +163,9 @@ query_param = "query"
 schema = "db/schema.sql"
 ```
 
-Without a schema, an uncast column is silently typed `str`:
-`sql("SELECT id, name FROM users")` gets `SQL[tuple[str, str]]`, with no
-warning. Cast the columns or configure a schema.
+Without a schema, an uncast column has no known type:
+`sql("SELECT id, name FROM users")` gets no typed overload, and falls through to
+the catch-all one. Cast the columns or configure a schema.
 
 On each run, generation logs `Using schema from <path> (<source>)` as a
 warning (on stderr by default) for every helper with a schema.

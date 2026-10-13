@@ -170,7 +170,7 @@ SELECT id, name, active, birth_date FROM users
 -- inferred: tuple[int, str, bool, datetime.date]
 ```
 
-## No schema — columns without casts default to str
+## No schema — columns without casts are unknown
 
 ```toml
 [tool.sqlty]
@@ -179,7 +179,7 @@ dialect = "postgres"
 
 ```sql
 SELECT id, name FROM users
--- inferred: tuple[str, str]
+-- inferred: None
 ```
 
 ## SELECT * follows the schema's column order
