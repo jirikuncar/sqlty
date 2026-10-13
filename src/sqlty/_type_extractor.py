@@ -32,6 +32,8 @@ import types
 import typing
 import uuid
 
+from sqlty._source import ParsedSource
+
 
 class TypeInfo:
     """Information about a user-defined type extracted from source.
@@ -120,7 +122,7 @@ PYTHON_TYPE_MAP: dict[str, type] = {
 }
 
 
-def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
+def extract_type_definitions(source: str | ParsedSource) -> dict[str, TypeInfo]:
     """Extract type definitions from Python source code.
 
     Finds class definitions that are:
@@ -134,30 +136,28 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
     if runtime resolution fails (e.g. missing dependencies).
 
     Args:
-        source: Python source code to parse.
+        source: Python source code, or a ``ParsedSource`` whose tree is reused.
 
     Returns:
         Dictionary mapping type name to TypeInfo.
     """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
+    parsed = ParsedSource.of(source)
+    if (tree := parsed.tree) is None:
         return {}
 
-    aliases = _typing_aliases(tree)
+    aliases = parsed.typing_aliases
     newtypes = _newtype_assignments(tree, aliases)
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
     # are recognized when their base is a TypedDict defined earlier
     recognized: list[tuple[ast.ClassDef, str]] = []  # (node, kind)
     typeddict_nodes: dict[str, ast.ClassDef] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            kind = _classify_class(node, aliases, typeddict_nodes)
-            if kind == "TypedDict":
-                typeddict_nodes[node.name] = node
-            if kind:
-                recognized.append((node, kind))
+    for node in parsed.classes:
+        kind = _classify_class(node, aliases, typeddict_nodes)
+        if kind == "TypedDict":
+            typeddict_nodes[node.name] = node
+        if kind:
+            recognized.append((node, kind))
 
     if not recognized:
         return {}
@@ -187,7 +187,9 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         nodes = list(_lineage(node, typeddict_nodes).values()) if is_typeddict else [node]
         info.field_types = _ast_key_types(nodes, aliases, newtypes)
         hints = None
-        if (fields or is_typeddict) and (resolved := _resolve_class(nodes, import_stmts, source)):
+        if (fields or is_typeddict) and (
+            resolved := _resolve_class(nodes, import_stmts, parsed.text)
+        ):
             cls, namespace = resolved
             hints = _type_hints(cls, namespace)
             info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
@@ -647,22 +649,6 @@ def _newtype_assignments(tree: ast.Module, aliases: dict[str, str]) -> dict[str,
     }
 
 
-def _typing_aliases(tree: ast.Module) -> dict[str, str]:
-    """Map local names for ``typing`` / ``typing_extensions`` and their members to originals.
-
-    Example:
-        >>> _typing_aliases(ast.parse("import typing as t\\nfrom typing import Any as A"))
-        {'t': 'typing', 'A': 'Any'}
-    """
-    aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in _TYPING_MODULES:
-            aliases |= {a.asname or a.name: a.name for a in node.names}
-        elif isinstance(node, ast.Import):
-            aliases |= {a.asname or a.name: a.name for a in node.names if a.name in _TYPING_MODULES}
-    return aliases
-
-
 def _classify_class(
     node: ast.ClassDef,
     aliases: dict[str, str] | None = None,
@@ -863,7 +849,7 @@ def _ast_type(
 ) -> typing.Any:
     """Builtin scalars and generics, ``Any``, ``Never``, NewTypes and their unions from source; None if unknown.
 
-    ``aliases`` maps local names to ``typing`` names (see `_typing_aliases`), so
+    ``aliases`` maps local names to ``typing`` names (see ``ParsedSource.typing_aliases``), so
     ``A`` for ``from typing import Any as A`` and ``t.Any`` for
     ``import typing as t`` resolve; ``Annotated`` metadata is dropped.
     ``typing`` generic aliases (``List``, ``Dict``, ``Set``, ``FrozenSet``,

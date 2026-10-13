@@ -260,6 +260,7 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
+    from sqlty._source import ParsedSource
     from sqlty.core import HelperIndex, check_source, fix_source
 
     resolver = SettingsResolver(args)
@@ -269,44 +270,49 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
-    sources = {path: path.read_text(encoding="utf-8") for path in files}
-    helpers = HelperIndex()
     modules = {path: _module_names(path, args.paths) for path in files}
-    for path, source in sources.items():
+    sources = {
+        path: ParsedSource(
+            path.read_text(encoding="utf-8"),
+            modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
+        )
+        for path in files
+    }
+    helpers = HelperIndex()
+    for path, parsed in sources.items():
         for name in modules[path]:
-            helpers.add(name, source)
+            helpers.add(name, parsed)
 
     total_errors = 0
     total_warnings = 0
     total_fixed = 0
 
     for path in files:
-        source = sources[path]
+        parsed = sources[path]
         settings = resolver.for_file(path)
         if args.fix:
             fixed = fix_source(
-                source,
+                parsed.text,
                 dialect=settings.dialect,
                 schema_sql=settings.schema_sql,
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 rules=settings.rules,
             )
-            if fixed != source:
+            if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")
-                source = fixed
+                parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
                     print(f"Fixed {path}")
         diagnostics = check_source(
-            source,
+            parsed,
             dialect=settings.dialect,
             schema_sql=settings.schema_sql,
             rules=settings.rules,
             import_style=settings.import_style,
             untyped=settings.untyped,
             helpers=helpers,
-            module=modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
         )
 
         for diag in diagnostics:
@@ -378,6 +384,21 @@ def _is_package(directory: Path) -> bool:
     return (directory / "__init__.py").exists()
 
 
+@functools.cache
+def _package_path(directory: Path) -> tuple[str, ...]:
+    """Names of ``directory`` and its parents up through the ``__init__.py`` ones."""
+    if directory == directory.parent or not _is_package(directory):
+        return ()
+    return (*_package_path(directory.parent), directory.name)
+
+
+@functools.cache
+def _resolved_root(root: Path) -> Path | None:
+    """``root`` resolved, or ``None`` when it is not a directory."""
+    root = root.resolve()
+    return root if root.is_dir() else None
+
+
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
     """Dotted names ``path`` can be imported by, the likeliest first.
 
@@ -390,15 +411,10 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         ['mod']
     """
     path = path.resolve()
-    parts = [] if path.stem == "__init__" else [path.stem]
-    directory = path.parent
-    while _is_package(directory) and directory != directory.parent:
-        parts.insert(0, directory.name)
-        directory = directory.parent
+    parts = [*_package_path(path.parent), *([] if path.stem == "__init__" else [path.stem])]
     names = [".".join(parts)]
-    for root in roots:
-        root = root.resolve()
-        if root.is_dir() and path.is_relative_to(root):
+    for root in map(_resolved_root, roots):
+        if root is not None and path.is_relative_to(root):
             relative = list(path.relative_to(root).with_suffix("").parts)
             if relative[-1] == "__init__":
                 relative.pop()

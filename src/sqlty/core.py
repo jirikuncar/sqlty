@@ -11,11 +11,7 @@ needs the Python runtime.
 from __future__ import annotations
 
 import ast
-import io
-import re
-import tokenize
 import typing
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_select as _analyze_select
@@ -31,6 +27,7 @@ from sqlty._core import (
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
     from sqlty._helpers import HelperCall
@@ -79,7 +76,7 @@ def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list
 
 
 def check_source(
-    source: str,
+    source: str | ParsedSource,
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
@@ -107,6 +104,10 @@ def check_source(
     comments that dropped nothing. Comments are found with ``tokenize``, so a
     ``#`` inside a string is not one.
 
+    ``source`` may be a ``ParsedSource``: the file is then parsed and walked at
+    most once for all of these checks, and not at all when it holds no query.
+    Build one per file when checking many (see ``sqlty._source``).
+
     Example:
         >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
         []
@@ -117,8 +118,9 @@ def check_source(
     Raises:
         ValueError: unsupported ``import_style``
     """
+    parsed = ParsedSource.of(source, module)
     diagnostics = _check_diagnostics(
-        source,
+        parsed,
         dialect=dialect,
         schema_sql=schema_sql,
         rules=rules,
@@ -127,11 +129,11 @@ def check_source(
         helpers=helpers,
         module=module,
     )
-    return _apply_suppressions(source, diagnostics, rules)
+    return _apply_suppressions(parsed, diagnostics, rules)
 
 
 def _check_diagnostics(
-    source: str,
+    parsed: ParsedSource,
     *,
     dialect: str,
     schema_sql: str | None,
@@ -146,17 +148,21 @@ def _check_diagnostics(
     from sqlty._type_extractor import extract_type_definitions
 
     diagnostics = _check_source(
-        source,
+        parsed.text,
         dialect=dialect,
         schema_sql=schema_sql,
         rules=rules,
         import_style=import_style,
         untyped=untyped,
     )
-    calls = find_helper_calls(source, helpers, module)
+    calls = find_helper_calls(parsed, helpers, module)
     queries = [
         (line, name, query)
-        for line, name, query in _wrapped_queries(source, import_style=import_style)
+        for line, name, query in (
+            _wrapped_queries(parsed.text, import_style=import_style)
+            if parsed.may_wrap(import_style)
+            else []
+        )
         if not name.startswith("tuple[")
     ]
     if not (queries or calls):
@@ -175,7 +181,7 @@ def _check_diagnostics(
             )
 
     named = [(call.line, ast.unparse(call.row), call.query) for call in calls if call.row]
-    type_defs = extract_type_definitions(source) if queries or named else {}
+    type_defs = extract_type_definitions(parsed) if queries or named else {}
     user_queries = [q for q in [*queries, *named] if q[1] in type_defs]
 
     if rule_config.is_enabled("typeddict-inheritance"):
@@ -272,44 +278,15 @@ def _value_diagnostics(call: HelperCall, columns: list[ColumnInfo]) -> list[tupl
     ]
 
 
-_IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
-
-
-@dataclass(frozen=True)
-class _Ignore:
-    """A ``# sqlty: ignore`` comment; ``rules`` is ``None`` for a bare one."""
-
-    line: int
-    rules: tuple[str, ...] | None
-
-
-def _ignore_comments(source: str) -> dict[int, _Ignore]:
-    """``# sqlty: ignore`` comments by line, read from COMMENT tokens only."""
-    found: dict[int, _Ignore] = {}
-    tokens = tokenize.generate_tokens(io.StringIO(source).readline)
-    try:
-        for tok in tokens:
-            if tok.type != tokenize.COMMENT or (match := _IGNORE_RE.match(tok.string)) is None:
-                continue
-            names = match.group(1)
-            rules = (
-                None if names is None else tuple(n.strip() for n in names.split(",") if n.strip())
-            )
-            found[tok.start[0]] = _Ignore(tok.start[0], rules)
-    except tokenize.TokenError, SyntaxError:
-        pass
-    return found
-
-
 def _apply_suppressions(
-    source: str,
+    parsed: ParsedSource,
     diagnostics: list[dict[str, str | int | None]],
     rules: dict[str, str] | None,
 ) -> list[dict[str, str | int | None]]:
     """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
     from sqlty._lint import RuleConfig
 
-    ignores = _ignore_comments(source)
+    ignores = parsed.ignores
     if not ignores:
         return diagnostics
 

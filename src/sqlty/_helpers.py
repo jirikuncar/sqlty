@@ -14,12 +14,12 @@ Usage:
 from __future__ import annotations
 
 import ast
-import functools
 import re
 from dataclasses import dataclass
 from typing import NamedTuple
 
-_TYPING_MODULES = ("typing", "typing_extensions")
+from sqlty._source import ParsedSource
+
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
 
 
@@ -48,51 +48,12 @@ class HelperCall(NamedTuple):
     typing_aliases: dict[str, str]
 
 
-@functools.lru_cache(maxsize=64)
-def _parse(source: str) -> ast.Module | None:
-    try:
-        return ast.parse(source)
-    except SyntaxError, ValueError:
-        return None
-
-
 def _dotted(node: ast.expr) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute) and (base := _dotted(node.value)):
         return f"{base}.{node.attr}"
     return None
-
-
-def _may_define(source: str) -> bool:
-    return "Annotated" in source and "SQL" in source
-
-
-def _marker_names(tree: ast.Module) -> tuple[set[str], set[str]]:
-    """Local spellings of ``Annotated`` and of the ``sqlty.SQL`` marker.
-
-    Example:
-        >>> _marker_names(ast.parse("import typing as t\\nfrom sqlty import SQL as Q"))
-        ({'t.Annotated'}, {'Q'})
-    """
-    annotated: set[str] = set()
-    marker: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and not node.level:
-            for alias in node.names:
-                local = alias.asname or alias.name
-                if node.module in _TYPING_MODULES and alias.name == "Annotated":
-                    annotated.add(local)
-                elif node.module == "sqlty" and alias.name == "SQL":
-                    marker.add(local)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                local = alias.asname or alias.name
-                if alias.name in _TYPING_MODULES:
-                    annotated.add(f"{local}.Annotated")
-                elif alias.name == "sqlty":
-                    marker.add(f"{local}.SQL")
-    return annotated, marker
 
 
 def _expr(annotation: ast.expr | None) -> ast.expr | None:
@@ -139,23 +100,22 @@ def _row_param(args: ast.arguments, returns: ast.expr | None) -> str | None:
     return None
 
 
-def index_functions(tree: ast.Module) -> dict[str, Helper]:
+def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
     """Module-level functions with a marked query parameter, by name.
 
     Methods are not indexed.
 
     Example:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
-        >>> index_functions(ast.parse(src))["f"]
+        >>> index_functions(src)["f"]
         Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t')
     """
-    annotated, marker = _marker_names(tree)
+    parsed = ParsedSource.of(source)
+    annotated, marker = parsed.marker_names
     if not annotated or not marker:
         return {}
     found: dict[str, Helper] = {}
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node in parsed.functions:
         args = node.args
         query = next(
             (
@@ -192,11 +152,10 @@ class HelperIndex:
         self.modules: dict[str, dict[str, Helper]] = {}
         self._pattern: re.Pattern[str] | None = None
 
-    def add(self, module: str, source: str) -> bool:
+    def add(self, module: str, source: str | ParsedSource) -> bool:
         """Index the helpers of ``source`` as module ``module``; whether it has any."""
-        if not _may_define(source) or (tree := _parse(source)) is None:
-            return False
-        if not (found := index_functions(tree)):
+        parsed = ParsedSource.of(source)
+        if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
         self.modules.setdefault(module, {}).update(found)
         self._pattern = None
@@ -211,18 +170,18 @@ class HelperIndex:
 
 
 def _imports(
-    tree: ast.Module, module: str | None
+    parsed: ParsedSource, module: str | None
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
     """Local names bound to imported functions ``(module, name)`` and to modules.
 
     Example:
-        >>> _imports(ast.parse("from a.b import f as g\\nimport a.c as m"), None)
+        >>> _imports(ParsedSource("from a.b import f as g\\nimport a.c as m"), None)
         ({'g': ('a.b', 'f')}, {'g': 'a.b.f', 'm': 'a.c'})
     """
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
     package = module.rpartition(".")[0] if module else ""
-    for node in ast.walk(tree):
+    for node in parsed.imports:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 modules[alias.asname or alias.name] = alias.name
@@ -261,7 +220,7 @@ def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | N
 
 
 def find_helper_calls(
-    source: str, helpers: HelperIndex | None = None, module: str | None = None
+    source: str | ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
 ) -> list[HelperCall]:
     """Calls passing a string literal to a marked query parameter.
 
@@ -278,14 +237,17 @@ def find_helper_calls(
         >>> [(c.line, c.query) for c in find_helper_calls(src)]
         [(5, 'SELECT 1')]
     """
-    local = _may_define(source)
-    imported = helpers is not None and bool(helpers.modules) and helpers.mentions(source)
-    if not (local or imported) or (tree := _parse(source)) is None:
+    parsed = ParsedSource.of(source, module)
+    local = parsed.may_define_helpers
+    imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
+    if not (local or imported):
         return []
-    own = index_functions(tree) if local else {}
+    own = index_functions(parsed) if local else {}
     if not own and not imported:
         return []
-    functions, modules = _imports(tree, module) if imported else ({}, {})
+    functions, modules = (
+        _imports(parsed, module if module is not None else parsed.module) if imported else ({}, {})
+    )
     registry = helpers.modules if helpers is not None else {}
 
     def resolve(func: ast.expr) -> Helper | None:
@@ -304,12 +266,10 @@ def find_helper_calls(
             return registry.get(prefix, {}).get(func.attr)
         return None
 
-    from sqlty._type_extractor import _typing_aliases
-
-    aliases = _typing_aliases(tree)
+    aliases = parsed.typing_aliases
     calls = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or (helper := resolve(node.func)) is None:
+    for node in parsed.calls:
+        if (helper := resolve(node.func)) is None:
             continue
         query = _argument(helper, node, helper.query)
         if not (isinstance(query, ast.Constant) and isinstance(query.value, str)):
