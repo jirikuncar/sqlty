@@ -226,6 +226,7 @@ pub(crate) fn wraps(
     let tokens = tokenize(source);
     let calls = wrapper_calls(source, &tokens, &istyle.wrapper_name);
     let groups = string_groups(source, &tokens);
+    let lines = LineIndex::new(source);
     let interpolated: Vec<usize> = groups
         .iter()
         .filter(|group| {
@@ -234,7 +235,7 @@ pub(crate) fn wraps(
                 Some("fstring-skipped" | "tstring-skipped")
             )
         })
-        .map(|group| line_at(source, tokens[group[0]].span.start))
+        .map(|group| lines.line_at(tokens[group[0]].span.start))
         .collect();
 
     let mut replacements = Vec::new();
@@ -247,7 +248,7 @@ pub(crate) fn wraps(
             || calls
                 .iter()
                 .any(|call| call.span.start <= start && end <= call.span.end)
-            || interpolated.contains(&line_at(source, start))
+            || (!interpolated.is_empty() && interpolated.contains(&lines.line_at(start)))
         {
             continue;
         }
@@ -326,9 +327,18 @@ pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> S
     result
 }
 
-/// 1-indexed line number of a byte position.
-pub(crate) fn line_at(source: &str, pos: usize) -> usize {
-    source[..pos].matches('\n').count() + 1
+/// Newline offsets of a source, so line lookups are a binary search.
+pub(crate) struct LineIndex(Vec<usize>);
+
+impl LineIndex {
+    pub(crate) fn new(source: &str) -> Self {
+        Self(source.match_indices('\n').map(|(i, _)| i).collect())
+    }
+
+    /// 1-indexed line number of a byte position.
+    pub(crate) fn line_at(&self, pos: usize) -> usize {
+        self.0.partition_point(|&newline| newline < pos) + 1
+    }
 }
 
 /// Extract string content from a quoted string literal (removes quotes and a `u` prefix).

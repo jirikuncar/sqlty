@@ -18,8 +18,8 @@ use regex::Regex;
 use crate::analyzer::Schema;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, line_at, skipped_rule, string_literals,
-    strip_line_break, wraps, ImportStyle,
+    after_marker, ends_marker_line, extract_string_content, skipped_rule, string_literals,
+    strip_line_break, wraps, ImportStyle, LineIndex,
 };
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
 use std::ops::Range;
@@ -50,7 +50,7 @@ pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
 /// MariaDB reject: they read `--` as a comment only before whitespace.
-fn mysql_marker_lines(source: &str) -> Vec<usize> {
+fn mysql_marker_lines(source: &str, lines: &LineIndex) -> Vec<usize> {
     let mut lines: Vec<usize> = string_literals(source)
         .into_iter()
         .filter(|&(start, end)| {
@@ -59,7 +59,7 @@ fn mysql_marker_lines(source: &str) -> Vec<usize> {
                 .strip_prefix("--sql")
                 .is_some_and(ends_marker_line)
         })
-        .map(|(start, _)| line_at(source, start))
+        .map(|(start, _)| lines.line_at(start))
         .collect();
     lines.dedup();
     lines
@@ -138,8 +138,9 @@ pub fn check_source(
 
     let style = ImportStyle::or_default(import_style);
     let (wrapper_name, untyped_name) = (style.wrapper_name.clone(), style.untyped_name());
+    let lines = LineIndex::new(source);
     if dialect.eq_ignore_ascii_case("mysql") {
-        for line in mysql_marker_lines(source) {
+        for line in mysql_marker_lines(source, &lines) {
             report(
                 "mysql-sql-marker",
                 r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#.to_string(),
@@ -153,7 +154,7 @@ pub fn check_source(
             report(
                 "stale-rewrite",
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
-                line_at(source, start),
+                lines.line_at(start),
             );
         }
     }
@@ -162,7 +163,7 @@ pub fn check_source(
     let calls = wrapper_calls(source, &tokens, &wrapper_name);
     for group in string_groups(source, &tokens) {
         let first = &tokens[group[0]];
-        let line = line_at(source, first.span.start);
+        let line = lines.line_at(first.span.start);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             report(rule, skipped_message(rule), line);
             continue;
@@ -178,7 +179,7 @@ pub fn check_source(
     }
 
     for call in &calls {
-        let line_num = line_at(source, call.span.start);
+        let line_num = lines.line_at(call.span.start);
         let Some(sql_content) = call.content(source) else {
             let interpolated = call.strings.iter().any(|span| {
                 source[span.clone()]
@@ -278,6 +279,7 @@ pub fn wrapped_queries(
     import_style: Option<&str>,
 ) -> Vec<(usize, String, Option<String>)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
+    let lines = LineIndex::new(source);
     wrapper_calls(source, &tokenize(source), &wrapper_name)
         .into_iter()
         .map(|call| {
@@ -286,7 +288,7 @@ pub fn wrapped_queries(
                 Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
             });
             (
-                line_at(source, call.span.start),
+                lines.line_at(call.span.start),
                 source[call.annotation.clone()].to_string(),
                 query,
             )
