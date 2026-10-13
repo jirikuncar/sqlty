@@ -90,9 +90,13 @@ accepted wherever its supertype is, and a parametrised generic such as
 `list[str]` or `dict[str, int]` for a column that infers the bare `list` or
 `dict`.
 
-Annotations are resolved with Python's typing machinery when the module can
-be imported, so `from datetime import datetime` matches a `TIMESTAMP` column
-just like `datetime.datetime` does:
+Annotations are resolved one field at a time with Python's typing machinery,
+so `from datetime import datetime` matches a `TIMESTAMP` column just like
+`datetime.datetime` does. Aliases from the same module (`UserName = str`,
+`type UserName = str`) and `from __future__ import annotations` work too. A
+field whose annotation cannot be resolved, such as one imported from a module
+that is not installed, is unknown and never reported; the other fields are
+still checked:
 
 ```python
 from datetime import datetime

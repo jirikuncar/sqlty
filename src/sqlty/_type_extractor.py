@@ -8,10 +8,12 @@ variations, forward references, and inheritance correctly.
 Two-phase approach:
 1. **AST scan**: Find recognized class definitions (TypedDict, NamedTuple,
    dataclass, BaseModel) and collect the source needed to reconstruct them.
-2. **Runtime resolve**: ``exec()`` just the imports, module-level
-   ``X = NewType("X", T)`` assignments and the class definition in a
-   sandbox namespace, then use ``typing.get_type_hints()`` to get actual
-   ``type`` objects for each field.
+2. **Runtime resolve**: ``exec()`` just the imports, module-level type
+   aliases and ``NewType`` assignments (each guarded: a name that fails to
+   import or evaluate becomes an unknown placeholder) and the class
+   definition in a sandbox namespace, then use ``typing.get_type_hints()`` on
+   each field on its own to get actual ``type`` objects. A field that stays
+   unresolved is unknown and never reported.
 
 This module enables ``check_source`` to validate ``SQL[UserType](...)``
 annotations by comparing the user-defined type's resolved field types
@@ -25,6 +27,7 @@ import ast
 import datetime
 import functools
 import operator
+import textwrap
 import types
 import typing
 import uuid
@@ -159,10 +162,8 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
     if not recognized:
         return {}
 
-    # Phase 2: Collect import statements needed for namespace
-    import_stmts = _collect_imports(tree) + [
-        f"try:\n    {ast.unparse(node)}\nexcept Exception:\n    pass" for node in newtypes.values()
-    ]
+    # Phase 2: Collect the guarded imports and aliases needed for the namespace
+    import_stmts = _namespace_statements(tree, set(newtypes))
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
@@ -186,8 +187,8 @@ def extract_type_definitions(source: str) -> dict[str, TypeInfo]:
         hints = None
         if (fields or is_typeddict) and (resolved := _resolve_class(nodes, import_stmts, source)):
             cls, namespace = resolved
-            if (hints := _type_hints(cls, namespace)) is not None:
-                info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
+            hints = _type_hints(cls, namespace)
+            info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
         if is_typeddict:
             info.bases = [p.name for p in parents]
             own = _own_openness(keywords, aliases)
@@ -221,8 +222,8 @@ def check_type_compatibility(
     Uses runtime type objects when available (``resolved_hints``), else the
     types resolved from source (``field_types``). ``Any``, unions and the
     ``int`` -> ``float`` promotion are accepted; narrower fields (``bool`` for
-    an ``int`` column) are not. Annotations neither path can resolve fall back
-    to string comparison.
+    an ``int`` column) are not. Annotations neither path can resolve or decide
+    count as compatible.
 
     Args:
         user_type: The user-defined type info.
@@ -271,9 +272,7 @@ def _accepts(field: typing.Any, annotation: str, column_python_type: str | None)
     if not column_python_type:
         return True
     fits = _is_subtype(PYTHON_TYPE_MAP.get(column_python_type), _erase(field))
-    if fits is not None:
-        return fits
-    return _normalize_type_str(annotation) == column_python_type
+    return fits is not False
 
 
 def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
@@ -305,6 +304,80 @@ def parse_tuple_annotation(annotation: str) -> list[tuple[str, str]] | None:
 # ---------------------------------------------------------------------------
 
 
+class _Unknown:
+    """Stands in for a name that failed to import or evaluate; every operation yields it again."""
+
+    def __or__(self, other: object) -> _Unknown:
+        return self
+
+    __ror__ = __or__
+
+    def __getitem__(self, key: object) -> _Unknown:
+        return self
+
+    def __call__(self, *args: object, **kwargs: object) -> _Unknown:
+        return self
+
+    def __getattr__(self, name: str) -> _Unknown:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self
+
+
+_UNKNOWN_NAME = "__sqlty_unknown__"
+
+
+def _guard(statement: ast.stmt, names: list[str]) -> str:
+    """``statement`` as source that binds ``names`` to the unknown placeholder if it fails."""
+    body = textwrap.indent(ast.unparse(statement), "    ")
+    fallback = "\n".join(f"    {name} = {_UNKNOWN_NAME}" for name in names)
+    return f"try:\n{body}\nexcept Exception:\n{fallback}"
+
+
+def _namespace_statements(tree: ast.Module, newtypes: set[str]) -> list[str]:
+    """Guarded source, in file order, of the module-level imports and type aliases.
+
+    A name that cannot be imported or evaluated is bound to the unknown
+    placeholder, so one failure does not hide the other names.
+
+    Example:
+        >>> _namespace_statements(ast.parse("import a.b\\nX = int\\nY = f()"), set())[0].splitlines()[:2]
+        ['try:', '    import a.b']
+    """
+    statements: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                statements.append(_guard(ast.Import(names=[alias]), [bound]))
+        elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
+            for alias in node.names:
+                if alias.name != "*":
+                    from_ = ast.ImportFrom(node.module, [alias], node.level)
+                    statements.append(_guard(from_, [alias.asname or alias.name]))
+        elif isinstance(node, ast.TypeAlias) and isinstance(node.name, ast.Name):
+            statements.append(_guard(node, [node.name.id]))
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and (
+                node.targets[0].id in newtypes
+                or all(isinstance(n, _TYPE_EXPR_NODES) for n in ast.walk(node.value))
+            )
+        ):
+            statements.append(_guard(node, [node.targets[0].id]))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+            and _get_name(node.annotation) == "TypeAlias"
+            and all(isinstance(n, _TYPE_EXPR_NODES) for n in ast.walk(node.value))
+        ):
+            statements.append(_guard(node, [node.target.id]))
+    return statements
+
+
 def _resolve_class(
     nodes: list[ast.ClassDef],
     import_stmts: list[str],
@@ -312,8 +385,9 @@ def _resolve_class(
 ) -> tuple[type, dict[str, object]] | None:
     """Try to build the last of ``nodes`` at runtime, returning it with its namespace.
 
-    Executes just the necessary imports + the class definitions (bases
-    first) in a sandboxed namespace. Returns None if this fails for any reason.
+    Executes just the necessary imports and aliases + the class definitions
+    (bases first) in a sandboxed namespace. Returns None if the classes
+    cannot be built.
     """
     class_sources = [
         segment for node in nodes if (segment := ast.get_source_segment(full_source, node))
@@ -326,6 +400,7 @@ def _resolve_class(
         "__builtins__": __builtins__,
         "datetime": datetime,
         "uuid": uuid,
+        _UNKNOWN_NAME: _Unknown(),
     }
 
     # Add typing imports based on kind
@@ -345,12 +420,45 @@ def _resolve_class(
     return (cls, namespace) if isinstance(cls, type) else None
 
 
-def _type_hints(cls: type, namespace: dict[str, object]) -> dict[str, typing.Any] | None:
-    """Resolve field types with qualifiers (``ReadOnly`` etc.) dropped."""
-    try:
-        return typing.get_type_hints(cls, globalns=namespace)
-    except Exception:
-        return None
+def _has_unknown(tp: typing.Any) -> bool:
+    """Whether ``tp`` is, or contains, an unresolved name or forward reference."""
+    if isinstance(tp, (_Unknown, annotationlib.ForwardRef)):
+        return True
+    if isinstance(tp, (list, tuple)):
+        return any(map(_has_unknown, tp))
+    return typing.get_origin(tp) is not typing.Literal and any(
+        map(_has_unknown, typing.get_args(tp))
+    )
+
+
+def _resolve_alias(tp: typing.Any) -> typing.Any:
+    """Look through ``type X = ...`` aliases, also within unions."""
+    while isinstance(tp, typing.TypeAliasType):
+        tp = tp.__value__
+    if len(members := _union_members(tp)) > 1:
+        return functools.reduce(operator.or_, map(_resolve_alias, members))
+    return tp
+
+
+def _type_hints(cls: type, namespace: dict[str, object]) -> dict[str, typing.Any]:
+    """Resolve each field's type on its own, with qualifiers (``ReadOnly`` etc.) dropped.
+
+    Fields that cannot be resolved are left out.
+    """
+    hints: dict[str, typing.Any] = {}
+    for name, raw in annotationlib.get_annotations(
+        cls, format=annotationlib.Format.FORWARDREF
+    ).items():
+        holder = type("_Field", (), {"__annotations__": {name: raw}})
+        try:
+            tp = _resolve_alias(
+                typing.get_type_hints(holder, globalns=namespace, localns=namespace)[name]
+            )
+        except Exception:
+            continue
+        if not _has_unknown(tp):
+            hints[name] = tp
+    return hints
 
 
 _QUALIFIERS = frozenset({"ReadOnly", "Required", "NotRequired"})
@@ -370,10 +478,10 @@ def _own_extra_type(cls: type, namespace: dict[str, object]) -> typing.Any:
         tp = annotationlib.ForwardRef(tp)
     if isinstance(tp, annotationlib.ForwardRef):
         try:
-            tp = typing.evaluate_forward_ref(tp, globals=namespace)
+            tp = typing.evaluate_forward_ref(tp, globals=namespace, locals=namespace)
         except Exception:
             return None
-    return type(None) if tp is None else tp
+    return None if _has_unknown(tp) else type(None) if tp is None else tp
 
 
 _NEVER = (typing.Never, typing.NoReturn)
@@ -500,15 +608,6 @@ def _unwrap_optional(tp: type) -> type:
 
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
-
-
-def _collect_imports(tree: ast.Module) -> list[str]:
-    """Collect import statements from an AST as source strings."""
-    imports: list[str] = []
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            imports.append(ast.unparse(node))
-    return imports
 
 
 _TYPE_EXPR_NODES = (
