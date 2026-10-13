@@ -144,8 +144,26 @@ static FUNCTION_TYPES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
-/// Schema: table name -> columns in declaration order; shared, so caching it is cheap.
-pub type Schema = Arc<HashMap<String, Vec<SchemaColumn>>>;
+/// What a schema defines; shared, so caching it is cheap.
+#[derive(Default)]
+pub struct SchemaData {
+    /// Table name -> columns in declaration order.
+    tables: HashMap<String, Vec<SchemaColumn>>,
+    /// View name -> output columns, as analyzed when the view was created.
+    views: HashMap<String, Vec<Column>>,
+}
+
+pub type Schema = Arc<SchemaData>;
+
+impl SchemaData {
+    fn get(&self, table: &str) -> Option<&Vec<SchemaColumn>> {
+        self.tables.get(table)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.tables.is_empty() && self.views.is_empty()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SchemaColumn {
@@ -156,6 +174,11 @@ pub struct SchemaColumn {
     pub sql_type: String,
 }
 
+impl SchemaColumn {
+    fn typed(&self) -> Typed {
+        from_sql_type(self.sql_type.clone())
+    }
+}
 /// `(reference, table)` pairs for the tables a statement reads, in query order.
 type Scope = Vec<(String, String)>;
 
@@ -469,20 +492,22 @@ fn object_name(name: &ObjectName) -> String {
         .unwrap_or_default()
 }
 
-/// Load schema from CREATE TABLE SQL statements.
+/// Load schema from CREATE TABLE, VIEW, DOMAIN and TYPE ... AS ENUM statements.
 #[cfg(test)]
 pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
 }
 
 /// [`load_schema`], and the names of the tables that could not be parsed even
-/// without their constraints.
+/// without their constraints. Tables load first, then each view in order, so a view
+/// may read the views before it.
 pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<String>) {
     let dialect = SqlDialect::from_name(dialect);
     let mut skipped = Vec::new();
-    let tables = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql)
-        .into_iter()
-        .filter(ddl::Statement::is_create_table)
+    let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
+    let tables = statements
+        .iter()
+        .filter(|stmt| stmt.is_create_table())
         .filter_map(|stmt| {
             let parsed = parse_ddl(&stmt.sql(), dialect)
                 .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect));
@@ -512,7 +537,31 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
             (object_name(&create.name), columns)
         })
         .collect();
-    (Arc::new(tables), skipped)
+    let mut data = SchemaData {
+        tables,
+        views: HashMap::new(),
+    };
+    for stmt in statements.iter().filter(|stmt| stmt.creates("view")) {
+        let Some(Statement::CreateView(view)) =
+            parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+        else {
+            continue;
+        };
+        let analyzer = Analyzer {
+            schema: &data,
+            dialect,
+            virtuals: HashMap::new(),
+        };
+        let mut columns = match analyzer.query_columns(&view.query) {
+            Ok(Some(columns)) => columns,
+            _ => vec![Column::unknown("*")],
+        };
+        for (column, name) in columns.iter_mut().zip(&view.columns) {
+            column.name = name.name.value.clone();
+        }
+        data.views.insert(object_name(&view.name), columns);
+    }
+    (Arc::new(data), skipped)
 }
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
@@ -535,13 +584,13 @@ pub fn analyze_select(
     dialect: &str,
     schema: &Option<Schema>,
 ) -> Inferred<Option<Vec<Column>>> {
-    let empty = Schema::default();
+    let empty = SchemaData::default();
     let dialect = SqlDialect::from_name(dialect);
     let Some(stmt) = parse_first(sql, dialect) else {
         return Ok(None);
     };
     let analyzer = Analyzer {
-        schema: schema.as_ref().unwrap_or(&empty),
+        schema: schema.as_deref().unwrap_or(&empty),
         dialect,
         virtuals: HashMap::new(),
     };
@@ -623,10 +672,40 @@ fn table_scope(factor: &TableFactor) -> Scope {
     }
 }
 
-/// Sources of a SELECT: each FROM relation followed by its joins (`FROM a, b` counts two).
-fn relations(from: &[TableWithJoins]) -> impl Iterator<Item = &TableFactor> {
-    from.iter().flat_map(|table| {
-        std::iter::once(&table.relation).chain(table.joins.iter().map(|join| &join.relation))
+/// Sources of a SELECT: each FROM relation followed by its joins (`FROM a, b` counts two),
+/// looking into unaliased parentheses such as `FROM (a JOIN b ON ...)`.
+fn relations(from: &[TableWithJoins]) -> std::vec::IntoIter<&TableFactor> {
+    fn push<'a>(table: &'a TableWithJoins, into: &mut Vec<&'a TableFactor>) {
+        for factor in
+            std::iter::once(&table.relation).chain(table.joins.iter().map(|j| &j.relation))
+        {
+            match factor {
+                TableFactor::NestedJoin {
+                    table_with_joins,
+                    alias: None,
+                } => push(table_with_joins, into),
+                other => into.push(other),
+            }
+        }
+    }
+    let mut factors = Vec::new();
+    for table in from {
+        push(table, &mut factors);
+    }
+    factors.into_iter()
+}
+
+/// Whether any join in `from`, nested ones included, merges columns.
+fn any_merging_join(from: &[TableWithJoins]) -> bool {
+    from.iter().any(|table| {
+        table.joins.iter().any(merges_columns)
+            || match &table.relation {
+                TableFactor::NestedJoin {
+                    table_with_joins,
+                    alias: None,
+                } => any_merging_join(std::slice::from_ref(table_with_joins)),
+                _ => false,
+            }
     })
 }
 
@@ -797,12 +876,30 @@ type Virtuals = HashMap<String, Vec<Column>>;
 
 #[derive(Clone)]
 struct Analyzer<'a> {
-    schema: &'a Schema,
+    schema: &'a SchemaData,
     dialect: SqlDialect,
     virtuals: Virtuals,
 }
 
 impl<'a> Analyzer<'a> {
+    /// Columns of a CTE, derived table or schema view; a CTE hides a view of its name.
+    fn virtual_columns(&self, table: &str) -> Option<&Vec<Column>> {
+        self.virtuals
+            .get(table)
+            .or_else(|| self.schema.views.get(table))
+    }
+
+    /// Whether a table reference reads a virtual source: a CTE or view by its bare
+    /// name, or a view by its schema-qualified name.
+    fn is_virtual(&self, name: &ObjectName) -> bool {
+        let table = object_name(name);
+        if name.0.len() == 1 {
+            self.virtual_columns(&table).is_some()
+        } else {
+            self.schema.views.contains_key(&table)
+        }
+    }
+
     fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Column>>> {
         match stmt {
             Statement::Query(query) => self.query_columns(query),
@@ -857,9 +954,7 @@ impl<'a> Analyzer<'a> {
         let mut scope = Scope::new();
         for factor in relations(from) {
             match factor {
-                TableFactor::Table { name, alias, .. }
-                    if name.0.len() == 1 && analyzer.virtuals.contains_key(&object_name(name)) =>
-                {
+                TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
                     let table = object_name(name);
                     let reference = alias
                         .as_ref()
@@ -953,7 +1048,7 @@ impl<'a> Analyzer<'a> {
     ///
     /// `USING`/`NATURAL` joins merge columns, so their stars are unresolved.
     fn star_resolvable(&self, from: &[TableWithJoins], reference: Option<&str>) -> bool {
-        if reference.is_none() && from.iter().flat_map(|t| &t.joins).any(merges_columns) {
+        if reference.is_none() && any_merging_join(from) {
             return false;
         }
         let reference = reference.map(str::to_lowercase);
@@ -963,8 +1058,7 @@ impl<'a> Analyzer<'a> {
         matched.peek().is_some()
             && matched.all(|factor| match factor {
                 TableFactor::Table { name, .. } => self
-                    .virtuals
-                    .get(&object_name(name))
+                    .virtual_columns(&object_name(name))
                     .is_none_or(|columns| !columns.iter().any(Column::is_unknown_star)),
                 TableFactor::Derived {
                     alias: Some(alias), ..
@@ -993,12 +1087,12 @@ impl<'a> Analyzer<'a> {
         let columns = tables
             .iter()
             .map(|table| {
-                self.virtuals.get(table).cloned().or_else(|| {
+                self.virtual_columns(table).cloned().or_else(|| {
                     self.schema.get(table).map(|columns| {
                         columns
                             .iter()
                             .map(|col| {
-                                let (python_type, sql_type) = from_sql_type(col.sql_type.clone());
+                                let (python_type, sql_type) = col.typed();
                                 Column {
                                     name: col.name.clone(),
                                     python_type,
@@ -1033,7 +1127,7 @@ impl<'a> Analyzer<'a> {
     /// Type of a column: its qualifier's source, else the first scope source having it.
     fn column_type(&self, expr: &Expr, scope: &Scope) -> Option<Typed> {
         let lookup = |table: &str, column: &str| {
-            if let Some(columns) = self.virtuals.get(table) {
+            if let Some(columns) = self.virtual_columns(table) {
                 return columns
                     .iter()
                     .find(|col| col.name.to_lowercase() == column)
@@ -1043,7 +1137,7 @@ impl<'a> Analyzer<'a> {
                 .get(table)?
                 .iter()
                 .find(|col| col.name == column)
-                .map(|col| from_sql_type(col.sql_type.clone()))
+                .map(|col| col.typed())
         };
         match expr {
             Expr::Identifier(ident) => {
@@ -1138,7 +1232,7 @@ impl<'a> Analyzer<'a> {
             ),
             _ => return numeric(),
         };
-        if self.schema.contains_key(&table) && !self.virtuals.contains_key(&table) {
+        if self.schema.get(&table).is_some() && self.virtual_columns(&table).is_none() {
             return Err(format!(
                 "Column '{column}' not found in table '{table}' in schema. \
                  If you want to query columns not in the schema, use an explicit cast: \
@@ -1162,7 +1256,7 @@ fn non_empty(columns: Vec<Column>) -> Option<Vec<Column>> {
 
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
 pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let schema = schema.as_ref().filter(|schema| !schema.is_empty())?;
+    let schema = schema.as_deref().filter(|schema| !schema.is_empty())?;
     let dialect = SqlDialect::from_name(dialect);
     let stmt = parse_first(sql, dialect)?;
     let analyzer = Analyzer {

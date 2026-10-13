@@ -54,6 +54,32 @@ whenever the table does. Without a schema, `SELECT *` is an error
 
 Nullability is not tracked: `email` above is `str`, not `str | None`.
 
+## Views
+
+A `CREATE VIEW` (or `CREATE OR REPLACE VIEW`, `CREATE MATERIALIZED VIEW`) in
+the schema is a table whose columns are typed from its query. Views are
+analyzed in file order, so a view may read the views before it. A column the
+schema cannot type, such as one read from a table that is not in the schema,
+stays unknown, as in a CTE.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER);
+CREATE VIEW adults (user_id, user_name) AS SELECT id, name FROM users WHERE age >= 18;
+```
+
+```python
+adults = "--sql\nSELECT user_id, user_name FROM adults"
+# rewritten: adults = SQL[tuple[int, str]]("--sql\nSELECT user_id, user_name FROM adults")
+```
+
 ## Where the schema comes from
 
 `sqlty rewrite` and `sqlty check` use, in order:

@@ -159,6 +159,24 @@ impl Statement<'_> {
             && self.0.iter().any(|p| is_punct(p, "("))
     }
 
+    /// Whether this is `CREATE [OR REPLACE] [TEMP | MATERIALIZED | ...] <object>`, e.g. `view`.
+    pub fn creates(&self, object: &str) -> bool {
+        const MODIFIERS: [&str; 7] = [
+            "or",
+            "replace",
+            "temp",
+            "temporary",
+            "materialized",
+            "recursive",
+            "secure",
+        ];
+        let mut words = self.0.iter().filter(|p| significant(p));
+        words.next().is_some_and(|p| is_word(p, "create"))
+            && words
+                .find(|p| !MODIFIERS.iter().any(|m| is_word(p, m)))
+                .is_some_and(|p| is_word(p, object))
+    }
+
     /// The table name as written, e.g. `public.users`.
     pub fn table_name(&self) -> String {
         let start = self
@@ -407,6 +425,13 @@ mod tests {
             sqls("SELECT E'a\\';b'; SELECT 1"),
             ["SELECT E'a\\';b'", "SELECT 1"]
         );
+    }
+
+    #[test]
+    fn test_creates() {
+        let first = |sql| split_statements(sql, false).remove(0);
+        assert!(first("CREATE OR REPLACE MATERIALIZED VIEW v AS SELECT 1").creates("view"));
+        assert!(!first("CREATE TABLE view (a INT)").creates("view"));
     }
 
     #[test]
