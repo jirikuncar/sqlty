@@ -217,6 +217,29 @@ impl SqlDialect {
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
 static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
+/// PostgreSQL row-lock clauses sqlparser cannot read, respelled as the closest ones it can:
+/// `NO KEY UPDATE` as `UPDATE`, `KEY SHARE` as `SHARE`, and `OF` keeps only its first table.
+static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
+    const NAME: &str = r#"(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))*"#;
+    [
+        (
+            Regex::new(r"(?i)\bFOR\s+NO\s+KEY\s+UPDATE\b").unwrap(),
+            "FOR UPDATE",
+        ),
+        (
+            Regex::new(r"(?i)\bFOR\s+KEY\s+SHARE\b").unwrap(),
+            "FOR SHARE",
+        ),
+        (
+            Regex::new(&format!(
+                r"(?i)\b(FOR\s+(?:UPDATE|SHARE))\s+OF\s+({NAME})(?:\s*,\s*{NAME})*"
+            ))
+            .unwrap(),
+            "$1 OF $2",
+        ),
+    ]
+});
+
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
 static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
 
@@ -263,7 +286,7 @@ fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
 /// the query doesn't parse as written.
 fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let sql = parser_input(sql);
+    let sql = parser_input(sql, dialect);
     parse(&sql, dialect).or_else(|| {
         (dialect == SqlDialect::Postgres && sql.contains('?'))
             .then(|| parse(&numbered_placeholders(&sql), dialect))
@@ -276,8 +299,17 @@ fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
 /// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
 /// literals and comments are not skipped; any query this mangles fails to parse
 /// and stays uninferred rather than mistyped.
-fn parser_input(sql: &str) -> String {
+fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = SQL_MARKER.replace(sql, "");
+    let sql = if dialect == SqlDialect::Postgres {
+        POSTGRES_LOCK_FIXES
+            .iter()
+            .fold(sql.into_owned(), |sql, (pattern, replacement)| {
+                pattern.replace_all(&sql, *replacement).into_owned()
+            })
+    } else {
+        sql.into_owned()
+    };
     PLACEHOLDER
         .replace_all(&sql, |caps: &Captures| match &caps[0] {
             "%%" => "%",
@@ -1166,11 +1198,28 @@ mod tests {
     #[test]
     fn test_parser_input() {
         assert_eq!(
-            parser_input("  --sql\r\nSELECT %s, %(id)s, %b, %(a-b)t, '%s', 5 %% 2"),
+            parser_input(
+                "  --sql\r\nSELECT %s, %(id)s, %b, %(a-b)t, '%s', 5 %% 2",
+                SqlDialect::MySql
+            ),
             "SELECT NULL, NULL, NULL, NULL, 'NULL', 5 % 2"
         );
-        assert_eq!(parser_input("--sql SELECT 1"), "");
-        assert_eq!(parser_input("SELECT %d, %%(a)s"), "SELECT %d, %(a)s");
+        assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql), "");
+        assert_eq!(
+            parser_input("SELECT %d, %%(a)s", SqlDialect::MySql),
+            "SELECT %d, %(a)s"
+        );
+        assert_eq!(
+            parser_input(
+                "SELECT 1 FOR no key update OF a, s.b FOR KEY SHARE FOR SHARE OF \"c\" NOWAIT",
+                SqlDialect::Postgres
+            ),
+            "SELECT 1 FOR UPDATE OF a FOR SHARE FOR SHARE OF \"c\" NOWAIT"
+        );
+        assert_eq!(
+            parser_input("SELECT 1 FOR NO KEY UPDATE OF a, b", SqlDialect::MySql),
+            "SELECT 1 FOR NO KEY UPDATE OF a, b"
+        );
         assert_eq!(
             infer_type("--sql\nSELECT 1 AS x", "mysql", &None)
                 .unwrap()
