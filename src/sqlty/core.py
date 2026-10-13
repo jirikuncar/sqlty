@@ -207,13 +207,17 @@ def _check_diagnostics(
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import extract_type_definitions
 
-    diagnostics = _check_source(
-        parsed.text,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        rules=rules,
-        import_style=import_style,
-        untyped=untyped,
+    diagnostics = (
+        _check_source(
+            parsed.text,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            rules=rules,
+            import_style=import_style,
+            untyped=untyped,
+        )
+        if parsed.may_need_rust_check(import_style)
+        else []
     )
     found = find_helper_calls(parsed, helpers, module)
     calls = [call for call in found if call.query is not None]

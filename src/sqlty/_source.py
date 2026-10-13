@@ -45,6 +45,8 @@ from dataclasses import dataclass
 from sqlty._psycopg import PsycopgScan
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
+_GAP = r"(?:[\s\"'rRuU]|#[^\n]*)*"
+_MARKER_RE = re.compile(rf"-{_GAP}-{_GAP}s{_GAP}q{_GAP}l", re.IGNORECASE)
 _IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
 
 
@@ -54,6 +56,19 @@ class _Ignore:
 
     line: int
     rules: tuple[str, ...] | None
+
+
+def _wrapper_name(import_style: str | None) -> str | None:
+    """How the engine spells the wrapper for ``import_style``; ``None`` when it rejects it."""
+    style = (import_style or "").strip()
+    if style in ("", "from sqlty import SQL"):
+        return "SQL"
+    if style == "import sqlty":
+        return "sqlty.SQL"
+    for prefix, suffix in (("from sqlty import SQL as ", ""), ("import sqlty as ", ".SQL")):
+        if style.startswith(prefix):
+            return style[len(prefix) :].strip() + suffix
+    return None
 
 
 class _Scan(ast.NodeVisitor):
@@ -215,6 +230,36 @@ class ParsedSource:
         prefix = "from sqlty import SQL as "
         style = (import_style or "").strip()
         return (style[len(prefix) :].strip() if style.startswith(prefix) else "SQL") in self.text
+
+    def may_need_rust_check(self, import_style: str | None = None) -> bool:
+        """Whether the Rust checker can report anything for the text.
+
+        Every Rust rule starts from a ``--sql`` / ``-- sql`` marker at the start of a
+        string (``mysql-sql-marker``, ``stale-rewrite``, ``inline-sql-comment``,
+        ``unparsed-query``, ``fstring-skipped``, ``tstring-skipped``,
+        ``unchecked-query``, ``select-star*``, ``stale-type``, ``untyped-query``); the
+        wrapper call (``SQL[``, spelled as ``import_style`` says) and ``UNTYPED`` count
+        too, which also covers a marker split over concatenated literals in a call. A marker
+        split over implicit concatenation anywhere else (``"--" "sql\\n..."``) matches
+        with quotes, prefixes, whitespace and comments allowed between its characters.
+        An ``import_style`` the engine rejects always needs the call, so that it raises.
+
+        Example:
+            >>> ParsedSource("x = 'SELECT 1'").may_need_rust_check()
+            False
+            >>> ParsedSource("x = '--sql\\nSELECT 1'").may_need_rust_check()
+            True
+            >>> ParsedSource("q = Q[UNTYPED]").may_need_rust_check("from sqlty import SQL as Q")
+            True
+        """
+        wrapper = _wrapper_name(import_style)
+        text = self.text
+        return (
+            wrapper is None
+            or f"{wrapper}[" in text
+            or "UNTYPED" in text
+            or _MARKER_RE.search(text) is not None
+        )
 
     @property
     def has_ignore_comments(self) -> bool:
