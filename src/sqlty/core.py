@@ -10,9 +10,11 @@ needs the Python runtime.
 
 from __future__ import annotations
 
+import ast
 import io
 import re
 import tokenize
+import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -28,10 +30,15 @@ from sqlty._core import (
 )
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
+from sqlty._helpers import HelperIndex, find_helper_calls
 
 if TYPE_CHECKING:
+    from sqlty._helpers import HelperCall
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import TypeInfo
+
+
+_CONTAINERS = (dict, list, set, frozenset, tuple)
 
 
 class ColumnInfo(NamedTuple):
@@ -79,12 +86,21 @@ def check_source(
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
     untyped: bool = False,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
     When ``SQL[UserType](...)`` names a type defined in the same source,
     structural checks (column count, type, name, TypedDict keys) run instead
     of ``stale-type``.
+
+    A string literal passed to a parameter annotated
+    ``Annotated[LiteralString, SQL]`` is a query too, checked against the row
+    type passed to the ``type[T]`` parameter of the same helper. Helpers
+    defined in ``source`` count; for those of other modules pass ``helpers``
+    (a ``HelperIndex``) and the ``module`` name of ``source``, which resolves
+    relative imports.
 
     A ``# sqlty: ignore`` comment on a diagnostic's line drops it; ``# sqlty:
     ignore[rule-a, rule-b]`` drops only those rules. ``unused-ignore`` reports
@@ -108,6 +124,8 @@ def check_source(
         rules=rules,
         import_style=import_style,
         untyped=untyped,
+        helpers=helpers,
+        module=module,
     )
     return _apply_suppressions(source, diagnostics, rules)
 
@@ -120,6 +138,8 @@ def _check_diagnostics(
     rules: dict[str, str] | None,
     import_style: str | None,
     untyped: bool,
+    helpers: HelperIndex | None,
+    module: str | None,
 ) -> list[dict[str, str | int | None]]:
     """Every diagnostic before inline suppression."""
     from sqlty._lint import RuleConfig
@@ -133,52 +153,123 @@ def _check_diagnostics(
         import_style=import_style,
         untyped=untyped,
     )
-    user_queries = [
+    calls = find_helper_calls(source, helpers, module)
+    queries = [
         (line, name, query)
         for line, name, query in _wrapped_queries(source, import_style=import_style)
         if not name.startswith("tuple[")
     ]
-    if not user_queries:
+    if not (queries or calls):
         return diagnostics
-    type_defs = extract_type_definitions(source)
-    user_queries = [q for q in user_queries if q[1] in type_defs]
-    if not user_queries:
-        return diagnostics
-
     rule_config = RuleConfig(overrides=rules)
-    if rule_config.is_enabled("typeddict-inheritance"):
-        severity = rule_config.severity("typeddict-inheritance").value
-        for info in _typeddict_lineage([name for _, name, _ in user_queries], type_defs):
-            diagnostics += [
+
+    def report(rule: str, message: str, line: int) -> None:
+        if rule_config.is_enabled(rule):
+            diagnostics.append(
                 {
-                    "rule": "typeddict-inheritance",
+                    "rule": rule,
                     "message": message,
-                    "severity": severity,
-                    "line": info.lineno,
+                    "severity": rule_config.severity(rule).value,
+                    "line": line,
                 }
-                for message in info.errors
-            ]
+            )
+
+    named = [(call.line, ast.unparse(call.row), call.query) for call in calls if call.row]
+    type_defs = extract_type_definitions(source) if queries or named else {}
+    user_queries = [q for q in [*queries, *named] if q[1] in type_defs]
+
+    if rule_config.is_enabled("typeddict-inheritance"):
+        for info in _typeddict_lineage([name for _, name, _ in user_queries], type_defs):
+            for message in info.errors:
+                report("typeddict-inheritance", message, info.lineno)
+
+    for call in calls:
+        upper = call.query.upper()
+        if "SELECT *" in upper or "SELECT\n*" in upper:
+            if schema_sql is not None:
+                report(
+                    "select-star",
+                    "SELECT * used \u2014 expand to explicit column list (joins need a manual edit)",
+                    call.line,
+                )
+            else:
+                report("select-star-no-schema", "SELECT * used but no schema available", call.line)
 
     for line, name, query in user_queries:
-        if query is None:
-            continue
-        try:
-            columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
-        except RuntimeError:
-            continue
-        if not columns:
+        if (columns := _columns(query, dialect, schema_sql)) is None:
             continue
         for rule, message in _structural_diagnostics(name, type_defs[name], columns, rule_config):
-            if rule_config.is_enabled(rule):
-                diagnostics.append(
-                    {
-                        "rule": rule,
-                        "message": message,
-                        "severity": rule_config.severity(rule).value,
-                        "line": line,
-                    }
-                )
+            report(rule, message, line)
+
+    for call in calls:
+        if call.row is None or ast.unparse(call.row) in type_defs:
+            continue
+        if (columns := _columns(call.query, dialect, schema_sql)) is None:
+            continue
+        for rule, message in _value_diagnostics(call, columns):
+            report(rule, message, call.line)
     return diagnostics
+
+
+def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[ColumnInfo] | None:
+    """Columns of a query, ``None`` when it has none or cannot be analysed."""
+    if query is None:
+        return None
+    try:
+        return analyze_select(query, dialect=dialect, schema_sql=schema_sql) or None
+    except RuntimeError:
+        return None
+
+
+def _value_diagnostics(call: HelperCall, columns: list[ColumnInfo]) -> list[tuple[str, str]]:
+    """Compare the row type of a helper call with the query columns.
+
+    A scalar type takes one column, ``tuple[A, B]`` one column per item. Other
+    row types (an unknown class, ``dict``, ``tuple[int, ...]``) are not checked.
+    """
+    from sqlty._type_extractor import _accepts, _ast_type
+
+    row, aliases = call.row, call.typing_aliases
+    if row is None:
+        return []
+    text = ast.unparse(row)
+    if isinstance(row, ast.Subscript) and _ast_type(row.value, aliases) is tuple:
+        items = list(row.slice.elts) if isinstance(row.slice, ast.Tuple) else [row.slice]
+        if not items or any(isinstance(i, ast.Constant) and i.value is ... for i in items):
+            return []
+        if len(items) != len(columns):
+            return [
+                (
+                    "column-count-mismatch",
+                    f"{text} has {len(items)} items but query returns {len(columns)} columns",
+                )
+            ]
+        targets = [
+            (f"{text} item {i} is {ast.unparse(item)}", ast.unparse(item), _ast_type(item, aliases))
+            for i, item in enumerate(items)
+        ]
+    else:
+        resolved = _ast_type(row, aliases)
+        if resolved is None or resolved in _CONTAINERS or typing.get_args(resolved):
+            return []
+        if len(columns) != 1:
+            return [
+                (
+                    "column-count-mismatch",
+                    f"{text} takes 1 column but query returns {len(columns)} columns",
+                )
+            ]
+        targets = [(f"{text} is expected", text, resolved)]
+    return [
+        (
+            "column-type-mismatch",
+            f"{label} but query column '{col.name}' infers {col.python_type}",
+        )
+        for (label, annotation, resolved), col in zip(targets, columns, strict=True)
+        if resolved is not None
+        and col.python_type
+        and not _accepts(resolved, annotation, col.python_type)
+    ]
 
 
 _IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
@@ -346,6 +437,7 @@ def _structural_diagnostics(
 
 __all__ = [
     "ColumnInfo",
+    "HelperIndex",
     "analyze_select",
     "check_source",
     "expand_star",

@@ -10,6 +10,7 @@ Commands:
 
 from __future__ import annotations
 
+import functools
 import logging
 import sys
 from dataclasses import dataclass
@@ -259,7 +260,7 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
-    from sqlty.core import check_source, fix_source
+    from sqlty.core import HelperIndex, check_source, fix_source
 
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
@@ -268,12 +269,19 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
+    sources = {path: path.read_text(encoding="utf-8") for path in files}
+    helpers = HelperIndex()
+    modules = {path: _module_names(path, args.paths) for path in files}
+    for path, source in sources.items():
+        for name in modules[path]:
+            helpers.add(name, source)
+
     total_errors = 0
     total_warnings = 0
     total_fixed = 0
 
     for path in files:
-        source = path.read_text(encoding="utf-8")
+        source = sources[path]
         settings = resolver.for_file(path)
         if args.fix:
             fixed = fix_source(
@@ -297,6 +305,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             rules=settings.rules,
             import_style=settings.import_style,
             untyped=settings.untyped,
+            helpers=helpers,
+            module=modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
         )
 
         for diag in diagnostics:
@@ -361,6 +371,39 @@ def _collect_python_files(paths: list[Path]) -> list[Path]:
         elif path.is_dir():
             files.extend(sorted(path.rglob("*.py")))
     return files
+
+
+@functools.cache
+def _is_package(directory: Path) -> bool:
+    return (directory / "__init__.py").exists()
+
+
+def _module_names(path: Path, roots: list[Path]) -> list[str]:
+    """Dotted names ``path`` can be imported by, the likeliest first.
+
+    The package path (up through the ``__init__.py`` directories) comes first,
+    then the path from each checked directory, with and without its own name.
+    ``pkg/__init__.py`` is ``pkg``.
+
+    Example:
+        >>> _module_names(Path("missing/pkg/mod.py"), [])
+        ['mod']
+    """
+    path = path.resolve()
+    parts = [] if path.stem == "__init__" else [path.stem]
+    directory = path.parent
+    while _is_package(directory) and directory != directory.parent:
+        parts.insert(0, directory.name)
+        directory = directory.parent
+    names = [".".join(parts)]
+    for root in roots:
+        root = root.resolve()
+        if root.is_dir() and path.is_relative_to(root):
+            relative = list(path.relative_to(root).with_suffix("").parts)
+            if relative[-1] == "__init__":
+                relative.pop()
+            names += [".".join(relative), ".".join([root.name, *relative])]
+    return list(dict.fromkeys(name for name in names if name)) or [path.stem]
 
 
 @dataclass(frozen=True)
