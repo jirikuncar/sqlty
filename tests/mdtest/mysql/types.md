@@ -54,7 +54,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM items
--- inferred: tuple[int, int, float, float]
+-- inferred: tuple[int, int, float, decimal.Decimal]
 -- expanded: SELECT a::UINT, b::UBIGINT(20), c::UDOUBLE, d::UDECIMAL(10, 2) FROM items
 ```
 
@@ -89,7 +89,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM items
--- inferred: tuple[float, str, datetime.datetime, datetime.datetime, str, str, dict, bytes, str, str]
+-- inferred: tuple[float, str, datetime.datetime, datetime.datetime, str, str, typing.Any, bytes, str, str]
 -- expanded: SELECT a::DOUBLE, b::BIT(8), c::DATETIME(6), d::TIMESTAMPTZ, e::ENUM('X', 'Y'), f::SET('X', 'Y'), g::JSON, h::BLOB, i::TEXT, j::POINT FROM items
 ```
 
@@ -134,7 +134,7 @@ dialect = "mysql"
 
 ```sql
 SELECT CAST(doc->'$.zips' AS UNSIGNED ARRAY) FROM t
--- inferred: tuple[list]
+-- inferred: tuple[list[int]]
 ```
 
 ## Bracketed array types are not MySQL

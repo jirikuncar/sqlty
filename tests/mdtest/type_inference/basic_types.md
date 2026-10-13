@@ -27,7 +27,7 @@ SELECT name::TEXT, email::VARCHAR, code::CHAR FROM users
 
 ```sql
 SELECT price::FLOAT, score::DOUBLE, rating::DECIMAL FROM products
--- inferred: tuple[float, float, float]
+-- inferred: tuple[float, float, decimal.Decimal]
 ```
 
 ## Boolean type
@@ -111,7 +111,7 @@ SELECT user_id::UUID FROM users
 
 ```sql
 SELECT tags::INT[], metadata::JSON, extra::JSONB FROM t
--- inferred: tuple[list, dict, dict]
+-- inferred: tuple[list[int], typing.Any, typing.Any]
 ```
 
 ## PostgreSQL dialect with named parameters

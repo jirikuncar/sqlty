@@ -4,14 +4,14 @@
 
 ```sql
 SELECT SUM(amount) FROM orders
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```
 
 ## AVG function without explicit cast
 
 ```sql
 SELECT AVG(score) FROM tests
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```
 
 ## TRIM function is recognized
@@ -46,7 +46,7 @@ SELECT WEIRD_FUNC(x, y) FROM z
 
 ```sql
 SELECT EXTRACT(YEAR FROM created_at) FROM events
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```
 
 ## NOW() function to hit line 115

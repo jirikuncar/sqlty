@@ -7,21 +7,21 @@ Aliases never change the type.
 
 ```sql
 SELECT 1, 1.5, 'text', TRUE, NULL
--- inferred: tuple[int, float, str, bool, str]
+-- inferred: tuple[int, decimal.Decimal, str, bool, str]
 ```
 
 ## Aliased aggregates
 
 ```sql
 SELECT COUNT(*) AS total, SUM(amount) AS revenue FROM orders
--- inferred: tuple[int, float]
+-- inferred: tuple[int, decimal.Decimal]
 ```
 
-## AVG is always float
+## AVG of integers is Decimal
 
 ```sql
 SELECT AVG(quantity::INTEGER) FROM orders
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```
 
 ## MIN and MAX keep the argument type
@@ -70,14 +70,14 @@ SELECT (SELECT MAX(total::INTEGER) FROM orders) AS best FROM users
 
 ```sql
 SELECT ROW_NUMBER() OVER (ORDER BY id), json_build_object('id', id) FROM users
--- inferred: tuple[int, dict]
+-- inferred: tuple[int, typing.Any]
 ```
 
 ## Array casts are list
 
 ```sql
 SELECT tags::TEXT[] FROM posts
--- inferred: tuple[list]
+-- inferred: tuple[list[str]]
 ```
 
 ## UNION takes the leftmost SELECT

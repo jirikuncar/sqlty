@@ -196,7 +196,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, float]
+-- inferred: tuple[int, str, decimal.Decimal]
 ```
 
 ## Qualified star and aliased columns resolve through table aliases

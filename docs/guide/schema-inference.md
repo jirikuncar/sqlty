@@ -35,9 +35,10 @@ Columns, qualified columns and `SELECT *` are typed from the schema:
 users = "--sql\nSELECT id, name, created_at FROM users"
 totals = "--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id"
 everything = "--sql\nSELECT * FROM orders"
+# rewritten: import decimal
 # rewritten: users = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users")
-# rewritten: totals = SQL[tuple[str, float]]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
-# rewritten: everything = SQL[tuple[int, int, float]]("--sql\nSELECT * FROM orders")
+# rewritten: totals = SQL[tuple[str, decimal.Decimal]]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
+# rewritten: everything = SQL[tuple[int, int, decimal.Decimal]]("--sql\nSELECT * FROM orders")
 ```
 
 An explicit cast still wins over the schema:
@@ -200,7 +201,8 @@ CREATE TABLE `orders` (
 ```python
 orders = "-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
-# rewritten: orders = SQL[tuple[int, float, int, str, str, dict, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
+# rewritten: import decimal
+# rewritten: orders = SQL[tuple[int, decimal.Decimal, int, str, str, typing.Any, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
 # rewritten: casts = SQL[tuple[int, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 

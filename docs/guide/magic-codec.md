@@ -19,7 +19,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 The `# decoded:` line shows the code Python runs. The codec wraps strings as
 `sqlty rewrite` does and adds the imports the inferred types need
-(`from sqlty import SQL`, `import datetime`, `import uuid`) after the module
+(`from sqlty import SQL`, `import datetime`, `import uuid`, `import decimal`, `import ipaddress`, `import typing`) after the module
 docstring and `__future__` imports. They go on an existing line, so line
 numbers in tracebacks match the file on disk, unless a `def`, `class`,
 decorator or other compound statement directly follows the coding line; put a

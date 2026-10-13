@@ -132,13 +132,14 @@ dialect = "postgres"
 
 ```python
 from dataclasses import dataclass
+from decimal import Decimal
 from sqlty import SQL
 
 @dataclass
 class Product:
     id: int
     name: str
-    price: float
+    price: Decimal
 
 q = SQL[Product]("--sql\nSELECT id::INTEGER, name::TEXT, price::NUMERIC FROM products")
 # error:

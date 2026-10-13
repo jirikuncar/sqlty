@@ -58,7 +58,7 @@ SELECT pg_try_advisory_lock(1) AS a, gen_random_uuid() AS b, strpos(name, 'a') A
 SELECT sum(small) AS a, sum(id) AS b, sum(big) AS c, sum(ratio) AS d FROM users
 -- columns: a: int (BIGINT)
 -- columns: b: int (BIGINT)
--- columns: c: float (DECIMAL)
+-- columns: c: decimal.Decimal (DECIMAL)
 -- columns: d: float (DOUBLE)
 ```
 
@@ -79,7 +79,7 @@ SELECT lower(valid) AS a, upper(valid) AS b, upper(day) AS c, lower(name) AS d F
 ```sql
 SELECT unnest(tags) AS a, array_agg(id) AS b, array_length(tags, 1) AS c FROM users
 -- columns: a: str (TEXT)
--- columns: b: list (ARRAY<INT>)
+-- columns: b: list[int] (ARRAY<INT>)
 -- columns: c: int (INT)
 ```
 

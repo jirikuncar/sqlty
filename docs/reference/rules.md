@@ -96,7 +96,8 @@ Also reported for extra columns that don't fit a TypedDict's `extra_items`
 type. A field typed `Any`, a union containing `Any` or the column type, or
 `float` for an `int` column is accepted, as is a `NewType` wherever its
 supertype is and a parametrised generic (`list[str]`, `dict[str, int]`) for a
-column that infers the bare `list` or `dict`; a narrower field, such as `bool` for
+column that infers `list` or `dict` (element types are not compared; a JSON
+column infers `Any`, which any field accepts); a narrower field, such as `bool` for
 an `int` column, is not; see `sqlty rule column-type-mismatch`.
 
 ```python

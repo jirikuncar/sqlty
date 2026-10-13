@@ -19,18 +19,18 @@ SELECT COUNT(DISTINCT email)::INTEGER FROM users
 -- inferred: tuple[int]
 ```
 
-## SUM without cast or schema defaults to float
+## SUM without cast or schema defaults to Decimal
 
 ```sql
 SELECT SUM(amount) FROM orders
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```
 
-## AVG returns float
+## AVG of an unknown column is Decimal
 
 ```sql
 SELECT AVG(score) FROM tests
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```
 
 ## SUM with explicit cast

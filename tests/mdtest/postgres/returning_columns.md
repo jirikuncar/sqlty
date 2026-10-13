@@ -207,7 +207,7 @@ UPDATE settings
 SET config = '{"key": "value"}'::jsonb
 RETURNING id::INTEGER, config::JSONB
 -- columns: id: int (INT)
--- columns: config: dict (JSONB)
+-- columns: config: typing.Any (JSONB)
 ```
 
 ## UPDATE with FROM clause and RETURNING

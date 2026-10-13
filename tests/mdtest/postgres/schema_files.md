@@ -47,5 +47,5 @@ schema = ["users.sql", "orders.sql"]
 
 ```sql
 SELECT u.name, o.total FROM users u, orders o
--- inferred: tuple[str, float]
+-- inferred: tuple[str, decimal.Decimal]
 ```

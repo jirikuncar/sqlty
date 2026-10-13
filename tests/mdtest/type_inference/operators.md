@@ -63,9 +63,9 @@ SELECT
     '{}'::jsonb @> '{}' AS e,
     '{}'::jsonb ? 'a' AS f
 -- columns: a: str (TEXT)
--- columns: b: dict (JSONB)
+-- columns: b: typing.Any (JSONB)
 -- columns: c: str (TEXT)
--- columns: d: dict (JSONB)
+-- columns: d: typing.Any (JSONB)
 -- columns: e: bool (BOOLEAN)
 -- columns: f: bool (BOOLEAN)
 ```

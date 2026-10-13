@@ -12,6 +12,7 @@ use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, line_ending, rewrite_source, splice, string_literals, ImportStyle,
+    TYPE_MODULES,
 };
 use crate::tokens::{tokenize, wrapper_calls};
 
@@ -162,9 +163,9 @@ fn expand_star_in(content: &str, quote: &str, dialect: &str, schema: &Schema) ->
     }
 }
 
-/// Add `datetime`/`uuid` imports new row types need; drop an `UNTYPED` import no longer used.
+/// Add the [`TYPE_MODULES`] imports new row types need; drop an `UNTYPED` import no longer used.
 fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<String>) -> String {
-    let missing: Vec<String> = ["datetime", "uuid"]
+    let missing: Vec<String> = TYPE_MODULES
         .into_iter()
         .filter(|module| {
             introduced

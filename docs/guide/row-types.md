@@ -141,8 +141,9 @@ A field passes the type check when it can hold the column's values: `Any`, a
 union containing `Any` or the column type, and `float` for an `int` column
 are all accepted, but `bool` for an `int` column is not. A `NewType` is
 accepted wherever its supertype is, and a parametrised generic such as
-`list[str]` or `dict[str, int]` for a column that infers the bare `list` or
-`dict`.
+`list[str]` or `dict[str, int]` for a column that infers `list` or `dict`
+(element types are not compared). A JSON column infers `Any`, so any field
+accepts it.
 
 Annotations are resolved one field at a time with Python's typing machinery,
 so `from datetime import datetime` matches a `TIMESTAMP` column just like

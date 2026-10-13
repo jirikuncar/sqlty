@@ -25,7 +25,14 @@ use sqlparser::dialect::{
 };
 use sqlparser::parser::Parser;
 
-/// Mapping from canonical SQL type names to Python type strings.
+const ANY: &str = "typing.Any";
+const DECIMAL: &str = "decimal.Decimal";
+/// What psycopg loads `inet` as: an address, or an interface when the value has a prefix.
+const INET: &str = "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface";
+const CIDR: &str = "ipaddress.IPv4Network | ipaddress.IPv6Network";
+
+/// Mapping from canonical SQL type names to Python type strings; `DECIMAL` types
+/// are mapped by [`decimal_type`] and arrays by [`python_type`].
 static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     HashMap::from([
         ("INT", "int"),
@@ -49,15 +56,24 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("FLOAT", "float"),
         ("DOUBLE", "float"),
         ("REAL", "float"),
-        ("DECIMAL", "float"),
-        ("NUMERIC", "float"),
         ("UDOUBLE", "float"),
-        ("UDECIMAL", "float"),
-        ("BIGDECIMAL", "float"),
         ("TEXT", "str"),
         ("VARCHAR", "str"),
         ("CHAR", "str"),
         ("STRING", "str"),
+        ("NAME", "str"),
+        ("CITEXT", "str"),
+        ("BPCHAR", "str"),
+        ("XML", "str"),
+        ("MONEY", "str"),
+        ("TSVECTOR", "str"),
+        ("TSQUERY", "str"),
+        ("MACADDR", "str"),
+        ("SERIAL", "int"),
+        ("SMALLSERIAL", "int"),
+        ("BIGSERIAL", "int"),
+        ("INET", INET),
+        ("CIDR", CIDR),
         ("BOOLEAN", "bool"),
         ("BOOL", "bool"),
         ("DATE", "datetime.date"),
@@ -67,9 +83,8 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
         ("TIME", "datetime.time"),
         ("TIMETZ", "datetime.time"),
         ("INTERVAL", "datetime.timedelta"),
-        ("ARRAY", "list"),
-        ("JSON", "dict"),
-        ("JSONB", "dict"),
+        ("JSON", ANY),
+        ("JSONB", ANY),
         ("UUID", "uuid.UUID"),
         ("BYTEA", "bytes"),
         ("BLOB", "bytes"),
@@ -498,10 +513,10 @@ pub struct SchemaColumn {
 }
 
 impl SchemaColumn {
-    fn typed(&self) -> Typed {
+    fn typed(&self, dialect: SqlDialect) -> Typed {
         match &self.python_type {
             Some(python_type) => (Some(python_type.clone()), Some(self.sql_type.clone())),
-            None => from_sql_type(self.sql_type.clone()),
+            None => from_sql_type(self.sql_type.clone(), dialect),
         }
     }
 }
@@ -919,10 +934,31 @@ fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
     format!("{sign}{base}{args}")
 }
 
+/// What the dialect's usual drivers load exact decimals as: SQLite and Oracle drivers
+/// return floats, the others `decimal.Decimal`.
+fn decimal_type(dialect: SqlDialect) -> &'static str {
+    match dialect {
+        SqlDialect::Sqlite | SqlDialect::Other("oracle") => "float",
+        _ => DECIMAL,
+    }
+}
+
 /// Map a canonical SQL type to a Python type string; unknown types are `str`.
-fn python_type(sql_type: &str) -> String {
+/// `ARRAY<T>` is `list[T]` (bare `list` when `T` is unknown).
+fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
+    if let Some(inner) = sql_type.strip_prefix("ARRAY<") {
+        let inner = &inner[..inner.rfind('>')?];
+        return Some(match python_type(inner, dialect) {
+            Some(item) => format!("list[{item}]"),
+            None => "list".to_string(),
+        });
+    }
     let base = sql_type.split(['(', '<']).next().unwrap_or_default().trim();
-    SQL_TO_PYTHON_TYPE.get(base).unwrap_or(&"str").to_string()
+    match base {
+        "ARRAY" => Some("list".to_string()),
+        "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
+        _ => Some(SQL_TO_PYTHON_TYPE.get(base).unwrap_or(&"str").to_string()),
+    }
 }
 
 /// Lowercased unqualified name: `public.users` -> `users`.
@@ -1394,8 +1430,8 @@ fn known(python_type: &str) -> Inferred<Typed> {
     Ok((Some(python_type.to_string()), None))
 }
 
-fn from_sql_type(sql_type: String) -> Typed {
-    (Some(python_type(&sql_type)), Some(sql_type))
+fn from_sql_type(sql_type: String, dialect: SqlDialect) -> Typed {
+    (python_type(&sql_type, dialect), Some(sql_type))
 }
 
 /// PostgreSQL's name for an unquoted identifier is lowercase.
@@ -1707,7 +1743,7 @@ impl<'a> Analyzer<'a> {
                         columns
                             .iter()
                             .map(|col| {
-                                let (python_type, sql_type) = col.typed();
+                                let (python_type, sql_type) = col.typed(self.dialect);
                                 Column {
                                     name: col.name.clone(),
                                     python_type,
@@ -1752,7 +1788,7 @@ impl<'a> Analyzer<'a> {
                 .get(table)?
                 .iter()
                 .find(|col| col.name == column)
-                .map(|col| col.typed())
+                .map(|col| col.typed(self.dialect))
         };
         match expr {
             Expr::Identifier(ident) => {
@@ -1774,7 +1810,7 @@ impl<'a> Analyzer<'a> {
                     resolve_type(data_type, &self.schema.types, self.dialect);
                 Ok(match python_type {
                     Some(python_type) => (Some(python_type), Some(sql_type)),
-                    None => from_sql_type(sql_type),
+                    None => from_sql_type(sql_type, self.dialect),
                 })
             }
             Expr::Nested(inner) => self.expr(inner, scope),
@@ -1786,13 +1822,16 @@ impl<'a> Analyzer<'a> {
                 self.function_type(Returns::Real, &[inner], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("DECIMAL".to_string()))
+                Ok(from_sql_type("DECIMAL".to_string(), self.dialect))
             }
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
                 Ok(self.column_type(expr, scope).unwrap_or((None, None)))
             }
             Expr::Value(value) => match &value.value {
-                Value::Number(number, _) if number.contains(['.', 'e', 'E']) => known("float"),
+                Value::Number(number, _) if number.contains(['e', 'E']) => known("float"),
+                Value::Number(number, _) if number.contains('.') => {
+                    known(decimal_type(self.dialect))
+                }
                 Value::Number(..) => known("int"),
                 Value::Boolean(_) => known("bool"),
                 Value::Null | Value::Placeholder(_) => Ok((None, None)),
@@ -1822,8 +1861,8 @@ impl<'a> Analyzer<'a> {
             | Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 ..
-            } => Ok(from_sql_type("BOOLEAN".to_string())),
-            Expr::Interval(_) => Ok(from_sql_type("INTERVAL".to_string())),
+            } => Ok(from_sql_type("BOOLEAN".to_string(), self.dialect)),
+            Expr::Interval(_) => Ok(from_sql_type("INTERVAL".to_string(), self.dialect)),
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
@@ -1857,7 +1896,7 @@ impl<'a> Analyzer<'a> {
                 let args = positional_args(&func.args);
                 let arg = args.first().copied();
                 match name.as_str() {
-                    "COUNT" => Ok(from_sql_type("BIGINT".to_string())),
+                    "COUNT" => Ok(from_sql_type("BIGINT".to_string(), self.dialect)),
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
@@ -1882,7 +1921,7 @@ impl<'a> Analyzer<'a> {
             Some(arg) => self.expr(arg, scope),
             None => Ok((None, None)),
         };
-        let sql = |name: &str| Ok(from_sql_type(name.to_string()));
+        let sql = |name: &str| Ok(from_sql_type(name.to_string(), self.dialect));
         match returns {
             Returns::Sql(name) => sql(name),
             Returns::Void => Ok((Some("None".to_string()), Some("VOID".to_string()))),
@@ -1900,14 +1939,18 @@ impl<'a> Analyzer<'a> {
                 .1
                 .as_deref()
                 .and_then(array_element)
-                .map_or((None, None), |elem| from_sql_type(elem.to_string()))),
+                .map_or((None, None), |elem| {
+                    from_sql_type(elem.to_string(), self.dialect)
+                })),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
                 let elem = typed
                     .1
                     .clone()
                     .or_else(|| operand_type(&typed).map(String::from));
-                Ok(elem.map_or((None, None), |elem| from_sql_type(format!("ARRAY<{elem}>"))))
+                Ok(elem.map_or((None, None), |elem| {
+                    from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
+                }))
             }
             Returns::Bound => {
                 let typed = arg(0)?;
@@ -1921,8 +1964,7 @@ impl<'a> Analyzer<'a> {
                 match operand_type(&typed) {
                     Some("DOUBLE" | "FLOAT") => sql("DOUBLE"),
                     Some("INTERVAL") => sql("INTERVAL"),
-                    Some(ty) if numeric_rank(ty).is_some_and(|rank| rank <= 3) => sql("DECIMAL"),
-                    _ => known("float"),
+                    _ => sql("DECIMAL"),
                 }
             }
             Returns::Real | Returns::Scaled => {
@@ -1956,7 +1998,7 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
-        let sql = |name: &str| Ok(from_sql_type(name.to_string()));
+        let sql = |name: &str| Ok(from_sql_type(name.to_string(), self.dialect));
         match op {
             Gt | Lt | GtEq | LtEq | Spaceship | Eq | NotEq | And | Or | Xor | Match | Regexp
             | Glob | PGOverlap | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
@@ -2000,7 +2042,8 @@ impl<'a> Analyzer<'a> {
                     (false, true) => (l.clone(), l),
                     _ => (l, r),
                 };
-                Ok(arithmetic(op, &l, &r, mysql_division).map_or((None, None), from_sql_type))
+                Ok(arithmetic(op, &l, &r, mysql_division)
+                    .map_or((None, None), |ty| from_sql_type(ty, self.dialect)))
             }
             _ => Ok((None, None)),
         }
@@ -2009,10 +2052,15 @@ impl<'a> Analyzer<'a> {
     /// SUM/MIN/MAX take their argument's type; SUM falls back to `NUMERIC`.
     fn aggregate(&self, name: &str, arg: Option<&Expr>, scope: &Scope) -> Inferred<Typed> {
         let typed = arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope))?;
-        let numeric = || Ok((Some("float".to_string()), Some("NUMERIC".to_string())));
+        let numeric = || {
+            Ok((
+                Some(decimal_type(self.dialect).to_string()),
+                Some("NUMERIC".to_string()),
+            ))
+        };
         if typed.0.is_some() || name != "SUM" {
             return Ok(if name == "SUM" && self.dialect == SqlDialect::Postgres {
-                sum_type(typed)
+                sum_type(typed, self.dialect)
             } else {
                 typed
             });
@@ -2040,7 +2088,7 @@ impl<'a> Analyzer<'a> {
 }
 
 /// PostgreSQL's `SUM` widens: `BIGINT` for `SMALLINT`/`INT`, `NUMERIC` for `BIGINT`/`NUMERIC`.
-fn sum_type(typed: Typed) -> Typed {
+fn sum_type(typed: Typed, dialect: SqlDialect) -> Typed {
     let widened = match operand_type(&typed) {
         Some("SMALLINT" | "INT") => "BIGINT",
         Some("BIGINT" | "DECIMAL" | "NUMERIC") => "DECIMAL",
@@ -2048,7 +2096,7 @@ fn sum_type(typed: Typed) -> Typed {
         Some("DOUBLE") => "DOUBLE",
         _ => return typed,
     };
-    from_sql_type(widened.to_string())
+    from_sql_type(widened.to_string(), dialect)
 }
 
 fn type_base(sql_type: &str) -> &str {
@@ -2304,7 +2352,7 @@ mod tests {
             infer_type("SELECT * FROM users", "postgres", &schema)
                 .unwrap()
                 .as_deref(),
-            Some("tuple[int, float, list]")
+            Some("tuple[int, decimal.Decimal, list[str]]")
         );
     }
 
@@ -2362,7 +2410,7 @@ mod tests {
     fn test_unaliased_names() {
         assert_eq!(
             names("SELECT NOT active, -n, -1, n::INT, COUNT(*), lower(x), f(x) FROM t"),
-            ["", "", "1", "n", "*", "", "f"]
+            ["?column?", "?column?", "?column?", "n", "count", "lower", "f"]
         );
     }
 

@@ -46,8 +46,8 @@ CREATE TABLE orders (
 
 ```sql
 SELECT discount, rate, note FROM orders
--- columns: discount: float (DECIMAL(5, 2))
--- columns: rate: float (DECIMAL(5, 2))
+-- columns: discount: decimal.Decimal (DECIMAL(5, 2))
+-- columns: rate: decimal.Decimal (DECIMAL(5, 2))
 -- columns: note: str (VARCHAR(20))
 ```
 

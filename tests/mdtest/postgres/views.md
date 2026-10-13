@@ -48,7 +48,7 @@ CREATE VIEW labelled AS SELECT id AS order_id, total::TEXT AS label FROM orders;
 
 ```sql
 SELECT uid, orders, spent FROM order_stats
--- inferred: tuple[int, int, float]
+-- inferred: tuple[int, int, decimal.Decimal]
 ```
 
 ```sql
@@ -113,7 +113,7 @@ CREATE VIEW public.user_orders AS
 
 ```sql
 SELECT name, total FROM user_orders
--- inferred: tuple[str, float]
+-- inferred: tuple[str, decimal.Decimal]
 ```
 
 ## Unresolvable columns stay unknown

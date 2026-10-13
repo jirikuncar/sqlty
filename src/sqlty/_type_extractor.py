@@ -26,7 +26,9 @@ import annotationlib
 import ast
 import contextlib
 import datetime
+import decimal
 import functools
+import ipaddress
 import operator
 import re
 import textwrap
@@ -124,7 +126,30 @@ PYTHON_TYPE_MAP: dict[str, type] = {
     "datetime.time": datetime.time,
     "datetime.timedelta": datetime.timedelta,
     "uuid.UUID": uuid.UUID,
+    "decimal.Decimal": decimal.Decimal,
+    "typing.Any": typing.Any,
+    "ipaddress.IPv4Address": ipaddress.IPv4Address,
+    "ipaddress.IPv6Address": ipaddress.IPv6Address,
+    "ipaddress.IPv4Interface": ipaddress.IPv4Interface,
+    "ipaddress.IPv6Interface": ipaddress.IPv6Interface,
+    "ipaddress.IPv4Network": ipaddress.IPv4Network,
+    "ipaddress.IPv6Network": ipaddress.IPv6Network,
 }
+
+
+def _column_type(python_type: str) -> typing.Any:
+    """The type object of an inferred column type; ``list[T]`` is ``list``, ``A | B`` a union, unknown is None.
+
+    Example:
+        >>> _column_type("list[decimal.Decimal]"), _column_type("int | str"), _column_type("nope")
+        (<class 'list'>, int | str, None)
+    """
+    if python_type.startswith("list["):
+        return list
+    members = [PYTHON_TYPE_MAP.get(name.strip()) for name in python_type.split(" | ")]
+    if None in members:
+        return None
+    return functools.reduce(operator.or_, members)
 
 
 def extract_type_definitions(
@@ -288,7 +313,7 @@ def field_accepts(annotation: str, column_python_type: str | None) -> bool:
 def _accepts(field: typing.Any, annotation: str, column_python_type: str | None) -> bool:
     if not column_python_type:
         return True
-    fits = _is_subtype(PYTHON_TYPE_MAP.get(column_python_type), _erase(field))
+    fits = _is_subtype(_column_type(column_python_type), _erase(field))
     return fits is not False
 
 

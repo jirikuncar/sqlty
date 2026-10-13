@@ -367,10 +367,11 @@ pub fn wrapped_queries(
         .collect()
 }
 
-/// Whether `annotated` is `inferred` or parametrises some of its bare generics
-/// (`tuple[int, list[str]]` for `tuple[int, list]`), so it is not stale.
+/// Whether `annotated` is `inferred`, narrows a `typing.Any` item to any type, or
+/// parametrises some of its generics (`tuple[int, list[str]]` for `tuple[int, list]`
+/// or `tuple[int, list[int]]`), so it is not stale.
 ///
-/// Element types are not checked: inference only yields a bare `list`.
+/// Element types are not checked.
 pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     fn balanced(args: &str) -> bool {
         let mut depth = 0i32;
@@ -403,9 +404,11 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     match (items(annotated), items(inferred)) {
         (Some(ours), Some(theirs)) if ours.len() == theirs.len() => {
             ours.iter().zip(&theirs).all(|(a, i)| {
+                let base = i.split('[').next().unwrap_or(i);
                 a == i
-                    || (["list", "dict", "set", "frozenset", "tuple"].contains(i)
-                        && a.strip_prefix(i)
+                    || *i == "typing.Any"
+                    || (["list", "dict", "set", "frozenset", "tuple"].contains(&base)
+                        && a.strip_prefix(base)
                             .and_then(|rest| rest.strip_prefix('['))
                             .and_then(|rest| rest.strip_suffix(']'))
                             .is_some_and(balanced))
@@ -513,6 +516,13 @@ mod tests {
             "tuple[dict, int]"
         ));
         assert!(refines_tuple("tuple[list[list[int]]]", "tuple[list]"));
+        assert!(refines_tuple("tuple[list[str]]", "tuple[list[int]]"));
+        assert!(!refines_tuple("tuple[set[str]]", "tuple[list[int]]"));
+        assert!(refines_tuple(
+            "tuple[list[str], dict]",
+            "tuple[typing.Any, dict]"
+        ));
+        assert!(!refines_tuple("tuple[int]", "tuple[typing.Any, dict]"));
     }
 
     #[test]

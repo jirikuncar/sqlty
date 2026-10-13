@@ -30,7 +30,7 @@ SELECT
     d::DECIMAL,
     e::NUMERIC
 FROM t
--- inferred: tuple[float, float, float, float, float]
+-- inferred: tuple[float, float, float, decimal.Decimal, decimal.Decimal]
 ```
 
 ## String family
@@ -87,7 +87,7 @@ SELECT id::UUID FROM t
 
 ```sql
 SELECT tags::INT[], metadata::JSON, extra::JSONB FROM t
--- inferred: tuple[list, dict, dict]
+-- inferred: tuple[list[int], typing.Any, typing.Any]
 ```
 
 ## Fixed-size array casts
@@ -96,7 +96,7 @@ PostgreSQL reads `x::INT[3]` as a cast (the size is ignored), not as a subscript
 
 ```sql
 SELECT a::INT[3], b::TEXT[2][2], c::INT ARRAY[3] FROM t
--- inferred: tuple[list, list, list]
+-- inferred: tuple[list[int], list[list[str]], list[int]]
 ```
 
 ## Bare ARRAY cast is invalid
@@ -133,7 +133,7 @@ SELECT
     c24::INT[], c25::JSON, c26::JSONB,
     c27::UUID
 FROM t
--- inferred: tuple[int, int, int, int, int, float, float, float, float, float, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list, dict, dict, uuid.UUID]
+-- inferred: tuple[int, int, int, int, int, float, float, float, decimal.Decimal, decimal.Decimal, str, str, str, str, bool, bool, datetime.date, datetime.datetime, datetime.datetime, datetime.datetime, datetime.time, datetime.time, datetime.timedelta, list[int], typing.Any, typing.Any, uuid.UUID]
 ```
 
 ## Unknown type defaults to str

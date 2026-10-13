@@ -164,7 +164,7 @@ SELECT
     ratio::FLOAT,
     precise::DOUBLE
 FROM measurements
--- inferred: tuple[int, int, int, float, float, float]
+-- inferred: tuple[int, int, int, decimal.Decimal, float, float]
 ```
 
 ## Binary types

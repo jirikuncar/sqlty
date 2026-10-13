@@ -57,7 +57,7 @@ CREATE TABLE t (a INT64, b FLOAT64, c BIGNUMERIC, d STRING, e BYTES, f BOOL)
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, float, float, str, bytes, bool]
+-- inferred: tuple[int, float, decimal.Decimal, str, bytes, bool]
 -- expanded: SELECT a::BIGINT, b::DOUBLE, c::BIGDECIMAL, d::TEXT, e::BINARY, f::BOOLEAN FROM t
 ```
 
@@ -76,7 +76,7 @@ CREATE TABLE t (a NUMBER(10,2), b TIMESTAMP_NTZ, c TIMESTAMP_TZ, d TIMESTAMP_LTZ
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[float, datetime.datetime, datetime.datetime, datetime.datetime, str]
+-- inferred: tuple[decimal.Decimal, datetime.datetime, datetime.datetime, datetime.datetime, str]
 -- expanded: SELECT a::DECIMAL(10, 2), b::TIMESTAMP, c::TIMESTAMPTZ, d::TIMESTAMPTZ, e::VARCHAR FROM t
 ```
 

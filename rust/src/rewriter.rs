@@ -17,6 +17,9 @@ pub(crate) use crate::tokens::string_literals;
 use crate::tokens::{content, string_at, string_groups, tokenize, wrapper_calls, Kind, Token};
 use std::ops::Range;
 
+/// Standard-library modules inferred row types are spelled with.
+pub(crate) const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipaddress", "typing"];
+
 // ---------------------------------------------------------------------------
 // Regex patterns
 // ---------------------------------------------------------------------------
@@ -113,7 +116,7 @@ impl ImportStyle {
 
 /// Rewrite Python source: `"--sql\n..."` → `SQL[T]("--sql\n...")`.
 ///
-/// Adds necessary imports (SQL, datetime, uuid) at the top.
+/// Adds necessary imports (SQL and the [`TYPE_MODULES`] row types use) at the top.
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
 /// With `untyped`, row-returning queries of unknown row type become `SQL[UNTYPED](...)`.
 pub fn rewrite_source(
@@ -150,14 +153,10 @@ pub fn rewrite_source_with(
     }
     let needs = |marker: &str| replacements.iter().any(|(_, _, r)| r.contains(marker));
     let mut imports = Vec::new();
-    if needs("datetime.") && !has_import(source, "import datetime") {
-        imports.push("import datetime");
-    }
-    if needs("typing.") && !has_import(source, "import typing") {
-        imports.push("import typing");
-    }
-    if needs("uuid.") && !has_import(source, "import uuid") {
-        imports.push("import uuid");
+    for module in TYPE_MODULES {
+        if needs(&format!("{module}.")) && !has_import(source, &format!("import {module}")) {
+            imports.push(format!("import {module}"));
+        }
     }
     let module_style = istyle.wrapper_name.contains('.');
     let bound = sqlty_imports(source);
@@ -169,11 +168,11 @@ pub fn rewrite_source_with(
     if (module_style && !has_import(source, &istyle.import_line))
         || (!module_style && !binds("SQL", &istyle.wrapper_name))
     {
-        imports.push(&istyle.import_line);
+        imports.push(istyle.import_line.clone());
     }
     if let Some(line) = istyle.untyped_import() {
         if needs_untyped_import && !binds("UNTYPED", "UNTYPED") {
-            imports.push(line);
+            imports.push(line.to_string());
         }
     }
 
@@ -450,7 +449,7 @@ pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
     )
 }
 
-/// Remove sqlty/datetime/typing/uuid imports that are no longer referenced.
+/// Remove sqlty and [`TYPE_MODULES`] imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
     let untyped_import = istyle.untyped_import();
@@ -464,9 +463,9 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
             let line = line.trim_end();
             !((Some(line) == untyped_import && !untyped_used)
                 || (line == istyle.import_line && !source.contains(&wrapper_marker))
-                || (line == "import datetime" && !source.contains("datetime."))
-                || (line == "import typing" && !source.contains("typing."))
-                || (line == "import uuid" && !source.contains("uuid.")))
+                || TYPE_MODULES.iter().any(|module| {
+                    line == format!("import {module}") && !source.contains(&format!("{module}."))
+                }))
         })
         .collect()
 }
