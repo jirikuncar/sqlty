@@ -327,6 +327,7 @@ class StubFile:
                 module="datetime", names=[], from_import=False
             ),
             r"\bdecimal\.Decimal\b": ImportStatement(module="decimal", names=[], from_import=False),
+            r"\btyping\.Literal\b": ImportStatement(module="typing", names=[], from_import=False),
         }
 
         # Check if Any or SQL is used in any return type or function signature

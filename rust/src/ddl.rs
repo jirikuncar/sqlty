@@ -177,6 +177,46 @@ impl Statement<'_> {
                 .is_some_and(|p| is_word(p, object))
     }
 
+    /// The name and base type of a `CREATE DOMAIN name [AS] type ...` as written, without
+    /// the `COLLATE`, `DEFAULT` and constraint clauses that follow the type.
+    pub fn domain(&self) -> Option<(String, String)> {
+        const CLAUSES: [&str; 6] = ["collate", "default", "constraint", "check", "not", "null"];
+        let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        let name_at = pieces.iter().position(|p| is_word(p, "domain"))? + 1;
+        let name_len = pieces[name_at..]
+            .iter()
+            .enumerate()
+            .take_while(|(at, p)| {
+                if at % 2 == 0 {
+                    matches!(p.0, Kind::Word | Kind::Quoted)
+                } else {
+                    is_punct(p, ".")
+                }
+            })
+            .count();
+        let type_at = name_at
+            + name_len
+            + usize::from(
+                pieces
+                    .get(name_at + name_len)
+                    .is_some_and(|p| is_word(p, "as")),
+            );
+        let type_len = pieces[type_at..]
+            .iter()
+            .position(|p| p.0 == Kind::Word && CLAUSES.iter().any(|c| is_word(p, c)))
+            .unwrap_or(pieces.len() - type_at);
+        let text = |range: &[&Piece]| range.iter().map(|p| p.1).collect::<Vec<_>>().join(" ");
+        (name_len > 0 && type_len > 0).then(|| {
+            (
+                pieces[name_at..name_at + name_len]
+                    .iter()
+                    .map(|p| p.1)
+                    .collect(),
+                text(&pieces[type_at..type_at + type_len]),
+            )
+        })
+    }
+
     /// The table name as written, e.g. `public.users`.
     pub fn table_name(&self) -> String {
         let start = self
@@ -428,10 +468,20 @@ mod tests {
     }
 
     #[test]
-    fn test_creates() {
+    fn test_creates_and_domain() {
         let first = |sql| split_statements(sql, false).remove(0);
         assert!(first("CREATE OR REPLACE MATERIALIZED VIEW v AS SELECT 1").creates("view"));
         assert!(!first("CREATE TABLE view (a INT)").creates("view"));
+        assert!(first("create domain a.b as numeric(5, 2) not null default 0").creates("domain"));
+        assert_eq!(
+            first("CREATE DOMAIN app.\"p\" AS numeric(5, 2) NOT NULL DEFAULT 0").domain(),
+            Some(("app.\"p\"".to_string(), "numeric ( 5 , 2 )".to_string()))
+        );
+        assert_eq!(
+            first("CREATE DOMAIN d text COLLATE \"C\" CHECK (VALUE <> '')").domain(),
+            Some(("d".to_string(), "text".to_string()))
+        );
+        assert_eq!(first("CREATE DOMAIN d").domain(), None);
     }
 
     #[test]

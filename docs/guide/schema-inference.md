@@ -80,6 +80,38 @@ adults = "--sql\nSELECT user_id, user_name FROM adults"
 # rewritten: adults = SQL[tuple[int, str]]("--sql\nSELECT user_id, user_name FROM adults")
 ```
 
+## Domains and enums
+
+A column typed by a `CREATE DOMAIN` gets the domain's base type; domains over
+domains resolve to the innermost base type, and a schema-qualified name
+(`app.percent`) matches the unqualified one. A column typed by a
+`CREATE TYPE ... AS ENUM` is a `typing.Literal` of the enum's labels, and so is
+a cast to the enum (`x::order_status`). `sqlty rewrite` adds `import typing` for
+it. The SQL type reported for a column is the domain's base type, or the
+enum's own (unqualified, upper-case) name.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE DOMAIN percent AS integer CHECK (VALUE BETWEEN 0 AND 100);
+CREATE TYPE order_status AS ENUM ('pending', 'paid');
+CREATE TABLE orders (id INTEGER PRIMARY KEY, discount percent, status order_status NOT NULL);
+```
+
+```python
+orders = "--sql\nSELECT discount, status FROM orders"
+# rewritten: orders = SQL[tuple[int, typing.Literal['pending', 'paid']]]("--sql\nSELECT discount, status FROM orders")
+```
+
+A field annotated `str` still accepts an enum column, and a `Literal[...]` field
+is not checked against the labels.
+
 ## Where the schema comes from
 
 `sqlty rewrite` and `sqlty check` use, in order:

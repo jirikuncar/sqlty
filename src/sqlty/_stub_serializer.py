@@ -94,7 +94,7 @@ class IRToASTSerializer:
         Returns:
             Sorted list of imports
         """
-        stdlib_modules = {"uuid", "datetime", "decimal"}
+        stdlib_modules = {"uuid", "datetime", "decimal", "typing"}
         typing_modules = {"typing"}
 
         stdlib_imports = []

@@ -16,7 +16,7 @@ use sqlparser::ast::{
     visit_expressions, ArrayElemTypeDef, DataType, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, Join, JoinConstraint, JoinOperator, ObjectName, OutputClause, Query, Select,
     SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableFactor,
-    TableObject, TableWithJoins, Value,
+    TableObject, TableWithJoins, UserDefinedTypeRepresentation, Value,
 };
 use sqlparser::dialect::{
     dialect_from_str, ClickHouseDialect, GenericDialect, MySqlDialect, PostgreSqlDialect,
@@ -151,6 +151,8 @@ pub struct SchemaData {
     tables: HashMap<String, Vec<SchemaColumn>>,
     /// View name -> output columns, as analyzed when the view was created.
     views: HashMap<String, Vec<Column>>,
+    /// Domain and enum type names -> the types their columns have.
+    types: HashMap<String, UserType>,
 }
 
 pub type Schema = Arc<SchemaData>;
@@ -172,13 +174,33 @@ pub struct SchemaColumn {
     /// The name as SQL spells it, quotes kept, for `SELECT *` expansion.
     pub ident: String,
     pub sql_type: String,
+    /// The Python type when it is not the one `sql_type` maps to (an enum's `Literal`).
+    python_type: Option<String>,
 }
 
 impl SchemaColumn {
     fn typed(&self) -> Typed {
-        from_sql_type(self.sql_type.clone())
+        match &self.python_type {
+            Some(python_type) => (Some(python_type.clone()), Some(self.sql_type.clone())),
+            None => from_sql_type(self.sql_type.clone()),
+        }
     }
 }
+
+/// A domain or enum: the SQL type its columns show (a domain's base type, an enum's
+/// own name) and the Python type when that is a `Literal` of the enum's labels.
+#[derive(Clone, Debug)]
+struct UserType {
+    sql_type: String,
+    python_type: Option<String>,
+}
+
+/// A domain or enum as written in the schema, before domains over other types resolve.
+enum TypeDef {
+    Domain(DataType),
+    Enum(Vec<String>),
+}
+
 /// `(reference, table)` pairs for the tables a statement reads, in query order.
 type Scope = Vec<(String, String)>;
 
@@ -498,13 +520,100 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
 }
 
+/// The labels of an enum as a `typing.Literal`.
+fn literal_of(labels: &[String]) -> String {
+    let labels: Vec<String> = labels
+        .iter()
+        .map(|label| format!("'{}'", label.replace('\\', "\\\\").replace('\'', "\\'")))
+        .collect();
+    format!("typing.Literal[{}]", labels.join(", "))
+}
+
+/// The lowercased unqualified name of a user-defined type such as `logfire.percent`.
+fn custom_name(dt: &DataType) -> Option<String> {
+    match dt {
+        DataType::Custom(name, modifiers) if modifiers.is_empty() => Some(object_name(name)),
+        _ => None,
+    }
+}
+
+/// The type a domain or enum named `name` gives its columns; domains over domains
+/// resolve through `defs`, up to a fixed depth.
+fn resolve_user_type(
+    name: &str,
+    defs: &HashMap<String, TypeDef>,
+    dialect: SqlDialect,
+    depth: usize,
+) -> Option<UserType> {
+    match defs.get(name)? {
+        TypeDef::Enum(labels) => Some(UserType {
+            sql_type: name.to_uppercase(),
+            python_type: (!labels.is_empty()).then(|| literal_of(labels)),
+        }),
+        TypeDef::Domain(base) => Some(
+            custom_name(base)
+                .filter(|_| depth < 16)
+                .and_then(|base| resolve_user_type(&base, defs, dialect, depth + 1))
+                .unwrap_or_else(|| UserType {
+                    sql_type: canonical_type(base, dialect),
+                    python_type: None,
+                }),
+        ),
+    }
+}
+
+/// The SQL type of a column, and its Python type when a domain or enum sets it.
+fn resolve_type(
+    dt: &DataType,
+    types: &HashMap<String, UserType>,
+    dialect: SqlDialect,
+) -> (String, Option<String>) {
+    match custom_name(dt).and_then(|name| types.get(&name)) {
+        Some(user) => (user.sql_type.clone(), user.python_type.clone()),
+        None => (canonical_type(dt, dialect), None),
+    }
+}
+
+fn type_defs(statements: &[ddl::Statement], dialect: SqlDialect) -> HashMap<String, TypeDef> {
+    let mut defs = HashMap::new();
+    let parser_dialect = dialect.parser_dialect();
+    let parse_with = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
+    for stmt in statements {
+        if stmt.creates("domain") {
+            let parsed = stmt.domain().and_then(|(name, base)| {
+                let name = parse_with(&name)?.parse_object_name(false).ok()?;
+                let base = parse_with(&base)?.parse_data_type().ok()?;
+                Some((object_name(&name), base))
+            });
+            if let Some((name, base)) = parsed {
+                defs.insert(name, TypeDef::Domain(base));
+            }
+        } else if stmt.creates("type") {
+            if let Some(Statement::CreateType {
+                name,
+                representation: Some(UserDefinedTypeRepresentation::Enum { labels }),
+            }) = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+            {
+                let labels = labels.into_iter().map(|label| label.value).collect();
+                defs.insert(object_name(&name), TypeDef::Enum(labels));
+            }
+        }
+    }
+    defs
+}
+
 /// [`load_schema`], and the names of the tables that could not be parsed even
-/// without their constraints. Tables load first, then each view in order, so a view
-/// may read the views before it.
+/// without their constraints. Domains and enums load first, then tables, then each
+/// view in order, so a view may read the views before it.
 pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<String>) {
     let dialect = SqlDialect::from_name(dialect);
     let mut skipped = Vec::new();
     let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
+    let defs = type_defs(&statements, dialect);
+    let types: HashMap<String, UserType> = defs
+        .keys()
+        .filter_map(|name| Some((name.clone(), resolve_user_type(name, &defs, dialect, 0)?)))
+        .collect();
     let tables = statements
         .iter()
         .filter(|stmt| stmt.is_create_table())
@@ -525,13 +634,17 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
                 .columns
                 .iter()
                 .filter(|col| col.data_type != DataType::Unspecified)
-                .map(|col| SchemaColumn {
-                    name: col.name.value.to_lowercase(),
-                    ident: match col.name.quote_style {
-                        Some(_) => col.name.to_string(),
-                        None => col.name.value.to_lowercase(),
-                    },
-                    sql_type: canonical_type(&col.data_type, dialect),
+                .map(|col| {
+                    let (sql_type, python_type) = resolve_type(&col.data_type, &types, dialect);
+                    SchemaColumn {
+                        name: col.name.value.to_lowercase(),
+                        ident: match col.name.quote_style {
+                            Some(_) => col.name.to_string(),
+                            None => col.name.value.to_lowercase(),
+                        },
+                        sql_type,
+                        python_type,
+                    }
                 })
                 .collect();
             (object_name(&create.name), columns)
@@ -540,6 +653,7 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
     let mut data = SchemaData {
         tables,
         views: HashMap::new(),
+        types,
     };
     for stmt in statements.iter().filter(|stmt| stmt.creates("view")) {
         let Some(Statement::CreateView(view)) =
@@ -1155,7 +1269,12 @@ impl<'a> Analyzer<'a> {
     fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => {
-                Ok(from_sql_type(canonical_type(data_type, self.dialect)))
+                let (sql_type, python_type) =
+                    resolve_type(data_type, &self.schema.types, self.dialect);
+                Ok(match python_type {
+                    Some(python_type) => (Some(python_type), Some(sql_type)),
+                    None => from_sql_type(sql_type),
+                })
             }
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {

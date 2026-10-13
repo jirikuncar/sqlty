@@ -153,6 +153,9 @@ pub fn rewrite_source_with(
     if needs("datetime.") && !has_import(source, "import datetime") {
         imports.push("import datetime");
     }
+    if needs("typing.") && !has_import(source, "import typing") {
+        imports.push("import typing");
+    }
     if needs("uuid.") && !has_import(source, "import uuid") {
         imports.push("import uuid");
     }
@@ -440,7 +443,7 @@ pub(crate) fn infer_sql_content(
         .flatten()
 }
 
-/// Remove sqlty/datetime/uuid imports that are no longer referenced.
+/// Remove sqlty/datetime/typing/uuid imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
     let untyped_import = istyle.untyped_import();
@@ -455,6 +458,7 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
             !((Some(line) == untyped_import && !untyped_used)
                 || (line == istyle.import_line && !source.contains(&wrapper_marker))
                 || (line == "import datetime" && !source.contains("datetime."))
+                || (line == "import typing" && !source.contains("typing."))
                 || (line == "import uuid" && !source.contains("uuid.")))
         })
         .collect()
