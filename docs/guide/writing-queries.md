@@ -100,7 +100,9 @@ without a cast, schema entry or literal type becomes `str`, as does an
 expression sqlty cannot type, such as arithmetic on such a column. Predicates
 are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
 wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
-`greatest`, `unnest` and the advisory locks are typed too. Cast the whole expression when the default is wrong:
+`greatest`, `unnest` and the advisory locks are typed too; `COALESCE`,
+`GREATEST` and `LEAST` take the first argument of known type, skipping `NULL`
+and placeholders. Cast the whole expression when the default is wrong:
 
 ```python
 query = "--sql\nSELECT COUNT(*), 1, x + 1, (x + 1)::INTEGER, name FROM t"

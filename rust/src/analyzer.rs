@@ -91,6 +91,8 @@ enum Returns {
     Elem(usize),
     /// An array of an argument's type.
     ArrayOf(usize),
+    /// The first argument of known type, skipping `NULL` and placeholders.
+    FirstKnown,
     /// `lower`/`upper`: the element type of a range argument, else `TEXT`.
     Bound,
     /// `AVG` and friends: `DOUBLE` for floats, `INTERVAL` for intervals, else `NUMERIC`.
@@ -123,6 +125,7 @@ const COMMON_FUNCTIONS: &[(&[&str], Returns)] = &[
     ),
     (&["ROW_NUMBER", "RANK", "DENSE_RANK"], Sql("BIGINT")),
     (&["AVG"], Returns::Mean),
+    (&["COALESCE"], Returns::FirstKnown),
     (
         &[
             "STDDEV",
@@ -418,6 +421,7 @@ const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Arg(0),
     ),
+    (&["GREATEST", "LEAST"], Returns::FirstKnown),
     (&["ARRAY_PREPEND"], Arg(1)),
     (&["UNNEST"], Elem(0)),
     (&["ARRAY_AGG"], Returns::ArrayOf(0)),
@@ -1395,7 +1399,7 @@ fn from_sql_type(sql_type: String) -> Typed {
 }
 
 /// Functions whose result type is known, besides those in [`COMMON_FUNCTIONS`].
-const TYPED_FUNCTIONS: [&str; 6] = ["COUNT", "AVG", "SUM", "MIN", "MAX", "COALESCE"];
+const TYPED_FUNCTIONS: [&str; 5] = ["COUNT", "AVG", "SUM", "MIN", "MAX"];
 
 /// Typed functions whose unaliased column is still named after the function.
 const NAMED_FUNCTIONS: [&str; 7] = [
@@ -1823,7 +1827,6 @@ impl<'a> Analyzer<'a> {
                 match name.as_str() {
                     "COUNT" => Ok((Some("int".to_string()), Some("INTEGER".to_string()))),
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
-                    "COALESCE" => arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope)),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
                         None => Ok((None, None)),
@@ -1852,6 +1855,15 @@ impl<'a> Analyzer<'a> {
             Returns::Sql(name) => sql(name),
             Returns::Void => Ok((Some("None".to_string()), Some("VOID".to_string()))),
             Returns::Arg(i) => arg(i),
+            Returns::FirstKnown => {
+                for expr in args {
+                    let typed = self.expr(expr, scope)?;
+                    if typed.0.is_some() {
+                        return Ok(typed);
+                    }
+                }
+                Ok((None, None))
+            }
             Returns::Elem(i) => Ok(arg(i)?
                 .1
                 .as_deref()
