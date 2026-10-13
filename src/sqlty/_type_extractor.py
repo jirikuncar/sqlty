@@ -31,6 +31,7 @@ import functools
 import ipaddress
 import operator
 import re
+import sys
 import textwrap
 import types
 import typing
@@ -175,7 +176,10 @@ def _column_type(python_type: str) -> typing.Any:
 
 
 def extract_type_definitions(
-    source: str | ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
+    source: str | ParsedSource,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+    type_modules: typing.Iterable[str] | None = None,
 ) -> dict[str, TypeInfo]:
     """Extract type definitions from Python source code.
 
@@ -191,12 +195,15 @@ def extract_type_definitions(
 
     Names imported from modules of ``helpers`` (a ``HelperIndex``) are read
     from those modules' source, never imported; ``module`` is the name of
-    ``source``, for relative imports.
+    ``source``, for relative imports. Imports are executed only for the
+    standard library, `_TRUSTED_MODULES` and ``type_modules``; any other name
+    is read from the source of ``helpers`` or is unknown.
 
     Args:
         source: Python source code, or a ``ParsedSource`` whose tree is reused.
         helpers: modules of the checked paths.
         module: dotted name of ``source``.
+        type_modules: extra modules (and their submodules) whose imports may be executed.
 
     Returns:
         Dictionary mapping type name to TypeInfo.
@@ -223,7 +230,11 @@ def extract_type_definitions(
         return {}
 
     # Phase 2: Collect the guarded imports and aliases needed for the namespace
-    import_stmts = _namespace_statements(tree, set(newtypes), helpers, module)
+    extra = frozenset(type_modules or ())
+    if helpers is not None and helpers.type_modules != extra:
+        helpers.type_modules = extra
+        helpers.namespaces.clear()
+    import_stmts = _namespace_statements(tree, set(newtypes), helpers, module, extra)
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
@@ -433,23 +444,48 @@ def _absolute(package: str | None, level: int, name: str | None) -> str | None:
     return ".".join([*parts, *([name] if name else [])]) or None
 
 
+_TRUSTED_MODULES = frozenset(
+    {"typing", "typing_extensions", "pydantic", "pydantic_core", "annotated_types", "sqlty"}
+)
+
+
+def _trusted(name: str | None, extra: frozenset[str]) -> bool:
+    """Whether importing module ``name`` may run: the standard library, `_TRUSTED_MODULES` or ``extra``.
+
+    Example:
+        >>> _trusted("os.path", frozenset()), _trusted("app.ids", frozenset()), _trusted("app.ids", frozenset({"app"}))
+        (True, False, True)
+    """
+    if not name:
+        return False
+    root = name.partition(".")[0]
+    return (
+        root in sys.stdlib_module_names
+        or root in _TRUSTED_MODULES
+        or any(name == m or name.startswith(f"{m}.") for m in extra)
+    )
+
+
 def _namespace_statements(
     tree: ast.Module,
     newtypes: set[str],
     index: HelperIndex | None = None,
     module: str | None = None,
+    type_modules: frozenset[str] = frozenset(),
 ) -> list[_Statement]:
     """Guarded source, in file order, of the module-level imports and type aliases.
 
     A name that cannot be imported or evaluated is bound to the unknown
     placeholder, so one failure does not hide the other names. An import of a
     module in ``index`` is an `_Import` naming it, to be read from its source
-    instead. ``module`` is the dotted name of ``tree`` (``pkg.__init__`` for a
-    package), for relative imports.
+    instead. Any other import is executed only if it names the standard
+    library, a trusted module or one of ``type_modules``, else it binds the
+    placeholder. ``module`` is the dotted name of ``tree`` (``pkg.__init__``
+    for a package), for relative imports.
 
     Example:
-        >>> _namespace_statements(ast.parse("import a.b\\nX = int\\nY = f()"), set())[0].code.splitlines()[:2]
-        ['try:', '    import a.b']
+        >>> _namespace_statements(ast.parse("import os.path\\nimport a.b\\nX = int"), set())[0].code.splitlines()[:2]
+        ['try:', '    import os.path']
     """
     package = None
     if module is not None:
@@ -463,9 +499,13 @@ def _namespace_statements(
         if isinstance(node, ast.Import):
             for alias in node.names:
                 bound = alias.asname or alias.name.split(".")[0]
-                code = _guard(ast.Import(names=[alias]), [bound])
                 target = alias.name if alias.asname else bound
                 checked = index is not None and target in index.prefixes
+                code = (
+                    _guard(ast.Import(names=[alias]), [bound])
+                    if checked or _trusted(alias.name, type_modules)
+                    else f"{bound} = {_UNKNOWN_NAME}"
+                )
                 statements.append(_Import(bound, code, target if checked else None))
         elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
             base = _absolute(package, node.level, node.module) if node.level else node.module
@@ -478,11 +518,12 @@ def _namespace_statements(
                         and base is not None
                         and (base in index.prefixes or f"{base}.{alias.name}" in index.prefixes)
                     )
-                    statements.append(
-                        _Import(
-                            local, _guard(from_, [local]), base if checked else None, alias.name
-                        )
+                    code = (
+                        _guard(from_, [local])
+                        if checked or (not node.level and _trusted(node.module, type_modules))
+                        else f"{local} = {_UNKNOWN_NAME}"
                     )
+                    statements.append(_Import(local, code, base if checked else None, alias.name))
         elif isinstance(node, ast.TypeAlias) and isinstance(node.name, ast.Name):
             statements.append(_guard(node, [node.name.id]))
         elif (
@@ -598,7 +639,7 @@ def _module_namespace(
         return namespace, pending
     newtypes = _newtype_assignments(tree, index.sources[module].typing_aliases)
     name = f"{module}.__init__" if module in index.packages else module
-    statements = _namespace_statements(tree, set(newtypes), index, name)
+    statements = _namespace_statements(tree, set(newtypes), index, name, index.type_modules)
     wanted = _identifiers(s for s in statements if isinstance(s, str))
     with contextlib.suppress(Exception):
         pending |= _populate(index, namespace, statements, wanted, skip=False)
@@ -613,7 +654,8 @@ def _resolve_class(
 ) -> tuple[type, dict[str, object]] | None:
     """Try to build the last of ``nodes`` at runtime, returning it with its namespace.
 
-    Executes just the necessary imports and aliases + the class definitions
+    Executes just the necessary imports (of the standard library and trusted
+    modules only, see `_namespace_statements`) and aliases + the class definitions
     (bases first) in a sandboxed namespace. Returns None if the classes
     cannot be built. Names imported from modules of ``index`` are read from
     their source, and only those the classes use.

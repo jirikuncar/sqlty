@@ -36,6 +36,7 @@ query_param = "query"
 | [`rules`](#rules) | `check` |
 | [`import-style`](#import-style) | `rewrite`, `strip`, `check`, magic codec |
 | [`untyped`](#untyped) | `rewrite`, stub generation |
+| [`type-modules`](#type-modules) | `check` |
 | [`format-command`](#format-command) | Stub generation |
 | [`functions`](#functions) | Stub generation, `python -m sqlty.registries` |
 
@@ -116,6 +117,20 @@ only on stripped sources. With `untyped = "sentinel"`, `UNTYPED` follows the
 style: `from sqlty import UNTYPED`, or `sqlty.UNTYPED` (`sy.UNTYPED`) for
 module imports.
 Example: [`examples/05_import_style/`](https://github.com/jirikuncar/sqlty/tree/main/examples/05_import_style).
+
+## `type-modules`
+
+Modules `check` may import to resolve the types of row type fields. By default
+only the standard library and `typing`, `typing_extensions`, `pydantic`,
+`pydantic_core`, `annotated_types` and `sqlty` are imported; names from
+modules of the checked paths are read from their source, and any other name is
+unknown and never reported, so no import-time code of your application runs.
+List a module (its submodules are included) to have it imported:
+
+```toml
+[tool.sqlty]
+type-modules = ["myapp.types"]
+```
 
 ## `untyped`
 

@@ -70,6 +70,7 @@ class SQLTyConfig(TypedDict, total=False):
         schema = "schema.sql"
         import-style = "from sqlty import SQL"
         untyped = "sentinel"
+        type-modules = ["myapp.types"]
 
         [tool.sqlty.rules]
         select-star = "ignore"
@@ -87,6 +88,7 @@ class SQLTyConfig(TypedDict, total=False):
     format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
+    type_modules: list[str]  # modules whose imports may run to resolve row types
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
 
@@ -217,6 +219,12 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
 
     if "untyped" in tool_config:
         config["untyped"] = str(tool_config["untyped"])
+
+    if "type-modules" in tool_config:
+        modules = tool_config["type-modules"]
+        config["type_modules"] = (
+            [str(m) for m in modules] if isinstance(modules, list) else [str(modules)]
+        )
 
     # Parse function configurations
     if "functions" in tool_config and isinstance(tool_config["functions"], list):

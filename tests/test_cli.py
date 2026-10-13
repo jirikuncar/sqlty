@@ -187,3 +187,12 @@ def test_unparseable_schema_view_is_reported(tmp_path, monkeypatch, caplog) -> N
     assert [r.getMessage() for r in caplog.records if "could not be parsed" in r.getMessage()] == [
         "Schema view public.bad could not be parsed; its columns are unknown"
     ]
+
+
+def test_type_modules_config_reaches_the_resolver(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ntype-modules = ["app", "lib.types"]\n')
+    args = build_parser().parse_args(["check", str(tmp_path)])
+
+    settings = SettingsResolver(args).for_file(tmp_path / "q.py")
+
+    assert settings.type_modules == ("app", "lib.types")

@@ -14,6 +14,7 @@ import ast
 import re
 import typing
 from collections import Counter
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_select as _analyze_select
@@ -143,6 +144,7 @@ def check_source(
     untyped: bool = False,
     helpers: HelperIndex | None = None,
     module: str | None = None,
+    type_modules: Iterable[str] | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
@@ -158,6 +160,10 @@ def check_source(
     relative imports. The same index resolves row type fields annotated with a
     type imported from another module of the index (``NewType``, ``Literal``
     and ``type`` aliases, ``X = int``), read from its source and never imported.
+    Row type resolution executes only imports of the standard library, of
+    ``typing``, ``pydantic`` and the like, and of ``type_modules`` (module
+    names, submodules included); any other name is unknown, so no import of the
+    checked application runs.
 
     A ``# sqlty: ignore`` comment on a diagnostic's line drops it; ``# sqlty:
     ignore[rule-a, rule-b]`` drops only those rules. ``unused-ignore`` reports
@@ -188,6 +194,7 @@ def check_source(
         untyped=untyped,
         helpers=helpers,
         module=module or parsed.module,
+        type_modules=type_modules,
     )
     return _apply_suppressions(parsed, diagnostics, rules)
 
@@ -202,6 +209,7 @@ def _check_diagnostics(
     untyped: bool,
     helpers: HelperIndex | None,
     module: str | None,
+    type_modules: Iterable[str] | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Every diagnostic before inline suppression."""
     from sqlty._lint import RuleConfig
@@ -254,7 +262,9 @@ def _check_diagnostics(
             )
 
     named = [(call.line, ast.unparse(call.row), call.query) for call in calls if call.row]
-    type_defs = extract_type_definitions(parsed, helpers, module) if queries or named else {}
+    type_defs = (
+        extract_type_definitions(parsed, helpers, module, type_modules) if queries or named else {}
+    )
     user_queries = [q for q in [*queries, *named] if q[1] in type_defs]
 
     if rule_config.is_enabled("typeddict-inheritance"):

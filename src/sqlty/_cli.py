@@ -322,6 +322,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             import_style=settings.import_style,
             untyped=settings.untyped,
             helpers=helpers,
+            type_modules=settings.type_modules,
         )
         if args.statistics:
             statistics += query_statistics(
@@ -461,6 +462,7 @@ class Settings:
     import_style: str | None = None
     untyped: bool = False
     rules: dict[str, str] | None = None
+    type_modules: tuple[str, ...] = ()
 
 
 class SettingsResolver:
@@ -522,6 +524,7 @@ class SettingsResolver:
             import_style=import_style,
             untyped=untyped == "sentinel",
             rules=config.get("rules"),
+            type_modules=tuple(config.get("type_modules", ())),
         )
 
 

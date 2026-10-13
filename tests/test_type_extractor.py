@@ -3,9 +3,11 @@
 import ast
 import contextlib
 import datetime
+import sys
 import typing
 import uuid
 from collections.abc import Sequence
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -21,6 +23,7 @@ from sqlty._type_extractor import (
     field_accepts,
     parse_tuple_annotation,
 )
+from sqlty.core import check_source
 
 
 def extract(source: str, *, runtime: bool) -> dict[str, TypeInfo]:
@@ -772,3 +775,36 @@ class Row(TypedDict):
     assert check_type_compatibility(row, "id", "int")
     assert check_type_compatibility(row, "missing", "int")
     assert not check_type_compatibility(row, "name", "int")
+
+
+MARKER_MODULE = "import pathlib\npathlib.Path({marker!r}).write_text('imported')\nfrom typing import NewType\nUserId = NewType('UserId', int)\n"
+MARKER_SOURCE = """
+from typing import TypedDict
+from marker_app_ids import UserId
+from sqlty import SQL
+
+class User(TypedDict):
+    id: UserId
+
+q = SQL[User]("--sql\\nSELECT id::TEXT FROM users")
+"""
+
+
+@pytest.fixture
+def marker_module(tmp_path, monkeypatch) -> Path:
+    marker = tmp_path / "marker"
+    (tmp_path / "marker_app_ids.py").write_text(MARKER_MODULE.format(marker=str(marker)))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "marker_app_ids", raising=False)
+    return marker
+
+
+def test_application_imports_are_not_executed(marker_module) -> None:
+    assert check_source(MARKER_SOURCE) == []
+    assert not marker_module.exists()
+
+
+def test_type_modules_allow_imports(marker_module) -> None:
+    diagnostics = check_source(MARKER_SOURCE, type_modules=["marker_app_ids"])
+    assert marker_module.exists()
+    assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]

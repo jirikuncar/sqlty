@@ -158,6 +158,7 @@ class HelperIndex:
         self.packages: set[str] = set()
         self.prefixes: set[str] = set()
         self.namespaces: dict[str, tuple[dict[str, object], dict[str, Any]]] = {}
+        self.type_modules: frozenset[str] = frozenset()
         self._pattern: re.Pattern[str] | None = None
 
     def add(self, module: str, source: str | ParsedSource) -> bool:

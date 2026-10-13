@@ -32,6 +32,7 @@ class Run:
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.rules: dict[str, str] | None = settings.get("rules")
+        self.type_modules: list[str] | None = settings.get("type-modules")
 
     def run(self) -> None:
         failures: list[str] = []
@@ -130,6 +131,7 @@ class Run:
                 rules=self.rules,
                 import_style=self.import_style,
                 untyped=self.untyped,
+                type_modules=self.type_modules,
             )
         ]
         expected = [a for a in assertions if a.expected]

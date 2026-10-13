@@ -190,7 +190,14 @@ class User(TypedDict):
 
 A module is parsed only when a row type names something from it, and only once
 per run. A name from a module outside the checked paths, or one that is not a
-type definition, stays unknown and is never reported. From Python, pass a
+type definition, stays unknown and is never reported.
+
+`check` never runs the imports of your application: it executes only imports
+of the standard library, `typing`, `typing_extensions`, `pydantic`,
+`pydantic_core`, `annotated_types` and `sqlty`, plus the modules listed in
+[`type-modules`](../reference/configuration.md#type-modules). Everything else
+is resolved from source as above or stays unknown, so a module with import-time
+side effects is not triggered by `sqlty check`. From Python, pass a
 `HelperIndex` filled with the modules (`index.add("pkg.ids", source)`) and the
 `module` name of the checked source as `check_source(..., helpers=index,
 module=...)`.
