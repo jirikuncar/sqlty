@@ -121,6 +121,11 @@ pub struct Catalog {
     composites: HashMap<String, Vec<SchemaColumn>>,
     /// `schema.name` -> overloads; a function of unknown shape is absent.
     functions: HashMap<String, Vec<Function>>,
+    /// `schema.name` of the functions the schema defines but whose shape is unknown.
+    unknown_functions: HashMap<String, ()>,
+    /// `schema.name` of every domain, enum and composite type the schema defines, those
+    /// of unknown shape included.
+    type_names: HashMap<String, ()>,
     /// Schemas a bare name is looked up in, in order.
     search_path: Vec<String>,
     /// Relations the schema itself defines, built-ins not counted.
@@ -173,6 +178,23 @@ impl Catalog {
         }
     }
 
+    /// Whether the schema defines a table or view `name`, whatever is known of its shape.
+    pub fn defines(&self, name: &str) -> bool {
+        self.find(name).is_some()
+    }
+
+    /// Whether `name` is a PostgreSQL system relation (`pg_catalog.x`,
+    /// `information_schema.x`, a bare `pg_*`) that the catalog does not model, so its
+    /// columns are unknown. A relation the schema or the built-ins define is never one.
+    pub fn is_unmodelled_system_relation(&self, name: &str) -> bool {
+        self.postgres
+            && self.find(name).is_none()
+            && match name.split_once('.') {
+                Some((schema, _)) => BUILTIN_SCHEMAS.contains(&schema),
+                None => name.starts_with("pg_"),
+            }
+    }
+
     /// Output columns of the view `name`.
     pub fn view(&self, name: &str) -> Option<&Vec<Column>> {
         match self.find(name)? {
@@ -203,6 +225,18 @@ impl Catalog {
         let first = fits.next()?;
         fits.all(|f| same_return(&f.returns, &first.returns))
             .then_some(&first.returns)
+    }
+
+    /// Whether the schema defines a function `name`, whatever is known of what it returns.
+    pub fn defines_function(&self, name: &str) -> bool {
+        let name = self.norm(name);
+        lookup_key(&self.functions, &self.search_path, name).is_some()
+            || lookup_key(&self.unknown_functions, &self.search_path, name).is_some()
+    }
+
+    /// Whether the schema defines a domain, enum or composite type `name`.
+    pub fn defines_type(&self, name: &str) -> bool {
+        lookup_key(&self.type_names, &self.search_path, self.norm(name)).is_some()
     }
 
     /// Whether the schema defines no table or view of its own.
@@ -1210,6 +1244,17 @@ impl Loader {
             types: user_types,
             composites,
             functions,
+            unknown_functions: self
+                .unknown_functions
+                .iter()
+                .map(|key| (key.clone(), ()))
+                .collect(),
+            type_names: self
+                .types
+                .keys()
+                .chain(self.type_aliases.keys())
+                .map(|key| (key.clone(), ()))
+                .collect(),
             search_path: path,
             user_relations,
             postgres: self.postgres,
@@ -1841,6 +1886,25 @@ mod tests {
         assert!(c.table("information_schema.columns").is_some());
         assert!(c.table("columns").is_none());
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn test_defined_names_and_unmodelled_system_relations() {
+        let c = pg(
+            "CREATE TABLE pg_orders (id int); CREATE TYPE mood AS ENUM ('a'); \
+                    CREATE TYPE pt AS (x int); CREATE DOMAIN pct AS int; \
+                    CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'; \
+                    CREATE FUNCTION g() LANGUAGE sql AS 'SELECT 1';",
+        );
+        assert!(["mood", "pt", "pct"].iter().all(|t| c.defines_type(t)));
+        assert!(!c.defines_type("nope"));
+        assert!(c.defines_function("f") && c.defines_function("g"));
+        assert!(!c.defines_function("h"));
+        assert!(c.defines("pg_orders") && !c.is_unmodelled_system_relation("pg_orders"));
+        assert!(!c.is_unmodelled_system_relation("pg_class"));
+        assert!(c.is_unmodelled_system_relation("pg_index"));
+        assert!(c.is_unmodelled_system_relation("information_schema.views"));
+        assert!(!c.is_unmodelled_system_relation("users"));
     }
 
     #[test]

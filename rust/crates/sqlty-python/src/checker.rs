@@ -22,7 +22,8 @@ use crate::rewriter::{
     string_literals, strip_line_break, wraps, ImportStyle, LineIndex,
 };
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
-use sqlty_sql::analyzer::{parse_error, Schema};
+use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, Schema};
+use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -105,6 +106,7 @@ impl RuleConfig {
             "inline-sql-comment" => "warn",
             "untyped-query" => "warn",
             "unparsed-query" => "ignore",
+            rule if NameRule::ALL.iter().any(|name| name.name() == rule) => "ignore",
             _ => "warn",
         }
     }
@@ -127,6 +129,9 @@ pub fn check_source(
     let rule_config = RuleConfig::new(rules);
     let unparsed_enabled = rule_config.is_enabled("unparsed-query");
     let has_schema = schema.is_some();
+    let names_enabled = NameRule::ALL
+        .iter()
+        .any(|rule| rule_config.is_enabled(rule.name()));
     let mut diagnostics = Vec::new();
     let mut report = |rule: &str, message: String, line: usize| {
         if rule_config.is_enabled(rule) {
@@ -224,6 +229,14 @@ pub fn check_source(
             .and_then(|sql| parse_error(&sql, dialect))
         {
             report("unparsed-query", unparsed_message(&error), line_num);
+        }
+
+        if names_enabled {
+            if let Some(query) = marked_query(&sql_content) {
+                for found in analyze_with_diagnostics(&query, dialect, schema).1 {
+                    report(found.rule.name(), found.message, line_num);
+                }
+            }
         }
 
         let upper = sql_content.to_uppercase();
@@ -612,6 +625,22 @@ mod tests {
         let diags = check_source(source, "postgres", &None, None, Some("import sqlty"), false);
         let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
         assert!(stale_rewrites.is_empty());
+    }
+
+    #[test]
+    fn test_name_rules_are_off_by_default() {
+        let schema = Some(sqlty_sql::analyzer::load_schema_with_skipped(
+            "CREATE TABLE users (id INT)",
+            "postgres",
+        ));
+        let schema = schema.map(|(schema, _)| schema);
+        let source = r#"q = SQL[tuple[int]]("--sql\nSELECT nope FROM users")"#;
+        assert!(check_source(source, "postgres", &schema, None, None, false).is_empty());
+        let rules = HashMap::from([("unknown-column".to_string(), "error".to_string())]);
+        let diags = check_source(source, "postgres", &schema, Some(rules), None, false);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].rule, "unknown-column");
+        assert_eq!(diags[0].severity, "error");
     }
 
     #[test]

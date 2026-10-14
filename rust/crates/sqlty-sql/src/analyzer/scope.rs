@@ -7,15 +7,88 @@ pub(super) type Scope = Vec<(String, String)>;
 
 pub(super) fn table_scope(factor: &TableFactor) -> Scope {
     match factor {
-        TableFactor::Table { name, alias, .. } => {
+        TableFactor::Table {
+            name,
+            alias,
+            args: None,
+            ..
+        } => {
             let reference = alias
                 .as_ref()
                 .map(|alias| alias.name.value.to_lowercase())
                 .unwrap_or_else(|| object_name(name));
             vec![(reference, table_key(name))]
         }
-        _ => Vec::new(),
+        other => vec![opaque_source(other)],
     }
+}
+
+/// sqlparser reads PostgreSQL's `FROM ONLY a` as a table `only` aliased `a`; this is the
+/// table `a` it means.
+fn only_table(factor: &TableFactor) -> Option<TableFactor> {
+    let TableFactor::Table {
+        name,
+        alias: Some(alias),
+        ..
+    } = factor
+    else {
+        return None;
+    };
+    let unquoted_only = matches!(name.0.as_slice(), [part]
+        if part.as_ident().is_some_and(|i| i.quote_style.is_none() && i.value.eq_ignore_ascii_case("only")));
+    if !unquoted_only || !alias.columns.is_empty() {
+        return None;
+    }
+    let mut table = factor.clone();
+    if let TableFactor::Table { name, alias, .. } = &mut table {
+        *name = ObjectName::from(vec![alias.take()?.name]);
+    }
+    Some(table)
+}
+
+/// Marks a scope source whose columns the analyzer does not know: a table function,
+/// `UNNEST`, a system catalog, an unaliased subquery. The key reads `(?description)`.
+pub(super) fn is_opaque(table: &str) -> bool {
+    table.starts_with("(?")
+}
+
+/// The tables of a DML statement's `FROM`/`USING`: they hide columns from RETURNING names,
+/// but `RETURNING *` lists the target table only.
+pub(super) const EXTRA_SOURCES: &str = "(?tables joined to the target with FROM or USING)";
+
+/// What an opaque source is, for messages.
+pub(super) fn opaque_description(table: &str) -> &str {
+    table
+        .strip_prefix("(?")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or(table)
+}
+
+/// `(alias, key)` of a FROM item the analyzer cannot read the columns of.
+pub(super) fn opaque_source(factor: &TableFactor) -> (String, String) {
+    let (alias, description) = match factor {
+        TableFactor::Table {
+            name,
+            alias,
+            args: Some(_),
+            ..
+        } => (alias, format!("table function {}", object_name(name))),
+        TableFactor::Table { name, alias, .. } => {
+            (alias, format!("system catalog {}", object_name(name)))
+        }
+        TableFactor::Derived { alias, .. } => (alias, "subquery without an alias".to_string()),
+        TableFactor::UNNEST { alias, .. } => (alias, "UNNEST".to_string()),
+        TableFactor::TableFunction { alias, .. } | TableFactor::Function { alias, .. } => {
+            (alias, "table function".to_string())
+        }
+        TableFactor::NestedJoin { alias, .. } => (alias, "aliased join".to_string()),
+        other => (&None, format!("table expression `{other}`")),
+    };
+    let reference = alias
+        .as_ref()
+        .map(|alias| alias.name.value.to_lowercase())
+        .unwrap_or_default();
+    (reference, format!("(?{description})"))
 }
 
 /// Sources of a SELECT: each FROM relation followed by its joins (`FROM a, b` counts two),
@@ -70,8 +143,44 @@ pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
     alias.map(|alias| alias.name.value.to_lowercase())
 }
 
+/// Lowercased names of the columns joins merge, nested joins included; `*` for `NATURAL`.
+/// A merged column is not ambiguous, whichever side it is read from.
+pub(super) fn merged_columns(from: &[TableWithJoins]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for table in from {
+        for join in &table.joins {
+            match join_constraint(join) {
+                Some(JoinConstraint::Natural) => merged.push("*".to_string()),
+                Some(JoinConstraint::Using(names)) => merged.extend(
+                    names
+                        .iter()
+                        .filter_map(|name| name.0.last()?.as_ident())
+                        .map(|ident| ident.value.to_lowercase()),
+                ),
+                _ => {}
+            }
+        }
+        if let TableFactor::NestedJoin {
+            table_with_joins,
+            alias: None,
+        } = &table.relation
+        {
+            merged.extend(merged_columns(std::slice::from_ref(table_with_joins)));
+        }
+    }
+    merged
+}
+
 /// Whether a join merges same-named columns (`USING`, `NATURAL`), so `*` does not list them all.
 pub(super) fn merges_columns(join: &Join) -> bool {
+    matches!(
+        join_constraint(join),
+        Some(JoinConstraint::Using(_) | JoinConstraint::Natural)
+    )
+}
+
+/// The constraint of a join, when its operator has one.
+fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
     use JoinOperator::*;
     let constraint = match &join.join_operator {
         Join(c)
@@ -90,12 +199,9 @@ pub(super) fn merges_columns(join: &Join) -> bool {
         | RightAnti(c)
         | StraightJoin(c)
         | AsOf { constraint: c, .. } => c,
-        _ => return false,
+        _ => return None,
     };
-    matches!(
-        constraint,
-        JoinConstraint::Using(_) | JoinConstraint::Natural
-    )
+    Some(constraint)
 }
 
 /// The table an alias (or table name) refers to.
@@ -148,12 +254,28 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Whether `name` is a PostgreSQL system relation the catalog does not model: the
+    /// modelled ones (`pg_class`, `information_schema.columns`, ...) are tables with columns.
+    pub(super) fn is_system_catalog(&self, name: &ObjectName) -> bool {
+        self.schema.is_unmodelled_system_relation(&table_key(name))
+    }
+
+    /// An analyzer for a subquery of an expression: its names may refer to `scope`.
+    pub(super) fn correlated(&self, scope: &Scope) -> Analyzer<'a> {
+        let mut inner = self.clone();
+        inner.outer = [scope.clone(), self.outer.clone()].concat();
+        inner
+    }
+
     /// Scope of a FROM clause, and an analyzer that knows its derived tables. A
     /// `LATERAL` subquery is analyzed with the relations before it.
     pub(super) fn scope_of(&self, from: &[TableWithJoins]) -> Inferred<(Analyzer<'a>, Scope)> {
         let mut analyzer = self.clone();
+        analyzer.merged = merged_columns(from);
         let mut scope = Scope::new();
         for factor in relations(from) {
+            let only = only_table(factor);
+            let factor = only.as_ref().unwrap_or(factor);
             match factor {
                 TableFactor::Table {
                     name,
@@ -188,7 +310,10 @@ impl<'a> Analyzer<'a> {
                     alias: Some(alias),
                     ..
                 } => {
-                    let mut columns = analyzer
+                    // A LATERAL subquery reads the relations before it.
+                    let mut inner = analyzer.clone();
+                    inner.outer = [scope.clone(), analyzer.outer.clone()].concat();
+                    let mut columns = inner
                         .query_columns(subquery)?
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
                     rename_columns(&mut columns, alias);
@@ -197,7 +322,18 @@ impl<'a> Analyzer<'a> {
                     analyzer.virtuals.insert(table.clone(), columns);
                     scope.push((reference, table));
                 }
-                other => scope.extend(table_scope(other)),
+                other => {
+                    let entries = match other {
+                        TableFactor::Table {
+                            name, args: None, ..
+                        } if analyzer.is_system_catalog(name) => vec![opaque_source(other)],
+                        _ => table_scope(other),
+                    };
+                    for (_, table) in &entries {
+                        analyzer.check_table(table);
+                    }
+                    scope.extend(entries);
+                }
             }
         }
         Ok((analyzer, scope))
@@ -234,7 +370,11 @@ impl<'a> Analyzer<'a> {
     pub(super) fn star_tables(reference: Option<&str>, scope: &Scope) -> Vec<String> {
         match reference {
             Some(reference) => vec![resolve(reference, scope)],
-            None => scope.iter().map(|(_, table)| table.clone()).collect(),
+            None => scope
+                .iter()
+                .map(|(_, table)| table.clone())
+                .filter(|table| table != EXTRA_SOURCES)
+                .collect(),
         }
     }
 
@@ -286,33 +426,5 @@ impl<'a> Analyzer<'a> {
             .map(|table| self.schema.table(table))
             .collect::<Option<Vec<_>>>()?;
         Some(columns.into_iter().flatten().cloned().collect())
-    }
-
-    /// Type of a column: its qualifier's source, else the first scope source having it.
-    pub(super) fn column_type(&self, expr: &Expr, scope: &Scope) -> Option<Typed> {
-        let lookup = |table: &str, column: &str| {
-            if let Some(columns) = self.virtual_columns(table) {
-                return columns
-                    .iter()
-                    .find(|col| col.name.to_lowercase() == column)
-                    .map(|col| (col.python_type.clone(), col.sql_type.clone()));
-            }
-            self.schema
-                .table(table)?
-                .iter()
-                .find(|col| col.name == column)
-                .map(|col| col.typed(self.dialect))
-        };
-        match expr {
-            Expr::Identifier(ident) => {
-                let column = ident.value.to_lowercase();
-                scope.iter().find_map(|(_, table)| lookup(table, &column))
-            }
-            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
-                let table = resolve(&parts[parts.len() - 2].value, scope);
-                lookup(&table, &parts[parts.len() - 1].value.to_lowercase())
-            }
-            _ => None,
-        }
     }
 }

@@ -23,6 +23,12 @@ Configuration via pyproject.toml:
     unchecked-query = "warn"            # default
     untyped-query = "warn"              # default
     unparsed-query = "ignore"           # default
+    unknown-table = "ignore"            # default
+    unknown-column = "ignore"           # default
+    ambiguous-column = "ignore"         # default
+    unknown-function = "ignore"         # default
+    unknown-type = "ignore"             # default
+    unsupported-syntax = "ignore"       # default
     unused-ignore = "ignore"            # default
 """
 
@@ -31,6 +37,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
+from sqlty._core import name_rules
 
 
 class Severity(Enum):
@@ -50,6 +58,10 @@ class LintRule:
     fixable: bool
     description: str
 
+
+# Rules that explain why a column is untyped, as the engine lists them; the entries in
+# ``RULES`` below must cover them (``tests/test_name_rules.py``).
+NAME_RULES: tuple[str, ...] = tuple(name_rules())
 
 # --- Rule definitions ---
 
@@ -152,6 +164,42 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="--sql query, SQL[T] query or Annotated helper query that does not parse",
+    ),
+    "unknown-table": LintRule(
+        name="unknown-table",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Query reads a table that the schema does not define",
+    ),
+    "unknown-column": LintRule(
+        name="unknown-column",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Query reads a column that its table does not have",
+    ),
+    "ambiguous-column": LintRule(
+        name="ambiguous-column",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Unqualified column exists in more than one table of the query",
+    ),
+    "unknown-function": LintRule(
+        name="unknown-function",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Function result is untyped because sqlty does not know the function",
+    ),
+    "unknown-type": LintRule(
+        name="unknown-type",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Cast or column type has no Python type",
+    ),
+    "unsupported-syntax": LintRule(
+        name="unsupported-syntax",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Query parses, but a construct in it is not typed, so the row type is not trusted",
     ),
     "unused-ignore": LintRule(
         name="unused-ignore",

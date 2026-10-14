@@ -58,6 +58,21 @@ impl<'a> Analyzer<'a> {
             .map_or((None, None), |col| col.typed(self.dialect))
     }
 
+    /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
+    /// schema defines.
+    fn defines_type(&self, data_type: &DataType) -> bool {
+        match data_type {
+            DataType::Custom(name, _) => self.schema.defines_type(&table_key(name)),
+            DataType::Array(
+                ArrayElemTypeDef::AngleBracket(inner)
+                | ArrayElemTypeDef::Parenthesis(inner)
+                | ArrayElemTypeDef::Qualified(inner, _)
+                | ArrayElemTypeDef::SquareBracket(inner, _),
+            ) => self.defines_type(inner),
+            _ => false,
+        }
+    }
+
     /// The type of a call to a function the schema defines.
     fn user_function(&self, name: &ObjectName, args: &FunctionArguments) -> Typed {
         let count = match args {
@@ -74,10 +89,21 @@ impl<'a> Analyzer<'a> {
         match expr {
             Expr::Cast { data_type, .. } => {
                 let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
-                Ok(match python_type {
+                let typed = match python_type {
                     Some(python_type) => (Some(python_type), Some(sql_type)),
                     None => from_sql_type(sql_type, self.dialect),
-                })
+                };
+                if typed.0.is_none() && self.diag.enabled() {
+                    if self.schema.is_empty() || self.defines_type(data_type) {
+                        self.diag.explain_silently();
+                    } else {
+                        self.diag.record(
+                            NameRule::UnknownType,
+                            format!("type `{data_type}` has no Python type"),
+                        );
+                    }
+                }
+                Ok(typed)
             }
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => {
@@ -144,9 +170,7 @@ impl<'a> Analyzer<'a> {
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL".to_string(), self.dialect))
             }
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
-                Ok(self.column_type(expr, scope).unwrap_or((None, None)))
-            }
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => match &value.value {
                 Value::Number(number, _) if number.contains(['e', 'E']) => known("float"),
                 Value::Number(number, _) if number.contains('.') => {
@@ -187,6 +211,7 @@ impl<'a> Analyzer<'a> {
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => Ok(self
+                .correlated(scope)
                 .query_columns(query)?
                 .and_then(|columns| columns.into_iter().next())
                 .map_or((None, None), |col| (col.python_type, col.sql_type))),
@@ -213,7 +238,25 @@ impl<'a> Analyzer<'a> {
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
-                        None => Ok(self.user_function(&func.name, &func.args)),
+                        None => {
+                            let typed = self.user_function(&func.name, &func.args);
+                            if typed.0.is_none() && self.diag.enabled() {
+                                if self.schema.is_empty()
+                                    || self.schema.defines_function(&table_key(&func.name))
+                                {
+                                    self.diag.explain_silently();
+                                } else {
+                                    self.diag.record(
+                                        NameRule::UnknownFunction,
+                                        format!(
+                                            "function `{}` is not known to sqlty, so its result is untyped",
+                                            func.name.to_string().to_lowercase()
+                                        ),
+                                    );
+                                }
+                            }
+                            Ok(typed)
+                        }
                     },
                 }
             }

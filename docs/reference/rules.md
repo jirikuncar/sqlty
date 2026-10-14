@@ -24,6 +24,12 @@ stale-type = "error"
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`unparsed-query`](#unparsed-query) | Query | ignore | no | Query that does not parse, so sqlty cannot check it |
+| [`unknown-table`](#unknown-table) | Names | ignore | no | Table the schema does not define |
+| [`unknown-column`](#unknown-column) | Names | ignore | no | Column the table does not have |
+| [`ambiguous-column`](#ambiguous-column) | Names | ignore | no | Unqualified column more than one table has |
+| [`unknown-function`](#unknown-function) | Names | ignore | no | Function whose result sqlty cannot type |
+| [`unknown-type`](#unknown-type) | Names | ignore | no | Cast or column type without a Python type |
+| [`unsupported-syntax`](#unsupported-syntax) | Names | ignore | no | Construct that parses but is not typed |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
@@ -304,6 +310,48 @@ q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
 
 Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
 counts such queries as unparsed whether or not the rule is enabled.
+
+## Name rules
+
+These six rules explain why a result column is untyped: with all of them
+enabled and a schema configured, no column is left untyped without a diagnostic. They are off by
+default because they report code that passes today. The
+[name diagnostics guide](../guide/name-diagnostics.md) shows how to enable
+them. All but `unsupported-syntax` are only judged when a
+[schema](../guide/schema-inference.md) is configured, because without one every
+table, column, function and type is unknown. Tables, columns and ambiguity are
+checked only in the `postgres`, `mysql` and `sqlite` dialects.
+
+### unknown-table
+
+Default: ignore. A `FROM`, `JOIN` or DML target that the schema does not
+define, or a qualifier (`x.id`) that names no table or alias of the query.
+CTEs, derived tables, views, table functions and system catalogs are not
+reported.
+
+### unknown-column
+
+Default: ignore. A select-list column that its table does not have.
+
+### ambiguous-column
+
+Default: ignore. An unqualified column that more than one table of the query
+has. Columns merged by `USING` or `NATURAL` are not ambiguous.
+
+### unknown-function
+
+Default: ignore. A function call sqlty cannot type because it does not know
+the function.
+
+### unknown-type
+
+Default: ignore. A cast target or schema column type with no Python type.
+
+### unsupported-syntax
+
+Default: ignore. A construct that parses but that sqlty does not type: an
+expression without a typing rule, `VALUES`, `*` over a `USING` join, a column
+of a table function. `NULL` and placeholders are not reported.
 
 ## Rewrite rules
 

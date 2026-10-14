@@ -28,11 +28,13 @@ from sqlty._core import (
 )
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import parse_error as _parse_error
+from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._lint import NAME_RULES
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
@@ -68,6 +70,22 @@ def analyze_select(
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
+
+
+def query_diagnostics(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[tuple[str, str]]:
+    """Why a query has untyped columns, as ``(rule, message)`` pairs.
+
+    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
+    ``unknown-function``, ``unknown-type`` and ``unsupported-syntax``. Tables and
+    columns are only judged when ``schema_sql`` defines some tables.
+
+    Example:
+        >>> query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
+        [('unknown-column', 'column `nope` does not exist in `users`')]
+    """
+    return _query_diagnostics(sql, dialect=dialect, schema_sql=schema_sql)
 
 
 def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list[str]:
@@ -302,6 +320,15 @@ def _check_diagnostics(
             and (error := _parse_error(call.query, dialect=dialect))
         ):
             report("unparsed-query", f"query does not parse: {error}", call.line)
+
+    if any(rule_config.is_enabled(name) for name in NAME_RULES):
+        for call in calls:
+            if call.query is None or _MARKER.match(call.query):
+                continue
+            for rule, message in _query_diagnostics(
+                call.query, dialect=dialect, schema_sql=schema_sql
+            ):
+                report(rule, message, call.line)
 
     for line, name, query in user_queries:
         if (columns := _columns(query, dialect, schema_sql)) is None:
@@ -607,6 +634,7 @@ __all__ = [
     "expand_star",
     "fix_source",
     "infer_type",
+    "query_diagnostics",
     "returns_rows",
     "rewrite_source",
     "schema_skipped_objects",

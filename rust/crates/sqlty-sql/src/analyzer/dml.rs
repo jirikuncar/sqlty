@@ -41,14 +41,36 @@ pub(super) fn dml_scope(stmt: &Statement) -> Scope {
             TableObject::TableName(name) => vec![(object_name(name), table_key(name))],
             _ => Vec::new(),
         },
-        Statement::Update(update) => table_scope(&update.table.relation),
-        Statement::Merge(merge) => table_scope(&merge.table),
-        Statement::Delete(delete) => match &delete.from {
-            FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
-                .first()
-                .map(|table| table_scope(&table.relation))
-                .unwrap_or_default(),
-        },
+        Statement::Update(update) => {
+            let mut scope = table_scope(&update.table.relation);
+            if update.from.is_some() || !update.table.joins.is_empty() {
+                scope.push(other_sources());
+            }
+            scope
+        }
+        Statement::Merge(merge) => {
+            let mut scope = table_scope(&merge.table);
+            scope.push(other_sources());
+            scope
+        }
+        Statement::Delete(delete) => {
+            let mut scope = match &delete.from {
+                FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
+                    .first()
+                    .map(|table| table_scope(&table.relation))
+                    .unwrap_or_default(),
+            };
+            if delete.using.is_some() {
+                scope.push(other_sources());
+            }
+            scope
+        }
         _ => Vec::new(),
     }
+}
+
+/// RETURNING may read the tables of `FROM`, `USING` and `MERGE ... USING`, which are not
+/// resolved here.
+fn other_sources() -> (String, String) {
+    (String::new(), EXTRA_SOURCES.to_string())
 }

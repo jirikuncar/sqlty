@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use crate::diagnostics::{Diagnostics, NameDiagnostic, NameRule};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
@@ -30,6 +31,7 @@ mod functions;
 mod names;
 mod operators;
 mod query;
+mod resolve;
 mod scope;
 
 use dml::*;
@@ -573,11 +575,7 @@ pub(crate) fn view_columns(
     dialect: SqlDialect,
     view: &sqlparser::ast::CreateView,
 ) -> Vec<Column> {
-    let analyzer = Analyzer {
-        schema: catalog,
-        dialect,
-        virtuals: HashMap::new(),
-    };
+    let analyzer = Analyzer::new(catalog, dialect);
     let mut columns = match analyzer.query_columns(&view.query) {
         Ok(Some(columns)) => columns,
         _ => vec![Column::unknown("*")],
@@ -621,18 +619,30 @@ pub fn analyze_select(
     dialect: &str,
     schema: &Option<Schema>,
 ) -> Inferred<Option<Vec<Column>>> {
+    analyze_with_diagnostics(sql, dialect, schema).0
+}
+
+/// [`analyze_select`], and why columns are untyped: unknown or ambiguous names, unknown
+/// functions and types, constructs the analyzer does not type. Name resolution (tables,
+/// columns, ambiguity) is only judged when `schema` has tables or views.
+pub fn analyze_with_diagnostics(
+    sql: &str,
+    dialect: &str,
+    schema: &Option<Schema>,
+) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
     let dialect = SqlDialect::from_name(dialect);
     let Some(stmt) = parse_first(sql, dialect) else {
-        return Ok(None);
+        return (Ok(None), Vec::new());
     };
-    let analyzer = Analyzer {
-        schema: schema
+    let mut analyzer = Analyzer::new(
+        schema
             .as_deref()
             .unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
-        virtuals: HashMap::new(),
-    };
-    analyzer.statement_columns(&stmt)
+    );
+    analyzer.diag = Diagnostics::collecting();
+    let columns = analyzer.statement_columns(&stmt);
+    (columns, analyzer.diag.items())
 }
 
 /// Why `sql` does not parse in `dialect`, as sqlparser words it; `None` when it parses
@@ -671,11 +681,7 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
     let schema = schema.as_deref().filter(|schema| !schema.is_empty())?;
     let dialect = SqlDialect::from_name(dialect);
     let stmt = parse_first(sql, dialect)?;
-    let analyzer = Analyzer {
-        schema,
-        dialect,
-        virtuals: HashMap::new(),
-    };
+    let analyzer = Analyzer::new(schema, dialect);
     let Statement::Query(query) = &stmt else {
         return None;
     };
@@ -1027,17 +1033,13 @@ mod tests {
             "postgres",
         ));
         let sql_types = |sql: &str| -> Vec<Option<String>> {
-            Analyzer {
-                schema: schema.as_deref().unwrap(),
-                dialect: SqlDialect::Postgres,
-                virtuals: Virtuals::new(),
-            }
-            .statement_columns(&parse_first(sql, SqlDialect::Postgres).unwrap())
-            .unwrap()
-            .unwrap()
-            .into_iter()
-            .map(|col| col.sql_type)
-            .collect()
+            Analyzer::new(schema.as_deref().unwrap(), SqlDialect::Postgres)
+                .statement_columns(&parse_first(sql, SqlDialect::Postgres).unwrap())
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .map(|col| col.sql_type)
+                .collect()
         };
         let types = |names: &[&str]| -> Vec<Option<String>> {
             names
@@ -1076,5 +1078,60 @@ mod tests {
             sql_types("SELECT ARRAY[n], n * 1.5 FROM a UNION SELECT ARRAY[n], n FROM b"),
             types(&["ARRAY<BIGINT>", "DECIMAL"])
         );
+    }
+    /// `(rule, message)` pairs for a query against a two-table schema.
+    fn diagnose(sql: &str) -> Vec<(&'static str, String)> {
+        let schema = Some(load_schema(
+            "CREATE TABLE a (id INT, n INT, g GEOMETRY); CREATE TABLE b (id INT, t TEXT);",
+            "postgres",
+        ));
+        analyze_with_diagnostics(sql, "postgres", &schema)
+            .1
+            .into_iter()
+            .map(|found| (found.rule.name(), found.message))
+            .collect()
+    }
+
+    fn rules(sql: &str) -> Vec<&'static str> {
+        diagnose(sql).into_iter().map(|(rule, _)| rule).collect()
+    }
+
+    #[test]
+    fn test_name_diagnostics() {
+        assert_eq!(rules("SELECT nope FROM a"), ["unknown-column"]);
+        assert_eq!(rules("SELECT x.id FROM a"), ["unknown-table"]);
+        assert_eq!(rules("SELECT id FROM a, b"), ["ambiguous-column"]);
+        assert_eq!(rules("SELECT id FROM missing"), ["unknown-table"]);
+        assert_eq!(rules("SELECT frob(n) FROM a"), ["unknown-function"]);
+        assert_eq!(rules("SELECT n::mood FROM a"), ["unknown-type"]);
+        assert_eq!(rules("SELECT g FROM a"), ["unknown-type"]);
+        assert_eq!(rules("SELECT 1 UNION VALUES (2)"), ["unsupported-syntax"]);
+    }
+
+    #[test]
+    fn test_name_diagnostics_stay_quiet() {
+        for sql in [
+            "SELECT id FROM a JOIN b USING (id)",
+            "SELECT id FROM a NATURAL JOIN b",
+            "WITH c AS (SELECT n AS k FROM a) SELECT k FROM c",
+            "SELECT s.k FROM (SELECT n AS k FROM a) s",
+            "SELECT (SELECT max(b.id) FROM b WHERE b.id = a.id) FROM a",
+            "SELECT a.id, l.m FROM a, LATERAL (SELECT max(b.id) AS m FROM b WHERE b.id = a.id) l",
+            "SELECT A.ID, \"n\" FROM A",
+            "SELECT NULL, $1",
+        ] {
+            assert!(rules(sql).is_empty(), "{sql}: {:?}", diagnose(sql));
+        }
+        // A table function's columns are not read, which is reported, not guessed.
+        assert_eq!(
+            rules("SELECT x FROM generate_series(1, 3) AS g(x)"),
+            ["unsupported-syntax"]
+        );
+    }
+
+    #[test]
+    fn test_name_rules_need_a_schema() {
+        let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", &None).1;
+        assert!(found.is_empty(), "{found:?}");
     }
 }
