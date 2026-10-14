@@ -19,11 +19,12 @@ use sqlparser::ast::{
 };
 
 use super::functions::{function_name, positional_args};
-use super::hashing::{ExprKey, FxHashSet};
+use super::hashing::ExprKey;
 use super::nullability::{Facts, Nullability};
 use super::query::Analyzer;
 use super::registry::lookup;
 use super::scope::Scope;
+use rustc_hash::FxHashSet;
 
 /// Columns and expressions proven not NULL.
 #[derive(Clone, Default)]

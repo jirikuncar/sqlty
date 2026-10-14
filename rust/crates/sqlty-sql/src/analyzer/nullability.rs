@@ -15,13 +15,14 @@ use sqlparser::ast::{
 
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
-use super::hashing::{ExprKey, FxHashSet};
+use super::hashing::ExprKey;
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::split_access;
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::{table_scope, Scope};
+use rustc_hash::FxHashSet;
 
 /// Whether a column can be NULL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

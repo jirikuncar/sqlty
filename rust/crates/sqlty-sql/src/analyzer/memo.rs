@@ -16,11 +16,11 @@ use std::rc::Rc;
 
 use sqlparser::ast::Query;
 
-use super::hashing::FxHasher;
 use super::nullability::Facts;
 use super::query::Analyzer;
 use super::scope::Scope;
 use super::{Column, Inferred};
+use rustc_hash::FxHasher;
 
 /// Columns of a subquery, shared between the walks that read them.
 pub(super) type SubqueryColumns = Rc<Inferred<Option<Vec<Column>>>>;
