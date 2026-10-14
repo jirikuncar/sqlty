@@ -216,7 +216,38 @@ const AGGREGATES: &[&str] = &[
     "CORR",
     "COVAR_POP",
     "COVAR_SAMP",
+    "REGR_SLOPE",
+    "REGR_INTERCEPT",
+    "REGR_R2",
+    "REGR_AVGX",
+    "REGR_AVGY",
+    "REGR_SXX",
+    "REGR_SXY",
+    "REGR_SYY",
     "TOTAL",
+];
+
+/// Aggregates that give NULL for a group of rows too: too few non-null rows for a sample
+/// statistic, a constant input for a correlation, or only NULLs to take a percentile of.
+const NULL_ON_FEW_ROWS: &[&str] = &[
+    "STDDEV",
+    "STDDEV_SAMP",
+    "VARIANCE",
+    "VAR_SAMP",
+    "PERCENTILE_CONT",
+    "PERCENTILE_DISC",
+    "MODE",
+    "CORR",
+    "COVAR_POP",
+    "COVAR_SAMP",
+    "REGR_SLOPE",
+    "REGR_INTERCEPT",
+    "REGR_R2",
+    "REGR_AVGX",
+    "REGR_AVGY",
+    "REGR_SXX",
+    "REGR_SXY",
+    "REGR_SYY",
 ];
 
 /// Aggregates whose group of one or more rows always gives a value, whatever the rows hold.
@@ -252,6 +283,19 @@ const ALWAYS_NULLABLE: &[&str] = &[
     "JSON_QUERY",
     "NTH_VALUE",
 ];
+
+/// Whether the frame of a window always holds the current row. The default frame does; a
+/// spelled-out one must start at or before the current row and end at or after it.
+fn frame_holds_current_row(over: &Option<sqlparser::ast::WindowType>) -> bool {
+    use sqlparser::ast::{WindowFrameBound::*, WindowType};
+    match over {
+        Some(WindowType::WindowSpec(spec)) => spec.window_frame.as_ref().is_none_or(|frame| {
+            !matches!(frame.start_bound, Following(_))
+                && !matches!(frame.end_bound, Some(Preceding(_)))
+        }),
+        _ => false,
+    }
+}
 
 /// Window and other functions that never return NULL.
 const NEVER_NULL: &[&str] = &[
@@ -290,7 +334,8 @@ fn contains_aggregate(expr: &Expr) -> bool {
             let scalar_min_max = matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2;
             (func.over.is_none()
                 && !scalar_min_max
-                && (name == "COUNT" || AGGREGATES.contains(&name.as_str())))
+                && (matches!(name.as_str(), "COUNT" | "REGR_COUNT")
+                    || AGGREGATES.contains(&name.as_str())))
                 || args.into_iter().any(contains_aggregate)
         }
         Expr::Nested(inner)
@@ -641,7 +686,7 @@ impl<'a> Analyzer<'a> {
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
 
-        if name == "COUNT" {
+        if name == "COUNT" || name == "REGR_COUNT" {
             return Nullability::NonNull;
         }
         // SQLite's two-argument MIN and MAX are scalar functions.
@@ -651,6 +696,9 @@ impl<'a> Analyzer<'a> {
         if AGGREGATES.contains(&name.as_str()) {
             // A window function over its frame sees the current row, unless the frame is
             // spelled out.
+            if NULL_ON_FEW_ROWS.contains(&name.as_str()) {
+                return Nullability::Nullable;
+            }
             let framed = match &func.over {
                 Some(sqlparser::ast::WindowType::WindowSpec(spec)) => spec.window_frame.is_some(),
                 Some(_) => true,
@@ -687,7 +735,9 @@ impl<'a> Analyzer<'a> {
                 [value, _, default] => any_nullable([of(value), of(default)]),
                 _ => Nullability::Nullable,
             },
-            "FIRST_VALUE" | "LAST_VALUE" => first(),
+            // A frame without the current row can be empty.
+            "FIRST_VALUE" | "LAST_VALUE" if frame_holds_current_row(&func.over) => first(),
+            "FIRST_VALUE" | "LAST_VALUE" => Nullability::Nullable,
             // PostgreSQL's and SQLite's concat skip NULLs.
             "CONCAT" if self.dialect != SqlDialect::MySql => Nullability::NonNull,
             "CONCAT" => any_nullable(args.iter().map(|arg| of(arg))),
@@ -864,6 +914,11 @@ mod tests {
             marks("SELECT b, max(id) FILTER (WHERE a > 1) FROM t GROUP BY b"),
             "-N"
         );
+        // Percentiles, correlations and sample statistics can be NULL for any group.
+        assert_eq!(
+            marks("SELECT b, percentile_cont(0.5) WITHIN GROUP (ORDER BY id), percentile_disc(0.5) WITHIN GROUP (ORDER BY id), corr(id, id), covar_samp(id, id), covar_pop(id, id), regr_slope(id, id), stddev(id), var_samp(id), regr_count(id, id), mode() WITHIN GROUP (ORDER BY id) FROM t GROUP BY b"),
+            "-NNNNNNNN-N"
+        );
         // GROUP BY () is a single group over possibly no rows.
         assert_eq!(marks("SELECT max(id) FROM t GROUP BY ()"), "N");
         assert_eq!(marks("SELECT max(id) FROM t GROUP BY ROLLUP (b)"), "N");
@@ -878,6 +933,10 @@ mod tests {
         assert_eq!(
             marks("SELECT sum(id) OVER (ORDER BY id), sum(a) OVER (), max(id) OVER (ORDER BY id ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING) FROM t"),
             "-NN"
+        );
+        assert_eq!(
+            marks("SELECT last_value(id) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), last_value(id) OVER (ORDER BY id ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING), first_value(id) OVER (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW), first_value(id) OVER (ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING), first_value(id) OVER (ROWS 2 PRECEDING), last_value(id) OVER w FROM t WINDOW w AS (ORDER BY id)"),
+            "-N-N-N"
         );
         assert_eq!(
             marks("SELECT lag(id) OVER (ORDER BY id), lag(id, 1, 0) OVER (ORDER BY id), lead(a, 1, 0) OVER (ORDER BY id), first_value(id) OVER (ORDER BY id) FROM t"),

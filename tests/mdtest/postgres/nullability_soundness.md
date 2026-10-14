@@ -112,3 +112,40 @@ SELECT a FROM t WHERE a = ANY (ARRAY[1, 2])
 SELECT a FROM t WHERE a NOT IN (1, 2)
 -- inferred: tuple[int]
 ```
+
+## Aggregates and window functions that can be NULL
+
+A sample statistic of one row is NULL, however many rows the group has. Percentiles,
+`corr`, `covar_*` and `regr_*` are optional for the same reason.
+
+```sql
+SELECT g, stddev(g), var_samp(g) FROM t GROUP BY g
+-- inferred: tuple[int, decimal.Decimal | None, decimal.Decimal | None]
+```
+
+`first_value` and `last_value` are NULL when the frame is empty.
+
+```sql
+SELECT
+    first_value(id) OVER (ORDER BY id),
+    last_value(id) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING),
+    first_value(id) OVER (ORDER BY id ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING),
+    last_value(id) OVER (ORDER BY id ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING),
+    first_value(a) OVER (ORDER BY id)
+FROM t
+-- inferred: tuple[int, int, int | None, int | None, int | None]
+```
+
+A frame named elsewhere is not read, so it may be empty.
+
+```sql
+SELECT last_value(id) OVER w FROM t WINDOW w AS (ORDER BY id)
+-- inferred: tuple[int | None]
+```
+
+`lag` and `lead` are NULL past the edge unless they have a non-null default.
+
+```sql
+SELECT lag(id) OVER (ORDER BY id), lag(id, 1, 0) OVER (ORDER BY id), lead(id, 1, NULL) OVER (ORDER BY id), lead(a, 1, 0) OVER (ORDER BY id) FROM t
+-- inferred: tuple[int | None, int, int | None, int | None]
+```
