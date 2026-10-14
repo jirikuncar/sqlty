@@ -71,13 +71,13 @@ SELECT status FROM orders
 `schema.sql`:
 
 ```sql
-CREATE TYPE logfire.mood AS ENUM ('it''s fine', 'bad');
+CREATE TYPE app.mood AS ENUM ('it''s fine', 'bad');
 CREATE DOMAIN current_mood AS mood;
 CREATE TABLE people (id INTEGER PRIMARY KEY, mood current_mood, name TEXT);
 ```
 
 ```sql
-SELECT mood, name::mood, name::logfire.mood, id FROM people
+SELECT mood, name::mood, name::app.mood, id FROM people
 -- inferred: tuple[typing.Literal['it\'s fine', 'bad'], typing.Literal['it\'s fine', 'bad'], typing.Literal['it\'s fine', 'bad'], int]
 ```
 

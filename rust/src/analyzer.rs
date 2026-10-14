@@ -992,7 +992,7 @@ fn literal_of(labels: &[String]) -> String {
     format!("typing.Literal[{}]", labels.join(", "))
 }
 
-/// The lowercased unqualified name of a user-defined type such as `logfire.percent`.
+/// The lowercased unqualified name of a user-defined type such as `app.percent`.
 fn custom_name(dt: &DataType) -> Option<String> {
     match dt {
         DataType::Custom(name, modifiers) if modifiers.is_empty() => Some(object_name(name)),
