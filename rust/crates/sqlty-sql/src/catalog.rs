@@ -479,18 +479,26 @@ impl Loader {
             if progress {
                 continue;
             }
-            match pending
-                .iter()
-                .position(|op| !matches!(op.kind, OpKind::View(_)))
-            {
-                Some(at) => {
-                    let op = pending.remove(at);
-                    self.give_up(&op);
+            // Stuck: nothing waits on anything that will appear. Give up on tables first
+            // (an unknown table lets the statements on it through), then on the rest, and
+            // only then read the views against what is there. Each step takes every
+            // statement of its kind at once, so a pass is never repeated per statement.
+            let is_table = |op: &Op| matches!(op.kind, OpKind::Table(..));
+            if pending.iter().any(is_table) {
+                let (tables, rest): (Vec<Op>, Vec<Op>) = pending.into_iter().partition(is_table);
+                for op in &tables {
+                    self.give_up(op);
                 }
-                None => {
-                    let op = pending.remove(0);
-                    self.apply(&op, true);
+                pending = rest;
+            } else if pending.iter().any(|op| !matches!(op.kind, OpKind::View(_))) {
+                pending.retain(|op| matches!(op.kind, OpKind::View(_)));
+            } else {
+                for op in &pending {
+                    if !self.apply(op, false) {
+                        self.apply(op, true);
+                    }
                 }
+                return;
             }
         }
     }
@@ -1746,5 +1754,27 @@ mod tests {
         );
         assert_eq!(c.table("t").map(Vec::len), Some(1));
         assert!(c.table("pg_class").is_none());
+    }
+
+    fn assert_fast(sql: &str) -> Catalog {
+        let start = std::time::Instant::now();
+        let catalog = pg(sql);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "load took {:?}",
+            start.elapsed()
+        );
+        catalog
+    }
+
+    #[test]
+    fn test_statements_that_never_resolve_load_fast() {
+        let mut sql = String::new();
+        for i in 0..2000 {
+            sql += &format!("CREATE TABLE t{i} (id int);\n");
+            sql += &format!("ALTER TABLE ext{i} ADD COLUMN x int;\n");
+        }
+        let catalog = assert_fast(&sql);
+        assert_eq!(cols(&catalog, "t1999"), ["id:INT"]);
     }
 }
