@@ -30,6 +30,9 @@ help:
 	@echo "  test-coverage     - Run pytest with coverage report"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
 	@echo "  bench             - Run sqlty.core benchmarks"
+	@echo "  bench-project     - Benchmark a synthetic 10k-file project"
+	@echo "  bench-ci          - CI performance budget check against benchmarks/baseline.json"
+	@echo "  bench-baseline    - Re-record the benchmark baseline"
 	@echo ""
 	@echo "Docs:"
 	@echo "  docs              - Build the docs site, strict via zensical.toml (output: site/)"
@@ -109,6 +112,18 @@ update-mdtest:
 .PHONY: bench
 bench:
 	uv run python benchmarks/bench_core.py
+
+.PHONY: bench-project
+bench-project:  ## Full-size synthetic project (10k files); needs a release build
+	uv run python benchmarks/bench_project.py --size full
+
+.PHONY: bench-ci
+bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseline.json
+	uv run python benchmarks/bench_project.py --size ci --repeats 7 --compare --out bench-result.json
+
+.PHONY: bench-baseline
+bench-baseline:  ## Re-record the CI-size baseline for this platform
+	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
 
 # --- Docs ---
 

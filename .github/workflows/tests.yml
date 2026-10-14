@@ -120,6 +120,50 @@ jobs:
       - name: Compare with the server's column names and types
         run: uv run pytest tests/test_pg_describe.py -rs -q
 
+  bench:
+    name: Performance budget
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.15"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust/target
+            ~/.cargo/registry
+          key: rust-bench-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: rust-bench-${{ runner.os }}-
+
+      - name: Install the project
+        run: uv sync --all-groups
+
+      - name: Build the release extension
+        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      # Fails when a time (normalised by a calibration loop) or peak RSS is over
+      # the budget in benchmarks/baseline.json. See benchmarks/README.md.
+      - name: Run benchmarks against the baseline
+        run: make bench-ci
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-result
+          path: bench-result.json
+          if-no-files-found: ignore
+
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

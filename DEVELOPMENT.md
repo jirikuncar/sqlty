@@ -134,6 +134,20 @@ uv run mypy src/sqlty
 uv run ty check src/sqlty
 ```
 
+### Benchmarks and the performance budget
+
+```bash
+make bench            # sqlty.core micro-benchmarks
+make bench-project    # generated 10k-file project: CLI wall time and peak RSS
+make bench-ci         # CI size; exits 1 when over the budget in benchmarks/baseline.json
+make bench-baseline   # re-record the baseline after an intended change
+```
+
+These need a release build
+(`uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`).
+The `Performance budget` CI job runs `make bench-ci`. See
+[benchmarks/README.md](benchmarks/README.md) for the metrics and the budget rules.
+
 ### Code Formatting
 
 ```bash
