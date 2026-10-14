@@ -8,7 +8,8 @@
 //! - `inline-sql-comment`: `"--sql SELECT ..."` (space) makes query a SQL comment
 //! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
 //! - `fstring-skipped` / `tstring-skipped`: interpolated `--sql` strings are never rewritten
-//! - `unchecked-query`: a `--sql` string that is not plain literals (raw, bytes, `SQL[T](q + x)`)
+//! - `unchecked-query`: a `--sql` string that is not plain literals (raw, bytes, `SQL[T](q + x)`),
+//!   unless it is wrapped in `SQL[Any](...)`
 
 use std::collections::HashMap;
 
@@ -166,15 +167,17 @@ pub fn check_source(
     for group in string_groups(source, &tokens) {
         let first = &tokens[group[0]];
         let line = lines.line_at(first.span.start);
+        let enclosing = calls
+            .iter()
+            .find(|call| call.span.start <= first.span.start && first.span.end <= call.span.end);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
-            report(rule, skipped_message(rule), line);
+            if !(rule == "unchecked-query" && enclosing.is_some_and(|call| call.is_any(source))) {
+                report(rule, skipped_message(rule), line);
+            }
             continue;
         }
         let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
-        if calls
-            .iter()
-            .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
-        {
+        if enclosing.is_some() {
             continue;
         }
         let sql_content = content(source, &spans);
@@ -198,7 +201,10 @@ pub fn check_source(
                     .next()
                     .is_some_and(|prefix| prefix.contains(['f', 'F', 't', 'T']))
             });
-            if !interpolated && after_marker(&content(source, &call.strings)).is_some() {
+            if !interpolated
+                && !call.is_any(source)
+                && after_marker(&content(source, &call.strings)).is_some()
+            {
                 report(
                     "unchecked-query",
                     skipped_message("unchecked-query"),
@@ -309,7 +315,14 @@ pub fn query_sites(source: &str, import_style: Option<&str>) -> Vec<(usize, &'st
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             let last = &tokens[group[group.len() - 1]];
             skipped.push(first.span.start..last.span.end);
-            sites.push((line, rule, String::new()));
+            let any = calls.iter().any(|call| {
+                call.span.start <= first.span.start
+                    && last.span.end <= call.span.end
+                    && call.is_any(source)
+            });
+            if !(rule == "unchecked-query" && any) {
+                sites.push((line, rule, String::new()));
+            }
             continue;
         }
         if calls
@@ -332,6 +345,7 @@ pub fn query_sites(source: &str, import_style: Option<&str>) -> Vec<(usize, &'st
                 }
             }
             None if after_marker(&content(source, &call.strings)).is_some()
+                && !call.is_any(source)
                 && !skipped.iter().any(|span| call.span.contains(&span.start)) =>
             {
                 sites.push((line, "unchecked-query", String::new()));

@@ -380,6 +380,7 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM " + table)
 ```
 
 Fix: write the query as one plain literal, or implicitly concatenated ones.
+`SQL[Any](...)`, or `Any` as a helper's row type, opts out explicitly.
 
 ### untyped-query
 

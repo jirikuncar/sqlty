@@ -27,4 +27,5 @@ r = r"--sql\nSELECT id::INTEGER FROM users WHERE name ~ '\d'"
 ## Fix
 
 Write the query as one plain literal, or as implicitly concatenated plain
-literals, and pass values as query parameters.
+literals, and pass values as query parameters. A query that must stay dynamic
+can opt out with `SQL[Any](...)`, or `Any` as a helper's row type.
