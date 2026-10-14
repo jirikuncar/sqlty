@@ -1426,11 +1426,12 @@ fn alter_op(
                 | AlterColumnOperation::AddGenerated { .. } => {}
             }
         }
-        AlterTableOperation::AddConstraint { constraint, .. } => {
-            if let TableConstraint::PrimaryKey(pk) = constraint {
-                for index_column in &pk.columns {
-                    mark_not_null(&mut table.columns, &index_column.column.expr);
-                }
+        AlterTableOperation::AddConstraint {
+            constraint: TableConstraint::PrimaryKey(pk),
+            ..
+        } => {
+            for index_column in &pk.columns {
+                mark_not_null(&mut table.columns, &index_column.column.expr);
             }
         }
         AlterTableOperation::ChangeColumn { .. }
