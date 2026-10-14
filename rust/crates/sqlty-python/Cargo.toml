@@ -14,3 +14,4 @@ workspace = true
 [dependencies]
 sqlty-sql.workspace = true
 regex.workspace = true
+thiserror.workspace = true

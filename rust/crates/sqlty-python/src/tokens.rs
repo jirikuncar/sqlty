@@ -236,15 +236,6 @@ pub(crate) fn tokenize(source: &str) -> Vec<Token> {
     tokens
 }
 
-/// Spans of plain string literals (no prefix but `u`), outside comments.
-pub(crate) fn string_literals(source: &str) -> Vec<(usize, usize)> {
-    tokenize(source)
-        .into_iter()
-        .filter(|t| t.is_plain(source))
-        .map(|t| (t.span.start, t.span.end))
-        .collect()
-}
-
 fn is_op(source: &str, tokens: &[Token], i: usize, op: &str) -> bool {
     tokens
         .get(i)
@@ -366,9 +357,9 @@ impl Call {
     }
 
     /// Whether the call starts at one of `any_calls`, the byte offsets of the calls
-    /// whose `T` is `typing.Any`: an explicit opt-out of checks.
+    /// whose `T` is `typing.Any`: an explicit opt-out of checks. `any_calls` is sorted.
     pub(crate) fn is_any(&self, any_calls: &[usize]) -> bool {
-        any_calls.contains(&self.span.start)
+        any_calls.binary_search(&self.span.start).is_ok()
     }
 
     /// The source of the argument's literals, from the first to the last.
@@ -377,8 +368,68 @@ impl Call {
     }
 }
 
+/// The calls of a source, in source order, with an index for "which call holds this span".
+pub(crate) struct Calls {
+    calls: Vec<Call>,
+    /// `reach[i]` is the furthest end of `calls[..=i]`; it never decreases.
+    reach: Vec<usize>,
+}
+
+impl Calls {
+    fn new(calls: Vec<Call>) -> Self {
+        let reach = calls
+            .iter()
+            .scan(0, |furthest, call| {
+                *furthest = (*furthest).max(call.span.end);
+                Some(*furthest)
+            })
+            .collect();
+        Self { calls, reach }
+    }
+
+    /// The first call (in source order) that holds `start..end`, in `O(log n)`.
+    ///
+    /// Calls start in ascending order, so the first call reaching `end` is the only
+    /// candidate: any later call starts after it, and so after `start` if it does.
+    pub(crate) fn enclosing(&self, start: usize, end: usize) -> Option<&Call> {
+        self.enclosing_index(start, end).map(|i| &self.calls[i])
+    }
+
+    /// Index of [`Calls::enclosing`].
+    pub(crate) fn enclosing_index(&self, start: usize, end: usize) -> Option<usize> {
+        let first = self.reach.partition_point(|&reach| reach < end);
+        (self.calls.get(first)?.span.start <= start).then_some(first)
+    }
+}
+
+impl IntoIterator for Calls {
+    type Item = Call;
+    type IntoIter = std::vec::IntoIter<Call>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.calls.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Calls {
+    type Item = &'a Call;
+    type IntoIter = std::slice::Iter<'a, Call>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.calls.iter()
+    }
+}
+
+impl std::ops::Deref for Calls {
+    type Target = [Call];
+
+    fn deref(&self) -> &[Call] {
+        &self.calls
+    }
+}
+
 /// Every `{wrapper}[T](...)` and `mod.{wrapper}[T](...)` call in `source`, in source order.
-pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Vec<Call> {
+pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Calls {
     let dotted = format!(".{wrapper}");
     let mut calls = Vec::new();
     for (i, token) in tokens.iter().enumerate() {
@@ -440,15 +491,29 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ve
             bare,
         });
     }
-    calls
+    Calls::new(calls)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan::Scan;
 
-    fn calls(source: &str) -> Vec<Call> {
+    fn calls(source: &str) -> Calls {
         wrapper_calls(source, &tokenize(source), "SQL")
+    }
+
+    #[test]
+    fn test_enclosing_finds_the_outermost_call_holding_a_span() {
+        let source = "SQL[A](\"a\")\nSQL[B](SQL[C](\"c\"))\n";
+        let found = calls(source);
+        let inner = source.find("SQL[C]").unwrap();
+        let outer = source.find("SQL[B]").unwrap();
+        let hit = |start: usize, end: usize| found.enclosing(start, end).map(|c| c.span.start);
+        assert_eq!(hit(inner, inner + 3), Some(outer));
+        assert_eq!(hit(source.find("\"a\"").unwrap(), 11), Some(0));
+        assert_eq!(hit(source.len() - 1, source.len()), None);
+        assert_eq!(hit(outer - 1, outer + 2), None);
     }
 
     fn texts(source: &str) -> Vec<(Kind, &str)> {
@@ -461,8 +526,8 @@ mod tests {
     #[test]
     fn test_string_literals_skip_past_prefixed_strings() {
         let source = "# it's\nf = f\"a\" + br'\\'\"' + 'it\\'s' + u\"c\"\nh = \"b\"\n";
-        let spans: Vec<&str> = string_literals(source)
-            .into_iter()
+        let spans: Vec<&str> = Scan::new(source, "SQL")
+            .plain_literals()
             .map(|(start, end)| &source[start..end])
             .collect();
         assert_eq!(spans, vec!["'it\\'s'", "u\"c\"", "\"b\""]);

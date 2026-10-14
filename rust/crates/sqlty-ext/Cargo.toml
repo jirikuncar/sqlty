@@ -19,3 +19,4 @@ crate-type = ["cdylib"]
 pyo3.workspace = true
 sqlty-sql.workspace = true
 sqlty-python.workspace = true
+thiserror.workspace = true

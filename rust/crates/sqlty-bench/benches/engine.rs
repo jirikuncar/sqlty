@@ -3,7 +3,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use sqlty_bench::{python_source, schema_sql, QUERIES};
-use sqlty_python::{checker, rewriter, rules::RuleConfig};
+use sqlty_python::{checker, options::Options, rewriter, rules::RuleConfig};
 use sqlty_sql::analyzer;
 use std::hint::black_box;
 
@@ -43,35 +43,17 @@ fn analyze(c: &mut Criterion) {
 fn python_source_passes(c: &mut Criterion) {
     let (schema, _) = analyzer::load_schema_with_skipped(&schema_sql(270), "postgres");
     let rules = RuleConfig::default();
+    let options = Options::new("postgres", Some(&schema), None, false).expect("valid options");
     let mut group = c.benchmark_group("python");
     group.sample_size(10);
     for queries in [1_000, 4_000] {
         let source = python_source(queries);
         group.throughput(Throughput::Elements(queries as u64));
         group.bench_function(format!("check_source_{queries}"), |b| {
-            b.iter(|| {
-                checker::check_source(
-                    black_box(&source),
-                    "postgres",
-                    Some(&schema),
-                    &rules,
-                    None,
-                    false,
-                    &[],
-                )
-            });
+            b.iter(|| checker::check_source(black_box(&source), &options, &rules, &[]));
         });
         group.bench_function(format!("rewrite_source_{queries}"), |b| {
-            b.iter(|| {
-                rewriter::rewrite_source_with(
-                    black_box(&source),
-                    "postgres",
-                    Some(&schema),
-                    None,
-                    false,
-                    false,
-                )
-            });
+            b.iter(|| rewriter::rewrite_source_with(black_box(&source), &options, false));
         });
     }
     group.finish();
