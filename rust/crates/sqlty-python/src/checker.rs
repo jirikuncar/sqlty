@@ -23,6 +23,7 @@ use crate::rewriter::{
 };
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
 use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, Schema};
+use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -66,17 +67,6 @@ fn mysql_marker_lines(source: &str, lines: &LineIndex) -> Vec<usize> {
     lines
 }
 
-/// Rules that explain why a column is untyped; off by default, as they flag code that
-/// passes today.
-pub const NAME_RULES: [&str; 6] = [
-    "unknown-table",
-    "unknown-column",
-    "ambiguous-column",
-    "unknown-function",
-    "unknown-type",
-    "unsupported-syntax",
-];
-
 /// A diagnostic result from checking source code.
 pub struct Diagnostic {
     pub rule: String,
@@ -116,7 +106,7 @@ impl RuleConfig {
             "inline-sql-comment" => "warn",
             "untyped-query" => "warn",
             "unparsed-query" => "ignore",
-            rule if NAME_RULES.contains(&rule) => "ignore",
+            rule if NameRule::ALL.iter().any(|name| name.name() == rule) => "ignore",
             _ => "warn",
         }
     }
@@ -139,7 +129,9 @@ pub fn check_source(
     let rule_config = RuleConfig::new(rules);
     let unparsed_enabled = rule_config.is_enabled("unparsed-query");
     let has_schema = schema.is_some();
-    let names_enabled = NAME_RULES.iter().any(|rule| rule_config.is_enabled(rule));
+    let names_enabled = NameRule::ALL
+        .iter()
+        .any(|rule| rule_config.is_enabled(rule.name()));
     let mut diagnostics = Vec::new();
     let mut report = |rule: &str, message: String, line: usize| {
         if rule_config.is_enabled(rule) {

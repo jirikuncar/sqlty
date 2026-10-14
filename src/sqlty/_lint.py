@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from sqlty._core import name_rules
+
 
 class Severity(Enum):
     """Lint rule severity level."""
@@ -56,6 +58,10 @@ class LintRule:
     fixable: bool
     description: str
 
+
+# Rules that explain why a column is untyped, as the engine lists them; the entries in
+# ``RULES`` below must cover them (``tests/test_name_rules.py``).
+NAME_RULES: tuple[str, ...] = tuple(name_rules())
 
 # --- Rule definitions ---
 

@@ -19,6 +19,16 @@ pub enum NameRule {
 }
 
 impl NameRule {
+    /// Every rule, the one list the checker and the Python side read.
+    pub const ALL: [NameRule; 6] = [
+        NameRule::UnknownTable,
+        NameRule::UnknownColumn,
+        NameRule::AmbiguousColumn,
+        NameRule::UnknownFunction,
+        NameRule::UnknownType,
+        NameRule::UnsupportedSyntax,
+    ];
+
     /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
     pub fn name(self) -> &'static str {
         match self {

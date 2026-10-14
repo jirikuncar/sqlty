@@ -34,6 +34,7 @@ from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._lint import NAME_RULES
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
@@ -44,15 +45,6 @@ if TYPE_CHECKING:
 
 _CONTAINERS = (dict, list, set, frozenset, tuple)
 # The `--sql` marker that opens a query string, as the engine reads it.
-# Rules that explain why a column is untyped (``query_diagnostics``).
-_NAME_RULES = (
-    "unknown-table",
-    "unknown-column",
-    "ambiguous-column",
-    "unknown-function",
-    "unknown-type",
-    "unsupported-syntax",
-)
 _MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
@@ -329,7 +321,7 @@ def _check_diagnostics(
         ):
             report("unparsed-query", f"query does not parse: {error}", call.line)
 
-    if any(rule_config.is_enabled(name) for name in _NAME_RULES):
+    if any(rule_config.is_enabled(name) for name in NAME_RULES):
         for call in calls:
             if call.query is None or _MARKER.match(call.query):
                 continue

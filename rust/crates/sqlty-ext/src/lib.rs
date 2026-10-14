@@ -115,6 +115,15 @@ fn analyze_select(
     }))
 }
 
+/// The rules `query_diagnostics` reports, which are off by default.
+#[pyfunction]
+fn name_rules() -> Vec<&'static str> {
+    sqlty_sql::diagnostics::NameRule::ALL
+        .iter()
+        .map(|rule| rule.name())
+        .collect()
+}
+
 /// Why a query has untyped columns, as `(rule, message)` pairs: `unknown-table`,
 /// `unknown-column`, `ambiguous-column`, `unknown-function`, `unknown-type` and
 /// `unsupported-syntax`. Tables, columns and ambiguity are only judged with a schema.
@@ -341,6 +350,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
