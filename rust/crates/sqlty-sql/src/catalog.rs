@@ -18,26 +18,11 @@
 //! case. A table the schema changes in a way this
 //! module cannot follow (unparsable `ALTER TABLE`, an unknown `LIKE` source) has an
 //! unknown shape: it resolves to nothing, so no column of it gets a type.
-//!
-//! Example:
-//! ```
-//! use sqlty_sql::catalog::load;
-//!
-//! let (catalog, _) = load(
-//!     "CREATE TABLE users (id int PRIMARY KEY, name text); \
-//!      ALTER TABLE users ADD COLUMN age int NOT NULL;",
-//!     "postgres",
-//! );
-//! let columns = catalog.table("users").unwrap();
-//! assert_eq!(columns.len(), 3);
-//! assert!(columns[0].not_null && !columns[1].not_null && columns[2].not_null);
-//! ```
 
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use once_cell::sync::Lazy;
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterTypeOperation, ArgMode, ArrayElemTypeDef,
     ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind, CreateView,
@@ -45,6 +30,7 @@ use sqlparser::ast::{
     RenameTableNameKind, Statement, TableConstraint, UserDefinedTypeRepresentation, Visit, Visitor,
 };
 use sqlparser::parser::Parser;
+use std::sync::LazyLock;
 
 use crate::analyzer::{
     canonical_type, parse_ddl, typed, view_columns, Column, SkippedObject, SqlDialect,
@@ -52,7 +38,7 @@ use crate::analyzer::{
 use crate::ddl;
 
 /// `(python_type, sql_type)`; `None` is unknown.
-pub type Typed = (Option<String>, Option<String>);
+pub(crate) type Typed = (Option<String>, Option<String>);
 
 /// A column of a table or composite type.
 #[derive(Clone, Debug)]
@@ -63,7 +49,7 @@ pub struct SchemaColumn {
     pub ident: String,
     pub sql_type: String,
     /// The Python type when it is not the one `sql_type` maps to (an enum's `Literal`).
-    pub(crate) python_type: Option<String>,
+    pub python_type: Option<String>,
     /// Declared `NOT NULL`, `PRIMARY KEY` or an identity / `serial` column. Not used for
     /// inference yet.
     pub not_null: bool,
@@ -75,7 +61,7 @@ pub struct SchemaColumn {
 /// domain's base type, an enum's own name) and the Python type when that is a `Literal`
 /// of the enum's labels.
 #[derive(Clone, Debug)]
-pub struct UserType {
+pub(crate) struct UserType {
     pub sql_type: String,
     pub python_type: Option<String>,
     /// An enum's labels.
@@ -84,7 +70,7 @@ pub struct UserType {
 
 /// What a function returns.
 #[derive(Clone, Debug)]
-pub enum FunctionReturn {
+pub(crate) enum FunctionReturn {
     /// One value of a type.
     Scalar(Typed),
     /// `SETOF type`: one value per row.
@@ -95,7 +81,7 @@ pub enum FunctionReturn {
 
 /// A function overload.
 #[derive(Clone, Debug)]
-pub struct Function {
+pub(crate) struct Function {
     /// Arguments a call must give.
     pub required: usize,
     /// Arguments a call may give; `usize::MAX` for a `VARIADIC` function.
@@ -168,7 +154,7 @@ impl Catalog {
 
     /// Columns of the table `name`, or `None` for a view, an unknown name or a table of
     /// unknown shape.
-    pub fn table(&self, name: &str) -> Option<&Vec<SchemaColumn>> {
+    pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
             Relation::Table(columns) => Some(columns),
             _ => None,
@@ -176,14 +162,14 @@ impl Catalog {
     }
 
     /// Whether the schema defines a table or view `name`, whatever is known of its shape.
-    pub fn defines(&self, name: &str) -> bool {
+    pub(crate) fn defines(&self, name: &str) -> bool {
         self.find(name).is_some()
     }
 
     /// Whether `name` is a PostgreSQL system relation (`pg_catalog.x`,
     /// `information_schema.x`, a bare `pg_*`) that the catalog does not model, so its
     /// columns are unknown. A relation the schema or the built-ins define is never one.
-    pub fn is_unmodelled_system_relation(&self, name: &str) -> bool {
+    pub(crate) fn is_unmodelled_system_relation(&self, name: &str) -> bool {
         self.postgres
             && self.find(name).is_none()
             && match name.split_once('.') {
@@ -193,7 +179,7 @@ impl Catalog {
     }
 
     /// Output columns of the view `name`.
-    pub fn view(&self, name: &str) -> Option<&Vec<Column>> {
+    pub(crate) fn view(&self, name: &str) -> Option<&[Column]> {
         match self.find(name)? {
             Relation::View(columns) => Some(columns),
             _ => None,
@@ -201,20 +187,21 @@ impl Catalog {
     }
 
     /// The domain or enum `name`; for a domain, its base type.
-    pub fn user_type(&self, name: &str) -> Option<&UserType> {
+    pub(crate) fn user_type(&self, name: &str) -> Option<&UserType> {
         lookup_key(&self.types, &self.search_path, self.norm(name))
             .and_then(|key| self.types.get(key))
     }
 
     /// Fields of the composite type `name`.
-    pub fn composite(&self, name: &str) -> Option<&Vec<SchemaColumn>> {
+    pub(crate) fn composite(&self, name: &str) -> Option<&[SchemaColumn]> {
         lookup_key(&self.composites, &self.search_path, self.norm(name))
             .and_then(|key| self.composites.get(key))
+            .map(Vec::as_slice)
     }
 
     /// What the function `name` returns when called with `args` arguments, if exactly one
     /// overload (or only one return type) fits.
-    pub fn function(&self, name: &str, args: usize) -> Option<&FunctionReturn> {
+    pub(crate) fn function(&self, name: &str, args: usize) -> Option<&FunctionReturn> {
         let key = lookup_key(&self.functions, &self.search_path, self.norm(name))?;
         let mut fits = self.functions[key]
             .iter()
@@ -225,25 +212,29 @@ impl Catalog {
     }
 
     /// Whether the schema defines a function `name`, whatever is known of what it returns.
-    pub fn defines_function(&self, name: &str) -> bool {
+    pub(crate) fn defines_function(&self, name: &str) -> bool {
         let name = self.norm(name);
         lookup_key(&self.functions, &self.search_path, name).is_some()
             || lookup_key(&self.unknown_functions, &self.search_path, name).is_some()
     }
 
     /// Whether the schema defines a domain, enum or composite type `name`.
-    pub fn defines_type(&self, name: &str) -> bool {
+    pub(crate) fn defines_type(&self, name: &str) -> bool {
         lookup_key(&self.type_names, &self.search_path, self.norm(name)).is_some()
     }
 
     /// Whether the schema defines no table or view of its own.
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.user_relations == 0
     }
 
     /// The SQL type of a column declared `dt`, and its Python type when a domain or enum
     /// sets it. Domains and enums resolve through the catalog.
-    pub fn resolve_type(&self, dt: &DataType, dialect: SqlDialect) -> (String, Option<String>) {
+    pub(crate) fn resolve_type(
+        &self,
+        dt: &DataType,
+        dialect: SqlDialect,
+    ) -> (String, Option<String>) {
         resolve_with(dt, &|name| self.user_type(name).cloned(), dialect)
     }
 }
@@ -331,9 +322,9 @@ fn name_key(name: &ObjectName, dialect: SqlDialect) -> String {
 
 /// An empty catalog, with the built-in relations in PostgreSQL: what queries read
 /// when there is no schema.
-pub fn empty(dialect: SqlDialect) -> &'static Catalog {
-    static POSTGRES: Lazy<Catalog> = Lazy::new(|| load("", "postgres").0);
-    static OTHER: Lazy<Catalog> = Lazy::new(Catalog::default);
+pub(crate) fn empty(dialect: SqlDialect) -> &'static Catalog {
+    static POSTGRES: LazyLock<Catalog> = LazyLock::new(|| load("", "postgres").0);
+    static OTHER: LazyLock<Catalog> = LazyLock::new(Catalog::default);
     if dialect == SqlDialect::Postgres {
         &POSTGRES
     } else {
@@ -1159,10 +1150,8 @@ impl Loader {
 
     /// The catalog as it stands now.
     fn snapshot(&mut self) -> &Catalog {
-        if self.cache.is_none() {
-            self.cache = Some(self.build());
-        }
-        self.cache.as_ref().unwrap()
+        let catalog = self.cache.take().unwrap_or_else(|| self.build());
+        self.cache.insert(catalog)
     }
 
     fn build(&self) -> Catalog {
@@ -1578,8 +1567,8 @@ fn changes_columns(action: &[String], mentions_type: bool) -> bool {
     }
 }
 
-static COLLATE: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
+static COLLATE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
 fn read_statements(
     statements: &[ddl::Statement],
@@ -1604,7 +1593,7 @@ fn read_statements(
             ops.push(Op {
                 path: path.clone(),
                 kind,
-            })
+            });
         };
         if stmt.is_create_table() || (postgres && stmt.is_create_table_any()) {
             let (likes, text) = match postgres.then(|| stmt.without_like()).flatten() {
@@ -1697,7 +1686,7 @@ fn read_alter_or_drop(stmt: &ddl::Statement, dialect: SqlDialect, push: &mut imp
     if let Some((kind, name, action)) = stmt.target_and_action("alter") {
         match (kind.as_str(), parsed()) {
             ("table", Some(Statement::AlterTable(alter))) => {
-                push(OpKind::AlterTable(Box::new(alter)))
+                push(OpKind::AlterTable(Box::new(alter)));
             }
             ("table", _) if !changes_columns(&action, stmt.has_word("type")) => {}
             ("table", _) => push(OpKind::Taint(Taint::Relation, name)),
@@ -1737,7 +1726,7 @@ const BUILTIN_SQL: &str = include_str!("builtin_catalog.sql");
 /// that could not be parsed. In PostgreSQL the catalog also holds the built-in
 /// relations and follows `ALTER`, `DROP`, `search_path` and functions; other dialects
 /// read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
-pub fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
+pub(crate) fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
     let dialect = SqlDialect::from_name(dialect);
     let mut loader = Loader::new(dialect);
     let mut skipped = Vec::new();
@@ -1761,6 +1750,18 @@ pub fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn module_example_alter_table_adds_a_column() {
+        let (catalog, _) = load(
+            "CREATE TABLE users (id int PRIMARY KEY, name text); \
+             ALTER TABLE users ADD COLUMN age int NOT NULL;",
+            "postgres",
+        );
+        let columns = catalog.table("users").unwrap();
+        assert_eq!(columns.len(), 3);
+        assert!(columns[0].not_null && !columns[1].not_null && columns[2].not_null);
+    }
 
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
@@ -1950,7 +1951,7 @@ mod tests {
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
             "mysql",
         );
-        assert_eq!(c.table("t").map(Vec::len), Some(1));
+        assert_eq!(c.table("t").map(<[SchemaColumn]>::len), Some(1));
         assert!(c.table("pg_class").is_none());
     }
 

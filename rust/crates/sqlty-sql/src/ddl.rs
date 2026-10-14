@@ -4,8 +4,8 @@
 //! A table sqlparser cannot read is retried without its constraints and `CHECK` /
 //! `REFERENCES` clauses, which never change column types.
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -145,15 +145,15 @@ fn significant(piece: &Piece) -> bool {
 }
 
 /// One statement of the schema: the pieces between two `;`.
-pub struct Statement<'a>(Vec<Piece<'a>>);
+pub(crate) struct Statement<'a>(Vec<Piece<'a>>);
 
 impl Statement<'_> {
-    pub fn sql(&self) -> String {
+    pub(crate) fn sql(&self) -> String {
         render(&self.0).trim().to_string()
     }
 
     /// Whether this is a `CREATE ... TABLE` with a column list.
-    pub fn is_create_table(&self) -> bool {
+    pub(crate) fn is_create_table(&self) -> bool {
         let mut sig = self.0.iter().filter(|p| significant(p));
         sig.next().is_some_and(|p| is_word(p, "create"))
             && sig
@@ -163,7 +163,7 @@ impl Statement<'_> {
     }
 
     /// Whether this is `CREATE [OR REPLACE] [TEMP | MATERIALIZED | ...] <object>`, e.g. `view`.
-    pub fn creates(&self, object: &str) -> bool {
+    pub(crate) fn creates(&self, object: &str) -> bool {
         const MODIFIERS: [&str; 7] = [
             "or",
             "replace",
@@ -182,7 +182,7 @@ impl Statement<'_> {
 
     /// The name and base type of a `CREATE DOMAIN name [AS] type ...` as written, without
     /// the `COLLATE`, `DEFAULT` and constraint clauses that follow the type.
-    pub fn domain(&self) -> Option<(String, String)> {
+    pub(crate) fn domain(&self) -> Option<(String, String)> {
         const CLAUSES: [&str; 6] = ["collate", "default", "constraint", "check", "not", "null"];
         let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
         let name_at = pieces.iter().position(|p| is_word(p, "domain"))? + 1;
@@ -221,7 +221,8 @@ impl Statement<'_> {
     }
 
     /// The lowercase words that open the statement, up to `n` (`create`, `or`, `replace`, ...).
-    pub fn lead_words(&self, n: usize) -> Vec<String> {
+    #[cfg(test)]
+    pub(crate) fn lead_words(&self, n: usize) -> Vec<String> {
         self.0
             .iter()
             .filter(|p| significant(p))
@@ -231,13 +232,13 @@ impl Statement<'_> {
     }
 
     /// Whether the lowercase `word` appears outside quotes and comments.
-    pub fn has_word(&self, word: &str) -> bool {
+    pub(crate) fn has_word(&self, word: &str) -> bool {
         self.0.iter().any(|p| is_word(p, word))
     }
 
     /// Whether this is a `CREATE ... TABLE` with or without a column list, such as
     /// `CREATE TABLE p PARTITION OF parent DEFAULT`.
-    pub fn is_create_table_any(&self) -> bool {
+    pub(crate) fn is_create_table_any(&self) -> bool {
         let mut sig = self.0.iter().filter(|p| significant(p));
         sig.next().is_some_and(|p| is_word(p, "create"))
             && sig
@@ -248,14 +249,17 @@ impl Statement<'_> {
     /// The `(kind, name parts)` an `ALTER` or `DROP` statement targets, e.g.
     /// `("table", ["app", "users"])` for `ALTER TABLE IF EXISTS ONLY app.users ...`.
     /// Parts are unquoted; an unquoted part is lowercased, a quoted one keeps its case. `DROP` lists give the first name.
-    pub fn target(&self, verb: &str) -> Option<(String, Vec<String>)> {
+    pub(crate) fn target(&self, verb: &str) -> Option<(String, Vec<String>)> {
         self.target_and_action(verb)
             .map(|(kind, name, _)| (kind, name))
     }
 
     /// [`Statement::target`], and the (up to two) lowercase words after the name,
     /// e.g. `["owner", "to"]` for `ALTER TABLE t OWNER TO me`.
-    pub fn target_and_action(&self, verb: &str) -> Option<(String, Vec<String>, Vec<String>)> {
+    pub(crate) fn target_and_action(
+        &self,
+        verb: &str,
+    ) -> Option<(String, Vec<String>, Vec<String>)> {
         let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
         if !pieces.first().is_some_and(|p| is_word(p, verb)) {
             return None;
@@ -286,7 +290,7 @@ impl Statement<'_> {
     }
 
     /// The name parts after the first `keyword` (`function` in `CREATE FUNCTION a.f(...)`).
-    pub fn name_parts_after(&self, keyword: &str) -> Vec<String> {
+    pub(crate) fn name_parts_after(&self, keyword: &str) -> Vec<String> {
         let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
         let Some(at) = pieces.iter().position(|p| is_word(p, keyword)) else {
             return Vec::new();
@@ -303,7 +307,7 @@ impl Statement<'_> {
 
     /// The schemas a `SET search_path TO a, b` (or `set_config('search_path', 'a, b', ...)`)
     /// statement sets; `DEFAULT` gives `["public"]`.
-    pub fn search_path(&self) -> Option<Vec<String>> {
+    pub(crate) fn search_path(&self) -> Option<Vec<String>> {
         let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
         let first = pieces.first()?;
         if is_word(first, "select") {
@@ -343,12 +347,12 @@ impl Statement<'_> {
     }
 
     /// The table name as written, e.g. `public.users`.
-    pub fn table_name(&self) -> String {
+    pub(crate) fn table_name(&self) -> String {
         self.name_after("table", |p| is_punct(p, "("))
     }
 
     /// The view name as written, e.g. `public.recent`.
-    pub fn view_name(&self) -> String {
+    pub(crate) fn view_name(&self) -> String {
         self.name_after("view", |p| is_punct(p, "(") || is_word(p, "as"))
     }
 
@@ -376,7 +380,7 @@ impl Statement<'_> {
 
     /// The statement without its `LIKE source [INCLUDING ...]` items, and the sources'
     /// name parts; `None` when it has none. sqlparser cannot read the `INCLUDING` options.
-    pub fn without_like(&self) -> Option<(String, Vec<Vec<String>>)> {
+    pub(crate) fn without_like(&self) -> Option<(String, Vec<Vec<String>>)> {
         let pieces = &self.0;
         let open = pieces.iter().position(|p| is_punct(p, "("))?;
         let close = matching_paren(pieces, open)?;
@@ -405,7 +409,7 @@ impl Statement<'_> {
 
     /// The statement without table constraints and column `CHECK` / `REFERENCES`
     /// clauses, or `None` when it has none to drop.
-    pub fn without_constraints(&self) -> Option<String> {
+    pub(crate) fn without_constraints(&self) -> Option<String> {
         let pieces = &self.0;
         let open = pieces.iter().position(|p| is_punct(p, "("))?;
         let close = matching_paren(pieces, open)?;
@@ -445,8 +449,9 @@ impl Statement<'_> {
     }
 }
 
-static SET_CONFIG: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap());
+static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
+});
 
 /// A comma-separated `search_path` value such as `app, "$user", public`.
 fn path_list(text: &str) -> Vec<String> {
@@ -491,7 +496,7 @@ fn name_parts(pieces: &[&Piece]) -> (Vec<String>, usize) {
 
 /// The statements of `sql`, split on `;` outside quotes, comments and dollar-quoted
 /// bodies; `mysql` also reads backslash escapes and `#` comments.
-pub fn split_statements(sql: &str, mysql: bool) -> Vec<Statement<'_>> {
+pub(crate) fn split_statements(sql: &str, mysql: bool) -> Vec<Statement<'_>> {
     let mut parts: Vec<Vec<Piece>> = vec![Vec::new()];
     for piece in scan(sql, mysql) {
         if is_punct(&piece, ";") {

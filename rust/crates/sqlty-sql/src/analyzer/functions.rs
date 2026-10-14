@@ -380,10 +380,10 @@ pub(super) fn function_table(
         .collect()
 }
 
-pub(super) static FUNCTION_TYPES: Lazy<HashMap<&'static str, Returns>> =
-    Lazy::new(|| function_table(COMMON_FUNCTIONS));
-pub(super) static POSTGRES_FUNCTION_TYPES: Lazy<HashMap<&'static str, Returns>> =
-    Lazy::new(|| function_table(POSTGRES_FUNCTIONS));
+pub(super) static FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
+    LazyLock::new(|| function_table(COMMON_FUNCTIONS));
+pub(super) static POSTGRES_FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
+    LazyLock::new(|| function_table(POSTGRES_FUNCTIONS));
 
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
 pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
@@ -521,11 +521,10 @@ impl<'a> Analyzer<'a> {
             _ => return numeric(),
         };
         if self.schema.table(&table).is_some() && self.virtual_columns(&table).is_none() {
-            return Err(format!(
-                "Column '{column}' not found in table '{table}' in schema. \
-                 If you want to query columns not in the schema, use an explicit cast: \
-                 SUM({column}::TYPE)"
-            ));
+            return Err(InferError::SumColumnNotInSchema {
+                column: column.clone(),
+                table,
+            });
         }
         numeric()
     }

@@ -6,6 +6,10 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
 
 [lib]
 name = "_core"

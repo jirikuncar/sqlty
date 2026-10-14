@@ -16,11 +16,11 @@ use super::*;
 #[derive(Clone, Default)]
 pub(super) struct Learned {
     /// `(reference, column)` pairs.
-    columns: Vec<(String, String)>,
+    columns: HashSet<(String, String)>,
     /// References whose relation has a row, because a column of it is not NULL.
-    present: Vec<String>,
+    present: HashSet<String>,
     /// Expressions as printed, such as `doc -> 'k'`.
-    exprs: Vec<String>,
+    exprs: HashSet<String>,
 }
 
 impl Learned {
@@ -32,7 +32,7 @@ impl Learned {
     }
 
     /// What both hold: facts that follow from either side of an `OR`.
-    fn intersect(self, other: Learned) -> Learned {
+    fn intersect(self, other: &Learned) -> Learned {
         Learned {
             columns: self
                 .columns
@@ -198,7 +198,7 @@ impl<'a> Analyzer<'a> {
                 if truth {
                     l.union(r)
                 } else {
-                    l.intersect(r)
+                    l.intersect(&r)
                 }
             }
             Expr::BinaryOp {
@@ -211,7 +211,7 @@ impl<'a> Analyzer<'a> {
                     self.learn(right, truth, scope),
                 );
                 if truth {
-                    l.intersect(r)
+                    l.intersect(&r)
                 } else {
                     l.union(r)
                 }
@@ -294,15 +294,15 @@ impl<'a> Analyzer<'a> {
             Expr::UnaryOp { expr: inner, .. } => return self.proven(inner, scope),
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
                 if let Some((reference, _, column)) = self.locate_column(expr, scope) {
-                    learned.present.push(reference.clone());
-                    learned.columns.push((reference, column));
+                    learned.present.insert(reference.clone());
+                    learned.columns.insert((reference, column));
                 }
                 return learned;
             }
             Expr::BinaryOp { left, op, right } => match op {
                 And | Or | Xor | Spaceship => return learned,
                 _ => {
-                    learned.exprs.push(expr.to_string());
+                    learned.exprs.insert(expr.to_string());
                     return self
                         .proven(left, scope)
                         .union(self.proven(right, scope))
@@ -351,7 +351,7 @@ impl<'a> Analyzer<'a> {
                     .and_then(|part| part.as_ident())
                     .map(|ident| ident.value.to_uppercase())
                     .unwrap_or_default();
-                learned.exprs.push(expr.to_string());
+                learned.exprs.insert(expr.to_string());
                 if func.over.is_none() && self.returns(&name).is_some() && is_strict(&name) {
                     for arg in positional_args(&func.args) {
                         learned = learned.union(self.proven(arg, scope));
@@ -361,7 +361,7 @@ impl<'a> Analyzer<'a> {
             }
             _ => {}
         }
-        learned.exprs.push(expr.to_string());
+        learned.exprs.insert(expr.to_string());
         learned
     }
 }
@@ -377,7 +377,7 @@ mod tests {
     /// One mark per result column: `N` nullable, `-` non-null, `?` unknown.
     fn marks(sql: &str) -> String {
         let schema = Some(load_schema(SCHEMA, "postgres"));
-        analyze_select(sql, "postgres", &schema)
+        analyze_select(sql, "postgres", schema.as_deref())
             .unwrap()
             .unwrap()
             .iter()

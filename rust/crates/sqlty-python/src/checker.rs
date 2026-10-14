@@ -11,18 +11,17 @@
 //! - `unchecked-query`: a `--sql` string that is not plain literals (raw, bytes, `SQL[T](q + x)`),
 //!   unless the wrapper call is one of `any_calls`
 
-use std::collections::HashMap;
-
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, ends_marker_line, extract_string_content, marked_query, skipped_rule,
     string_literals, strip_line_break, wraps, ImportStyle, LineIndex,
 };
+use crate::rules::{Rule, RuleConfig, Severity};
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
-use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, Schema};
+use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, SchemaData};
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
@@ -47,8 +46,8 @@ const INLINE_SQL_COMMENT: &str = concat!(
 );
 
 /// String content starting with `INLINE_SQL_COMMENT`.
-pub static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
-    Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
+pub(crate) static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
 /// MariaDB reject: they read `--` as a comment only before whitespace.
@@ -69,77 +68,34 @@ fn mysql_marker_lines(source: &str, lines: &LineIndex) -> Vec<usize> {
 
 /// A diagnostic result from checking source code.
 pub struct Diagnostic {
-    pub rule: String,
+    pub rule: Rule,
     pub message: String,
-    pub severity: String,
+    pub severity: Severity,
     pub line: usize,
-}
-
-/// Rule severity configuration.
-pub struct RuleConfig {
-    overrides: HashMap<String, String>,
-}
-
-impl RuleConfig {
-    pub fn new(overrides: Option<HashMap<String, String>>) -> Self {
-        RuleConfig {
-            overrides: overrides.unwrap_or_default(),
-        }
-    }
-
-    /// Get the effective severity for a rule.
-    pub fn severity(&self, rule: &str) -> &str {
-        if let Some(override_val) = self.overrides.get(rule) {
-            return override_val.as_str();
-        }
-        // Defaults
-        match rule {
-            "stale-rewrite" => "warn",
-            "stale-type" => "warn",
-            "select-star" => "warn",
-            "select-star-no-schema" => "error",
-            "column-count-mismatch" => "error",
-            "column-type-mismatch" => "error",
-            "column-name-mismatch" => "warn",
-            "typeddict-key-mismatch" => "error",
-            "typeddict-inheritance" => "error",
-            "inline-sql-comment" => "warn",
-            "untyped-query" => "warn",
-            "unparsed-query" => "ignore",
-            rule if NameRule::ALL.iter().any(|name| name.name() == rule) => "ignore",
-            _ => "warn",
-        }
-    }
-
-    /// Check if a rule is enabled (not "ignore").
-    pub fn is_enabled(&self, rule: &str) -> bool {
-        self.severity(rule) != "ignore"
-    }
 }
 
 /// Check Python source code for SQL type issues.
 pub fn check_source(
     source: &str,
     dialect: &str,
-    schema: &Option<Schema>,
-    rules: Option<HashMap<String, String>>,
+    schema: Option<&SchemaData>,
+    rule_config: &RuleConfig,
     import_style: Option<&str>,
     untyped: bool,
     any_calls: &[usize],
 ) -> Vec<Diagnostic> {
-    let rule_config = RuleConfig::new(rules);
-    let unparsed_enabled = rule_config.is_enabled("unparsed-query");
+    let unparsed_enabled = rule_config.is_enabled(Rule::UnparsedQuery);
     let has_schema = schema.is_some();
     let names_enabled = NameRule::ALL
         .iter()
-        .any(|rule| rule_config.is_enabled(rule.name()));
+        .any(|&rule| rule_config.is_enabled(Rule::Name(rule)));
     let mut diagnostics = Vec::new();
-    let mut report = |rule: &str, message: String, line: usize| {
+    let mut report = |rule: Rule, message: String, line: usize| {
         if rule_config.is_enabled(rule) {
             diagnostics.push(Diagnostic {
-                rule: rule.to_string(),
+                rule,
                 message,
-                severity: rule_config.severity(rule).to_string(),
+                severity: rule_config.severity(rule),
                 line,
             });
         }
@@ -151,17 +107,17 @@ pub fn check_source(
     if dialect.eq_ignore_ascii_case("mysql") {
         for line in mysql_marker_lines(source, &lines) {
             report(
-                "mysql-sql-marker",
+                Rule::MysqlSqlMarker,
                 r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#.to_string(),
                 line,
             );
         }
     }
 
-    if rule_config.is_enabled("stale-rewrite") {
+    if rule_config.is_enabled(Rule::StaleRewrite) {
         for (start, _, _) in wraps(source, dialect, schema, &style, untyped, &|_| false) {
             report(
-                "stale-rewrite",
+                Rule::StaleRewrite,
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
                 lines.line_at(start),
             );
@@ -177,7 +133,8 @@ pub fn check_source(
             .iter()
             .find(|call| call.span.start <= first.span.start && first.span.end <= call.span.end);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
-            if !(rule == "unchecked-query" && enclosing.is_some_and(|call| call.is_any(any_calls)))
+            if !(rule == Rule::UncheckedQuery
+                && enclosing.is_some_and(|call| call.is_any(any_calls)))
             {
                 report(rule, skipped_message(rule), line);
             }
@@ -189,13 +146,13 @@ pub fn check_source(
         }
         let sql_content = content(source, &spans);
         if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
-            report("inline-sql-comment", INLINE_MESSAGE.to_string(), line);
+            report(Rule::InlineSqlComment, INLINE_MESSAGE.to_string(), line);
         }
         if let Some(error) = marked_query(&sql_content)
             .filter(|_| unparsed_enabled)
             .and_then(|sql| parse_error(&sql, dialect))
         {
-            report("unparsed-query", unparsed_message(&error), line);
+            report(Rule::UnparsedQuery, unparsed_message(&error), line);
         }
     }
 
@@ -213,8 +170,8 @@ pub fn check_source(
                 && after_marker(&content(source, &call.strings)).is_some()
             {
                 report(
-                    "unchecked-query",
-                    skipped_message("unchecked-query"),
+                    Rule::UncheckedQuery,
+                    skipped_message(Rule::UncheckedQuery),
                     line_num,
                 );
             }
@@ -224,19 +181,19 @@ pub fn check_source(
             continue;
         }
         if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
-            report("inline-sql-comment", INLINE_MESSAGE.to_string(), line_num);
+            report(Rule::InlineSqlComment, INLINE_MESSAGE.to_string(), line_num);
         }
         if let Some(error) = marked_query(&sql_content)
             .filter(|_| unparsed_enabled)
             .and_then(|sql| parse_error(&sql, dialect))
         {
-            report("unparsed-query", unparsed_message(&error), line_num);
+            report(Rule::UnparsedQuery, unparsed_message(&error), line_num);
         }
 
         if names_enabled {
             if let Some(query) = marked_query(&sql_content) {
                 for found in analyze_with_diagnostics(&query, dialect, schema).1 {
-                    report(found.rule.name(), found.message, line_num);
+                    report(Rule::Name(found.rule), found.message, line_num);
                 }
             }
         }
@@ -245,14 +202,14 @@ pub fn check_source(
         if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
             if has_schema {
                 report(
-                    "select-star",
+                    Rule::SelectStar,
                     "SELECT * used — expand to explicit column list (joins need a manual edit)"
                         .to_string(),
                     line_num,
                 );
             } else {
                 report(
-                    "select-star-no-schema",
+                    Rule::SelectStarNoSchema,
                     "SELECT * used but no schema available".to_string(),
                     line_num,
                 );
@@ -273,15 +230,15 @@ pub fn check_source(
                     untyped
                 ),
             };
-            report("untyped-query", message, line_num);
+            report(Rule::UntypedQuery, message, line_num);
             continue;
         }
 
-        if annotated.starts_with("tuple[") && rule_config.is_enabled("stale-type") {
+        if annotated.starts_with("tuple[") && rule_config.is_enabled(Rule::StaleType) {
             if let Some(current) = infer_from_sql_content(&sql_content, dialect, schema) {
                 if !refines_tuple(annotated, &current) {
                     report(
-                        "stale-type",
+                        Rule::StaleType,
                         format!("SQL[{}] should be SQL[{}]", annotated, current),
                         line_num,
                     );
@@ -297,12 +254,12 @@ pub fn check_source(
 
 const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#;
 
-fn skipped_message(rule: &str) -> String {
+fn skipped_message(rule: Rule) -> String {
     match rule {
-        "tstring-skipped" => {
+        Rule::TstringSkipped => {
             "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
         }
-        "fstring-skipped" => {
+        Rule::FstringSkipped => {
             "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
         }
         _ => "--sql query is not plain string literals, so it is not checked or rewritten",
@@ -311,17 +268,35 @@ fn skipped_message(rule: &str) -> String {
 }
 
 /// Message of `unparsed-query`, given sqlparser's error (see `analyzer::parse_error`).
-pub fn unparsed_message(error: &str) -> String {
+pub(crate) fn unparsed_message(error: &str) -> String {
     format!("query does not parse: {error}")
 }
 
-/// Each query `sqlty check` sees, as `(line, kind, text)` for `--statistics`: `kind` is
-/// `query` with the marked text, or the rule that skips the string (text empty).
+/// What `sqlty check --statistics` counts a string as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiteKind {
+    /// A query; the text is the marked query.
+    Query,
+    /// A string the rule skips; the text is empty.
+    Skipped(Rule),
+}
+
+impl SiteKind {
+    /// `query`, or the name of the rule that skips the string.
+    pub fn name(self) -> &'static str {
+        match self {
+            SiteKind::Query => "query",
+            SiteKind::Skipped(rule) => rule.name(),
+        }
+    }
+}
+
+/// Each query `sqlty check` sees, as `(line, kind, text)` for `--statistics`.
 pub fn query_sites(
     source: &str,
     import_style: Option<&str>,
     any_calls: &[usize],
-) -> Vec<(usize, &'static str, String)> {
+) -> Vec<(usize, SiteKind, String)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     let lines = LineIndex::new(source);
     let tokens = tokenize(source);
@@ -337,9 +312,10 @@ pub fn query_sites(
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             let last = &tokens[group[group.len() - 1]];
             skipped.push(first.span.start..last.span.end);
-            if !(rule == "unchecked-query" && enclosing.is_some_and(|call| call.is_any(any_calls)))
+            if !(rule == Rule::UncheckedQuery
+                && enclosing.is_some_and(|call| call.is_any(any_calls)))
             {
-                sites.push((line, rule, String::new()));
+                sites.push((line, SiteKind::Skipped(rule), String::new()));
             }
             continue;
         }
@@ -348,7 +324,7 @@ pub fn query_sites(
         }
         let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
         if let Some(sql) = marked_query(&content(source, &spans)) {
-            sites.push((line, "query", sql));
+            sites.push((line, SiteKind::Query, sql));
         }
     }
     for call in &calls {
@@ -356,14 +332,14 @@ pub fn query_sites(
         match call.content(source) {
             Some(text) => {
                 if let Some(sql) = marked_query(&text) {
-                    sites.push((line, "query", sql));
+                    sites.push((line, SiteKind::Query, sql));
                 }
             }
             None if after_marker(&content(source, &call.strings)).is_some()
                 && !call.is_any(any_calls)
                 && !skipped.iter().any(|span| call.span.contains(&span.start)) =>
             {
-                sites.push((line, "unchecked-query", String::new()));
+                sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
             }
             None => {}
         }
@@ -389,7 +365,7 @@ pub fn wrapped_queries(
             });
             (
                 lines.line_at(call.span.start),
-                source[call.annotation.clone()].to_string(),
+                source[call.annotation].to_string(),
                 query,
             )
         })
@@ -401,7 +377,7 @@ pub fn wrapped_queries(
 /// or `tuple[int, list[int]]`), so it is not stale.
 ///
 /// Element types are not checked.
-pub fn refines_tuple(annotated: &str, inferred: &str) -> bool {
+pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     fn balanced(args: &str) -> bool {
         let mut depth = 0i32;
         args.bytes().all(|byte| {
@@ -450,13 +426,27 @@ pub fn refines_tuple(annotated: &str, inferred: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn override_rule(rule: &str, severity: &str) -> RuleConfig {
+        let overrides = HashMap::from([(rule.to_string(), severity.to_string())]);
+        RuleConfig::from_overrides(Some(overrides)).unwrap()
+    }
 
     #[test]
     fn test_detects_stale_rewrite() {
         let source = r#"q = "--sql\nSELECT 1::INTEGER""#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].rule, "stale-rewrite");
+        assert_eq!(diags[0].rule, Rule::StaleRewrite);
     }
 
     #[test]
@@ -469,10 +459,18 @@ mod tests {
             ),
             ("q = '  --sql\\nSELECT 1'", 1),
         ] {
-            let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+            let diags = check_source(
+                source,
+                "postgres",
+                None,
+                &RuleConfig::default(),
+                None,
+                false,
+                &[],
+            );
             let lines: Vec<usize> = diags
                 .iter()
-                .filter(|d| d.rule == "stale-rewrite")
+                .filter(|d| d.rule == Rule::StaleRewrite)
                 .map(|d| d.line)
                 .collect();
             assert_eq!(lines, vec![line], "{source}");
@@ -485,32 +483,79 @@ mod tests {
             r#"q = "--sql SELECT 1::INTEGER""#,
             r#"q = "--sql\nDROP TABLE t""#,
         ] {
-            let diags = check_source(source, "postgres", &None, None, None, false, &[]);
-            assert!(diags.iter().all(|d| d.rule != "stale-rewrite"), "{source}");
+            let diags = check_source(
+                source,
+                "postgres",
+                None,
+                &RuleConfig::default(),
+                None,
+                false,
+                &[],
+            );
+            assert!(
+                diags.iter().all(|d| d.rule != Rule::StaleRewrite),
+                "{source}"
+            );
         }
     }
 
     #[test]
     fn test_untyped_rows_are_stale_with_sentinel() {
         let source = r#"q = "--sql\nSELECT x, y FROM pairs""#;
-        assert!(check_source(source, "postgres", &None, None, None, false, &[]).is_empty());
-        let diags = check_source(source, "postgres", &None, None, None, true, &[]);
-        assert_eq!(diags[0].rule, "stale-rewrite");
+        assert!(check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[]
+        )
+        .is_empty());
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            true,
+            &[],
+        );
+        assert_eq!(diags[0].rule, Rule::StaleRewrite);
     }
 
     #[test]
     fn test_clean_no_stale() {
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
-        let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
+        let stale_rewrites: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == Rule::StaleRewrite)
+            .collect();
         assert!(stale_rewrites.is_empty());
     }
 
     #[test]
     fn test_detects_stale_type() {
         let source = r#"q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM t")"#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
-        let stale_types: Vec<_> = diags.iter().filter(|d| d.rule == "stale-type").collect();
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
+        let stale_types: Vec<_> = diags.iter().filter(|d| d.rule == Rule::StaleType).collect();
         assert_eq!(stale_types.len(), 1);
         assert!(stale_types[0].message.contains("tuple[int]"));
     }
@@ -519,8 +564,16 @@ mod tests {
     fn test_parametrised_tuple_item_is_not_stale() {
         let source =
             r#"q = SQL[tuple[int, list[str]]]("--sql\nSELECT 1::INTEGER, t::TEXT[] FROM t")"#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
-        assert!(diags.iter().all(|d| d.rule != "stale-type"));
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
+        assert!(diags.iter().all(|d| d.rule != Rule::StaleType));
         assert!(refines_tuple("tuple[int, list[str]]", "tuple[int, list]"));
         assert!(!refines_tuple("tuple[str, list[str]]", "tuple[int, list]"));
         assert!(!refines_tuple("tuple[int, list[str]]", "tuple[int, li]"));
@@ -557,20 +610,30 @@ mod tests {
     #[test]
     fn test_rule_override_ignore() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
-        let mut rules = HashMap::new();
-        rules.insert("stale-rewrite".to_string(), "ignore".to_string());
-        let diags = check_source(source, "postgres", &None, Some(rules), None, false, &[]);
-        let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
+        let rules = override_rule("stale-rewrite", "ignore");
+        let diags = check_source(source, "postgres", None, &rules, None, false, &[]);
+        let stale_rewrites: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == Rule::StaleRewrite)
+            .collect();
         assert!(stale_rewrites.is_empty());
     }
 
     #[test]
     fn test_detects_inline_sql_comment_unwrapped() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
         let inline: Vec<_> = diags
             .iter()
-            .filter(|d| d.rule == "inline-sql-comment")
+            .filter(|d| d.rule == Rule::InlineSqlComment)
             .collect();
         assert_eq!(inline.len(), 1);
         assert!(inline[0].message.contains("SQL comment"));
@@ -579,10 +642,18 @@ mod tests {
     #[test]
     fn test_no_inline_sql_comment_with_newline() {
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
         let inline: Vec<_> = diags
             .iter()
-            .filter(|d| d.rule == "inline-sql-comment")
+            .filter(|d| d.rule == Rule::InlineSqlComment)
             .collect();
         assert!(inline.is_empty());
     }
@@ -590,10 +661,18 @@ mod tests {
     #[test]
     fn test_detects_inline_sql_comment_wrapped() {
         let source = r#"q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")"#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
         let inline: Vec<_> = diags
             .iter()
-            .filter(|d| d.rule == "inline-sql-comment")
+            .filter(|d| d.rule == Rule::InlineSqlComment)
             .collect();
         assert_eq!(inline.len(), 1);
     }
@@ -601,12 +680,11 @@ mod tests {
     #[test]
     fn test_inline_sql_comment_ignored_when_disabled() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
-        let mut rules = HashMap::new();
-        rules.insert("inline-sql-comment".to_string(), "ignore".to_string());
-        let diags = check_source(source, "postgres", &None, Some(rules), None, false, &[]);
+        let rules = override_rule("inline-sql-comment", "ignore");
+        let diags = check_source(source, "postgres", None, &rules, None, false, &[]);
         let inline: Vec<_> = diags
             .iter()
-            .filter(|d| d.rule == "inline-sql-comment")
+            .filter(|d| d.rule == Rule::InlineSqlComment)
             .collect();
         assert!(inline.is_empty());
     }
@@ -617,13 +695,16 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
             None,
+            &RuleConfig::default(),
             Some("from sqlty import SQL as Q"),
             false,
             &[],
         );
-        let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
+        let stale_rewrites: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == Rule::StaleRewrite)
+            .collect();
         assert!(stale_rewrites.is_empty());
     }
 
@@ -633,13 +714,16 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
             None,
+            &RuleConfig::default(),
             Some("import sqlty"),
             false,
             &[],
         );
-        let stale_rewrites: Vec<_> = diags.iter().filter(|d| d.rule == "stale-rewrite").collect();
+        let stale_rewrites: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == Rule::StaleRewrite)
+            .collect();
         assert!(stale_rewrites.is_empty());
     }
 
@@ -651,20 +735,45 @@ mod tests {
         ));
         let schema = schema.map(|(schema, _)| schema);
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT nope FROM users")"#;
-        assert!(check_source(source, "postgres", &schema, None, None, false, &[]).is_empty());
-        let rules = HashMap::from([("unknown-column".to_string(), "error".to_string())]);
-        let diags = check_source(source, "postgres", &schema, Some(rules), None, false, &[]);
+        assert!(check_source(
+            source,
+            "postgres",
+            schema.as_deref(),
+            &RuleConfig::default(),
+            None,
+            false,
+            &[]
+        )
+        .is_empty());
+        let rules = override_rule("unknown-column", "error");
+        let diags = check_source(
+            source,
+            "postgres",
+            schema.as_deref(),
+            &rules,
+            None,
+            false,
+            &[],
+        );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].rule, "unknown-column");
-        assert_eq!(diags[0].severity, "error");
+        assert_eq!(diags[0].rule, Rule::Name(NameRule::UnknownColumn));
+        assert_eq!(diags[0].severity, Severity::Error);
     }
 
     #[test]
     fn test_untyped_query() {
         let source = r#"q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")"#;
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].rule, "untyped-query");
+        assert_eq!(diags[0].rule, Rule::UntypedQuery);
         assert!(diags[0].message.contains("add casts"));
     }
 
@@ -674,8 +783,8 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
             None,
+            &RuleConfig::default(),
             Some("import sqlty"),
             false,
             &[],
@@ -698,7 +807,13 @@ mod tests {
         let lines = |diags: Vec<Diagnostic>| diags.into_iter().map(|d| d.line).collect::<Vec<_>>();
         assert_eq!(
             lines(check_source(
-                source, "postgres", &None, None, None, false, &any
+                source,
+                "postgres",
+                None,
+                &RuleConfig::default(),
+                None,
+                false,
+                &any
             )),
             [3]
         );
@@ -706,8 +821,8 @@ mod tests {
             lines(check_source(
                 source,
                 "postgres",
-                &None,
                 None,
+                &RuleConfig::default(),
                 None,
                 false,
                 &[]
@@ -721,17 +836,24 @@ mod tests {
     #[test]
     fn test_skipped_and_unchecked_queries() {
         let source = "a = (\"--sql\\nSELECT 1 \"\n     f\"AS n{x}\")\nb = SQL[T](\"--sql\\nSELECT 1\" + x)\nc = r\"--sql\\nSELECT 1\"\n";
-        let diags: Vec<(String, usize)> =
-            check_source(source, "postgres", &None, None, None, false, &[])
-                .into_iter()
-                .map(|d| (d.rule, d.line))
-                .collect();
+        let diags: Vec<(Rule, usize)> = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        )
+        .into_iter()
+        .map(|d| (d.rule, d.line))
+        .collect();
         assert_eq!(
             diags,
             vec![
-                ("fstring-skipped".to_string(), 1),
-                ("unchecked-query".to_string(), 3),
-                ("unchecked-query".to_string(), 4),
+                (Rule::FstringSkipped, 1),
+                (Rule::UncheckedQuery, 3),
+                (Rule::UncheckedQuery, 4),
             ]
         );
     }
@@ -739,7 +861,15 @@ mod tests {
     #[test]
     fn test_every_wrapper_on_a_line() {
         let source = "a, b = SQL[tuple[int]](\"--sql\\nSELECT 1\"), SQL[tuple[int]](\"--sql\\nSELECT 'x'::TEXT\")";
-        let diags = check_source(source, "postgres", &None, None, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            None,
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].message,

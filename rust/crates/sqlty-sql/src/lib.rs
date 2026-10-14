@@ -1,6 +1,6 @@
 //! SQL parsing and type inference.
 
 pub mod analyzer;
-pub mod catalog;
-pub mod ddl;
+pub(crate) mod catalog;
+pub(crate) mod ddl;
 pub mod diagnostics;

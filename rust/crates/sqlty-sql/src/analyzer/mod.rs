@@ -5,12 +5,13 @@
 //! names are canonicalized (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes
 //! `DECIMAL(10, 2)`), as `SELECT *` expansion writes them back into queries.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::ops::ControlFlow;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic, NameRule};
-use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, AccessExpr, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable,
@@ -24,6 +25,7 @@ use sqlparser::dialect::{
     SQLiteDialect,
 };
 use sqlparser::parser::Parser;
+use std::sync::LazyLock;
 
 mod dml;
 mod expr;
@@ -56,7 +58,7 @@ const CIDR: &str = "ipaddress.IPv4Network | ipaddress.IPv6Network";
 
 /// Mapping from canonical SQL type names to Python type strings; `DECIMAL` types
 /// are mapped by [`decimal_type`] and arrays by [`python_type`].
-static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         ("INT", "int"),
         ("INTEGER", "int"),
@@ -139,7 +141,8 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
     ])
 });
 
-static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
+static STAR_ITEM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
 use crate::catalog::{fold, FunctionReturn};
 pub use crate::catalog::{Catalog as SchemaData, SchemaColumn};
@@ -159,11 +162,33 @@ impl SchemaColumn {
 pub type SkippedObject = (&'static str, String);
 
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
-type Inferred<T> = Result<T, String>;
+type Inferred<T> = Result<T, InferError>;
+
+/// Why a query's types cannot be inferred at all, as opposed to being unknown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InferError {
+    /// `SUM(column)` names a column that is not in the schema table it reads.
+    SumColumnNotInSchema { column: String, table: String },
+}
+
+impl fmt::Display for InferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InferError::SumColumnNotInSchema { column, table } => write!(
+                f,
+                "Column '{column}' not found in table '{table}' in schema. \
+                 If you want to query columns not in the schema, use an explicit cast: \
+                 SUM({column}::TYPE)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InferError {}
 
 /// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SqlDialect {
+pub(crate) enum SqlDialect {
     Postgres,
     MySql,
     Sqlite,
@@ -188,7 +213,7 @@ const OTHER_DIALECTS: [&str; 12] = [
 ];
 
 impl SqlDialect {
-    pub fn from_name(name: &str) -> Self {
+    pub(crate) fn from_name(name: &str) -> Self {
         match name.to_ascii_lowercase().as_str() {
             "postgres" | "postgresql" => Self::Postgres,
             "mysql" => Self::MySql,
@@ -204,7 +229,7 @@ impl SqlDialect {
         }
     }
 
-    pub fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
+    pub(crate) fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
         match self {
             Self::Postgres => Box::new(PostgreSqlDialect {}),
             Self::MySql => Box::new(MySqlDialect {}),
@@ -216,11 +241,11 @@ impl SqlDialect {
 }
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
-static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
+static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
 /// PostgreSQL row-lock clauses sqlparser cannot read, respelled as the closest ones it can:
 /// `NO KEY UPDATE` as `UPDATE`, `KEY SHARE` as `SHARE`, and `OF` keeps only its first table.
-static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
+static POSTGRES_LOCK_FIXES: LazyLock<[(Regex, &str); 3]> = LazyLock::new(|| {
     const NAME: &str = r#"(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))*"#;
     [
         (
@@ -242,16 +267,17 @@ static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
 });
 
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
-static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
+static PLACEHOLDER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
-static QMARK: Lazy<Regex> = Lazy::new(|| {
+static QMARK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
 });
 
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`), then
 /// `INT3`/`MIDDLEINT` before `UNSIGNED`.
-static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
+static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 2]> = LazyLock::new(|| {
     [
         (
             Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
@@ -323,9 +349,10 @@ fn parser_input(sql: &str, dialect: SqlDialect) -> String {
 /// Drops the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO ...`, the
 /// partial unique index that arbitrates the conflict; it does not change the result columns.
 fn drop_conflict_predicate(sql: &str) -> String {
-    static CONFLICT_TARGET: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
-    static WHERE_CLAUSE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
+    static CONFLICT_TARGET: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
+    static WHERE_CLAUSE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
     let mut out = String::with_capacity(sql.len());
     let mut last = 0;
     for target in CONFLICT_TARGET.find_iter(sql) {
@@ -591,7 +618,7 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
 }
 
 #[cfg(test)]
-pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
+pub(crate) fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
 }
 
@@ -635,7 +662,11 @@ impl Column {
 }
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
-pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
+pub fn infer_type(
+    sql: &str,
+    dialect: &str,
+    schema: Option<&SchemaData>,
+) -> Inferred<Option<String>> {
     let columns = analyze_select(sql, dialect, schema)?;
     // A column of unknown type, `*` the schema cannot resolve included, leaves the row type unknown.
     Ok(columns.and_then(|columns| {
@@ -653,7 +684,7 @@ pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred
 pub fn analyze_select(
     sql: &str,
     dialect: &str,
-    schema: &Option<Schema>,
+    schema: Option<&SchemaData>,
 ) -> Inferred<Option<Vec<Column>>> {
     analyze_with_diagnostics(sql, dialect, schema).0
 }
@@ -664,16 +695,14 @@ pub fn analyze_select(
 pub fn analyze_with_diagnostics(
     sql: &str,
     dialect: &str,
-    schema: &Option<Schema>,
+    schema: Option<&SchemaData>,
 ) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
     let dialect = SqlDialect::from_name(dialect);
     let Some(stmt) = parse_first(sql, dialect) else {
         return (Ok(None), Vec::new());
     };
     let mut analyzer = Analyzer::new(
-        schema
-            .as_deref()
-            .unwrap_or_else(|| crate::catalog::empty(dialect)),
+        schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
     );
     analyzer.diag = Diagnostics::collecting();
@@ -713,8 +742,8 @@ pub fn returns_rows(sql: &str, dialect: &str) -> bool {
 }
 
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
-pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<String> {
-    let schema = schema.as_deref().filter(|schema| !schema.is_empty())?;
+pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<String> {
+    let schema = schema.filter(|schema| !schema.is_empty())?;
     let dialect = SqlDialect::from_name(dialect);
     let stmt = parse_first(sql, dialect)?;
     let analyzer = Analyzer::new(schema, dialect);
@@ -823,7 +852,19 @@ mod tests {
     use super::*;
 
     fn infer(sql: &str) -> Option<String> {
-        infer_type(sql, "postgres", &None).unwrap()
+        infer_type(sql, "postgres", None).unwrap()
+    }
+
+    #[test]
+    fn sum_of_a_column_missing_from_the_schema_is_an_error() {
+        let (schema, _) = load_schema_with_skipped("CREATE TABLE users (id INT)", "postgres");
+        let error =
+            infer_type("SELECT SUM(nope) FROM users", "postgres", Some(&schema)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Column 'nope' not found in table 'users' in schema. If you want to query \
+             columns not in the schema, use an explicit cast: SUM(nope::TYPE)"
+        );
     }
 
     #[test]
@@ -862,11 +903,11 @@ mod tests {
             "postgres",
         ));
         assert_eq!(
-            expand_star("SELECT * FROM users", "postgres", &schema).as_deref(),
+            expand_star("SELECT * FROM users", "postgres", schema.as_deref()).as_deref(),
             Some("SELECT id::INT, score::DECIMAL(10, 2), tags::ARRAY<TEXT> FROM users")
         );
         assert_eq!(
-            infer_type("SELECT * FROM users", "postgres", &schema)
+            infer_type("SELECT * FROM users", "postgres", schema.as_deref())
                 .unwrap()
                 .as_deref(),
             Some("tuple[int, decimal.Decimal, list[str]]")
@@ -910,7 +951,7 @@ mod tests {
             "SELECT 1 ON CONFLICT (a) WHERE b"
         );
         assert_eq!(
-            infer_type("--sql\nSELECT 1 AS x", "mysql", &None)
+            infer_type("--sql\nSELECT 1 AS x", "mysql", None)
                 .unwrap()
                 .as_deref(),
             Some("tuple[int]")
@@ -939,7 +980,7 @@ mod tests {
             "mysql",
         ));
         assert_eq!(
-            expand_star("SELECT * FROM t", "mysql", &schema).as_deref(),
+            expand_star("SELECT * FROM t", "mysql", schema.as_deref()).as_deref(),
             Some("SELECT a::UMEDIUMINT, b::UINT, c::UINT, d::UMEDIUMINT(8) FROM t")
         );
         assert_eq!(
@@ -950,7 +991,7 @@ mod tests {
     }
 
     fn names_in(sql: &str, dialect: &str) -> Vec<String> {
-        analyze_select(sql, dialect, &None)
+        analyze_select(sql, dialect, None)
             .unwrap()
             .unwrap()
             .into_iter()
@@ -985,7 +1026,7 @@ mod tests {
     fn test_dialect_type_aliases() {
         let expand = |columns: &str, dialect: &str| {
             let schema = Some(load_schema(&format!("CREATE TABLE t ({columns})"), dialect));
-            expand_star("SELECT * FROM t", dialect, &schema)
+            expand_star("SELECT * FROM t", dialect, schema.as_deref())
         };
         assert_eq!(
             expand("a INT64, b FLOAT64", "bigquery").as_deref(),
@@ -1008,7 +1049,7 @@ mod tests {
     #[test]
     fn test_sum_of_unknown_schema_column_is_an_error() {
         let schema = Some(load_schema("CREATE TABLE users (id INT)", "postgres"));
-        assert!(infer_type("SELECT SUM(nope) FROM users", "postgres", &schema).is_err());
+        assert!(infer_type("SELECT SUM(nope) FROM users", "postgres", schema.as_deref()).is_err());
     }
 
     #[test]
@@ -1017,7 +1058,7 @@ mod tests {
             "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, born DATE NOT NULL)",
             "postgres",
         ));
-        let infer = |sql: &str| infer_type(sql, "postgres", &schema).unwrap();
+        let infer = |sql: &str| infer_type(sql, "postgres", schema.as_deref()).unwrap();
         assert_eq!(
             infer("WITH r AS (SELECT id, name FROM users) SELECT id, name FROM r").as_deref(),
             Some("tuple[int, str]")
@@ -1121,7 +1162,7 @@ mod tests {
             "CREATE TABLE a (id INT, n INT, g GEOMETRY); CREATE TABLE b (id INT, t TEXT);",
             "postgres",
         ));
-        analyze_with_diagnostics(sql, "postgres", &schema)
+        analyze_with_diagnostics(sql, "postgres", schema.as_deref())
             .1
             .into_iter()
             .map(|found| (found.rule.name(), found.message))
@@ -1167,7 +1208,7 @@ mod tests {
 
     #[test]
     fn test_name_rules_need_a_schema() {
-        let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", &None).1;
+        let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", None).1;
         assert!(found.is_empty(), "{found:?}");
     }
 }

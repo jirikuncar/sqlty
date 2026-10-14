@@ -8,7 +8,7 @@
 use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
+pub(crate) enum Kind {
     /// A string literal, with its prefix.
     Str,
     Comment,
@@ -22,7 +22,7 @@ pub enum Kind {
 }
 
 #[derive(Clone, Debug)]
-pub struct Token {
+pub(crate) struct Token {
     pub kind: Kind,
     pub span: Range<usize>,
     /// Bracket depth; a bracket and its match share it.
@@ -31,13 +31,13 @@ pub struct Token {
 
 impl Token {
     /// The prefix of a string literal (`""`, `u`, `rb`, `f`, ...), lowercased.
-    pub fn prefix(&self, source: &str) -> String {
+    pub(crate) fn prefix(&self, source: &str) -> String {
         let text = &source[self.span.clone()];
         text[..text.find(['"', '\'']).unwrap_or(0)].to_ascii_lowercase()
     }
 
     /// A string literal with no prefix but `u`, whose source text is its content.
-    pub fn is_plain(&self, source: &str) -> bool {
+    pub(crate) fn is_plain(&self, source: &str) -> bool {
         self.kind == Kind::Str && matches!(self.prefix(source).as_str(), "" | "u")
     }
 }
@@ -114,7 +114,7 @@ fn field_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
                 i = bytes[i..]
                     .iter()
                     .position(|&b| b == b'\n')
-                    .map_or(bytes.len(), |n| i + n)
+                    .map_or(bytes.len(), |n| i + n);
             }
             _ => i += 1,
         }
@@ -178,7 +178,7 @@ fn lex(source: &str, i: usize) -> (Kind, usize) {
 }
 
 /// End of the string literal starting at `pos`, prefix included.
-pub fn string_at(source: &str, pos: usize) -> Option<usize> {
+pub(crate) fn string_at(source: &str, pos: usize) -> Option<usize> {
     match source[pos..].starts_with(|c: char| !c.is_whitespace()) {
         true => Some(lex(source, pos))
             .filter(|(kind, _)| *kind == Kind::Str)
@@ -189,7 +189,7 @@ pub fn string_at(source: &str, pos: usize) -> Option<usize> {
 
 /// Tokens of `source`; whitespace, line continuations and line breaks inside
 /// brackets are skipped.
-pub fn tokenize(source: &str) -> Vec<Token> {
+pub(crate) fn tokenize(source: &str) -> Vec<Token> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let (mut i, mut depth) = (0, 0usize);
@@ -237,7 +237,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
 }
 
 /// Spans of plain string literals (no prefix but `u`), outside comments.
-pub fn string_literals(source: &str) -> Vec<(usize, usize)> {
+pub(crate) fn string_literals(source: &str) -> Vec<(usize, usize)> {
     tokenize(source)
         .into_iter()
         .filter(|t| t.is_plain(source))
@@ -299,7 +299,7 @@ fn needs_brackets(source: &str, tokens: &[Token], a: usize, b: usize) -> bool {
 
 /// Implicitly concatenated string literals, as token indices: runs of strings
 /// with only comments between, on one logical line.
-pub fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
+pub(crate) fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut open = false;
     for (i, token) in tokens.iter().enumerate() {
@@ -327,7 +327,7 @@ pub fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
 }
 
 /// The concatenated content of string literals.
-pub fn content(source: &str, spans: &[Range<usize>]) -> String {
+pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
     spans
         .iter()
         .map(|span| {
@@ -339,7 +339,7 @@ pub fn content(source: &str, spans: &[Range<usize>]) -> String {
 }
 
 /// A `{wrapper}[T](...)` call.
-pub struct Call {
+pub(crate) struct Call {
     pub span: Range<usize>,
     /// `T`, between the brackets.
     pub annotation: Range<usize>,
@@ -361,24 +361,24 @@ pub struct Call {
 
 impl Call {
     /// The argument's string content, concatenated, when it is plain strings only.
-    pub fn content(&self, source: &str) -> Option<String> {
+    pub(crate) fn content(&self, source: &str) -> Option<String> {
         self.plain.then(|| content(source, &self.strings))
     }
 
     /// Whether the call starts at one of `any_calls`, the byte offsets of the calls
     /// whose `T` is `typing.Any`: an explicit opt-out of checks.
-    pub fn is_any(&self, any_calls: &[usize]) -> bool {
+    pub(crate) fn is_any(&self, any_calls: &[usize]) -> bool {
         any_calls.contains(&self.span.start)
     }
 
     /// The source of the argument's literals, from the first to the last.
-    pub fn argument<'a>(&self, source: &'a str) -> &'a str {
+    pub(crate) fn argument<'a>(&self, source: &'a str) -> &'a str {
         &source[self.strings[0].start..self.strings[self.strings.len() - 1].end]
     }
 }
 
 /// Every `{wrapper}[T](...)` and `mod.{wrapper}[T](...)` call in `source`, in source order.
-pub fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Vec<Call> {
+pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Vec<Call> {
     let dotted = format!(".{wrapper}");
     let mut calls = Vec::new();
     for (i, token) in tokens.iter().enumerate() {
