@@ -1,6 +1,5 @@
 """SQLTy - Type-safe SQL queries for Python."""
 
-import importlib.metadata
 import sys
 from typing import get_args, overload
 
@@ -10,10 +9,20 @@ else:
     from typing_extensions import Sentinel as sentinel
     from typing_extensions import TypeForm
 
-try:
-    __version__ = importlib.metadata.version(__name__)
-except importlib.metadata.PackageNotFoundError:
-    __version__ = "0.0.0"  # Fallback for development mode
+
+def __getattr__(name: str) -> str:
+    # ``__version__`` is looked up lazily: importlib.metadata costs ~10 ms to import.
+    if name == "__version__":
+        import importlib.metadata
+
+        try:
+            version = importlib.metadata.version(__name__)
+        except importlib.metadata.PackageNotFoundError:
+            version = "0.0.0"  # Fallback for development mode
+        globals()["__version__"] = version
+        return version
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["SQL", "UNTYPED", "row_form"]
 
