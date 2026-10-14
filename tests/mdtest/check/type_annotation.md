@@ -65,10 +65,10 @@ dialect = "postgres"
 ```
 
 ```python
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     user_id: int
     username: str
 
@@ -106,10 +106,10 @@ column-count-mismatch = "ignore"
 ```
 
 ```python
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     id: int
 
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")

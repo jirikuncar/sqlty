@@ -59,7 +59,7 @@ Earlier versions also shipped a pure-Python backend built on
 [sqlglot](https://sqlglot.com). Removing it changed:
 
 - Unaliased calls to functions sqlty can't type are named after the function
-  (`NULLIF(a, b)` is `NULLIF`, not an empty name) in `column-name-mismatch`
+  (`NULLIF(a, b)` is `nullif`, not an empty name) in `column-name-mismatch`
   and `typeddict-key-mismatch`.
 - The magic codec adds imports after the module header, as `sqlty rewrite`
   does, instead of placing them with isort, and turns `# coding: sqlty` into

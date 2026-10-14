@@ -36,8 +36,9 @@ query_param = "query"
 | [`rules`](#rules) | `check` |
 | [`import-style`](#import-style) | `rewrite`, `strip`, `check`, magic codec |
 | [`untyped`](#untyped) | `rewrite`, stub generation |
+| [`type-modules`](#type-modules) | `check` |
 | [`format-command`](#format-command) | Stub generation |
-| [`functions`](#functions) | Stub generation, `python -m sqlty.registries` |
+| [`functions`](#functions) | `check` ([helpers](../guide/helpers.md#helpers-you-cannot-annotate)), stub generation, `python -m sqlty.registries` |
 
 ## `dialect`
 
@@ -48,11 +49,19 @@ SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
 
 ## `schema`
 
-Path to a `.sql` file with `CREATE TABLE` statements, relative to the
-directory of `pyproject.toml`. CLI: `--schema` (relative to the current
-directory). See [Schema inference](../guide/schema-inference.md).
+A `.sql` file with `CREATE TABLE` statements, or a list of them, relative to
+the directory of `pyproject.toml`. Each entry is a file, a directory (every
+`*.sql` below it) or a glob (`tables/*.sql`, `**/*.sql`). The files are joined
+in the order of the list; directory and glob matches are sorted by path, and a
+file named twice is read once. CLI: `--schema`, repeatable (relative to the
+current directory). See [Schema inference](../guide/schema-inference.md).
 Stub generation uses it for helpers that have no more specific schema; see
 [Generated stubs](../guide/stubs.md#schemas).
+
+```toml
+[tool.sqlty]
+schema = ["extensions.sql", "tables/"]
+```
 
 ## `schemas`
 
@@ -109,6 +118,20 @@ style: `from sqlty import UNTYPED`, or `sqlty.UNTYPED` (`sy.UNTYPED`) for
 module imports.
 Example: [`examples/05_import_style/`](https://github.com/jirikuncar/sqlty/tree/main/examples/05_import_style).
 
+## `type-modules`
+
+Modules `check` may import to resolve the types of row type fields. By default
+only the standard library and `typing`, `typing_extensions`, `pydantic`,
+`pydantic_core`, `annotated_types` and `sqlty` are imported; names from
+modules of the checked paths are read from their source, and any other name is
+unknown and never reported, so no import-time code of your application runs.
+List a module (its submodules are included) to have it imported:
+
+```toml
+[tool.sqlty]
+type-modules = ["myapp.types"]
+```
+
 ## `untyped`
 
 `"skip"` (default) leaves row-returning queries of unknown type as plain
@@ -136,7 +159,9 @@ run the formatter; run yours after it.
 ## `functions`
 
 An array of tables registering helper functions for
-[stub generation](../guide/stubs.md):
+[stub generation](../guide/stubs.md) and for `sqlty check`, which checks their
+calls like those of an [annotated helper](../guide/helpers.md#helpers-you-cannot-annotate)
+without editing the signature (a method is `"pkg.db.Db.fetch_all"`):
 
 ```toml
 [[tool.sqlty.functions]]
@@ -152,7 +177,7 @@ return_type_template = "list[{sqlty}]"
 | `return_type_template` | no | Return type of each overload, with `{sqlty}` for the inferred row type. Default: `"SQL[{sqlty}]"` |
 | `imports` | no | Import lines added to the stub (a string or a list), for names used in `return_type_template` |
 | `schema` | no | Schema path for this helper, relative to the directory of `pyproject.toml`. Overrides every other [schema source](../guide/stubs.md#schemas) |
-| `return_type_param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it |
+| `return_type_param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it. `check` compares it with the query columns |
 | `self_type_template` | no | Reserved for methods, which are not supported |
 
 Entries without `import_path` or `query_param` are skipped with a warning.

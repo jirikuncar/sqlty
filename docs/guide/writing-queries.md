@@ -90,20 +90,33 @@ query = "--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions"
 # rewritten-file: query = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions")
 ```
 
-The rewriter adds `import datetime` and `import uuid` when the row type needs
-them. `SQL` and `UNTYPED` already imported by any top-level
-`from sqlty import ...` (a list, parentheses, `*`) are not imported again; a
-missing one gets a line of its own.
+The rewriter adds `import datetime`, `import uuid`, `import decimal`,
+`import ipaddress` and `import typing` when the row type needs them. `SQL` and
+`UNTYPED` already imported by any top-level `from sqlty import ...` (a list,
+parentheses, `*`) are not imported again; a missing one gets a line of its own.
 
 Literals, `COUNT(*)` and casts inside expressions are typed too. A column
-without a cast, schema entry or literal type becomes `str`, as does an
-expression sqlty cannot type, such as arithmetic. Cast the whole expression
-when the default is wrong:
+without a cast, schema entry or literal type, a column of a type sqlty does not
+know, and an expression it cannot type, such as arithmetic or `NULL`, make the
+row type unknown: the string is left as it is (`SQL[UNTYPED]` with
+[`untyped = "sentinel"`](untyped.md)) and `sqlty check` skips the column.
+Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
+wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
+`greatest`, `unnest` and the advisory locks are typed too; `COALESCE`,
+`GREATEST` and `LEAST` take the first argument of known type, skipping `NULL`
+and placeholders. Cast the whole expression to type it:
 
 ```python
-query = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, (x::INTEGER + 1)::INTEGER, name FROM t"
-# rewritten: query = SQL[tuple[int, int, str, int, str]]("--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, (x::INTEGER + 1)::INTEGER, name FROM t")
+unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
+typed = "--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t"
+# rewritten: unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
+# rewritten: typed = SQL[tuple[int, int, int, str]]("--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t")
 ```
+
+An unaliased column is named as PostgreSQL names it: the column (also under a
+cast), the function (`count`, `max`, `now`), the array of a subscript (`tags[1]`
+is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, else
+`?column?`. Alias columns that a row type matches by name.
 
 Row types are never optional: a nullable column is typed as its base type.
 Annotate a [row type](row-types.md) with `T | None` when you need it.
@@ -152,25 +165,34 @@ parameters instead of interpolating them, and keep the query a plain literal.
 | `SIGNED`, `UNSIGNED` (MySQL `CAST(x AS SIGNED)`) | `int` |
 | `TEXT`, `VARCHAR`, `CHAR`, `STRING` | `str` |
 | `BOOLEAN`, `BOOL` | `bool` |
-| `FLOAT`, `DOUBLE`, `REAL`, `DECIMAL`, `NUMERIC` | `float` |
-| `UDOUBLE`, `UDECIMAL` (MySQL `... UNSIGNED`) | `float` |
+| `FLOAT`, `DOUBLE`, `REAL`, `UDOUBLE` (MySQL `... UNSIGNED`) | `float` |
+| `DECIMAL`, `NUMERIC`, `UDECIMAL` (MySQL `... UNSIGNED`) | `decimal.Decimal`, `float` in `sqlite` and `oracle` |
 | `DATE` | `datetime.date` |
 | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` |
 | `TIME`, `TIMETZ` | `datetime.time` |
 | `INTERVAL` | `datetime.timedelta` |
-| `JSON`, `JSONB` | `dict` |
+| `JSON`, `JSONB` | `typing.Any`: any JSON value can be stored |
+| `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` |
+| `CIDR` | `ipaddress.IPv4Network \| ipaddress.IPv6Network` |
 | `UUID` | `uuid.UUID` |
 | `BYTEA`, `BLOB`, `BINARY`, `VARBINARY` | `bytes` |
-| Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list` |
-| Anything else (`ENUM`, `SET`, ...) | `str` |
+| `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
+| `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `TSVECTOR`, `TSQUERY` | `str` |
+| Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
+| Anything else (`SET`, `POINT`, custom types, ...) | unknown: the row type is unknown |
 
 ### Dialect notes
 
-- Array element types are not inferred: `FROM users` with a `TEXT[]` column
-  gives `tuple[int, list]`. Narrow it by hand to `list[str]`, in a row type or
-  in `SQL[tuple[...]]`, without triggering `column-type-mismatch` or
-  `stale-type`.
-- An array type needs an element type: `x::INT[]` is a `list`, but a bare
+- The types are the ones psycopg returns: `NUMERIC` is `decimal.Decimal`, `inet`
+  an address, or an interface when the value has a prefix (`1.2.3.4/24`).
+  `AVG` of integers, `SUM` without a known argument type and fractional
+  literals (`1.5`) are decimals too. Drivers for SQLite and Oracle return
+  floats, so `decimal.Decimal` is used in the other dialects, MySQL included.
+- A `TEXT[]` column gives `list[str]`. Narrowing the element type by hand (a
+  `list[str]` field for `list[int]`) is not reported: elements are not compared.
+  A JSON column gives `Any`, which any field accepts, and any annotation
+  (`dict`, `list[str]`, a `TypedDict`) in `SQL[tuple[...]]` is not `stale-type`.
+- An array type needs an element type: `x::INT[]` is a `list[int]`, but a bare
   `x::ARRAY` is rejected and nothing is inferred. A fixed size must be an
   integer literal (`INT[3]`, not `INT[n]`); the size itself is ignored.
 - MySQL has no `INT[]`; use `CAST(x AS UNSIGNED ARRAY)`.

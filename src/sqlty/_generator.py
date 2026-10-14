@@ -45,20 +45,24 @@ class QueryTyper:
     schema_sql: str | None = None
 
     @classmethod
-    def load(cls, dialect: str, schema_path: Path | None) -> QueryTyper:
-        """Read the schema file, if any.
+    def load(cls, dialect: str, schema_path: Path | list[Path] | None) -> QueryTyper:
+        """Read and concatenate the schema files, if any.
 
         Raises:
-            RuntimeError: The schema file is missing or can't be read.
+            RuntimeError: A schema file is missing or can't be read.
         """
         if schema_path is None:
             return cls(dialect)
-        if not schema_path.exists():
-            raise RuntimeError(f"Schema file not found: {schema_path}")
-        try:
-            return cls(dialect, schema_path.read_text())
-        except Exception as e:
-            raise RuntimeError(f"Failed to read schema file {schema_path}: {e}") from e
+        paths = [schema_path] if isinstance(schema_path, Path) else schema_path
+        parts: list[str] = []
+        for path in paths:
+            if not path.exists():
+                raise RuntimeError(f"Schema file not found: {path}")
+            try:
+                parts.append(path.read_text())
+            except Exception as e:
+                raise RuntimeError(f"Failed to read schema file {path}: {e}") from e
+        return cls(dialect, "\n".join(parts))
 
     def infer_type(self, sql: str) -> str | None:
         return core.infer_type(sql, dialect=self.dialect, schema_sql=self.schema_sql)
@@ -73,7 +77,7 @@ class TypeStubGenerator:
     def __init__(
         self,
         sql_dialect: str = "postgres",
-        schema_mappings: dict[str | None, Path] | None = None,
+        schema_mappings: dict[str | None, Path | list[Path]] | None = None,
         format_command: str | None = None,
         verbose: int = 0,
         function_configs: list[FunctionConfigComplete] | None = None,
@@ -319,7 +323,7 @@ class TypeStubGenerator:
         if cache_key in self._typer_cache:
             return self._typer_cache[cache_key]
 
-        schema_to_use: Path | None = None
+        schema_to_use: Path | list[Path] | None = None
         schema_source = "default"
 
         # Resolve the registry module path (the file that defines the registry)
@@ -379,7 +383,7 @@ class TypeStubGenerator:
 
         return analyzer
 
-    def _get_analyzer_for_schema(self, schema_path: Path) -> QueryTyper:
+    def _get_analyzer_for_schema(self, schema_path: Path | list[Path]) -> QueryTyper:
         """Analyzer for the ``schema`` of a ``[[tool.sqlty.functions]]`` entry."""
         cache_key = f"schema::{schema_path}"
         if cache_key not in self._typer_cache:
@@ -595,7 +599,12 @@ class TypeStubGenerator:
             registry_class = call.get("registry_class")
 
             if schema_path := call.get("schema_path"):
-                analyzer = self._get_analyzer_for_schema(Path(schema_path))
+                paths = (
+                    [Path(schema_path)]
+                    if isinstance(schema_path, str)
+                    else [Path(p) for p in schema_path]
+                )
+                analyzer = self._get_analyzer_for_schema(paths)
             else:
                 analyzer = self._get_analyzer_for_registry(
                     registry_name, module_path, registry_class

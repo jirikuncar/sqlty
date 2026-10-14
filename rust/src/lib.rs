@@ -2,6 +2,7 @@
 
 mod analyzer;
 mod checker;
+mod ddl;
 mod fixer;
 mod rewriter;
 mod tokens;
@@ -17,19 +18,54 @@ use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 
-/// The last schema loaded, as `(schema_sql, dialect, schema)`: callers pass the same one per query.
-static LAST_SCHEMA: Mutex<Option<(String, String, analyzer::Schema)>> = Mutex::new(None);
+type CachedSchema = (
+    String,
+    String,
+    analyzer::Schema,
+    Vec<analyzer::SkippedObject>,
+);
+
+/// Most recently used first. Callers pass the same few schemas call after call, and
+/// parsing a large one costs about a millisecond, so keep the last few parsed.
+static SCHEMAS: Mutex<Vec<CachedSchema>> = Mutex::new(Vec::new());
+const SCHEMAS_KEPT: usize = 8;
+
+fn cached_schema(
+    schema_sql: &str,
+    dialect: &str,
+) -> (analyzer::Schema, Vec<analyzer::SkippedObject>) {
+    let mut cache = SCHEMAS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = cache
+        .iter()
+        .position(|(sql, d, ..)| sql == schema_sql && d == dialect)
+    {
+        cache[..=at].rotate_right(1);
+    } else {
+        let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+        cache.insert(
+            0,
+            (schema_sql.to_string(), dialect.to_string(), schema, skipped),
+        );
+        cache.truncate(SCHEMAS_KEPT);
+    }
+    (cache[0].2.clone(), cache[0].3.clone())
+}
 
 fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
-    let schema_sql = schema_sql?;
-    let mut last = LAST_SCHEMA.lock().unwrap_or_else(|e| e.into_inner());
-    match last.as_ref() {
-        Some((sql, d, schema)) if sql == schema_sql && d == dialect => Some(schema.clone()),
-        _ => {
-            let schema = analyzer::load_schema(schema_sql, dialect);
-            *last = Some((schema_sql.to_string(), dialect.to_string(), schema.clone()));
-            Some(schema)
-        }
+    Some(cached_schema(schema_sql?, dialect).0)
+}
+
+/// The schema, unless `source` cannot hold a query: every query, wrapper and
+/// diagnostic involves the text `sql` (`--sql`, `SQL[...]`), in any case.
+fn schema_for(source: &str, schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
+    if source
+        .as_bytes()
+        .windows(3)
+        .any(|w| w.eq_ignore_ascii_case(b"sql"))
+    {
+        schema(schema_sql, dialect)
+    } else {
+        None
     }
 }
 
@@ -81,6 +117,44 @@ fn analyze_select(
     }))
 }
 
+/// Names of the schema tables that could not be parsed, even without their
+/// constraints; their columns are unknown to inference.
+#[pyfunction]
+#[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
+fn schema_skipped_tables(schema_sql: &str, dialect: &str) -> Vec<String> {
+    skipped_objects(schema_sql, dialect, Some("table"))
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect()
+}
+
+/// `(kind, name)` of the schema tables and views that could not be parsed, `kind` being
+/// `"table"` or `"view"`; their columns are unknown to inference.
+#[pyfunction]
+#[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
+fn schema_skipped_objects(schema_sql: &str, dialect: &str) -> Vec<(String, String)> {
+    skipped_objects(schema_sql, dialect, None)
+}
+
+fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(String, String)> {
+    cached_schema(schema_sql, dialect)
+        .1
+        .into_iter()
+        .filter(|(kind, _)| only.is_none_or(|only| only == *kind))
+        .map(|(kind, name)| (kind.to_string(), name))
+        .collect()
+}
+
+/// Why a query does not parse, as sqlparser words it; None when it parses (or is empty).
+///
+/// Example:
+///     parse_error("SELECT id FROM", dialect="postgres")  # "Expected: ..., found: EOF ..."
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres"))]
+fn parse_error(sql: &str, dialect: &str) -> Option<String> {
+    analyzer::parse_error(sql, dialect)
+}
+
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
@@ -113,7 +187,7 @@ fn rewrite_source(
     Ok(rewriter::rewrite_source_with(
         source,
         dialect,
-        &schema(schema_sql, dialect),
+        &schema_for(source, schema_sql, dialect),
         import_style,
         untyped,
         keep_lines,
@@ -135,10 +209,13 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
+/// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
+/// (`None` for all); fixes of those rules on that line are not applied.
+///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
 fn fix_source(
     source: &str,
     dialect: &str,
@@ -146,15 +223,17 @@ fn fix_source(
     import_style: Option<&str>,
     untyped: bool,
     rules: Option<HashMap<String, String>>,
+    suppressed: Option<rewriter::Suppressed>,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
     Ok(fixer::fix_source(
         source,
         dialect,
-        &schema(schema_sql, dialect),
+        &schema_for(source, schema_sql, dialect),
         import_style,
         untyped,
         rules,
+        suppressed.unwrap_or_default(),
     ))
 }
 
@@ -190,7 +269,7 @@ fn check_source<'py>(
     let diagnostics = checker::check_source(
         source,
         dialect,
-        &schema(schema_sql, dialect),
+        &schema_for(source, schema_sql, dialect),
         rules,
         import_style,
         untyped,
@@ -224,10 +303,32 @@ fn wrapped_queries(
     Ok(checker::wrapped_queries(source, import_style))
 }
 
+/// Each query `check` sees, for `sqlty check --statistics`: `(line, kind, text)`.
+///
+/// `kind` is `"query"` with the `--sql` text (marker included), or the rule that
+/// skips the string (`fstring-skipped`, `tstring-skipped`, `unchecked-query`), with
+/// empty text. Queries passed to an `Annotated[LiteralString, SQL]` helper are not
+/// included, except those carrying the marker.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, import_style = None))]
+fn query_sites(source: &str, import_style: Option<&str>) -> PyResult<Vec<(usize, String, String)>> {
+    check_import_style(import_style)?;
+    Ok(checker::query_sites(source, import_style)
+        .into_iter()
+        .map(|(line, kind, text)| (line, kind.to_string(), text))
+        .collect())
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
+    m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
@@ -235,5 +336,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     Ok(())
 }

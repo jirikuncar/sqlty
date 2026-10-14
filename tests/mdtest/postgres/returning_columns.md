@@ -171,7 +171,7 @@ UPDATE products
 SET price = price * 1.1
 RETURNING id::INTEGER, (price * 1.1)::FLOAT
 -- columns: id: int (INT)
--- columns: : float (DOUBLE)
+-- columns: float8: float (DOUBLE)
 ```
 
 ## RETURNING with various datetime types
@@ -207,7 +207,7 @@ UPDATE settings
 SET config = '{"key": "value"}'::jsonb
 RETURNING id::INTEGER, config::JSONB
 -- columns: id: int (INT)
--- columns: config: dict (JSONB)
+-- columns: config: typing.Any (JSONB)
 ```
 
 ## UPDATE with FROM clause and RETURNING

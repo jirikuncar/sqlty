@@ -154,7 +154,7 @@ SELECT SUM(unknown_col::INTEGER) FROM products
 -- inferred: tuple[int]
 ```
 
-## SUM with unknown table falls back to float
+## SUM with unknown table falls back to Decimal
 
 ```toml
 [tool.sqlty]
@@ -173,5 +173,5 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(amount) FROM orders
--- inferred: tuple[float]
+-- inferred: tuple[decimal.Decimal]
 ```

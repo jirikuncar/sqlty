@@ -39,7 +39,7 @@ class StubASTUnparser:
             - local: from sqlty
             """
             if isinstance(n, ast.Import):
-                std_names = {"uuid", "datetime", "decimal"}
+                std_names = {"uuid", "datetime", "decimal", "typing"}
                 if any(alias.name in std_names for alias in n.names):
                     return "stdlib"
                 return "other"

@@ -135,7 +135,7 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
             from typing import Any, cast
 
             from sqlty._auto_generator import auto_generate_stub
-            from sqlty._config import load_config
+            from sqlty._config import expand_schema, load_config
 
             # Get the module and file path of the decorated function
             func_config = None
@@ -172,7 +172,9 @@ def sqlty[F](func: F | None = None, *, schema: str | None = None) -> F | Callabl
                         if func_config is not None and "schema" in func_config:
                             func_config = func_config.copy()
                             root = config_dir or Path.cwd()
-                            func_config["schema"] = str(root / func_config["schema"])
+                            func_config["schema"] = [
+                                str(p) for p in expand_schema(func_config["schema"], root)
+                            ]
                         if func_config is None:
                             warnings.warn(
                                 f"Function {expected_import_path} is decorated with @sqlty but not "

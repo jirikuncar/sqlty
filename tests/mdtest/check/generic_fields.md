@@ -112,11 +112,11 @@ q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM use
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str, list[str]]] should be SQL[tuple[int, list]]"
+# error: [stale-type] "SQL[tuple[str, list[str]]] should be SQL[tuple[int, list[str]]]"
 q = SQL[tuple[str, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, list]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# fixed: q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 ```
 
 ## Unions with a parametrised item are still stale
@@ -127,9 +127,9 @@ Only an item that is exactly `list[...]` refines an inferred `list`;
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, list[str] | str]] should be SQL[tuple[int, list]]"
+# error: [stale-type] "SQL[tuple[int, list[str] | str]] should be SQL[tuple[int, list[str]]]"
 a = SQL[tuple[int, list[str] | str]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
-# error: [stale-type] "SQL[tuple[int, list[str] | None]] should be SQL[tuple[int, list]]"
+# error: [stale-type] "SQL[tuple[int, list[str] | None]] should be SQL[tuple[int, list[str]]]"
 b = SQL[tuple[int, list[str] | None]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 ```
 

@@ -10,6 +10,7 @@ Commands:
 
 from __future__ import annotations
 
+import functools
 import logging
 import sys
 from dataclasses import dataclass
@@ -18,6 +19,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
+    from collections import Counter
+
+    from sqlty._config import SchemaSpec
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fix what can be fixed (the rules `sqlty rule` marks fixable, e.g. stale-rewrite, "
         "stale-type, select-star with a schema), then report the rest",
     )
+    check_parser.add_argument(
+        "--statistics",
+        action="store_true",
+        help="After the diagnostics, count queries typed, partially typed, unparsed and skipped",
+    )
 
     # --- rule ---
     rule_parser = subparsers.add_parser(
@@ -143,8 +152,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--schema",
-        type=Path,
-        help="Schema .sql file for every path (default: [tool.sqlty] schema per project)",
+        action="append",
+        help="Schema .sql file, directory or glob for every path; repeat for several "
+        "(default: [tool.sqlty] schema per project)",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
@@ -256,7 +266,10 @@ def _cmd_strip(args: argparse.Namespace) -> None:
 
 def _cmd_check(args: argparse.Namespace) -> None:
     """Check command: lint SQL type annotations."""
-    from sqlty.core import check_source, fix_source
+    from collections import Counter
+
+    from sqlty._source import ParsedSource
+    from sqlty.core import HelperIndex, check_source, fix_source, query_statistics
 
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
@@ -265,36 +278,72 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
+    modules = {path: _module_names(path, args.paths) for path in files}
+    sources = {
+        path: ParsedSource(
+            path.read_text(encoding="utf-8"),
+            modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
+        )
+        for path in files
+    }
+    helpers = HelperIndex()
+    for path, parsed in sources.items():
+        for name in modules[path]:
+            helpers.add(name, parsed)
+    configured: dict[tuple[tuple[str, str, str | None], ...], HelperIndex] = {}
+
+    def helpers_for(settings: Settings) -> HelperIndex:
+        """The index for files governed by ``settings``: its own ``functions`` only."""
+        if not settings.functions:
+            return helpers
+        if settings.functions not in configured:
+            configured[settings.functions] = index = helpers.fork()
+            for import_path, query_param, return_param in settings.functions:
+                index.register(import_path, query_param, return_param)
+        return configured[settings.functions]
+
     total_errors = 0
     total_warnings = 0
     total_fixed = 0
+    statistics: Counter[str] = Counter()
 
     for path in files:
-        source = path.read_text(encoding="utf-8")
+        parsed = sources[path]
         settings = resolver.for_file(path)
+        file_helpers = helpers_for(settings)
         if args.fix:
             fixed = fix_source(
-                source,
+                parsed,
                 dialect=settings.dialect,
                 schema_sql=settings.schema_sql,
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 rules=settings.rules,
             )
-            if fixed != source:
+            if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")
-                source = fixed
+                parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
                     print(f"Fixed {path}")
         diagnostics = check_source(
-            source,
+            parsed,
             dialect=settings.dialect,
             schema_sql=settings.schema_sql,
             rules=settings.rules,
             import_style=settings.import_style,
             untyped=settings.untyped,
+            helpers=file_helpers,
+            type_modules=settings.type_modules,
         )
+        if args.statistics:
+            statistics += query_statistics(
+                parsed,
+                dialect=settings.dialect,
+                schema_sql=settings.schema_sql,
+                import_style=settings.import_style,
+                helpers=file_helpers,
+            )
 
         for diag in diagnostics:
             severity = diag["severity"]
@@ -319,9 +368,22 @@ def _cmd_check(args: argparse.Namespace) -> None:
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
         print(f"Found {', '.join(parts)}")
+    if args.statistics and not args.quiet:
+        print(_format_statistics(statistics))
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _format_statistics(counts: Counter[str]) -> str:
+    """One line of query counts; skipped strings are broken down by rule."""
+    skipped = {rule: counts[rule] for rule in _SKIPPED_STRING_RULES if counts[rule]}
+    detail = ", ".join(f"{rule}: {count}" for rule, count in skipped.items())
+    return (
+        f"Queries: {counts['typed']} typed, {counts['partially typed']} partially typed, "
+        f"{counts['unparsed']} unparsed, {sum(skipped.values())} skipped"
+        + (f" ({detail})" if detail else "")
+    )
 
 
 def _cmd_rule(name: str | None) -> None:
@@ -360,6 +422,49 @@ def _collect_python_files(paths: list[Path]) -> list[Path]:
     return files
 
 
+@functools.cache
+def _is_package(directory: Path) -> bool:
+    return (directory / "__init__.py").exists()
+
+
+@functools.cache
+def _package_path(directory: Path) -> tuple[str, ...]:
+    """Names of ``directory`` and its parents up through the ``__init__.py`` ones."""
+    if directory == directory.parent or not _is_package(directory):
+        return ()
+    return (*_package_path(directory.parent), directory.name)
+
+
+@functools.cache
+def _resolved_root(root: Path) -> Path | None:
+    """``root`` resolved, or ``None`` when it is not a directory."""
+    root = root.resolve()
+    return root if root.is_dir() else None
+
+
+def _module_names(path: Path, roots: list[Path]) -> list[str]:
+    """Dotted names ``path`` can be imported by, the likeliest first.
+
+    The package path (up through the ``__init__.py`` directories) comes first,
+    then the path from each checked directory, with and without its own name.
+    ``pkg/__init__.py`` is ``pkg``.
+
+    Example:
+        >>> _module_names(Path("missing/pkg/mod.py"), [])
+        ['mod']
+    """
+    path = path.resolve()
+    parts = [*_package_path(path.parent), *([] if path.stem == "__init__" else [path.stem])]
+    names = [".".join(parts)]
+    for root in map(_resolved_root, roots):
+        if root is not None and path.is_relative_to(root):
+            relative = list(path.relative_to(root).with_suffix("").parts)
+            if relative[-1] == "__init__":
+                relative.pop()
+            names += [".".join(relative), ".".join([root.name, *relative])]
+    return list(dict.fromkeys(name for name in names if name)) or [path.stem]
+
+
 @dataclass(frozen=True)
 class Settings:
     """``[tool.sqlty]`` of the nearest ``pyproject.toml``, with CLI flags on top."""
@@ -369,6 +474,8 @@ class Settings:
     import_style: str | None = None
     untyped: bool = False
     rules: dict[str, str] | None = None
+    type_modules: tuple[str, ...] = ()
+    functions: tuple[tuple[str, str, str | None], ...] = ()
 
 
 class SettingsResolver:
@@ -383,8 +490,18 @@ class SettingsResolver:
 
     def __init__(self, args: argparse.Namespace) -> None:
         self._args = args
-        self._schema_sql = _load_schema(args.schema) if args.schema else None
+        self._schema_sql = _load_schema(args.schema, Path.cwd()) if args.schema else None
         self._by_dir: dict[Path, Settings] = {}
+        self._warned: set[tuple[str, str]] = set()
+
+    def _warn_skipped_objects(self, schema_sql: str | None, dialect: str) -> None:
+        from sqlty.core import schema_skipped_objects
+
+        if schema_sql is None or (schema_sql, dialect) in self._warned:
+            return
+        self._warned.add((schema_sql, dialect))
+        for kind, name in schema_skipped_objects(schema_sql, dialect=dialect):
+            logger.warning("Schema %s %s could not be parsed; its columns are unknown", kind, name)
 
     def for_file(self, path: Path) -> Settings:
         directory = path.parent.resolve()
@@ -400,7 +517,7 @@ class SettingsResolver:
         args = self._args
         schema_sql = self._schema_sql
         if schema_sql is None and "schema" in config and config_dir is not None:
-            schema_sql = _load_schema(config_dir / config["schema"])
+            schema_sql = _load_schema(config["schema"], config_dir)
         untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
         if untyped not in ("skip", "sentinel"):
             raise SystemExit(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
@@ -412,21 +529,33 @@ class SettingsResolver:
                 f"{config_dir}/pyproject.toml: {exc}; use 'from sqlty import SQL [as Q]' "
                 "or 'import sqlty [as sy]'"
             ) from None
+        dialect = args.dialect or config.get("dialect", "postgres")
+        self._warn_skipped_objects(schema_sql, dialect)
         return Settings(
-            dialect=args.dialect or config.get("dialect", "postgres"),
+            dialect=dialect,
             schema_sql=schema_sql,
             import_style=import_style,
             untyped=untyped == "sentinel",
             rules=config.get("rules"),
+            type_modules=tuple(config.get("type_modules", ())),
+            functions=tuple(
+                (f["import_path"], f["query_param"], f.get("return_type_param"))
+                for f in config.get("functions", [])
+            ),
         )
 
 
-def _load_schema(schema_path: Path) -> str | None:
-    """Load schema SQL from a file path."""
-    if schema_path.exists():
-        return schema_path.read_text(encoding="utf-8")
-    logger.warning("Schema file not found: %s", schema_path)
-    return None
+def _load_schema(spec: SchemaSpec, base: Path) -> str | None:
+    """Concatenate the schema files named by ``spec``; None if none can be read."""
+    from sqlty._config import expand_schema
+
+    parts: list[str] = []
+    for path in expand_schema(spec, base):
+        if path.is_file():
+            parts.append(path.read_text(encoding="utf-8"))
+        else:
+            logger.warning("Schema file not found: %s", path)
+    return "\n".join(parts) if parts else None
 
 
 def _print_diff(path: Path, original: str, modified: str) -> None:

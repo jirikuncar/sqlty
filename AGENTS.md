@@ -44,6 +44,7 @@ Hooks defined in `.pre-commit-config.yaml`:
 - `sqlty check` on `examples/`; `sqlty rewrite` in place on `examples/`
   (except `magic_codec/`)
 - `cargo fmt --check` on `rust/` (requires `cargo`)
+- `cargo test` on `rust/` when files under `rust/` change (requires `cargo`)
 - ruff (lint + format) and uv-lock
 - standard file checks (trailing whitespace, YAML/TOML/JSON syntax, etc.)
 

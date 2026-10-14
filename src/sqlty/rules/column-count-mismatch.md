@@ -5,7 +5,8 @@ Default severity: **error**
 ## What it does
 
 Checks that a user-defined row type (`TypedDict`, `NamedTuple`, dataclass,
-Pydantic model) has as many fields as the query returns columns.
+Pydantic model) has as many fields as the query returns columns. A TypedDict, dataclass or
+Pydantic model may omit fields with a default (`NotRequired` keys).
 
 ## Why is this bad?
 

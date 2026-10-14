@@ -48,7 +48,61 @@ included; a bare `# error:` means it reports nothing.
 
 ## What is checked
 
-Fields are matched to columns by position, in this order:
+`TypedDict`, `@dataclass` and Pydantic `BaseModel` fields are matched to
+columns by name, as psycopg's `dict_row`, `class_row` and `kwargs_row` pass
+them, so the order of fields and columns does not matter:
+
+1. Field count
+   ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
+   error), counting only required fields as the minimum.
+2. Field types
+   ([`column-type-mismatch`](../reference/rules.md#column-type-mismatch),
+   error).
+3. Columns without a field and required fields without a column
+   ([`typeddict-key-mismatch`](../reference/rules.md#typeddict-key-mismatch),
+   error).
+
+A field with a default, and a `NotRequired` key, may be missing from the
+query. A column without a field is an error for a TypedDict and a dataclass;
+a Pydantic model ignores it, as `extra="ignore"` is its default.
+
+```python
+from dataclasses import dataclass
+from typing import TypedDict
+
+from pydantic import BaseModel
+from sqlty import SQL
+
+class User(TypedDict):
+    name: str
+    id: int
+
+@dataclass
+class Account:
+    id: int
+    name: str
+    email: str | None = None
+
+class Profile(BaseModel):
+    id: int
+
+class Short(TypedDict):
+    id: int
+
+class Typed(TypedDict):
+    id: str
+    name: str
+
+reordered = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+optional = SQL[Account]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+ignored = SQL[Profile]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
+c = SQL[Short]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [column-type-mismatch] "Typed.id is str but query column 'id' infers int"
+a = SQL[Typed]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+`NamedTuple` fields are matched by position, in this order:
 
 1. Field count
    ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
@@ -61,18 +115,18 @@ Fields are matched to columns by position, in this order:
    warning).
 
 ```python
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     id: str
     name: str
 
-class Account(TypedDict):
+class Account(NamedTuple):
     user_id: int
     name: str
 
-class Short(TypedDict):
+class Short(NamedTuple):
     id: int
 
 # error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
@@ -87,12 +141,17 @@ A field passes the type check when it can hold the column's values: `Any`, a
 union containing `Any` or the column type, and `float` for an `int` column
 are all accepted, but `bool` for an `int` column is not. A `NewType` is
 accepted wherever its supertype is, and a parametrised generic such as
-`list[str]` or `dict[str, int]` for a column that infers the bare `list` or
-`dict`.
+`list[str]` or `dict[str, int]` for a column that infers `list` or `dict`
+(element types are not compared). A JSON column infers `Any`, so any field
+accepts it.
 
-Annotations are resolved with Python's typing machinery when the module can
-be imported, so `from datetime import datetime` matches a `TIMESTAMP` column
-just like `datetime.datetime` does:
+Annotations are resolved one field at a time with Python's typing machinery,
+so `from datetime import datetime` matches a `TIMESTAMP` column just like
+`datetime.datetime` does. Aliases from the same module (`UserName = str`,
+`type UserName = str`) and `from __future__ import annotations` work too. A
+field whose annotation cannot be resolved, such as one imported from a module
+that is not installed, is unknown and never reported; the other fields are
+still checked:
 
 ```python
 from datetime import datetime
@@ -109,11 +168,92 @@ q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP, token::UUID FR
 # error:
 ```
 
+### Types from other modules
+
+`sqlty check` also resolves a field annotated with a name imported from
+another module of the checked paths, such as the shared `NewType` ID types of
+an application. The module is read from its source and never imported: its
+module-level `X = NewType("X", T)`, `X = Literal[...]`, `type X = ...`,
+`X: TypeAlias = ...` and plain `X = <type expression>` are followed through
+any number of further imports, aliases and `__init__.py` re-exports, and
+import cycles are cut. `from pkg.ids import UserId [as U]`,
+`import pkg.ids as ids` (`ids.UserId`) and relative imports all work.
+
+```text
+# pkg/ids.py
+UserId = NewType("UserId", int)
+
+# app.py
+class User(TypedDict):
+    id: UserId   # accepted for an int column, reported for a text column
+```
+
+A module is parsed only when a row type names something from it, and only once
+per run. A name from a module outside the checked paths, or one that is not a
+type definition, stays unknown and is never reported.
+
+`check` never runs the imports of your application: it executes only imports
+of the standard library, `typing`, `typing_extensions`, `pydantic`,
+`pydantic_core`, `annotated_types` and `sqlty`, plus the modules listed in
+[`type-modules`](../reference/configuration.md#type-modules). Everything else
+is resolved from source as above or stays unknown, so a module with import-time
+side effects is not triggered by `sqlty check`. From Python, pass a
+`HelperIndex` filled with the modules (`index.add("pkg.ids", source)`) and the
+`module` name of the checked source as `check_source(..., helpers=index,
+module=...)`.
+
+## Pydantic aliases and extra columns
+
+A Pydantic model validates a row by alias, so a column is matched to a field by
+its `Field(alias="id")` or `Field(validation_alias="id")` string (also inside
+`Annotated`). With `populate_by_name=True` either the alias or the field name
+fills the field. `ConfigDict(extra="forbid")` (or `class Config: extra =
+"forbid"`) makes a column without a field an error, like a TypedDict. Aliases
+and the config are read from the class source, so Pydantic need not be
+installed.
+
+```python
+from pydantic import BaseModel, ConfigDict, Field
+from sqlty import SQL
+
+class User(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: int = Field(alias="id")
+
+ok = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# error: [typeddict-key-mismatch] "User has no field for query column 'name'"
+bad = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+`AliasChoices`, `AliasPath`, a non-literal alias and `alias_generator` make a
+field's names unknown: it is not reported as missing, and `extra="forbid"` no
+longer reports columns without a field.
+
+## Defaults in `Annotated`
+
+A field whose `Annotated` metadata holds `Field(default=...)` or
+`Field(default_factory=...)` (Pydantic, or a dataclass `field(...)` with a
+default) is optional for every row type, TypedDict included, as is common when
+rows are validated by `TypeAdapter(Row)` after psycopg builds them. A bare
+`Field()` or `Field(...)` stays required.
+
+```python
+from typing import Annotated, TypedDict
+from pydantic import Field
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    tags: Annotated[list[str], Field(default_factory=list)]
+
+# error:
+query = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+```
+
 ## TypedDict qualifiers
 
 `ReadOnly`, `Required` and `NotRequired` are looked through before types are
-compared. An open TypedDict is still matched by position, so a `NotRequired`
-key needs a column:
+compared. A `NotRequired` key may be missing from the query:
 
 ```python
 from typing import NotRequired, ReadOnly, TypedDict
@@ -124,16 +264,16 @@ class User(TypedDict):
     name: NotRequired[str]
 
 ok = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 short = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# error:
 ```
 
 ## Closed TypedDicts
 
-A closed TypedDict ([PEP 728](https://peps.python.org/pep-0728/):
-`closed=True`, `extra_items=Never`, or a subclass of either) is matched by
-key instead of position. `NotRequired` keys may be missing and column order
-does not matter. Undeclared columns and missing required keys are
+Open and closed TypedDicts ([PEP 728](https://peps.python.org/pep-0728/):
+`closed=True`, `extra_items=Never`, or a subclass of either) are both matched
+by key; `closed=True` states the intent, and `extra_items=T` (below) is what
+admits extra columns. Undeclared columns and missing required keys are
 [`typeddict-key-mismatch`](../reference/rules.md#typeddict-key-mismatch)
 errors:
 
@@ -236,8 +376,10 @@ operations such as `query + " LIMIT 1"` do not: `row_form` raises
 
 - The row type must be defined in the same file as the `SQL[T](...)` call.
   Imported row types are skipped silently.
-- A column with neither a cast nor a schema type is typed `str` by
-  `rewrite`, but `check` does not compare it with the field type.
+- A column with neither a cast nor a schema type has an unknown type: the
+  query is not wrapped by `rewrite` (`SQL[UNTYPED]` with
+  [`untyped = "sentinel"`](untyped.md)), and `check` does not compare the
+  column with the field type.
 - Validation is static. Nothing checks rows at runtime; use Pydantic if you
   need that.
 

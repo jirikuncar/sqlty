@@ -16,22 +16,51 @@ stale-type = "error"
 |------|-------|---------|---------|---------|
 | [`column-count-mismatch`](#column-count-mismatch) | Row type | error | no | Row type has a different number of fields than the query has columns |
 | [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field can't hold its column's values |
-| [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | Row type field name differs from its column name |
-| [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the keys of a closed or `extra_items` TypedDict |
+| [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | `NamedTuple` field name differs from its column name |
+| [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the fields of a TypedDict, dataclass or Pydantic model |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
 | [`select-star-no-schema`](#select-star-no-schema) | Query | error | no | `SELECT *` with no schema to expand it |
 | [`select-star`](#select-star) | Query | warn | yes | `SELECT *` |
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
+| [`unparsed-query`](#unparsed-query) | Query | ignore | no | Query that does not parse, so sqlty cannot check it |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
+| [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
 
 `sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
 rule's page.
+
+## Inline suppression
+
+A comment on the line a diagnostic is reported on drops it:
+
+- `# sqlty: ignore` drops every diagnostic on that line.
+- `# sqlty: ignore[rule-a, rule-b]` drops only the listed rules. A name that
+  matches no diagnostic on the line drops nothing, so the diagnostic stays.
+
+The comment is read with Python's tokenizer, so a `#` inside a string does
+not start one. For a statement that spans lines, put the comment on the line
+the diagnostic names. `sqlty check --fix` keeps the comment and does not apply
+a fix for a rule the comment suppresses.
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: str
+
+# error:
+q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[column-type-mismatch]
+```
+
+Enable [`unused-ignore`](#unused-ignore) to report comments that suppress
+nothing, so accepted cases do not outlive their reason.
 
 The examples below show what `sqlty check` reports for each block. `# error:`
 lines sit above the line they report on, warnings included; a bare `# error:`
@@ -68,7 +97,8 @@ Also reported for extra columns that don't fit a TypedDict's `extra_items`
 type. A field typed `Any`, a union containing `Any` or the column type, or
 `float` for an `int` column is accepted, as is a `NewType` wherever its
 supertype is and a parametrised generic (`list[str]`, `dict[str, int]`) for a
-column that infers the bare `list` or `dict`; a narrower field, such as `bool` for
+column that infers `list` or `dict` (element types are not compared; a JSON
+column infers `Any`, which any field accepts); a narrower field, such as `bool` for
 an `int` column, is not; see `sqlty rule column-type-mismatch`.
 
 ```python
@@ -87,15 +117,16 @@ Fix: change the field type or the cast.
 
 ### column-name-mismatch
 
-Default: warn. A field name differs from its column name or alias. Fields
-are matched by position, so the row would still be built, with misleading
-names.
+Default: warn. A `NamedTuple` field name differs from its column name or
+alias. `NamedTuple` fields are matched by position, so the row would still
+be built, with misleading names. TypedDicts, dataclasses and Pydantic models
+are matched by name instead; see `typeddict-key-mismatch`.
 
 ```python
-from typing import TypedDict
+from typing import NamedTuple
 from sqlty import SQL
 
-class User(TypedDict):
+class User(NamedTuple):
     user_id: int
     name: str
 
@@ -107,8 +138,10 @@ Fix: rename the field or alias the column (`id AS user_id`).
 
 ### typeddict-key-mismatch
 
-Default: error. A closed TypedDict, or one with `extra_items`, is matched by
-key. The query has a column with no key, or lacks a required key.
+Default: error. TypedDicts, dataclasses and Pydantic models are matched to
+columns by name. The query has a column with no field (a Pydantic model
+ignores it, and `extra_items` admits it), or lacks a required field. A
+field with a default, or a `NotRequired` key, may be missing.
 
 ```python
 from typing import TypedDict
@@ -149,6 +182,20 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 Fix: see [TypedDict inheritance](../guide/row-types.md#typeddict-inheritance)
 for what a subclass may do.
+
+## Suppression rules
+
+### unused-ignore
+
+Default: ignore. A `# sqlty: ignore` comment that suppresses no diagnostic on
+its line, or a rule listed in one that suppresses nothing. Off by default;
+enable it with `unused-ignore = "warn"`. It reports, for example:
+
+```text
+'# sqlty: ignore[select-star]' suppresses no diagnostic
+```
+
+Fix: remove the comment, or correct the rule name.
 
 ## Query rules
 
@@ -191,8 +238,9 @@ Fix: `sqlty check --fix` replaces `*` with the cast column list from the
 schema, unless the string holds escapes or quotes, the query is split over
 several concatenated strings, or it reads from more than one table (`JOIN` or
 `FROM a, b`), because the expansion drops table qualifiers. A `*` the schema
-cannot resolve (a subquery, a CTE, a `USING` or `NATURAL` join) gets no
-inferred type, so its annotation is kept.
+cannot resolve (a `USING` or `NATURAL` join) gets no inferred type, so its
+annotation is kept. A `*` over a subquery or CTE is typed from that query's
+columns but not expanded by `--fix`.
 
 ### inline-sql-comment
 
@@ -234,6 +282,28 @@ q = SQL[tuple[int]]("--sql\nSELECT CAST(id AS SIGNED) FROM users")
 
 Fix: `sqlty check --fix` replaces `--sql` with `-- sql` in plain string
 literals, wrapped or not.
+
+### unparsed-query
+
+Default: ignore. A query that does not parse in the configured dialect: a
+`--sql` string, the argument of `SQL[T](...)`, or a string passed to an
+`Annotated[LiteralString, SQL]` parameter. The message quotes sqlparser's
+error. Enable it with `unparsed-query = "warn"`:
+
+```toml
+[tool.sqlty.rules]
+unparsed-query = "warn"
+```
+
+```python
+from sqlty import SQL
+
+# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
+q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
+```
+
+Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
+counts such queries as unparsed whether or not the rule is enabled.
 
 ## Rewrite rules
 

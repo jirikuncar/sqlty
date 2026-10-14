@@ -26,6 +26,7 @@ def compute_additional_imports(calls: list[CallInfo]) -> list[str]:
         r"\buuid\.UUID\b": "uuid",
         r"\bdatetime\.(datetime|date|time|timedelta)\b": "datetime",
         r"\bdecimal\.Decimal\b": "decimal",
+        r"\btyping\.Literal\b": "typing",
     }
     needed: set[str] = set()
     for call in calls:

@@ -22,6 +22,8 @@ Configuration via pyproject.toml:
     tstring-skipped = "warn"            # default
     unchecked-query = "warn"            # default
     untyped-query = "warn"              # default
+    unparsed-query = "ignore"           # default
+    unused-ignore = "ignore"            # default
 """
 
 from __future__ import annotations
@@ -68,13 +70,13 @@ RULES: dict[str, LintRule] = {
         name="column-name-mismatch",
         default_severity=Severity.WARN,
         fixable=False,
-        description="Annotated type field name doesn't match query column alias",
+        description="Annotated NamedTuple field name doesn't match query column alias",
     ),
     "typeddict-key-mismatch": LintRule(
         name="typeddict-key-mismatch",
         default_severity=Severity.ERROR,
         fixable=False,
-        description="Query columns don't fit the keys of a closed or extra_items TypedDict",
+        description="Query columns don't fit the fields of a TypedDict, dataclass or Pydantic model",
     ),
     "typeddict-inheritance": LintRule(
         name="typeddict-inheritance",
@@ -144,6 +146,18 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=True,
         description="SQL[UNTYPED] query has no inferable row type; add casts or a schema",
+    ),
+    "unparsed-query": LintRule(
+        name="unparsed-query",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="--sql query, SQL[T] query or Annotated helper query that does not parse",
+    ),
+    "unused-ignore": LintRule(
+        name="unused-ignore",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="# sqlty: ignore comment, or rule in one, that suppresses no diagnostic",
     ),
 }
 

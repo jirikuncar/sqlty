@@ -390,6 +390,23 @@ def test_compute_required_imports():
     assert "sqlty" in from_imports
 
 
+def test_compute_required_imports_for_enum_literal():
+    """A ``typing.Literal`` return type needs ``import typing`` next to ``from typing import ...``."""
+    stub = StubFile()
+    registry = RegistryDecorator(name="Query")
+    registry.add_overload(
+        OverloadSignature(
+            query_literal="SELECT 1", return_type="SQL[tuple[typing.Literal['a', 'b']]]"
+        )
+    )
+    stub.add_registry(registry)
+
+    required = stub.compute_required_imports()
+
+    assert "typing" in {imp.module for imp in required if not imp.from_import}
+    assert "typing" in {imp.module for imp in required if imp.from_import}
+
+
 def test_ast_node_references_preserved():
     """Test that AST node references are preserved during parsing."""
     pyi_source = """from typing import Literal, overload

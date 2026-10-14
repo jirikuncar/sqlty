@@ -19,15 +19,15 @@ class TestParser:
             (
                 "SELECT x::INT[3], y::TEXT[2][2], z::INT ARRAY[3] FROM t",
                 "postgres",
-                "tuple[list, list, list]",
+                "tuple[list[int], list[list[str]], list[int]]",
             ),
-            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[str]"),
+            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[int]"),
             ("SELECT x::INT[y] FROM t", "postgres", None),
             ("SELECT x::INT[1+1] FROM t", "postgres", None),
-            ("SELECT x::INT ARRAY, y FROM t", "postgres", "tuple[list, str]"),
-            ('SELECT "CAST"(x), "LENGTH"(y), LENGTH(z) FROM t', "postgres", "tuple[str, str, int]"),
+            ("SELECT x::INT ARRAY, y::TEXT FROM t", "postgres", "tuple[list[int], str]"),
+            ('SELECT "CAST"(x), "LENGTH"(y), LENGTH(z) FROM t', "postgres", None),
             ("SELECT CAST(x AS INT[]) FROM t", "mysql", None),
-            ("SELECT CAST(x AS UNSIGNED ARRAY) FROM t", "mysql", "tuple[list]"),
+            ("SELECT CAST(x AS UNSIGNED ARRAY) FROM t", "mysql", "tuple[list[int]]"),
             ("SELECT CAST(x AS SET('a')) FROM t", "postgres", None),
             ("SELECT CAST(x AS SIGNED INTEGER) FROM t", "sqlite", None),
             ("SELECT CAST(x AS UNSIGNED INTEGER) FROM t", "mysql", "tuple[int]"),
@@ -37,15 +37,15 @@ class TestParser:
                 "mysql",
                 "tuple[int, float]",
             ),
-            ("SELECT CAST(x AS POINT) FROM t", "mysql", "tuple[str]"),
-            ("SELECT CAST(x AS DEC(8,3) UNSIGNED) FROM t", "mysql", "tuple[float]"),
+            ("SELECT CAST(x AS POINT) FROM t", "mysql", None),
+            ("SELECT CAST(x AS DEC(8,3) UNSIGNED) FROM t", "mysql", "tuple[decimal.Decimal]"),
             ("SELECT CAST(x AS NUMERIC(8,3) UNSIGNED) FROM t", "mysql", None),
             ("SELECT CAST(x AS FIXED UNSIGNED) FROM t", "mysql", None),
             (
                 "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE "
                 "RETURNING merge_action(), t.id::INT",
                 "postgres",
-                "tuple[str, int]",
+                None,
             ),
             ("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "postgres", None),
         ],
@@ -85,9 +85,7 @@ class TestParser:
     @pytest.mark.parametrize("dialect", ["postgres", "sqlite"])
     def test_mysql_only_column_skips_table(self, dialect: str):
         schema = "CREATE TABLE t (a INT, b SET('x'));"
-        assert core.infer_type("SELECT a FROM t", dialect=dialect, schema_sql=schema) == (
-            "tuple[str]"
-        )
+        assert core.infer_type("SELECT a FROM t", dialect=dialect, schema_sql=schema) is None
 
     def test_int3_unsigned_column(self):
         schema = "CREATE TABLE t (a INT, b INT3 UNSIGNED);"
@@ -113,7 +111,7 @@ class TestQueryInput:
             ("--sql SELECT id FROM users", "mysql", None),
             ("SELECT id FROM users WHERE name = %b AND id = %(n)t", "postgres", "tuple[int]"),
             ("SELECT id FROM users WHERE id = %(a-b)s", "postgres", "tuple[int]"),
-            ("SELECT id, 5 %% 2 FROM users WHERE name LIKE 'a%%'", "postgres", "tuple[int, str]"),
+            ("SELECT id, 5 %% 2 FROM users WHERE name LIKE 'a%%'", "postgres", "tuple[int, int]"),
             (
                 "SELECT $$it's %s$$::TEXT, id FROM users WHERE id = %s",
                 "postgres",
@@ -137,30 +135,26 @@ class TestQueryInput:
 
 
 def _type_table() -> dict[str, str]:
+    """``SQL_TO_PYTHON_TYPE`` of the analyzer, without ``ENUM`` (its values are needed to parse)."""
     source = (Path(__file__).resolve().parent.parent / "rust/src/analyzer.rs").read_text()
+    constants = dict(re.findall(r'const (\w+): &str = "([\w. |]+)";', source))
     table = source[
         source.index("static SQL_TO_PYTHON_TYPE") : source.index("static FUNCTION_TYPES")
     ]
-    return dict(re.findall(r'\("(\w+)", "([\w.]+)"\)', table))
+    pairs = re.findall(r'\("(\w+)", (?:"([\w.]+)"|(\w+))\)', table)
+    return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
 
 
 @pytest.mark.parametrize("dialect", ["postgres", "mysql", "sqlite"])
 @pytest.mark.parametrize(("sql_type", "python_type"), sorted(_type_table().items()))
 def test_type_names(sql_type: str, python_type: str, dialect: str):
-    """A mapped type name, cast or in a schema, is its Python type.
-
-    A bare ``ARRAY`` needs an element type, so the cast doesn't parse and the
-    schema table is skipped.
-    """
+    """A mapped type name, cast or in a schema, is its Python type."""
     schema = f"CREATE TABLE t (c {sql_type});"
     cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
-    if sql_type == "ARRAY":
-        assert (cast, column) == (None, "tuple[str]")
-    else:
-        assert cast == column == f"tuple[{python_type}]"
-        expanded = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
-        assert expanded is not None and expanded.startswith("SELECT c::")
+    assert cast == column == f"tuple[{python_type}]"
+    expanded = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
+    assert expanded is not None and expanded.startswith("SELECT c::")
 
 
 @pytest.mark.parametrize(

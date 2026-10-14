@@ -20,7 +20,7 @@ SELECT id::INTEGER, name::TEXT FROM users
 
 ```sql
 SELECT COUNT(*) FROM users
--- columns: *: int (INTEGER)
+-- columns: count: int (BIGINT)
 ```
 
 ## SELECT with various type casts
@@ -37,7 +37,7 @@ FROM products
 -- columns: name: str (TEXT)
 -- columns: price: float (DOUBLE)
 -- columns: active: bool (BOOLEAN)
--- columns: *: int (INT)
+-- columns: count: int (INT)
 ```
 
 ## Return type generation for multiple columns
@@ -287,25 +287,26 @@ SELECT id::INTEGER, created_at::TIMESTAMP, birth_date::DATE FROM users
 
 ```sql
 SELECT TRIM(name), SUBSTRING(name FROM 1 FOR 2), POSITION('a' IN name) FROM users
--- columns: : str (None)
--- columns: : str (None)
--- columns: : int (None)
+-- columns: btrim: str (None)
+-- columns: substring: str (None)
+-- columns: position: int (None)
 ```
 
 ## Unaliased function names
 
-Calls sqlty can't type are named after the function; typed ones have no name.
-Alias columns that a row type matches by name.
+Unaliased columns are named as PostgreSQL does: after the column (also under a
+cast) or the function, else `?column?`. Alias columns that a row type matches
+by name.
 
 ```sql
 SELECT NULLIF(a::INTEGER, 0), my_fn(b), COUNT(*), count(c), LOWER(d), json_build_object('k', 1), NOT e, -f, -1 FROM t
--- columns: NULLIF: None (None)
+-- columns: nullif: int (INT)
 -- columns: my_fn: None (None)
--- columns: *: int (INTEGER)
--- columns: : int (INTEGER)
--- columns: : str (None)
--- columns: json_build_object: dict (None)
--- columns: : None (None)
--- columns: : None (None)
--- columns: 1: None (None)
+-- columns: count: int (BIGINT)
+-- columns: count: int (BIGINT)
+-- columns: lower: None (None)
+-- columns: json_build_object: typing.Any (JSON)
+-- columns: ?column?: bool (BOOLEAN)
+-- columns: ?column?: None (None)
+-- columns: ?column?: int (None)
 ```

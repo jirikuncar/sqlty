@@ -35,9 +35,10 @@ Columns, qualified columns and `SELECT *` are typed from the schema:
 users = "--sql\nSELECT id, name, created_at FROM users"
 totals = "--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id"
 everything = "--sql\nSELECT * FROM orders"
+# rewritten: import decimal
 # rewritten: users = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users")
-# rewritten: totals = SQL[tuple[str, float]]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
-# rewritten: everything = SQL[tuple[int, int, float]]("--sql\nSELECT * FROM orders")
+# rewritten: totals = SQL[tuple[str, decimal.Decimal]]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
+# rewritten: everything = SQL[tuple[int, int, decimal.Decimal]]("--sql\nSELECT * FROM orders")
 ```
 
 An explicit cast still wins over the schema:
@@ -53,6 +54,64 @@ whenever the table does. Without a schema, `SELECT *` is an error
 ([`select-star-no-schema`](../reference/rules.md#select-star-no-schema)).
 
 Nullability is not tracked: `email` above is `str`, not `str | None`.
+
+## Views
+
+A `CREATE VIEW` (or `CREATE OR REPLACE VIEW`, `CREATE MATERIALIZED VIEW`) in
+the schema is a table whose columns are typed from its query. Views are
+analyzed in file order, so a view may read the views before it. A column the
+schema cannot type, such as one read from a table that is not in the schema,
+stays unknown, as in a CTE.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER);
+CREATE VIEW adults (user_id, user_name) AS SELECT id, name FROM users WHERE age >= 18;
+```
+
+```python
+adults = "--sql\nSELECT user_id, user_name FROM adults"
+# rewritten: adults = SQL[tuple[int, str]]("--sql\nSELECT user_id, user_name FROM adults")
+```
+
+## Domains and enums
+
+A column typed by a `CREATE DOMAIN` gets the domain's base type; domains over
+domains resolve to the innermost base type, and a schema-qualified name
+(`app.percent`) matches the unqualified one. A column typed by a
+`CREATE TYPE ... AS ENUM` is a `typing.Literal` of the enum's labels, and so is
+a cast to the enum (`x::order_status`). `sqlty rewrite` adds `import typing` for
+it. The SQL type reported for a column is the domain's base type, or the
+enum's own (unqualified, upper-case) name.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE DOMAIN percent AS integer CHECK (VALUE BETWEEN 0 AND 100);
+CREATE TYPE order_status AS ENUM ('pending', 'paid');
+CREATE TABLE orders (id INTEGER PRIMARY KEY, discount percent, status order_status NOT NULL);
+```
+
+```python
+orders = "--sql\nSELECT discount, status FROM orders"
+# rewritten: orders = SQL[tuple[int, typing.Literal['pending', 'paid']]]("--sql\nSELECT discount, status FROM orders")
+```
+
+A field annotated `str` still accepts an enum column, and a `Literal[...]` field
+is not checked against the labels.
 
 ## Where the schema comes from
 
@@ -117,7 +176,8 @@ not, and skips a table that uses one (see
 ### MySQL
 
 MySQL schemas may quote identifiers with backticks and use `UNSIGNED`,
-`ENUM`, `SET` and `JSON` columns:
+`ENUM`, `SET` and `JSON` columns. `SET` has no known Python type, so a query
+that selects one is not typed:
 
 ```toml
 [tool.sqlty]
@@ -140,9 +200,12 @@ CREATE TABLE `orders` (
 ```
 
 ```python
-orders = "-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`"
+orders = "-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`"
+with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
-# rewritten: orders = SQL[tuple[int, float, int, str, str, dict, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, tags, meta, created_at FROM `orders`")
+# rewritten: import decimal
+# rewritten: orders = SQL[tuple[int, decimal.Decimal, int, str, typing.Any, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
+# rewritten: with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 # rewritten: casts = SQL[tuple[int, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 

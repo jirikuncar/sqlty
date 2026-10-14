@@ -35,14 +35,14 @@ SELECT id::INTEGER FROM users WHERE data = %b AND name = %(user-name)t
 
 ```sql
 SELECT 5 %% 2, 'a%%'::TEXT
--- inferred: tuple[str, str]
+-- inferred: tuple[int, str]
 ```
 
 ## Cast placeholder
 
 ```sql
 SELECT %s::INTEGER, %s
--- inferred: tuple[int, str]
+-- inferred: None
 ```
 
 ## Placeholder text in strings

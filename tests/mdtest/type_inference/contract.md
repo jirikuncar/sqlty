@@ -111,7 +111,7 @@ SELECT id, name FROM users
 
 ```sql
 SELECT id FROM users
--- inferred: tuple[str]
+-- inferred: None
 ```
 
 ## Regression cases
@@ -183,21 +183,21 @@ SELECT a::INTEGER FROM t UNION SELECT b FROM u UNION SELECT c FROM v
 
 ```sql
 SELECT 1, 1.5, 'a', TRUE, NULL
--- inferred: tuple[int, float, str, bool, str]
+-- inferred: None
 ```
 
 ### `SELECT COUNT(*) AS n, SUM(x) AS s FROM t`
 
 ```sql
 SELECT COUNT(*) AS n, SUM(x) AS s FROM t
--- inferred: tuple[int, float]
+-- inferred: tuple[int, decimal.Decimal]
 ```
 
 ### `SELECT AVG(x::INTEGER), MIN(x::INTEGER), MAX(d::DATE) FROM t`
 
 ```sql
 SELECT AVG(x::INTEGER), MIN(x::INTEGER), MAX(d::DATE) FROM t
--- inferred: tuple[float, int, datetime.date]
+-- inferred: tuple[decimal.Decimal, int, datetime.date]
 ```
 
 ### `SELECT COALESCE(x::INTEGER, 0), (x::INTEGER) FROM t`
@@ -232,14 +232,14 @@ SELECT (SELECT y::INTEGER FROM u) FROM t
 
 ```sql
 SELECT ROW_NUMBER() OVER (), json_build_object('a', 1) FROM t
--- inferred: tuple[int, dict]
+-- inferred: tuple[int, typing.Any]
 ```
 
 ### `SELECT ts::DOUBLE PRECISION, tags::INT[] FROM t`
 
 ```sql
 SELECT ts::DOUBLE PRECISION, tags::INT[] FROM t
--- inferred: tuple[float, list]
+-- inferred: tuple[float, list[int]]
 ```
 
 ### Schema: `SELECT * FROM users`
@@ -257,7 +257,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, float]
+-- inferred: tuple[int, str, decimal.Decimal]
 ```
 
 ### Schema: `SELECT o.*, u.name FROM users u JOIN orders o ON TRUE`
@@ -329,7 +329,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT MAX(placed), AVG(oid) FROM orders
--- inferred: tuple[datetime.datetime, float]
+-- inferred: tuple[datetime.datetime, decimal.Decimal]
 ```
 
 ### Schema: `DELETE FROM users RETURNING *`
@@ -347,7 +347,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 DELETE FROM users RETURNING *
--- inferred: tuple[int, str, float]
+-- inferred: tuple[int, str, decimal.Decimal]
 ```
 
 ### Schema: `DELETE FROM users RETURNING id, name`

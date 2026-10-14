@@ -1,3 +1,4 @@
+import decimal
 from sqlty import SQL
 
 # Schema-based inference: no ::TYPE casts needed.
@@ -6,7 +7,7 @@ from sqlty import SQL
 # Types inferred from schema.sql
 user_query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 
-order_query = SQL[tuple[int, int, float, str]](
+order_query = SQL[tuple[int, int, decimal.Decimal, str]](
     "--sql\nSELECT id, user_id, total, status FROM orders"
 )
 

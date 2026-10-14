@@ -19,7 +19,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 
 The `# decoded:` line shows the code Python runs. The codec wraps strings as
 `sqlty rewrite` does and adds the imports the inferred types need
-(`from sqlty import SQL`, `import datetime`, `import uuid`) after the module
+(`from sqlty import SQL`, `import datetime`, `import uuid`, `import decimal`, `import ipaddress`, `import typing`) after the module
 docstring and `__future__` imports. They go on an existing line, so line
 numbers in tracebacks match the file on disk, unless a `def`, `class`,
 decorator or other compound statement directly follows the coding line; put a
@@ -92,7 +92,7 @@ the codec.
 ## Configuration
 
 The codec uses the PostgreSQL dialect and no schema, so cast every column;
-an uncast column is typed `str`. It reads only `import-style` from the
+a query with an uncast column is not typed. It reads only `import-style` from the
 `pyproject.toml` found from the current working directory (see
 [Configuration](../reference/configuration.md#import-style)).
 

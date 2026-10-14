@@ -75,7 +75,7 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error:
 ```
 
-## Open TypedDict still requires NotRequired keys positionally
+## Open TypedDict may omit NotRequired keys
 
 ```python
 from typing import NotRequired, TypedDict
@@ -85,8 +85,8 @@ class User(TypedDict):
     id: int
     name: NotRequired[str]
 
-# error: [column-count-mismatch] "User has 2 fields but query returns 1 columns"
 q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
+# error:
 ```
 
 ## Closed — exact match
@@ -360,7 +360,8 @@ class Base(TypedDict):
 class User(Base):
     name: str
 
-# error: [column-name-mismatch] "User.name doesn't match query column 'email'"
+# error: [typeddict-key-mismatch] "User has no key for query column 'email'"
+# error: [typeddict-key-mismatch] "User.name is required but missing from query"
 q = SQL[User]("--sql\nSELECT id::INTEGER, email::TEXT FROM users")
 ```
 

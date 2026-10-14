@@ -5,8 +5,9 @@ Default severity: **warn**
 ## What it does
 
 Flags `SQL[tuple[...]]` annotations that no longer match the query. An item
-that only parametrises an inferred bare generic (`list[str]` for `list`) is
-more precise than inference and is not flagged.
+that only parametrises an inferred generic (`list[str]` for `list`), or narrows
+an inferred `typing.Any` (a JSON column), is more precise than inference and is
+not flagged.
 
 ## Why is this bad?
 

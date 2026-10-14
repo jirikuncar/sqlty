@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::analyzer::Schema;
+use crate::analyzer::{parse_error, Schema};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, line_at, skipped_rule, string_literals,
-    strip_line_break, wraps, ImportStyle,
+    after_marker, ends_marker_line, extract_string_content, marked_query, skipped_rule,
+    string_literals, strip_line_break, wraps, ImportStyle, LineIndex,
 };
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
 use std::ops::Range;
@@ -50,7 +50,7 @@ pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
 /// MariaDB reject: they read `--` as a comment only before whitespace.
-fn mysql_marker_lines(source: &str) -> Vec<usize> {
+fn mysql_marker_lines(source: &str, lines: &LineIndex) -> Vec<usize> {
     let mut lines: Vec<usize> = string_literals(source)
         .into_iter()
         .filter(|&(start, end)| {
@@ -59,7 +59,7 @@ fn mysql_marker_lines(source: &str) -> Vec<usize> {
                 .strip_prefix("--sql")
                 .is_some_and(ends_marker_line)
         })
-        .map(|(start, _)| line_at(source, start))
+        .map(|(start, _)| lines.line_at(start))
         .collect();
     lines.dedup();
     lines
@@ -103,6 +103,7 @@ impl RuleConfig {
             "typeddict-inheritance" => "error",
             "inline-sql-comment" => "warn",
             "untyped-query" => "warn",
+            "unparsed-query" => "ignore",
             _ => "warn",
         }
     }
@@ -123,6 +124,7 @@ pub fn check_source(
     untyped: bool,
 ) -> Vec<Diagnostic> {
     let rule_config = RuleConfig::new(rules);
+    let unparsed_enabled = rule_config.is_enabled("unparsed-query");
     let has_schema = schema.is_some();
     let mut diagnostics = Vec::new();
     let mut report = |rule: &str, message: String, line: usize| {
@@ -138,8 +140,9 @@ pub fn check_source(
 
     let style = ImportStyle::or_default(import_style);
     let (wrapper_name, untyped_name) = (style.wrapper_name.clone(), style.untyped_name());
+    let lines = LineIndex::new(source);
     if dialect.eq_ignore_ascii_case("mysql") {
-        for line in mysql_marker_lines(source) {
+        for line in mysql_marker_lines(source, &lines) {
             report(
                 "mysql-sql-marker",
                 r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#.to_string(),
@@ -149,11 +152,11 @@ pub fn check_source(
     }
 
     if rule_config.is_enabled("stale-rewrite") {
-        for (start, _, _) in wraps(source, dialect, schema, &style, untyped) {
+        for (start, _, _) in wraps(source, dialect, schema, &style, untyped, &|_| false) {
             report(
                 "stale-rewrite",
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
-                line_at(source, start),
+                lines.line_at(start),
             );
         }
     }
@@ -162,23 +165,32 @@ pub fn check_source(
     let calls = wrapper_calls(source, &tokens, &wrapper_name);
     for group in string_groups(source, &tokens) {
         let first = &tokens[group[0]];
-        let line = line_at(source, first.span.start);
+        let line = lines.line_at(first.span.start);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             report(rule, skipped_message(rule), line);
             continue;
         }
         let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
-        if !calls
+        if calls
             .iter()
             .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
-            && INLINE_SQL_COMMENT_CONTENT.is_match(&content(source, &spans))
         {
+            continue;
+        }
+        let sql_content = content(source, &spans);
+        if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
             report("inline-sql-comment", INLINE_MESSAGE.to_string(), line);
+        }
+        if let Some(error) = marked_query(&sql_content)
+            .filter(|_| unparsed_enabled)
+            .and_then(|sql| parse_error(&sql, dialect))
+        {
+            report("unparsed-query", unparsed_message(&error), line);
         }
     }
 
     for call in &calls {
-        let line_num = line_at(source, call.span.start);
+        let line_num = lines.line_at(call.span.start);
         let Some(sql_content) = call.content(source) else {
             let interpolated = call.strings.iter().any(|span| {
                 source[span.clone()]
@@ -200,6 +212,12 @@ pub fn check_source(
         }
         if INLINE_SQL_COMMENT_CONTENT.is_match(&sql_content) {
             report("inline-sql-comment", INLINE_MESSAGE.to_string(), line_num);
+        }
+        if let Some(error) = marked_query(&sql_content)
+            .filter(|_| unparsed_enabled)
+            .and_then(|sql| parse_error(&sql, dialect))
+        {
+            report("unparsed-query", unparsed_message(&error), line_num);
         }
 
         let upper = sql_content.to_uppercase();
@@ -271,6 +289,60 @@ fn skipped_message(rule: &str) -> String {
     .to_string()
 }
 
+/// Message of `unparsed-query`, given sqlparser's error (see `analyzer::parse_error`).
+pub(crate) fn unparsed_message(error: &str) -> String {
+    format!("query does not parse: {error}")
+}
+
+/// Each query `sqlty check` sees, as `(line, kind, text)` for `--statistics`: `kind` is
+/// `query` with the marked text, or the rule that skips the string (text empty).
+pub fn query_sites(source: &str, import_style: Option<&str>) -> Vec<(usize, &'static str, String)> {
+    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
+    let lines = LineIndex::new(source);
+    let tokens = tokenize(source);
+    let calls = wrapper_calls(source, &tokens, &wrapper_name);
+    let mut sites = Vec::new();
+    let mut skipped: Vec<Range<usize>> = Vec::new();
+    for group in string_groups(source, &tokens) {
+        let first = &tokens[group[0]];
+        let line = lines.line_at(first.span.start);
+        if let Some(rule) = skipped_rule(source, &tokens, &group) {
+            let last = &tokens[group[group.len() - 1]];
+            skipped.push(first.span.start..last.span.end);
+            sites.push((line, rule, String::new()));
+            continue;
+        }
+        if calls
+            .iter()
+            .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
+        {
+            continue;
+        }
+        let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
+        if let Some(sql) = marked_query(&content(source, &spans)) {
+            sites.push((line, "query", sql));
+        }
+    }
+    for call in &calls {
+        let line = lines.line_at(call.span.start);
+        match call.content(source) {
+            Some(text) => {
+                if let Some(sql) = marked_query(&text) {
+                    sites.push((line, "query", sql));
+                }
+            }
+            None if after_marker(&content(source, &call.strings)).is_some()
+                && !skipped.iter().any(|span| call.span.contains(&span.start)) =>
+            {
+                sites.push((line, "unchecked-query", String::new()));
+            }
+            None => {}
+        }
+    }
+    sites.sort_by_key(|site| site.0);
+    sites
+}
+
 /// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
 /// without its marker, `None` unless the call holds a marked string literal.
 pub fn wrapped_queries(
@@ -278,6 +350,7 @@ pub fn wrapped_queries(
     import_style: Option<&str>,
 ) -> Vec<(usize, String, Option<String>)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
+    let lines = LineIndex::new(source);
     wrapper_calls(source, &tokenize(source), &wrapper_name)
         .into_iter()
         .map(|call| {
@@ -286,7 +359,7 @@ pub fn wrapped_queries(
                 Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
             });
             (
-                line_at(source, call.span.start),
+                lines.line_at(call.span.start),
                 source[call.annotation.clone()].to_string(),
                 query,
             )
@@ -294,10 +367,11 @@ pub fn wrapped_queries(
         .collect()
 }
 
-/// Whether `annotated` is `inferred` or parametrises some of its bare generics
-/// (`tuple[int, list[str]]` for `tuple[int, list]`), so it is not stale.
+/// Whether `annotated` is `inferred`, narrows a `typing.Any` item to any type, or
+/// parametrises some of its generics (`tuple[int, list[str]]` for `tuple[int, list]`
+/// or `tuple[int, list[int]]`), so it is not stale.
 ///
-/// Element types are not checked: inference only yields a bare `list`.
+/// Element types are not checked.
 pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     fn balanced(args: &str) -> bool {
         let mut depth = 0i32;
@@ -330,9 +404,11 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     match (items(annotated), items(inferred)) {
         (Some(ours), Some(theirs)) if ours.len() == theirs.len() => {
             ours.iter().zip(&theirs).all(|(a, i)| {
+                let base = i.split('[').next().unwrap_or(i);
                 a == i
-                    || (["list", "dict", "set", "frozenset", "tuple"].contains(i)
-                        && a.strip_prefix(i)
+                    || *i == "typing.Any"
+                    || (["list", "dict", "set", "frozenset", "tuple"].contains(&base)
+                        && a.strip_prefix(base)
                             .and_then(|rest| rest.strip_prefix('['))
                             .and_then(|rest| rest.strip_suffix(']'))
                             .is_some_and(balanced))
@@ -440,6 +516,13 @@ mod tests {
             "tuple[dict, int]"
         ));
         assert!(refines_tuple("tuple[list[list[int]]]", "tuple[list]"));
+        assert!(refines_tuple("tuple[list[str]]", "tuple[list[int]]"));
+        assert!(!refines_tuple("tuple[set[str]]", "tuple[list[int]]"));
+        assert!(refines_tuple(
+            "tuple[list[str], dict]",
+            "tuple[typing.Any, dict]"
+        ));
+        assert!(!refines_tuple("tuple[int]", "tuple[typing.Any, dict]"));
     }
 
     #[test]

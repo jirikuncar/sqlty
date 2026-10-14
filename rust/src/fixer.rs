@@ -11,7 +11,8 @@ use crate::analyzer::{expand_star, Schema};
 use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
-    is_sqlty_managed, line_ending, rewrite_source, splice, string_literals, ImportStyle,
+    is_sqlty_managed, line_ending, rewrite_source_skipping, splice, string_literals, suppresses,
+    ImportStyle, LineIndex, Suppressed, TYPE_MODULES,
 };
 use crate::tokens::{tokenize, wrapper_calls};
 
@@ -22,7 +23,8 @@ static SQL_PREFIX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
 
 /// Fix `inline-sql-comment`, `mysql-sql-marker`, `stale-rewrite`, `select-star`,
-/// `stale-type` and `untyped-query`.
+/// `stale-type` and `untyped-query`, except where a `# sqlty: ignore` comment on the line
+/// the rule reports (`suppressed`, by line of `source`) suppresses that rule.
 pub fn fix_source(
     source: &str,
     dialect: &str,
@@ -30,20 +32,36 @@ pub fn fix_source(
     import_style: Option<&str>,
     untyped: bool,
     rules: Option<HashMap<String, String>>,
+    mut suppressed: Suppressed,
 ) -> String {
     let rules = RuleConfig::new(rules);
     let enabled = |rule: &str| rules.is_enabled(rule);
     let style = ImportStyle::or_default(import_style);
     let mut source = source.to_string();
     if enabled("inline-sql-comment") {
-        source = fix_inline_sql_comments(&source);
+        source = fix_inline_sql_comments(&source, &style.wrapper_name, &suppressed);
     }
     if dialect.eq_ignore_ascii_case("mysql") && enabled("mysql-sql-marker") {
-        source = fix_mysql_markers(&source);
+        source = fix_mysql_markers(&source, &suppressed);
     }
     if enabled("stale-rewrite") {
-        source = rewrite_source(&source, dialect, schema, import_style, untyped);
+        let skip = |line| suppresses(&suppressed, line, "stale-rewrite");
+        let rewritten = rewrite_source_skipping(
+            &source,
+            dialect,
+            schema,
+            import_style,
+            untyped,
+            false,
+            &skip,
+        );
+        suppressed = shift_lines(suppressed, &source, &rewritten);
+        source = rewritten;
     }
+    let lines = LineIndex::new(&source);
+    let allowed = |rule: &str, call_start: usize| {
+        enabled(rule) && !suppresses(&suppressed, lines.line_at(call_start), rule)
+    };
 
     let untyped_name = style.untyped_name();
     let mut introduced = BTreeSet::new();
@@ -58,7 +76,9 @@ pub fn fix_source(
         let mut literal_edit = None;
         if let ([span], Some(schema)) = (
             call.strings.as_slice(),
-            schema.as_ref().filter(|_| enabled("select-star")),
+            schema
+                .as_ref()
+                .filter(|_| allowed("select-star", call.span.start)),
         ) {
             let literal = &source[span.clone()];
             let quoted = literal.trim_start_matches(['u', 'U']);
@@ -78,8 +98,8 @@ pub fn fix_source(
             }
         }
         let annotated = &source[call.annotation.clone()];
-        let refresh = (annotated.starts_with("tuple[") && enabled("stale-type"))
-            || (annotated == untyped_name && enabled("untyped-query"));
+        let refresh = (annotated.starts_with("tuple[") && allowed("stale-type", call.span.start))
+            || (annotated == untyped_name && allowed("untyped-query", call.span.start));
         if let Some(row_type) = refresh
             .then(|| infer_sql_content(&content, dialect, schema))
             .flatten()
@@ -100,11 +120,24 @@ pub fn fix_source(
 /// `"--sql SELECT ..."` to `"--sql\nSELECT ..."` in plain string literals that
 /// `inline-sql-comment` reports, so prose such as `"--sql flag enables it"` is kept.
 /// This and `select-star` are the only fixes that change string content.
-fn fix_inline_sql_comments(source: &str) -> String {
+fn fix_inline_sql_comments(source: &str, wrapper: &str, suppressed: &Suppressed) -> String {
+    let lines = LineIndex::new(source);
+    let calls = if suppressed.is_empty() {
+        Vec::new()
+    } else {
+        wrapper_calls(source, &tokenize(source), wrapper)
+    };
     let edits: Vec<(usize, usize, String)> = string_literals(source)
         .into_iter()
         .filter(|&(start, end)| {
             INLINE_SQL_COMMENT_CONTENT.is_match(extract_string_content(&source[start..end]))
+        })
+        .filter(|&(start, _)| {
+            let reported = calls
+                .iter()
+                .find(|call| call.span.start <= start && start < call.span.end)
+                .map_or(start, |call| call.span.start);
+            !suppresses(suppressed, lines.line_at(reported), "inline-sql-comment")
         })
         .map(|(start, end)| {
             let literal = &source[start..end];
@@ -121,13 +154,17 @@ fn fix_inline_sql_comments(source: &str) -> String {
 }
 
 /// `"--sql\n..."` to `"-- sql\n..."`, the marker MySQL reads as a comment.
-fn fix_mysql_markers(source: &str) -> String {
+fn fix_mysql_markers(source: &str, suppressed: &Suppressed) -> String {
+    let lines = LineIndex::new(source);
     let edits: Vec<(usize, usize, String)> = string_literals(source)
         .into_iter()
         .filter_map(|(start, end)| {
             let literal = &source[start..end];
             let content = extract_string_content(literal);
             let marked = content.trim_start();
+            if suppresses(suppressed, lines.line_at(start), "mysql-sql-marker") {
+                return None;
+            }
             marked
                 .strip_prefix("--sql")
                 .is_some_and(ends_marker_line)
@@ -138,6 +175,23 @@ fn fix_mysql_markers(source: &str) -> String {
         })
         .collect();
     splice(source, &edits)
+}
+
+/// `suppressed` moved to the line numbers of `after`, the same source with `import` lines
+/// added at its header.
+fn shift_lines(suppressed: Suppressed, before: &str, after: &str) -> Suppressed {
+    let added = after
+        .matches('\n')
+        .count()
+        .saturating_sub(before.matches('\n').count());
+    if added == 0 || suppressed.is_empty() {
+        return suppressed;
+    }
+    let first = LineIndex::new(before).line_at(header_end(before));
+    suppressed
+        .into_iter()
+        .map(|(line, rules)| (if line >= first { line + added } else { line }, rules))
+        .collect()
 }
 
 /// Replace `*` in the query part of a string literal, when that is safe to write back.
@@ -162,9 +216,9 @@ fn expand_star_in(content: &str, quote: &str, dialect: &str, schema: &Schema) ->
     }
 }
 
-/// Add `datetime`/`uuid` imports new row types need; drop an `UNTYPED` import no longer used.
+/// Add the [`TYPE_MODULES`] imports new row types need; drop an `UNTYPED` import no longer used.
 fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<String>) -> String {
-    let missing: Vec<String> = ["datetime", "uuid"]
+    let missing: Vec<String> = TYPE_MODULES
         .into_iter()
         .filter(|module| {
             introduced
@@ -207,7 +261,15 @@ mod tests {
     use super::*;
 
     fn fix(source: &str) -> String {
-        fix_source(source, "postgres", &None, None, false, None)
+        fix_source(
+            source,
+            "postgres",
+            &None,
+            None,
+            false,
+            None,
+            Suppressed::new(),
+        )
     }
 
     #[test]
@@ -233,7 +295,11 @@ mod tests {
     #[test]
     fn test_inline_comment_only_in_plain_strings() {
         assert_eq!(
-            fix_inline_sql_comments(r#"a = "--sql SELECT 1" b = f"--sql SELECT 1""#),
+            fix_inline_sql_comments(
+                r#"a = "--sql SELECT 1" b = f"--sql SELECT 1""#,
+                "SQL",
+                &Suppressed::new()
+            ),
             r#"a = "--sql\nSELECT 1" b = f"--sql SELECT 1""#
         );
     }
@@ -272,6 +338,6 @@ b = """  -- sql
 SELECT 1"""
 c = f"--sql\nSELECT 1"
 d = "--sql SELECT 1""#;
-        assert_eq!(fix_mysql_markers(source), fixed);
+        assert_eq!(fix_mysql_markers(source, &Suppressed::new()), fixed);
     }
 }

@@ -28,10 +28,11 @@ class Run:
         self.updater = updater
         settings = section.settings
         self.dialect: str = settings.get("dialect", "postgres")
-        self.schema_sql: str | None = section.files.get(settings.get("schema", ""))
+        self.schema_sql: str | None = section.schema_sql
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.rules: dict[str, str] | None = settings.get("rules")
+        self.type_modules: list[str] | None = settings.get("type-modules")
 
     def run(self) -> None:
         failures: list[str] = []
@@ -117,7 +118,7 @@ class Run:
     def _imports(self) -> set[str]:
         style = (self.import_style or "from sqlty import SQL").strip()
         extra = {"from sqlty import UNTYPED"} if style.startswith("from ") else set()
-        return {"import datetime", "import uuid", style, *extra}
+        return {"import datetime", "import typing", "import uuid", style, *extra}
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
@@ -130,6 +131,7 @@ class Run:
                 rules=self.rules,
                 import_style=self.import_style,
                 untyped=self.untyped,
+                type_modules=self.type_modules,
             )
         ]
         expected = [a for a in assertions if a.expected]
@@ -178,11 +180,26 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
 
 
 def string_constants(source: str) -> list[str]:
-    """Every string value in ``source``, implicit concatenation applied, sorted."""
+    """Every string value in ``source``, implicit concatenation applied, sorted.
+
+    The labels of a ``Literal[...]`` inside the subscript of a called wrapper
+    (``SQL[...](...)``) are left out: rewrite writes an enum column's type as
+    ``typing.Literal[...]`` into that annotation, and nowhere else.
+    """
+    tree = ast.parse(source)
+    labels = {
+        id(node)
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Subscript)
+        for sub in ast.walk(call.func.slice)
+        if isinstance(sub, ast.Subscript)
+        and ast.unparse(sub.value) in ("Literal", "typing.Literal")
+        for node in ast.walk(sub.slice)
+    }
     return sorted(
         node.value
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in labels
     )
 
 

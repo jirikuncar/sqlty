@@ -147,7 +147,7 @@ class RuntimeCallRegistry:
 
         # Import here to avoid circular imports
         try:
-            from sqlty._config import load_config
+            from sqlty._config import expand_schema, load_config
             from sqlty._generator import TypeStubGenerator
         except ImportError as e:
             logger.warning("Failed to import generator: %s", e)
@@ -158,11 +158,11 @@ class RuntimeCallRegistry:
         config, config_dir = load_config(source_paths[0].parent if source_paths else None)
         root = config_dir or Path.cwd()
 
-        schema_mappings: dict[str | None, Path] = {
-            name: root / path for name, path in config.get("schemas", {}).items()
+        schema_mappings: dict[str | None, Path | list[Path]] = {
+            name: expand_schema(spec, root) for name, spec in config.get("schemas", {}).items()
         }
         if "schema" in config:
-            schema_mappings[None] = root / config["schema"]
+            schema_mappings[None] = expand_schema(config["schema"], root)
 
         format_command = config.get("format_command")
         generator = TypeStubGenerator(

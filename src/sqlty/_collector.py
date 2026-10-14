@@ -29,7 +29,7 @@ class CallInfo(TypedDict, total=False):
     query_param_name: str | None  # Name of the query parameter (e.g., "query")
     return_type_param_name: str | None  # Name of the return type parameter (e.g., "return_tp")
     return_type_param_value: str | None  # Actual value passed to return_type param (e.g., "int")
-    schema_path: str | None  # Path to SQL schema file for type inference (from function config)
+    schema_path: str | list[str] | None  # Schema files for type inference (from function config)
     function_name: str | None  # Name of the function being called (for configured functions)
     # Template fields for custom type generation
     return_type_template: str | None  # Template for return type with {sqlty} placeholder

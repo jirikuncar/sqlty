@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 import sqlty.core as core
+from sqlty._source import ParsedSource
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants
 
@@ -34,7 +35,7 @@ def _corpus(kind: str) -> list[Any]:
             settings = section.settings
             options = {
                 "dialect": settings.get("dialect", "postgres"),
-                "schema_sql": section.files.get(settings.get("schema", "")),
+                "schema_sql": section.schema_sql,
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
             }
@@ -245,3 +246,53 @@ def test_user_type_check_skips_unknown_sum_column() -> None:
         'q = SQL[Row]("--sql\\nSELECT SUM(nope) AS total FROM users")\n'
     )
     assert core.check_source(source, schema_sql="CREATE TABLE users (id INT);") == []
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_fix_suppression_follows_inserted_import(newline: str) -> None:
+    source = (
+        '"""Doc."""\nr = "--sql\\nSELECT id FROM t"\n'
+        'q = "--sql\\nSELECT * FROM t"  # sqlty: ignore[select-star]\n'
+    ).replace("\n", newline)
+    fixed = core.fix_source(source, schema_sql="CREATE TABLE t (id INT);")
+    assert fixed.count("from sqlty import SQL") == 1
+    assert f'SELECT * FROM t")  # sqlty: ignore[select-star]{newline}' in fixed
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_skipping_the_rust_checker_changes_no_diagnostics(
+    source: str, options: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``check_source`` skips the engine for a file without SQL markers; nothing is lost.
+
+    Checks the code as written, rewritten, stripped and fixed, so files with and
+    without markers, wrappers and ``UNTYPED`` are all compared.
+    """
+    style = options["import_style"]
+    variants = [
+        source,
+        core.rewrite_source(source, **options),
+        core.strip_source(source, import_style=style),
+        core.fix_source(source, **options),
+    ]
+    with_shortcut = [core.check_source(text, **options) for text in variants]
+    monkeypatch.setattr(ParsedSource, "may_need_rust_check", lambda self, import_style=None: True)
+    assert with_shortcut == [core.check_source(text, **options) for text in variants]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'q = "--" "sql\\nSELECT 1"\n',
+        'q = ("-"\n    "-sql\\nSELECT 1")\n',
+        'q = ("--s"  # why\n    "ql\\nSELECT 1")\n',
+    ],
+)
+def test_split_marker_is_not_skipped(source: str) -> None:
+    assert ParsedSource(source).may_need_rust_check()
+    assert [d["rule"] for d in core.check_source(source)] == ["stale-rewrite"]
+
+
+def test_unsupported_import_style_still_raises_without_markers() -> None:
+    with pytest.raises(ValueError):
+        core.check_source("x = 1\n", import_style="import nothing")

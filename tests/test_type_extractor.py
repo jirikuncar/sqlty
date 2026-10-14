@@ -1,10 +1,14 @@
 """Unit tests for _type_extractor module."""
 
 import ast
+import contextlib
 import datetime
+import sys
 import typing
 import uuid
 from collections.abc import Sequence
+from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -19,6 +23,17 @@ from sqlty._type_extractor import (
     field_accepts,
     parse_tuple_annotation,
 )
+from sqlty.core import check_source
+
+
+def extract(source: str, *, runtime: bool) -> dict[str, TypeInfo]:
+    """Extract types, without runtime resolution (the AST fallback) when ``runtime`` is false."""
+    with (
+        contextlib.nullcontext()
+        if runtime
+        else mock.patch("sqlty._type_extractor._resolve_class", return_value=None)
+    ):
+        return extract_type_definitions(source)
 
 
 class TestParseTupleAnnotation:
@@ -502,20 +517,19 @@ class Reopened(Extra, closed=False):
 """
 
     def _extract(self, runtime: bool) -> dict[str, TypeInfo]:
-        imports = "" if runtime else "import not_installed"
-        return extract_type_definitions(self.SOURCE.format(imports=imports))
+        return extract(self.SOURCE.format(imports=""), runtime=runtime)
 
-    def test_runtime_and_ast_agree(self):
-        for runtime in (True, False):
-            types = self._extract(runtime)
-            row, extra = types["Row"], types["Extra"]
-            assert (row.resolved_hints is not None) is runtime
-            assert row.fields == [("id", "int"), ("note", "str")]
-            assert row.required == {"id"}
-            assert row.closed and row.keyed and row.extra_items is None
-            assert extra.extra_items == "int" and not extra.closed
-            assert check_type_compatibility(extra, "views", "int")
-            assert not check_type_compatibility(extra, "ratio", "float")
+    @pytest.mark.parametrize("runtime", [True, False])
+    def test_runtime_and_ast_agree(self, runtime: bool):
+        types = self._extract(runtime)
+        row, extra = types["Row"], types["Extra"]
+        assert (row.resolved_hints is not None) is runtime
+        assert row.fields == [("id", "int"), ("note", "str")]
+        assert row.required == {"id"}
+        assert row.closed and row.keyed and row.extra_items is None
+        assert extra.extra_items == "int" and not extra.closed
+        assert check_type_compatibility(extra, "views", "int")
+        assert not check_type_compatibility(extra, "ratio", "float")
 
     def test_extra_items_never_is_closed(self):
         for runtime in (True, False):
@@ -604,17 +618,13 @@ class TestTypedDictInheritance:
     @pytest.mark.parametrize("runtime", [True, False])
     @pytest.mark.parametrize("name", list(CASES))
     def test_errors(self, name: str, runtime: bool):
-        types = extract_type_definitions(
-            INHERITANCE_SOURCE.format(imports="" if runtime else "import not_installed")
-        )
+        types = extract(INHERITANCE_SOURCE.format(imports=""), runtime=runtime)
         assert (types[name].resolved_hints is not None) is runtime
         assert types[name].errors == self.CASES[name]
 
     @pytest.mark.parametrize("runtime", [True, False])
     def test_rejected_override_keeps_base_openness(self, runtime: bool):
-        types = extract_type_definitions(
-            INHERITANCE_SOURCE.format(imports="" if runtime else "import not_installed")
-        )
+        types = extract(INHERITANCE_SOURCE.format(imports=""), runtime=runtime)
         widens, seals, retypes = types["Widens"], types["Seals"], types["Retypes"]
         assert widens.closed and widens.extra_items is None and widens.owner == "Closed"
         for info in (seals, retypes):
@@ -735,3 +745,66 @@ E = NewType("E", f())
 F = NewType("F", int + str)
 """
     assert list(_newtype_assignments(ast.parse(src), {})) == ["A", "B"]
+
+
+def test_fields_resolve_one_by_one():
+    src = """\
+from __future__ import annotations
+from datetime import datetime
+from typing import TypedDict
+from myapp.ids import UserId
+import not_installed.sub
+
+UserName = str
+type Born = datetime
+
+class Row(TypedDict):
+    id: UserId
+    name: UserName | None
+    created_at: datetime
+    born: Born
+    other: not_installed.sub.Thing
+    missing: Undefined
+"""
+    row = extract_type_definitions(src)["Row"]
+    assert row.resolved_hints == {
+        "name": str,
+        "created_at": datetime.datetime,
+        "born": datetime.datetime,
+    }
+    assert check_type_compatibility(row, "id", "int")
+    assert check_type_compatibility(row, "missing", "int")
+    assert not check_type_compatibility(row, "name", "int")
+
+
+MARKER_MODULE = "import pathlib\npathlib.Path({marker!r}).write_text('imported')\nfrom typing import NewType\nUserId = NewType('UserId', int)\n"
+MARKER_SOURCE = """
+from typing import TypedDict
+from marker_app_ids import UserId
+from sqlty import SQL
+
+class User(TypedDict):
+    id: UserId
+
+q = SQL[User]("--sql\\nSELECT id::TEXT FROM users")
+"""
+
+
+@pytest.fixture
+def marker_module(tmp_path, monkeypatch) -> Path:
+    marker = tmp_path / "marker"
+    (tmp_path / "marker_app_ids.py").write_text(MARKER_MODULE.format(marker=str(marker)))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "marker_app_ids", raising=False)
+    return marker
+
+
+def test_application_imports_are_not_executed(marker_module) -> None:
+    assert check_source(MARKER_SOURCE) == []
+    assert not marker_module.exists()
+
+
+def test_type_modules_allow_imports(marker_module) -> None:
+    diagnostics = check_source(MARKER_SOURCE, type_modules=["marker_app_ids"])
+    assert marker_module.exists()
+    assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]
