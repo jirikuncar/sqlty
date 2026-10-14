@@ -425,13 +425,19 @@ impl<'a> Analyzer<'a> {
             Returns::Void => Ok((Some("None".to_string()), Some("VOID".to_string()))),
             Returns::Arg(i) => arg(i),
             Returns::FirstKnown => {
+                let mut typed_args = Vec::with_capacity(args.len());
                 for expr in args {
-                    let typed = self.expr(expr, scope)?;
-                    if typed.0.is_some() {
-                        return Ok(typed);
+                    typed_args.push(self.expr(expr, scope)?);
+                }
+                if self.dialect == SqlDialect::Postgres {
+                    if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
+                        return Ok(common);
                     }
                 }
-                Ok((None, None))
+                Ok(typed_args
+                    .into_iter()
+                    .find(|typed| typed.0.is_some())
+                    .unwrap_or((None, None)))
             }
             Returns::Elem(i) => Ok(self.element_typed(arg(i)?.1.as_deref())),
             Returns::ArrayOf(i) => {

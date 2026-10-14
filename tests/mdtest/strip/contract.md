@@ -24,10 +24,10 @@ x = 1
 ```python
 from sqlty import SQL
 from sqlty import UNTYPED
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 UNTYPED
 # stripped: from sqlty import UNTYPED
-# stripped: q = "--sql\nVALUES (1, 2)"
+# stripped: q = "--sql\nSELECT x, y FROM pairs"
 # stripped: UNTYPED
 ```
 

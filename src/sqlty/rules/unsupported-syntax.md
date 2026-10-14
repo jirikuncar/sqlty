@@ -4,7 +4,7 @@ Default severity: **ignore**
 
 ## What it does
 
-Reports a query that parses, but uses a construct sqlty does not type: an expression it has no rule for, `VALUES`, `*` over a `USING` or `NATURAL` join, a column of a table function or of a `FROM`/`USING` source of a DML statement, branches of a set operation that disagree on a type. The result is not trusted, so the column stays untyped.
+Reports a query that parses, but uses a construct sqlty does not type: an expression it has no rule for, `VALUES` outside PostgreSQL, `*` over a `USING` or `NATURAL` join, a column of a table function or of a `FROM`/`USING` source of a DML statement, branches of a set operation that disagree on a type. The result is not trusted, so the column stays untyped.
 
 ```toml
 [tool.sqlty]

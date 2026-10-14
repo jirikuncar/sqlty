@@ -1119,7 +1119,7 @@ mod tests {
         assert_eq!(rules("SELECT frob(n) FROM a"), ["unknown-function"]);
         assert_eq!(rules("SELECT n::mood FROM a"), ["unknown-type"]);
         assert_eq!(rules("SELECT g FROM a"), ["unknown-type"]);
-        assert_eq!(rules("SELECT 1 UNION VALUES (2)"), ["unsupported-syntax"]);
+        assert_eq!(rules("SELECT 1 UNION TABLE a"), ["unsupported-syntax"]);
     }
 
     #[test]

@@ -1,12 +1,12 @@
 # Untyped queries
 
-Some queries return rows whose type sqlty cannot infer: `VALUES` lists and
+Some queries return rows whose type sqlty cannot infer: columns of tables without a schema and
 `SELECT` statements sqlty cannot parse. By default `sqlty rewrite` leaves
 them as plain strings, so nothing marks them as untyped:
 
 ```python
-pairs = "--sql\nVALUES (1, 2)"
-# rewritten: pairs = "--sql\nVALUES (1, 2)"
+pairs = "--sql\nSELECT x, y FROM pairs"
+# rewritten: pairs = "--sql\nSELECT x, y FROM pairs"
 ```
 
 ## The `UNTYPED` sentinel
@@ -19,11 +19,11 @@ untyped = "sentinel"  # or: sqlty rewrite --untyped sentinel
 ```
 
 ```python
-pairs = "--sql\nVALUES (1, 2)"
+pairs = "--sql\nSELECT x, y FROM pairs"
 users = "--sql\nSELECT id::INTEGER FROM users"
 # rewritten-file: from sqlty import SQL
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: pairs = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# rewritten-file: pairs = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # rewritten-file: users = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
@@ -59,7 +59,7 @@ Once casts or a schema make the type known, the message names it:
 
 ```python
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-pairs = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+pairs = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ```python

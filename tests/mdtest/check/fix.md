@@ -85,10 +85,10 @@ q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 ```python
 from sqlty import SQL
 
-q = SQL[tuple[int]]("--sql\nVALUES (1, 2)")
+q = SQL[tuple[int]]("--sql\nSELECT x, y FROM pairs")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int]]("--sql\nVALUES (1, 2)")
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Formatter-split wrapper keeps its layout
@@ -125,12 +125,12 @@ from sqlty import SQL
 from sqlty import UNTYPED
 
 known = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
-unknown = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+unknown = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # fixed: from sqlty import SQL
 # fixed: from sqlty import UNTYPED
 # fixed:
 # fixed: known = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-# fixed: unknown = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# fixed: unknown = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Module import style

@@ -1,6 +1,7 @@
 //! Output-column names, following PostgreSQL's naming of unaliased expressions.
 
 use super::*;
+use sqlparser::ast::TrimWhereField;
 
 /// Lowercased unqualified name: `public.users` -> `users`.
 pub(super) fn object_name(name: &ObjectName) -> String {
@@ -31,8 +32,9 @@ pub(super) fn ident_name(ident: &Ident) -> String {
 }
 
 /// Name of an unaliased result column, as PostgreSQL picks it: a column's name (also under
-/// a cast), a function's name, a few keywords (`case`, `exists`, `array`, ...), and
-/// `?column?` for anything else.
+/// a cast), a function's name, a few keywords (`case`, `exists`, `array`, ...), the target
+/// type of a cast of an unnamed value (`1::int` is `int4`), and `?column?` for anything
+/// else.
 pub(super) fn column_name(expr: &Expr) -> String {
     let name = figure_name(expr);
     if name.is_empty() {
@@ -44,43 +46,79 @@ pub(super) fn column_name(expr: &Expr) -> String {
 
 /// [`column_name`], empty when PostgreSQL gives the column no name of its own.
 pub(super) fn figure_name(expr: &Expr) -> String {
+    name_strength(expr).0
+}
+
+/// How firmly an expression names its column: an own name (a column, a function, a
+/// keyword like `case`) is `Named`, a type name taken from a cast is `Weak` and a cast
+/// replaces it, and no name at all is `None`. This is PostgreSQL's `FigureColname`:
+/// `x::int` is `x`, `'a'::text` is `text` and `'a'::text::int` is `int4`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Strength {
+    None,
+    Weak,
+    Named,
+}
+
+fn name_strength(expr: &Expr) -> (String, Strength) {
+    let named = |name: &str| (name.to_string(), Strength::Named);
+    let own = |name: String| {
+        let strength = if name.is_empty() {
+            Strength::None
+        } else {
+            Strength::Named
+        };
+        (name, strength)
+    };
     match expr {
-        Expr::Identifier(ident) => ident_name(ident),
-        Expr::CompoundIdentifier(parts) => parts.last().map(ident_name).unwrap_or_default(),
+        Expr::Identifier(ident) => own(ident_name(ident)),
+        Expr::CompoundIdentifier(parts) => own(parts.last().map(ident_name).unwrap_or_default()),
         Expr::Cast {
             expr, data_type, ..
-        } => Some(figure_name(expr))
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| type_column_name(data_type)),
-        Expr::Nested(expr) | Expr::Collate { expr, .. } => figure_name(expr),
+        } => match name_strength(expr) {
+            (name, Strength::Named) => (name, Strength::Named),
+            _ => (type_column_name(data_type), Strength::Weak),
+        },
+        Expr::Nested(expr) | Expr::Collate { expr, .. } => name_strength(expr),
         Expr::CompoundFieldAccess { root, access_chain } => access_chain
             .iter()
             .rev()
             .find_map(|access| match access {
-                AccessExpr::Dot(Expr::Identifier(field)) => Some(ident_name(field)),
+                AccessExpr::Dot(Expr::Identifier(field)) => Some(own(ident_name(field))),
                 _ => None,
             })
-            .unwrap_or_else(|| figure_name(root)),
-        Expr::Function(func) => func
+            .unwrap_or_else(|| name_strength(root)),
+        Expr::Function(func) => own(func
             .name
             .0
             .last()
             .and_then(|part| part.as_ident())
             .map(ident_name)
-            .unwrap_or_default(),
-        Expr::Extract { .. } => "extract".to_string(),
-        Expr::Case { .. } => "case".to_string(),
-        Expr::Exists { .. } => "exists".to_string(),
-        Expr::Array(_) => "array".to_string(),
-        Expr::Trim { .. } => "btrim".to_string(),
-        Expr::Substring { .. } => "substring".to_string(),
-        Expr::Position { .. } => "position".to_string(),
-        Expr::Overlay { .. } => "overlay".to_string(),
-        Expr::AtTimeZone { .. } => "timezone".to_string(),
-        Expr::Interval(_) => "interval".to_string(),
-        Expr::TypedString(typed) => type_column_name(&typed.data_type),
+            .unwrap_or_default()),
+        Expr::Extract { .. } => named("extract"),
+        Expr::Case { .. } => named("case"),
+        Expr::Exists { .. } => named("exists"),
+        Expr::Array(_) => named("array"),
+        Expr::Tuple(_) => named("row"),
+        Expr::Ceil { .. } => named("ceil"),
+        Expr::Floor { .. } => named("floor"),
+        Expr::Trim { trim_where, .. } => named(match trim_where {
+            Some(TrimWhereField::Leading) => "ltrim",
+            Some(TrimWhereField::Trailing) => "rtrim",
+            _ => "btrim",
+        }),
+        Expr::Substring { .. } => named("substring"),
+        Expr::Position { .. } => named("position"),
+        Expr::Overlay { .. } => named("overlay"),
+        Expr::AtTimeZone { .. } => named("timezone"),
+        // `true` and `false` are casts of a string constant to `bool`.
+        Expr::Value(value) if matches!(value.value, Value::Boolean(_)) => {
+            ("bool".to_string(), Strength::Weak)
+        }
+        Expr::Interval(_) => ("interval".to_string(), Strength::Weak),
+        Expr::TypedString(typed) => (type_column_name(&typed.data_type), Strength::Weak),
         Expr::Subquery(query) => scalar_subquery_name(query),
-        _ => String::new(),
+        _ => (String::new(), Strength::None),
     }
 }
 
@@ -88,6 +126,7 @@ pub(super) fn figure_name(expr: &Expr) -> String {
 pub(super) fn type_column_name(data_type: &DataType) -> String {
     let text = data_type.to_string().to_lowercase();
     let base = text.split(['(', '[']).next().unwrap_or_default().trim();
+    let zoned = text.contains("with time zone");
     match base {
         "int" | "integer" => "int4",
         "bigint" => "int8",
@@ -98,9 +137,18 @@ pub(super) fn type_column_name(data_type: &DataType) -> String {
         "character varying" => "varchar",
         "character" | "char" => "bpchar",
         "decimal" => "numeric",
-        "float" => "float8",
+        "float" => match text
+            .split(['(', ')'])
+            .nth(1)
+            .and_then(|p| p.trim().parse().ok())
+        {
+            Some(1..=24) => "float4",
+            _ => "float8",
+        },
+        "timestamp" | "timestamp without time zone" if zoned => "timestamptz",
         "timestamp" | "timestamp without time zone" => "timestamp",
         "timestamp with time zone" => "timestamptz",
+        "time" | "time without time zone" if zoned => "timetz",
         "time without time zone" => "time",
         "time with time zone" => "timetz",
         other => other.rsplit('.').next().unwrap_or(other),
@@ -109,10 +157,10 @@ pub(super) fn type_column_name(data_type: &DataType) -> String {
 }
 
 /// A scalar subquery is named after its single column.
-pub(super) fn scalar_subquery_name(query: &Query) -> String {
+fn scalar_subquery_name(query: &Query) -> (String, Strength) {
     match leftmost_select(&query.body).and_then(|select| select.projection.first()) {
-        Some(SelectItem::UnnamedExpr(expr)) => figure_name(expr),
-        Some(SelectItem::ExprWithAlias { alias, .. }) => alias.value.clone(),
-        _ => String::new(),
+        Some(SelectItem::UnnamedExpr(expr)) => name_strength(expr),
+        Some(SelectItem::ExprWithAlias { alias, .. }) => (alias.value.clone(), Strength::Named),
+        _ => (String::new(), Strength::None),
     }
 }

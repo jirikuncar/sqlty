@@ -881,7 +881,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             ("\"\"\"from sqlty import SQL\"\"\"\n", false, 1),
         ] {
             let query = if untyped {
-                "VALUES (1, 2)"
+                "SELECT x, y FROM pairs"
             } else {
                 "SELECT 1::INTEGER"
             };
@@ -993,7 +993,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_untyped_skipped_by_default() {
-        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        let source = r#"q = "--sql\nSELECT x, y FROM pairs""#;
         assert_eq!(
             rewrite_source(source, "postgres", &None, None, false),
             source
@@ -1002,23 +1002,23 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_untyped_sentinel() {
-        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        let source = r#"q = "--sql\nSELECT x, y FROM pairs""#;
         let result = rewrite_source(source, "postgres", &None, None, true);
         assert_eq!(
             result,
-            "from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED](\"--sql\\nVALUES (1, 2)\")"
+            "from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED](\"--sql\\nSELECT x, y FROM pairs\")"
         );
         assert_eq!(strip_source(&result, None), source);
     }
 
     #[test]
     fn test_untyped_sentinel_module_import() {
-        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        let source = r#"q = "--sql\nSELECT x, y FROM pairs""#;
         let style = Some("import sqlty as sy");
         let result = rewrite_source(source, "postgres", &None, style, true);
         assert_eq!(
             result,
-            "import sqlty as sy\nq = sy.SQL[sy.UNTYPED](\"--sql\\nVALUES (1, 2)\")"
+            "import sqlty as sy\nq = sy.SQL[sy.UNTYPED](\"--sql\\nSELECT x, y FROM pairs\")"
         );
         assert_eq!(strip_source(&result, style), source);
     }
@@ -1031,7 +1031,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             r#"q = "--sql\nCREATE TABLE users (id INTEGER)""#,
             r#"q = "--sql\nBEGIN""#,
             r#"q = "--sql\n""#,
-            r#"q = "--sql VALUES (1, 2)""#,
+            r#"q = "--sql SELECT x, y FROM pairs""#,
         ] {
             assert_eq!(
                 rewrite_source(source, "postgres", &None, None, true),

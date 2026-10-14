@@ -68,12 +68,12 @@ from sqlty import (  # see (docs)
     SQL,  # the wrapper
     UNTYPED,
 )
-q = "--sql\nVALUES (1, 2)"
+q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file: from sqlty import (  # see (docs)
 # rewritten-file:     SQL,  # the wrapper
 # rewritten-file:     UNTYPED,
 # rewritten-file: )
-# rewritten-file: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ### Star import
@@ -85,9 +85,9 @@ untyped = "sentinel"
 
 ```python
 from sqlty import *
-q = "--sql\nVALUES (1, 2)"
+q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file: from sqlty import *
-# rewritten-file: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ### Missing names get their own line

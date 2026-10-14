@@ -164,6 +164,19 @@ impl<'a> Analyzer<'a> {
                 op: UnaryOperator::Minus | UnaryOperator::Plus,
                 expr: inner,
             } => self.expr(inner, scope),
+            Expr::UnaryOp {
+                op: UnaryOperator::PGAbs | UnaryOperator::BitwiseNot,
+                expr: inner,
+            } if self.dialect == SqlDialect::Postgres => self.expr(inner, scope),
+            Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
+                // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
+                let typed = self.expr(timestamp, scope)?;
+                Ok(match operand_type(&typed) {
+                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ".to_string(), self.dialect),
+                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP".to_string(), self.dialect),
+                    _ => (None, None),
+                })
+            }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
                 self.function_type(Returns::Real, &[inner], scope)
             }
@@ -172,7 +185,14 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => match &value.value {
-                Value::Number(number, _) if number.contains(['e', 'E']) => known("float"),
+                // PostgreSQL reads `1e3` as a `numeric`.
+                Value::Number(number, _) if number.contains(['e', 'E']) => {
+                    known(if self.dialect == SqlDialect::Postgres {
+                        decimal_type(self.dialect)
+                    } else {
+                        "float"
+                    })
+                }
                 Value::Number(number, _) if number.contains('.') => {
                     known(decimal_type(self.dialect))
                 }
@@ -208,6 +228,9 @@ impl<'a> Analyzer<'a> {
             } => Ok(from_sql_type("BOOLEAN".to_string(), self.dialect)),
             Expr::Interval(_) => Ok(from_sql_type("INTERVAL".to_string(), self.dialect)),
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
+            Expr::Trim { .. } | Expr::Substring { .. } if self.dialect == SqlDialect::Postgres => {
+                Ok(from_sql_type("TEXT".to_string(), self.dialect))
+            }
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => Ok(self
@@ -220,6 +243,19 @@ impl<'a> Analyzer<'a> {
                 else_result,
                 ..
             } => {
+                if self.dialect == SqlDialect::Postgres {
+                    let mut results = Vec::new();
+                    for expr in conditions
+                        .iter()
+                        .map(|when| &when.result)
+                        .chain(else_result.as_deref())
+                    {
+                        results.push(self.expr(expr, scope)?);
+                    }
+                    if let Some(common) = common_of(results, self.dialect) {
+                        return Ok(common);
+                    }
+                }
                 match conditions
                     .first()
                     .map(|when| &when.result)

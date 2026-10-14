@@ -249,7 +249,7 @@ to `Any`), and a warning naming the query is logged.
 
 With [`untyped = "sentinel"`](untyped.md) in `[tool.sqlty]`:
 
-- A row-returning query sqlty cannot type, such as `VALUES (1, 2)`, gets an
+- A row-returning query sqlty cannot type, such as `SELECT x, y FROM pairs`, gets an
   overload returning `SQL[UNTYPED]` (or the template applied to `UNTYPED`).
   Statements without rows still get `SQL[Any]`.
 - The catch-all overload returns `SQL[UNTYPED]` (or the template applied to
@@ -262,7 +262,7 @@ def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:  # 
     ...
 
 @overload
-def sql(query: Literal['VALUES (1, 2)']) -> SQL[UNTYPED]:
+def sql(query: Literal['SELECT x, y FROM pairs']) -> SQL[UNTYPED]:
     ...
 
 @overload
