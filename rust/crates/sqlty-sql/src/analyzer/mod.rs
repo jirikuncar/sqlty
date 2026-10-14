@@ -119,7 +119,7 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
-use crate::catalog::FunctionReturn;
+use crate::catalog::{fold, FunctionReturn};
 pub use crate::catalog::{Catalog as SchemaData, SchemaColumn};
 
 pub type Schema = Arc<SchemaData>;
@@ -585,7 +585,7 @@ pub(crate) fn view_columns(
         _ => vec![Column::unknown("*")],
     };
     for (column, name) in columns.iter_mut().zip(&view.columns) {
-        column.name = name.name.value.clone();
+        column.name = alias_name(&name.name, dialect);
     }
     columns
 }
@@ -715,7 +715,7 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
     }) {
         return None;
     }
-    let scope = table_scope(&select.from[0].relation);
+    let scope = table_scope(&select.from[0].relation, dialect);
 
     let upper = sql.to_ascii_uppercase();
     let select_idx = top_level(&upper, "SELECT", 0)?;

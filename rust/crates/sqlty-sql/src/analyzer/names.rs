@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Lowercased unqualified name: `public.users` -> `users`.
+/// Lowercased unqualified name, which is how aliases and qualifiers are compared: `public.users` -> `users`.
 pub(super) fn object_name(name: &ObjectName) -> String {
     name.0
         .last()
@@ -11,13 +11,14 @@ pub(super) fn object_name(name: &ObjectName) -> String {
         .unwrap_or_default()
 }
 
-/// The key a table reference is looked up by: `schema.name` when qualified, else `name`.
-pub(super) fn table_key(name: &ObjectName) -> String {
+/// The key a table reference is looked up by: `schema.name` when qualified, else `name`,
+/// each part folded as the dialect does (PostgreSQL keeps quoted case).
+pub(super) fn table_key(name: &ObjectName, dialect: SqlDialect) -> String {
     let parts: Vec<String> = name
         .0
         .iter()
         .filter_map(|part| part.as_ident())
-        .map(|ident| ident.value.to_lowercase())
+        .map(|ident| fold(ident, dialect))
         .collect();
     parts[parts.len().saturating_sub(2)..].join(".")
 }
@@ -27,6 +28,16 @@ pub(super) fn ident_name(ident: &Ident) -> String {
     match ident.quote_style {
         Some(_) => ident.value.clone(),
         None => ident.value.to_lowercase(),
+    }
+}
+
+/// The name an alias gives an output column: PostgreSQL folds an unquoted one to lower case;
+/// the other dialects keep it as written.
+pub(super) fn alias_name(ident: &Ident, dialect: SqlDialect) -> String {
+    if dialect == SqlDialect::Postgres {
+        ident_name(ident)
+    } else {
+        ident.value.clone()
     }
 }
 

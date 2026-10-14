@@ -78,7 +78,7 @@ impl<'a> Analyzer<'a> {
             Statement::Query(query) => self.query_columns(query),
             _ => match returning(stmt) {
                 Some(items) => {
-                    let scope = dml_scope(stmt);
+                    let scope = dml_scope(stmt, self.dialect);
                     for (_, table) in &scope {
                         self.check_table(table);
                     }
@@ -93,20 +93,20 @@ impl<'a> Analyzer<'a> {
         if let Some(with) = &query.with {
             let mut inner = self.clone();
             for cte in &with.cte_tables {
-                let name = cte.alias.name.value.to_lowercase();
+                let name = fold(&cte.alias.name, self.dialect);
                 if let (true, SetExpr::SetOperation { left, .. }) =
                     (with.recursive, cte.query.body.as_ref())
                 {
                     if let Some(select) = leftmost_select(left) {
                         let mut seed = inner.select_columns(select)?;
-                        rename_columns(&mut seed, &cte.alias);
+                        rename_columns(&mut seed, &cte.alias, self.dialect);
                         inner.virtuals.insert(name.clone(), seed);
                     }
                 }
                 let mut columns = inner
                     .query_columns(&cte.query)?
                     .unwrap_or_else(|| vec![Column::unknown("*")]);
-                rename_columns(&mut columns, &cte.alias);
+                rename_columns(&mut columns, &cte.alias, self.dialect);
                 inner.virtuals.insert(name, columns);
             }
             return inner.query_body(query);
@@ -207,12 +207,14 @@ impl<'a> Analyzer<'a> {
         for item in items {
             let (expr, name) = match item {
                 SelectItem::UnnamedExpr(expr) => (expr, column_name(expr)),
-                SelectItem::ExprWithAlias { expr, alias } => (expr, alias.value.clone()),
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    (expr, alias_name(alias, self.dialect))
+                }
                 SelectItem::ExprWithAliases { expr, aliases } => (
                     expr,
                     aliases
                         .first()
-                        .map_or_else(|| column_name(expr), |a| a.value.clone()),
+                        .map_or_else(|| column_name(expr), |a| alias_name(a, self.dialect)),
                 ),
                 SelectItem::Wildcard(_) => {
                     columns.extend(self.star(None, scope, from));
@@ -343,9 +345,9 @@ pub(super) fn set_branches(body: &SetExpr) -> Vec<&SetExpr> {
 }
 
 /// Apply a column alias list (`t(a, b)`) to a derived table's columns, by position.
-pub(super) fn rename_columns(columns: &mut [Column], alias: &TableAlias) {
+pub(super) fn rename_columns(columns: &mut [Column], alias: &TableAlias, dialect: SqlDialect) {
     for (column, name) in columns.iter_mut().zip(&alias.columns) {
-        column.name = name.name.value.clone();
+        column.name = alias_name(&name.name, dialect);
     }
 }
 

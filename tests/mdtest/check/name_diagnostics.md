@@ -409,10 +409,12 @@ CREATE TABLE users (id INTEGER, name TEXT);
 ```python
 from sqlty import SQL
 
-a = SQL[tuple[int, int]]("--sql\nSELECT oid, tableoid FROM users")
-b = SQL[tuple[object, object, object, object, object]]("--sql\nSELECT ctid, xmin, xmax, cmin, cmax FROM users")
-# error: [stale-type] "SQL[tuple[int, int]] should be SQL[tuple[int | None, int]]"
-c = SQL[tuple[int, int]]("--sql\nSELECT u.id, u.oid FROM users u")
+a = SQL[tuple[int]]("--sql\nSELECT tableoid FROM users")
+b = SQL[tuple[str, str, str, str, str]]("--sql\nSELECT ctid, xmin, xmax, cmin, cmax FROM users")
+# error: [unknown-column] "column `oid` does not exist in `users`"
+oid = SQL[tuple[int]]("--sql\nSELECT oid FROM users")
+# error: [stale-type] "SQL[tuple[int, int]] should be SQL[tuple[int | None, str]]"
+c = SQL[tuple[int, int]]("--sql\nSELECT u.id, u.ctid FROM users u")
 # error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
 d = SQL[tuple[int]]("--sql\nSELECT id FROM ONLY users")
 # error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"

@@ -53,7 +53,7 @@ impl<'a> Analyzer<'a> {
             .and_then(|fields| {
                 fields
                     .iter()
-                    .find(|col| col.name == field.value.to_lowercase())
+                    .find(|col| col.name == fold(field, self.dialect))
             })
             .map_or((None, None), |col| col.typed(self.dialect))
     }
@@ -62,7 +62,7 @@ impl<'a> Analyzer<'a> {
     /// schema defines.
     fn defines_type(&self, data_type: &DataType) -> bool {
         match data_type {
-            DataType::Custom(name, _) => self.schema.defines_type(&table_key(name)),
+            DataType::Custom(name, _) => self.schema.defines_type(&table_key(name, self.dialect)),
             DataType::Array(
                 ArrayElemTypeDef::AngleBracket(inner)
                 | ArrayElemTypeDef::Parenthesis(inner)
@@ -73,13 +73,56 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a
+    /// `pg_catalog.` qualifier names the same built-in, and a quoted name that is not lower
+    /// case (`"LOWER"`) is no built-in at all.
+    fn builtin_name(&self, name: &ObjectName) -> String {
+        if self.dialect != SqlDialect::Postgres {
+            return name.to_string().to_uppercase();
+        }
+        let idents: Vec<&Ident> = name.0.iter().filter_map(|part| part.as_ident()).collect();
+        let bare = match idents.as_slice() {
+            [only] => only,
+            [schema, last] if fold(schema, self.dialect) == "pg_catalog" => last,
+            _ => return name.to_string().to_uppercase(),
+        };
+        let folded = fold(bare, self.dialect);
+        if folded == folded.to_lowercase() {
+            folded.to_uppercase()
+        } else {
+            format!("\"{folded}\"")
+        }
+    }
+
+    /// A function name for messages: lower case, except that a PostgreSQL name keeping its
+    /// case is quoted.
+    fn display_name(&self, name: &ObjectName) -> String {
+        if self.dialect != SqlDialect::Postgres {
+            return name.to_string().to_lowercase();
+        }
+        let parts: Vec<String> = name
+            .0
+            .iter()
+            .filter_map(|part| part.as_ident())
+            .map(|ident| {
+                let folded = fold(ident, self.dialect);
+                if folded == folded.to_lowercase() {
+                    folded
+                } else {
+                    format!("\"{folded}\"")
+                }
+            })
+            .collect();
+        parts.join(".")
+    }
+
     /// The type of a call to a function the schema defines.
     fn user_function(&self, name: &ObjectName, args: &FunctionArguments) -> Typed {
         let count = match args {
             FunctionArguments::List(list) => list.args.len(),
             _ => 0,
         };
-        match self.schema.function(&table_key(name), count) {
+        match self.schema.function(&table_key(name, self.dialect), count) {
             Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => typed.clone(),
             _ => (None, None),
         }
@@ -230,7 +273,7 @@ impl<'a> Analyzer<'a> {
                 }
             }
             Expr::Function(func) => {
-                let name = func.name.to_string().to_uppercase();
+                let name = self.builtin_name(&func.name);
                 let args = positional_args(&func.args);
                 let arg = args.first().copied();
                 match name.as_str() {
@@ -242,7 +285,9 @@ impl<'a> Analyzer<'a> {
                             let typed = self.user_function(&func.name, &func.args);
                             if typed.0.is_none() && self.diag.enabled() {
                                 if self.schema.is_empty()
-                                    || self.schema.defines_function(&table_key(&func.name))
+                                    || self
+                                        .schema
+                                        .defines_function(&table_key(&func.name, self.dialect))
                                 {
                                     self.diag.explain_silently();
                                 } else {
@@ -250,7 +295,7 @@ impl<'a> Analyzer<'a> {
                                         NameRule::UnknownFunction,
                                         format!(
                                             "function `{}` is not known to sqlty, so its result is untyped",
-                                            func.name.to_string().to_lowercase()
+                                            self.display_name(&func.name)
                                         ),
                                     );
                                 }

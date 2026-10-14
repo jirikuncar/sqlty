@@ -94,25 +94,31 @@ SELECT * FROM users
 -- inferred: tuple[int | None, str | None]
 ```
 
-## A schema with one definition needs no search_path
+## A schema with one definition still needs the search_path
 
-A bare name that only one schema defines resolves to it.
+A bare name resolves only through the `search_path`. A table that lives in a single
+other schema is not found without it (see `name_resolution.md` for the diagnostics).
 
 `schema.sql`:
 
 ```sql
 CREATE TABLE app.users (id INTEGER, name TEXT);
 CREATE TYPE app.mood AS ENUM ('ok', 'bad');
-CREATE TABLE app.checkins (id INTEGER, mood mood);
+CREATE TABLE app.checkins (id INTEGER, mood app.mood);
 ```
 
 ```sql
 SELECT * FROM users
+-- inferred: None
+```
+
+```sql
+SELECT * FROM app.users
 -- inferred: tuple[int | None, str | None]
 ```
 
 ```sql
-SELECT mood FROM checkins
+SELECT mood FROM app.checkins
 -- inferred: tuple[typing.Literal['ok', 'bad'] | None]
 ```
 

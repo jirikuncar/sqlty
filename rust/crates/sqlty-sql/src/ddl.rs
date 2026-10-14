@@ -247,7 +247,7 @@ impl Statement<'_> {
 
     /// The `(kind, name parts)` an `ALTER` or `DROP` statement targets, e.g.
     /// `("table", ["app", "users"])` for `ALTER TABLE IF EXISTS ONLY app.users ...`.
-    /// Parts are unquoted and lowercase. `DROP` lists give the first name.
+    /// Parts are unquoted; an unquoted part is lowercased, a quoted one keeps its case. `DROP` lists give the first name.
     pub fn target(&self, verb: &str) -> Option<(String, Vec<String>)> {
         self.target_and_action(verb)
             .map(|(kind, name, _)| (kind, name))
@@ -477,7 +477,7 @@ fn name_parts(pieces: &[&Piece]) -> (Vec<String>, usize) {
     let mut used = 0;
     for piece in pieces {
         if expect_name && matches!(piece.0, Kind::Word | Kind::Quoted) {
-            parts.push(unquote(piece.1).to_lowercase());
+            parts.push(unquote(piece.1));
             expect_name = false;
         } else if !expect_name && is_punct(piece, ".") {
             expect_name = true;
@@ -727,7 +727,7 @@ mod tests {
             ),
             Some((
                 "table".to_string(),
-                vec!["app".to_string(), "users".to_string()],
+                vec!["app".to_string(), "Users".to_string()],
                 vec!["owner".to_string(), "to".to_string()]
             ))
         );

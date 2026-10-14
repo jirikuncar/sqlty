@@ -35,21 +35,21 @@ pub(super) fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
 }
 
 /// Tables a DML statement writes to, for resolving RETURNING columns.
-pub(super) fn dml_scope(stmt: &Statement) -> Scope {
+pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
     match stmt {
         Statement::Insert(insert) => match &insert.table {
-            TableObject::TableName(name) => vec![(object_name(name), table_key(name))],
+            TableObject::TableName(name) => vec![(object_name(name), table_key(name, dialect))],
             _ => Vec::new(),
         },
         Statement::Update(update) => {
-            let mut scope = table_scope(&update.table.relation);
+            let mut scope = table_scope(&update.table.relation, dialect);
             if update.from.is_some() || !update.table.joins.is_empty() {
                 scope.push(other_sources());
             }
             scope
         }
         Statement::Merge(merge) => {
-            let mut scope = table_scope(&merge.table);
+            let mut scope = table_scope(&merge.table, dialect);
             scope.push(other_sources());
             scope
         }
@@ -57,7 +57,7 @@ pub(super) fn dml_scope(stmt: &Statement) -> Scope {
             let mut scope = match &delete.from {
                 FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables
                     .first()
-                    .map(|table| table_scope(&table.relation))
+                    .map(|table| table_scope(&table.relation, dialect))
                     .unwrap_or_default(),
             };
             if delete.using.is_some() {
