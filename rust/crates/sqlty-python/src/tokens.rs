@@ -114,7 +114,7 @@ fn field_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
                 i = bytes[i..]
                     .iter()
                     .position(|&b| b == b'\n')
-                    .map_or(bytes.len(), |n| i + n)
+                    .map_or(bytes.len(), |n| i + n);
             }
             _ => i += 1,
         }

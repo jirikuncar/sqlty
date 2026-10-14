@@ -6,6 +6,10 @@ description = "SQL schema parsing and type inference for sqlty"
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 sqlparser.workspace = true

@@ -130,10 +130,10 @@ fn group(table: &TableWithJoins, extended: &mut Vec<String>, dialect: SqlDialect
         let right = factor_references(&join.relation, extended, dialect);
         match &join.join_operator {
             JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply => {
-                extended.extend(right.iter().cloned())
+                extended.extend(right.iter().cloned());
             }
             JoinOperator::Right(_) | JoinOperator::RightOuter(_) => {
-                extended.extend(left.iter().cloned())
+                extended.extend(left.iter().cloned());
             }
             JoinOperator::FullOuter(_) => {
                 extended.extend(left.iter().cloned());

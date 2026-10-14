@@ -185,7 +185,7 @@ pub(super) fn merges_columns(join: &Join) -> bool {
 /// The constraint of a join, when its operator has one.
 fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
     use JoinOperator::*;
-    let constraint = match &join.join_operator {
+    match &join.join_operator {
         Join(c)
         | Inner(c)
         | Left(c)
@@ -201,10 +201,9 @@ fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
         | LeftAnti(c)
         | RightAnti(c)
         | StraightJoin(c)
-        | AsOf { constraint: c, .. } => c,
-        _ => return None,
-    };
-    Some(constraint)
+        | AsOf { constraint: c, .. } => Some(c),
+        _ => None,
+    }
 }
 
 /// The table an alias (or table name) refers to.

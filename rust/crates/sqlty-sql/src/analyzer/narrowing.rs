@@ -32,7 +32,7 @@ impl Learned {
     }
 
     /// What both hold: facts that follow from either side of an `OR`.
-    fn intersect(self, other: Learned) -> Learned {
+    fn intersect(self, other: &Learned) -> Learned {
         Learned {
             columns: self
                 .columns
@@ -198,7 +198,7 @@ impl<'a> Analyzer<'a> {
                 if truth {
                     l.union(r)
                 } else {
-                    l.intersect(r)
+                    l.intersect(&r)
                 }
             }
             Expr::BinaryOp {
@@ -211,7 +211,7 @@ impl<'a> Analyzer<'a> {
                     self.learn(right, truth, scope),
                 );
                 if truth {
-                    l.intersect(r)
+                    l.intersect(&r)
                 } else {
                     l.union(r)
                 }

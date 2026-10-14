@@ -9,6 +9,7 @@ description = "Rust engine of sqlty: SQL type inference and Python source rewrit
 license = "MIT"
 repository = "https://github.com/jirikuncar/sqlty"
 publish = false
+rust-version = "1.88"
 
 [workspace.dependencies]
 pyo3 = { version = "0.29", features = ["extension-module"] }
@@ -17,3 +18,10 @@ regex = "1"
 once_cell = "1"
 sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+needless_pass_by_value = "warn"
+redundant_clone = "warn"
+manual_let_else = "warn"
+semicolon_if_nothing_returned = "warn"

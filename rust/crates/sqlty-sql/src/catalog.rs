@@ -1604,7 +1604,7 @@ fn read_statements(
             ops.push(Op {
                 path: path.clone(),
                 kind,
-            })
+            });
         };
         if stmt.is_create_table() || (postgres && stmt.is_create_table_any()) {
             let (likes, text) = match postgres.then(|| stmt.without_like()).flatten() {
@@ -1697,7 +1697,7 @@ fn read_alter_or_drop(stmt: &ddl::Statement, dialect: SqlDialect, push: &mut imp
     if let Some((kind, name, action)) = stmt.target_and_action("alter") {
         match (kind.as_str(), parsed()) {
             ("table", Some(Statement::AlterTable(alter))) => {
-                push(OpKind::AlterTable(Box::new(alter)))
+                push(OpKind::AlterTable(Box::new(alter)));
             }
             ("table", _) if !changes_columns(&action, stmt.has_word("type")) => {}
             ("table", _) => push(OpKind::Taint(Taint::Relation, name)),

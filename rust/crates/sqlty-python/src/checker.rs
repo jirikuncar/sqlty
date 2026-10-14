@@ -389,7 +389,7 @@ pub fn wrapped_queries(
             });
             (
                 lines.line_at(call.span.start),
-                source[call.annotation.clone()].to_string(),
+                source[call.annotation].to_string(),
                 query,
             )
         })

@@ -317,6 +317,10 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
@@ -378,6 +382,10 @@ fn wrapped_queries(
 ///     ValueError: unsupported import_style
 #[pyfunction]
 #[pyo3(signature = (source, *, import_style = None, any_calls = vec![]))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
 fn query_sites(
     source: &str,
     import_style: Option<&str>,
