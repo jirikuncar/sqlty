@@ -1,0 +1,47 @@
+# unknown-column
+
+Default severity: **ignore**
+
+## What it does
+
+Reports a column that the table it is read from does not have. The table must be known: a column of an unknown table is covered by `unknown-table` instead.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-column = "warn"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `email` does not exist in `users`"
+q = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
+```
+
+## Why is this bad?
+
+An unknown column has no type, so its annotation is not checked, and the query fails when it runs.
+
+## How to fix
+
+Fix the name or add the column to the schema file. Columns of CTEs and derived tables, `USING`/`NATURAL` join columns, outer-query columns in correlated subqueries and `LATERAL`, and whole-row references (`SELECT u FROM users u`) are resolved and not reported. A column that may come from a table function or another source whose columns are not read is reported as `unsupported-syntax`. To accept one case, put `# sqlty: ignore[unknown-column]` on its line.
+
+## Configuration
+
+Off by default, because it reports code that passes today. Enable it:
+
+```toml
+[tool.sqlty.rules]
+unknown-column = "warn"
+```
+
+Only checked when a schema with tables is configured. Only the select list is resolved: a column used in `WHERE`, `ON`, `GROUP BY` or `ORDER BY` is not checked. Applies to the `postgres`, `mysql` and `sqlite` dialects. `error` makes `sqlty check` fail on it.

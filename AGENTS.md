@@ -173,6 +173,8 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `-- inferred:` | in the `sql` block | `core.infer_type()` |
 | `-- expanded:` | in the `sql` block | `core.expand_star()` |
 | `-- columns:` | in the `sql` block | `core.analyze_select()`: `name: type (SQL_TYPE)` per line |
+| `-- json:` | in the `sql` block | `core.json_shapes()`: `name: shape` per JSON column of known shape |
+| `-- params:` | in the `sql` block | `core.analyze_params()`: `number-or-name: type (SQL_TYPE)` per parameter, then ` NULL` or ` NOT NULL` when known |
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
@@ -259,7 +261,7 @@ decoded at import time, which type checkers cannot do.
 |------|------|----|------------|
 | Setting attributes on a function (`fn.__sqlty__ = True`) | `attr-defined` | `invalid-assignment` / `unresolved-attribute` | Suppress both on the same line |
 | `__name__` of a `Callable` | Allowed | Not part of `Callable` | `getattr(fn, "__name__", "unknown")` |
-| Rust functions (`sqlty._core`) | Read from `_core.pyi` | Read from `_core.pyi` | Keep the stub in sync with `rust/src/lib.rs` |
+| Rust functions (`sqlty._core`) | Read from `_core.pyi` | Read from `_core.pyi` | Keep the stub in sync with `rust/crates/sqlty-ext/src/lib.rs` |
 | Optional `psycopg` dependency | `ignore_missing_imports` override in `pyproject.toml` | Installed by `uv sync --all-groups` | No inline suppression |
 
 ### Suppression comments
@@ -283,11 +285,14 @@ test with an explicit expected error count.
 src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
 ├── core.py              # Public API over the Rust engine, plus row type checks
-├── _core.pyi            # Stub for sqlty._core (rust/src/lib.rs)
+├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _type_extractor.py   # Row types (TypedDict, dataclass, ...) for structural checks
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, version
 └── magic.py             # Python codec registration
-rust/src/                # The engine, sqlty._core: lib.rs (PyO3), analyzer, rewriter, checker, fixer
+rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
+├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
+├── sqlty-python/        # tokens, rewriter, checker, fixer
+└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core
 ```

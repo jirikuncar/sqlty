@@ -48,12 +48,12 @@ CREATE VIEW labelled AS SELECT id AS order_id, total::TEXT AS label FROM orders;
 
 ```sql
 SELECT uid, orders, spent FROM order_stats
--- inferred: tuple[int, int, decimal.Decimal]
+-- inferred: tuple[int | None, int, decimal.Decimal | None]
 ```
 
 ```sql
 SELECT order_id, label FROM labelled
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Views over views
@@ -91,7 +91,7 @@ SELECT id, name FROM public.v
 
 ```sql
 SELECT age, n FROM counts
--- inferred: tuple[int, int]
+-- inferred: tuple[int | None, int]
 ```
 
 ## pg_dump style views

@@ -72,7 +72,7 @@ schema-qualified tables match unqualified queries:
 
 ```python
 query = "--sql\nSELECT id, name, created_at FROM users WHERE id = %s"
-# rewritten: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
+# rewritten: query = SQL[tuple[int, str, datetime.datetime | None]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
 ```
 
 Without a schema, an uncast column has no known type, so the query is left
@@ -153,8 +153,10 @@ values as parameters (`%s`) instead.
 `str`, so [`row_form`](../guide/row-types.md#the-row-type-at-runtime) and
 `execute` no longer know `T`. Put the complete query in the literal.
 
-**Nullable columns.** Row types are never `T | None`. Annotate the field in
-a row type if the column can be `NULL`.
+**Nullable columns.** A column that can be `NULL` infers `T | None`, so a row type
+field must be optional too ([`nullable-mismatch`](../reference/rules.md#nullable-mismatch)).
+Wrappers written by an earlier release are `stale-type`: `sqlty check --fix` updates
+them. See [Nullability](../guide/schema-inference.md#nullability).
 
 Related issue:
 [#19 Create migration tool for existing codebases](https://github.com/jirikuncar/sqlty/issues/19).

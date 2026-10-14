@@ -20,7 +20,9 @@ def _project(root: Path, name: str, config: str | None) -> Path:
     project.mkdir()
     (project / "queries.py").write_text(QUERY)
     if config is not None:
-        (project / "schema.sql").write_text("CREATE TABLE users (id INTEGER, name TEXT);\n")
+        (project / "schema.sql").write_text(
+            "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);\n"
+        )
         (project / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
     return project
 
@@ -66,7 +68,7 @@ def test_check_and_strip_use_each_paths_config(cli: Cli, projects: dict[str, Pat
 
 def test_cli_schema_overrides_every_config(cli: Cli, projects: dict[str, Path], tmp_path: Path):
     override = tmp_path / "override.sql"
-    override.write_text("CREATE TABLE users (id TEXT, name INTEGER);\n")
+    override.write_text("CREATE TABLE users (id TEXT NOT NULL, name INTEGER NOT NULL);\n")
     result = cli(["rewrite", "--schema", override, projects["plain"], projects["schema"]])
     assert result.returncode == 0, result.stderr
     for name in ("plain", "schema"):

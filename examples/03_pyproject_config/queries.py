@@ -4,4 +4,4 @@ from sqlty import SQL
 # Run from this directory: sqlty check .
 
 # Schema inference uses the configured schema file
-user_query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
+user_query = SQL[tuple[int, str, str | None]]("--sql\nSELECT id, name, email FROM users")

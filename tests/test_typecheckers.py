@@ -152,7 +152,7 @@ OVERLAP_CALLS = """from queries import sql
 
 users = sql("SELECT id::INTEGER FROM users")
 names = sql("SELECT 'a'::TEXT AS y")
-pairs = sql("VALUES (1, 2)")
+pairs = sql("SELECT x, y FROM pairs")
 purge = sql("DELETE FROM users")
 """
 

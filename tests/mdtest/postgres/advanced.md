@@ -106,5 +106,5 @@ SELECT
 FROM users u
 LEFT JOIN user_stats s ON u.id = s.user_id
 ORDER BY s.total_spent DESC NULLS LAST
--- inferred: tuple[int, str, str, datetime.datetime, int, float, datetime.datetime, bool]
+-- inferred: tuple[int, str, str, datetime.datetime, int, float, datetime.datetime | None, bool]
 ```

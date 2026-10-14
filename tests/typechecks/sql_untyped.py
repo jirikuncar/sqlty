@@ -14,7 +14,7 @@ def rows[T](query: SQL[T]) -> list[T]:
     return []
 
 
-query = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+query = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 assert_type(query, SQL[UNTYPED])
 row = rows(query)[0]
 assert_type(row, UNTYPED)

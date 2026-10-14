@@ -17,6 +17,11 @@ stale-type = "error"
 | [`column-count-mismatch`](#column-count-mismatch) | Row type | error | no | Row type has a different number of fields than the query has columns |
 | [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field can't hold its column's values |
 | [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | `NamedTuple` field name differs from its column name |
+| [`nullable-mismatch`](#nullable-mismatch) | Row type | error | no | Row type field is not optional but its column can be NULL |
+| [`json-shape-mismatch`](#json-shape-mismatch) | Row type | error | no | Row type field can't hold the JSON its column builds |
+| [`redundant-optional`](#redundant-optional) | Row type | ignore | no | Row type field is optional but its column cannot be NULL |
+| [`literal-mismatch`](#literal-mismatch) | Row type | error | no | Row type field is a `Literal` that does not cover its column's values |
+| [`redundant-literal`](#redundant-literal) | Row type | ignore | no | Row type field is a `Literal` that lists values its column never takes |
 | [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the fields of a TypedDict, dataclass or Pydantic model |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
 | [`select-star-no-schema`](#select-star-no-schema) | Query | error | no | `SELECT *` with no schema to expand it |
@@ -24,13 +29,26 @@ stale-type = "error"
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`unparsed-query`](#unparsed-query) | Query | ignore | no | Query that does not parse, so sqlty cannot check it |
+| [`unknown-table`](#unknown-table) | Names | ignore | no | Table the schema does not define |
+| [`unknown-column`](#unknown-column) | Names | ignore | no | Column the table does not have |
+| [`ambiguous-column`](#ambiguous-column) | Names | ignore | no | Unqualified column more than one table has |
+| [`unknown-function`](#unknown-function) | Names | ignore | no | Function whose result sqlty cannot type |
+| [`unknown-type`](#unknown-type) | Names | ignore | no | Cast or column type without a Python type |
+| [`unsupported-syntax`](#unsupported-syntax) | Names | ignore | no | Construct that parses but is not typed |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
+| [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
+| [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
 | [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
+
+`nullable-mismatch` and `redundant-optional` check nullability; see
+[Nullability](../guide/schema-inference.md#nullability). `literal-mismatch` and
+`redundant-literal` check `Literal` annotations against the values a column can
+take; see [Literal values](../guide/schema-inference.md#literal-values).
 
 `sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
 rule's page.
@@ -136,6 +154,185 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 Fix: rename the field or alias the column (`id AS user_id`).
 
+### nullable-mismatch
+
+Default: error. A row type field is not
+optional, but its query column can be NULL: a schema column without `NOT NULL`,
+a column of the optional side of an outer join, an aggregate over an empty
+input. Fields typed `Any` and columns of unknown nullability are not reported;
+see `sqlty rule nullable-mismatch`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str
+
+# error: [nullable-mismatch] "User.name is str but query column 'name' can be NULL"
+q = SQL[User]("--sql\nSELECT id, name FROM users")
+```
+
+Fix: annotate `name: str | None`, or filter or `COALESCE` the NULLs away.
+
+### json-shape-mismatch
+
+Default: error. A column built with `jsonb_build_object()`, `jsonb_agg()`, `to_jsonb()` and
+the like has a known JSON shape, which the row type field must be able to hold: nested
+`TypedDict`s, `list[...]` and `dict[str, ...]` are followed. Scalars of the wrong type,
+members that can be `null`, required keys the query may omit and undeclared keys are
+reported with their path. Columns of unknown shape and fields typed `Any` are not
+reported; see [JSON shapes](../guide/json-shapes.md) and `sqlty rule json-shape-mismatch`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (id INTEGER PRIMARY KEY, total NUMERIC(10, 2) NOT NULL);
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Doc(TypedDict):
+    id: int
+    total: str
+
+class Order(TypedDict):
+    doc: Doc
+
+# error: [json-shape-mismatch] "Order.doc is Doc but query column 'doc' builds JSON that does not fit: doc.total is str but the query builds a number"
+q = SQL[Order]("--sql\nSELECT jsonb_build_object('id', id, 'total', total) AS doc FROM orders")
+```
+
+Fix: annotate `total: float`, or cast the value in the query (`total::TEXT`).
+
+### redundant-optional
+
+Default: ignore. The strict side of `nullable-mismatch`: a field is annotated
+`T | None` or `Optional[T]`, but its column cannot be NULL. A wider annotation
+is correct, only looser than needed, so the rule stays off until enabled in
+`[tool.sqlty.rules]`; see `sqlty rule redundant-optional`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+redundant-optional = "warn"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    name: str | None
+
+# error: [redundant-optional] "User.name is str | None but query column 'name' is never NULL"
+q = SQL[User]("--sql\nSELECT id, name FROM users")
+```
+
+Fix: drop the `| None`.
+
+### literal-mismatch
+
+Default: error. A row type field is a `Literal` that does not cover every
+value its query column can take: the values of an enum, of a `CHECK (col IN
+(...))` constraint, of a `CASE` over constants and the like. Fields typed `str`,
+`int`, `Any` or an enum class take any value and are not reported; see `sqlty
+rule literal-mismatch`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'refunded'))
+);
+```
+
+```python
+from typing import Literal, TypedDict
+from sqlty import SQL
+
+class Order(TypedDict):
+    id: int
+    status: Literal["pending", "paid"]
+
+# error: [literal-mismatch] "Order.status is Literal['pending', 'paid'] but query column 'status' can be 'refunded'"
+q = SQL[Order]("--sql\nSELECT id, status FROM orders")
+```
+
+Fix: add the missing values to the `Literal`, or annotate `str`.
+
+### redundant-literal
+
+Default: ignore. The strict side of `literal-mismatch`: the `Literal` lists
+values the column can never take. A wider `Literal` is correct, only looser than
+needed (one alias often serves many queries), so the rule stays off until enabled
+in `[tool.sqlty.rules]`; see `sqlty rule redundant-literal`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+redundant-literal = "warn"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid'))
+);
+```
+
+```python
+from typing import Literal, TypedDict
+from sqlty import SQL
+
+class Order(TypedDict):
+    id: int
+    status: Literal["pending", "paid", "refunded"]
+
+# error: [redundant-literal] "Order.status is Literal['pending', 'paid', 'refunded'] but query column 'status' is never 'refunded'"
+q = SQL[Order]("--sql\nSELECT id, status FROM orders")
+```
+
+Fix: drop the extra values.
+
 ### typeddict-key-mismatch
 
 Default: error. TypedDicts, dataclasses and Pydantic models are matched to
@@ -182,6 +379,48 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 Fix: see [TypedDict inheritance](../guide/row-types.md#typeddict-inheritance)
 for what a subclass may do.
+
+## Parameter rules
+
+Both rules read the arguments a [query helper](../guide/helpers.md) call passes
+for the query's placeholders; see [Query parameters](../guide/parameters.md).
+
+### param-type-mismatch
+
+Default: error. An argument whose type, stated in the source, can't be the type
+the query gives its parameter, or `None` for a parameter stored in a `NOT NULL`
+column. A `str`, a number for a numeric parameter, an argument of a cast
+parameter and any argument of unknown type are never reported. Not checked for
+SQLite, except `None`.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...]) -> None: ...
+
+# error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+execute("SELECT 1 FROM users LIMIT %s", (b"1",))
+```
+
+Fix: pass a value of the expected type.
+
+### param-count-mismatch
+
+Default: error. A different number of positional arguments than the query has
+placeholders, or named arguments that don't match the query's names.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...]) -> None: ...
+
+# error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+execute("SELECT 1 FROM users WHERE id = %s AND name = %s", (1,))
+```
+
+Fix: pass one argument per placeholder.
 
 ## Suppression rules
 
@@ -305,6 +544,48 @@ q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
 Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
 counts such queries as unparsed whether or not the rule is enabled.
 
+## Name rules
+
+These six rules explain why a result column is untyped: with all of them
+enabled and a schema configured, no column is left untyped without a diagnostic. They are off by
+default because they report code that passes today. The
+[name diagnostics guide](../guide/name-diagnostics.md) shows how to enable
+them. All but `unsupported-syntax` are only judged when a
+[schema](../guide/schema-inference.md) is configured, because without one every
+table, column, function and type is unknown. Tables, columns and ambiguity are
+checked only in the `postgres`, `mysql` and `sqlite` dialects.
+
+### unknown-table
+
+Default: ignore. A `FROM`, `JOIN` or DML target that the schema does not
+define, or a qualifier (`x.id`) that names no table or alias of the query.
+CTEs, derived tables, views, table functions and system catalogs are not
+reported.
+
+### unknown-column
+
+Default: ignore. A select-list column that its table does not have.
+
+### ambiguous-column
+
+Default: ignore. An unqualified column that more than one table of the query
+has. Columns merged by `USING` or `NATURAL` are not ambiguous.
+
+### unknown-function
+
+Default: ignore. A function call sqlty cannot type because it does not know
+the function.
+
+### unknown-type
+
+Default: ignore. A cast target or schema column type with no Python type.
+
+### unsupported-syntax
+
+Default: ignore. A construct that parses but that sqlty does not type: an
+expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
+of a table function. `NULL` and placeholders are not reported.
+
 ## Rewrite rules
 
 ### stale-rewrite
@@ -391,7 +672,7 @@ known, the message suggests it.
 
 ```python
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 Fix: add casts or schema entries; `sqlty check --fix` then writes the row

@@ -30,13 +30,13 @@ repos:
         files: ^examples/
       - id: cargo-fmt
         name: cargo fmt
-        entry: cargo fmt --manifest-path rust/Cargo.toml --check
+        entry: cargo fmt --all --manifest-path rust/Cargo.toml --check
         language: system
         pass_filenames: false
         types: [rust]
       - id: cargo-test
         name: cargo test
-        entry: cargo test --manifest-path rust/Cargo.toml -q
+        entry: cargo test --workspace --manifest-path rust/Cargo.toml -q
         language: system
         pass_filenames: false
         files: ^rust/

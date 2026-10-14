@@ -30,7 +30,7 @@ t = SQL[UNTYPED]("--sql\nSELECT id::INTEGER, * FROM users")
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    email VARCHAR(255)
+    email VARCHAR(255) NOT NULL
 );
 ```
 

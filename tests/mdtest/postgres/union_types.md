@@ -31,14 +31,14 @@ SELECT amount FROM events UNION ALL SELECT amount FROM archived_events
 ```sql
 SELECT sum(amount) AS total
 FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```
 
 ## NULL and placeholder branches take the other branch's type
 
 ```sql
 SELECT NULL AS amount UNION ALL SELECT amount FROM events
--- columns: amount: int (INT)
+-- columns: amount: int | None (INT)
 ```
 
 ```sql
@@ -58,7 +58,7 @@ CREATE VIEW all_events AS SELECT amount FROM events UNION ALL SELECT amount FROM
 
 ```sql
 SELECT sum(amount) AS total FROM all_events
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```
 
 ## INTERSECT and EXCEPT
@@ -105,7 +105,7 @@ SELECT 1.5 AS amount UNION ALL SELECT amount FROM events
 ## Different categories are unknown
 
 ```sql
-SELECT amount FROM events UNION SELECT 'none'
+SELECT amount FROM events UNION SELECT 'none'::text
 -- columns: amount: None (None)
 ```
 
@@ -123,6 +123,13 @@ SELECT 'a'::VARCHAR(10) AS t UNION SELECT 'b'::VARCHAR(20)
 
 ```sql
 SELECT 'a'::CHAR(1) AS t UNION SELECT 'b'::TEXT
+-- columns: t: str (CHAR)
+```
+
+`text`, `varchar` and `char` cast to each other implicitly, so the first input's type wins.
+
+```sql
+SELECT 'a'::TEXT AS t UNION SELECT 'b'::CHAR(1)
 -- columns: t: str (TEXT)
 ```
 
@@ -158,14 +165,14 @@ CREATE TABLE b (m mood, p percent, tags TEXT[], ids BIGINT[]);
 
 ```sql
 SELECT m, p, tags FROM a UNION SELECT m, p, tags FROM b
--- inferred: tuple[typing.Literal['happy', 'sad'], int, list[str]]
+-- inferred: tuple[typing.Literal['happy', 'sad'] | None, int | None, list[str] | None]
 ```
 
 Arrays resolve by their elements.
 
 ```sql
 SELECT ids FROM a UNION SELECT ids FROM b
--- columns: ids: list[int] (ARRAY<BIGINT>)
+-- columns: ids: list[int] | None (ARRAY<BIGINT>)
 ```
 
 ```sql

@@ -1,0 +1,17 @@
+[package]
+name = "sqlty-python"
+version.workspace = true
+edition.workspace = true
+description = "Python source tokenizing, rewriting and linting for sqlty"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sqlty-sql.workspace = true
+sqlparser.workspace = true
+regex.workspace = true

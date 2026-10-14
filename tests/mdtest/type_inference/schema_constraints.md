@@ -42,7 +42,7 @@ CREATE TABLE orders (
 
 ```sql
 SELECT id, user_id FROM orders
--- inferred: tuple[int, int]
+-- inferred: tuple[int, int | None]
 ```
 
 ## Column-level CHECK and REFERENCES
@@ -83,5 +83,5 @@ CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT DEFAULT 'x;y');
 
 ```sql
 SELECT id, label FROM events
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```

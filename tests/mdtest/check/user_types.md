@@ -249,7 +249,7 @@ q = SQL[WrongType]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    email VARCHAR(255)
+    email VARCHAR(255) NOT NULL
 );
 ```
 
@@ -279,7 +279,7 @@ q = SQL[User]("--sql\nSELECT id, name, email FROM users")
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    email VARCHAR(255)
+    email VARCHAR(255) NOT NULL
 );
 ```
 

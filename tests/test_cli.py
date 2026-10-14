@@ -9,8 +9,8 @@ from sqlty._cli import SettingsResolver, build_parser, main
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
     """``untyped`` comes from [tool.sqlty]; ``--untyped`` overrides it."""
-    source = 'q = "--sql\\nVALUES (1, 2)"\n'
-    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nVALUES (1, 2)")\n'
+    source = 'q = "--sql\\nSELECT x, y FROM pairs"\n'
+    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nSELECT x, y FROM pairs")\n'
     target = tmp_path / "q.py"
     monkeypatch.chdir(tmp_path)
 
@@ -37,7 +37,7 @@ def test_each_file_uses_its_nearest_config(tmp_path, monkeypatch, capsys) -> Non
         (tmp_path / name / "q.py").write_text(
             source.replace("id FROM", "id::INTEGER FROM", 1) if name == "b" else source
         )
-    (tmp_path / "a" / "schema.sql").write_text("CREATE TABLE users (id INTEGER);")
+    (tmp_path / "a" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
     monkeypatch.chdir(tmp_path)
 
     main(["rewrite", "b", "a"])
@@ -64,7 +64,9 @@ def test_dialect_flag_overrides_config(tmp_path, flag, expected) -> None:
 
 def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
-    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, name TEXT);")
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);"
+    )
     (tmp_path / "q.py").write_text(
         "from sqlty import SQL\n"
         'stale = SQL[tuple[str]]("--sql\\nSELECT id FROM users")\n'
@@ -153,7 +155,9 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunparsed-query = "warn"\n'
     )
-    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, name TEXT);")
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);"
+    )
     (tmp_path / "q.py").write_text(
         "from sqlty import SQL\n"
         'typed = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'

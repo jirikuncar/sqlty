@@ -128,8 +128,8 @@ untyped = "sentinel"
 ```
 
 ```python
-q = "--sql\r\nVALUES (1, 2)"
-# rewritten: q = SQL[UNTYPED]("--sql\r\nVALUES (1, 2)")
+q = "--sql\r\nSELECT x, y FROM pairs"
+# rewritten: q = SQL[UNTYPED]("--sql\r\nSELECT x, y FROM pairs")
 ```
 
 ## Marker on the second line of a triple-quoted string

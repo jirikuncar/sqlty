@@ -58,7 +58,10 @@ class TypeInfo:
     to its field, ``opaque`` names the fields whose validation names are not
     statically known (``AliasChoices``, ``alias_generator``) and ``forbid``
     is ``extra="forbid"``. ``lax`` names the fields of a Pydantic model or
-    dataclass that accept lax-mode conversions (not strict).
+    dataclass that accept lax-mode conversions (not strict). ``annotations`` holds
+    each field's annotation from source, qualifiers stripped and ``| None`` kept, and
+    ``aliases`` the typing names of the source it was read from (see
+    ``ParsedSource.typing_aliases``); JSON shapes are checked against them.
     """
 
     __slots__ = (
@@ -66,6 +69,7 @@ class TypeInfo:
         "fields",
         "kind",
         "resolved_hints",
+        "declared_hints",
         "required",
         "closed",
         "extra_items",
@@ -81,6 +85,8 @@ class TypeInfo:
         "opaque",
         "forbid",
         "lax",
+        "annotations",
+        "aliases",
     )
 
     def __init__(
@@ -106,6 +112,7 @@ class TypeInfo:
         self.extra_items_readonly = False
         self.extra_items_type: typing.Any = None
         self.field_types: dict[str, typing.Any] = {}
+        self.declared_hints: dict[str, typing.Any] = {}  # runtime hints, ``| None`` kept
         self.owner = name
         self.lineno = 0
         self.bases: list[str] = []
@@ -114,6 +121,8 @@ class TypeInfo:
         self.opaque: frozenset[str] = frozenset()
         self.forbid = False
         self.lax: frozenset[str] = frozenset()
+        self.annotations: dict[str, ast.expr] = {}
+        self.aliases: dict[str, str] = {}
 
     def field_for(self, column: str) -> str | None:
         """The field a query column fills, by name (a Pydantic alias counts); None if none does."""
@@ -138,7 +147,7 @@ class TypeInfo:
 
 # ---------------------------------------------------------------------------
 # Mapping from sqlty's python_type strings to actual Python types
-# (mirrors SQL_TO_PYTHON_TYPE in rust/src/analyzer.rs, with real type objects)
+# (mirrors SQL_TO_PYTHON_TYPE in rust/crates/sqlty-sql/src/analyzer/mod.rs, with real type objects)
 # ---------------------------------------------------------------------------
 PYTHON_TYPE_MAP: dict[str, type] = {
     "int": int,
@@ -267,12 +276,15 @@ def extract_type_definitions(
         if (config := _pydantic_config(node, kind, imports)) is not None:
             info.lax = _lax_fields(node, config, aliases, imports)
         info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
+        info.annotations = _ast_annotations(nodes, aliases)
+        info.aliases = aliases
         hints = None
         if (fields or is_typeddict) and (
             resolved := _resolve_class(nodes, import_stmts, parsed.text, helpers)
         ):
             cls, namespace = resolved
             hints = _type_hints(cls, namespace)
+            info.declared_hints = hints
             info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
         if is_typeddict:
             info.bases = [p.name for p in parents]
@@ -340,6 +352,145 @@ def check_type_compatibility(
         return column_python_type is None
     lax = column_name in user_type.lax
     return _accepts(field, annotation, column_python_type, _LAX_FROM if lax else _PROMOTED_FROM)
+
+
+def admits_none(tp: typing.Any) -> bool | None:
+    """Whether a resolved annotation admits ``None``; ``None`` when it can't be told.
+
+    ``Optional[X]``, ``X | None``, ``Any``, ``object`` and ``Literal[None]`` admit it;
+    plain classes, generics and ``NewType`` of those don't. A forward reference or a
+    name that failed to resolve is undecided.
+
+    Example:
+        >>> admits_none(int), admits_none(int | None), admits_none(typing.Any), admits_none(None)
+        (False, True, True, None)
+    """
+    if tp is None:
+        return None
+    verdicts = [_member_admits_none(member) for member in _union_members(tp)]
+    if True in verdicts:
+        return True
+    return None if None in verdicts else False
+
+
+def _member_admits_none(member: typing.Any) -> bool | None:
+    if member is type(None) or member is None or member is typing.Any or member is object:
+        return True
+    if isinstance(member, typing.NewType):
+        return admits_none(member.__supertype__)
+    origin = typing.get_origin(member)
+    if origin is typing.Literal:
+        return None in typing.get_args(member)
+    if isinstance(member, type) or isinstance(origin, type):
+        return False
+    return None
+
+
+def column_literal_values(python_type: str) -> list[str | int] | None:
+    """The values of an inferred ``Literal`` column type, ``None`` when it is not one.
+
+    ``None`` members (a nullable column) are left out; nullability is checked separately.
+
+    Example:
+        >>> column_literal_values("typing.Literal['a', 'b'] | None")
+        ['a', 'b']
+        >>> column_literal_values("typing.Literal[1, 2]")
+        [1, 2]
+        >>> column_literal_values("str") is None
+        True
+    """
+    try:
+        tree = ast.parse(python_type, mode="eval").body
+    except SyntaxError:
+        return None
+    members = [tree]
+    while any(isinstance(m, ast.BinOp) and isinstance(m.op, ast.BitOr) for m in members):
+        members = [
+            part
+            for m in members
+            for part in ((m.left, m.right) if isinstance(m, ast.BinOp) else (m,))
+        ]
+    values: list[str | int] = []
+    for member in members:
+        if isinstance(member, ast.Constant) and member.value is None:
+            continue
+        if not (
+            isinstance(member, ast.Subscript)
+            and isinstance(member.value, ast.Attribute)
+            and ast.unparse(member.value) == "typing.Literal"
+        ):
+            return None
+        items = member.slice.elts if isinstance(member.slice, ast.Tuple) else [member.slice]
+        for item in items:
+            if not (isinstance(item, ast.Constant) and isinstance(item.value, (str, int))):
+                return None
+            values.append(item.value)
+    return values or None
+
+
+def declared_literal_values(tp: typing.Any, inferred: list[str | int]) -> set[str | int] | None:
+    """The values a resolved annotation admits for a column that takes ``inferred``.
+
+    ``None`` when the annotation also takes values by class (``str`` for string values,
+    ``int`` for integers, ``Any``), or when it can't be told (an enum or other user class,
+    an unresolved name): only an annotation made of ``Literal`` members and ``None`` is a set.
+
+    Example:
+        >>> declared_literal_values(typing.Literal["a", "b"] | None, ["a"]) == {"a", "b"}
+        True
+        >>> declared_literal_values(str, ["a"]) is None
+        True
+        >>> declared_literal_values(typing.Literal[1], ["a"]) == {1}
+        True
+    """
+    covering: tuple[type, ...] = (str,) if isinstance(inferred[0], str) else (int, float, complex)
+    admitted: set[str | int] = set()
+    for member in _union_members(tp):
+        while isinstance(member, typing.NewType):
+            member = member.__supertype__
+        if member is type(None) or member is None:
+            continue
+        if typing.get_origin(member) is typing.Literal:
+            admitted.update(a for a in typing.get_args(member) if isinstance(a, (str, int)))
+        elif (
+            member is typing.Any
+            or member is object
+            or member in covering
+            or not (isinstance(member, type) and member.__module__ == "builtins")
+        ):
+            return None
+    return admitted
+
+
+def is_optional(tp: typing.Any) -> bool:
+    """Whether a resolved annotation spells ``None`` out: ``Optional[X]`` or ``X | None``.
+
+    ``Any`` and ``object`` admit ``None`` but are not optional in this sense.
+
+    Example:
+        >>> is_optional(int | None), is_optional(typing.Optional[str]), is_optional(typing.Any)
+        (True, True, False)
+    """
+    members = _union_members(tp)
+    return len(members) > 1 and any(m is type(None) for m in members)
+
+
+def field_type(user_type: TypeInfo, column_name: str) -> typing.Any:
+    """The resolved annotation of the field of ``user_type`` that holds ``column_name``.
+
+    Resolved as `check_type_compatibility` resolves it, but with ``| None`` kept (type
+    compatibility ignores it, since every column may be NULL); ``None`` when the field is
+    unknown or its annotation can't be resolved.
+    """
+    declared = dict(user_type.fields)
+    if column_name in declared:
+        hints = user_type.declared_hints
+        return (
+            hints[column_name] if column_name in hints else user_type.field_types.get(column_name)
+        )
+    if user_type.extra_items is not None:
+        return user_type.extra_items_type
+    return None
 
 
 def field_accepts(annotation: str, column_python_type: str | None) -> bool:
@@ -1191,6 +1342,12 @@ def _ast_type(
             newtypes,
             imports,
         )
+    if isinstance(node, ast.Subscript) and _is_name(node.value, "Literal", aliases):
+        items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        if all(isinstance(i, ast.Constant) and isinstance(i.value, (str, int)) for i in items):
+            literal: typing.Any = typing.Literal
+            return literal[tuple(typing.cast(ast.Constant, i).value for i in items)]
+        return None
     if (
         isinstance(node, ast.Subscript)
         and (origin := _ast_type(node.value, aliases, newtypes, imports)) in _GENERICS
@@ -1233,6 +1390,16 @@ def _ast_key_types(
         item.target.id: _ast_type(
             _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes, imports
         )
+        for node in nodes
+        for item in node.body
+        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+    }
+
+
+def _ast_annotations(nodes: list[ast.ClassDef], aliases: dict[str, str]) -> dict[str, ast.expr]:
+    """Field annotations of a class lineage (bases first), qualifiers stripped, ``| None`` kept."""
+    return {
+        item.target.id: _unwrap_qualifiers_ast(item.annotation, aliases)[0]
         for node in nodes
         for item in node.body
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)

@@ -11,6 +11,11 @@ Configuration via pyproject.toml:
     column-count-mismatch = "error"     # default
     column-type-mismatch = "error"      # default
     column-name-mismatch = "warn"       # default
+    nullable-mismatch = "error"         # default
+    json-shape-mismatch = "error"       # default
+    redundant-optional = "ignore"       # default
+    literal-mismatch = "error"          # default
+    redundant-literal = "ignore"        # default
     typeddict-key-mismatch = "error"    # default
     typeddict-inheritance = "error"     # default
     select-star = "warn"                # default
@@ -23,7 +28,15 @@ Configuration via pyproject.toml:
     unchecked-query = "warn"            # default
     untyped-query = "warn"              # default
     unparsed-query = "ignore"           # default
+    unknown-table = "ignore"            # default
+    unknown-column = "ignore"           # default
+    ambiguous-column = "ignore"         # default
+    unknown-function = "ignore"         # default
+    unknown-type = "ignore"             # default
+    unsupported-syntax = "ignore"       # default
     unused-ignore = "ignore"            # default
+    param-count-mismatch = "error"      # default
+    param-type-mismatch = "error"       # default
 """
 
 from __future__ import annotations
@@ -31,6 +44,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
+from sqlty._core import name_rules
 
 
 class Severity(Enum):
@@ -50,6 +65,10 @@ class LintRule:
     fixable: bool
     description: str
 
+
+# Rules that explain why a column is untyped, as the engine lists them; the entries in
+# ``RULES`` below must cover them (``tests/test_name_rules.py``).
+NAME_RULES: tuple[str, ...] = tuple(name_rules())
 
 # --- Rule definitions ---
 
@@ -86,6 +105,36 @@ RULES: dict[str, LintRule] = {
             "TypedDict subclass changes openness or adds keys a closed or extra_items base "
             "forbids (PEP 728)"
         ),
+    ),
+    "nullable-mismatch": LintRule(
+        name="nullable-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Row type field is not optional but its query column can be NULL",
+    ),
+    "json-shape-mismatch": LintRule(
+        name="json-shape-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Row type field cannot hold the JSON a query column builds",
+    ),
+    "redundant-optional": LintRule(
+        name="redundant-optional",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Row type field is optional but its query column cannot be NULL",
+    ),
+    "literal-mismatch": LintRule(
+        name="literal-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Row type field is a Literal that does not cover the values its column can take",
+    ),
+    "redundant-literal": LintRule(
+        name="redundant-literal",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Row type field is a Literal that lists values its column can never take",
     ),
     "select-star": LintRule(
         name="select-star",
@@ -152,6 +201,54 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="--sql query, SQL[T] query or Annotated helper query that does not parse",
+    ),
+    "unknown-table": LintRule(
+        name="unknown-table",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Query reads a table that the schema does not define",
+    ),
+    "unknown-column": LintRule(
+        name="unknown-column",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Query reads a column that its table does not have",
+    ),
+    "ambiguous-column": LintRule(
+        name="ambiguous-column",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Unqualified column exists in more than one table of the query",
+    ),
+    "unknown-function": LintRule(
+        name="unknown-function",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Function result is untyped because sqlty does not know the function",
+    ),
+    "unknown-type": LintRule(
+        name="unknown-type",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Cast or column type has no Python type",
+    ),
+    "unsupported-syntax": LintRule(
+        name="unsupported-syntax",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Query parses, but a construct in it is not typed, so the row type is not trusted",
+    ),
+    "param-count-mismatch": LintRule(
+        name="param-count-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="A call passes a different number of parameters, or different names, than its query has placeholders",
+    ),
+    "param-type-mismatch": LintRule(
+        name="param-type-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="A call passes an argument whose type can't be the type its query parameter takes",
     ),
     "unused-ignore": LintRule(
         name="unused-ignore",

@@ -31,13 +31,13 @@ pub(crate) struct Token {
 
 impl Token {
     /// The prefix of a string literal (`""`, `u`, `rb`, `f`, ...), lowercased.
-    pub fn prefix(&self, source: &str) -> String {
+    pub(crate) fn prefix(&self, source: &str) -> String {
         let text = &source[self.span.clone()];
         text[..text.find(['"', '\'']).unwrap_or(0)].to_ascii_lowercase()
     }
 
     /// A string literal with no prefix but `u`, whose source text is its content.
-    pub fn is_plain(&self, source: &str) -> bool {
+    pub(crate) fn is_plain(&self, source: &str) -> bool {
         self.kind == Kind::Str && matches!(self.prefix(source).as_str(), "" | "u")
     }
 }
@@ -114,7 +114,7 @@ fn field_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
                 i = bytes[i..]
                     .iter()
                     .position(|&b| b == b'\n')
-                    .map_or(bytes.len(), |n| i + n)
+                    .map_or(bytes.len(), |n| i + n);
             }
             _ => i += 1,
         }
@@ -361,18 +361,18 @@ pub(crate) struct Call {
 
 impl Call {
     /// The argument's string content, concatenated, when it is plain strings only.
-    pub fn content(&self, source: &str) -> Option<String> {
+    pub(crate) fn content(&self, source: &str) -> Option<String> {
         self.plain.then(|| content(source, &self.strings))
     }
 
     /// Whether the call starts at one of `any_calls`, the byte offsets of the calls
     /// whose `T` is `typing.Any`: an explicit opt-out of checks.
-    pub fn is_any(&self, any_calls: &[usize]) -> bool {
+    pub(crate) fn is_any(&self, any_calls: &[usize]) -> bool {
         any_calls.contains(&self.span.start)
     }
 
     /// The source of the argument's literals, from the first to the last.
-    pub fn argument<'a>(&self, source: &'a str) -> &'a str {
+    pub(crate) fn argument<'a>(&self, source: &'a str) -> &'a str {
         &source[self.strings[0].start..self.strings[self.strings.len() - 1].end]
     }
 }

@@ -14,9 +14,11 @@ import ast
 import re
 import typing
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
+from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
 from sqlty._core import (
@@ -28,11 +30,15 @@ from sqlty._core import (
 )
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import parse_error as _parse_error
+from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
+from sqlty._drivers import find_driver_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._lint import NAME_RULES
+from sqlty._params import mismatch
 from sqlty._source import ParsedSource, is_any
 
 if TYPE_CHECKING:
@@ -54,20 +60,117 @@ class ColumnInfo(NamedTuple):
     sql_type: str | None
 
 
+class _RowColumn(NamedTuple):
+    """A result column with whether it can be NULL (``None`` when unknown), for row type checks."""
+
+    name: str
+    python_type: str | None
+    sql_type: str | None
+    nullable: bool | None
+    json_shape: str | None = None
+    """The shape of the JSON the column builds, as the engine spells it (see ``_json_shape``)."""
+
+
 def analyze_select(
     sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
 ) -> list[ColumnInfo] | None:
     """Result columns of a query, or ``None`` when it returns no rows or doesn't parse.
 
+    A column that can be NULL has a ``T | None`` Python type.
+
     Example:
         >>> analyze_select("SELECT id::INTEGER, COUNT(*) AS n FROM users")
         [ColumnInfo(name='id', python_type='int', sql_type='INT'), ColumnInfo(name='n', python_type='int', sql_type='BIGINT')]
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema)]
+        ['int', 'str | None']
 
     Raises:
         RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
+
+
+def json_shapes(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[tuple[str, str]]:
+    """The shape of the JSON each column builds, as ``(column, shape)`` pairs.
+
+    Only PostgreSQL columns built with ``jsonb_build_object()``, ``jsonb_agg()``,
+    ``to_jsonb()``, ``->`` and the like have one. The column's Python type stays ``Any``;
+    ``json-shape-mismatch`` checks the shape against the row type.
+
+    Example:
+        >>> json_shapes("SELECT jsonb_build_object('id', 1, 'name', 'x') AS doc")
+        [('doc', '{id: integer, name: string}')]
+        >>> json_shapes("SELECT coalesce(jsonb_agg(1), '[]') AS xs")
+        [('xs', '[integer]')]
+    """
+    from sqlty._json_shape import render
+
+    try:
+        columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
+    except RuntimeError:
+        return []
+    return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
+
+
+class ParamInfo(NamedTuple):
+    """A query parameter. ``name`` is set for ``%(name)s`` and ``:name``; types are ``None`` when unknown.
+
+    ``nullable`` is ``False`` when ``None`` cannot be passed (the parameter is stored in a
+    ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
+    ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
+    accepts any value.
+    """
+
+    number: int
+    name: str | None
+    python_type: str | None
+    sql_type: str | None
+    nullable: bool | None
+    cast: bool = False
+
+
+def analyze_params(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[ParamInfo] | None:
+    """Parameters of a query with the type each takes from its context, or ``None`` when it doesn't parse.
+
+    Placeholders are ``%s``, ``%(name)s``, ``$1``, ``?`` and ``:name`` (``?`` outside
+    PostgreSQL, ``:name`` in SQLite). A parameter takes its type from the column it is
+    compared with or stored in, a cast, ``LIMIT``, ``IN`` lists, function arguments or an
+    array (``= ANY(%s)`` is ``list[T]``). ``number`` is 1-based, in order of appearance; a
+    named parameter used twice is one.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
+        >>> analyze_params("SELECT name FROM users WHERE id = %s AND age > %(min)s", schema_sql=schema)
+        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False)]
+        >>> [(p.python_type, p.nullable) for p in analyze_params("INSERT INTO users (id, name, age) VALUES ($1, $2, $3)", schema_sql=schema)]
+        [('int', False), ('str', False), ('int', True)]
+        >>> analyze_params("SELECT 1 FROM users WHERE id = ANY(%s)", schema_sql=schema)[0].python_type
+        'list[int]'
+    """
+    params = _analyze_params(sql, dialect=dialect, schema_sql=schema_sql)
+    return None if params is None else [ParamInfo(*param) for param in params]
+
+
+def query_diagnostics(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[tuple[str, str]]:
+    """Why a query has untyped columns, as ``(rule, message)`` pairs.
+
+    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
+    ``unknown-function``, ``unknown-type`` and ``unsupported-syntax``. Tables and
+    columns are only judged when ``schema_sql`` defines some tables.
+
+    Example:
+        >>> query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
+        [('unknown-column', 'column `nope` does not exist in `users`')]
+    """
+    return _query_diagnostics(sql, dialect=dialect, schema_sql=schema_sql)
 
 
 def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list[str]:
@@ -116,7 +219,7 @@ def fix_source(
         'q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]'
 
     Raises:
-        ValueError: unsupported ``import_style``
+        ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source)
     return _fix_source(
@@ -147,6 +250,9 @@ def check_source(
     type_modules: Iterable[str] | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
+
+    A column that can be NULL infers as ``T | None`` (``stale-type`` compares against
+    that), and ``nullable-mismatch`` reports a row field that does not admit ``None`` for it.
 
     When ``SQL[UserType](...)`` names a type defined in the same source,
     structural checks (column count, type, name, TypedDict keys) run instead
@@ -182,7 +288,7 @@ def check_source(
         List of diagnostic dicts with keys: rule, message, severity, line
 
     Raises:
-        ValueError: unsupported ``import_style``
+        ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source, module)
     diagnostics = _check_diagnostics(
@@ -229,6 +335,7 @@ def _check_diagnostics(
         else []
     )
     found = find_helper_calls(parsed, helpers, module)
+    driver_calls = find_driver_calls(parsed)
     calls = [call for call in found if call.query is not None]
     queries = [
         (line, name, query)
@@ -239,7 +346,7 @@ def _check_diagnostics(
         )
         if not name.startswith("tuple[")
     ]
-    if not (queries or found):
+    if not (queries or found or driver_calls):
         return diagnostics
     rule_config = RuleConfig(overrides=rules)
 
@@ -271,6 +378,14 @@ def _check_diagnostics(
         if key not in unparsed:
             unparsed[key] = ast.unparse(row)
         return unparsed[key]
+
+    if rule_config.is_enabled("param-type-mismatch") or rule_config.is_enabled(
+        "param-count-mismatch"
+    ):
+        for call in [*calls, *driver_calls]:
+            if call.params is not None:
+                for rule, message in _param_diagnostics(call, dialect, schema_sql):
+                    report(rule, message, call.line)
 
     rows = [unparse(call.row) if call.row else None for call in calls]
     named = [(call.line, row, call.query) for call, row in zip(calls, rows, strict=True) if row]
@@ -304,10 +419,21 @@ def _check_diagnostics(
         ):
             report("unparsed-query", f"query does not parse: {error}", call.line)
 
+    if any(rule_config.is_enabled(name) for name in NAME_RULES):
+        for call in calls:
+            if call.query is None or _MARKER.match(call.query):
+                continue
+            for rule, message in _query_diagnostics(
+                call.query, dialect=dialect, schema_sql=schema_sql
+            ):
+                report(rule, message, call.line)
+
     for line, name, query in user_queries:
         if (columns := _columns(query, dialect, schema_sql)) is None:
             continue
-        for rule, message in _structural_diagnostics(name, type_defs[name], columns, rule_config):
+        for rule, message in _structural_diagnostics(
+            name, type_defs[name], columns, rule_config, type_defs
+        ):
             report(rule, message, line)
 
     shapes: dict[str, _RowShape | None] = {}
@@ -318,7 +444,7 @@ def _check_diagnostics(
             continue
         if row not in shapes:
             shapes[row] = _row_shape(call.row, row, call.typing_aliases)
-        for rule, message in _value_diagnostics(shapes[row], columns):
+        for rule, message in _value_diagnostics(shapes[row], columns, rule_config, type_defs):
             report(rule, message, call.line)
     return diagnostics
 
@@ -383,14 +509,177 @@ def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
     return "partially typed"
 
 
-def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[ColumnInfo] | None:
-    """Columns of a query, ``None`` when it has none or cannot be analysed."""
+def _param_diagnostics(
+    call: HelperCall, dialect: str, schema_sql: str | None
+) -> list[tuple[str, str]]:
+    """``(rule, message)`` for the arguments a call passes for its query's placeholders."""
+    assert call.query is not None and call.params is not None
+    params = analyze_params(call.query, dialect=dialect, schema_sql=schema_sql)
+    if params is None:
+        return []
+    named = bool(params) and all(p.name is not None for p in params)
+    positional = all(p.name is None for p in params)
+    passed = {arg.key: arg for arg in call.params}
+    by_key: dict[int | str, ParamInfo] = {
+        (p.name if named and p.name else p.number): p for p in params
+    }
+    by_name = bool(passed) and all(isinstance(key, str) for key in passed)
+    if (named and passed and not by_name) or (positional and by_name):
+        return []
+    found: list[tuple[str, str]] = []
+    if positional and len(passed) != len(by_key):
+        found.append(
+            (
+                "param-count-mismatch",
+                f"query has {len(by_key)} parameter{'' if len(by_key) == 1 else 's'}, "
+                f"the call passes {len(passed)}",
+            )
+        )
+    elif named and (missing := [f"'{key}'" for key in by_key if key not in passed]):
+        found.append(
+            (
+                "param-count-mismatch",
+                f"call is missing parameter{'' if len(missing) == 1 else 's'} {', '.join(missing)}",
+            )
+        )
+    # sqlite3 is dynamically typed, and a cast converts whatever it is given.
+    typed = dialect.lower() != "sqlite"
+    for key, arg in passed.items():
+        if (param := by_key.get(key)) is None:
+            continue
+        label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
+        if arg.type == "None" or (typed and not param.cast):
+            if problem := mismatch(param.python_type, param.nullable, arg.type):
+                found.append(("param-type-mismatch", f"{label} {problem}"))
+    return found
+
+
+def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[_RowColumn] | None:
+    """Columns of a query and whether each can be NULL; ``None`` when it has none or cannot be analysed."""
     if query is None:
         return None
     try:
-        return analyze_select(query, dialect=dialect, schema_sql=schema_sql) or None
+        columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
     except RuntimeError:
         return None
+    return [_RowColumn(*column) for column in columns] if columns else None
+
+
+def _nullability_diagnostics(
+    label: str,
+    declared: typing.Any,
+    col: _RowColumn,
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """``nullable-mismatch`` and ``redundant-optional`` for one field and its column.
+
+    ``label`` reads ``<field>`` or ``<row> item <i>``, and is followed by ``is <annotation>``;
+    ``declared`` is the resolved annotation. A column of unknown nullability, or an
+    annotation that can't be resolved, is never reported.
+    """
+    from sqlty._type_extractor import _type_repr, admits_none, is_optional
+
+    if col.nullable is None or declared is None:
+        return []
+    if col.nullable and rules.is_enabled("nullable-mismatch") and admits_none(declared) is False:
+        return [
+            (
+                "nullable-mismatch",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' can be NULL",
+            )
+        ]
+    if not col.nullable and rules.is_enabled("redundant-optional") and is_optional(declared):
+        return [
+            (
+                "redundant-optional",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' is never NULL",
+            )
+        ]
+    return []
+
+
+def _json_diagnostics(
+    label: str,
+    annotation: ast.expr | None,
+    col: _RowColumn,
+    type_defs: Mapping[str, TypeInfo],
+    aliases: Mapping[str, str],
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """``json-shape-mismatch`` for one field and a JSON column of known shape.
+
+    ``label`` reads ``<field>`` or ``<row> item <i>`` and is followed by ``is <annotation>``.
+    An annotation that can't be read is never reported.
+    """
+    from sqlty._json_shape import json_problems, summarize
+
+    if col.json_shape is None or annotation is None or not rules.is_enabled("json-shape-mismatch"):
+        return []
+    problems = json_problems(col.json_shape, annotation, type_defs, aliases, col.name)
+    if not problems:
+        return []
+    return [
+        (
+            "json-shape-mismatch",
+            f"{label} is {ast.unparse(annotation)} but query column '{col.name}' builds JSON "
+            f"that does not fit: {summarize(problems)}",
+        )
+    ]
+
+
+def _literal_diagnostics(
+    label: str,
+    declared: typing.Any,
+    col: _RowColumn,
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """``literal-mismatch`` and ``redundant-literal`` for one field and its column.
+
+    Reported only when the annotation is made of ``Literal`` members (and ``None``) and the
+    column's values are known: ``str``, ``int``, ``Any`` or an enum take any value, so
+    there is nothing to compare.
+    """
+    from sqlty._type_extractor import _type_repr, column_literal_values, declared_literal_values
+
+    if declared is None or not col.python_type:
+        return []
+    inferred = column_literal_values(col.python_type)
+    if inferred is None:
+        return []
+    admitted = declared_literal_values(declared, inferred)
+    if admitted is None:
+        return []
+    missing = [v for v in inferred if v not in admitted]
+    if missing and rules.is_enabled("literal-mismatch"):
+        return [
+            (
+                "literal-mismatch",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' "
+                f"can be {', '.join(map(repr, missing))}",
+            )
+        ]
+    extra = sorted((v for v in admitted if v not in inferred), key=repr)
+    if not missing and extra and rules.is_enabled("redundant-literal"):
+        return [
+            (
+                "redundant-literal",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' "
+                f"is never {', '.join(map(repr, extra))}",
+            )
+        ]
+    return []
+
+
+def _field_diagnostics(
+    label: str,
+    declared: typing.Any,
+    col: _RowColumn,
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """Nullability and value-set diagnostics for one field and its column."""
+    return _nullability_diagnostics(label, declared, col, rules) + _literal_diagnostics(
+        label, declared, col, rules
+    )
 
 
 class _RowShape(NamedTuple):
@@ -398,8 +687,9 @@ class _RowShape(NamedTuple):
 
     text: str
     is_tuple: bool
-    targets: list[tuple[str, str, typing.Any]]
+    targets: list[tuple[str, str, typing.Any, ast.expr]]
     accepts: dict[tuple[int, str], bool]
+    aliases: Mapping[str, str]
 
 
 def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape | None:
@@ -416,17 +706,22 @@ def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape |
             return None
         annotations = [ast.unparse(item) for item in items]
         targets = [
-            (f"{text} item {i} is {annotation}", annotation, _ast_type(item, aliases))
+            (f"{text} item {i} is {annotation}", annotation, _ast_type(item, aliases), item)
             for i, (item, annotation) in enumerate(zip(items, annotations, strict=True))
         ]
-        return _RowShape(text, True, targets, {})
+        return _RowShape(text, True, targets, {}, aliases)
     resolved = _ast_type(row, aliases)
     if resolved is None or resolved in _CONTAINERS or typing.get_args(resolved):
         return None
-    return _RowShape(text, False, [(f"{text} is expected", text, resolved)], {})
+    return _RowShape(text, False, [(f"{text} is expected", text, resolved, row)], {}, aliases)
 
 
-def _value_diagnostics(shape: _RowShape | None, columns: list[ColumnInfo]) -> list[tuple[str, str]]:
+def _value_diagnostics(
+    shape: _RowShape | None,
+    columns: list[_RowColumn],
+    rules: RuleConfig,
+    type_defs: Mapping[str, TypeInfo],
+) -> list[tuple[str, str]]:
     """Compare the row type of a helper call with the query columns."""
     from sqlty._type_extractor import _accepts
 
@@ -441,9 +736,11 @@ def _value_diagnostics(shape: _RowShape | None, columns: list[ColumnInfo]) -> li
             )
         ]
     found = []
-    for i, ((label, annotation, resolved), col) in enumerate(
+    for i, ((label, annotation, resolved, node), col) in enumerate(
         zip(shape.targets, columns, strict=True)
     ):
+        item = f"{shape.text} item {i}" if shape.is_tuple else "row type"
+        found.extend(_json_diagnostics(item, node, col, type_defs, shape.aliases, rules))
         if resolved is None or not col.python_type:
             continue
         key = (i, col.python_type)
@@ -456,6 +753,8 @@ def _value_diagnostics(shape: _RowShape | None, columns: list[ColumnInfo]) -> li
                     f"{label} but query column '{col.name}' infers {col.python_type}",
                 )
             )
+        else:
+            found.extend(_field_diagnostics(item, resolved, col, rules))
     return found
 
 
@@ -520,7 +819,11 @@ def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list
 
 
 def _structural_diagnostics(
-    type_name: str, info: TypeInfo, columns: list[ColumnInfo], rules: RuleConfig
+    type_name: str,
+    info: TypeInfo,
+    columns: list[_RowColumn],
+    rules: RuleConfig,
+    type_defs: Mapping[str, TypeInfo],
 ) -> list[tuple[str, str]]:
     """Compare a user type with query columns, returning ``(rule, message)`` pairs.
 
@@ -530,9 +833,11 @@ def _structural_diagnostics(
     violation, except that Pydantic models ignore it and only ``extra_items``
     admits it (type-checked against it). Key-set violations are
     ``typeddict-key-mismatch``. NamedTuples match by position.
-    A reported count mismatch suppresses the per-column checks.
+    A reported count mismatch suppresses the per-column checks. A column that builds JSON
+    of a known shape is also checked against the field's annotation, nested types looked up
+    in ``type_defs`` (``json-shape-mismatch``).
     """
-    from sqlty._type_extractor import check_type_compatibility
+    from sqlty._type_extractor import check_type_compatibility, field_type
 
     fields = info.fields
     declared = dict(fields)
@@ -554,17 +859,21 @@ def _structural_diagnostics(
             )
         ]
 
-    def type_mismatch(field: str, col: ColumnInfo) -> list[tuple[str, str]]:
-        if not col.python_type or check_type_compatibility(info, field, col.python_type):
-            return []
+    def type_mismatch(field: str, col: _RowColumn) -> list[tuple[str, str]]:
         declared_type = declared.get(field) or f"extra_items {info.extra_items}"
-        return [
-            (
-                "column-type-mismatch",
-                f"{type_name}.{field} is {declared_type} but query column "
-                f"'{col.name}' infers {col.python_type}",
-            )
-        ]
+        if col.python_type and not check_type_compatibility(info, field, col.python_type):
+            return [
+                (
+                    "column-type-mismatch",
+                    f"{type_name}.{field} is {declared_type} but query column "
+                    f"'{col.name}' infers {col.python_type}",
+                )
+            ]
+        return _field_diagnostics(
+            f"{type_name}.{field}", field_type(info, field), col, rules
+        ) + _json_diagnostics(
+            f"{type_name}.{field}", info.annotations.get(field), col, type_defs, info.aliases, rules
+        )
 
     if not by_name:
         pairs = list(zip(fields, columns, strict=False))
@@ -608,6 +917,8 @@ __all__ = [
     "expand_star",
     "fix_source",
     "infer_type",
+    "json_shapes",
+    "query_diagnostics",
     "returns_rows",
     "rewrite_source",
     "schema_skipped_objects",

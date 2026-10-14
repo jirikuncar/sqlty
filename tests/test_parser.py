@@ -21,7 +21,7 @@ class TestParser:
                 "postgres",
                 "tuple[list[int], list[list[str]], list[int]]",
             ),
-            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[int]"),
+            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[int | None]"),
             ("SELECT x::INT[y] FROM t", "postgres", None),
             ("SELECT x::INT[1+1] FROM t", "postgres", None),
             ("SELECT x::INT ARRAY, y::TEXT FROM t", "postgres", "tuple[list[int], str]"),
@@ -136,11 +136,11 @@ class TestQueryInput:
 
 def _type_table() -> dict[str, str]:
     """``SQL_TO_PYTHON_TYPE`` of the analyzer, without ``ENUM`` (its values are needed to parse)."""
-    source = (Path(__file__).resolve().parent.parent / "rust/src/analyzer.rs").read_text()
+    source = (
+        Path(__file__).resolve().parent.parent / "rust/crates/sqlty-sql/src/analyzer/mod.rs"
+    ).read_text()
     constants = dict(re.findall(r'const (\w+): &str = "([\w. |]+)";', source))
-    table = source[
-        source.index("static SQL_TO_PYTHON_TYPE") : source.index("static FUNCTION_TYPES")
-    ]
+    table = source[source.index("static SQL_TO_PYTHON_TYPE") : source.index("static STAR_ITEM")]
     pairs = re.findall(r'\("(\w+)", (?:"([\w.]+)"|(\w+))\)', table)
     return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
 
@@ -149,7 +149,7 @@ def _type_table() -> dict[str, str]:
 @pytest.mark.parametrize(("sql_type", "python_type"), sorted(_type_table().items()))
 def test_type_names(sql_type: str, python_type: str, dialect: str):
     """A mapped type name, cast or in a schema, is its Python type."""
-    schema = f"CREATE TABLE t (c {sql_type});"
+    schema = f"CREATE TABLE t (c {sql_type} NOT NULL);"
     cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
     assert cast == column == f"tuple[{python_type}]"

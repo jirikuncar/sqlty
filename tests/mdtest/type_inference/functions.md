@@ -4,7 +4,7 @@
 
 ```sql
 SELECT SUM(amount) FROM orders
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```
 
 ## AVG function without explicit cast

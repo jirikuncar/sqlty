@@ -1,0 +1,21 @@
+[package]
+name = "sqlty-core"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3.workspace = true
+sqlty-sql.workspace = true
+sqlty-python.workspace = true

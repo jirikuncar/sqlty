@@ -36,7 +36,7 @@ SELECT total FROM orders
 
 ```sql
 SELECT 1.5, AVG(total), AVG(total::DOUBLE PRECISION) FROM orders
--- inferred: tuple[decimal.Decimal, decimal.Decimal, float]
+-- inferred: tuple[decimal.Decimal, decimal.Decimal | None, float | None]
 ```
 
 ## JSONB holds any JSON value

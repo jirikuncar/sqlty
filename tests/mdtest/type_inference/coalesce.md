@@ -21,14 +21,14 @@ schema = "schema.sql"
 
 ```sql
 SELECT coalesce(%(since)s, created_at) AS since FROM users
--- inferred: tuple[datetime.datetime]
+-- inferred: tuple[datetime.datetime | None]
 ```
 
 ## NULL first
 
 ```sql
 SELECT coalesce(NULL, created_at) AS created_at FROM users
--- inferred: tuple[datetime.datetime]
+-- inferred: tuple[datetime.datetime | None]
 ```
 
 ## GREATEST and LEAST skip them too

@@ -19,7 +19,7 @@ or a schema.
 from sqlty import SQL, UNTYPED
 
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-values = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+values = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 cast = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
 ```

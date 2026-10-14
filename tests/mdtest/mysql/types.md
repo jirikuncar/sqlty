@@ -26,7 +26,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM items
--- inferred: tuple[int, int, int, int, int, int, int]
+-- inferred: tuple[int | None, int | None, int | None, int | None, int | None, int | None, int | None]
 -- expanded: SELECT a::TINYINT, b::MEDIUMINT, c::MEDIUMINT, d::MEDIUMINT, e::BIGINT, f::INT(11), g::YEAR FROM items
 ```
 
@@ -54,7 +54,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM items
--- inferred: tuple[int, int, float, decimal.Decimal]
+-- inferred: tuple[int | None, int | None, float | None, decimal.Decimal | None]
 -- expanded: SELECT a::UINT, b::UBIGINT(20), c::UDOUBLE, d::UDECIMAL(10, 2) FROM items
 ```
 
@@ -62,7 +62,7 @@ SELECT * FROM items
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
 variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
-in the expansion; an `ENUM` is a `str`.
+in the expansion; an `ENUM` column is a `typing.Literal` of its labels.
 Unmapped types such as `BIT`, `SET` and spatial `POINT` are unknown, so a
 query selecting one has no row type.
 
@@ -96,7 +96,7 @@ SELECT * FROM items
 
 ```sql
 SELECT a, c, d, e, g, h, i FROM items
--- inferred: tuple[float, datetime.datetime, datetime.datetime, str, typing.Any, bytes, str]
+-- inferred: tuple[float | None, datetime.datetime | None, datetime.datetime | None, typing.Literal['x', 'y'] | None, typing.Any, bytes | None, str | None]
 ```
 
 ## Unsigned NUMERIC and FIXED are rejected
@@ -140,7 +140,7 @@ dialect = "mysql"
 
 ```sql
 SELECT CAST(doc->'$.zips' AS UNSIGNED ARRAY) FROM t
--- inferred: tuple[list[int]]
+-- inferred: tuple[list[int] | None]
 ```
 
 ## Bracketed array types are not MySQL
@@ -180,6 +180,6 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM items
--- inferred: tuple[int, int, int, int]
+-- inferred: tuple[int | None, int | None, int | None, int | None]
 -- expanded: SELECT a::UMEDIUMINT, b::UMEDIUMINT(8), c::UINT(5), d::UBIGINT FROM items
 ```

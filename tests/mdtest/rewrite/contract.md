@@ -163,8 +163,8 @@ q = "--sql SELECT 1::INTEGER"
 ### Skipped by default
 
 ```python
-q = "--sql\nVALUES (1, 2)"
-# rewritten-file: q = "--sql\nVALUES (1, 2)"
+q = "--sql\nSELECT x, y FROM pairs"
+# rewritten-file: q = "--sql\nSELECT x, y FROM pairs"
 ```
 
 ### Skips statements without rows
@@ -263,7 +263,7 @@ q = "--sql\n"
 # rewritten-file: q = "--sql\n"
 ```
 
-### Skips statements without rows: `q = "--sql VALUES (1, 2)"`
+### Skips statements without rows: `q = "--sql SELECT x, y FROM pairs"`
 
 ```toml
 [tool.sqlty]
@@ -271,8 +271,8 @@ untyped = "sentinel"
 ```
 
 ```python
-q = "--sql VALUES (1, 2)"
-# rewritten-file: q = "--sql VALUES (1, 2)"
+q = "--sql SELECT x, y FROM pairs"
+# rewritten-file: q = "--sql SELECT x, y FROM pairs"
 ```
 
 ### Skips statements without rows: `q = "--sql SELECT FROM users"`

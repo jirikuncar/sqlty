@@ -1,58 +1,94 @@
 //! sqlty._core — the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
 
-mod analyzer;
-mod checker;
-mod ddl;
-mod fixer;
-mod rewriter;
-mod tokens;
+use sqlty_python::checker;
+use sqlty_python::fixer;
+use sqlty_python::rewriter;
+use sqlty_sql::analyzer;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use rewriter::ImportStyle;
+use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
-
-type CachedSchema = (
+type NullableColumnTuple = (
     String,
-    String,
-    analyzer::Schema,
-    Vec<analyzer::SkippedObject>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<String>,
 );
+type ParamTuple = (
+    usize,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    bool,
+);
+
+/// A parsed schema and the tables and views it could not parse.
+struct LoadedSchema {
+    schema: analyzer::Schema,
+    skipped: Vec<analyzer::SkippedObject>,
+}
+
+type CachedSchema = (String, String, Arc<LoadedSchema>);
 
 /// Most recently used first. Callers pass the same few schemas call after call, and
 /// parsing a large one costs about a millisecond, so keep the last few parsed.
 static SCHEMAS: Mutex<Vec<CachedSchema>> = Mutex::new(Vec::new());
 const SCHEMAS_KEPT: usize = 8;
 
-fn cached_schema(
+/// Move the entry for the schema to the front and return it, if cached.
+fn cache_hit(
+    cache: &mut [CachedSchema],
     schema_sql: &str,
     dialect: &str,
-) -> (analyzer::Schema, Vec<analyzer::SkippedObject>) {
-    let mut cache = SCHEMAS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(at) = cache
+) -> Option<Arc<LoadedSchema>> {
+    let at = cache
         .iter()
-        .position(|(sql, d, ..)| sql == schema_sql && d == dialect)
-    {
-        cache[..=at].rotate_right(1);
-    } else {
-        let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
-        cache.insert(
-            0,
-            (schema_sql.to_string(), dialect.to_string(), schema, skipped),
-        );
-        cache.truncate(SCHEMAS_KEPT);
+        .position(|(sql, d, _)| sql == schema_sql && d == dialect)?;
+    cache[..=at].rotate_right(1);
+    Some(Arc::clone(&cache[0].2))
+}
+
+fn lock_schemas() -> MutexGuard<'static, Vec<CachedSchema>> {
+    SCHEMAS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The parsed schema. The cache is not locked while parsing, so a slow schema does not hold
+/// up callers of other schemas; two threads may parse the same one, and the first to finish
+/// is kept.
+fn cached_schema(schema_sql: &str, dialect: &str) -> Arc<LoadedSchema> {
+    if let Some(hit) = cache_hit(&mut lock_schemas(), schema_sql, dialect) {
+        return hit;
     }
-    (cache[0].2.clone(), cache[0].3.clone())
+    let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+    let loaded = Arc::new(LoadedSchema { schema, skipped });
+    let mut cache = lock_schemas();
+    if let Some(hit) = cache_hit(&mut cache, schema_sql, dialect) {
+        return hit;
+    }
+    cache.insert(
+        0,
+        (
+            schema_sql.to_string(),
+            dialect.to_string(),
+            Arc::clone(&loaded),
+        ),
+    );
+    cache.truncate(SCHEMAS_KEPT);
+    loaded
 }
 
 fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
-    Some(cached_schema(schema_sql?, dialect).0)
+    Some(cached_schema(schema_sql?, dialect).schema.clone())
 }
 
 /// The schema, unless `source` cannot hold a query: every query, wrapper and
@@ -75,6 +111,11 @@ fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
         .map_err(PyValueError::new_err)
 }
 
+/// Parse `rules` (rule name to `error`, `warn` or `ignore`) once, at the boundary.
+fn rule_config(rules: Option<HashMap<String, String>>) -> PyResult<RuleConfig> {
+    RuleConfig::from_overrides(rules).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 /// Infer the Python return type for a SQL query.
 ///
 /// Args:
@@ -90,8 +131,8 @@ fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
-    analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
-        .map_err(PyRuntimeError::new_err)
+    analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref())
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -107,14 +148,112 @@ fn analyze_select(
     dialect: &str,
     schema_sql: Option<&str>,
 ) -> PyResult<Option<Vec<ColumnTuple>>> {
-    let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
-        .map_err(PyRuntimeError::new_err)?;
+    let columns = analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(columns.map(|columns| {
         columns
             .into_iter()
-            .map(|col| (col.name, col.python_type, col.sql_type))
+            .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
             .collect()
     }))
+}
+
+/// Result columns of a query as `(name, python_type, sql_type, nullable, json_shape)` tuples.
+///
+/// `python_type` is never spelled `T | None` here, unlike in `analyze_select`: `nullable` says
+/// whether the column can be NULL (True), cannot (False), or is not known (None: an
+/// unresolved column, an unknown function), so row types can be judged against it.
+/// Returns None when the query returns no rows or doesn't parse.
+///
+/// Raises:
+///     RuntimeError: SUM(column) names a column missing from a schema table
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn analyze_columns(
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> PyResult<Option<Vec<NullableColumnTuple>>> {
+    let columns = analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(columns.map(|columns| {
+        columns
+            .into_iter()
+            .map(|col| {
+                let nullable = match col.nullability {
+                    analyzer::Nullability::Nullable => Some(true),
+                    analyzer::Nullability::NonNull => Some(false),
+                    analyzer::Nullability::Unknown => None,
+                };
+                (
+                    col.name,
+                    col.python_type,
+                    col.sql_type,
+                    nullable,
+                    col.json.map(|shape| shape.to_json()),
+                )
+            })
+            .collect()
+    }))
+}
+
+/// Parameters of a query as `(index, name, python_type, sql_type, nullable, cast)` tuples.
+///
+/// A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) takes its type from its context: the
+/// column it is compared with or stored in, a cast, `LIMIT`, `= ANY(%s)`. `index` is
+/// 1-based; `name` is set for named placeholders. `nullable` is False when the parameter is
+/// stored in a `NOT NULL` column, True for a nullable one, None when not known. `cast` is
+/// True when the type is that of an explicit cast, which accepts any value. Types are
+/// None when the context does not say. Returns None when the query doesn't parse.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn analyze_params(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Vec<ParamTuple>> {
+    let params = analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())?;
+    Some(
+        params
+            .into_iter()
+            .map(|param| {
+                let nullable = match param.nullability {
+                    analyzer::Nullability::Nullable => Some(true),
+                    analyzer::Nullability::NonNull => Some(false),
+                    analyzer::Nullability::Unknown => None,
+                };
+                (
+                    param.index,
+                    param.name,
+                    param.python_type,
+                    param.sql_type,
+                    nullable,
+                    param.cast,
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The rules `query_diagnostics` reports, which are off by default.
+#[pyfunction]
+fn name_rules() -> Vec<&'static str> {
+    sqlty_sql::diagnostics::NameRule::ALL
+        .iter()
+        .map(|rule| rule.name())
+        .collect()
+}
+
+/// Why a query has untyped columns, as `(rule, message)` pairs: `unknown-table`,
+/// `unknown-column`, `ambiguous-column`, `unknown-function`, `unknown-type` and
+/// `unsupported-syntax`. Tables, columns and ambiguity are only judged with a schema.
+///
+/// Example:
+///     query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn query_diagnostics(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Vec<(String, String)> {
+    analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
+        .1
+        .into_iter()
+        .map(|found| (found.rule.name().to_string(), found.message))
+        .collect()
 }
 
 /// Names of the schema tables that could not be parsed, even without their
@@ -138,10 +277,10 @@ fn schema_skipped_objects(schema_sql: &str, dialect: &str) -> Vec<(String, Strin
 
 fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(String, String)> {
     cached_schema(schema_sql, dialect)
-        .1
-        .into_iter()
+        .skipped
+        .iter()
         .filter(|(kind, _)| only.is_none_or(|only| only == *kind))
-        .map(|(kind, name)| (kind.to_string(), name))
+        .map(|(kind, name)| ((*kind).to_string(), name.clone()))
         .collect()
 }
 
@@ -187,7 +326,7 @@ fn rewrite_source(
     Ok(rewriter::rewrite_source_with(
         source,
         dialect,
-        &schema_for(source, schema_sql, dialect),
+        schema_for(source, schema_sql, dialect).as_deref(),
         import_style,
         untyped,
         keep_lines,
@@ -213,7 +352,7 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 /// (`None` for all); fixes of those rules on that line are not applied.
 ///
 /// Raises:
-///     ValueError: unsupported import_style
+///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
 fn fix_source(
@@ -226,13 +365,14 @@ fn fix_source(
     suppressed: Option<rewriter::Suppressed>,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
+    let rules = rule_config(rules)?;
     Ok(fixer::fix_source(
         source,
         dialect,
-        &schema_for(source, schema_sql, dialect),
+        schema_for(source, schema_sql, dialect).as_deref(),
         import_style,
         untyped,
-        rules,
+        &rules,
         suppressed.unwrap_or_default(),
     ))
 }
@@ -244,7 +384,7 @@ fn fix_source(
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<String> {
-    analyzer::expand_star(sql, dialect, &schema(schema_sql, dialect))
+    analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref())
 }
 
 /// Check Python source for SQL type issues.
@@ -256,10 +396,14 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 ///     List of diagnostic dicts with keys: rule, message, severity, line
 ///
 /// Raises:
-///     ValueError: unsupported import_style
+///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
@@ -271,11 +415,12 @@ fn check_source<'py>(
     any_calls: Vec<usize>,
 ) -> PyResult<Bound<'py, PyList>> {
     check_import_style(import_style)?;
+    let rules = rule_config(rules)?;
     let diagnostics = checker::check_source(
         source,
         dialect,
-        &schema_for(source, schema_sql, dialect),
-        rules,
+        schema_for(source, schema_sql, dialect).as_deref(),
+        &rules,
         import_style,
         untyped,
         &any_calls,
@@ -283,9 +428,9 @@ fn check_source<'py>(
     let list = PyList::empty(py);
     for diag in diagnostics {
         let dict = PyDict::new(py);
-        dict.set_item("rule", &diag.rule)?;
+        dict.set_item("rule", diag.rule.name())?;
         dict.set_item("message", &diag.message)?;
-        dict.set_item("severity", &diag.severity)?;
+        dict.set_item("severity", diag.severity.as_str())?;
         dict.set_item("line", diag.line)?;
         list.append(dict)?;
     }
@@ -321,6 +466,10 @@ fn wrapped_queries(
 ///     ValueError: unsupported import_style
 #[pyfunction]
 #[pyo3(signature = (source, *, import_style = None, any_calls = vec![]))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
 fn query_sites(
     source: &str,
     import_style: Option<&str>,
@@ -329,7 +478,7 @@ fn query_sites(
     check_import_style(import_style)?;
     Ok(checker::query_sites(source, import_style, &any_calls)
         .into_iter()
-        .map(|(line, kind, text)| (line, kind.to_string(), text))
+        .map(|(line, kind, text)| (line, kind.name().to_string(), text))
         .collect())
 }
 
@@ -337,6 +486,10 @@ fn query_sites(
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
+    m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;

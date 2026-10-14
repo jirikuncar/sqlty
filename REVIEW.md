@@ -11,7 +11,7 @@ Reserve Important for findings that break behavior users rely on:
 - Rust engine panics reachable from Python input.
 - The magic codec or `sqlty_magic.pth` affecting files without `# coding: sqlty`,
   or failing to return the source unchanged on error.
-- `src/sqlty/_core.pyi` out of sync with `rust/src/lib.rs`.
+- `src/sqlty/_core.pyi` out of sync with `rust/crates/sqlty-ext/src/lib.rs`.
 - Wheel or sdist missing `sqlty_magic.pth`.
 
 Style, naming and refactoring suggestions are Nit at most.

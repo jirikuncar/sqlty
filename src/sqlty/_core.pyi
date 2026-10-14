@@ -12,6 +12,25 @@ def analyze_select(
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> list[tuple[str, str | None, str | None]] | None: ...
+def analyze_columns(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[str, str | None, str | None, bool | None, str | None]] | None: ...
+def analyze_params(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool]] | None: ...
+def query_diagnostics(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[str, str]]: ...
+def name_rules() -> list[str]: ...
 def parse_error(sql: str, *, dialect: str = "postgres") -> str | None: ...
 def returns_rows(sql: str, *, dialect: str = "postgres") -> bool: ...
 def rewrite_source(

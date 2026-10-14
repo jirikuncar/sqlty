@@ -97,7 +97,7 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INTEGER);
+CREATE TABLE users (id INTEGER NOT NULL);
 ```
 
 ```python
@@ -378,7 +378,7 @@ q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```
 
-### `CREATE TABLE users (id INT);`
+### `CREATE TABLE users (id INT NOT NULL);`
 
 ```toml
 [tool.sqlty]
@@ -388,7 +388,7 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INT);
+CREATE TABLE users (id INT NOT NULL);
 ```
 
 ```python

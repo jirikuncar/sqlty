@@ -20,7 +20,7 @@ def sql(query: str) -> str:
 
 CALLS = """
 users = sql("SELECT id::INTEGER FROM users")
-pairs = sql("VALUES (1, 2)")
+pairs = sql("SELECT x, y FROM pairs")
 purge = sql("DELETE FROM users")
 """
 
@@ -37,7 +37,7 @@ def sql(query: Literal['SELECT id::INTEGER FROM users']) -> SQL[tuple[int]]:  # 
     ...
 
 @overload
-def sql(query: Literal['VALUES (1, 2)']) -> SQL[UNTYPED]:
+def sql(query: Literal['SELECT x, y FROM pairs']) -> SQL[UNTYPED]:
     ...
 
 @overload
@@ -70,7 +70,7 @@ def test_skip_is_default(tmp_path: Path) -> None:
     ).generate_stub_file(_queries(tmp_path), mode="incremental,create")
     content = stub.read_text()
     assert "UNTYPED" not in content
-    assert "def sql(query: Literal['VALUES (1, 2)']) -> SQL[Any]:" in content
+    assert "def sql(query: Literal['SELECT x, y FROM pairs']) -> SQL[Any]:" in content
     assert content.endswith("def sql(query: str) -> str:\n    ...\n")
 
 
@@ -86,7 +86,7 @@ def test_custom_template(tmp_path: Path) -> None:
     ).generate_stub_file(_queries(tmp_path), mode="incremental,create")
     content = stub.read_text()
     assert "from psycopg import Cursor\nfrom sqlty import UNTYPED\n" in content
-    assert "def sql(query: Literal['VALUES (1, 2)']) -> Cursor[UNTYPED]:\n" in content
+    assert "def sql(query: Literal['SELECT x, y FROM pairs']) -> Cursor[UNTYPED]:\n" in content
     assert content.endswith("def sql(query: str) -> Cursor[UNTYPED]:\n    ...\n")
 
 
@@ -140,7 +140,7 @@ def test_switching_mode_updates_fallback(tmp_path: Path, before: str, after: str
 
 @pytest.mark.parametrize(("before", "after"), [("skip", "sentinel"), ("sentinel", "skip")])
 def test_incremental_replaces_stale_overloads(tmp_path: Path, before: str, after: str) -> None:
-    """VALUES (1, 2) flips between SQL[Any] and SQL[UNTYPED] without regenerating from scratch."""
+    """SELECT x, y FROM pairs flips between SQL[Any] and SQL[UNTYPED] without regenerating from scratch."""
     queries = _queries(tmp_path)
     stub = _generator(before).generate_stub_file(queries, mode="incremental,create")
     _generator(after).generate_stub_file(queries, mode="incremental")
@@ -205,9 +205,9 @@ def test_check_detects_missing_sentinel(tmp_path: Path, capsys: pytest.CaptureFi
     assert _generator().check(queries) == 1
     out = capsys.readouterr().out
     removed, added = out.split("- 1 overload(s) removed:")[1].split("+ 2 overload(s) added:")
-    assert "VALUES (1, 2) → SQL[Any]" in removed
+    assert "SELECT x, y FROM pairs → SQL[Any]" in removed
     assert "<fallback> → SQL[UNTYPED]" in added
-    assert "VALUES (1, 2) → SQL[UNTYPED]" in added
+    assert "SELECT x, y FROM pairs → SQL[UNTYPED]" in added
 
 
 def test_auto_generate(tmp_path: Path) -> None:
@@ -215,7 +215,7 @@ def test_auto_generate(tmp_path: Path) -> None:
         '[tool.sqlty]\nuntyped = "sentinel"\n\n'
         '[[tool.sqlty.functions]]\nimport_path = "__main__.sql"\nquery_param = "query"\n'
     )
-    module = _queries(tmp_path, 'pairs = sql("VALUES (1, 2)")\n')
+    module = _queries(tmp_path, 'pairs = sql("SELECT x, y FROM pairs")\n')
     result = subprocess.run(
         [sys.executable, str(module)],
         capture_output=True,
@@ -225,7 +225,7 @@ def test_auto_generate(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     content = module.with_suffix(".pyi").read_text()
     assert "from sqlty import SQL, UNTYPED" in content
-    assert "def sql(query: Literal['VALUES (1, 2)']) -> SQL[UNTYPED]:" in content
+    assert "def sql(query: Literal['SELECT x, y FROM pairs']) -> SQL[UNTYPED]:" in content
     assert "def sql(query: str) -> SQL[UNTYPED]:" in content
 
 

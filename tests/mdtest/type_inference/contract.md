@@ -104,7 +104,7 @@ CREATE TABLE users (id INTEGER, name TEXT);
 
 ```sql
 SELECT id, name FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ### Schema none
@@ -190,14 +190,14 @@ SELECT 1, 1.5, 'a', TRUE, NULL
 
 ```sql
 SELECT COUNT(*) AS n, SUM(x) AS s FROM t
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int, decimal.Decimal | None]
 ```
 
 ### `SELECT AVG(x::INTEGER), MIN(x::INTEGER), MAX(d::DATE) FROM t`
 
 ```sql
 SELECT AVG(x::INTEGER), MIN(x::INTEGER), MAX(d::DATE) FROM t
--- inferred: tuple[decimal.Decimal, int, datetime.date]
+-- inferred: tuple[decimal.Decimal | None, int | None, datetime.date | None]
 ```
 
 ### `SELECT COALESCE(x::INTEGER, 0), (x::INTEGER) FROM t`
@@ -225,7 +225,7 @@ SELECT EXISTS (SELECT 1), x NOT IN (SELECT 1) FROM t
 
 ```sql
 SELECT (SELECT y::INTEGER FROM u) FROM t
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ### `SELECT ROW_NUMBER() OVER (), json_build_object('a', 1) FROM t`
@@ -257,7 +257,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, decimal.Decimal]
+-- inferred: tuple[int | None, str | None, decimal.Decimal | None]
 ```
 
 ### Schema: `SELECT o.*, u.name FROM users u JOIN orders o ON TRUE`
@@ -275,7 +275,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT o.*, u.name FROM users u JOIN orders o ON TRUE
--- inferred: tuple[int, int, datetime.datetime, str]
+-- inferred: tuple[int | None, int | None, datetime.datetime | None, str | None]
 ```
 
 ### Schema: `SELECT u.id, placed FROM users u JOIN orders o ON TRUE`
@@ -293,7 +293,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT u.id, placed FROM users u JOIN orders o ON TRUE
--- inferred: tuple[int, datetime.datetime]
+-- inferred: tuple[int | None, datetime.datetime | None]
 ```
 
 ### Schema: `SELECT * FROM audit_log`
@@ -329,7 +329,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT MAX(placed), AVG(oid) FROM orders
--- inferred: tuple[datetime.datetime, decimal.Decimal]
+-- inferred: tuple[datetime.datetime | None, decimal.Decimal | None]
 ```
 
 ### Schema: `DELETE FROM users RETURNING *`
@@ -347,7 +347,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 DELETE FROM users RETURNING *
--- inferred: tuple[int, str, decimal.Decimal]
+-- inferred: tuple[int | None, str | None, decimal.Decimal | None]
 ```
 
 ### Schema: `DELETE FROM users RETURNING id, name`
@@ -365,5 +365,5 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 DELETE FROM users RETURNING id, name
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```

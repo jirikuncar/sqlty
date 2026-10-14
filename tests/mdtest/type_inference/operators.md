@@ -62,9 +62,9 @@ SELECT
     '{}'::jsonb #> '{a}' AS d,
     '{}'::jsonb @> '{}' AS e,
     '{}'::jsonb ? 'a' AS f
--- columns: a: str (TEXT)
+-- columns: a: str | None (TEXT)
 -- columns: b: typing.Any (JSONB)
--- columns: c: str (TEXT)
+-- columns: c: str | None (TEXT)
 -- columns: d: typing.Any (JSONB)
 -- columns: e: bool (BOOLEAN)
 -- columns: f: bool (BOOLEAN)
@@ -75,10 +75,10 @@ SELECT
 ```sql
 SELECT id + 1 AS a, id + big AS b, id * ratio AS c, big - id AS d, id + %(n)s AS e FROM users
 -- columns: a: int (INT)
--- columns: b: int (BIGINT)
--- columns: c: float (DOUBLE)
--- columns: d: int (BIGINT)
--- columns: e: int (INT)
+-- columns: b: int | None (BIGINT)
+-- columns: c: float | None (DOUBLE)
+-- columns: d: int | None (BIGINT)
+-- columns: e: int | None (INT)
 ```
 
 A decimal literal is `NUMERIC`.
@@ -86,13 +86,13 @@ A decimal literal is `NUMERIC`.
 ```sql
 SELECT id * 2.5 AS a, ratio + 0.5 AS b FROM users
 -- columns: a: decimal.Decimal (DECIMAL)
--- columns: b: float (DOUBLE)
+-- columns: b: float | None (DOUBLE)
 ```
 
 ## Date arithmetic
 
 ```sql
 SELECT created_at + INTERVAL '1 day' AS a, created_at - created_at AS b FROM users
--- columns: a: datetime.datetime (TIMESTAMP)
--- columns: b: datetime.timedelta (INTERVAL)
+-- columns: a: datetime.datetime | None (TIMESTAMP)
+-- columns: b: datetime.timedelta | None (INTERVAL)
 ```

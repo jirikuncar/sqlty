@@ -53,7 +53,7 @@ welcome under these rules:
 
 Maintainers publish releases from GitHub Releases; the
 [Release workflow](.github/workflows/pypi.yml) builds wheels and uploads them to
-PyPI with trusted publishing. The version comes from `rust/Cargo.toml`.
+PyPI with trusted publishing. The version comes from `rust/Cargo.toml` (`[workspace.package]`).
 
 ## License
 

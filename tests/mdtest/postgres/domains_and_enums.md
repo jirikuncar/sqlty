@@ -21,8 +21,8 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, discount percent);
 
 ```sql
 SELECT discount FROM orders
--- inferred: tuple[int]
--- columns: discount: int (INT)
+-- inferred: tuple[int | None]
+-- columns: discount: int | None (INT)
 ```
 
 ## Domains over domains and qualified names
@@ -33,6 +33,7 @@ name matches the unqualified one and the other way round.
 `schema.sql`:
 
 ```sql
+SET search_path TO app, public;
 CREATE DOMAIN app.small_percent AS percent NOT NULL DEFAULT 0;
 CREATE DOMAIN app.percent AS numeric(5, 2);
 CREATE DOMAIN label AS varchar(20);
@@ -40,15 +41,15 @@ CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
     discount small_percent,
     rate app.percent,
-    note public.label
+    note app.label
 );
 ```
 
 ```sql
 SELECT discount, rate, note FROM orders
--- columns: discount: decimal.Decimal (DECIMAL(5, 2))
--- columns: rate: decimal.Decimal (DECIMAL(5, 2))
--- columns: note: str (VARCHAR(20))
+-- columns: discount: decimal.Decimal | None (DECIMAL(5, 2))
+-- columns: rate: decimal.Decimal | None (DECIMAL(5, 2))
+-- columns: note: str | None (VARCHAR(20))
 ```
 
 ## Enum resolves to Literal
@@ -71,6 +72,7 @@ SELECT status FROM orders
 `schema.sql`:
 
 ```sql
+SET search_path TO app, public;
 CREATE TYPE app.mood AS ENUM ('it''s fine', 'bad');
 CREATE DOMAIN current_mood AS mood;
 CREATE TABLE people (id INTEGER PRIMARY KEY, mood current_mood, name TEXT);
@@ -78,7 +80,7 @@ CREATE TABLE people (id INTEGER PRIMARY KEY, mood current_mood, name TEXT);
 
 ```sql
 SELECT mood, name::mood, name::app.mood, id FROM people
--- inferred: tuple[typing.Literal['it\'s fine', 'bad'], typing.Literal['it\'s fine', 'bad'], typing.Literal['it\'s fine', 'bad'], int]
+-- inferred: tuple[typing.Literal['it\'s fine', 'bad'] | None, typing.Literal['it\'s fine', 'bad'] | None, typing.Literal['it\'s fine', 'bad'] | None, int]
 ```
 
 ## Views keep enum and domain columns
@@ -94,7 +96,7 @@ CREATE VIEW open_orders AS SELECT status, discount FROM orders WHERE status = 'p
 
 ```sql
 SELECT status, discount FROM open_orders
--- inferred: tuple[typing.Literal['pending', 'paid'], int]
+-- inferred: tuple[typing.Literal['pending', 'paid'], int | None]
 ```
 
 ## Arrays of enums and domains
@@ -111,12 +113,12 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, history order_status[] NOT NULL, la
 
 ```sql
 SELECT history, labels FROM orders
--- inferred: tuple[list[typing.Literal['pending', 'paid']], list[str]]
+-- inferred: tuple[list[typing.Literal['pending', 'paid']], list[str] | None]
 ```
 
 ```sql
 SELECT history[1], labels[1] FROM orders
--- inferred: tuple[typing.Literal['pending', 'paid'], str]
+-- inferred: tuple[typing.Literal['pending', 'paid'] | None, str | None]
 ```
 
 ## Rewrite imports typing

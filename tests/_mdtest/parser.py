@@ -22,6 +22,8 @@ Kind = Literal[
     "inferred",
     "expanded",
     "columns",
+    "json",
+    "params",
     "rewritten",
     "rewritten-file",
     "stripped",
@@ -29,7 +31,7 @@ Kind = Literal[
     "error",
     "decoded",
 ]
-SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns")
+SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns", "json", "params")
 PY_KINDS: tuple[Kind, ...] = (
     "rewritten",
     "rewritten-file",

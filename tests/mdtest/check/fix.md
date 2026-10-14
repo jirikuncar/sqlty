@@ -85,10 +85,10 @@ q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 ```python
 from sqlty import SQL
 
-q = SQL[tuple[int]]("--sql\nVALUES (1, 2)")
+q = SQL[tuple[int]]("--sql\nSELECT x, y FROM pairs")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int]]("--sql\nVALUES (1, 2)")
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Formatter-split wrapper keeps its layout
@@ -125,12 +125,12 @@ from sqlty import SQL
 from sqlty import UNTYPED
 
 known = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
-unknown = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+unknown = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # fixed: from sqlty import SQL
 # fixed: from sqlty import UNTYPED
 # fixed:
 # fixed: known = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-# fixed: unknown = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# fixed: unknown = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Module import style
@@ -191,7 +191,7 @@ from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
+# fixed: q = SQL[tuple[int | None, str | None]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
 ### Triple-quoted string
@@ -206,7 +206,7 @@ WHERE id = 1
 """)
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("""--sql
+# fixed: q = SQL[tuple[int, str | None]]("""--sql
 # fixed: SELECT id::INT, name::TEXT FROM users
 # fixed: WHERE id = 1
 # fixed: """)
@@ -217,7 +217,7 @@ WHERE id = 1
 ```python
 q = "--sql\nSELECT * FROM users"
 # fixed: from sqlty import SQL
-# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
+# fixed: q = SQL[tuple[int | None, str | None]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
 ### Escapes in the query are left alone
@@ -228,7 +228,7 @@ from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users WHERE name = 'a\tb'")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users WHERE name = 'a\tb'")
+# fixed: q = SQL[tuple[int | None, str]]("--sql\nSELECT * FROM users WHERE name = 'a\tb'")
 ```
 
 ### Star rule ignored
@@ -244,7 +244,7 @@ from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
+# fixed: q = SQL[tuple[int | None, str | None]]("--sql\nSELECT * FROM users")
 ```
 
 ## Formatter trailing comma is kept
@@ -379,10 +379,10 @@ s = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM users JOIN orders USING (id)
 t = SQL[tuple[int, int, str]]("--sql\nSELECT id, * FROM users")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT * FROM (SELECT id FROM users) s")
-# fixed: r = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT * FROM c")
+# fixed: q = SQL[tuple[int | None]]("--sql\nSELECT * FROM (SELECT id FROM users) s")
+# fixed: r = SQL[tuple[int | None]]("--sql\nWITH c AS (SELECT id FROM users) SELECT * FROM c")
 # fixed: s = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM users JOIN orders USING (id)")
-# fixed: t = SQL[tuple[int, int, str]]("--sql\nSELECT id, id::INT, name::TEXT FROM users")
+# fixed: t = SQL[tuple[int | None, int | None, str | None]]("--sql\nSELECT id, id::INT, name::TEXT FROM users")
 ```
 
 ## Star with a join is not expanded
@@ -407,7 +407,7 @@ from sqlty import SQL
 q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+# fixed: q = SQL[tuple[int, str | None, int | None]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
 ```
 
 ## Plain string after an f-string is wrapped
