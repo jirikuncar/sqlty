@@ -312,23 +312,18 @@ pub fn query_sites(source: &str, import_style: Option<&str>) -> Vec<(usize, &'st
     for group in string_groups(source, &tokens) {
         let first = &tokens[group[0]];
         let line = lines.line_at(first.span.start);
+        let enclosing = calls
+            .iter()
+            .find(|call| call.span.start <= first.span.start && first.span.end <= call.span.end);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             let last = &tokens[group[group.len() - 1]];
             skipped.push(first.span.start..last.span.end);
-            let any = calls.iter().any(|call| {
-                call.span.start <= first.span.start
-                    && last.span.end <= call.span.end
-                    && call.is_any(source)
-            });
-            if !(rule == "unchecked-query" && any) {
+            if !(rule == "unchecked-query" && enclosing.is_some_and(|call| call.is_any(source))) {
                 sites.push((line, rule, String::new()));
             }
             continue;
         }
-        if calls
-            .iter()
-            .any(|call| call.span.start <= first.span.start && first.span.end <= call.span.end)
-        {
+        if enclosing.is_some() {
             continue;
         }
         let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
