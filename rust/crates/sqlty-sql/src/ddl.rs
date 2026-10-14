@@ -4,6 +4,9 @@
 //! A table sqlparser cannot read is retried without its constraints and `CHECK` /
 //! `REFERENCES` clauses, which never change column types.
 
+use once_cell::sync::Lazy;
+use regex::Regex;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Space,
@@ -217,6 +220,128 @@ impl Statement<'_> {
         })
     }
 
+    /// The lowercase words that open the statement, up to `n` (`create`, `or`, `replace`, ...).
+    pub fn lead_words(&self, n: usize) -> Vec<String> {
+        self.0
+            .iter()
+            .filter(|p| significant(p))
+            .map_while(|p| (p.0 == Kind::Word).then(|| p.1.to_lowercase()))
+            .take(n)
+            .collect()
+    }
+
+    /// Whether the lowercase `word` appears outside quotes and comments.
+    pub fn has_word(&self, word: &str) -> bool {
+        self.0.iter().any(|p| is_word(p, word))
+    }
+
+    /// Whether this is a `CREATE ... TABLE` with or without a column list, such as
+    /// `CREATE TABLE p PARTITION OF parent DEFAULT`.
+    pub fn is_create_table_any(&self) -> bool {
+        let mut sig = self.0.iter().filter(|p| significant(p));
+        sig.next().is_some_and(|p| is_word(p, "create"))
+            && sig
+                .take_while(|p| p.0 == Kind::Word)
+                .any(|p| is_word(p, "table"))
+    }
+
+    /// The `(kind, name parts)` an `ALTER` or `DROP` statement targets, e.g.
+    /// `("table", ["app", "users"])` for `ALTER TABLE IF EXISTS ONLY app.users ...`.
+    /// Parts are unquoted and lowercase. `DROP` lists give the first name.
+    pub fn target(&self, verb: &str) -> Option<(String, Vec<String>)> {
+        self.target_and_action(verb)
+            .map(|(kind, name, _)| (kind, name))
+    }
+
+    /// [`Statement::target`], and the (up to two) lowercase words after the name,
+    /// e.g. `["owner", "to"]` for `ALTER TABLE t OWNER TO me`.
+    pub fn target_and_action(&self, verb: &str) -> Option<(String, Vec<String>, Vec<String>)> {
+        let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        if !pieces.first().is_some_and(|p| is_word(p, verb)) {
+            return None;
+        }
+        let mut at = 1;
+        let mut kind = pieces.get(at)?.1.to_lowercase();
+        at += 1;
+        if kind == "materialized" {
+            kind = pieces.get(at)?.1.to_lowercase();
+            at += 1;
+        }
+        for skip in [&["if", "exists"][..], &["only"][..]] {
+            if skip
+                .iter()
+                .enumerate()
+                .all(|(i, w)| pieces.get(at + i).is_some_and(|p| is_word(p, w)))
+            {
+                at += skip.len();
+            }
+        }
+        let (name, used) = name_parts(&pieces[at..]);
+        let action = pieces[at + used..]
+            .iter()
+            .map_while(|p| (p.0 == Kind::Word).then(|| p.1.to_lowercase()))
+            .take(2)
+            .collect();
+        (!name.is_empty()).then_some((kind, name, action))
+    }
+
+    /// The name parts after the first `keyword` (`function` in `CREATE FUNCTION a.f(...)`).
+    pub fn name_parts_after(&self, keyword: &str) -> Vec<String> {
+        let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        let Some(at) = pieces.iter().position(|p| is_word(p, keyword)) else {
+            return Vec::new();
+        };
+        let mut at = at + 1;
+        if pieces
+            .get(at..at + 3)
+            .is_some_and(|w| is_word(w[0], "if") && is_word(w[1], "not") && is_word(w[2], "exists"))
+        {
+            at += 3;
+        }
+        name_parts(&pieces[at..]).0
+    }
+
+    /// The schemas a `SET search_path TO a, b` (or `set_config('search_path', 'a, b', ...)`)
+    /// statement sets; `DEFAULT` gives `["public"]`.
+    pub fn search_path(&self) -> Option<Vec<String>> {
+        let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        let first = pieces.first()?;
+        if is_word(first, "select") {
+            let text = self.sql();
+            let caps = SET_CONFIG.captures(&text)?;
+            return Some(path_list(&caps[1]));
+        }
+        if !is_word(first, "set") {
+            return None;
+        }
+        let mut at = 1;
+        if pieces
+            .get(at)
+            .is_some_and(|p| is_word(p, "session") || is_word(p, "local"))
+        {
+            at += 1;
+        }
+        if !pieces.get(at).is_some_and(|p| is_word(p, "search_path")) {
+            return None;
+        }
+        at += 1;
+        if !pieces
+            .get(at)
+            .is_some_and(|p| is_word(p, "to") || is_punct(p, "="))
+        {
+            return None;
+        }
+        let items: Vec<String> = pieces[at + 1..]
+            .iter()
+            .filter(|p| !is_punct(p, ","))
+            .map(|p| unquote(p.1))
+            .collect();
+        if items.len() == 1 && items[0] == "default" && pieces[at + 1].0 == Kind::Word {
+            return Some(vec!["public".to_string()]);
+        }
+        Some(items)
+    }
+
     /// The table name as written, e.g. `public.users`.
     pub fn table_name(&self) -> String {
         self.name_after("table", |p| is_punct(p, "("))
@@ -247,6 +372,35 @@ impl Statement<'_> {
             _ => name,
         }
         .to_string()
+    }
+
+    /// The statement without its `LIKE source [INCLUDING ...]` items, and the sources'
+    /// name parts; `None` when it has none. sqlparser cannot read the `INCLUDING` options.
+    pub fn without_like(&self) -> Option<(String, Vec<Vec<String>>)> {
+        let pieces = &self.0;
+        let open = pieces.iter().position(|p| is_punct(p, "("))?;
+        let close = matching_paren(pieces, open)?;
+        let mut kept = Vec::new();
+        let mut sources = Vec::new();
+        for item in split_top_level(&pieces[open + 1..close], ",") {
+            let sig: Vec<&Piece> = item.iter().filter(|p| significant(p)).collect();
+            if sig.first().is_some_and(|p| is_word(p, "like")) {
+                sources.push(name_parts(&sig[1..]).0);
+            } else {
+                kept.push(render(item));
+            }
+        }
+        (!sources.is_empty()).then(|| {
+            (
+                format!(
+                    "{}{}{}",
+                    render(&pieces[..=open]),
+                    kept.join(","),
+                    render(&pieces[close..])
+                ),
+                sources,
+            )
+        })
     }
 
     /// The statement without table constraints and column `CHECK` / `REFERENCES`
@@ -289,6 +443,50 @@ impl Statement<'_> {
             )
         })
     }
+}
+
+static SET_CONFIG: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap());
+
+/// A comma-separated `search_path` value such as `app, "$user", public`.
+fn path_list(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(unquote)
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// An identifier or string literal without its quotes, lowercased unless quoted.
+fn unquote(text: &str) -> String {
+    let text = text.trim();
+    for quote in ['"', '`', '\''] {
+        if let Some(inner) = text
+            .strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+        {
+            return inner.replace(&format!("{quote}{quote}"), &quote.to_string());
+        }
+    }
+    text.to_lowercase()
+}
+
+/// The dotted name at the start of `pieces`: words or quoted names joined by `.`.
+fn name_parts(pieces: &[&Piece]) -> (Vec<String>, usize) {
+    let mut parts = Vec::new();
+    let mut expect_name = true;
+    let mut used = 0;
+    for piece in pieces {
+        if expect_name && matches!(piece.0, Kind::Word | Kind::Quoted) {
+            parts.push(unquote(piece.1).to_lowercase());
+            expect_name = false;
+        } else if !expect_name && is_punct(piece, ".") {
+            expect_name = true;
+        } else {
+            break;
+        }
+        used += 1;
+    }
+    (parts, used)
 }
 
 /// The statements of `sql`, split on `;` outside quotes, comments and dollar-quoted
@@ -512,6 +710,82 @@ mod tests {
             )
             .as_deref(),
             Some("CREATE TABLE t (a INT DEFAULT 1)")
+        );
+    }
+
+    fn first(sql: &str) -> Statement<'_> {
+        split_statements(sql, false).remove(0)
+    }
+
+    #[test]
+    fn test_target_and_action() {
+        let target = |sql: &str, verb: &str| first(sql).target_and_action(verb);
+        assert_eq!(
+            target(
+                "ALTER TABLE IF EXISTS ONLY app.\"Users\" OWNER TO me",
+                "alter"
+            ),
+            Some((
+                "table".to_string(),
+                vec!["app".to_string(), "users".to_string()],
+                vec!["owner".to_string(), "to".to_string()]
+            ))
+        );
+        assert_eq!(
+            target("DROP MATERIALIZED VIEW IF EXISTS v CASCADE", "drop").map(|t| (t.0, t.1)),
+            Some(("view".to_string(), vec!["v".to_string()]))
+        );
+        assert_eq!(target("CREATE TABLE t (a int)", "alter"), None);
+    }
+
+    #[test]
+    fn test_search_path() {
+        let path = |sql: &str| first(sql).search_path();
+        let list = |names: &[&str]| Some(names.iter().map(|n| n.to_string()).collect());
+        assert_eq!(
+            path("SET search_path TO app, \"$user\", Public"),
+            list(&["app", "$user", "public"])
+        );
+        assert_eq!(path("SET LOCAL search_path = 'a'"), list(&["a"]));
+        assert_eq!(path("SET search_path TO DEFAULT"), list(&["public"]));
+        assert_eq!(
+            path("SELECT pg_catalog.set_config('search_path', 'a, b', false)"),
+            list(&["a", "b"])
+        );
+        assert_eq!(
+            path("SELECT pg_catalog.set_config('search_path', '', false)"),
+            Some(vec![])
+        );
+        assert_eq!(path("SET statement_timeout = 0"), None);
+        assert_eq!(path("SELECT 1"), None);
+    }
+
+    #[test]
+    fn test_without_like() {
+        let stmt = first("CREATE TABLE t (LIKE app.a INCLUDING ALL, x int, LIKE b)");
+        let (sql, likes) = stmt.without_like().unwrap();
+        assert_eq!(
+            sql.split_whitespace().collect::<String>(),
+            "CREATETABLEt(xint)"
+        );
+        assert_eq!(
+            likes,
+            vec![
+                vec!["app".to_string(), "a".to_string()],
+                vec!["b".to_string()]
+            ]
+        );
+        assert!(first("CREATE TABLE t (x int)").without_like().is_none());
+    }
+
+    #[test]
+    fn test_create_table_any_and_lead_words() {
+        assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table_any());
+        assert!(!first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
+        assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table_any());
+        assert_eq!(
+            first("create or replace function f()").lead_words(3),
+            ["create", "or", "replace"]
         );
     }
 }
