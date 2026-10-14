@@ -54,20 +54,20 @@ jobs:
           path: |
             rust/target
             ~/.cargo/registry
-          key: rust-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml') }}
+          key: rust-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
 
       - name: Install the project (with Rust extension)
         run: uv sync --all-groups
 
       - name: Build Rust extension
-        run: uv run maturin develop --manifest-path rust/Cargo.toml
+        run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Run tests
         run: uv run pytest
 
       - name: Run Rust unit tests
-        run: cargo test --manifest-path rust/Cargo.toml
+        run: cargo test --workspace --manifest-path rust/Cargo.toml
 
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
@@ -139,7 +139,7 @@ jobs:
         run: make typecheck-examples
 
       - name: Run clippy
-        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --workspace --manifest-path rust/Cargo.toml --all-targets -- -D warnings
 
       # Show diff ONLY if previous step failed
       - name: Show git diff

@@ -10,6 +10,7 @@ on:
       - pyproject.toml
       - rust/Cargo.lock
       - rust/Cargo.toml
+      - rust/crates/**
 
 permissions:
   contents: read
@@ -65,7 +66,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter --manifest-path rust/Cargo.toml
+          args: --release --out dist --find-interpreter --manifest-path rust/crates/sqlty-ext/Cargo.toml
           manylinux: ${{ matrix.manylinux || 'auto' }}
           container: ${{ matrix.container }}
 
@@ -115,7 +116,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --out dist --manifest-path rust/Cargo.toml
+          args: --out dist --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Check sqlty_magic.pth is in the sdist
         shell: bash

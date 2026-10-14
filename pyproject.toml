@@ -54,7 +54,7 @@ build-backend = "maturin"
 python-source = "src"
 module-name = "sqlty._core"
 features = ["pyo3/extension-module"]
-manifest-path = "rust/Cargo.toml"
+manifest-path = "rust/crates/sqlty-ext/Cargo.toml"
 # Ship the startup hook at the wheel root so it lands in site-packages and
 # registers the lazy "sqlty" codec lookup (see docs/guide/magic-codec.md).
 # The path is relative to the project root (maturin >= 1.12.1): the wheel gets

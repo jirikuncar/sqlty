@@ -41,15 +41,15 @@ use operators::*;
 use query::*;
 use scope::*;
 
-pub(super) const ANY: &str = "typing.Any";
-pub(super) const DECIMAL: &str = "decimal.Decimal";
+const ANY: &str = "typing.Any";
+const DECIMAL: &str = "decimal.Decimal";
 /// What psycopg loads `inet` as: an address, or an interface when the value has a prefix.
-pub(super) const INET: &str = "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface";
-pub(super) const CIDR: &str = "ipaddress.IPv4Network | ipaddress.IPv6Network";
+const INET: &str = "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface";
+const CIDR: &str = "ipaddress.IPv4Network | ipaddress.IPv6Network";
 
 /// Mapping from canonical SQL type names to Python type strings; `DECIMAL` types
 /// are mapped by [`decimal_type`] and arrays by [`python_type`].
-pub(super) static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     HashMap::from([
         ("INT", "int"),
         ("INTEGER", "int"),
@@ -110,8 +110,7 @@ pub(super) static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> 
     ])
 });
 
-pub(super) static STAR_ITEM: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
+static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
 /// What a schema defines; shared, so caching it is cheap.
 #[derive(Default)]
@@ -164,24 +163,24 @@ pub type SkippedObject = (&'static str, String);
 /// A domain or enum: the SQL type its columns show (a domain's base type, an enum's
 /// own name) and the Python type when that is a `Literal` of the enum's labels.
 #[derive(Clone, Debug)]
-pub(super) struct UserType {
+struct UserType {
     sql_type: String,
     python_type: Option<String>,
 }
 
 /// A domain or enum as written in the schema, before domains over other types resolve.
-pub(super) enum TypeDef {
+enum TypeDef {
     Domain(DataType),
     Enum(Vec<String>),
     Composite(Vec<(Ident, DataType)>),
 }
 
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
-pub(super) type Inferred<T> = Result<T, String>;
+type Inferred<T> = Result<T, String>;
 
 /// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SqlDialect {
+enum SqlDialect {
     Postgres,
     MySql,
     Sqlite,
@@ -190,7 +189,7 @@ pub(super) enum SqlDialect {
 }
 
 /// sqlparser dialects beyond the special-cased ones; `tsql` is read as `mssql`.
-pub(super) const OTHER_DIALECTS: [&str; 12] = [
+const OTHER_DIALECTS: [&str; 12] = [
     "ansi",
     "bigquery",
     "databricks",
@@ -234,12 +233,11 @@ impl SqlDialect {
 }
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
-pub(super) static SQL_MARKER: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
+static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
 /// PostgreSQL row-lock clauses sqlparser cannot read, respelled as the closest ones it can:
 /// `NO KEY UPDATE` as `UPDATE`, `KEY SHARE` as `SHARE`, and `OF` keeps only its first table.
-pub(super) static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
+static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
     const NAME: &str = r#"(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))*"#;
     [
         (
@@ -261,17 +259,16 @@ pub(super) static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
 });
 
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
-pub(super) static PLACEHOLDER: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
+static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
-pub(super) static QMARK: Lazy<Regex> = Lazy::new(|| {
+static QMARK: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
 });
 
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`), then
 /// `INT3`/`MIDDLEINT` before `UNSIGNED`.
-pub(super) static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
+static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
     [
         (
             Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
@@ -285,13 +282,13 @@ pub(super) static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
 });
 
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
-pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
 }
 
 /// Parse schema DDL, with the MySQL column types sqlparser rejects respelled.
-pub(super) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     if dialect != SqlDialect::MySql {
         return parse(sql, dialect);
     }
@@ -306,7 +303,7 @@ pub(super) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
 /// the query doesn't parse as written.
-pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     let sql = parser_input(sql, dialect);
     parse(&sql, dialect).or_else(|| {
         (dialect == SqlDialect::Postgres && sql.contains('?'))
@@ -320,7 +317,7 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
 /// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
 /// literals and comments are not skipped; any query this mangles fails to parse
 /// and stays uninferred rather than mistyped.
-pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
+fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = SQL_MARKER.replace(sql, "");
     let sql = if dialect == SqlDialect::Postgres {
         let sql = drop_conflict_predicate(&sql);
@@ -342,7 +339,7 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
 
 /// Drops the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO ...`, the
 /// partial unique index that arbitrates the conflict; it does not change the result columns.
-pub(super) fn drop_conflict_predicate(sql: &str) -> String {
+fn drop_conflict_predicate(sql: &str) -> String {
     static CONFLICT_TARGET: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
     static WHERE_CLAUSE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
@@ -370,7 +367,7 @@ pub(super) fn drop_conflict_predicate(sql: &str) -> String {
 }
 
 /// Byte index of the `)` closing the parenthesis that ends just before `start`.
-pub(super) fn closing_paren(sql: &str, start: usize) -> Option<usize> {
+fn closing_paren(sql: &str, start: usize) -> Option<usize> {
     let bytes = sql.as_bytes();
     let (mut depth, mut i) = (1, start);
     while i < bytes.len() {
@@ -394,7 +391,7 @@ pub(super) fn closing_paren(sql: &str, start: usize) -> Option<usize> {
 }
 
 /// Byte index of the first `DO` word at or after `start` outside parentheses and quotes.
-pub(super) fn do_keyword(sql: &str, start: usize) -> Option<usize> {
+fn do_keyword(sql: &str, start: usize) -> Option<usize> {
     let bytes = sql.as_bytes();
     let (mut depth, mut i) = (0, start);
     while i < bytes.len() {
@@ -424,7 +421,7 @@ pub(super) fn do_keyword(sql: &str, start: usize) -> Option<usize> {
 
 /// Index just past the quoted string or identifier that opens at `start`; a doubled quote
 /// stays inside it.
-pub(super) fn quoted_end(bytes: &[u8], start: usize) -> usize {
+fn quoted_end(bytes: &[u8], start: usize) -> usize {
     let quote = bytes[start];
     let mut i = start + 1;
     while i < bytes.len() {
@@ -440,7 +437,7 @@ pub(super) fn quoted_end(bytes: &[u8], start: usize) -> usize {
     bytes.len()
 }
 
-pub(super) fn numbered_placeholders(sql: &str) -> String {
+fn numbered_placeholders(sql: &str) -> String {
     let mut n = 0;
     QMARK
         .replace_all(sql, |caps: &Captures| match caps.get(1) {
@@ -456,7 +453,7 @@ pub(super) fn numbered_placeholders(sql: &str) -> String {
 /// Whether `stmts` use what sqlparser accepts but the dialect does not:
 /// `CAST(x AS <not a type>)`, which sqlparser re-reads as a call to a function
 /// named `CAST`, and MySQL-only types such as `SET('a')` in other dialects.
-pub(super) fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
+fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
     let foreign = |dt: &DataType| {
         dialect != SqlDialect::MySql
             && matches!(
@@ -484,12 +481,12 @@ pub(super) fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bo
     })
 }
 
-pub(super) fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
+fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
     parse_query(sql, dialect)?.into_iter().next()
 }
 
 /// Canonical spelling of a SQL type, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
-pub(super) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
+fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
     if let DataType::Array(elem) = dt {
         return match elem {
             ArrayElemTypeDef::None => "ARRAY".to_string(),
@@ -576,7 +573,7 @@ pub(super) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
 
 /// What the dialect's usual drivers load exact decimals as: SQLite and Oracle drivers
 /// return floats, the others `decimal.Decimal`.
-pub(super) fn decimal_type(dialect: SqlDialect) -> &'static str {
+fn decimal_type(dialect: SqlDialect) -> &'static str {
     match dialect {
         SqlDialect::Sqlite | SqlDialect::Other("oracle") => "float",
         _ => DECIMAL,
@@ -585,7 +582,7 @@ pub(super) fn decimal_type(dialect: SqlDialect) -> &'static str {
 
 /// Map a canonical SQL type to a Python type string; unknown types are `None`.
 /// `ARRAY<T>` is `list[T]` (bare `list` when `T` is unknown).
-pub(super) fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
+fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     if let Some(inner) = sql_type.strip_prefix("ARRAY<") {
         let inner = &inner[..inner.rfind('>')?];
         return Some(match python_type(inner, dialect) {
@@ -608,7 +605,7 @@ pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
 }
 
 /// The labels of an enum as a `typing.Literal`.
-pub(super) fn literal_of(labels: &[String]) -> String {
+fn literal_of(labels: &[String]) -> String {
     let labels: Vec<String> = labels
         .iter()
         .map(|label| format!("'{}'", label.replace('\\', "\\\\").replace('\'', "\\'")))
@@ -617,7 +614,7 @@ pub(super) fn literal_of(labels: &[String]) -> String {
 }
 
 /// The lowercased unqualified name of a user-defined type such as `app.percent`.
-pub(super) fn custom_name(dt: &DataType) -> Option<String> {
+fn custom_name(dt: &DataType) -> Option<String> {
     match dt {
         DataType::Custom(name, modifiers) if modifiers.is_empty() => Some(object_name(name)),
         _ => None,
@@ -626,7 +623,7 @@ pub(super) fn custom_name(dt: &DataType) -> Option<String> {
 
 /// The type a domain or enum named `name` gives its columns; domains over domains
 /// resolve through `defs`, up to a fixed depth.
-pub(super) fn resolve_user_type(
+fn resolve_user_type(
     name: &str,
     defs: &HashMap<String, TypeDef>,
     dialect: SqlDialect,
@@ -654,7 +651,7 @@ pub(super) fn resolve_user_type(
 }
 
 /// The SQL type of a column, and its Python type when a domain or enum sets it.
-pub(super) fn resolve_type(
+fn resolve_type(
     dt: &DataType,
     types: &HashMap<String, UserType>,
     dialect: SqlDialect,
@@ -686,10 +683,7 @@ pub(super) fn resolve_type(
     }
 }
 
-pub(super) fn type_defs(
-    statements: &[ddl::Statement],
-    dialect: SqlDialect,
-) -> HashMap<String, TypeDef> {
+fn type_defs(statements: &[ddl::Statement], dialect: SqlDialect) -> HashMap<String, TypeDef> {
     let mut defs = HashMap::new();
     let parser_dialect = dialect.parser_dialect();
     let parse_with = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
@@ -961,12 +955,12 @@ pub fn expand_star(sql: &str, dialect: &str, schema: &Option<Schema>) -> Option<
     })
 }
 
-pub(super) fn is_word(byte: u8) -> bool {
+fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
 }
 
 /// Byte index of `keyword` outside parentheses at or after `start`.
-pub(super) fn top_level(sql_upper: &str, keyword: &str, start: usize) -> Option<usize> {
+fn top_level(sql_upper: &str, keyword: &str, start: usize) -> Option<usize> {
     let bytes = sql_upper.as_bytes();
     let mut depth = 0i32;
     for i in 0..bytes.len() {
@@ -989,7 +983,7 @@ pub(super) fn top_level(sql_upper: &str, keyword: &str, start: usize) -> Option<
 }
 
 /// Split on commas outside parentheses, trimming each item.
-pub(super) fn split_top_level(text: &str) -> Vec<&str> {
+fn split_top_level(text: &str) -> Vec<&str> {
     let mut items = Vec::new();
     let (mut depth, mut start) = (0i32, 0);
     for (i, byte) in text.bytes().enumerate() {

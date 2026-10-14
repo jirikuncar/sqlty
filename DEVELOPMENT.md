@@ -164,19 +164,27 @@ It follows [maturin's recommended mixed Python/Rust project layout](https://www.
 
 ```
 rust/
-├── Cargo.toml        # Crate config (pyo3, sqlparser, regex)
-└── src/
-    ├── lib.rs        # PyO3 module entry: the sqlty._core functions
-    ├── analyzer.rs   # SQL parsing, type inference, schemas, SELECT * expansion
-    ├── rewriter.rs   # Python source rewrite/strip, import-style
-    ├── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *, ...)
-    └── fixer.rs      # check --fix
+├── Cargo.toml                # Workspace root: shared deps and package metadata
+└── crates/
+    ├── sqlty-sql/            # No PyO3: SQL parsing and type inference
+    │   └── src/
+    │       ├── ddl.rs        # Schema (DDL) statements
+    │       └── analyzer/     # mod.rs: parsing, dialects, schemas, SELECT * expansion
+    │                         # scope, names, expr, functions, operators, query, dml
+    ├── sqlty-python/         # Python source handling (depends on sqlty-sql)
+    │   └── src/
+    │       ├── tokens.rs     # Python tokenizer
+    │       ├── rewriter.rs   # Python source rewrite/strip, import-style
+    │       ├── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *, ...)
+    │       └── fixer.rs      # check --fix
+    └── sqlty-ext/            # PyO3 module sqlty._core (the maturin manifest)
+        └── src/lib.rs        # The sqlty._core functions
 ```
 
 Run Rust unit tests independently:
 
 ```bash
-cargo test --manifest-path rust/Cargo.toml
+cargo test --workspace --manifest-path rust/Cargo.toml
 ```
 
 ### Magic codec internals
@@ -200,7 +208,7 @@ How it works:
    `decode()` on the raw bytes.
 3. `decode()` runs `rewrite_source(..., keep_lines=True)`, which wraps strings
    as `sqlty rewrite` does but joins the imports with `; ` onto an existing
-   line (`insert_inline` in `rust/src/rewriter.rs`), and turns the
+   line (`insert_inline` in `rust/crates/sqlty-python/src/rewriter.rs`), and turns the
    `# coding: sqlty` declaration into `utf-8`. Running a file as a script
    decodes from the end of the coding line and drops the first decoded line
    (`fp_setreadl` in CPython's `Parser/tokenizer/file_tokenizer.c`), so
