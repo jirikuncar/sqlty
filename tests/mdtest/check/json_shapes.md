@@ -79,11 +79,13 @@ SELECT o.id, (SELECT coalesce(jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', 
 FROM orders o""")
 ```
 
-## A number is not an int
+## A number fits int, float and Decimal, not str
 
-`numeric` values can have decimals, so `int` does not hold them; an integer column fits `float`.
+A numeric value is an integer in JSON when it is integral, so Python reads an `int` or a
+`float`; `Decimal` fits too.
 
 ```python
+from decimal import Decimal
 from typing import TypedDict
 
 from sqlty import SQL
@@ -91,11 +93,16 @@ from sqlty import SQL
 
 class Summary(TypedDict):
     id: int
-    total: int
+    a: int
+    b: float
+    c: Decimal
+    d: str
 
 
-# error: [json-shape-mismatch] "Summary.total is int but query column 'total' builds JSON"
-q = SQL[Summary]("--sql\nSELECT id, to_jsonb(total) AS total FROM orders")
+# error: [json-shape-mismatch] "Summary.d is str but query column 'd' builds JSON"
+q = SQL[Summary]("""--sql
+SELECT id, to_jsonb(total) AS a, to_jsonb(total) AS b, to_jsonb(total) AS c, to_jsonb(total) AS d
+FROM orders""")
 ```
 
 ## A member that can be null
@@ -265,10 +272,10 @@ from sqlty import SQL
 
 class Row(TypedDict):
     totals: dict[str, float]
-    by_user: dict[str, int]
+    by_user: dict[str, str]
 
 
-# error: [json-shape-mismatch] "Row.by_user is dict[str, int] but query column 'by_user' builds JSON that does not fit: by_user[key] is int but the query builds a number"
+# error: [json-shape-mismatch] "Row.by_user is dict[str, str] but query column 'by_user' builds JSON that does not fit: by_user[key] is str but the query builds a number"
 q = SQL[Row]("""--sql
 SELECT
     coalesce(jsonb_object_agg(id::TEXT, total), '{}') AS totals,

@@ -20,11 +20,12 @@ if typing.TYPE_CHECKING:
 
     from sqlty._type_extractor import TypeInfo
 
-# Annotation heads a JSON scalar decodes into (bool is an int, an int a float).
+# Annotation heads a JSON scalar decodes into (bool is an int, an int a float; a number
+# is an int when integral, else a float, and ``Decimal`` loads it exactly).
 _SCALAR_HEADS = {
     "boolean": {"bool", "int", "float"},
     "integer": {"int", "float"},
-    "number": {"float"},
+    "number": {"float", "int", "Decimal"},
     "string": {"str"},
 }
 _SCALAR_NAMES = {

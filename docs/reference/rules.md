@@ -207,16 +207,16 @@ from sqlty import SQL
 
 class Doc(TypedDict):
     id: int
-    total: int
+    total: str
 
 class Order(TypedDict):
     doc: Doc
 
-# error: [json-shape-mismatch] "Order.doc is Doc but query column 'doc' builds JSON that does not fit: doc.total is int but the query builds a number"
+# error: [json-shape-mismatch] "Order.doc is Doc but query column 'doc' builds JSON that does not fit: doc.total is str but the query builds a number"
 q = SQL[Order]("--sql\nSELECT jsonb_build_object('id', id, 'total', total) AS doc FROM orders")
 ```
 
-Fix: annotate `total: float`, or cast the value in the query.
+Fix: annotate `total: float`, or cast the value in the query (`total::TEXT`).
 
 ### redundant-optional
 

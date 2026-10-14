@@ -188,12 +188,45 @@ impl<'a> Analyzer<'a> {
                     Some(filter) => {
                         let mut inner = self.clone();
                         inner.facts = self.facts.with(self.learn(filter, true, scope));
+                        inner.facts.present.extend(self.row_guards(filter, scope));
                         inner.json_function(&name, &args, scope)
                     }
                     None => self.json_function(&name, &args, scope),
                 }
             }
             _ => Ok(JsonShape::Any),
+        }
+    }
+
+    /// References of the relations a condition proves present with `r IS NOT NULL` or
+    /// `r.* IS NOT NULL`, which `learn` does not read.
+    fn row_guards(&self, cond: &Expr, scope: &Scope) -> Vec<String> {
+        match cond {
+            Expr::Nested(inner) => self.row_guards(inner, scope),
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::And,
+                right,
+            } => {
+                let mut found = self.row_guards(left, scope);
+                found.extend(self.row_guards(right, scope));
+                found
+            }
+            Expr::IsNotNull(inner) => {
+                let reference = match inner.as_ref() {
+                    Expr::Identifier(ident) if self.whole_row(inner, scope).is_some() => {
+                        ident.value.to_lowercase()
+                    }
+                    Expr::QualifiedWildcard(name, _) => object_name(name).to_lowercase(),
+                    _ => return Vec::new(),
+                };
+                if scope.iter().any(|(source, _)| *source == reference) {
+                    vec![reference]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -474,6 +507,24 @@ mod tests {
             shape(sql).unwrap(),
             r#"{"array":{"shape":{"object":[{"name":"t","value":{"shape":"number","nullable":false},"optional":false}]},"nullable":false}}"#
         );
+    }
+
+    #[test]
+    fn row_guards_in_filter_count_as_null_guards() {
+        for guard in ["o IS NOT NULL", "o.* IS NOT NULL", "o.user_id IS NOT NULL"] {
+            let sql = format!(
+                "SELECT jsonb_agg(jsonb_build_object('t', o.total)) FILTER (WHERE {guard})
+                 FROM users u LEFT JOIN orders o ON o.user_id = u.id"
+            );
+            assert!(
+                shape(&sql).unwrap().contains(r#""nullable":false}"#),
+                "{guard}"
+            );
+            assert!(
+                !shape(&sql).unwrap().contains(r#""nullable":true"#),
+                "{guard}"
+            );
+        }
     }
 
     #[test]

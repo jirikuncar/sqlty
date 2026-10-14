@@ -147,6 +147,24 @@ FROM users u LEFT JOIN orders o ON o.user_id = u.id GROUP BY u.id
 -- json: orders: [{id: integer, total: number}]
 ```
 
+## FILTER with a whole-row or NOT NULL column guard
+
+`o IS NOT NULL`, `o.* IS NOT NULL` and a `NOT NULL` column of `o` all prove that the
+outer-joined row is there.
+
+```sql
+SELECT
+    jsonb_agg(jsonb_build_object('total', o.total)) FILTER (WHERE o IS NOT NULL) AS a,
+    jsonb_agg(jsonb_build_object('total', o.total)) FILTER (WHERE o.* IS NOT NULL) AS b,
+    jsonb_agg(jsonb_build_object('total', o.total)) FILTER (WHERE o.user_id IS NOT NULL) AS c,
+    jsonb_agg(jsonb_build_object('total', o.total)) AS unguarded
+FROM users u LEFT JOIN orders o ON o.user_id = u.id
+-- json: a: [{total: number}]
+-- json: b: [{total: number}]
+-- json: c: [{total: number}]
+-- json: unguarded: [{total: number | null}]
+```
+
 ## coalesce(jsonb_agg(...), '[]') keeps the element shape
 
 ```sql
