@@ -107,6 +107,8 @@ pub(super) struct Loader {
     /// The resolved catalog; a change to one relation updates it in place, any other
     /// change drops it to be built again.
     pub(super) cache: Option<Catalog>,
+    /// The cached catalog's function table is stale; `snapshot` rebuilds it once.
+    pub(super) functions_dirty: bool,
     /// Old name -> current name of a renamed type: columns declared with the old name
     /// have the type under its new one.
     pub(super) type_aliases: FxHashMap<String, String>,
@@ -128,6 +130,7 @@ impl Loader {
             unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
             cache: None,
+            functions_dirty: false,
             skipped: Vec::new(),
             type_aliases: FxHashMap::default(),
             setof_names: FxHashSet::default(),

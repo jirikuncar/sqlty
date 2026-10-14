@@ -626,6 +626,27 @@ mod tests {
         }
     }
 
+    /// A view read first caches the catalog; the functions after it must not each rebuild
+    /// the function table. Time should grow about linearly with the count.
+    #[test]
+    #[ignore = "timing, run by hand in release mode"]
+    fn perf_view_then_many_functions() {
+        for n in [500, 1000, 2000, 4000] {
+            let mut sql =
+                String::from("CREATE TABLE t (id integer);\nCREATE VIEW v AS SELECT id FROM t;\n");
+            for i in 0..n {
+                sql.push_str(&format!(
+                    "CREATE FUNCTION f{i}(a integer) RETURNS integer LANGUAGE sql AS 'SELECT 1';\n"
+                ));
+            }
+            let start = std::time::Instant::now();
+            let catalog = pg(&sql);
+            let elapsed = start.elapsed();
+            assert!(catalog.table("t").is_some());
+            println!("perf view + {n:5} functions: {elapsed:>10.2?}");
+        }
+    }
+
     /// The common column types `canonical_type` answers without formatting the AST must
     /// spell exactly what the general path does, in every dialect.
     #[test]

@@ -26,6 +26,9 @@ thread_local! {
 impl Loader {
     /// The catalog as it stands now.
     pub(super) fn snapshot(&mut self) -> &Catalog {
+        if self.functions_dirty {
+            self.rebuild_functions();
+        }
         let catalog = self.cache.take().unwrap_or_else(|| self.build());
         self.cache.insert(catalog)
     }
@@ -171,9 +174,16 @@ impl Loader {
         (functions, unknown)
     }
 
+    /// Mark the functions of the cached catalog stale; the next `snapshot` resolves them
+    /// again once, however many were changed in between.
+    pub(super) fn refresh_functions(&mut self) {
+        self.functions_dirty = self.cache.is_some();
+    }
+
     /// Resolve the functions of the cached catalog again, leaving its relations and
     /// types as they are.
-    pub(super) fn refresh_functions(&mut self) {
+    fn rebuild_functions(&mut self) {
+        self.functions_dirty = false;
         let Some(mut cache) = self.cache.take() else {
             return;
         };
