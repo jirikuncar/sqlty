@@ -400,6 +400,8 @@ struct Loader {
     /// The resolved catalog; a change to one relation updates it in place, any other
     /// change drops it to be built again.
     cache: Option<Catalog>,
+    /// Objects whose columns or types the loader could not follow.
+    skipped: Vec<SkippedObject>,
     /// Some function returns `SETOF table`, so its rows follow the table.
     setof_functions: bool,
 }
@@ -423,6 +425,7 @@ impl Loader {
             unknown_functions: HashSet::new(),
             search_path: vec!["public".to_string()],
             cache: None,
+            skipped: Vec::new(),
             setof_functions: false,
         }
     }
@@ -547,6 +550,7 @@ impl Loader {
         if let OpKind::Table(create, _) = &op.kind {
             // A table built from one that never appears: it exists, shape unknown.
             let key = self.new_key(&create.name, &path);
+            self.skipped.push(("table", create.name.to_string()));
             self.set_relation(
                 key,
                 Some(Rel::Table(RawTable {
@@ -712,6 +716,9 @@ impl Loader {
             return false;
         }
         let unsupported = failed.is_some();
+        if unsupported {
+            self.skipped.push(("table", alter.name.to_string()));
+        }
         let mut changed = vec![(key.clone(), root)];
         if !alter.only {
             for child in self.descendants(&key) {
@@ -844,7 +851,10 @@ impl Loader {
                     self.types.insert(new_key, def);
                 }
             }
-            (_, Some(def)) => *def = TypeDef::Unknown,
+            (_, Some(def)) => {
+                *def = TypeDef::Unknown;
+                self.skipped.push(("type", alter.name.to_string()));
+            }
             _ => {}
         }
         true
@@ -858,6 +868,7 @@ impl Loader {
                         Some(Rel::Table(table)) => table.parents.clone(),
                         _ => Vec::new(),
                     };
+                    self.skipped.push(("table", name.join(".")));
                     for name in std::iter::once(key.clone()).chain(self.descendants(&key)) {
                         self.set_relation(
                             name,
@@ -875,6 +886,7 @@ impl Loader {
             Taint::Type => match self.lookup(&self.types, name, path) {
                 Some(key) => {
                     self.cache = None;
+                    self.skipped.push(("type", name.join(".")));
                     self.types.insert(key, TypeDef::Unknown);
                     true
                 }
@@ -886,6 +898,7 @@ impl Loader {
                         .map(|last| format!("{}.{last}", self.default_schema(path)))
                 });
                 if let Some(key) = key {
+                    self.skipped.push(("function", name.join(".")));
                     self.cache = None;
                     self.functions.entry(key.clone()).or_default();
                     self.unknown_functions.insert(key);
@@ -1396,29 +1409,12 @@ fn alter_op(
                 }
             }
         }
-        AlterTableOperation::DisableRowLevelSecurity
-        | AlterTableOperation::DisableRule { .. }
-        | AlterTableOperation::DisableTrigger { .. }
-        | AlterTableOperation::DropConstraint { .. }
-        | AlterTableOperation::AttachPartition { .. }
-        | AlterTableOperation::DetachPartition { .. }
-        | AlterTableOperation::EnableAlwaysRule { .. }
-        | AlterTableOperation::EnableAlwaysTrigger { .. }
-        | AlterTableOperation::EnableReplicaRule { .. }
-        | AlterTableOperation::EnableReplicaTrigger { .. }
-        | AlterTableOperation::EnableRowLevelSecurity
-        | AlterTableOperation::ForceRowLevelSecurity
-        | AlterTableOperation::NoForceRowLevelSecurity
-        | AlterTableOperation::EnableRule { .. }
-        | AlterTableOperation::EnableTrigger { .. }
-        | AlterTableOperation::ReplicaIdentity { .. }
-        | AlterTableOperation::RenameConstraint { .. }
-        | AlterTableOperation::SetTblProperties { .. }
-        | AlterTableOperation::SetLogged
-        | AlterTableOperation::SetUnlogged
-        | AlterTableOperation::OwnerTo { .. }
-        | AlterTableOperation::ValidateConstraint { .. } => {}
-        _ => return Err(AlterFail::Unsupported),
+        AlterTableOperation::ChangeColumn { .. }
+        | AlterTableOperation::ModifyColumn { .. }
+        | AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
+        // Storage, options, tablespace, triggers, RLS, partitions, comments and the like
+        // never change a column.
+        _ => {}
     }
     Ok(())
 }
@@ -1427,27 +1423,26 @@ fn alter_op(
 // Reading statements
 // ---------------------------------------------------------------------------------------
 
-/// `ALTER TABLE t <action>` forms sqlparser cannot read that never change a column.
-fn harmless_alter(action: &[String]) -> bool {
+/// Whether an `ALTER TABLE` that sqlparser cannot read may change the table's columns,
+/// by the words after the table name. Constraints, storage, ownership, triggers, RLS,
+/// partitions, tablespaces and comments cannot.
+fn changes_columns(action: &[String], mentions_type: bool) -> bool {
     let word = |i: usize| action.get(i).map_or("", String::as_str);
-    matches!(
-        word(0),
-        "attach"
-            | "detach"
-            | "owner"
-            | "enable"
-            | "disable"
-            | "force"
-            | "cluster"
-            | "replica"
-            | "reset"
-            | "inherit"
-            | "validate"
-            | "of"
-    ) || (word(0) == "no" && matches!(word(1), "inherit" | "force"))
-        || (word(0) == "not" && word(1) == "of")
-        || (word(0) == "set" && !matches!(word(1), "schema" | "data"))
+    match word(0) {
+        "add" | "drop" => !matches!(
+            word(1),
+            "constraint" | "primary" | "unique" | "check" | "foreign" | "exclude"
+        ),
+        "rename" => word(1) != "constraint",
+        "alter" => mentions_type,
+        "set" => word(1) == "schema",
+        "of" => true,
+        _ => false,
+    }
 }
+
+static COLLATE: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
 fn read_statements(
     statements: &[ddl::Statement],
@@ -1554,16 +1549,20 @@ fn read_statements(
 }
 
 fn read_alter_or_drop(stmt: &ddl::Statement, dialect: SqlDialect, push: &mut impl FnMut(OpKind)) {
-    let parsed = || parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next());
+    // sqlparser rejects `COLLATE` after an ALTER COLUMN type; the collation does not
+    // change the type.
+    let parsed = || {
+        let sql = stmt.sql();
+        parse_ddl(&sql, dialect)
+            .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
+            .and_then(|stmts| stmts.into_iter().next())
+    };
     if let Some((kind, name, action)) = stmt.target_and_action("alter") {
         match (kind.as_str(), parsed()) {
             ("table", Some(Statement::AlterTable(alter))) => {
                 push(OpKind::AlterTable(Box::new(alter)))
             }
-            ("table", _)
-                if harmless_alter(&action)
-                    || (action.first().is_some_and(|w| w == "alter") && !stmt.has_word("type")) => {
-            }
+            ("table", _) if !changes_columns(&action, stmt.has_word("type")) => {}
             ("table", _) => push(OpKind::Taint(Taint::Relation, name)),
             ("type", Some(Statement::AlterType(alter))) => push(OpKind::AlterType(alter)),
             ("type", _) if action.first().is_some_and(|w| w == "owner") => {}
@@ -1655,6 +1654,7 @@ pub fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
     let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
     let ops = read_statements(&statements, dialect, &mut loader, &mut skipped);
     loader.run(ops);
+    skipped.append(&mut loader.skipped);
     let mut catalog = loader.build();
     if catalog.search_path.is_empty() {
         catalog.search_path.push("public".to_string());
@@ -1881,5 +1881,22 @@ mod tests {
         }
         let catalog = assert_fast(&sql);
         assert_eq!(catalog.view("v1499").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_degraded_objects_are_reported() {
+        let (c, skipped) = load(
+            "CREATE TABLE a (x int); ALTER TABLE a SET SCHEMA other;
+             CREATE TABLE b (x int); ALTER TABLE b SET (fillfactor = 70);
+             CREATE TABLE c (LIKE nothing);
+             CREATE TYPE e AS ENUM ('x'); ALTER TYPE e SET SCHEMA other;",
+            "postgres",
+        );
+        assert!(c.table("a").is_none() && c.table("b").is_some());
+        let names: Vec<_> = skipped
+            .iter()
+            .map(|(kind, name)| format!("{kind} {name}"))
+            .collect();
+        assert_eq!(names, ["table a", "type e", "table c"]);
     }
 }
