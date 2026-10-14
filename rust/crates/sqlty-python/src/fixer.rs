@@ -2,17 +2,18 @@
 //!
 //! User-defined row types (`SQL[User]`) are never changed.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
+use crate::checker::{refines_tuple, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, line_ending, rewrite_source_skipping, splice, string_literals, suppresses,
     ImportStyle, LineIndex, Suppressed, TYPE_MODULES,
 };
+use crate::rules::{Rule, RuleConfig};
 use crate::tokens::{tokenize, wrapper_calls};
 use sqlty_sql::analyzer::{expand_star, Schema};
 
@@ -31,21 +32,20 @@ pub fn fix_source(
     schema: &Option<Schema>,
     import_style: Option<&str>,
     untyped: bool,
-    rules: Option<HashMap<String, String>>,
+    rules: &RuleConfig,
     mut suppressed: Suppressed,
 ) -> String {
-    let rules = RuleConfig::new(rules);
-    let enabled = |rule: &str| rules.is_enabled(rule);
+    let enabled = |rule: Rule| rules.is_enabled(rule);
     let style = ImportStyle::or_default(import_style);
     let mut source = source.to_string();
-    if enabled("inline-sql-comment") {
+    if enabled(Rule::InlineSqlComment) {
         source = fix_inline_sql_comments(&source, &style.wrapper_name, &suppressed);
     }
-    if dialect.eq_ignore_ascii_case("mysql") && enabled("mysql-sql-marker") {
+    if dialect.eq_ignore_ascii_case("mysql") && enabled(Rule::MysqlSqlMarker) {
         source = fix_mysql_markers(&source, &suppressed);
     }
-    if enabled("stale-rewrite") {
-        let skip = |line| suppresses(&suppressed, line, "stale-rewrite");
+    if enabled(Rule::StaleRewrite) {
+        let skip = |line| suppresses(&suppressed, line, Rule::StaleRewrite);
         let rewritten = rewrite_source_skipping(
             &source,
             dialect,
@@ -59,7 +59,7 @@ pub fn fix_source(
         source = rewritten;
     }
     let lines = LineIndex::new(&source);
-    let allowed = |rule: &str, call_start: usize| {
+    let allowed = |rule: Rule, call_start: usize| {
         enabled(rule) && !suppresses(&suppressed, lines.line_at(call_start), rule)
     };
 
@@ -78,7 +78,7 @@ pub fn fix_source(
             call.strings.as_slice(),
             schema
                 .as_ref()
-                .filter(|_| allowed("select-star", call.span.start)),
+                .filter(|_| allowed(Rule::SelectStar, call.span.start)),
         ) {
             let literal = &source[span.clone()];
             let quoted = literal.trim_start_matches(['u', 'U']);
@@ -98,8 +98,9 @@ pub fn fix_source(
             }
         }
         let annotated = &source[call.annotation.clone()];
-        let refresh = (annotated.starts_with("tuple[") && allowed("stale-type", call.span.start))
-            || (annotated == untyped_name && allowed("untyped-query", call.span.start));
+        let refresh = (annotated.starts_with("tuple[")
+            && allowed(Rule::StaleType, call.span.start))
+            || (annotated == untyped_name && allowed(Rule::UntypedQuery, call.span.start));
         if let Some(row_type) = refresh
             .then(|| infer_sql_content(&content, dialect, schema))
             .flatten()
@@ -137,7 +138,7 @@ fn fix_inline_sql_comments(source: &str, wrapper: &str, suppressed: &Suppressed)
                 .iter()
                 .find(|call| call.span.start <= start && start < call.span.end)
                 .map_or(start, |call| call.span.start);
-            !suppresses(suppressed, lines.line_at(reported), "inline-sql-comment")
+            !suppresses(suppressed, lines.line_at(reported), Rule::InlineSqlComment)
         })
         .map(|(start, end)| {
             let literal = &source[start..end];
@@ -162,7 +163,7 @@ fn fix_mysql_markers(source: &str, suppressed: &Suppressed) -> String {
             let literal = &source[start..end];
             let content = extract_string_content(literal);
             let marked = content.trim_start();
-            if suppresses(suppressed, lines.line_at(start), "mysql-sql-marker") {
+            if suppresses(suppressed, lines.line_at(start), Rule::MysqlSqlMarker) {
                 return None;
             }
             marked
@@ -267,7 +268,7 @@ mod tests {
             &None,
             None,
             false,
-            None,
+            &RuleConfig::default(),
             Suppressed::new(),
         )
     }

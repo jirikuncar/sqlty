@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::rules::Rule;
 pub(crate) use crate::tokens::string_literals;
 use crate::tokens::{content, string_at, string_groups, tokenize, wrapper_calls, Kind, Token};
 use sqlty_sql::analyzer::{infer_type, returns_rows, Schema};
@@ -30,22 +31,18 @@ static CODING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#.*?coding[:=]")
 
 /// Why rewrite leaves a string group alone although it holds a `--sql` string:
 /// `fstring-skipped`, `tstring-skipped`, or `unchecked-query` for a raw or bytes part.
-pub(crate) fn skipped_rule(
-    source: &str,
-    tokens: &[Token],
-    group: &[usize],
-) -> Option<&'static str> {
+pub(crate) fn skipped_rule(source: &str, tokens: &[Token], group: &[usize]) -> Option<Rule> {
     let prefixes: String = group.iter().map(|&i| tokens[i].prefix(source)).collect();
     let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
     if prefixes.trim_matches('u').is_empty() || after_marker(&content(source, &spans)).is_none() {
         return None;
     }
     Some(if prefixes.contains('t') {
-        "tstring-skipped"
+        Rule::TstringSkipped
     } else if prefixes.contains('f') {
-        "fstring-skipped"
+        Rule::FstringSkipped
     } else {
-        "unchecked-query"
+        Rule::UncheckedQuery
     })
 }
 
@@ -271,7 +268,7 @@ pub(crate) fn wraps(
         .filter(|group| {
             matches!(
                 skipped_rule(source, &tokens, group),
-                Some("fstring-skipped" | "tstring-skipped")
+                Some(Rule::FstringSkipped | Rule::TstringSkipped)
             )
         })
         .map(|group| lines.line_at(tokens[group[0]].span.start))
@@ -375,11 +372,11 @@ pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> S
 pub type Suppressed = HashMap<usize, Option<Vec<String>>>;
 
 /// Whether a comment on `line` suppresses `rule`.
-pub(crate) fn suppresses(suppressed: &Suppressed, line: usize, rule: &str) -> bool {
+pub(crate) fn suppresses(suppressed: &Suppressed, line: usize, rule: Rule) -> bool {
     suppressed.get(&line).is_some_and(|rules| {
         rules
             .as_ref()
-            .is_none_or(|rules| rules.iter().any(|r| r == rule))
+            .is_none_or(|rules| rules.iter().any(|r| r == rule.name()))
     })
 }
 

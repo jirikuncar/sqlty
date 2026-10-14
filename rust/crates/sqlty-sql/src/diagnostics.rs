@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// The lint rule a diagnostic belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NameRule {
     UnknownTable,
     UnknownColumn,

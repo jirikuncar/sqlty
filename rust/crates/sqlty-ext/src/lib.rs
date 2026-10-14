@@ -13,6 +13,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use rewriter::ImportStyle;
+use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 type NullableColumnTuple = (String, Option<String>, Option<String>, Option<bool>);
@@ -72,6 +73,11 @@ fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
     ImportStyle::parse(import_style)
         .map(drop)
         .map_err(PyValueError::new_err)
+}
+
+/// Parse `rules` (rule name to `error`, `warn` or `ignore`) once, at the boundary.
+fn rule_config(rules: Option<HashMap<String, String>>) -> PyResult<RuleConfig> {
+    RuleConfig::from_overrides(rules).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 /// Infer the Python return type for a SQL query.
@@ -270,7 +276,7 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 /// (`None` for all); fixes of those rules on that line are not applied.
 ///
 /// Raises:
-///     ValueError: unsupported import_style
+///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
 fn fix_source(
@@ -283,13 +289,14 @@ fn fix_source(
     suppressed: Option<rewriter::Suppressed>,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
+    let rules = rule_config(rules)?;
     Ok(fixer::fix_source(
         source,
         dialect,
         &schema_for(source, schema_sql, dialect),
         import_style,
         untyped,
-        rules,
+        &rules,
         suppressed.unwrap_or_default(),
     ))
 }
@@ -313,7 +320,7 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 ///     List of diagnostic dicts with keys: rule, message, severity, line
 ///
 /// Raises:
-///     ValueError: unsupported import_style
+///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[allow(clippy::too_many_arguments)]
@@ -332,11 +339,12 @@ fn check_source<'py>(
     any_calls: Vec<usize>,
 ) -> PyResult<Bound<'py, PyList>> {
     check_import_style(import_style)?;
+    let rules = rule_config(rules)?;
     let diagnostics = checker::check_source(
         source,
         dialect,
         &schema_for(source, schema_sql, dialect),
-        rules,
+        &rules,
         import_style,
         untyped,
         &any_calls,
@@ -344,9 +352,9 @@ fn check_source<'py>(
     let list = PyList::empty(py);
     for diag in diagnostics {
         let dict = PyDict::new(py);
-        dict.set_item("rule", &diag.rule)?;
+        dict.set_item("rule", diag.rule.name())?;
         dict.set_item("message", &diag.message)?;
-        dict.set_item("severity", &diag.severity)?;
+        dict.set_item("severity", diag.severity.as_str())?;
         dict.set_item("line", diag.line)?;
         list.append(dict)?;
     }
@@ -394,7 +402,7 @@ fn query_sites(
     check_import_style(import_style)?;
     Ok(checker::query_sites(source, import_style, &any_calls)
         .into_iter()
-        .map(|(line, kind, text)| (line, kind.to_string(), text))
+        .map(|(line, kind, text)| (line, kind.name().to_string(), text))
         .collect())
 }
 

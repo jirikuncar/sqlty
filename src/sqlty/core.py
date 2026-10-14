@@ -149,7 +149,7 @@ def fix_source(
         'q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]'
 
     Raises:
-        ValueError: unsupported ``import_style``
+        ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source)
     return _fix_source(
@@ -218,7 +218,7 @@ def check_source(
         List of diagnostic dicts with keys: rule, message, severity, line
 
     Raises:
-        ValueError: unsupported ``import_style``
+        ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source, module)
     diagnostics = _check_diagnostics(
