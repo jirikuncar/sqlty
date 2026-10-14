@@ -37,6 +37,7 @@ from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES
+from sqlty._params import mismatch
 from sqlty._source import ParsedSource, is_any
 
 if TYPE_CHECKING:
@@ -347,6 +348,14 @@ def _check_diagnostics(
             unparsed[key] = ast.unparse(row)
         return unparsed[key]
 
+    if rule_config.is_enabled("param-type-mismatch") or rule_config.is_enabled(
+        "param-count-mismatch"
+    ):
+        for call in calls:
+            if call.params is not None:
+                for rule, message in _param_diagnostics(call, dialect, schema_sql):
+                    report(rule, message, call.line)
+
     rows = [unparse(call.row) if call.row else None for call in calls]
     named = [(call.line, row, call.query) for call, row in zip(calls, rows, strict=True) if row]
     type_defs = (
@@ -465,6 +474,49 @@ def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
     if columns is not None and all(column.python_type is not None for column in columns):
         return "typed"
     return "partially typed"
+
+
+def _param_diagnostics(
+    call: HelperCall, dialect: str, schema_sql: str | None
+) -> list[tuple[str, str]]:
+    """``(rule, message)`` for the arguments a call passes for its query's placeholders."""
+    assert call.query is not None and call.params is not None
+    params = analyze_params(call.query, dialect=dialect, schema_sql=schema_sql)
+    if params is None:
+        return []
+    named = bool(params) and all(p.name is not None for p in params)
+    positional = all(p.name is None for p in params)
+    passed = {arg.key: arg for arg in call.params}
+    by_key: dict[int | str, ParamInfo] = {
+        (p.name if named and p.name else p.number): p for p in params
+    }
+    by_name = bool(passed) and all(isinstance(key, str) for key in passed)
+    if (named and passed and not by_name) or (positional and by_name):
+        return []
+    found: list[tuple[str, str]] = []
+    if positional and len(passed) != len(by_key):
+        found.append(
+            (
+                "param-count-mismatch",
+                f"query has {len(by_key)} parameter{'' if len(by_key) == 1 else 's'}, "
+                f"the call passes {len(passed)}",
+            )
+        )
+    elif named and passed.keys() != by_key.keys():
+        missing = [f"'{key}'" for key in by_key if key not in passed]
+        extra = [f"'{key}'" for key in passed if key not in by_key]
+        parts = [f"missing {', '.join(missing)}"] if missing else []
+        parts += [f"unknown {', '.join(extra)}"] if extra else []
+        found.append(
+            ("param-count-mismatch", f"query and call parameters differ: {'; '.join(parts)}")
+        )
+    for key, arg in passed.items():
+        if (param := by_key.get(key)) is None:
+            continue
+        label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
+        if problem := mismatch(param.python_type, param.nullable, arg.type):
+            found.append(("param-type-mismatch", f"{label} {problem}"))
+    return found
 
 
 def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[_RowColumn] | None:

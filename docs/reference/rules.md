@@ -38,6 +38,8 @@ stale-type = "error"
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
+| [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
+| [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
 | [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
 
 `nullable-mismatch` and `redundant-optional` check nullability; see
@@ -261,6 +263,46 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 
 Fix: see [TypedDict inheritance](../guide/row-types.md#typeddict-inheritance)
 for what a subclass may do.
+
+## Parameter rules
+
+Both rules read the arguments a [query helper](../guide/helpers.md) call passes
+for the query's placeholders; see [Query parameters](../guide/parameters.md).
+
+### param-type-mismatch
+
+Default: error. An argument whose type, stated in the source, can't be the type
+the query gives its parameter, or `None` for a parameter stored in a `NOT NULL`
+column. A `str`, and any argument of unknown type, is never reported.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...]) -> None: ...
+
+# error: [param-type-mismatch] "parameter 1 expects int, got float"
+execute("SELECT 1 FROM users LIMIT %s", (1.5,))
+```
+
+Fix: pass a value of the expected type.
+
+### param-count-mismatch
+
+Default: error. A different number of positional arguments than the query has
+placeholders, or named arguments that don't match the query's names.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...]) -> None: ...
+
+# error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+execute("SELECT 1 FROM users WHERE id = %s AND name = %s", (1,))
+```
+
+Fix: pass one argument per placeholder.
 
 ## Suppression rules
 

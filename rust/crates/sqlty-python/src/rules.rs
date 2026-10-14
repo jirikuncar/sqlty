@@ -32,13 +32,15 @@ pub enum Rule {
     UntypedQuery,
     UnparsedQuery,
     UnusedIgnore,
+    ParamCountMismatch,
+    ParamTypeMismatch,
     /// A rule explaining why a column is untyped.
     Name(NameRule),
 }
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 25] = [
+    pub const ALL: [Rule; 27] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -58,6 +60,8 @@ impl Rule {
         Rule::UntypedQuery,
         Rule::UnparsedQuery,
         Rule::UnusedIgnore,
+        Rule::ParamCountMismatch,
+        Rule::ParamTypeMismatch,
         Rule::Name(NameRule::UnknownTable),
         Rule::Name(NameRule::UnknownColumn),
         Rule::Name(NameRule::AmbiguousColumn),
@@ -88,6 +92,8 @@ impl Rule {
             Rule::UntypedQuery => "untyped-query",
             Rule::UnparsedQuery => "unparsed-query",
             Rule::UnusedIgnore => "unused-ignore",
+            Rule::ParamCountMismatch => "param-count-mismatch",
+            Rule::ParamTypeMismatch => "param-type-mismatch",
             Rule::Name(rule) => rule.name(),
         }
     }
@@ -105,6 +111,8 @@ impl Rule {
             | Rule::TypeddictKeyMismatch
             | Rule::TypeddictInheritance
             | Rule::NullableMismatch
+            | Rule::ParamCountMismatch
+            | Rule::ParamTypeMismatch
             | Rule::SelectStarNoSchema => Severity::Error,
             Rule::ColumnNameMismatch
             | Rule::SelectStar
