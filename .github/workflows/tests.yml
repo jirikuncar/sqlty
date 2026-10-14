@@ -69,6 +69,29 @@ jobs:
       - name: Run Rust unit tests
         run: cargo test --workspace --manifest-path rust/Cargo.toml
 
+  free-threaded:
+    name: Threads on free-threaded Python 3.14t
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the extension and run the thread tests
+        run: |
+          uv venv --python 3.14t
+          uv pip install maturin pytest
+          uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
+          uv run --no-sync python -c "import sys; from sqlty import _core; assert not sys._is_gil_enabled()"
+          uv run --no-sync pytest -p no:randomly tests/test_threads.py
+
   pg-fidelity:
     name: PostgreSQL column names and types
     runs-on: ubuntu-latest
