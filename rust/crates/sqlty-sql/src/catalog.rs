@@ -400,6 +400,9 @@ struct Loader {
     /// The resolved catalog; a change to one relation updates it in place, any other
     /// change drops it to be built again.
     cache: Option<Catalog>,
+    /// Old name -> current name of a renamed type: columns declared with the old name
+    /// have the type under its new one.
+    type_aliases: HashMap<String, String>,
     /// Objects whose columns or types the loader could not follow.
     skipped: Vec<SkippedObject>,
     /// Some function returns `SETOF table`, so its rows follow the table.
@@ -426,6 +429,7 @@ impl Loader {
             search_path: vec!["public".to_string()],
             cache: None,
             skipped: Vec::new(),
+            type_aliases: HashMap::new(),
             setof_functions: false,
         }
     }
@@ -519,13 +523,15 @@ impl Loader {
             OpKind::View(view) => !self.create_view(view, &path, force),
             OpKind::Domain(name, base) => {
                 self.cache = None;
-                self.types
-                    .insert(self.new_key(name, &path), TypeDef::Domain(base.clone()));
+                let key = self.new_key(name, &path);
+                self.type_aliases.remove(&key);
+                self.types.insert(key, TypeDef::Domain(base.clone()));
                 false
             }
             OpKind::Type(name, def) => {
                 self.cache = None;
                 let key = self.new_key(name, &path);
+                self.type_aliases.remove(&key);
                 self.types.insert(key, def.clone());
                 false
             }
@@ -854,6 +860,13 @@ impl Loader {
                 let schema = key.split_once('.').map_or("public", |(schema, _)| schema);
                 let new_key = format!("{schema}.{}", rename.new_name.value.to_lowercase());
                 if let Some(def) = self.types.remove(&key) {
+                    for target in self.type_aliases.values_mut() {
+                        if *target == key {
+                            target.clone_from(&new_key);
+                        }
+                    }
+                    self.type_aliases.remove(&new_key);
+                    self.type_aliases.insert(key, new_key.clone());
                     self.types.insert(new_key, def);
                 }
             }
@@ -1082,6 +1095,11 @@ impl Loader {
                 user_types.insert(key.clone(), user);
             }
         }
+        for (old, new) in &self.type_aliases {
+            if let Some(user) = user_types.get(new).cloned() {
+                user_types.entry(old.clone()).or_insert(user);
+            }
+        }
         let lookup = |name: &str| -> Option<UserType> {
             lookup_key(&user_types, &path, name).and_then(|key| user_types.get(key).cloned())
         };
@@ -1123,7 +1141,7 @@ impl Loader {
                 },
             );
         }
-        let composites = self
+        let mut composites: HashMap<String, Vec<SchemaColumn>> = self
             .types
             .iter()
             .filter_map(|(key, def)| match def {
@@ -1137,6 +1155,11 @@ impl Loader {
                 _ => None,
             })
             .collect();
+        for (old, new) in &self.type_aliases {
+            if let Some(fields) = composites.get(new).cloned() {
+                composites.entry(old.clone()).or_insert(fields);
+            }
+        }
         let mut functions = HashMap::new();
         for (key, overloads) in &self.functions {
             if self.unknown_functions.contains(key) {
@@ -1916,5 +1939,21 @@ mod tests {
         assert_eq!(cols(&c, "t"), ["a:INT"]);
         assert_eq!(c.view("v").unwrap().len(), 1);
         assert_eq!(cols(&c, "fresh"), ["c:INT"]);
+    }
+
+    #[test]
+    fn test_renamed_enum_keeps_its_columns_literal() {
+        let c = pg("CREATE TYPE mood AS ENUM ('a', 'b');
+            CREATE TABLE t (m mood);
+            ALTER TYPE mood RENAME TO feel;
+            ALTER TYPE feel ADD VALUE 'c';
+            CREATE TABLE u (f feel, m2 mood);");
+        let t = c.table("t").unwrap();
+        assert_eq!(t[0].sql_type, "FEEL");
+        assert_eq!(
+            t[0].python_type.as_deref(),
+            Some("typing.Literal['a', 'b', 'c']")
+        );
+        assert_eq!(c.table("u").unwrap()[0].sql_type, "FEEL");
     }
 }

@@ -43,6 +43,32 @@ SELECT status FROM tasks
 -- inferred: tuple[typing.Literal['new', 'finished']]
 ```
 
+## A renamed enum keeps the columns that use it
+
+A column follows its type through a rename: it is declared with the old name, and
+the enum is now called `feel`.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE mood AS ENUM ('happy', 'sad');
+CREATE TABLE checkins (id INTEGER PRIMARY KEY, mood mood NOT NULL);
+ALTER TYPE mood RENAME TO feel;
+ALTER TYPE feel ADD VALUE 'ok';
+CREATE TABLE notes (id INTEGER PRIMARY KEY, feel feel);
+```
+
+```sql
+SELECT mood FROM checkins
+-- inferred: tuple[typing.Literal['happy', 'sad', 'ok']]
+-- columns: mood: typing.Literal['happy', 'sad', 'ok'] (FEEL)
+```
+
+```sql
+SELECT feel FROM notes
+-- inferred: tuple[typing.Literal['happy', 'sad', 'ok']]
+```
+
 ## An ALTER TYPE the catalog cannot follow
 
 The type keeps its name, but what it holds is not trusted: the composite's fields
