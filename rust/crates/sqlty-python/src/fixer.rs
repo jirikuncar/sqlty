@@ -2,7 +2,8 @@
 //!
 //! User-defined row types (`SQL[User]`) are never changed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Mutex;
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -15,9 +16,19 @@ use crate::rewriter::{
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::tokens::{tokenize, wrapper_calls};
-use sqlty_sql::analyzer::{expand_star, Schema};
+use sqlty_sql::analyzer::{expand_star, SchemaData};
 
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
+
+/// `\bname\b`, compiled once per name: the few import styles in use repeat call after call.
+fn word_regex(name: &str) -> Regex {
+    static CACHE: LazyLock<Mutex<HashMap<String, Regex>>> = LazyLock::new(Mutex::default);
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .entry(name.to_string())
+        .or_insert_with(|| Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap())
+        .clone()
+}
 
 /// A `--sql` marker line at the start of string content.
 static SQL_PREFIX: LazyLock<Regex> =
@@ -29,7 +40,7 @@ static SQL_PREFIX: LazyLock<Regex> =
 pub fn fix_source(
     source: &str,
     dialect: &str,
-    schema: &Option<Schema>,
+    schema: Option<&SchemaData>,
     import_style: Option<&str>,
     untyped: bool,
     rules: &RuleConfig,
@@ -196,7 +207,7 @@ fn shift_lines(suppressed: Suppressed, before: &str, after: &str) -> Suppressed 
 }
 
 /// Replace `*` in the query part of a string literal, when that is safe to write back.
-fn expand_star_in(content: &str, quote: &str, dialect: &str, schema: &Schema) -> String {
+fn expand_star_in(content: &str, quote: &str, dialect: &str, schema: &SchemaData) -> String {
     let Some(caps) = SQL_PREFIX.captures(content) else {
         return content.to_string();
     };
@@ -205,7 +216,7 @@ fn expand_star_in(content: &str, quote: &str, dialect: &str, schema: &Schema) ->
     if !query.contains('*') || query.contains('\\') || query.contains(quote_char) {
         return content.to_string();
     }
-    match expand_star(query, dialect, &Some(schema.clone())) {
+    match expand_star(query, dialect, Some(schema)) {
         Some(expanded)
             if !expanded.contains('\\')
                 && !expanded.contains(quote_char)
@@ -237,9 +248,7 @@ fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<St
             .split_inclusive('\n')
             .filter(|line| line.trim_end() != untyped)
             .collect();
-        let used = Regex::new(&format!(r"\b{}\b", regex::escape(&style.untyped_name())))
-            .unwrap()
-            .is_match(&rest);
+        let used = word_regex(&style.untyped_name()).is_match(&rest);
         if !used {
             source = rest;
         }
@@ -265,7 +274,7 @@ mod tests {
         fix_source(
             source,
             "postgres",
-            &None,
+            None,
             None,
             false,
             &RuleConfig::default(),

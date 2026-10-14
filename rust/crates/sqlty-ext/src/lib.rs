@@ -6,7 +6,7 @@ use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -18,41 +18,63 @@ use sqlty_python::rules::RuleConfig;
 type ColumnTuple = (String, Option<String>, Option<String>);
 type NullableColumnTuple = (String, Option<String>, Option<String>, Option<bool>);
 
-type CachedSchema = (
-    String,
-    String,
-    analyzer::Schema,
-    Vec<analyzer::SkippedObject>,
-);
+/// A parsed schema and the tables and views it could not parse.
+struct LoadedSchema {
+    schema: analyzer::Schema,
+    skipped: Vec<analyzer::SkippedObject>,
+}
+
+type CachedSchema = (String, String, Arc<LoadedSchema>);
 
 /// Most recently used first. Callers pass the same few schemas call after call, and
 /// parsing a large one costs about a millisecond, so keep the last few parsed.
 static SCHEMAS: Mutex<Vec<CachedSchema>> = Mutex::new(Vec::new());
 const SCHEMAS_KEPT: usize = 8;
 
-fn cached_schema(
+/// Move the entry for the schema to the front and return it, if cached.
+fn cache_hit(
+    cache: &mut [CachedSchema],
     schema_sql: &str,
     dialect: &str,
-) -> (analyzer::Schema, Vec<analyzer::SkippedObject>) {
-    let mut cache = SCHEMAS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(at) = cache
+) -> Option<Arc<LoadedSchema>> {
+    let at = cache
         .iter()
-        .position(|(sql, d, ..)| sql == schema_sql && d == dialect)
-    {
-        cache[..=at].rotate_right(1);
-    } else {
-        let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
-        cache.insert(
-            0,
-            (schema_sql.to_string(), dialect.to_string(), schema, skipped),
-        );
-        cache.truncate(SCHEMAS_KEPT);
+        .position(|(sql, d, _)| sql == schema_sql && d == dialect)?;
+    cache[..=at].rotate_right(1);
+    Some(Arc::clone(&cache[0].2))
+}
+
+fn lock_schemas() -> MutexGuard<'static, Vec<CachedSchema>> {
+    SCHEMAS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The parsed schema. The cache is not locked while parsing, so a slow schema does not hold
+/// up callers of other schemas; two threads may parse the same one, and the first to finish
+/// is kept.
+fn cached_schema(schema_sql: &str, dialect: &str) -> Arc<LoadedSchema> {
+    if let Some(hit) = cache_hit(&mut lock_schemas(), schema_sql, dialect) {
+        return hit;
     }
-    (cache[0].2.clone(), cache[0].3.clone())
+    let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+    let loaded = Arc::new(LoadedSchema { schema, skipped });
+    let mut cache = lock_schemas();
+    if let Some(hit) = cache_hit(&mut cache, schema_sql, dialect) {
+        return hit;
+    }
+    cache.insert(
+        0,
+        (
+            schema_sql.to_string(),
+            dialect.to_string(),
+            Arc::clone(&loaded),
+        ),
+    );
+    cache.truncate(SCHEMAS_KEPT);
+    loaded
 }
 
 fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
-    Some(cached_schema(schema_sql?, dialect).0)
+    Some(cached_schema(schema_sql?, dialect).schema.clone())
 }
 
 /// The schema, unless `source` cannot hold a query: every query, wrapper and
@@ -95,7 +117,7 @@ fn rule_config(rules: Option<HashMap<String, String>>) -> PyResult<RuleConfig> {
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
-    analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
+    analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref())
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
@@ -112,7 +134,7 @@ fn analyze_select(
     dialect: &str,
     schema_sql: Option<&str>,
 ) -> PyResult<Option<Vec<ColumnTuple>>> {
-    let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
+    let columns = analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(columns.map(|columns| {
         columns
@@ -138,7 +160,7 @@ fn analyze_columns(
     dialect: &str,
     schema_sql: Option<&str>,
 ) -> PyResult<Option<Vec<NullableColumnTuple>>> {
-    let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
+    let columns = analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(columns.map(|columns| {
         columns
@@ -173,7 +195,7 @@ fn name_rules() -> Vec<&'static str> {
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn query_diagnostics(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Vec<(String, String)> {
-    analyzer::analyze_with_diagnostics(sql, dialect, &schema(schema_sql, dialect))
+    analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
         .1
         .into_iter()
         .map(|found| (found.rule.name().to_string(), found.message))
@@ -201,10 +223,10 @@ fn schema_skipped_objects(schema_sql: &str, dialect: &str) -> Vec<(String, Strin
 
 fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(String, String)> {
     cached_schema(schema_sql, dialect)
-        .1
-        .into_iter()
+        .skipped
+        .iter()
         .filter(|(kind, _)| only.is_none_or(|only| only == *kind))
-        .map(|(kind, name)| (kind.to_string(), name))
+        .map(|(kind, name)| ((*kind).to_string(), name.clone()))
         .collect()
 }
 
@@ -250,7 +272,7 @@ fn rewrite_source(
     Ok(rewriter::rewrite_source_with(
         source,
         dialect,
-        &schema_for(source, schema_sql, dialect),
+        schema_for(source, schema_sql, dialect).as_deref(),
         import_style,
         untyped,
         keep_lines,
@@ -293,7 +315,7 @@ fn fix_source(
     Ok(fixer::fix_source(
         source,
         dialect,
-        &schema_for(source, schema_sql, dialect),
+        schema_for(source, schema_sql, dialect).as_deref(),
         import_style,
         untyped,
         &rules,
@@ -308,7 +330,7 @@ fn fix_source(
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<String> {
-    analyzer::expand_star(sql, dialect, &schema(schema_sql, dialect))
+    analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref())
 }
 
 /// Check Python source for SQL type issues.
@@ -343,7 +365,7 @@ fn check_source<'py>(
     let diagnostics = checker::check_source(
         source,
         dialect,
-        &schema_for(source, schema_sql, dialect),
+        schema_for(source, schema_sql, dialect).as_deref(),
         &rules,
         import_style,
         untyped,

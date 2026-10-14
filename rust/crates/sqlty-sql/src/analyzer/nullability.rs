@@ -43,14 +43,14 @@ pub(super) struct Facts {
     pub(super) present: Vec<String>,
     /// Expressions (as printed) the conditions rule out as NULL, such as `doc -> 'k'`
     /// after `doc ? 'k'`.
-    pub(super) non_null_exprs: Vec<String>,
+    pub(super) non_null_exprs: HashSet<String>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
     /// `(reference, column)` pairs that `ROLLUP`, `CUBE`, `GROUPING SETS` or `WITH ROLLUP`
     /// turn into NULL in their subtotal rows.
     rolled_up: Vec<(String, String)>,
     /// Other grouping expressions (as printed) such subtotal rows set to NULL.
-    rolled_up_exprs: Vec<String>,
+    rolled_up_exprs: HashSet<String>,
 }
 
 impl Facts {
@@ -297,7 +297,7 @@ const ALWAYS_NULLABLE: &[&str] = &[
 
 /// Whether the frame of a window always holds the current row. The default frame does; a
 /// spelled-out one must start at or before the current row and end at or after it.
-fn frame_holds_current_row(over: &Option<sqlparser::ast::WindowType>) -> bool {
+fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
     use sqlparser::ast::{WindowFrameBound::*, WindowType};
     match over {
         Some(WindowType::WindowSpec(spec)) => spec.window_frame.as_ref().is_none_or(|frame| {
@@ -464,7 +464,9 @@ impl<'a> Analyzer<'a> {
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {
                 Some((reference, _, column)) => facts.rolled_up.push((reference, column)),
-                None => facts.rolled_up_exprs.push(expr.to_string()),
+                None => {
+                    facts.rolled_up_exprs.insert(expr.to_string());
+                }
             }
         }
         self.narrow_select(select, scope, facts)
@@ -820,7 +822,7 @@ impl<'a> Analyzer<'a> {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }
             "MOD" if !postgres => Nullability::Nullable,
-            "FIRST_VALUE" | "LAST_VALUE" if frame_holds_current_row(&func.over) => first(),
+            "FIRST_VALUE" | "LAST_VALUE" if frame_holds_current_row(func.over.as_ref()) => first(),
             "FIRST_VALUE" | "LAST_VALUE" => Nullability::Nullable,
             // PostgreSQL's and SQLite's concat skip NULLs.
             "CONCAT" if self.dialect != SqlDialect::MySql => Nullability::NonNull,
@@ -856,7 +858,7 @@ mod tests {
 
     fn marks_with(sql: &str, dialect: &str, schema: &str) -> String {
         let schema = Some(load_schema(schema, dialect));
-        analyze_select(sql, dialect, &schema)
+        analyze_select(sql, dialect, schema.as_deref())
             .unwrap()
             .unwrap()
             .iter()

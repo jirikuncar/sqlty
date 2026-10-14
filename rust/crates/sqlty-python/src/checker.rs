@@ -21,7 +21,7 @@ use crate::rewriter::{
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
-use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, Schema};
+use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, SchemaData};
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
@@ -78,7 +78,7 @@ pub struct Diagnostic {
 pub fn check_source(
     source: &str,
     dialect: &str,
-    schema: &Option<Schema>,
+    schema: Option<&SchemaData>,
     rule_config: &RuleConfig,
     import_style: Option<&str>,
     untyped: bool,
@@ -439,7 +439,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -462,7 +462,7 @@ mod tests {
             let diags = check_source(
                 source,
                 "postgres",
-                &None,
+                None,
                 &RuleConfig::default(),
                 None,
                 false,
@@ -486,7 +486,7 @@ mod tests {
             let diags = check_source(
                 source,
                 "postgres",
-                &None,
+                None,
                 &RuleConfig::default(),
                 None,
                 false,
@@ -505,7 +505,7 @@ mod tests {
         assert!(check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -515,7 +515,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             true,
@@ -530,7 +530,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -549,7 +549,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -567,7 +567,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -611,7 +611,7 @@ mod tests {
     fn test_rule_override_ignore() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
         let rules = override_rule("stale-rewrite", "ignore");
-        let diags = check_source(source, "postgres", &None, &rules, None, false, &[]);
+        let diags = check_source(source, "postgres", None, &rules, None, false, &[]);
         let stale_rewrites: Vec<_> = diags
             .iter()
             .filter(|d| d.rule == Rule::StaleRewrite)
@@ -625,7 +625,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -645,7 +645,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -664,7 +664,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -681,7 +681,7 @@ mod tests {
     fn test_inline_sql_comment_ignored_when_disabled() {
         let source = r#"q = "--sql SELECT 1::INTEGER""#;
         let rules = override_rule("inline-sql-comment", "ignore");
-        let diags = check_source(source, "postgres", &None, &rules, None, false, &[]);
+        let diags = check_source(source, "postgres", None, &rules, None, false, &[]);
         let inline: Vec<_> = diags
             .iter()
             .filter(|d| d.rule == Rule::InlineSqlComment)
@@ -695,7 +695,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             Some("from sqlty import SQL as Q"),
             false,
@@ -714,7 +714,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             Some("import sqlty"),
             false,
@@ -738,7 +738,7 @@ mod tests {
         assert!(check_source(
             source,
             "postgres",
-            &schema,
+            schema.as_deref(),
             &RuleConfig::default(),
             None,
             false,
@@ -746,7 +746,15 @@ mod tests {
         )
         .is_empty());
         let rules = override_rule("unknown-column", "error");
-        let diags = check_source(source, "postgres", &schema, &rules, None, false, &[]);
+        let diags = check_source(
+            source,
+            "postgres",
+            schema.as_deref(),
+            &rules,
+            None,
+            false,
+            &[],
+        );
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].rule, Rule::Name(NameRule::UnknownColumn));
         assert_eq!(diags[0].severity, Severity::Error);
@@ -758,7 +766,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -775,7 +783,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             Some("import sqlty"),
             false,
@@ -801,7 +809,7 @@ mod tests {
             lines(check_source(
                 source,
                 "postgres",
-                &None,
+                None,
                 &RuleConfig::default(),
                 None,
                 false,
@@ -813,7 +821,7 @@ mod tests {
             lines(check_source(
                 source,
                 "postgres",
-                &None,
+                None,
                 &RuleConfig::default(),
                 None,
                 false,
@@ -831,7 +839,7 @@ mod tests {
         let diags: Vec<(Rule, usize)> = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,
@@ -856,7 +864,7 @@ mod tests {
         let diags = check_source(
             source,
             "postgres",
-            &None,
+            None,
             &RuleConfig::default(),
             None,
             false,

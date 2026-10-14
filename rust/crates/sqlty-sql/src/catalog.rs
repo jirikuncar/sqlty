@@ -154,7 +154,7 @@ impl Catalog {
 
     /// Columns of the table `name`, or `None` for a view, an unknown name or a table of
     /// unknown shape.
-    pub(crate) fn table(&self, name: &str) -> Option<&Vec<SchemaColumn>> {
+    pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
             Relation::Table(columns) => Some(columns),
             _ => None,
@@ -193,9 +193,10 @@ impl Catalog {
     }
 
     /// Fields of the composite type `name`.
-    pub(crate) fn composite(&self, name: &str) -> Option<&Vec<SchemaColumn>> {
+    pub(crate) fn composite(&self, name: &str) -> Option<&[SchemaColumn]> {
         lookup_key(&self.composites, &self.search_path, self.norm(name))
             .and_then(|key| self.composites.get(key))
+            .map(Vec::as_slice)
     }
 
     /// What the function `name` returns when called with `args` arguments, if exactly one
@@ -1149,10 +1150,8 @@ impl Loader {
 
     /// The catalog as it stands now.
     fn snapshot(&mut self) -> &Catalog {
-        if self.cache.is_none() {
-            self.cache = Some(self.build());
-        }
-        self.cache.as_ref().unwrap()
+        let catalog = self.cache.take().unwrap_or_else(|| self.build());
+        self.cache.insert(catalog)
     }
 
     fn build(&self) -> Catalog {
@@ -1952,7 +1951,7 @@ mod tests {
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
             "mysql",
         );
-        assert_eq!(c.table("t").map(Vec::len), Some(1));
+        assert_eq!(c.table("t").map(<[SchemaColumn]>::len), Some(1));
         assert!(c.table("pg_class").is_none());
     }
 
