@@ -251,7 +251,7 @@ const NULL_ON_FEW_ROWS: &[&str] = &[
 ];
 
 /// Aggregates whose group of one or more rows always gives a value, whatever the rows hold.
-const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
+pub(super) const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
     "ARRAY_AGG",
     "JSON_AGG",
     "JSONB_AGG",
@@ -322,6 +322,8 @@ const NEVER_NULL: &[&str] = &[
     "JSONB_BUILD_OBJECT",
     "JSON_BUILD_ARRAY",
     "JSONB_BUILD_ARRAY",
+    "NUM_NULLS",
+    "NUM_NONNULLS",
     "JSON_OBJECT",
     "JSON_ARRAY",
     "ROW",
@@ -586,11 +588,24 @@ impl<'a> Analyzer<'a> {
                 substring_from,
                 substring_for,
                 ..
-            } => any_nullable(
-                std::iter::once(of(inner))
-                    .chain(substring_from.as_deref().map(of))
-                    .chain(substring_for.as_deref().map(of)),
-            ),
+            } => {
+                // PostgreSQL's `substring(s FROM 'pattern')` is NULL when nothing matches.
+                let by_pattern = self.dialect == SqlDialect::Postgres
+                    && substring_from.as_deref().is_some_and(
+                        |from| !matches!(self.expr(from, scope), Ok((Some(t), _)) if t == "int"),
+                    );
+                let missed = if by_pattern {
+                    Nullability::Nullable
+                } else {
+                    Nullability::NonNull
+                };
+                any_nullable(
+                    std::iter::once(of(inner))
+                        .chain([missed])
+                        .chain(substring_from.as_deref().map(of))
+                        .chain(substring_for.as_deref().map(of)),
+                )
+            }
             Expr::Trim {
                 expr: inner,
                 trim_what,
@@ -761,6 +776,10 @@ impl<'a> Analyzer<'a> {
             } else {
                 arg
             };
+        }
+        // Without `missing_ok`, a setting that is not there is an error; with it, NULL.
+        if name == "CURRENT_SETTING" && args.len() == 2 {
+            return Nullability::Nullable;
         }
         if ALWAYS_NULLABLE.contains(&name.as_str()) {
             return Nullability::Nullable;
@@ -943,6 +962,14 @@ mod tests {
                 schema
             ),
             "--N"
+        );
+    }
+
+    #[test]
+    fn test_functions_that_can_miss() {
+        assert_eq!(
+            marks("SELECT regexp_match(b, 'a'), regexp_substr(b, 'a'), regexp_replace(b, 'a', 'b'), substring(b FROM 'a'), substring(b FROM 2), substring(b FROM $1 FOR 2), current_setting('x', true), current_setting('x') FROM t"),
+            "NN-N-NN-"
         );
     }
 

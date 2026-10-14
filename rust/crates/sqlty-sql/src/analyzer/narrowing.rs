@@ -67,20 +67,42 @@ impl Facts {
 /// Functions that return NULL for a NULL argument, as far as narrowing goes: a known
 /// built-in other than the ones that look through NULLs.
 fn is_strict(name: &str) -> bool {
-    !matches!(
-        name,
-        "COALESCE"
-            | "IFNULL"
-            | "NVL"
-            | "CONCAT"
-            | "CONCAT_WS"
-            | "GREATEST"
-            | "LEAST"
-            | "IF"
-            | "IIF"
-            | "COUNT"
-            | "NULLIF"
-    )
+    !super::nullability::ALWAYS_VALUED_AGGREGATES.contains(&name)
+        && !matches!(
+            name,
+            "COALESCE"
+                | "IFNULL"
+                | "NVL"
+                | "CONCAT"
+                | "CONCAT_WS"
+                | "GREATEST"
+                | "LEAST"
+                | "IF"
+                | "IIF"
+                | "COUNT"
+                | "REGR_COUNT"
+                | "NULLIF"
+                | "NVL2"
+                | "ISNULL"
+                | "TYPEOF"
+                | "FIELD"
+                | "QUOTE"
+                | "QUOTE_NULLABLE"
+                | "FORMAT"
+                | "NUM_NULLS"
+                | "NUM_NONNULLS"
+                | "JSON_BUILD_OBJECT"
+                | "JSONB_BUILD_OBJECT"
+                | "JSON_BUILD_ARRAY"
+                | "JSONB_BUILD_ARRAY"
+                | "JSON_OBJECT"
+                | "JSON_ARRAY"
+                | "ROW"
+                | "ARRAY_APPEND"
+                | "ARRAY_PREPEND"
+                | "ARRAY_CAT"
+                | "ARRAY_TO_STRING"
+        )
 }
 
 /// The conditions every row of a SELECT satisfies: WHERE, HAVING, and the ON of inner

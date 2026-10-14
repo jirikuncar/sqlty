@@ -188,3 +188,47 @@ An array spelled out lists its elements.
 SELECT g = ANY (ARRAY[1, 2]), g = ANY (ARRAY[1, a]) FROM t
 -- inferred: tuple[bool, bool | None]
 ```
+
+## Functions that return NULL for a non-null input
+
+`substring(s FROM 'pattern')` is NULL when nothing matches, and `current_setting(name, true)`
+when the setting is not there. The integer forms stay non-null.
+
+```sql
+SELECT substring(txt FROM 'a+'), substring(txt FROM 2 FOR 3), substring(txt FROM 2), current_setting('x', true), current_setting('x') FROM t
+-- inferred: tuple[str | None, str, str, str | None, str]
+```
+
+## Functions that look through NULLs do not narrow their arguments
+
+`num_nulls`, `num_nonnulls` and the JSON builders accept NULL arguments, so a non-null result
+says nothing about them.
+
+```sql
+SELECT a FROM t WHERE num_nonnulls(a, g) IS NOT NULL
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT a FROM t WHERE jsonb_build_array(a) IS NOT NULL
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT a FROM t WHERE jsonb_build_object('k', a) IS NOT NULL
+-- inferred: tuple[int | None]
+```
+
+`array_agg` of a group with a NULL is still an array.
+
+```sql
+SELECT a FROM t GROUP BY a HAVING array_agg(a) IS NOT NULL
+-- inferred: tuple[int | None]
+```
+
+A strict function still narrows.
+
+```sql
+SELECT a FROM t WHERE abs(a) IS NOT NULL
+-- inferred: tuple[int]
+```
