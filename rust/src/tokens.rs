@@ -365,12 +365,10 @@ impl Call {
         self.plain.then(|| content(source, &self.strings))
     }
 
-    /// Whether `T` is `Any`, `typing.Any` or `typing_extensions.Any`: an explicit opt-out of checks.
-    pub fn is_any(&self, source: &str) -> bool {
-        matches!(
-            source[self.annotation.clone()].trim(),
-            "Any" | "typing.Any" | "typing_extensions.Any"
-        )
+    /// Whether the call starts at one of `any_calls`, the byte offsets of the calls
+    /// whose `T` is `typing.Any`: an explicit opt-out of checks.
+    pub fn is_any(&self, any_calls: &[usize]) -> bool {
+        any_calls.contains(&self.span.start)
     }
 
     /// The source of the argument's literals, from the first to the last.
