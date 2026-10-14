@@ -286,3 +286,39 @@ SELECT t.id IN (SELECT t.a + 1 FROM u t) FROM t WHERE t.a + 1 > 0
 SELECT t.id IN (SELECT t.a + 1 FROM u t) FROM t
 -- inferred: tuple[bool | None]
 ```
+
+## Narrowing follows the column's identity, not its spelling
+
+A quoted mixed-case column is narrowed by a condition on it.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY,
+    "userId" INTEGER,
+    "Email" TEXT
+);
+```
+
+```sql
+SELECT "userId", "Email" FROM accounts WHERE "userId" IS NOT NULL
+-- inferred: tuple[int, str | None]
+```
+
+```sql
+SELECT a."userId" FROM accounts AS a WHERE a."userId" = 1
+-- inferred: tuple[int]
+```
+
+A left-joined relation with a quoted alias is back once a condition proves its row.
+
+```sql
+SELECT "A".id FROM accounts LEFT JOIN accounts AS "A" ON "A"."userId" = accounts.id WHERE "A"."userId" IS NOT NULL
+-- inferred: tuple[int]
+```

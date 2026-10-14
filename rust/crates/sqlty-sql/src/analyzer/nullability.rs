@@ -67,22 +67,22 @@ impl Facts {
             .any(|(r, c)| r == reference && c == column)
     }
 
-    /// Nullability of a column of `reference`, given what its source declares.
+    /// Nullability of a column of `reference`, given what its source declares. `column` is
+    /// the identity the resolver gives it (see [`Analyzer::column_key`]), never raw text.
     pub(super) fn column(
         &self,
         reference: &str,
         column: &str,
         declared: Nullability,
     ) -> Nullability {
-        let column = column.to_lowercase();
         // A subtotal row is made after WHERE, so a condition cannot rule its NULL out.
         let rolled = self
             .rolled_up
             .iter()
-            .any(|(r, c)| r == reference && *c == column);
+            .any(|(r, c)| r == reference && c == column);
         if rolled {
             Nullability::Nullable
-        } else if self.is_non_null(reference, &column) {
+        } else if self.is_non_null(reference, column) {
             Nullability::NonNull
         } else if self.is_null_extended(reference) {
             Nullability::Nullable
@@ -152,10 +152,11 @@ fn factor_references(factor: &TableFactor, extended: &mut Vec<String>) -> Vec<St
             table_with_joins,
             alias: None,
         } => group(table_with_joins, extended),
-        TableFactor::Table { name, alias, .. } => vec![alias
-            .as_ref()
-            .map_or_else(|| object_name(name), |a| a.name.value.to_lowercase())],
-        other => vec![opaque_source(other).0],
+        // The reference the scope of the SELECT gives the relation.
+        other => table_scope(other)
+            .into_iter()
+            .map(|(reference, _)| reference)
+            .collect(),
     }
 }
 
@@ -461,6 +462,16 @@ impl<'a> Analyzer<'a> {
             }
         }
         self.narrow_select(select, scope, facts)
+    }
+
+    /// The identity narrowing knows column `name` of the relation `reference` by: what
+    /// [`Self::locate_column`] resolves a reference to it to, so that a condition on the
+    /// column and a read of it agree whatever the folding of identifiers.
+    pub(super) fn column_key(&self, reference: &str, name: &str, scope: &Scope) -> String {
+        let quoted = |text: &str| Ident::with_quote('"', text);
+        let expr = Expr::CompoundIdentifier(vec![quoted(reference), quoted(name)]);
+        self.locate_column(&expr, scope)
+            .map_or_else(|| name.to_string(), |(_, _, column)| column)
     }
 
     /// Whether `expr` can be NULL under `facts`.

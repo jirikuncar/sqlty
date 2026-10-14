@@ -420,9 +420,8 @@ impl<'a> Analyzer<'a> {
                     })
                 })?;
                 for column in &mut columns {
-                    column.nullability =
-                        self.facts
-                            .column(reference, &column.name, column.nullability);
+                    let key = self.column_key(reference, &column.name, scope);
+                    column.nullability = self.facts.column(reference, &key, column.nullability);
                 }
                 Some(columns)
             })
