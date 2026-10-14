@@ -13,8 +13,8 @@
 
 use std::collections::HashMap;
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
@@ -47,8 +47,8 @@ const INLINE_SQL_COMMENT: &str = concat!(
 );
 
 /// String content starting with `INLINE_SQL_COMMENT`.
-pub static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
-    Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
+pub static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
 /// MariaDB reject: they read `--` as a comment only before whitespace.

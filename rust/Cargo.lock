@@ -262,7 +262,6 @@ dependencies = [
 name = "sqlty-python"
 version = "0.1.0"
 dependencies = [
- "once_cell",
  "regex",
  "sqlparser",
  "sqlty-sql",
@@ -272,7 +271,6 @@ dependencies = [
 name = "sqlty-sql"
 version = "0.1.0"
 dependencies = [
- "once_cell",
  "regex",
  "sqlparser",
 ]

@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 pub use crate::tokens::string_literals;
 use crate::tokens::{content, string_at, string_groups, tokenize, wrapper_calls, Kind, Token};
@@ -26,7 +26,7 @@ pub const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipaddress",
 // Regex patterns
 // ---------------------------------------------------------------------------
 
-static CODING: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
+static CODING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
 
 /// Why rewrite leaves a string group alone although it holds a `--sql` string:
 /// `fstring-skipped`, `tstring-skipped`, or `unchecked-query` for a raw or bytes part.

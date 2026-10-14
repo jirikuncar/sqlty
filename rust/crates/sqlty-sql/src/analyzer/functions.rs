@@ -380,10 +380,10 @@ pub(super) fn function_table(
         .collect()
 }
 
-pub(super) static FUNCTION_TYPES: Lazy<HashMap<&'static str, Returns>> =
-    Lazy::new(|| function_table(COMMON_FUNCTIONS));
-pub(super) static POSTGRES_FUNCTION_TYPES: Lazy<HashMap<&'static str, Returns>> =
-    Lazy::new(|| function_table(POSTGRES_FUNCTIONS));
+pub(super) static FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
+    LazyLock::new(|| function_table(COMMON_FUNCTIONS));
+pub(super) static POSTGRES_FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
+    LazyLock::new(|| function_table(POSTGRES_FUNCTIONS));
 
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
 pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {

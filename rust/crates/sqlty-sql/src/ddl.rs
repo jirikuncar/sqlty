@@ -4,8 +4,8 @@
 //! A table sqlparser cannot read is retried without its constraints and `CHECK` /
 //! `REFERENCES` clauses, which never change column types.
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -445,8 +445,9 @@ impl Statement<'_> {
     }
 }
 
-static SET_CONFIG: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap());
+static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
+});
 
 /// A comma-separated `search_path` value such as `app, "$user", public`.
 fn path_list(text: &str) -> Vec<String> {

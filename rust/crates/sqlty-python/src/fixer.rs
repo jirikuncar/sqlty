@@ -4,8 +4,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
@@ -19,8 +19,8 @@ use sqlty_sql::analyzer::{expand_star, Schema};
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
 /// A `--sql` marker line at the start of string content.
-static SQL_PREFIX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
+static SQL_PREFIX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
 
 /// Fix `inline-sql-comment`, `mysql-sql-marker`, `stale-rewrite`, `select-star`,
 /// `stale-type` and `untyped-query`, except where a `# sqlty: ignore` comment on the line

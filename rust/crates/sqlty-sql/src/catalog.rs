@@ -37,7 +37,6 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use once_cell::sync::Lazy;
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterTypeOperation, ArgMode, ArrayElemTypeDef,
     ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind, CreateView,
@@ -45,6 +44,7 @@ use sqlparser::ast::{
     RenameTableNameKind, Statement, TableConstraint, UserDefinedTypeRepresentation, Visit, Visitor,
 };
 use sqlparser::parser::Parser;
+use std::sync::LazyLock;
 
 use crate::analyzer::{
     canonical_type, parse_ddl, typed, view_columns, Column, SkippedObject, SqlDialect,
@@ -332,8 +332,8 @@ fn name_key(name: &ObjectName, dialect: SqlDialect) -> String {
 /// An empty catalog, with the built-in relations in PostgreSQL: what queries read
 /// when there is no schema.
 pub fn empty(dialect: SqlDialect) -> &'static Catalog {
-    static POSTGRES: Lazy<Catalog> = Lazy::new(|| load("", "postgres").0);
-    static OTHER: Lazy<Catalog> = Lazy::new(Catalog::default);
+    static POSTGRES: LazyLock<Catalog> = LazyLock::new(|| load("", "postgres").0);
+    static OTHER: LazyLock<Catalog> = LazyLock::new(Catalog::default);
     if dialect == SqlDialect::Postgres {
         &POSTGRES
     } else {
@@ -1578,8 +1578,8 @@ fn changes_columns(action: &[String], mentions_type: bool) -> bool {
     }
 }
 
-static COLLATE: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
+static COLLATE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
 fn read_statements(
     statements: &[ddl::Statement],

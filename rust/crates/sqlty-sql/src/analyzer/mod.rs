@@ -10,7 +10,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic, NameRule};
-use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, AccessExpr, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable,
@@ -24,6 +23,7 @@ use sqlparser::dialect::{
     SQLiteDialect,
 };
 use sqlparser::parser::Parser;
+use std::sync::LazyLock;
 
 mod dml;
 mod expr;
@@ -56,7 +56,7 @@ const CIDR: &str = "ipaddress.IPv4Network | ipaddress.IPv6Network";
 
 /// Mapping from canonical SQL type names to Python type strings; `DECIMAL` types
 /// are mapped by [`decimal_type`] and arrays by [`python_type`].
-static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         ("INT", "int"),
         ("INTEGER", "int"),
@@ -139,7 +139,8 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
     ])
 });
 
-static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
+static STAR_ITEM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
 use crate::catalog::{fold, FunctionReturn};
 pub use crate::catalog::{Catalog as SchemaData, SchemaColumn};
@@ -216,11 +217,11 @@ impl SqlDialect {
 }
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
-static SQL_MARKER: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
+static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
 /// PostgreSQL row-lock clauses sqlparser cannot read, respelled as the closest ones it can:
 /// `NO KEY UPDATE` as `UPDATE`, `KEY SHARE` as `SHARE`, and `OF` keeps only its first table.
-static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
+static POSTGRES_LOCK_FIXES: LazyLock<[(Regex, &str); 3]> = LazyLock::new(|| {
     const NAME: &str = r#"(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))*"#;
     [
         (
@@ -242,16 +243,17 @@ static POSTGRES_LOCK_FIXES: Lazy<[(Regex, &str); 3]> = Lazy::new(|| {
 });
 
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
-static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
+static PLACEHOLDER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
-static QMARK: Lazy<Regex> = Lazy::new(|| {
+static QMARK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
 });
 
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`), then
 /// `INT3`/`MIDDLEINT` before `UNSIGNED`.
-static MYSQL_TYPE_FIXES: Lazy<[(Regex, &str); 2]> = Lazy::new(|| {
+static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 2]> = LazyLock::new(|| {
     [
         (
             Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
@@ -323,9 +325,10 @@ fn parser_input(sql: &str, dialect: SqlDialect) -> String {
 /// Drops the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO ...`, the
 /// partial unique index that arbitrates the conflict; it does not change the result columns.
 fn drop_conflict_predicate(sql: &str) -> String {
-    static CONFLICT_TARGET: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
-    static WHERE_CLAUSE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
+    static CONFLICT_TARGET: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
+    static WHERE_CLAUSE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
     let mut out = String::with_capacity(sql.len());
     let mut last = 0;
     for target in CONFLICT_TARGET.find_iter(sql) {

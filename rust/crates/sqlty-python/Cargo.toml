@@ -15,4 +15,3 @@ workspace = true
 sqlty-sql.workspace = true
 sqlparser.workspace = true
 regex.workspace = true
-once_cell.workspace = true

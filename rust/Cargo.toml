@@ -15,7 +15,6 @@ rust-version = "1.88"
 pyo3 = { version = "0.29", features = ["extension-module"] }
 sqlparser = { version = "0.63", features = ["visitor"] }
 regex = "1"
-once_cell = "1"
 sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 
