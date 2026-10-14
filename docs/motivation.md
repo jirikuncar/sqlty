@@ -46,3 +46,33 @@ Use something else for:
 | Runtime validation (Pydantic) | Catches mismatches only when the code runs |
 | Hand-written annotations | Drift from the SQL silently |
 | sqlty | Needs casts or a schema; queries must be literals |
+
+## Prior art
+
+Typed raw SQL is not new. Most tools get column types from a live database;
+sqlty works offline, from casts or `CREATE TABLE` statements, and keeps
+queries inline as string literals.
+
+| Project | Language | Approach | Live database |
+|---------|----------|----------|---------------|
+| [sqlx](https://github.com/transact-rs/sqlx) | Rust | `query!` macros check inline SQL at compile time | Yes, or an offline cache |
+| [postgresql-typed](https://github.com/dylex/postgresql-typed) | Haskell | Template Haskell prepares each query at compile time | Yes |
+| [Doobie](https://github.com/typelevel/doobie) | Scala | `check` validates queries against declared types in tests | Yes |
+| [SafeQL](https://github.com/ts-safeql/safeql) | TypeScript | ESLint rule checks inline `sql` tags and fixes their type annotations | Yes |
+| [sqlx-ts](https://github.com/JasonShin/sqlx-ts), [mfsqlchecker](https://github.com/MedFlyt/mfsqlchecker) | TypeScript | Check inline queries and their result types | Yes |
+| [sqlc](https://github.com/sqlc-dev/sqlc) | Go, Python and others | Generates typed code from schema and `.sql` files | No |
+| [SQLDelight](https://github.com/sqldelight/sqldelight) | Kotlin | Generates typed APIs from `.sq` files | No |
+| [PgTyped](https://github.com/adelsz/pgtyped) | TypeScript | Generates types for `.sql` files and `sql` tags | Yes |
+| [Prisma TypedSQL](https://www.prisma.io/docs/orm/v7/prisma-client/using-raw-sql/typedsql) | TypeScript | Typed functions from `.sql` files | Yes |
+| [Cornucopia](https://github.com/cornucopia-rs/cornucopia), [Squirrel](https://github.com/giacomocavalieri/squirrel) | Rust, Gleam | Generate typed functions from `.sql` files | Yes |
+| [querky](https://github.com/racinette/querky) | Python | Decorated raw SQL becomes typed functions | Yes |
+| [aiosql](https://github.com/nackjicholson/aiosql), [PugSQL](https://github.com/mcfunley/pugsql), [HugSQL](https://github.com/layerware/hugsql) | Python, Clojure | Load named queries from `.sql` files, untyped | No |
+| [sqlglot](https://github.com/tobymao/sqlglot) | Python | `annotate_types` infers expression types from a schema | No |
+
+Query builders such as [Kysely](https://github.com/kysely-org/kysely),
+[jOOQ](https://github.com/jOOQ/jOOQ) and SQLAlchemy type results through a
+DSL instead of SQL strings. [psycopg](https://www.psycopg.org/psycopg3/docs/advanced/typing.html)
+types rows by row factory, which sqlty's [psycopg helpers](guide/psycopg.md)
+build on. Linters such as [SQLFluff](https://github.com/sqlfluff/sqlfluff)
+and [Squawk](https://github.com/sbdchd/squawk) check style and migrations,
+not result types.
