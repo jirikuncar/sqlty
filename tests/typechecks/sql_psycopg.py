@@ -5,8 +5,14 @@ pyright: ok
 ty: ok
 """
 
+import sys
 from dataclasses import dataclass
-from typing import Any, NamedTuple, TypedDict, TypeForm, assert_type
+from typing import Any, NamedTuple, TypedDict, assert_type
+
+if sys.version_info >= (3, 15):
+    from typing import TypeForm
+else:
+    from typing_extensions import TypeForm
 
 from psycopg import Connection, Cursor
 from psycopg.rows import BaseRowFactory

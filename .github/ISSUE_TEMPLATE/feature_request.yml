@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest new SQL support, a lint rule, an integration or a CLI option.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and why sqlty does not support it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Desired behavior, with example Python source, SQL and expected `SQL[T]`.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds or other designs you considered.
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI disclosure
+      description: Was this request written with an AI tool? See CONTRIBUTING.md.
+      options:
+        - "No"
+        - "Yes, and I reviewed it myself"
+    validations:
+      required: true

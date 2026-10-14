@@ -1,10 +1,10 @@
 # Development Guide
 
-This guide covers development setup, workflows, and contribution guidelines for SQLTy.
+This guide covers development setup and workflows for SQLTy.
 
 ## Prerequisites
 
-- Python 3.15+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 - [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the `cargo-fmt` pre-commit hook)
 
@@ -239,35 +239,7 @@ otherwise the first deploy fails.
 
 ## Contributing
 
-### Development Process
-
-1. Fork and clone the repository
-2. Create a branch for your feature/fix
-3. Make changes with tests
-4. Run `make test` and `make typecheck`
-5. Commit with a clear message
-6. Push and create a pull request
-
-### Code Style
-
-- Follow PEP 8 and PEP 484 (type hints)
-- Use Ruff for formatting and linting
-- Add type hints to all functions
-
-### Testing Guidelines
-
-- **New type inference behavior**: Add mdtest cases in `tests/mdtest/`
-- **New lint rules**: Add mdtest cases in `tests/mdtest/check/`
-- **CLI changes**: Add e2e tests in `tests/e2e/`
-- **Internal changes**: Add unit tests alongside existing test files
-- Use `make update-mdtest` to bootstrap expected values
-
-### Pull Request Guidelines
-
-- Write clear PR descriptions
-- Reference related issues
-- Ensure CI passes
-- Request review from maintainers
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Getting Help
 
