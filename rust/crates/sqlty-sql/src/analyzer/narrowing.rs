@@ -19,8 +19,8 @@ pub(super) struct Learned {
     columns: HashSet<(String, String)>,
     /// References whose relation has a row, because a column of it is not NULL.
     present: HashSet<String>,
-    /// Expressions as printed, such as `doc -> 'k'`.
-    exprs: HashSet<String>,
+    /// Expressions such as `doc -> 'k'`.
+    exprs: FxHashSet<ExprKey>,
 }
 
 impl Learned {
@@ -57,9 +57,15 @@ impl Facts {
     /// These facts and what a condition proved.
     pub(super) fn with(&self, learned: Learned) -> Facts {
         let mut facts = self.clone();
-        facts.non_null.extend(learned.columns);
-        facts.present.extend(learned.present);
-        facts.non_null_exprs.extend(learned.exprs);
+        if !learned.columns.is_empty() {
+            Rc::make_mut(&mut facts.non_null).extend(learned.columns);
+        }
+        if !learned.present.is_empty() {
+            Rc::make_mut(&mut facts.present).extend(learned.present);
+        }
+        if !learned.exprs.is_empty() {
+            Rc::make_mut(&mut facts.non_null_exprs).extend(learned.exprs);
+        }
         facts
     }
 }
@@ -302,7 +308,7 @@ impl<'a> Analyzer<'a> {
             Expr::BinaryOp { left, op, right } => match op {
                 And | Or | Xor | Spaceship => return learned,
                 _ => {
-                    learned.exprs.insert(expr.to_string());
+                    learned.exprs.insert(ExprKey::of(expr));
                     return self
                         .proven(left, scope)
                         .union(self.proven(right, scope))
@@ -351,7 +357,7 @@ impl<'a> Analyzer<'a> {
                     .and_then(|part| part.as_ident())
                     .map(|ident| ident.value.to_uppercase())
                     .unwrap_or_default();
-                learned.exprs.insert(expr.to_string());
+                learned.exprs.insert(ExprKey::of(expr));
                 if func.over.is_none() && self.returns(&name).is_some() && is_strict(&name) {
                     for arg in positional_args(&func.args) {
                         learned = learned.union(self.proven(arg, scope));
@@ -361,7 +367,7 @@ impl<'a> Analyzer<'a> {
             }
             _ => {}
         }
-        learned.exprs.insert(expr.to_string());
+        learned.exprs.insert(ExprKey::of(expr));
         learned
     }
 }

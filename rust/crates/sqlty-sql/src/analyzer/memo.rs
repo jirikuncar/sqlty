@@ -10,13 +10,13 @@
 //! value, not by address, because the analyzer builds and drops temporary expressions.
 
 use std::cell::RefCell;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use sqlparser::ast::Query;
 
+use super::hashing::FxHasher;
 use super::nullability::Facts;
 use super::scope::Scope;
 use super::{Analyzer, Column, Inferred};
@@ -56,7 +56,7 @@ impl Entry {
 pub(super) struct SubqueryMemo(Rc<RefCell<HashMap<u64, Vec<Entry>>>>);
 
 fn digest(query: &Query) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = FxHasher::default();
     query.hash(&mut hasher);
     hasher.finish()
 }

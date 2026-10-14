@@ -32,25 +32,29 @@ impl Nullability {
 }
 
 /// What a SELECT's FROM and conditions tell about NULLs.
+///
+/// The lists are shared between the facts of a query and those of the expressions and
+/// subqueries inside it, which mostly add nothing: cloning is a reference count, and a list
+/// is copied only when something is added to a shared one.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Facts {
     /// References of relations an outer join null-extends: all their columns can be NULL.
-    null_extended: Vec<String>,
+    null_extended: Rc<Vec<String>>,
     /// `(reference, column)` pairs the conditions in force rule out as NULL.
-    pub(super) non_null: Vec<(String, String)>,
+    pub(super) non_null: Rc<Vec<(String, String)>>,
     /// References whose relation has a row in each result row: a null-extended relation
     /// with a column the conditions rule out as NULL cannot be the all-NULL row.
-    pub(super) present: Vec<String>,
-    /// Expressions (as printed) the conditions rule out as NULL, such as `doc -> 'k'`
-    /// after `doc ? 'k'`.
-    pub(super) non_null_exprs: HashSet<String>,
+    pub(super) present: Rc<Vec<String>>,
+    /// Expressions the conditions rule out as NULL, such as `doc -> 'k'` after `doc ? 'k'`.
+    /// Compared structurally (ignoring spans), not by their printed form.
+    pub(super) non_null_exprs: Rc<FxHashSet<ExprKey>>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
     /// `(reference, column)` pairs that `ROLLUP`, `CUBE`, `GROUPING SETS` or `WITH ROLLUP`
     /// turn into NULL in their subtotal rows.
-    rolled_up: Vec<(String, String)>,
-    /// Other grouping expressions (as printed) such subtotal rows set to NULL.
-    rolled_up_exprs: HashSet<String>,
+    rolled_up: Rc<Vec<(String, String)>>,
+    /// Other grouping expressions such subtotal rows set to NULL.
+    rolled_up_exprs: Rc<FxHashSet<ExprKey>>,
 }
 
 impl Facts {
@@ -94,23 +98,30 @@ impl Facts {
     /// Forget what is known about relations a nested SELECT defines itself.
     pub(super) fn without(&mut self, scope: &Scope) {
         let shadowed = |r: &String| scope.iter().any(|(s, _)| s == r);
-        self.null_extended.retain(|r| !shadowed(r));
-        self.non_null.retain(|(r, _)| !shadowed(r));
-        self.present.retain(|r| !shadowed(r));
-        self.rolled_up.retain(|(r, _)| !shadowed(r));
-        // A printed expression does not say which relation its names belong to, and the
-        // nested SELECT may bind them to its own: none of them carries over.
-        self.non_null_exprs.clear();
-        self.rolled_up_exprs.clear();
+        // Rebuilding a list only when it has something to forget keeps shared ones shared.
+        fn forget<T: Clone>(list: &mut Rc<Vec<T>>, gone: impl Fn(&T) -> bool) {
+            if list.iter().any(&gone) {
+                Rc::make_mut(list).retain(|item| !gone(item));
+            }
+        }
+        forget(&mut self.null_extended, |r| shadowed(r));
+        forget(&mut self.non_null, |(r, _)| shadowed(r));
+        forget(&mut self.present, |r| shadowed(r));
+        forget(&mut self.rolled_up, |(r, _)| shadowed(r));
+        // An expression does not say which relation its names belong to, and the nested
+        // SELECT may bind them to its own: none of them carries over.
+        self.non_null_exprs = Rc::default();
+        self.rolled_up_exprs = Rc::default();
     }
 
     /// These facts without the grouping subtotals: what an aggregate reads is the rows of
     /// a group, not its subtotal row.
     fn ungrouped_rows(&self) -> Facts {
-        let mut facts = self.clone();
-        facts.rolled_up.clear();
-        facts.rolled_up_exprs.clear();
-        facts
+        Facts {
+            rolled_up: Rc::default(),
+            rolled_up_exprs: Rc::default(),
+            ..self.clone()
+        }
     }
 }
 
@@ -457,15 +468,15 @@ impl<'a> Analyzer<'a> {
     pub(super) fn select_facts(&self, select: &Select, scope: &Scope) -> Facts {
         let mut facts = self.facts.clone();
         facts.without(scope);
-        facts
-            .null_extended
-            .extend(null_extended(&select.from, self.dialect));
+        Rc::make_mut(&mut facts.null_extended).extend(null_extended(&select.from, self.dialect));
         facts.grouped = is_grouped(select);
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {
-                Some((reference, _, column)) => facts.rolled_up.push((reference, column)),
+                Some((reference, _, column)) => {
+                    Rc::make_mut(&mut facts.rolled_up).push((reference, column));
+                }
                 None => {
-                    facts.rolled_up_exprs.insert(expr.to_string());
+                    Rc::make_mut(&mut facts.rolled_up_exprs).insert(ExprKey::of(expr));
                 }
             }
         }
@@ -484,11 +495,14 @@ impl<'a> Analyzer<'a> {
 
     /// Whether `expr` can be NULL under `facts`.
     pub(super) fn nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
-        if !facts.non_null_exprs.is_empty() && facts.non_null_exprs.contains(&expr.to_string()) {
-            return Nullability::NonNull;
-        }
-        if !facts.rolled_up_exprs.is_empty() && facts.rolled_up_exprs.contains(&expr.to_string()) {
-            return Nullability::Nullable;
+        if !facts.non_null_exprs.is_empty() || !facts.rolled_up_exprs.is_empty() {
+            let key = ExprKey::of(expr);
+            if facts.non_null_exprs.contains(&key) {
+                return Nullability::NonNull;
+            }
+            if facts.rolled_up_exprs.contains(&key) {
+                return Nullability::Nullable;
+            }
         }
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {

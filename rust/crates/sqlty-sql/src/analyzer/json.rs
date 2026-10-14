@@ -189,7 +189,8 @@ impl<'a> Analyzer<'a> {
                     Some(filter) => {
                         let mut inner = self.clone();
                         inner.facts = self.facts.with(self.learn(filter, true, scope));
-                        inner.facts.present.extend(self.row_guards(filter, scope));
+                        Rc::make_mut(&mut inner.facts.present)
+                            .extend(self.row_guards(filter, scope));
                         inner.json_function(&name, &args, scope)
                     }
                     None => self.json_function(&name, &args, scope),

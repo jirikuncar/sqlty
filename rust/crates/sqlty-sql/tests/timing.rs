@@ -44,8 +44,15 @@ fn queries() -> Vec<(&'static str, String)> {
 #[ignore = "timing; run with --release --ignored --nocapture"]
 fn analyzer_timing() {
     let (schema, _) = load_schema_with_skipped(SCHEMA, "postgres");
+    let only = std::env::var("SQLTY_TIMING_ONLY").ok();
     for (name, sql) in queries() {
-        let iterations = 50;
+        if only.as_deref().is_some_and(|only| only != name) {
+            continue;
+        }
+        let iterations = std::env::var("SQLTY_TIMING_ITERS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(50);
         let first = analyze_with_diagnostics(&sql, "postgres", Some(&schema));
         let shape = first.0.as_ref().map(|c| c.as_ref().map(Vec::len));
         println!("{name}: columns {shape:?}, diagnostics {}", first.1.len());
