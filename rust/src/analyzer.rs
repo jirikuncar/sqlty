@@ -1,9 +1,9 @@
 //! SQL type inference with sqlparser-rs.
 //!
-//! Rows come from the leftmost `SELECT` of a query or from the top-level
-//! `RETURNING` of INSERT/UPDATE/DELETE/MERGE. Type names are canonicalized
-//! (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes `DECIMAL(10, 2)`), as
-//! `SELECT *` expansion writes them back into queries.
+//! Rows come from the `SELECT`s of a query, typed across the branches of a set
+//! operation, or from the top-level `RETURNING` of INSERT/UPDATE/DELETE/MERGE. Type
+//! names are canonicalized (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes
+//! `DECIMAL(10, 2)`), as `SELECT *` expansion writes them back into queries.
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
@@ -1643,13 +1643,21 @@ impl<'a> Analyzer<'a> {
         if let Some(with) = &query.with {
             let mut inner = self.clone();
             for cte in &with.cte_tables {
+                let name = cte.alias.name.value.to_lowercase();
+                if let (true, SetExpr::SetOperation { left, .. }) =
+                    (with.recursive, cte.query.body.as_ref())
+                {
+                    if let Some(select) = leftmost_select(left) {
+                        let mut seed = inner.select_columns(select)?;
+                        rename_columns(&mut seed, &cte.alias);
+                        inner.virtuals.insert(name.clone(), seed);
+                    }
+                }
                 let mut columns = inner
                     .query_columns(&cte.query)?
                     .unwrap_or_else(|| vec![Column::unknown("*")]);
                 rename_columns(&mut columns, &cte.alias);
-                inner
-                    .virtuals
-                    .insert(cte.alias.name.value.to_lowercase(), columns);
+                inner.virtuals.insert(name, columns);
             }
             return inner.query_body(query);
         }
@@ -1662,16 +1670,49 @@ impl<'a> Analyzer<'a> {
             | SetExpr::Update(stmt)
             | SetExpr::Delete(stmt)
             | SetExpr::Merge(stmt) => self.statement_columns(stmt),
-            body => match leftmost_select(body) {
-                Some(select) => {
-                    let (analyzer, scope) = self.scope_of(&select.from)?;
-                    analyzer
-                        .projection(&select.projection, &scope, Some(&select.from))
-                        .map(Some)
-                }
-                None => Ok(None),
-            },
+            body => self.set_columns(body),
         }
+    }
+
+    fn select_columns(&self, select: &Select) -> Inferred<Vec<Column>> {
+        let (analyzer, scope) = self.scope_of(&select.from)?;
+        analyzer.projection(&select.projection, &scope, Some(&select.from))
+    }
+
+    /// Columns of a SELECT or set operation. Names come from the leftmost branch; each
+    /// type is resolved across all branches as PostgreSQL resolves `UNION` (skipping
+    /// branches of unknown type), and branches of conflicting types leave it unknown.
+    fn set_columns(&self, body: &SetExpr) -> Inferred<Option<Vec<Column>>> {
+        let mut branches = Vec::new();
+        for branch in set_branches(body) {
+            branches.push(match branch {
+                SetExpr::Select(select) => Some(self.select_columns(select)?),
+                SetExpr::Query(query) => self.query_columns(query)?,
+                _ => None,
+            });
+        }
+        let mut branches = branches.into_iter();
+        let Some(mut columns) = branches.next().flatten() else {
+            return Ok(None);
+        };
+        let mut types: Vec<Option<Typed>> = columns
+            .iter()
+            .map(|col| Some((col.python_type.clone(), col.sql_type.clone())))
+            .collect();
+        for branch in branches
+            .flatten()
+            .filter(|cols| cols.len() == columns.len())
+        {
+            for (common, col) in types.iter_mut().zip(branch) {
+                *common = common
+                    .take()
+                    .and_then(|ty| common_type(ty, (col.python_type, col.sql_type), self.dialect));
+            }
+        }
+        for (column, common) in columns.iter_mut().zip(types) {
+            (column.python_type, column.sql_type) = common.unwrap_or((None, None));
+        }
+        Ok(Some(columns))
     }
 
     /// Scope of a FROM clause, and an analyzer that knows its derived tables. A
@@ -1916,26 +1957,31 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => {
-                let mut common: Option<String> = None;
+                let mut common: Option<Typed> = None;
                 for elem in &array.elem {
                     if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
                         continue;
                     }
-                    let typed = self.expr(elem, scope)?;
-                    let Some(elem) = typed
-                        .1
-                        .clone()
-                        .or_else(|| operand_type(&typed).map(String::from))
-                        .or_else(|| (typed.0.as_deref() == Some("str")).then(|| "TEXT".into()))
-                    else {
-                        return Ok((None, None));
+                    let mut typed = self.expr(elem, scope)?;
+                    if let Some(inner) = typed.1.as_deref().and_then(array_element) {
+                        typed = from_sql_type(inner.to_string(), self.dialect);
+                    }
+                    common = match common {
+                        _ if typed == (None, None) => None,
+                        Some(common) => common_type(common, typed, self.dialect),
+                        None => Some(typed),
                     };
-                    let elem = array_element(&elem).unwrap_or(&elem).to_string();
-                    if common.get_or_insert_with(|| elem.clone()) != &elem {
+                    if common.is_none() {
                         return Ok((None, None));
                     }
                 }
-                Ok(common.map_or((None, None), |elem| {
+                let elem = common.and_then(|typed| {
+                    typed
+                        .1
+                        .clone()
+                        .or_else(|| category(&typed).map(String::from))
+                });
+                Ok(elem.map_or((None, None), |elem| {
                     from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
                 }))
             }
@@ -2016,17 +2062,10 @@ impl<'a> Analyzer<'a> {
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
-            Expr::Subquery(query) => match leftmost_select(&query.body) {
-                Some(select) if !select.projection.is_empty() => {
-                    let (analyzer, scope) = self.scope_of(&select.from)?;
-                    Ok(analyzer
-                        .projection(&select.projection[..1], &scope, Some(&select.from))?
-                        .into_iter()
-                        .next()
-                        .map_or((None, None), |col| (col.python_type, col.sql_type)))
-                }
-                _ => Ok((None, None)),
-            },
+            Expr::Subquery(query) => Ok(self
+                .query_columns(query)?
+                .and_then(|columns| columns.into_iter().next())
+                .map_or((None, None), |col| (col.python_type, col.sql_type))),
             Expr::Case {
                 conditions,
                 else_result,
@@ -2255,6 +2294,7 @@ fn operand_type(typed: &Typed) -> Option<&str> {
         (Some(sql_type), _) => Some(type_base(sql_type)),
         (None, Some("int")) => Some("INT"),
         (None, Some("float")) => Some("DOUBLE"),
+        (None, Some(DECIMAL)) => Some("DECIMAL"),
         _ => None,
     }
 }
@@ -2323,6 +2363,70 @@ fn arithmetic(
             Some("INTERVAL".to_string())
         }
         _ => None,
+    }
+}
+
+/// The SELECTs and `WITH` queries a set operation combines, left to right.
+fn set_branches(body: &SetExpr) -> Vec<&SetExpr> {
+    match body {
+        SetExpr::SetOperation { left, right, .. } => {
+            let mut branches = set_branches(left);
+            branches.extend(set_branches(right));
+            branches
+        }
+        SetExpr::Query(query) if query.with.is_none() => set_branches(&query.body),
+        branch => vec![branch],
+    }
+}
+
+/// The type of a set operation's column whose branches have types `left` and `right`,
+/// following PostgreSQL: an unknown type yields to the other, numbers promote to the
+/// wider type, text and timestamps to the preferred one, arrays by their elements;
+/// other mixes conflict (`None`).
+fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Option<Typed> {
+    if right == (None, None) || left == right {
+        return Some(left);
+    }
+    if left == (None, None) || (left.1.is_none() && left.0 == right.0) {
+        return Some(right);
+    }
+    if right.1.is_none() && left.0 == right.0 {
+        return Some(left);
+    }
+    if let (Some(x), Some(y)) = (
+        left.1.as_deref().and_then(array_element),
+        right.1.as_deref().and_then(array_element),
+    ) {
+        let elem = |ty: &str| from_sql_type(ty.to_string(), dialect);
+        let elem = common_type(elem(x), elem(y), dialect)?.1?;
+        return Some(from_sql_type(format!("ARRAY<{elem}>"), dialect));
+    }
+    let (a, b) = (category(&left)?, category(&right)?);
+    const TEMPORAL: [&str; 3] = ["DATE", "TIMESTAMP", "TIMESTAMPTZ"];
+    let common = if let (Some(x), Some(y)) = (numeric_rank(a), numeric_rank(b)) {
+        NUMERIC_RANKS[x.max(y)][0]
+    } else if is_text(&left) && is_text(&right) {
+        if a == b {
+            a
+        } else {
+            "TEXT"
+        }
+    } else if let (Some(x), Some(y)) = (
+        TEMPORAL.iter().position(|ty| *ty == a),
+        TEMPORAL.iter().position(|ty| *ty == b),
+    ) {
+        TEMPORAL[x.max(y)]
+    } else {
+        return None;
+    };
+    Some(from_sql_type(common.to_string(), dialect))
+}
+
+/// The type category of a set operation's input; literals know only their Python type.
+fn category(typed: &Typed) -> Option<&str> {
+    match (typed.1.as_deref(), typed.0.as_deref()) {
+        (None, Some("str")) => Some("TEXT"),
+        _ => operand_type(typed),
     }
 }
 
@@ -2686,6 +2790,66 @@ mod tests {
         assert_eq!(
             infer("WITH users AS (SELECT 1 AS other) SELECT id FROM users"),
             None
+        );
+    }
+
+    #[test]
+    fn test_set_operation_types() {
+        let schema = Some(load_schema(
+            "CREATE TABLE a (n INTEGER, t TEXT, d DATE);\
+             CREATE TABLE b (n BIGINT, t VARCHAR(5), d TIMESTAMP);\
+             CREATE TABLE c (g GEOMETRY);",
+            "postgres",
+        ));
+        let sql_types = |sql: &str| -> Vec<Option<String>> {
+            Analyzer {
+                schema: schema.as_deref().unwrap(),
+                dialect: SqlDialect::Postgres,
+                virtuals: Virtuals::new(),
+            }
+            .statement_columns(&parse_first(sql, SqlDialect::Postgres).unwrap())
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|col| col.sql_type)
+            .collect()
+        };
+        let types = |names: &[&str]| -> Vec<Option<String>> {
+            names
+                .iter()
+                .map(|name| (!name.is_empty()).then(|| name.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            sql_types("SELECT n, t, d FROM a UNION SELECT n, t, d FROM b"),
+            types(&["BIGINT", "TEXT", "TIMESTAMP"])
+        );
+        assert_eq!(
+            sql_types("SELECT NULL, $1, n FROM a INTERSECT SELECT n, t, n::REAL FROM b"),
+            types(&["BIGINT", "VARCHAR(5)", "FLOAT"])
+        );
+        assert_eq!(
+            sql_types("SELECT n, t FROM a EXCEPT (SELECT t, n FROM b UNION SELECT n, t FROM b)"),
+            types(&["", ""])
+        );
+        assert_eq!(
+            sql_types("SELECT (SELECT n FROM a UNION ALL SELECT n FROM b)"),
+            types(&["BIGINT"])
+        );
+        assert_eq!(
+            sql_types(
+                "WITH RECURSIVE r AS (SELECT n FROM a UNION ALL SELECT n * 2::BIGINT FROM r) \
+                 SELECT n FROM r"
+            ),
+            types(&["BIGINT"])
+        );
+        assert_eq!(
+            sql_types("SELECT g, ARRAY[g] FROM c UNION SELECT n, ARRAY[g] FROM a, c"),
+            types(&["", "ARRAY<GEOMETRY>"])
+        );
+        assert_eq!(
+            sql_types("SELECT ARRAY[n], n * 1.5 FROM a UNION SELECT ARRAY[n], n FROM b"),
+            types(&["ARRAY<BIGINT>", "DECIMAL"])
         );
     }
 }

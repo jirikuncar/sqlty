@@ -80,9 +80,12 @@ SELECT tags::TEXT[] FROM posts
 -- inferred: tuple[list[str]]
 ```
 
-## UNION takes the leftmost SELECT
+## UNION resolves each column across all branches
+
+Branches of unknown type are skipped; numbers promote to the wider type.
 
 ```sql
-SELECT id::INTEGER FROM a UNION SELECT id FROM b UNION SELECT id FROM c
+SELECT id::INTEGER FROM a UNION SELECT id FROM b UNION SELECT id::BIGINT FROM c
 -- inferred: tuple[int]
+-- columns: id: int (BIGINT)
 ```

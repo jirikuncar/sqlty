@@ -81,6 +81,14 @@ SELECT id + 1 AS a, id + big AS b, id * ratio AS c, big - id AS d, id + %(n)s AS
 -- columns: e: int (INT)
 ```
 
+A decimal literal is `NUMERIC`.
+
+```sql
+SELECT id * 2.5 AS a, ratio + 0.5 AS b FROM users
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: float (DOUBLE)
+```
+
 ## Date arithmetic
 
 ```sql

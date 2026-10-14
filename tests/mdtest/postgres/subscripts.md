@@ -48,13 +48,15 @@ SELECT (home).street, (users.home).zip FROM users
 -- columns: zip: int (INT)
 ```
 
-## ARRAY literals of mixed element types stay unknown
+## ARRAY literals resolve a common element type
 
-PostgreSQL resolves `ARRAY[1.5, 2]` to `numeric[]`; only elements of one type are typed.
+As for `UNION`, PostgreSQL resolves `ARRAY[1.5, 2]` to `numeric[]`; elements of
+different categories leave the array unknown.
 
 ```sql
-SELECT ARRAY[1, 2], ARRAY[1.5, 2], ARRAY[name, NULL] FROM users
+SELECT ARRAY[1, 2], ARRAY[1.5, 2], ARRAY[name, NULL], ARRAY[1, TRUE] FROM users
 -- columns: array: list[int] (ARRAY<INT>)
--- columns: array: None (None)
+-- columns: array: list[decimal.Decimal] (ARRAY<DECIMAL>)
 -- columns: array: list[str] (ARRAY<TEXT>)
+-- columns: array: None (None)
 ```
