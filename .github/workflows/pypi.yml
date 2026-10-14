@@ -69,11 +69,21 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           container: ${{ matrix.container }}
 
-      - name: Import the wheel
+      - name: Install uv
         if: ${{ !contains(matrix.target, 'musl') }}
+        uses: astral-sh/setup-uv@v7
+
+      - name: Import the wheel on each Python
+        if: ${{ !contains(matrix.target, 'musl') }}
+        shell: bash
         run: |
-          python -m pip install --no-deps --no-index --find-links dist sqlty
-          python -c "import sqlty._core"
+          for v in 3.14 3.15; do
+            t=cp${v/./}; wheel=$(ls dist/sqlty-*-$t-$t-*.whl)
+            uv venv -q --python "$v" "venv-$v"
+            py="venv-$v/bin/python"; [ -x "$py" ] || py="venv-$v/Scripts/python.exe"
+            uv pip install -q --python "$py" "$wheel"
+            "$py" -c "import sqlty, sqlty._core; print(sqlty.__version__, sqlty.UNTYPED)"
+          done
 
       - uses: actions/setup-python@v5
         with:
