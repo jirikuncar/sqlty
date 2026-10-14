@@ -252,24 +252,22 @@ impl<'a> Analyzer<'a> {
     /// Rows of a call to the function `name` with `args` arguments in `FROM`, when the
     /// schema defines it.
     pub(super) fn function_rows(&self, name: &ObjectName, args: usize) -> Option<Vec<Column>> {
-        let column = |name: String, (python_type, sql_type): Typed| Column {
-            name,
-            python_type,
-            sql_type,
-            nullability: Nullability::Unknown,
-            json: None,
-        };
+        let column =
+            |name: String, typed: Typed| Column::from_typed(name, typed, Nullability::Unknown);
         Some(
             match self.schema.function(&table_key(name, self.dialect), args)? {
                 FunctionReturn::Rows(columns) => columns
                     .iter()
-                    .map(|col| Column {
-                        nullability: Nullability::declared(col.not_null),
-                        ..column(col.name.clone(), col.typed(self.dialect))
+                    .map(|col| {
+                        Column::from_typed(
+                            col.name.clone(),
+                            col.typed(self.dialect),
+                            Nullability::declared(col.not_null),
+                        )
                     })
                     .collect(),
                 FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed) => {
-                    vec![column(object_name(name), typed.clone())]
+                    vec![column(object_name(name), typed.clone().into())]
                 }
             },
         )
@@ -440,14 +438,11 @@ impl<'a> Analyzer<'a> {
                             columns
                                 .iter()
                                 .map(|col| {
-                                    let (python_type, sql_type) = col.typed(self.dialect);
-                                    Column {
-                                        name: col.name.clone(),
-                                        python_type,
-                                        sql_type,
-                                        nullability: Nullability::declared(col.not_null),
-                                        json: None,
-                                    }
+                                    Column::from_typed(
+                                        col.name.clone(),
+                                        col.typed(self.dialect),
+                                        Nullability::declared(col.not_null),
+                                    )
                                 })
                                 .collect()
                         })

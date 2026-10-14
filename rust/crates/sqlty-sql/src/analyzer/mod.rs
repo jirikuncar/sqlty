@@ -42,6 +42,7 @@ mod params;
 mod query;
 mod resolve;
 mod scope;
+mod typed;
 
 use dml::*;
 use expr::*;
@@ -57,6 +58,7 @@ pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
 pub use query::Column;
 use scope::*;
+use typed::Typed;
 
 const ANY: &str = "typing.Any";
 const DECIMAL: &str = "decimal.Decimal";
@@ -160,8 +162,11 @@ pub type Schema = Arc<SchemaData>;
 impl SchemaColumn {
     fn typed(&self, dialect: SqlDialect) -> Typed {
         match &self.python_type {
-            Some(python_type) => (Some(python_type.clone()), Some(self.sql_type.clone())),
-            None => from_sql_type(self.sql_type.clone(), dialect),
+            Some(python_type) => Typed {
+                python: Some(Rc::from(python_type.as_str())),
+                sql: Some(Rc::from(self.sql_type.as_str())),
+            },
+            None => from_sql_type(&self.sql_type, dialect),
         }
     }
 }
@@ -649,10 +654,14 @@ pub(crate) fn view_columns(
 
 /// `(python_type, sql_type)` of a column of SQL type `sql_type`, whose Python type is
 /// `python_type` when that is not the one the SQL type maps to.
-pub(crate) fn typed(sql_type: String, python_type: Option<String>, dialect: SqlDialect) -> Typed {
+pub(crate) fn typed(
+    sql_type: String,
+    python_type: Option<String>,
+    dialect: SqlDialect,
+) -> (Option<String>, Option<String>) {
     match python_type {
         Some(python_type) => (Some(python_type), Some(sql_type)),
-        None => from_sql_type(sql_type, dialect),
+        None => from_sql_type(&sql_type, dialect).into_strings(),
     }
 }
 

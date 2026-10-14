@@ -13,7 +13,7 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
-        let sql = |name: &str| Ok(from_sql_type(name.to_string(), self.dialect));
+        let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
         match op {
             Gt | Lt | GtEq | LtEq | Spaceship | Eq | NotEq | And | Or | Xor | Match | Regexp
             | Glob | PGOverlap | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
@@ -22,7 +22,7 @@ impl<'a> Analyzer<'a> {
             | QuestionPipe | Overlaps => sql("BOOLEAN"),
             LongArrow | HashLongArrow => sql("TEXT"),
             Arrow | HashArrow | HashMinus if self.dialect == SqlDialect::Postgres => {
-                let json = self.expr(left, scope)?.1.is_some_and(|ty| ty == "JSON");
+                let json = self.expr(left, scope)?.sql() == Some("JSON");
                 sql(if json && *op != HashMinus {
                     "JSON"
                 } else {
@@ -31,21 +31,20 @@ impl<'a> Analyzer<'a> {
             }
             StringConcat if self.dialect != SqlDialect::MySql => {
                 let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-                let array =
-                    |t: &Typed| t.1.as_deref().is_some_and(|ty| array_element(ty).is_some());
-                if l.1.as_deref() == Some("JSONB") || r.1.as_deref() == Some("JSONB") {
+                let array = |t: &Typed| t.sql().is_some_and(|ty| array_element(ty).is_some());
+                if l.sql() == Some("JSONB") || r.sql() == Some("JSONB") {
                     sql("JSONB")
                 } else if self.dialect == SqlDialect::Postgres && (array(&l) || array(&r)) {
                     // `anyarray || anyarray`, `anyarray || elem` and `elem || anyarray`.
                     Ok(match (array(&l), array(&r)) {
-                        (true, true) => common_type(l, r, self.dialect).unwrap_or((None, None)),
+                        (true, true) => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
                         (true, false) => l,
                         _ => r,
                     })
                 } else if is_text(&l) || is_text(&r) {
                     sql("TEXT")
                 } else {
-                    Ok((None, None))
+                    Ok(Typed::UNKNOWN)
                 }
             }
             PGExp => {
@@ -71,9 +70,9 @@ impl<'a> Analyzer<'a> {
                 Ok(match (integer(&l), integer(&r)) {
                     (Some(a), Some(b)) => {
                         let rank = if shift { a } else { a.max(b) };
-                        from_sql_type(NUMERIC_RANKS[rank][0].to_string(), self.dialect)
+                        from_sql_type(NUMERIC_RANKS[rank][0], self.dialect)
                     }
-                    _ => (None, None),
+                    _ => Typed::UNKNOWN,
                 })
             }
             Plus | Minus | Multiply | Divide | Modulo => {
@@ -86,9 +85,9 @@ impl<'a> Analyzer<'a> {
                     _ => (l, r),
                 };
                 Ok(arithmetic(op, &l, &r, mysql_division)
-                    .map_or((None, None), |ty| from_sql_type(ty, self.dialect)))
+                    .map_or(Typed::UNKNOWN, |ty| from_sql_type(&ty, self.dialect)))
             }
-            _ => Ok((None, None)),
+            _ => Ok(Typed::UNKNOWN),
         }
     }
 }
@@ -99,7 +98,7 @@ pub(super) fn type_base(sql_type: &str) -> &str {
 
 /// The SQL type of an operand; literals know only their Python type.
 pub(super) fn operand_type(typed: &Typed) -> Option<&str> {
-    match (typed.1.as_deref(), python_kind(typed)) {
+    match (typed.sql(), python_kind(typed)) {
         (Some(sql_type), _) => Some(type_base(sql_type)),
         (None, Some("int")) => Some("INT"),
         (None, Some("float")) => Some("DOUBLE"),
@@ -109,7 +108,7 @@ pub(super) fn operand_type(typed: &Typed) -> Option<&str> {
 }
 
 pub(super) fn is_text(typed: &Typed) -> bool {
-    match &typed.1 {
+    match &typed.sql {
         Some(sql_type) => matches!(type_base(sql_type), "TEXT" | "VARCHAR" | "CHAR"),
         None => python_kind(typed) == Some("str"),
     }
@@ -187,10 +186,10 @@ pub(super) fn arithmetic(
 /// wider type, text and timestamps to the preferred one, arrays by their elements;
 /// other mixes conflict (`None`).
 pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Option<Typed> {
-    if right == (None, None) || left == right {
+    if right == Typed::UNKNOWN || left == right {
         return Some(left);
     }
-    if left == (None, None) {
+    if left == Typed::UNKNOWN {
         return Some(right);
     }
     if let Some(merged) = merge(&left, &right, dialect) {
@@ -208,25 +207,25 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
     // An integer literal is an `integer`, so it widens a `smallint`.
     let widens = |literal: &Typed, other: &Typed| {
         postgres
-            && literal.1.is_none()
+            && literal.sql.is_none()
             && python_kind(literal) == Some("int")
             && operand_type(other) == Some("SMALLINT")
     };
     if !widens(&left, &right) && !widens(&right, &left) {
-        if left.1.is_none() && left.0 == right.0 {
+        if left.sql.is_none() && left.python == right.python {
             return Some(right);
         }
-        if right.1.is_none() && left.0 == right.0 {
+        if right.sql.is_none() && left.python == right.python {
             return Some(left);
         }
     }
     if let (Some(x), Some(y)) = (
-        left.1.as_deref().and_then(array_element),
-        right.1.as_deref().and_then(array_element),
+        left.sql().and_then(array_element),
+        right.sql().and_then(array_element),
     ) {
-        let elem = |ty: &str| from_sql_type(ty.to_string(), dialect);
-        let elem = common_type(elem(x), elem(y), dialect)?.1?;
-        return Some(from_sql_type(format!("ARRAY<{elem}>"), dialect));
+        let elem = |ty: &str| from_sql_type(ty, dialect);
+        let elem = common_type(elem(x), elem(y), dialect)?.sql?;
+        return Some(from_sql_type(&format!("ARRAY<{elem}>"), dialect));
     }
     let (a, b) = (category(&left)?, category(&right)?);
     const TEMPORAL: [&str; 3] = ["DATE", "TIMESTAMP", "TIMESTAMPTZ"];
@@ -244,12 +243,12 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
     } else {
         return None;
     };
-    Some(from_sql_type(common.to_string(), dialect))
+    Some(from_sql_type(common, dialect))
 }
 
 /// A string literal: PostgreSQL types it `unknown` until the other inputs decide.
 pub(super) fn is_unknown_literal(typed: &Typed) -> bool {
-    typed.1.is_none() && python_kind(typed) == Some("str")
+    typed.sql.is_none() && python_kind(typed) == Some("str")
 }
 
 /// The common type of the branches of a `CASE`, the arguments of `COALESCE`, `GREATEST`
@@ -260,14 +259,14 @@ pub(super) fn common_of(
     types: impl IntoIterator<Item = Typed>,
     dialect: SqlDialect,
 ) -> Option<Typed> {
-    types
-        .into_iter()
-        .try_fold((None, None), |acc, typed| common_type(acc, typed, dialect))
+    types.into_iter().try_fold(Typed::UNKNOWN, |acc, typed| {
+        common_type(acc, typed, dialect)
+    })
 }
 
 /// The type category of a set operation's input; literals know only their Python type.
 pub(super) fn category(typed: &Typed) -> Option<&str> {
-    match (typed.1.as_deref(), python_kind(typed)) {
+    match (typed.sql(), python_kind(typed)) {
         (None, Some("str")) => Some("TEXT"),
         _ => operand_type(typed),
     }

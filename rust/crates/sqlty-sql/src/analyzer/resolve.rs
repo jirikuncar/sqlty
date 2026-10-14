@@ -87,7 +87,7 @@ impl<'a> Analyzer<'a> {
             return columns
                 .iter()
                 .find(|col| self.same_column(&col.name, column))
-                .map(|col| ((col.python_type.clone(), col.sql_type.clone()), origin));
+                .map(|col| (col.typed(), origin));
         }
         let columns = self.schema.table(table)?;
         match columns.iter().find(|col| col.name == column) {
@@ -105,7 +105,10 @@ impl<'a> Analyzer<'a> {
     /// `ctid`, `xmin`, `xmax`, `cmin`, `cmax` and `tableoid`. PostgreSQL 12 dropped `oid`.
     /// PostgreSQL drivers load `tid`, `xid` and `cid` as text.
     fn system_column(&self, column: &str) -> Option<Typed> {
-        let typed = |python: &str, sql: &str| (Some(python.to_string()), Some(sql.to_string()));
+        let typed = |python: &str, sql: &str| Typed {
+            python: Some(Rc::from(python)),
+            sql: Some(Rc::from(sql)),
+        };
         match (self.dialect, column) {
             (SqlDialect::Sqlite, "rowid" | "oid" | "_rowid_") => Some(typed("int", "INT")),
             (SqlDialect::Postgres, "tableoid") => Some(typed("int", "OID")),
@@ -197,8 +200,8 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_column(expr, scope) {
             Some((typed, origin)) => {
-                if typed.0.is_none() && self.diag.enabled() {
-                    match (origin, &typed.1) {
+                if typed.python.is_none() && self.diag.enabled() {
+                    match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
                             NameRule::UnknownType,
                             format!(
@@ -220,7 +223,7 @@ impl<'a> Analyzer<'a> {
             }
             None => {
                 self.explain_unresolved(expr, scope);
-                (None, None)
+                Typed::UNKNOWN
             }
         }
     }
@@ -375,7 +378,7 @@ impl<'a> Analyzer<'a> {
                 }
             } else if let Some(columns) = self.schema.table(&table) {
                 for col in columns {
-                    if col.typed(self.dialect).0.is_none() {
+                    if col.typed(self.dialect).python.is_none() {
                         self.diag.record(
                             NameRule::UnknownType,
                             format!(

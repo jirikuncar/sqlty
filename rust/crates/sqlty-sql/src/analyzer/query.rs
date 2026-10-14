@@ -42,6 +42,23 @@ impl Column {
         self.nullability == Nullability::Nullable
     }
 
+    /// A column of the given type, with no JSON shape.
+    pub(super) fn from_typed(name: String, typed: Typed, nullability: Nullability) -> Self {
+        let (python_type, sql_type) = typed.into_strings();
+        Column {
+            name,
+            python_type,
+            sql_type,
+            nullability,
+            json: None,
+        }
+    }
+
+    /// The column's type as the analyzer passes it around.
+    pub(super) fn typed(&self) -> Typed {
+        Typed::new(self.python_type.clone(), self.sql_type.clone())
+    }
+
     pub(super) fn is_unknown_star(&self) -> bool {
         self.name == "*" && self.python_type.is_none()
     }
@@ -203,10 +220,7 @@ impl<'a> Analyzer<'a> {
         };
         let mut shapes: Vec<Option<JsonShape>> =
             columns.iter().map(|col| col.json.clone()).collect();
-        let mut types: Vec<Option<Typed>> = columns
-            .iter()
-            .map(|col| Some((col.python_type.clone(), col.sql_type.clone())))
-            .collect();
+        let mut types: Vec<Option<Typed>> = columns.iter().map(|col| Some(col.typed())).collect();
         for branch in branches
             .flatten()
             .filter(|cols| cols.len() == columns.len())
@@ -215,7 +229,7 @@ impl<'a> Analyzer<'a> {
                 *shape = shape.take().zip(col.json.clone()).map(|(a, b)| a.unify(&b));
                 *common = common
                     .take()
-                    .and_then(|ty| common_type(ty, (col.python_type, col.sql_type), self.dialect));
+                    .and_then(|ty| common_type(ty, col.typed(), self.dialect));
             }
         }
         for (column, common) in columns.iter_mut().zip(types) {
@@ -228,7 +242,7 @@ impl<'a> Analyzer<'a> {
                     ),
                 );
             }
-            (column.python_type, column.sql_type) = common.unwrap_or((None, None));
+            (column.python_type, column.sql_type) = common.unwrap_or(Typed::UNKNOWN).into_strings();
         }
         for ((column, nullability), shape) in columns.iter_mut().zip(nullability).zip(shapes) {
             column.nullability = nullability;
@@ -260,7 +274,9 @@ impl<'a> Analyzer<'a> {
                     _ => Nullability::Unknown,
                 };
             }
-            let (python_type, sql_type) = common_of(types, self.dialect).unwrap_or((None, None));
+            let (python_type, sql_type) = common_of(types, self.dialect)
+                .unwrap_or(Typed::UNKNOWN)
+                .into_strings();
             columns.push(Column {
                 name: format!("column{}", index + 1),
                 python_type,
@@ -323,11 +339,10 @@ impl<'a> Analyzer<'a> {
             ) {
                 typed = strip(typed, self.dialect);
             }
-            let (python_type, sql_type) = typed;
-            if python_type.is_none()
-                && self.diag.enabled()
-                && self.diag.explained() == explained
-                && !is_wild(expr)
+            let sql_type = typed.sql.clone();
+            let known = typed.is_known();
+            let (python_type, _) = typed.into_strings();
+            if !known && self.diag.enabled() && self.diag.explained() == explained && !is_wild(expr)
             {
                 self.diag.record(
                     NameRule::UnsupportedSyntax,
@@ -339,7 +354,7 @@ impl<'a> Analyzer<'a> {
             columns.push(Column {
                 name,
                 python_type,
-                sql_type,
+                sql_type: sql_type.map(|ty| ty.to_string()),
                 nullability,
                 json,
             });

@@ -330,7 +330,7 @@ impl<'a> Analyzer<'a> {
         }
         let nullable = self.nullability(expr, scope, &self.facts) == Nullability::Nullable;
         let typed = self.expr(expr, scope)?;
-        let shape = if matches!(typed.1.as_deref().map(type_base), Some("JSON" | "JSONB")) {
+        let shape = if matches!(typed.sql().map(type_base), Some("JSON" | "JSONB")) {
             self.json_shape(expr, scope)?
         } else {
             self.shape_of_type(&typed, 0)
@@ -385,7 +385,7 @@ impl<'a> Analyzer<'a> {
         match (&col.json, col.sql_type.as_deref().map(type_base)) {
             (Some(shape), _) => shape.clone(),
             (None, Some("JSON" | "JSONB")) => JsonShape::Any,
-            _ => self.shape_of_type(&(col.python_type.clone(), col.sql_type.clone()), 0),
+            _ => self.shape_of_type(&col.typed(), 0),
         }
     }
 
@@ -394,7 +394,7 @@ impl<'a> Analyzer<'a> {
         if depth > MAX_DEPTH {
             return JsonShape::Any;
         }
-        if let Some(sql_type) = typed.1.as_deref() {
+        if let Some(sql_type) = typed.sql() {
             if array_element(sql_type).is_some() {
                 let elem = self.element_typed(Some(sql_type));
                 let value = JsonValue::new(self.shape_of_type(&elem, depth + 1), false);
@@ -416,7 +416,7 @@ impl<'a> Analyzer<'a> {
                 );
             }
         }
-        match typed.0.as_deref() {
+        match typed.python() {
             None | Some(ANY) => JsonShape::Any,
             Some("bool") => JsonShape::Boolean,
             Some("int") => JsonShape::Integer,

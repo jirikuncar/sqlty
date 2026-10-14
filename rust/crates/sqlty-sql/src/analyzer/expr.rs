@@ -21,28 +21,25 @@ pub(super) fn range_element(sql_type: &str) -> Option<&'static str> {
     })
 }
 
-/// `(python_type, sql_type)` of an expression.
-pub(super) type Typed = (Option<String>, Option<String>);
-
 pub(super) fn known(python_type: &str) -> Inferred<Typed> {
-    Ok((Some(python_type.to_string()), None))
+    Ok(Typed::python_only(python_type))
 }
 
-pub(super) fn from_sql_type(sql_type: String, dialect: SqlDialect) -> Typed {
-    (python_type(&sql_type, dialect), Some(sql_type))
+pub(super) fn from_sql_type(sql_type: &str, dialect: SqlDialect) -> Typed {
+    Typed::of_sql(sql_type, dialect)
 }
 
 impl<'a> Analyzer<'a> {
     /// The element type of an array type; an enum element keeps its `Literal`.
     pub(super) fn element_typed(&self, array: Option<&str>) -> Typed {
         let Some(elem) = array.and_then(array_element) else {
-            return (None, None);
+            return Typed::UNKNOWN;
         };
         match self.schema.user_type(&elem.to_lowercase()) {
             Some(user) if user.python_type.is_some() => {
-                (user.python_type.clone(), Some(elem.to_string()))
+                Typed::new(user.python_type.clone(), Some(elem.to_string()))
             }
-            _ => from_sql_type(elem.to_string(), self.dialect),
+            _ => from_sql_type(elem, self.dialect),
         }
     }
 
@@ -55,7 +52,7 @@ impl<'a> Analyzer<'a> {
                     .iter()
                     .find(|col| col.name == fold(field, self.dialect))
             })
-            .map_or((None, None), |col| col.typed(self.dialect))
+            .map_or(Typed::UNKNOWN, |col| col.typed(self.dialect))
     }
 
     /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
@@ -123,8 +120,10 @@ impl<'a> Analyzer<'a> {
             _ => 0,
         };
         match self.schema.function(&table_key(name, self.dialect), count) {
-            Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => typed.clone(),
-            _ => (None, None),
+            Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => {
+                typed.clone().into()
+            }
+            _ => Typed::UNKNOWN,
         }
     }
 
@@ -136,12 +135,12 @@ impl<'a> Analyzer<'a> {
                     // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
                     // labels upper-cased, which are not the column's values.
                     Some(_) if matches!(data_type, DataType::Enum(..)) => {
-                        from_sql_type(sql_type, self.dialect)
+                        from_sql_type(&sql_type, self.dialect)
                     }
-                    Some(python_type) => (Some(python_type), Some(sql_type)),
-                    None => from_sql_type(sql_type, self.dialect),
+                    Some(python_type) => Typed::new(Some(python_type), Some(sql_type)),
+                    None => from_sql_type(&sql_type, self.dialect),
                 };
-                if typed.0.is_none() && self.diag.enabled() {
+                if !typed.is_known() && self.diag.enabled() {
                     if self.schema.is_empty() || self.defines_type(data_type) {
                         self.diag.explain_silently();
                     } else {
@@ -161,26 +160,22 @@ impl<'a> Analyzer<'a> {
                         continue;
                     }
                     let mut typed = self.expr(elem, scope)?;
-                    if let Some(inner) = typed.1.as_deref().and_then(array_element) {
-                        typed = from_sql_type(inner.to_string(), self.dialect);
+                    if let Some(inner) = typed.sql().and_then(array_element) {
+                        typed = from_sql_type(inner, self.dialect);
                     }
                     common = match common {
-                        _ if typed == (None, None) => None,
+                        _ if typed == Typed::UNKNOWN => None,
                         Some(common) => common_type(common, typed, self.dialect),
                         None => Some(typed),
                     };
                     if common.is_none() {
-                        return Ok((None, None));
+                        return Ok(Typed::UNKNOWN);
                     }
                 }
-                let elem = common.and_then(|typed| {
-                    typed
-                        .1
-                        .clone()
-                        .or_else(|| category(&typed).map(String::from))
-                });
-                Ok(elem.map_or((None, None), |elem| {
-                    from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
+                let elem = common
+                    .and_then(|typed| typed.sql().or_else(|| category(&typed)).map(String::from));
+                Ok(elem.map_or(Typed::UNKNOWN, |elem| {
+                    from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
                 }))
             }
             Expr::CompoundFieldAccess { root, access_chain } => {
@@ -197,11 +192,11 @@ impl<'a> Analyzer<'a> {
                 for access in chain {
                     typed = match access {
                         AccessExpr::Subscript(Subscript::Index { .. }) => {
-                            self.element_typed(typed.1.as_deref())
+                            self.element_typed(typed.sql())
                         }
                         AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
                         AccessExpr::Dot(Expr::Identifier(field)) => {
-                            self.field_typed(typed.1.as_deref(), field)
+                            self.field_typed(typed.sql(), field)
                         }
                         AccessExpr::Dot(_) => typed,
                     };
@@ -225,16 +220,16 @@ impl<'a> Analyzer<'a> {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
                 let typed = self.expr(timestamp, scope)?;
                 Ok(match operand_type(&typed) {
-                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ".to_string(), self.dialect),
-                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP".to_string(), self.dialect),
-                    _ => (None, None),
+                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
+                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    _ => Typed::UNKNOWN,
                 })
             }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
                 self.function_type(Returns::Real, &[inner], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("DECIMAL".to_string(), self.dialect))
+                Ok(from_sql_type("DECIMAL", self.dialect))
             }
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => match &value.value {
@@ -250,11 +245,11 @@ impl<'a> Analyzer<'a> {
                     known(decimal_type(self.dialect))
                 }
                 Value::Number(number, _) => Ok(number.parse().map_or_else(
-                    |_| (Some("int".to_string()), None),
+                    |_| Typed::python_only("int"),
                     |n| constant(crate::values::Value::Int(n)),
                 )),
                 Value::Boolean(_) => known("bool"),
-                Value::Null | Value::Placeholder(_) => Ok((None, None)),
+                Value::Null | Value::Placeholder(_) => Ok(Typed::UNKNOWN),
                 Value::SingleQuotedString(text) => {
                     Ok(constant(crate::values::Value::Str(text.clone())))
                 }
@@ -284,19 +279,19 @@ impl<'a> Analyzer<'a> {
             | Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 ..
-            } => Ok(from_sql_type("BOOLEAN".to_string(), self.dialect)),
-            Expr::Interval(_) => Ok(from_sql_type("INTERVAL".to_string(), self.dialect)),
+            } => Ok(from_sql_type("BOOLEAN", self.dialect)),
+            Expr::Interval(_) => Ok(from_sql_type("INTERVAL", self.dialect)),
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
             Expr::Trim { .. } | Expr::Substring { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("TEXT".to_string(), self.dialect))
+                Ok(from_sql_type("TEXT", self.dialect))
             }
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => {
                 Ok(
                     first_column(&self.subquery_columns(query, scope, Reporting::Record))?
-                        .map_or((None, None), |col| {
-                            (col.python_type.clone(), col.sql_type.clone())
+                        .map_or(Typed::UNKNOWN, |col| {
+                            Typed::new(col.python_type.clone(), col.sql_type.clone())
                         }),
                 )
             }
@@ -320,7 +315,7 @@ impl<'a> Analyzer<'a> {
                 }
                 // Other dialects take the first branch's type, but a set of values
                 // covers every branch.
-                let first = results.first().cloned().unwrap_or((None, None));
+                let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
                 if value_set(&first).is_some() {
                     return Ok(common_of(results, self.dialect)
                         .unwrap_or_else(|| strip(first, self.dialect)));
@@ -332,13 +327,13 @@ impl<'a> Analyzer<'a> {
                 let args = positional_args(&func.args);
                 let arg = args.first().copied();
                 match name.as_str() {
-                    "COUNT" => Ok(from_sql_type("BIGINT".to_string(), self.dialect)),
+                    "COUNT" => Ok(from_sql_type("BIGINT", self.dialect)),
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
                         None => {
                             let typed = self.user_function(&func.name, &func.args);
-                            if typed.0.is_none() && self.diag.enabled() {
+                            if typed.python.is_none() && self.diag.enabled() {
                                 if self.schema.is_empty()
                                     || self
                                         .schema
@@ -360,7 +355,7 @@ impl<'a> Analyzer<'a> {
                     },
                 }
             }
-            _ => Ok((None, None)),
+            _ => Ok(Typed::UNKNOWN),
         }
     }
 }
