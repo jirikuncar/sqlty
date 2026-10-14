@@ -3,37 +3,11 @@
 `nullable-mismatch` reports a row field that is not optional for a column that can be
 NULL; `redundant-optional` (opt-in) reports an optional field for a column that cannot be.
 
-## Preview off reports nothing
+## A non-optional field for a nullable column
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-```
-
-`schema.sql`:
-
-```sql
-CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-
-q = SQL[User]("--sql\nSELECT id, name FROM users")
-# error:
-```
-
-## Preview makes nullable-mismatch an error
-
-```toml
-[tool.sqlty]
-schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -63,7 +37,6 @@ NULL: a wider annotation is not an error, only `redundant-optional` reports it.
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -90,7 +63,6 @@ q = SQL[User]("--sql\nSELECT id, name, nick FROM users")
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -141,7 +113,6 @@ q = SQL[Model]("--sql\nSELECT id, name FROM users")
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -169,7 +140,6 @@ Casts with no schema carry no nullability, so they are neither optional nor repo
 
 ```toml
 [tool.sqlty]
-preview = true
 
 [tool.sqlty.rules]
 redundant-optional = "error"
@@ -192,7 +162,6 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 
 [tool.sqlty.rules]
 redundant-optional = "error"
@@ -219,12 +188,11 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 ## redundant-optional
 
 Strict mode: enable the rule to flag `| None` on columns that cannot be NULL. It stays
-off in preview unless enabled.
+off unless enabled.
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 
 [tool.sqlty.rules]
 redundant-optional = "warn"
@@ -248,12 +216,11 @@ class User(TypedDict):
 q = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 
-## Switching nullable-mismatch off in preview
+## Switching nullable-mismatch off
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 
 [tool.sqlty.rules]
 nullable-mismatch = "ignore"
@@ -277,9 +244,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 # error:
 ```
 
-## Turning nullable-mismatch on without preview
-
-The rule works without preview when its severity is set: the row types stay as they are.
+## Lowering the severity of nullable-mismatch
 
 ```toml
 [tool.sqlty]
@@ -312,7 +277,6 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:

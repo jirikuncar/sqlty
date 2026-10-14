@@ -44,14 +44,14 @@ SELECT COUNT(*)::INTEGER FROM users
 
 ```sql
 SELECT SUM(price)::FLOAT FROM products
--- inferred: tuple[float]
+-- inferred: tuple[float | None]
 ```
 
 ## AVG aggregation
 
 ```sql
 SELECT AVG(score)::FLOAT FROM reviews
--- inferred: tuple[float]
+-- inferred: tuple[float | None]
 ```
 
 ## MIN and MAX aggregations
@@ -61,7 +61,7 @@ SELECT
     MIN(price)::FLOAT,
     MAX(price)::FLOAT
 FROM products
--- inferred: tuple[float, float]
+-- inferred: tuple[float | None, float | None]
 ```
 
 ## GROUP BY with aggregations
@@ -95,7 +95,7 @@ SELECT
     id::INTEGER,
     (data->>'name')::TEXT
 FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Nested JSON extraction
@@ -105,7 +105,7 @@ SELECT
     id::INTEGER,
     (data->'profile'->>'email')::TEXT
 FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Jsonb_agg aggregation
@@ -345,7 +345,7 @@ SELECT
     id::INTEGER,
     NULLIF(status, 'deleted')::TEXT
 FROM records
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## CONCAT function

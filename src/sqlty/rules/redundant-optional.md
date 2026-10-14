@@ -64,8 +64,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 
 ## Configuration
 
-Off by default, also in preview, because `T | None` on a non-null column is correct, only
-loose. Enable it:
+Off by default, because `T | None` on a non-null column is correct, only loose. Enable it:
 
 ```toml
 [tool.sqlty.rules]

@@ -1,12 +1,11 @@
 # Nullability of expressions (PostgreSQL)
 
-With `preview = true`, an expression that can be NULL infers `T | None`. Expressions
+An expression that can be NULL infers `T | None`. Expressions
 sqlty cannot read stay non-optional.
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:

@@ -31,7 +31,6 @@ class Run:
         self.schema_sql: str | None = section.schema_sql
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
-        self.preview: bool = bool(settings.get("preview", False))
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
 
@@ -63,19 +62,12 @@ class Run:
         text = unit.code.text
         match kind:
             case "inferred":
-                return str(
-                    core.infer_type(
-                        text,
-                        dialect=self.dialect,
-                        schema_sql=self.schema_sql,
-                        preview=self.preview,
-                    )
-                )
+                return str(core.infer_type(text, dialect=self.dialect, schema_sql=self.schema_sql))
             case "expanded":
                 return str(core.expand_star(text, dialect=self.dialect, schema_sql=self.schema_sql))
             case "columns":
                 columns = core.analyze_select(
-                    text, dialect=self.dialect, schema_sql=self.schema_sql, preview=self.preview
+                    text, dialect=self.dialect, schema_sql=self.schema_sql
                 )
                 if columns is None:
                     return "None"
@@ -111,7 +103,6 @@ class Run:
             import_style=self.import_style,
             untyped=self.untyped,
             rules=self.rules,
-            preview=self.preview,
         )
 
     def _rewrite(self, text: str) -> str:
@@ -121,7 +112,6 @@ class Run:
             schema_sql=self.schema_sql,
             import_style=self.import_style,
             untyped=self.untyped,
-            preview=self.preview,
         )
 
     @cached_property
@@ -159,7 +149,6 @@ class Run:
                 rules=self.rules,
                 import_style=self.import_style,
                 untyped=self.untyped,
-                preview=self.preview,
                 type_modules=self.type_modules,
                 helpers=self._helpers,
             )

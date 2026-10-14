@@ -36,24 +36,42 @@ impl Nullability {
 pub(super) struct Facts {
     /// References of relations an outer join null-extends: all their columns can be NULL.
     null_extended: Vec<String>,
+    /// `(reference, column)` pairs the conditions in force rule out as NULL.
+    pub(super) non_null: Vec<(String, String)>,
+    /// References whose relation has a row in each result row: a null-extended relation
+    /// with a column the conditions rule out as NULL cannot be the all-NULL row.
+    pub(super) present: Vec<String>,
+    /// Expressions (as printed) the conditions rule out as NULL, such as `doc -> 'k'`
+    /// after `doc ? 'k'`.
+    pub(super) non_null_exprs: Vec<String>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
 }
 
 impl Facts {
-    /// Whether the relation `reference` can be a row of NULLs.
+    /// Whether the relation `reference` can be a row of NULLs. A condition NULL cannot
+    /// satisfy on one of its columns proves the row is there.
     pub(super) fn is_null_extended(&self, reference: &str) -> bool {
         self.null_extended.iter().any(|r| r == reference)
+            && !self.present.iter().any(|r| r == reference)
+    }
+
+    fn is_non_null(&self, reference: &str, column: &str) -> bool {
+        self.non_null
+            .iter()
+            .any(|(r, c)| r == reference && c == column)
     }
 
     /// Nullability of a column of `reference`, given what its source declares.
     pub(super) fn column(
         &self,
         reference: &str,
-        _column: &str,
+        column: &str,
         declared: Nullability,
     ) -> Nullability {
-        if self.is_null_extended(reference) {
+        if self.is_non_null(reference, &column.to_lowercase()) {
+            Nullability::NonNull
+        } else if self.is_null_extended(reference) {
             Nullability::Nullable
         } else {
             declared
@@ -62,8 +80,10 @@ impl Facts {
 
     /// Forget what is known about relations a nested SELECT defines itself.
     pub(super) fn without(&mut self, scope: &Scope) {
-        self.null_extended
-            .retain(|r| !scope.iter().any(|(s, _)| s == r));
+        let shadowed = |r: &String| scope.iter().any(|(s, _)| s == r);
+        self.null_extended.retain(|r| !shadowed(r));
+        self.non_null.retain(|(r, _)| !shadowed(r));
+        self.present.retain(|r| !shadowed(r));
     }
 }
 
@@ -327,11 +347,14 @@ impl<'a> Analyzer<'a> {
         facts.without(scope);
         facts.null_extended.extend(null_extended(&select.from));
         facts.grouped = is_grouped(select);
-        facts
+        self.narrow_select(select, scope, facts)
     }
 
     /// Whether `expr` can be NULL under `facts`.
     pub(super) fn nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
+        if !facts.non_null_exprs.is_empty() && facts.non_null_exprs.contains(&expr.to_string()) {
+            return Nullability::NonNull;
+        }
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
             Expr::Nested(inner) | Expr::Collate { expr: inner, .. } => of(inner),
@@ -377,6 +400,11 @@ impl<'a> Analyzer<'a> {
             Expr::BinaryOp { left, op, right } => {
                 use BinaryOperator::*;
                 match op {
+                    // The right side is read where the left one is true (AND) or false (OR).
+                    And | Or => {
+                        let known = self.learn(left, *op == And, scope);
+                        any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
+                    }
                     // MySQL's null-safe equality.
                     Spaceship => Nullability::NonNull,
                     // JSON accessors yield NULL for a missing key or a JSON null.
@@ -518,14 +546,25 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         facts: &Facts,
     ) -> Nullability {
-        let _ = operand;
-        let mut results: Vec<Nullability> = conditions
-            .iter()
-            .map(|when| self.nullability(&when.result, scope, facts))
-            .collect();
+        // A branch is read where its WHEN holds and the earlier ones do not.
+        let mut skipped = facts.clone();
+        let mut results = Vec::new();
+        for when in conditions {
+            let condition = match operand {
+                Some(operand) => Expr::BinaryOp {
+                    left: Box::new(operand.clone()),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(when.condition.clone()),
+                },
+                None => when.condition.clone(),
+            };
+            let taken = skipped.with(self.learn(&condition, true, scope));
+            results.push(self.nullability(&when.result, scope, &taken));
+            skipped = skipped.with(self.learn(&condition, false, scope));
+        }
         // Without ELSE, a row no WHEN matches yields NULL.
         results.push(else_result.map_or(Nullability::Nullable, |expr| {
-            self.nullability(expr, scope, facts)
+            self.nullability(expr, scope, &skipped)
         }));
         any_nullable(results)
     }

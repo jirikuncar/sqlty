@@ -28,7 +28,7 @@ SELECT id FROM moved
 
 ```sql
 SELECT id FROM kept
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## An ALTER of a column that does not exist
@@ -44,7 +44,7 @@ ALTER TABLE t ALTER COLUMN missing TYPE TEXT;
 
 ```sql
 SELECT a FROM t
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## An unreadable CREATE TABLE is skipped
@@ -97,10 +97,10 @@ DROP TABLE orders;
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ```sql
 SELECT total FROM shop.orders
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```

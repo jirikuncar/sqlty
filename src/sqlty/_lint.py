@@ -11,7 +11,7 @@ Configuration via pyproject.toml:
     column-count-mismatch = "error"     # default
     column-type-mismatch = "error"      # default
     column-name-mismatch = "warn"       # default
-    nullable-mismatch = "ignore"        # default; "error" with preview = true
+    nullable-mismatch = "error"         # default
     redundant-optional = "ignore"       # default
     typeddict-key-mismatch = "error"    # default
     typeddict-inheritance = "error"     # default
@@ -103,12 +103,9 @@ RULES: dict[str, LintRule] = {
     ),
     "nullable-mismatch": LintRule(
         name="nullable-mismatch",
-        default_severity=Severity.IGNORE,
+        default_severity=Severity.ERROR,
         fixable=False,
-        description=(
-            "Row type field is not optional but its query column can be NULL "
-            "(error by default with preview = true)"
-        ),
+        description="Row type field is not optional but its query column can be NULL",
     ),
     "redundant-optional": LintRule(
         name="redundant-optional",
@@ -227,10 +224,6 @@ RULES: dict[str, LintRule] = {
 }
 
 
-# Rules whose default severity differs in preview mode (``preview = true``).
-PREVIEW_SEVERITIES: dict[str, Severity] = {"nullable-mismatch": Severity.ERROR}
-
-
 @dataclass
 class Diagnostic:
     """A single lint diagnostic emitted by the checker."""
@@ -249,26 +242,15 @@ class Diagnostic:
 class RuleConfig:
     """Resolved rule configuration — maps rule names to effective severities.
 
-    Merges defaults with user overrides from [tool.sqlty.rules]. With ``preview``,
-    the rules ``PREVIEW_SEVERITIES`` lists are on by default.
-
-    Example:
-        >>> RuleConfig().severity("nullable-mismatch").value
-        'ignore'
-        >>> RuleConfig(preview=True).severity("nullable-mismatch").value
-        'error'
-        >>> RuleConfig({"nullable-mismatch": "warn"}, preview=True).severity("nullable-mismatch").value
-        'warn'
+    Merges defaults with user overrides from [tool.sqlty.rules].
     """
 
-    def __init__(self, overrides: dict[str, str] | None = None, *, preview: bool = False) -> None:
+    def __init__(self, overrides: dict[str, str] | None = None) -> None:
         self._severities: dict[str, Severity] = {}
 
         # Start with defaults
         for name, rule in RULES.items():
             self._severities[name] = rule.default_severity
-        if preview:
-            self._severities.update(PREVIEW_SEVERITIES)
 
         # Apply user overrides
         if overrides:
@@ -292,7 +274,7 @@ class RuleConfig:
     def from_config(cls, config: dict[str, Any]) -> RuleConfig:
         """Create RuleConfig from a [tool.sqlty] config dict."""
         rules = config.get("rules", {})
-        return cls(overrides=rules, preview=bool(config.get("preview", False)))
+        return cls(overrides=rules)
 
 
 def rule_doc(name: str) -> str:

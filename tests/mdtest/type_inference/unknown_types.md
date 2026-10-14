@@ -58,7 +58,7 @@ A range (or any other non-string) argument has no `str` result.
 
 ```sql
 SELECT lower(name), upper(email) FROM users
--- inferred: tuple[str, str]
+-- inferred: tuple[str, str | None]
 ```
 
 ```sql

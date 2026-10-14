@@ -1,8 +1,6 @@
 # nullable-mismatch
 
-Default severity: **ignore**
-
-With `preview = true` the default is **error**.
+Default severity: **error**
 
 ## What it does
 
@@ -14,7 +12,6 @@ or from an expression that can yield NULL.
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -65,19 +62,15 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 
 Fields typed `Any` or `object`, and fields whose annotation sqlty cannot resolve, are
 not reported. A column whose nullability is unknown, such as `id::INTEGER` with no
-schema, is never reported.
+schema, is never reported: sqlty only reports what the schema or the query proves.
 
 ## Configuration
 
-Nullability inference is a preview feature: it changes what `sqlty rewrite` writes, so
-it is off until the next minor release. `preview = true` in `[tool.sqlty]` (or
-`--preview` on `sqlty rewrite` and `sqlty check`) turns it on, and with it this rule as an
-error. To use the rule without preview, set its severity:
+A field annotated `T | None` is accepted for a column that cannot be NULL; only
+[`redundant-optional`](redundant-optional.md) reports that. To lower the severity of this
+rule while you add the missing `| None`, or to turn it off:
 
 ```toml
 [tool.sqlty.rules]
 nullable-mismatch = "warn"
 ```
-
-A field annotated `T | None` is accepted for a column that cannot be NULL; only
-`redundant-optional` reports that.

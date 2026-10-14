@@ -9,7 +9,6 @@ that differ follow each database.
 [tool.sqlty]
 dialect = "mysql"
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -62,7 +61,6 @@ SELECT name, max(id), max(age) FROM users GROUP BY name
 [tool.sqlty]
 dialect = "sqlite"
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:

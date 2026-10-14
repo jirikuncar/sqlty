@@ -36,9 +36,9 @@ users = "--sql\nSELECT id, name, created_at FROM users"
 totals = "--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id"
 everything = "--sql\nSELECT * FROM orders"
 # rewritten: import decimal
-# rewritten: users = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id, name, created_at FROM users")
+# rewritten: users = SQL[tuple[int, str, datetime.datetime | None]]("--sql\nSELECT id, name, created_at FROM users")
 # rewritten: totals = SQL[tuple[str, decimal.Decimal]]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
-# rewritten: everything = SQL[tuple[int, int, decimal.Decimal]]("--sql\nSELECT * FROM orders")
+# rewritten: everything = SQL[tuple[int, int | None, decimal.Decimal]]("--sql\nSELECT * FROM orders")
 ```
 
 An explicit cast still wins over the schema:
@@ -53,7 +53,76 @@ query = "--sql\nSELECT id::TEXT, name FROM users"
 whenever the table does. Without a schema, `SELECT *` is an error
 ([`select-star-no-schema`](../reference/rules.md#select-star-no-schema)).
 
-Nullability is not tracked: `email` above is `str`, not `str | None`.
+`email` above has no `NOT NULL`, so it is `str | None`; see [Nullability](#nullability).
+
+## Nullability
+
+A column that can be NULL infers `T | None`. sqlty only reports what the schema or the
+query proves: a column of unknown nullability (a cast with no schema, an unknown
+function) stays `T`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, nick TEXT);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total NUMERIC(10, 2));
+```
+
+```python
+users = "--sql\nSELECT id, name, nick FROM users"
+left = "--sql\nSELECT u.id, o.id FROM users u LEFT JOIN orders o ON o.user_id = u.id"
+narrowed = "--sql\nSELECT nick FROM users WHERE nick IS NOT NULL"
+total = "--sql\nSELECT count(*), max(total) FROM orders"
+# rewritten: import decimal
+# rewritten: users = SQL[tuple[int, str, str | None]]("--sql\nSELECT id, name, nick FROM users")
+# rewritten: left = SQL[tuple[int, int | None]]("--sql\nSELECT u.id, o.id FROM users u LEFT JOIN orders o ON o.user_id = u.id")
+# rewritten: narrowed = SQL[tuple[str]]("--sql\nSELECT nick FROM users WHERE nick IS NOT NULL")
+# rewritten: total = SQL[tuple[int, decimal.Decimal | None]]("--sql\nSELECT count(*), max(total) FROM orders")
+```
+
+What makes a column nullable or not:
+
+- **Schema.** `NOT NULL` and `PRIMARY KEY` columns are non-null; others are nullable.
+- **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
+  is nullable.
+- **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
+  `IS NOT NULL`, comparisons, `IN`, `BETWEEN`, `LIKE`, a strict function such as
+  `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` proves only what both sides prove,
+  and the right side of `AND`, `OR` and a `CASE` branch is read under what the left side
+  established. A non-null column of an outer-joined table in `WHERE` also drops the
+  null-extended rows.
+- **Expressions.** Operators and most functions are NULL when an argument is.
+  `COALESCE` is nullable only if every argument is. `NULLIF`, JSON accessors, array
+  subscripts and a `CASE` without `ELSE` can always be NULL.
+- **Aggregates.** `COUNT` is never NULL. Other aggregates are nullable without a plain
+  `GROUP BY` (empty input), with `FILTER`, or when the argument is.
+- **Subqueries.** A scalar subquery is nullable unless it always returns one row.
+- **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
+  `EXCEPT` follows its left side.
+- **DML.** `RETURNING` reads the schema like a `SELECT`.
+
+[`nullable-mismatch`](../reference/rules.md#nullable-mismatch) reports a row type field
+that is not optional for a nullable column;
+[`redundant-optional`](../reference/rules.md#redundant-optional) (off by default) reports
+the opposite. See [Row types](row-types.md#nullable-columns).
+
+### Upgrading
+
+Before this release, row types were never `T | None`. Existing `SQL[...]` wrappers over
+nullable columns are now `stale-type`, and row types that omit `| None` are
+`nullable-mismatch` errors. `sqlty check --fix` updates wrappers in place, and
+`sqlty rewrite` writes the new types for unwrapped queries. Add `| None` to the flagged
+row type fields, filter the NULLs in the query, or lower the rule while you migrate:
+
+```toml
+[tool.sqlty.rules]
+nullable-mismatch = "warn"
+```
 
 ## Views
 
@@ -104,7 +173,7 @@ CREATE TABLE archived_events (amount BIGINT NOT NULL);
 ```python
 totals = "--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u"
 # rewritten: import decimal
-# rewritten: totals = SQL[tuple[decimal.Decimal]]("--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u")
+# rewritten: totals = SQL[tuple[decimal.Decimal | None]]("--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u")
 ```
 
 ## Domains and enums
@@ -133,7 +202,7 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, discount percent, status order_stat
 
 ```python
 orders = "--sql\nSELECT discount, status FROM orders"
-# rewritten: orders = SQL[tuple[int, typing.Literal['pending', 'paid']]]("--sql\nSELECT discount, status FROM orders")
+# rewritten: orders = SQL[tuple[int | None, typing.Literal['pending', 'paid']]]("--sql\nSELECT discount, status FROM orders")
 ```
 
 A field annotated `str` still accepts an enum column, and a `Literal[...]` field
@@ -185,7 +254,7 @@ any order.
 ```python
 users = "--sql\nSELECT * FROM users"
 total = "--sql\nSELECT user_count()"
-# rewritten: users = SQL[tuple[int, str, typing.Literal['pending', 'active', 'banned']]]("--sql\nSELECT * FROM users")
+# rewritten: users = SQL[tuple[int, str | None, typing.Literal['pending', 'active', 'banned']]]("--sql\nSELECT * FROM users")
 # rewritten: total = SQL[tuple[int]]("--sql\nSELECT user_count()")
 ```
 
@@ -198,9 +267,6 @@ As in PostgreSQL, `pg_catalog` is searched first, so a user table named like a
 system relation (`CREATE TABLE pg_class (...)`) is reached as `public.pg_class`;
 a bare `pg_class` is the system one. Other `pg_*` names, such as `pg_orders`,
 are ordinary tables in every dialect.
-
-Nullability (`NOT NULL`, `PRIMARY KEY`) is recorded but does not change the
-inferred types yet.
 
 sqlty does not guess where it cannot follow. A table changed by a statement it
 cannot read (for instance `ALTER TABLE ... SET SCHEMA`), or built from a table
@@ -266,8 +332,8 @@ CREATE TABLE notes (
 ```python
 notes = "--sql\nSELECT id, title, score, attachment, created_at FROM notes"
 stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
-# rewritten: notes = SQL[tuple[int, str, float, bytes, datetime.datetime]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
-# rewritten: stats = SQL[tuple[int, float, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
+# rewritten: notes = SQL[tuple[int, str, float | None, bytes | None, datetime.datetime | None]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
+# rewritten: stats = SQL[tuple[int, float | None, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
 SQLite accepts free-form type names such as `UNSIGNED BIG INT`; sqlty does
@@ -305,9 +371,9 @@ orders = "-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `order
 with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: import decimal
-# rewritten: orders = SQL[tuple[int, decimal.Decimal, int, str, typing.Any, datetime.datetime]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
+# rewritten: orders = SQL[tuple[int, decimal.Decimal | None, int | None, str | None, typing.Any, datetime.datetime | None]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
 # rewritten: with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
-# rewritten: casts = SQL[tuple[int, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
+# rewritten: casts = SQL[tuple[int | None, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 
 `TINYINT(1)` is an `int`, not a `bool`. See the

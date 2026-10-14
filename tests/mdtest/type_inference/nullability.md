@@ -1,40 +1,15 @@
 # Nullability inference
 
-With `preview = true`, a column that can be NULL infers `T | None`. Nullability is
-tracked next to the type: with preview off, every row type is spelled as before.
-
-## Preview off is unchanged
-
-```toml
-[tool.sqlty]
-schema = "schema.sql"
-```
-
-`schema.sql`:
-
-```sql
-CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE posts (id INTEGER NOT NULL, user_id INTEGER, title TEXT NOT NULL);
-```
-
-```sql
-SELECT u.id, u.name, p.title FROM users u LEFT JOIN posts p ON p.user_id = u.id
--- inferred: tuple[int, str, str]
-```
-
-```python
-from sqlty import SQL
-
-q = "--sql\nSELECT id, name FROM users"
-# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
-```
+A column that can be NULL infers `T | None`: a schema column without `NOT NULL` or
+`PRIMARY KEY`, a column of the optional side of an outer join, an expression that can yield
+NULL. Nullability is tracked next to the type, and only what the schema or the query proves
+is optional: a column of unknown nullability keeps its plain type.
 
 ## Schema columns without NOT NULL
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -68,7 +43,6 @@ SELECT * FROM users
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -89,7 +63,6 @@ Nothing says `id` can be NULL, so a cast is not made optional.
 
 ```toml
 [tool.sqlty]
-preview = true
 ```
 
 ```sql
@@ -102,7 +75,6 @@ SELECT id::INTEGER, name::TEXT FROM users
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -121,7 +93,6 @@ SELECT id::BIGINT, age::BIGINT, (age) FROM users
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -163,7 +134,6 @@ SELECT u.id, p.id FROM users u JOIN posts p ON p.user_id = u.id
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -208,7 +178,6 @@ JOIN tags t ON t.post_id = p.id
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -247,7 +216,6 @@ SELECT p.id, d.id FROM posts p LEFT JOIN (SELECT id FROM users) d ON d.id = p.us
 [tool.sqlty]
 dialect = "mysql"
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -268,7 +236,6 @@ SELECT u.id, u.name, p.id FROM users u LEFT JOIN posts p ON p.user_id = u.id
 [tool.sqlty]
 dialect = "sqlite"
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -288,7 +255,6 @@ SELECT u.id, u.name, p.id FROM users u LEFT JOIN posts p ON p.user_id = u.id
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:

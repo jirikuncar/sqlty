@@ -300,7 +300,7 @@ by name.
 
 ```sql
 SELECT NULLIF(a::INTEGER, 0), my_fn(b), COUNT(*), count(c), LOWER(d), json_build_object('k', 1), NOT e, -f, -1 FROM t
--- columns: nullif: int (INT)
+-- columns: nullif: int | None (INT)
 -- columns: my_fn: None (None)
 -- columns: count: int (BIGINT)
 -- columns: count: int (BIGINT)

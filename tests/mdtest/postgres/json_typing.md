@@ -25,21 +25,21 @@ SELECT metadata::JSONB FROM users
 
 ```sql
 SELECT id::INTEGER, (data->>'name')::TEXT FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Nested JSON extraction
 
 ```sql
 SELECT id::INTEGER, (data->'address'->>'city')::TEXT FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## JSON extraction with cast to non-text type
 
 ```sql
 SELECT id::INTEGER, (data->>'age')::INTEGER FROM users
--- inferred: tuple[int, int]
+-- inferred: tuple[int, int | None]
 ```
 
 ## json_build_object — basic

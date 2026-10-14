@@ -29,6 +29,7 @@ mod dml;
 mod expr;
 mod functions;
 mod names;
+mod narrowing;
 mod nullability;
 mod operators;
 mod query;
@@ -598,35 +599,12 @@ pub(crate) fn typed(sql_type: String, python_type: Option<String>, dialect: SqlD
     }
 }
 
-thread_local! {
-    static PREVIEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Runs `f` with preview mode on or off: in preview mode [`infer_type`] and
-/// [`Column::display_type`] spell nullable columns `T | None`. Off by default, so output
-/// is unchanged unless a caller opts in. The setting is per thread and restored on exit.
-pub fn with_preview<R>(on: bool, f: impl FnOnce() -> R) -> R {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            PREVIEW.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(PREVIEW.with(|cell| cell.replace(on)));
-    f()
-}
-
-/// Whether preview mode is on for the running call; see [`with_preview`].
-pub fn preview() -> bool {
-    PREVIEW.with(|cell| cell.get())
-}
-
 impl Column {
-    /// The Python type as written in a row type: `T | None` for a nullable column in
-    /// preview mode, else `python_type`. `Any` already admits `None`.
+    /// The Python type as written in a row type: `T | None` for a column that can be NULL,
+    /// else `python_type`. `Any` already admits `None`.
     pub fn display_type(&self) -> Option<String> {
         let python_type = self.python_type.as_deref()?;
-        Some(if self.nullable() && preview() && python_type != ANY {
+        Some(if self.nullable() && python_type != ANY {
             format!("{python_type} | None")
         } else {
             python_type.to_string()
@@ -858,7 +836,7 @@ mod tests {
     #[test]
     fn test_schema_order_and_canonical_types() {
         let schema = Some(load_schema(
-            "CREATE TABLE users (id INTEGER, score NUMERIC(10,2), tags TEXT[])",
+            "CREATE TABLE users (id INTEGER NOT NULL, score NUMERIC(10,2) NOT NULL, tags TEXT[] NOT NULL)",
             "postgres",
         ));
         assert_eq!(
@@ -1014,7 +992,7 @@ mod tests {
     #[test]
     fn test_ctes_and_derived_tables() {
         let schema = Some(load_schema(
-            "CREATE TABLE users (id INTEGER, name TEXT, born DATE)",
+            "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, born DATE NOT NULL)",
             "postgres",
         ));
         let infer = |sql: &str| infer_type(sql, "postgres", &schema).unwrap();

@@ -61,13 +61,13 @@ CREATE TABLE users (id INTEGER PRIMARY KEY);
 
 ```sql
 SELECT table_schema, table_name, table_type FROM information_schema.tables
--- inferred: tuple[str, str, str]
+-- inferred: tuple[str | None, str | None, str | None]
 ```
 
 ```sql
 SELECT column_name, ordinal_position, is_nullable, data_type
 FROM information_schema.columns WHERE table_name = 'users'
--- inferred: tuple[str, int, str, str]
+-- inferred: tuple[str | None, int | None, str | None, str | None]
 ```
 
 ```sql
@@ -127,7 +127,7 @@ SELECT relname FROM pg_class
 
 ```sql
 SELECT x FROM public.pg_class
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## A table with a pg_ prefix that is not a system relation
@@ -146,7 +146,7 @@ CREATE TABLE pg_orders (id INTEGER, total NUMERIC(10, 2));
 
 ```sql
 SELECT id, total FROM pg_orders
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int | None, decimal.Decimal | None]
 ```
 
 ## The same table in SQLite and MySQL
@@ -166,12 +166,12 @@ CREATE TABLE pg_class (x INTEGER);
 
 ```sql
 SELECT id, total FROM pg_orders
--- inferred: tuple[int, float]
+-- inferred: tuple[int | None, float | None]
 ```
 
 ```sql
 SELECT x FROM pg_class
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ```toml
@@ -182,5 +182,5 @@ schema = "schema.sql"
 
 ```sql
 SELECT id, total FROM pg_orders
--- inferred: tuple[int, float]
+-- inferred: tuple[int | None, float | None]
 ```

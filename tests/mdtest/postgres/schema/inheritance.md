@@ -22,12 +22,12 @@ ALTER TABLE measurements ADD COLUMN sensor TEXT;
 
 ```sql
 SELECT * FROM measurements_2024
--- inferred: tuple[datetime.datetime, float, str]
+-- inferred: tuple[datetime.datetime, float | None, str | None]
 ```
 
 ```sql
 SELECT sensor FROM measurements_rest
--- inferred: tuple[str]
+-- inferred: tuple[str | None]
 ```
 
 ## INHERITS
@@ -44,7 +44,7 @@ ALTER TABLE cities ADD COLUMN elevation INTEGER;
 
 ```sql
 SELECT * FROM capitals
--- inferred: tuple[str, int, str, int]
+-- inferred: tuple[str | None, int | None, str | None, int | None]
 ```
 
 ## ALTER TABLE ONLY does not reach children
@@ -59,7 +59,7 @@ ALTER TABLE ONLY cities ADD COLUMN elevation INTEGER;
 
 ```sql
 SELECT * FROM capitals
--- inferred: tuple[str, str]
+-- inferred: tuple[str | None, str | None]
 ```
 
 ## LIKE
@@ -76,7 +76,7 @@ ALTER TABLE users ADD COLUMN email TEXT;
 
 ```sql
 SELECT * FROM users_archive
--- inferred: tuple[int, str, datetime.datetime]
+-- inferred: tuple[int, str | None, datetime.datetime | None]
 ```
 
 ## The parent may come later
@@ -91,12 +91,12 @@ CREATE TABLE cities (name TEXT, population INTEGER);
 
 ```sql
 SELECT * FROM capitals
--- inferred: tuple[str, int, str]
+-- inferred: tuple[str | None, int | None, str | None]
 ```
 
 ```sql
 SELECT * FROM copy
--- inferred: tuple[str, int]
+-- inferred: tuple[str | None, int | None]
 ```
 
 ## A parent the schema never defines

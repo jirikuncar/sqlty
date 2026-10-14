@@ -141,7 +141,7 @@ Use them to build your own tooling:
 >>> from sqlty.core import infer_type, rewrite_source, strip_source
 >>> infer_type("SELECT id::INTEGER, name::TEXT FROM users")
 'tuple[int, str]'
->>> infer_type("SELECT id FROM users", schema_sql="CREATE TABLE users (id INTEGER);")
+>>> infer_type("SELECT id FROM users", schema_sql="CREATE TABLE users (id INTEGER NOT NULL);")
 'tuple[int]'
 >>> source = rewrite_source('q = "--sql\\nSELECT 1::INTEGER"')
 >>> print(source)
@@ -153,11 +153,11 @@ q = "--sql\nSELECT 1::INTEGER"
 
 | Function | Returns |
 |----------|---------|
-| `infer_type(sql, *, dialect="postgres", schema_sql=None, preview=False)` | Row type as a string, or `None` |
-| `analyze_select(sql, *, dialect="postgres", schema_sql=None, preview=False)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
+| `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
+| `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
-| `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, preview=False)` | Rewritten source |
+| `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |
 | `strip_source(source, *, import_style=None)` | Stripped source |
-| `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, preview=False)` | Source with `sqlty check --fix` applied |
-| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None, preview=False)` | List of diagnostics: dicts with `rule`, `message`, `severity`, `line` |
+| `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None)` | Source with `sqlty check --fix` applied |
+| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: dicts with `rule`, `message`, `severity`, `line` |

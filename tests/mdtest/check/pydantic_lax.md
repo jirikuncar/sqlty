@@ -352,6 +352,7 @@ class Usage(BaseModel):
     active: bool
 
 # error: [column-type-mismatch] "Usage.active is bool but query column 'active' infers int"
+# error: [nullable-mismatch] "Usage.total is int but query column 'total' can be NULL"
 query = SQL[Usage]("--sql\nSELECT sum(records) AS total, active FROM usage")
 ```
 
@@ -375,6 +376,7 @@ class Configured:
     __pydantic_config__ = ConfigDict(strict=True)
     total: int
 
+# error: [nullable-mismatch] "Lax.total is int but query column 'total' can be NULL"
 lax = SQL[Lax]("--sql\nSELECT sum(records) AS total FROM usage")
 # error: [column-type-mismatch] "Strict.total is int but query column 'total' infers decimal.Decimal"
 strict = SQL[Strict]("--sql\nSELECT sum(records) AS total FROM usage")

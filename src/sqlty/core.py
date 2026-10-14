@@ -67,27 +67,23 @@ class _RowColumn(NamedTuple):
 
 
 def analyze_select(
-    sql: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | None = None,
-    preview: bool = False,
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
 ) -> list[ColumnInfo] | None:
     """Result columns of a query, or ``None`` when it returns no rows or doesn't parse.
 
-    With ``preview``, a column that can be NULL has a ``T | None`` Python type.
+    A column that can be NULL has a ``T | None`` Python type.
 
     Example:
         >>> analyze_select("SELECT id::INTEGER, COUNT(*) AS n FROM users")
         [ColumnInfo(name='id', python_type='int', sql_type='INT'), ColumnInfo(name='n', python_type='int', sql_type='BIGINT')]
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
-        >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema, preview=True)]
+        >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema)]
         ['int', 'str | None']
 
     Raises:
         RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
-    columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql, preview=preview)
+    columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
 
 
@@ -141,7 +137,6 @@ def fix_source(
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
-    preview: bool = False,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
@@ -164,7 +159,6 @@ def fix_source(
         import_style=import_style,
         untyped=untyped,
         rules=rules,
-        preview=preview,
         suppressed={
             line: None if ignore.rules is None else list(ignore.rules)
             for line, ignore in parsed.ignores.items()
@@ -181,15 +175,14 @@ def check_source(
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
     untyped: bool = False,
-    preview: bool = False,
     helpers: HelperIndex | None = None,
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
 
-    With ``preview``, nullable columns infer as ``T | None`` (so ``stale-type`` compares
-    against that) and ``nullable-mismatch`` is an error unless ``rules`` says otherwise.
+    A column that can be NULL infers as ``T | None`` (``stale-type`` compares against
+    that), and ``nullable-mismatch`` reports a row field that does not admit ``None`` for it.
 
     When ``SQL[UserType](...)`` names a type defined in the same source,
     structural checks (column count, type, name, TypedDict keys) run instead
@@ -235,7 +228,6 @@ def check_source(
         rules=rules,
         import_style=import_style,
         untyped=untyped,
-        preview=preview,
         helpers=helpers,
         module=module or parsed.module,
         type_modules=type_modules,
@@ -251,7 +243,6 @@ def _check_diagnostics(
     rules: dict[str, str] | None,
     import_style: str | None,
     untyped: bool,
-    preview: bool,
     helpers: HelperIndex | None,
     module: str | None,
     type_modules: Iterable[str] | None = None,
@@ -268,7 +259,6 @@ def _check_diagnostics(
             rules=rules,
             import_style=import_style,
             untyped=untyped,
-            preview=preview,
         )
         if parsed.may_need_rust_check(import_style)
         else []
@@ -286,7 +276,7 @@ def _check_diagnostics(
     ]
     if not (queries or found):
         return diagnostics
-    rule_config = RuleConfig(overrides=rules, preview=preview)
+    rule_config = RuleConfig(overrides=rules)
 
     def report(rule: str, message: str, line: int) -> None:
         if rule_config.is_enabled(rule):

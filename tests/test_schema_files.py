@@ -8,11 +8,11 @@ from sqlty._config import expand_schema
 
 def _tree(tmp_path: Path) -> None:
     (tmp_path / "tables" / "nested").mkdir(parents=True)
-    (tmp_path / "tables" / "b.sql").write_text("CREATE TABLE b (id INTEGER);")
-    (tmp_path / "tables" / "a.sql").write_text("CREATE TABLE a (id INTEGER);")
-    (tmp_path / "tables" / "nested" / "c.sql").write_text("CREATE TABLE c (id INTEGER);")
+    (tmp_path / "tables" / "b.sql").write_text("CREATE TABLE b (id INTEGER NOT NULL);")
+    (tmp_path / "tables" / "a.sql").write_text("CREATE TABLE a (id INTEGER NOT NULL);")
+    (tmp_path / "tables" / "nested" / "c.sql").write_text("CREATE TABLE c (id INTEGER NOT NULL);")
     (tmp_path / "tables" / "notes.txt").write_text("not sql")
-    (tmp_path / "extra.sql").write_text("CREATE TABLE e (id INTEGER);")
+    (tmp_path / "extra.sql").write_text("CREATE TABLE e (id INTEGER NOT NULL);")
 
 
 def test_directory_is_recursive_and_sorted(tmp_path: Path) -> None:
@@ -31,7 +31,7 @@ def test_glob_and_order_of_entries(tmp_path: Path) -> None:
 def test_load_schema_joins_files(tmp_path: Path) -> None:
     _tree(tmp_path)
     sql = _load_schema(["tables/a.sql", "extra.sql"], tmp_path)
-    assert sql == "CREATE TABLE a (id INTEGER);\nCREATE TABLE e (id INTEGER);"
+    assert sql == "CREATE TABLE a (id INTEGER NOT NULL);\nCREATE TABLE e (id INTEGER NOT NULL);"
     assert _load_schema("missing.sql", tmp_path) is None
     assert _load_schema("nothing/*.sql", tmp_path) is None
 

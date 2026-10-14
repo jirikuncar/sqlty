@@ -19,7 +19,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(quantity) FROM products
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## SUM of float column with schema returns float
@@ -41,7 +41,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(price) FROM products
--- inferred: tuple[float]
+-- inferred: tuple[float | None]
 ```
 
 ## Explicit cast takes precedence over schema (1)
@@ -63,7 +63,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(quantity::FLOAT) FROM products
--- inferred: tuple[float]
+-- inferred: tuple[float | None]
 ```
 
 ## Explicit cast takes precedence over schema (2)
@@ -85,7 +85,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(price::INTEGER) FROM products
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## Mixing schema-inferred and cast-specified types
@@ -107,7 +107,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(quantity), SUM(price::INTEGER) FROM products
--- inferred: tuple[int, int]
+-- inferred: tuple[int | None, int | None]
 ```
 
 ## Multiple SUM operations with schema inference
@@ -129,7 +129,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(quantity), SUM(price) FROM products
--- inferred: tuple[int, float]
+-- inferred: tuple[int | None, float | None]
 ```
 
 ## SUM of unknown column with explicit cast works
@@ -151,7 +151,7 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(unknown_col::INTEGER) FROM products
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## SUM with unknown table falls back to Decimal
@@ -173,5 +173,5 @@ CREATE TABLE products (
 
 ```sql
 SELECT SUM(amount) FROM orders
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```

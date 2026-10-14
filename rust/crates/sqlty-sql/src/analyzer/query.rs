@@ -15,7 +15,7 @@ pub(super) fn leftmost_select(body: &SetExpr) -> Option<&Select> {
 /// A result column: name, Python type and SQL type; unknown types are `None`.
 ///
 /// `nullability` is kept next to the type, never inside it. Callers decide whether to
-/// show it (preview mode); only [`Nullability::Nullable`] makes a type optional.
+/// spell it (see [`Column::display_type`]); only [`Nullability::Nullable`] makes a type optional.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
@@ -150,7 +150,15 @@ impl<'a> Analyzer<'a> {
                 }
             });
         }
-        let combined = branches.len() > 1;
+        let shapes: Vec<Option<Vec<Nullability>>> = branches
+            .iter()
+            .map(|b| {
+                b.as_ref()
+                    .map(|cols| cols.iter().map(|c| c.nullability).collect())
+            })
+            .collect();
+        let width = branches.first().and_then(|b| b.as_ref()).map(Vec::len);
+        let nullability = set_nullability(body, &mut shapes.into_iter(), width);
         let mut branches = branches.into_iter();
         let Some(mut columns) = branches.next().flatten() else {
             return Ok(None);
@@ -180,9 +188,9 @@ impl<'a> Analyzer<'a> {
                 );
             }
             (column.python_type, column.sql_type) = common.unwrap_or((None, None));
-            if combined {
-                column.nullability = Nullability::Unknown;
-            }
+        }
+        for (column, nullability) in columns.iter_mut().zip(nullability) {
+            column.nullability = nullability;
         }
         Ok(Some(columns))
     }
@@ -273,6 +281,51 @@ impl<'a> Analyzer<'a> {
                 vec![Column::unknown("*")]
             }
         }
+    }
+}
+
+/// Nullability of a set operation's columns, folding the branches' (taken from `shapes`
+/// in `set_branches` order): UNION is nullable if either side is, INTERSECT only if both
+/// are, EXCEPT follows its left side. A branch of another width or one not analyzed
+/// leaves its columns unknown.
+fn set_nullability(
+    body: &SetExpr,
+    shapes: &mut std::vec::IntoIter<Option<Vec<Nullability>>>,
+    width: Option<usize>,
+) -> Vec<Nullability> {
+    use sqlparser::ast::SetOperator;
+    let unknown = || vec![Nullability::Unknown; width.unwrap_or(0)];
+    match body {
+        SetExpr::SetOperation {
+            op, left, right, ..
+        } => {
+            let left = set_nullability(left, shapes, width);
+            let right = set_nullability(right, shapes, width);
+            left.into_iter()
+                .zip(right)
+                .map(|(l, r)| match (op, l, r) {
+                    (SetOperator::Except | SetOperator::Minus, l, _) => l,
+                    (SetOperator::Intersect, Nullability::Nullable, Nullability::Nullable) => {
+                        Nullability::Nullable
+                    }
+                    (SetOperator::Intersect, Nullability::NonNull, _)
+                    | (SetOperator::Intersect, _, Nullability::NonNull) => Nullability::NonNull,
+                    (SetOperator::Intersect, _, _) => Nullability::Unknown,
+                    (_, Nullability::Nullable, _) | (_, _, Nullability::Nullable) => {
+                        Nullability::Nullable
+                    }
+                    (_, Nullability::NonNull, Nullability::NonNull) => Nullability::NonNull,
+                    _ => Nullability::Unknown,
+                })
+                .collect()
+        }
+        SetExpr::Query(query) if query.with.is_none() => {
+            set_nullability(&query.body, shapes, width)
+        }
+        _ => match shapes.next().flatten() {
+            Some(shape) if Some(shape.len()) == width => shape,
+            _ => unknown(),
+        },
     }
 }
 

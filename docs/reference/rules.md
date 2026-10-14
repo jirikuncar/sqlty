@@ -17,7 +17,7 @@ stale-type = "error"
 | [`column-count-mismatch`](#column-count-mismatch) | Row type | error | no | Row type has a different number of fields than the query has columns |
 | [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field can't hold its column's values |
 | [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | `NamedTuple` field name differs from its column name |
-| [`nullable-mismatch`](#nullable-mismatch) | Row type | ignore | no | Row type field is not optional but its column can be NULL (error in preview) |
+| [`nullable-mismatch`](#nullable-mismatch) | Row type | error | no | Row type field is not optional but its column can be NULL |
 | [`redundant-optional`](#redundant-optional) | Row type | ignore | no | Row type field is optional but its column cannot be NULL |
 | [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the fields of a TypedDict, dataclass or Pydantic model |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
@@ -40,7 +40,7 @@ stale-type = "error"
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
 
-`nullable-mismatch` is off by default but an error with `preview = true`; see
+`nullable-mismatch` and `redundant-optional` check nullability; see
 [Nullability](../guide/schema-inference.md#nullability).
 
 `sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
@@ -149,7 +149,7 @@ Fix: rename the field or alias the column (`id AS user_id`).
 
 ### nullable-mismatch
 
-Default: ignore; error with `preview = true`. A row type field is not
+Default: error. A row type field is not
 optional, but its query column can be NULL: a schema column without `NOT NULL`,
 a column of the optional side of an outer join, an aggregate over an empty
 input. Fields typed `Any` and columns of unknown nullability are not reported;
@@ -158,7 +158,6 @@ see `sqlty rule nullable-mismatch`.
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-preview = true
 ```
 
 `schema.sql`:
@@ -186,7 +185,7 @@ Fix: annotate `name: str | None`, or filter or `COALESCE` the NULLs away.
 Default: ignore. The strict side of `nullable-mismatch`: a field is annotated
 `T | None` or `Optional[T]`, but its column cannot be NULL. A wider annotation
 is correct, only looser than needed, so the rule stays off until enabled in
-`[tool.sqlty.rules]`, preview or not; see `sqlty rule redundant-optional`.
+`[tool.sqlty.rules]`; see `sqlty rule redundant-optional`.
 
 ```toml
 [tool.sqlty]

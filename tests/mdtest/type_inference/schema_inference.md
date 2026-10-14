@@ -22,7 +22,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT id, name, email FROM users
--- inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str | None]
 ```
 
 ## Schema with explicit cast override
@@ -67,7 +67,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT SUM(quantity) FROM products
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## SUM of float column from schema
@@ -89,7 +89,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT SUM(price) FROM products
--- inferred: tuple[float]
+-- inferred: tuple[float | None]
 ```
 
 ## SUM with explicit cast overrides schema
@@ -111,7 +111,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT SUM(quantity::FLOAT) FROM products
--- inferred: tuple[float]
+-- inferred: tuple[float | None]
 ```
 
 ## Multiple tables in schema — full table names
@@ -144,7 +144,7 @@ schema = "schema.sql"
 SELECT users.id, users.name, orders.total, orders.created_at
 FROM users
 JOIN orders ON users.id = orders.user_id
--- inferred: tuple[int, str, float, datetime.datetime]
+-- inferred: tuple[int, str, float, datetime.datetime | None]
 ```
 
 ## Schema with boolean and date types
@@ -167,7 +167,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT id, name, active, birth_date FROM users
--- inferred: tuple[int, str, bool, datetime.date]
+-- inferred: tuple[int, str, bool | None, datetime.date | None]
 ```
 
 ## No schema — columns without casts are unknown
@@ -196,7 +196,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, decimal.Decimal]
+-- inferred: tuple[int | None, str | None, decimal.Decimal | None]
 ```
 
 ## Qualified star and aliased columns resolve through table aliases
@@ -214,7 +214,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT u.*, o.placed FROM users u JOIN orders o ON o.user_id = u.id
--- inferred: tuple[int, str, datetime.datetime]
+-- inferred: tuple[int, str | None, datetime.datetime | None]
 ```
 
 ## Unqualified columns search the joined tables in order
@@ -232,7 +232,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT name, placed FROM users JOIN orders ON user_id = users.id
--- inferred: tuple[str, datetime.datetime]
+-- inferred: tuple[str | None, datetime.datetime | None]
 ```
 
 ## Star over a table missing from the schema has no row type

@@ -57,7 +57,7 @@ CREATE TABLE t (a INT64, b FLOAT64, c BIGNUMERIC, d STRING, e BYTES, f BOOL)
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, float, decimal.Decimal, str, bytes, bool]
+-- inferred: tuple[int | None, float | None, decimal.Decimal | None, str | None, bytes | None, bool | None]
 -- expanded: SELECT a::BIGINT, b::DOUBLE, c::BIGDECIMAL, d::TEXT, e::BINARY, f::BOOLEAN FROM t
 ```
 
@@ -76,7 +76,7 @@ CREATE TABLE t (a NUMBER(10,2), b TIMESTAMP_NTZ, c TIMESTAMP_TZ, d TIMESTAMP_LTZ
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[decimal.Decimal, datetime.datetime, datetime.datetime, datetime.datetime, str]
+-- inferred: tuple[decimal.Decimal | None, datetime.datetime | None, datetime.datetime | None, datetime.datetime | None, str | None]
 -- expanded: SELECT a::DECIMAL(10, 2), b::TIMESTAMP, c::TIMESTAMPTZ, d::TIMESTAMPTZ, e::VARCHAR FROM t
 ```
 
@@ -95,7 +95,7 @@ CREATE TABLE t (a Int8, b Int32, c UInt64, d Float32, e Float64, f String)
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, int, int, float, float, str]
+-- inferred: tuple[int | None, int | None, int | None, float | None, float | None, str | None]
 -- expanded: SELECT a::TINYINT, b::INT, c::UBIGINT, d::FLOAT, e::DOUBLE, f::TEXT FROM t
 ```
 
@@ -114,7 +114,7 @@ CREATE TABLE t (a INT, b DATETIME2, c DATETIMEOFFSET, d UNIQUEIDENTIFIER, e NVAR
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, datetime.datetime, datetime.datetime, uuid.UUID, str]
+-- inferred: tuple[int | None, datetime.datetime | None, datetime.datetime | None, uuid.UUID | None, str | None]
 -- expanded: SELECT a::INT, b::TIMESTAMP, c::TIMESTAMPTZ, d::UUID, e::VARCHAR(10) FROM t
 ```
 
@@ -133,7 +133,7 @@ CREATE TABLE t (a NUMBER(10,2), b VARCHAR2(20), c CLOB, d DATE)
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[float, str, str, datetime.date]
+-- inferred: tuple[float | None, str | None, str | None, datetime.date | None]
 -- expanded: SELECT a::DECIMAL(10, 2), b::VARCHAR(20), c::TEXT, d::DATE FROM t
 ```
 

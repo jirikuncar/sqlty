@@ -23,7 +23,7 @@ SELECT COUNT(DISTINCT email)::INTEGER FROM users
 
 ```sql
 SELECT SUM(amount) FROM orders
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```
 
 ## AVG of an unknown column is Decimal
@@ -37,7 +37,7 @@ SELECT AVG(score) FROM tests
 
 ```sql
 SELECT SUM(quantity)::INTEGER FROM order_items
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## Mixed aggregates
@@ -50,7 +50,7 @@ SELECT
     MIN(created_at)::TIMESTAMP,
     MAX(created_at)::TIMESTAMP
 FROM orders
--- inferred: tuple[int, float, float, datetime.datetime, datetime.datetime]
+-- inferred: tuple[int, float | None, float | None, datetime.datetime | None, datetime.datetime | None]
 ```
 
 ## GROUP BY with multiple aggregates

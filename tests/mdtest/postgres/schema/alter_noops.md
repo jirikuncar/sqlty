@@ -24,7 +24,7 @@ ALTER TABLE t ALTER COLUMN name SET STATISTICS 500;
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## Constraint options sqlparser cannot read
@@ -38,7 +38,7 @@ ALTER TABLE t ADD CONSTRAINT u UNIQUE (name) USING INDEX TABLESPACE x;
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## A collation on a new column type
@@ -54,7 +54,7 @@ ALTER TABLE t ALTER COLUMN name TYPE text COLLATE "C";
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## Partition management
@@ -69,7 +69,7 @@ ALTER TABLE t ATTACH PARTITION p FOR VALUES FROM (1) TO (5);
 
 ```sql
 SELECT * FROM t
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## An action that does change columns still degrades

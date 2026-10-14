@@ -87,17 +87,10 @@ fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None, preview = false))]
-fn infer_type(
-    sql: &str,
-    dialect: &str,
-    schema_sql: Option<&str>,
-    preview: bool,
-) -> PyResult<Option<String>> {
-    analyzer::with_preview(preview, || {
-        analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
-    })
-    .map_err(PyRuntimeError::new_err)
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
+    analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
+        .map_err(PyRuntimeError::new_err)
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -107,28 +100,25 @@ fn infer_type(
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None, preview = false))]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn analyze_select(
     sql: &str,
     dialect: &str,
     schema_sql: Option<&str>,
-    preview: bool,
 ) -> PyResult<Option<Vec<ColumnTuple>>> {
     let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
         .map_err(PyRuntimeError::new_err)?;
     Ok(columns.map(|columns| {
-        analyzer::with_preview(preview, || {
-            columns
-                .into_iter()
-                .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
-                .collect()
-        })
+        columns
+            .into_iter()
+            .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
+            .collect()
     }))
 }
 
 /// Result columns of a query as `(name, python_type, sql_type, nullable)` tuples.
 ///
-/// `python_type` is never spelled `T | None`, whatever the preview mode: `nullable` says
+/// `python_type` is never spelled `T | None` here, unlike in `analyze_select`: `nullable` says
 /// whether the column can be NULL (True), cannot (False), or is not known (None: an
 /// unresolved column, an unknown function), so row types can be judged against it.
 /// Returns None when the query returns no rows or doesn't parse.
@@ -241,7 +231,7 @@ fn returns_rows(sql: &str, dialect: &str) -> bool {
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false, preview = false))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false))]
 fn rewrite_source(
     source: &str,
     dialect: &str,
@@ -249,19 +239,16 @@ fn rewrite_source(
     import_style: Option<&str>,
     untyped: bool,
     keep_lines: bool,
-    preview: bool,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
-    Ok(analyzer::with_preview(preview, || {
-        rewriter::rewrite_source_with(
-            source,
-            dialect,
-            &schema_for(source, schema_sql, dialect),
-            import_style,
-            untyped,
-            keep_lines,
-        )
-    }))
+    Ok(rewriter::rewrite_source_with(
+        source,
+        dialect,
+        &schema_for(source, schema_sql, dialect),
+        import_style,
+        untyped,
+        keep_lines,
+    ))
 }
 
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
@@ -285,8 +272,7 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None, preview = false))]
-#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
 fn fix_source(
     source: &str,
     dialect: &str,
@@ -295,20 +281,17 @@ fn fix_source(
     untyped: bool,
     rules: Option<HashMap<String, String>>,
     suppressed: Option<rewriter::Suppressed>,
-    preview: bool,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
-    Ok(analyzer::with_preview(preview, || {
-        fixer::fix_source(
-            source,
-            dialect,
-            &schema_for(source, schema_sql, dialect),
-            import_style,
-            untyped,
-            rules,
-            suppressed.unwrap_or_default(),
-        )
-    }))
+    Ok(fixer::fix_source(
+        source,
+        dialect,
+        &schema_for(source, schema_sql, dialect),
+        import_style,
+        untyped,
+        rules,
+        suppressed.unwrap_or_default(),
+    ))
 }
 
 /// Expand SELECT * into explicit column list.
@@ -329,8 +312,7 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, preview = false))]
-#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false))]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
@@ -339,19 +321,16 @@ fn check_source<'py>(
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
-    preview: bool,
 ) -> PyResult<Bound<'py, PyList>> {
     check_import_style(import_style)?;
-    let diagnostics = analyzer::with_preview(preview, || {
-        checker::check_source(
-            source,
-            dialect,
-            &schema_for(source, schema_sql, dialect),
-            rules,
-            import_style,
-            untyped,
-        )
-    });
+    let diagnostics = checker::check_source(
+        source,
+        dialect,
+        &schema_for(source, schema_sql, dialect),
+        rules,
+        import_style,
+        untyped,
+    );
     let list = PyList::empty(py);
     for diag in diagnostics {
         let dict = PyDict::new(py);

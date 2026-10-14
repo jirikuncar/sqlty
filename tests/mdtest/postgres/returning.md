@@ -186,7 +186,7 @@ schema = "schema.sql"
 
 ```sql
 DELETE FROM users WHERE id = 1 RETURNING *
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## MERGE RETURNING
@@ -225,5 +225,5 @@ schema = "schema.sql"
 MERGE INTO users u USING staged s ON u.id = s.id
 WHEN MATCHED THEN DELETE
 RETURNING *
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```

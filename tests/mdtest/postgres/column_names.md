@@ -22,7 +22,7 @@ schema = "schema.sql"
 ```sql
 SELECT count(*), max(id), now(), id + 1 FROM users
 -- columns: count: int (BIGINT)
--- columns: max: int (INT)
+-- columns: max: int | None (INT)
 -- columns: now: datetime.datetime (TIMESTAMPTZ)
 -- columns: ?column?: int (INT)
 ```
@@ -35,9 +35,9 @@ A column keeps its name under a cast, and `lower` is the function's name.
 SELECT id::BIGINT, users.name, lower(email), COALESCE(email, 'x'), CASE WHEN id > 1 THEN 1 END, EXISTS (SELECT 1), 'a', TRUE FROM users
 -- columns: id: int (BIGINT)
 -- columns: name: str (TEXT)
--- columns: lower: str (TEXT)
+-- columns: lower: str | None (TEXT)
 -- columns: coalesce: str (VARCHAR(255))
--- columns: case: int (None)
+-- columns: case: int | None (None)
 -- columns: exists: bool (BOOLEAN)
 -- columns: ?column?: str (None)
 -- columns: ?column?: bool (None)

@@ -18,7 +18,6 @@ dialect = "postgres"
 schema = "schema.sql"
 import-style = "from sqlty import SQL"
 untyped = "skip"
-preview = false
 
 [tool.sqlty.rules]
 select-star = "ignore"
@@ -37,7 +36,6 @@ query_param = "query"
 | [`rules`](#rules) | `check` |
 | [`import-style`](#import-style) | `rewrite`, `strip`, `check`, magic codec |
 | [`untyped`](#untyped) | `rewrite`, stub generation |
-| [`preview`](#preview) | `rewrite`, `check` |
 | [`type-modules`](#type-modules) | `check` |
 | [`format-command`](#format-command) | Stub generation |
 | [`functions`](#functions) | `check` ([helpers](../guide/helpers.md#helpers-you-cannot-annotate)), stub generation, `python -m sqlty.registries` |
@@ -141,30 +139,6 @@ strings. `"sentinel"` wraps them as `SQL[UNTYPED](...)`, and makes the
 catch-all overload of generated stubs return `SQL[UNTYPED]` instead of `str`
 (or `Any` for a helper with more parameters than the query). CLI:
 `sqlty rewrite --untyped`. See [Untyped queries](../guide/untyped.md).
-
-## `preview`
-
-`false` (default) or `true`. Preview opts in to behavior planned for the next
-minor release, as in ruff: it may change what `sqlty rewrite` writes, so it is
-off until you ask. CLI: `--preview` on `rewrite` and `check`, which turns it on
-for every path.
-
-With `preview = true`:
-
-- A column that can be NULL infers as `T | None`: `sqlty rewrite` writes
-  `SQL[tuple[int, str | None]]`, and `stale-type` flags the old
-  annotations. See [Nullability](../guide/schema-inference.md#nullability).
-- [`nullable-mismatch`](rules.md#nullable-mismatch) defaults to `error`
-  instead of `ignore`; `[tool.sqlty.rules]` still wins.
-
-With preview off, inference and diagnostics are exactly as before.
-[`redundant-optional`](rules.md#redundant-optional) is never on by default.
-
-```toml
-[tool.sqlty]
-schema = "schema.sql"
-preview = true
-```
 
 ## `format-command`
 
