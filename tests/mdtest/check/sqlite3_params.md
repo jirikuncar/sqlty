@@ -20,8 +20,7 @@ import sqlite3
 conn = sqlite3.connect("app.db")
 cur = conn.cursor()
 cur.execute("SELECT id FROM users WHERE id = ?", (1,))
-# error: [param-type-mismatch] "parameter 1 expects int, got float"
-cur.execute("SELECT id FROM users WHERE id = ?", (1.5,))
+cur.execute("SELECT id FROM users WHERE id = ?", (b"1",))
 # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
 conn.execute("SELECT id FROM users WHERE id = ? AND age = ?", (1,))
 # error: [param-type-mismatch] "parameter 2 is not nullable, got None"
@@ -35,10 +34,10 @@ import sqlite3
 
 with sqlite3.connect("app.db") as conn:
     conn.execute("SELECT id FROM users WHERE id = :id", {"id": 1})
-    # error: [param-count-mismatch] "query and call parameters differ: missing 'id'; unknown 'ident'"
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
     conn.execute("SELECT id FROM users WHERE id = :id", {"ident": 1})
-    # error: [param-type-mismatch] "parameter 'id' expects int, got float"
-    conn.execute("SELECT id FROM users WHERE id = :id", {"id": 1.5})
+    # SQLite is dynamically typed: no type is wrong, but NULL is for NOT NULL.
+    conn.execute("SELECT id FROM users WHERE id = :id", {"id": b"1", "extra": 2})
 ```
 
 ## executemany
@@ -49,4 +48,18 @@ import sqlite3
 conn = sqlite3.connect("app.db")
 # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
 conn.executemany("INSERT INTO users (id, name) VALUES (?, ?)", [(1, "a"), (2,)])
+```
+
+## Types are not checked, NULL and counts are
+
+SQLite columns hold any type, so a `bytes` or `date` for an `INTEGER` column is not reported.
+
+```python
+import sqlite3
+from datetime import date
+
+conn = sqlite3.connect("app.db")
+conn.execute("SELECT id FROM users WHERE id = ?", (date(2020, 1, 1),))
+conn.execute("SELECT id FROM users WHERE id = :id", {"id": b"1"})
+# error:
 ```

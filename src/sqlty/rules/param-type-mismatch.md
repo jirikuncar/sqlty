@@ -21,8 +21,11 @@ psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
 An argument is judged only where the source states its type: a literal, a
 variable annotated or assigned a class, a call of a known class (`date(...)`,
 `UUID(...)`). An argument of unknown type is never reported, and neither is a
-`str`, which the server coerces to any type. `None` is reported only for a
-parameter stored in a `NOT NULL` column.
+`str`, which the server coerces to any type. `int`, `float` and `Decimal` are
+interchangeable, and a parameter with an explicit cast (`%s::text`) takes
+anything. `None` is reported only for a parameter stored in a `NOT NULL`
+column. SQLite is dynamically typed: with `dialect = "sqlite"` only `None` is
+checked.
 
 ## Why is this bad?
 
@@ -57,8 +60,8 @@ execute("SELECT name FROM users WHERE id = %s AND born > %s", (1, date(2000, 1, 
 execute("SELECT name FROM users WHERE id = %s", (date(2000, 1, 1),))
 # error: [param-type-mismatch] "parameter 2 is not nullable, got None"
 execute("INSERT INTO users (id, name) VALUES (%s, %s)", (1, None))
-# error: [param-type-mismatch] "parameter 'id' expects int, got float"
-execute("DELETE FROM users WHERE id = %(id)s", {"id": 1.5})
+# error: [param-type-mismatch] "parameter 'id' expects int, got bytes"
+execute("DELETE FROM users WHERE id = %(id)s", {"id": b"1"})
 ```
 
 ## Fix

@@ -27,6 +27,9 @@ pub struct Styles {
     /// Respell as `$N`, which only PostgreSQL's parser reads as a placeholder; else as `?N`,
     /// which every dialect's does.
     pub dollar_numbers: bool,
+    /// A backslash escapes the next character in a string (MySQL). `E'...'` strings do
+    /// in every dialect.
+    pub backslash_escapes: bool,
 }
 
 impl Styles {
@@ -69,7 +72,13 @@ pub fn rewrite(sql: &str, styles: Styles) -> Rewritten {
     let mut copied = 0;
     while i < bytes.len() {
         let skip_to = match bytes[i] {
-            b'\'' | b'"' | b'`' => Some(quoted_end(bytes, i)),
+            b'\'' => Some(quoted_end(
+                bytes,
+                i,
+                styles.backslash_escapes || escape_string(bytes, i),
+            )),
+            b'"' => Some(quoted_end(bytes, i, styles.backslash_escapes)),
+            b'`' => Some(quoted_end(bytes, i, false)),
             b'-' if bytes.get(i + 1) == Some(&b'-') => Some(line_end(bytes, i)),
             b'/' if bytes.get(i + 1) == Some(&b'*') => Some(block_comment_end(bytes, i)),
             _ => None,
@@ -176,13 +185,22 @@ fn is_name(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
+/// Whether the quote at `at` opens an `E'...'` string.
+fn escape_string(bytes: &[u8], at: usize) -> bool {
+    at > 0
+        && matches!(bytes[at - 1], b'E' | b'e')
+        && (at == 1 || !(bytes[at - 2].is_ascii_alphanumeric() || bytes[at - 2] == b'_'))
+}
+
 /// Index just past the quoted string or identifier opening at `start`; a doubled quote
 /// stays inside it.
-fn quoted_end(bytes: &[u8], start: usize) -> usize {
+fn quoted_end(bytes: &[u8], start: usize, backslashes: bool) -> usize {
     let quote = bytes[start];
     let mut i = start + 1;
     while i < bytes.len() {
-        if bytes[i] == quote {
+        if backslashes && bytes[i] == b'\\' {
+            i += 2;
+        } else if bytes[i] == quote {
             if bytes.get(i + 1) != Some(&quote) {
                 return i + 1;
             }
@@ -218,11 +236,13 @@ mod tests {
         question_marks: true,
         colon_names: true,
         dollar_numbers: true,
+        backslash_escapes: false,
     };
     const PLAIN: Styles = Styles {
         question_marks: false,
         colon_names: false,
         dollar_numbers: true,
+        backslash_escapes: false,
     };
 
     fn text(sql: &str, styles: Styles) -> String {
@@ -272,6 +292,20 @@ mod tests {
             "SELECT '%s ? :a', \"?\", `:b` -- ? %s\n, /* ? */ $1"
         );
         assert_eq!(text("SELECT 'it''s ?', ?", ALL), "SELECT 'it''s ?', $1");
+    }
+
+    #[test]
+    fn backslash_escapes() {
+        let mysql = Styles {
+            backslash_escapes: true,
+            ..ALL
+        };
+        assert_eq!(text(r"SELECT 'it\'s ?', ?", mysql), r"SELECT 'it\'s ?', $1");
+        assert_eq!(text(r"SELECT 'a\\', ?", mysql), r"SELECT 'a\\', $1");
+        // Standard strings end at the quote; `E` strings take the backslash.
+        assert_eq!(text(r"SELECT 'a\', ?", ALL), r"SELECT 'a\', $1");
+        assert_eq!(text(r"SELECT E'it\'s ?', ?", ALL), r"SELECT E'it\'s ?', $1");
+        assert_eq!(text(r"SELECT bare'x', ?", ALL), r"SELECT bare'x', $1");
     }
 
     #[test]

@@ -47,10 +47,11 @@ _SEQUENCES = frozenset({"list", "tuple", "set", "frozenset"})
 
 # What a parameter of a given type takes. Any ``str`` is taken for any type: the server
 # coerces text (psycopg sends it untyped), so only the other types are judged.
+_NUMBERS = frozenset({"int", "float", "bool", "decimal.Decimal"})
 _ACCEPTS: dict[str, frozenset[str]] = {
-    "int": frozenset({"int", "bool"}),
-    "float": frozenset({"int", "float", "bool", "decimal.Decimal"}),
-    "decimal.Decimal": frozenset({"int", "float", "bool", "decimal.Decimal"}),
+    "int": _NUMBERS,
+    "float": _NUMBERS,
+    "decimal.Decimal": _NUMBERS,
     "str": frozenset({"str"}),
     "bool": frozenset({"bool", "int"}),
     "bytes": frozenset({"bytes"}),
@@ -123,10 +124,10 @@ def mismatch(expected: str | None, nullable: bool | None, actual: str | None) ->
         'expects int, got datetime.date'
         >>> mismatch("int", False, "None")
         'is not nullable, got None'
-        >>> mismatch("list[int]", None, "list[float]")
-        'expects list[int], got list[float]'
-        >>> [mismatch("int", None, a) for a in ("bool", "str", None)]
-        [None, None, None]
+        >>> mismatch("list[int]", None, "list[bytes]")
+        'expects list[int], got list[bytes]'
+        >>> [mismatch("int", None, a) for a in ("bool", "str", "float", None)]
+        [None, None, None, None]
     """
     if actual is None:
         return None

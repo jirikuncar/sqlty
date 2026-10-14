@@ -58,11 +58,10 @@ from sqlty import SQL
 def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) -> None: ...
 
 execute("DELETE FROM users WHERE id = %(id)s OR age = %(id)s", {"id": 1})
-# error: [param-count-mismatch] "query and call parameters differ: missing 'name'"
+# error: [param-count-mismatch] "call is missing parameter 'name'"
 execute("DELETE FROM users WHERE id = %(id)s AND name = %(name)s", {"id": 1})
-# error: [param-count-mismatch] "query and call parameters differ: unknown 'age'"
 execute("DELETE FROM users WHERE id = %(id)s", {"id": 1, "age": 3})
-# error: [param-count-mismatch] "query and call parameters differ: missing 'id'; unknown 'ident'"
+# error: [param-count-mismatch] "call is missing parameter 'id'"
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 ```
 

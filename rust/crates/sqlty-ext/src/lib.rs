@@ -23,6 +23,7 @@ type ParamTuple = (
     Option<String>,
     Option<String>,
     Option<bool>,
+    bool,
 );
 
 /// A parsed schema and the tables and views it could not parse.
@@ -184,12 +185,13 @@ fn analyze_columns(
     }))
 }
 
-/// Parameters of a query as `(index, name, python_type, sql_type, nullable)` tuples.
+/// Parameters of a query as `(index, name, python_type, sql_type, nullable, cast)` tuples.
 ///
 /// A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) takes its type from its context: the
 /// column it is compared with or stored in, a cast, `LIMIT`, `= ANY(%s)`. `index` is
 /// 1-based; `name` is set for named placeholders. `nullable` is False when the parameter is
-/// stored in a `NOT NULL` column, True for a nullable one, None when not known. Types are
+/// stored in a `NOT NULL` column, True for a nullable one, None when not known. `cast` is
+/// True when the type is that of an explicit cast, which accepts any value. Types are
 /// None when the context does not say. Returns None when the query doesn't parse.
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
@@ -210,6 +212,7 @@ fn analyze_params(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<
                     param.python_type,
                     param.sql_type,
                     nullable,
+                    param.cast,
                 )
             })
             .collect(),

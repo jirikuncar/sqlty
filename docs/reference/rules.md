@@ -273,7 +273,9 @@ for the query's placeholders; see [Query parameters](../guide/parameters.md).
 
 Default: error. An argument whose type, stated in the source, can't be the type
 the query gives its parameter, or `None` for a parameter stored in a `NOT NULL`
-column. A `str`, and any argument of unknown type, is never reported.
+column. A `str`, a number for a numeric parameter, an argument of a cast
+parameter and any argument of unknown type are never reported. Not checked for
+SQLite, except `None`.
 
 ```python
 from typing import Annotated, LiteralString
@@ -281,8 +283,8 @@ from sqlty import SQL
 
 def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...]) -> None: ...
 
-# error: [param-type-mismatch] "parameter 1 expects int, got float"
-execute("SELECT 1 FROM users LIMIT %s", (1.5,))
+# error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+execute("SELECT 1 FROM users LIMIT %s", (b"1",))
 ```
 
 Fix: pass a value of the expected type.

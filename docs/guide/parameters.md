@@ -75,8 +75,8 @@ def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...] = (
 
 execute("SELECT id FROM users WHERE id = %s AND age > %s", (1, 18))
 
-# error: [param-type-mismatch] "parameter 2 expects int, got float"
-execute("SELECT id FROM users WHERE id = %s AND age > %s", (1, 18.5))
+# error: [param-type-mismatch] "parameter 2 expects int, got bytes"
+execute("SELECT id FROM users WHERE id = %s AND age > %s", (1, b"1"))
 
 # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
 execute("SELECT id FROM users WHERE id = %s AND age > %s", (1,))
@@ -85,8 +85,11 @@ execute("SELECT id FROM users WHERE id = %s AND age > %s", (1,))
 [`param-type-mismatch`](../reference/rules.md#param-type-mismatch) judges an
 argument only where its type is stated: a literal, a variable annotated or
 assigned a class, a call of a known class. An argument of unknown type is
-never reported, and a `str` is accepted everywhere because the server coerces
-text. `None` is reported only for a parameter stored in a `NOT NULL` column.
+never reported. Text (`str`) is accepted everywhere because the server coerces
+it, `int`, `float` and `Decimal` are interchangeable, and an explicit cast
+(`%s::text`) takes anything. `None` is reported only for a parameter stored in
+a `NOT NULL` column. SQLite is dynamically typed, so with `dialect = "sqlite"`
+only `None` and the parameter count are checked.
 
 ```python
 from datetime import date
@@ -104,7 +107,7 @@ def register(name: str, born: date, age: int | None, other) -> None:
 
 Named placeholders match a dict literal or keyword arguments;
 [`param-count-mismatch`](../reference/rules.md#param-count-mismatch) reports
-names that are missing or unknown:
+names the call does not pass; extra keys are ignored, as the drivers do:
 
 ```python
 from typing import Annotated, LiteralString
@@ -114,7 +117,7 @@ def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) 
 def run(query: Annotated[LiteralString, SQL], /, **params: object) -> None: ...
 
 execute("DELETE FROM users WHERE id = %(id)s", {"id": 1})
-# error: [param-count-mismatch] "query and call parameters differ: missing 'id'; unknown 'ident'"
+# error: [param-count-mismatch] "call is missing parameter 'id'"
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 # error: [param-type-mismatch] "parameter 'age' expects int, got bytes"
 run("DELETE FROM users WHERE age = %(age)s", age=b"1")

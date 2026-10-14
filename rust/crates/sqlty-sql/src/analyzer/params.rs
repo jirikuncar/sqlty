@@ -28,6 +28,9 @@ pub struct Param {
     /// [`Nullability::NonNull`] when `None` cannot be passed (it is stored in a `NOT NULL`
     /// column), [`Nullability::Nullable`] when it can, else [`Nullability::Unknown`].
     pub nullability: Nullability,
+    /// Whether the type is that of an explicit cast (`%s::text`): the server converts
+    /// whatever is passed, so the value is not held to it.
+    pub cast: bool,
 }
 
 /// What a parameter's uses say about it. The first use that types it wins, and so does the
@@ -36,12 +39,22 @@ pub struct Param {
 struct Hint {
     typed: Typed,
     nullability: Nullability,
+    cast: bool,
 }
 
 #[derive(Default)]
 pub(super) struct Hints(BTreeMap<usize, Hint>);
 
 impl Hints {
+    /// The type of an explicit cast.
+    fn add_cast(&mut self, index: usize, typed: Typed) {
+        let hint = self.0.entry(index).or_default();
+        if hint.typed.0.is_none() && typed.0.is_some() {
+            hint.typed = typed;
+            hint.cast = true;
+        }
+    }
+
     fn add(&mut self, index: usize, typed: Typed, nullability: Nullability) {
         let hint = self.0.entry(index).or_default();
         if hint.typed.0.is_none() && typed.0.is_some() {
@@ -65,6 +78,7 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
         question_marks: dialect != SqlDialect::Postgres,
         colon_names: dialect == SqlDialect::Sqlite,
         dollar_numbers: dialect == SqlDialect::Postgres,
+        backslash_escapes: dialect == SqlDialect::MySql,
     };
     let read = |styles| {
         let rewritten = placeholders::rewrite(sql, styles);
@@ -106,6 +120,7 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
                     python_type: hint.typed.0,
                     sql_type: hint.typed.1,
                     nullability: hint.nullability,
+                    cast: hint.cast,
                 }
             })
             .collect(),
@@ -510,7 +525,7 @@ impl<'a> Analyzer<'a> {
                 if let (Some(index), Ok(typed)) = (placeholder_index(inner), self.expr(expr, scope))
                 {
                     if is_typed(&typed) {
-                        out.add(index, typed, Nullability::Unknown);
+                        out.add_cast(index, typed);
                     }
                 }
             }

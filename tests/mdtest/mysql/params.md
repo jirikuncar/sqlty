@@ -30,3 +30,10 @@ INSERT INTO users (id, name, age) VALUES (?, ?, ?)
 -- params: 2: str (VARCHAR(50)) NOT NULL
 -- params: 3: int (INT) NULL
 ```
+
+## Backslash escapes in strings
+
+```sql
+SELECT 'it\'s ?', id FROM users WHERE name = ?
+-- params: 1: str (VARCHAR(50))
+```

@@ -6,6 +6,9 @@ A receiver is recognised only when the file shows what it is: a variable bound t
 query is a string literal, ``SQL[T]("...")`` of one, or a name assigned exactly one of
 those. Anything else is skipped.
 
+Names are resolved per scope, and a name a loop, comprehension, unpacking, import or
+unannotated parameter binds is unknown.
+
 Example:
     >>> src = '''
     ... import sqlite3
@@ -69,65 +72,132 @@ def _qualified(name: str | None, parsed: ParsedSource) -> str | None:
     return None if imported is None else f"{imported}.{rest}" if rest else imported
 
 
-def _receivers(parsed: ParsedSource) -> dict[str, str]:
-    """Names the file binds to a connection or cursor, to the driver; ambiguous names are dropped."""
-    tree = parsed.tree
-    if tree is None:
-        return {}
-    kinds: dict[str, set[str | None]] = defaultdict(set)
+_Binding = tuple[ast.expr | None, ast.expr | None]  # (value, annotation); both None: unknown
+_Scope = ast.AST  # the module, or a function
 
-    def kind_of(value: ast.expr | None, annotation: ast.expr | None = None) -> str | None:
+
+class _Scopes:
+    """What names mean in each scope of a file.
+
+    A name takes its meaning from the innermost enclosing function (or the module) that
+    binds it. Names bound by anything but a plain assignment, an annotated parameter or
+    ``with ... as name`` (loops, comprehensions, unpacking, imports, definitions, an
+    unannotated parameter) are unknown.
+    """
+
+    def __init__(self, parsed: ParsedSource) -> None:
+        assert parsed.tree is not None
+        self.parsed = parsed
+        self.tree: _Scope = parsed.tree
+        self._bindings: dict[int, dict[str, list[_Binding]]] = {}
+        self._resolving: set[tuple[int, str]] = set()
+
+    def chain(self, call: ast.Call) -> list[_Scope]:
+        """The scopes around ``call``, outermost (the module) first."""
+        inner = [
+            s
+            for s in self.parsed.scopes_of(call)
+            if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        return [self.tree, *inner]
+
+    def _of(self, scope: _Scope) -> dict[str, list[_Binding]]:
+        if (found := self._bindings.get(id(scope))) is not None:
+            return found
+        names: dict[str, list[_Binding]] = defaultdict(list)
+        self._bindings[id(scope)] = names
+        unknown: _Binding = (None, None)
+
+        def bind(target: ast.AST, binding: _Binding = unknown) -> None:
+            if isinstance(target, ast.Name):
+                names[target.id].append(binding)
+            else:
+                for node in ast.walk(target):
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                        names[node.id].append(unknown)
+
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = scope.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+                if arg is not None:
+                    names[arg.arg].append((None, arg.annotation))
+        pending = list(ast.iter_child_nodes(scope))
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names[node.name].append(unknown)
+                continue
+            if isinstance(node, ast.Lambda):
+                continue
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    bind(target, (node.value, None) if isinstance(target, ast.Name) else unknown)
+            elif isinstance(node, ast.AnnAssign):
+                bind(node.target, (node.value, node.annotation))
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        bind(item.optional_vars, (item.context_expr, None))
+            elif isinstance(
+                node, (ast.For, ast.AsyncFor, ast.comprehension, ast.AugAssign, ast.NamedExpr)
+            ):
+                bind(node.target)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                names[node.name].append(unknown)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    names[(alias.asname or alias.name).partition(".")[0]].append(unknown)
+            pending.extend(ast.iter_child_nodes(node))
+        return names
+
+    def _lookup(self, name: str, scopes: list[_Scope]) -> list[_Binding] | None:
+        for scope in reversed(scopes):
+            if (found := self._of(scope).get(name)) is not None:
+                return found
+        return None
+
+    def driver(self, name: str, scopes: list[_Scope]) -> str | None:
+        """The driver of the connection or cursor ``name`` is, in ``scopes``, when every binding agrees."""
+        key = (id(scopes[-1]), name)
+        if key in self._resolving or (bindings := self._lookup(name, scopes)) is None:
+            return None
+        self._resolving.add(key)
+        try:
+            drivers = {self._kind(value, annotation, scopes) for value, annotation in bindings}
+        finally:
+            self._resolving.discard(key)
+        return drivers.pop() if len(drivers) == 1 else None
+
+    def _kind(
+        self, value: ast.expr | None, annotation: ast.expr | None, scopes: list[_Scope]
+    ) -> str | None:
         if annotation is not None:
-            name = _qualified(_dotted(annotation), parsed)
-            if name in _CONNECTIONS or name in _CURSORS:
-                return (_CONNECTIONS | _CURSORS)[name]
+            name = _qualified(_dotted(annotation), self.parsed)
+            if name in _CONNECTIONS:
+                return _CONNECTIONS[name]
+            if name in _CURSORS:
+                return _CURSORS[name]
         while isinstance(value, ast.Await):
             value = value.value
         if isinstance(value, ast.Call):
-            name = _qualified(_dotted(value.func), parsed)
+            name = _qualified(_dotted(value.func), self.parsed)
             if name in _CONNECTIONS:
                 return _CONNECTIONS[name]
             func = value.func
-            if isinstance(func, ast.Attribute) and func.attr == "cursor":
-                if isinstance(func.value, ast.Name) and func.value.id in kinds:
-                    return (
-                        next(iter(kinds[func.value.id])) if len(kinds[func.value.id]) == 1 else None
-                    )
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "cursor"
+                and isinstance(func.value, ast.Name)
+            ):
+                return self.driver(func.value.id, scopes)
         return None
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            if isinstance(node.targets[0], ast.Name):
-                kinds[node.targets[0].id].add(kind_of(node.value))
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            kinds[node.target.id].add(kind_of(node.value, node.annotation))
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for item in node.items:
-                if isinstance(item.optional_vars, ast.Name):
-                    kinds[item.optional_vars.id].add(kind_of(item.context_expr))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
-                kinds[arg.arg].add(kind_of(None, arg.annotation))
-    resolved: dict[str, str] = {}
-    for name, found in kinds.items():
-        driver = next(iter(found)) if len(found) == 1 else None
-        if driver is not None:
-            resolved[name] = driver
-    return resolved
-
-
-def _literals(parsed: ParsedSource) -> dict[str, str]:
-    """Names assigned exactly once, to a query literal."""
-    tree = parsed.tree
-    assert tree is not None
-    values: dict[str, list[str | None]] = defaultdict(list)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            if isinstance(node.targets[0], ast.Name):
-                values[node.targets[0].id].append(_literal(node.value))
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            values[node.target.id].append(_literal(node.value))
-    return {n: v[0] for n, v in values.items() if len(v) == 1 and v[0] is not None}
+    def query(self, name: str, scopes: list[_Scope]) -> str | None:
+        """The query literal ``name`` is bound to, in ``scopes``, when it has exactly one binding."""
+        bindings = self._lookup(name, scopes)
+        if bindings is None or len(bindings) != 1:
+            return None
+        return _literal(bindings[0][0])
 
 
 def _literal(node: ast.expr | None) -> str | None:
@@ -151,10 +221,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         return []
     if parsed.tree is None:
         return []
-    receivers = _receivers(parsed)
-    if not receivers:
-        return []
-    literals = _literals(parsed)
+    scopes = _Scopes(parsed)
     found: list[HelperCall] = []
     aliases = parsed.typing_aliases
     for call in parsed.calls_to(None):
@@ -162,7 +229,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         if not (
             isinstance(func, ast.Attribute)
             and isinstance(func.value, ast.Name)
-            and (driver := receivers.get(func.value.id))
+            and (driver := scopes.driver(func.value.id, chain := scopes.chain(call)))
             and func.attr in _METHODS[driver]
             and call.args
             and not any(isinstance(arg, ast.Starred) for arg in call.args)
@@ -171,7 +238,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         first = call.args[0]
         query = _literal(first)
         if query is None and isinstance(first, ast.Name):
-            query = literals.get(first.id)
+            query = scopes.query(first.id, chain)
         if query is None:
             continue
         stack = parsed.scopes_of(call)

@@ -23,7 +23,7 @@ def analyze_params(
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
-) -> list[tuple[int, str | None, str | None, str | None, bool | None]] | None: ...
+) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool]] | None: ...
 def query_diagnostics(
     sql: str,
     *,

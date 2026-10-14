@@ -95,6 +95,8 @@ class ParamInfo(NamedTuple):
 
     ``nullable`` is ``False`` when ``None`` cannot be passed (the parameter is stored in a
     ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
+    ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
+    accepts any value.
     """
 
     number: int
@@ -102,6 +104,7 @@ class ParamInfo(NamedTuple):
     python_type: str | None
     sql_type: str | None
     nullable: bool | None
+    cast: bool = False
 
 
 def analyze_params(
@@ -118,7 +121,7 @@ def analyze_params(
     Example:
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
         >>> analyze_params("SELECT name FROM users WHERE id = %s AND age > %(min)s", schema_sql=schema)
-        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None)]
+        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False)]
         >>> [(p.python_type, p.nullable) for p in analyze_params("INSERT INTO users (id, name, age) VALUES ($1, $2, $3)", schema_sql=schema)]
         [('int', False), ('str', False), ('int', True)]
         >>> analyze_params("SELECT 1 FROM users WHERE id = ANY(%s)", schema_sql=schema)[0].python_type
@@ -504,20 +507,22 @@ def _param_diagnostics(
                 f"the call passes {len(passed)}",
             )
         )
-    elif named and passed.keys() != by_key.keys():
-        missing = [f"'{key}'" for key in by_key if key not in passed]
-        extra = [f"'{key}'" for key in passed if key not in by_key]
-        parts = [f"missing {', '.join(missing)}"] if missing else []
-        parts += [f"unknown {', '.join(extra)}"] if extra else []
+    elif named and (missing := [f"'{key}'" for key in by_key if key not in passed]):
         found.append(
-            ("param-count-mismatch", f"query and call parameters differ: {'; '.join(parts)}")
+            (
+                "param-count-mismatch",
+                f"call is missing parameter{'' if len(missing) == 1 else 's'} {', '.join(missing)}",
+            )
         )
+    # sqlite3 is dynamically typed, and a cast converts whatever it is given.
+    typed = dialect.lower() != "sqlite"
     for key, arg in passed.items():
         if (param := by_key.get(key)) is None:
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
-        if problem := mismatch(param.python_type, param.nullable, arg.type):
-            found.append(("param-type-mismatch", f"{label} {problem}"))
+        if arg.type == "None" or (typed and not param.cast):
+            if problem := mismatch(param.python_type, param.nullable, arg.type):
+                found.append(("param-type-mismatch", f"{label} {problem}"))
     return found
 
 

@@ -212,3 +212,17 @@ SELECT id FROM users
 SELEC id FROM users WHERE id = %s
 -- params: None
 ```
+
+## E strings take backslash escapes
+
+```sql
+SELECT E'it\'s ?', id FROM users WHERE name = %s
+-- params: 1: str (TEXT)
+```
+
+## An explicit cast marks the parameter
+
+```sql
+SELECT %s::text
+-- params: 1: str (TEXT)
+```

@@ -11,8 +11,8 @@ spelled out (a `params` argument holding a tuple, list or dict literal,
 
 - a different number of positional arguments than the query has placeholders
   (`%s`, `$1`, `?`; the highest `$N` counts);
-- named arguments that the query does not name (`%(name)s`, `:name`), or
-  names the call does not pass. A name used twice is one parameter.
+- names of the query (`%(name)s`, `:name`) the call does not pass. A name used
+  twice is one parameter; extra keys are ignored, as the drivers do.
 
 Driver calls are checked too: `execute` and `executemany` (each row) on a
 psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
@@ -55,7 +55,7 @@ def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...] | d
 
 # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
 execute("SELECT id FROM users WHERE id = %s AND name = %s", (1,))
-# error: [param-count-mismatch] "query and call parameters differ: missing 'name'"
+# error: [param-count-mismatch] "call is missing parameter 'name'"
 execute("SELECT id FROM users WHERE id = %(id)s AND name = %(name)s", {"id": 1})
 ```
 
