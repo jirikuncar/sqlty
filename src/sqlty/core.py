@@ -64,6 +64,8 @@ class _RowColumn(NamedTuple):
     python_type: str | None
     sql_type: str | None
     nullable: bool | None
+    json_shape: str | None = None
+    """The shape of the JSON the column builds, as the engine spells it (see ``_json_shape``)."""
 
 
 def analyze_select(
@@ -85,6 +87,30 @@ def analyze_select(
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
+
+
+def json_shapes(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[tuple[str, str]]:
+    """The shape of the JSON each column builds, as ``(column, shape)`` pairs.
+
+    Only PostgreSQL columns built with ``jsonb_build_object()``, ``jsonb_agg()``,
+    ``to_jsonb()``, ``->`` and the like have one. The column's Python type stays ``Any``;
+    ``json-shape-mismatch`` checks the shape against the row type.
+
+    Example:
+        >>> json_shapes("SELECT jsonb_build_object('id', 1, 'name', 'x') AS doc")
+        [('doc', '{id: integer, name: string}')]
+        >>> json_shapes("SELECT coalesce(jsonb_agg(x::TEXT), '[]') AS xs FROM t")
+        [('xs', '[string | null]')]
+    """
+    from sqlty._json_shape import render
+
+    try:
+        columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
+    except RuntimeError:
+        return []
+    return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
 
 
 def query_diagnostics(
@@ -692,6 +718,7 @@ __all__ = [
     "expand_star",
     "fix_source",
     "infer_type",
+    "json_shapes",
     "query_diagnostics",
     "returns_rows",
     "rewrite_source",

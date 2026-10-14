@@ -72,6 +72,9 @@ class Run:
                 if columns is None:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
+            case "json":
+                shapes = core.json_shapes(text, dialect=self.dialect, schema_sql=self.schema_sql)
+                return "\n".join(f"{name}: {shape}" for name, shape in shapes) or "None"
             case "rewritten":
                 rewritten = _parses(text, self._rewrite(text), same_strings=True)
                 return _without_imports(rewritten, self._imports).strip()

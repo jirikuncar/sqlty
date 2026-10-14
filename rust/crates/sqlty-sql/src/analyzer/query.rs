@@ -22,6 +22,8 @@ pub struct Column {
     pub python_type: Option<String>,
     pub sql_type: Option<String>,
     pub nullability: Nullability,
+    /// The shape of the JSON value the column holds, when the query spells it out.
+    pub json: Option<JsonShape>,
 }
 
 impl Column {
@@ -31,6 +33,7 @@ impl Column {
             python_type: None,
             sql_type: None,
             nullability: Nullability::Unknown,
+            json: None,
         }
     }
 
@@ -198,6 +201,8 @@ impl<'a> Analyzer<'a> {
         let Some(mut columns) = branches.next().flatten() else {
             return Ok(None);
         };
+        let mut shapes: Vec<Option<JsonShape>> =
+            columns.iter().map(|col| col.json.clone()).collect();
         let mut types: Vec<Option<Typed>> = columns
             .iter()
             .map(|col| Some((col.python_type.clone(), col.sql_type.clone())))
@@ -206,7 +211,8 @@ impl<'a> Analyzer<'a> {
             .flatten()
             .filter(|cols| cols.len() == columns.len())
         {
-            for (common, col) in types.iter_mut().zip(branch) {
+            for ((common, shape), col) in types.iter_mut().zip(&mut shapes).zip(branch) {
+                *shape = shape.take().zip(col.json.clone()).map(|(a, b)| a.unify(&b));
                 *common = common
                     .take()
                     .and_then(|ty| common_type(ty, (col.python_type, col.sql_type), self.dialect));
@@ -224,8 +230,9 @@ impl<'a> Analyzer<'a> {
             }
             (column.python_type, column.sql_type) = common.unwrap_or((None, None));
         }
-        for (column, nullability) in columns.iter_mut().zip(nullability) {
+        for ((column, nullability), shape) in columns.iter_mut().zip(nullability).zip(shapes) {
             column.nullability = nullability;
+            column.json = shape;
         }
         Ok(Some(columns))
     }
@@ -259,6 +266,7 @@ impl<'a> Analyzer<'a> {
                 python_type,
                 sql_type,
                 nullability,
+                json: None,
             });
         }
         Ok(columns)
@@ -318,11 +326,13 @@ impl<'a> Analyzer<'a> {
                 );
             }
             let nullability = self.nullability(expr, scope, &self.facts);
+            let json = self.column_json(expr, sql_type.as_deref(), scope)?;
             columns.push(Column {
                 name,
                 python_type,
                 sql_type,
                 nullability,
+                json,
             });
         }
         Ok(columns)

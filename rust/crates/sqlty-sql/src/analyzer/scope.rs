@@ -252,6 +252,7 @@ impl<'a> Analyzer<'a> {
             python_type,
             sql_type,
             nullability: Nullability::Unknown,
+            json: None,
         };
         Some(
             match self.schema.function(&table_key(name, self.dialect), args)? {
@@ -440,6 +441,7 @@ impl<'a> Analyzer<'a> {
                                         python_type,
                                         sql_type,
                                         nullability: Nullability::declared(col.not_null),
+                                        json: None,
                                     }
                                 })
                                 .collect()
