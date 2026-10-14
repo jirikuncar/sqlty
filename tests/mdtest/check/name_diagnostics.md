@@ -436,3 +436,37 @@ a = SQL[tuple[int, int, int]]("--sql\nSELECT rowid, oid, _rowid_ FROM users")
 # error: [unknown-column] "column `ctid` does not exist in `users`"
 b = SQL[tuple[int]]("--sql\nSELECT ctid FROM users")
 ```
+
+## Stars
+
+A column a star lists without a type is explained like a named one.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-type = "error"
+unsupported-syntax = "error"
+select-star = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE a (id INTEGER, g GEOMETRY);
+CREATE VIEW opaque AS SELECT id, DATE '2020-01-01' AS day FROM a;
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-type] "column `a.g` has type `GEOMETRY`"
+x = SQL[tuple[int, str]]("--sql\nSELECT * FROM a")
+# error: [unknown-type] "column `a.g` has type `GEOMETRY`"
+y = SQL[tuple[int, str]]("--sql\nSELECT a.* FROM a, generate_series(1, 3) AS g(x)")
+# error: [unsupported-syntax] "view column `opaque.day` is not typed"
+z = SQL[tuple[int, object]]("--sql\nSELECT * FROM opaque")
+# error: [unsupported-syntax] "`*` reads table function generate_series"
+w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, generate_series(1, 3) AS g(x)")
+```

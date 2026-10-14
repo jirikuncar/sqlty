@@ -272,6 +272,43 @@ impl<'a> Analyzer<'a> {
         self.diag.record(NameRule::UnknownColumn, message);
     }
 
+    /// The columns a star lists that have no Python type: a schema column of an unmapped
+    /// type, or a view column its own query left untyped.
+    pub(super) fn explain_untyped_star_columns(&self, reference: Option<&str>, scope: &Scope) {
+        let reference = reference.map(str::to_lowercase);
+        for table in Self::star_tables(reference.as_deref(), scope) {
+            if self.virtuals.contains_key(&table) {
+                continue;
+            }
+            if let Some(columns) = self.virtual_columns(&table) {
+                for col in columns
+                    .iter()
+                    .filter(|c| c.python_type.is_none() && !c.is_unknown_star())
+                {
+                    self.diag.record(
+                        NameRule::UnsupportedSyntax,
+                        format!(
+                            "view column `{table}.{}` is not typed by the view's query",
+                            col.name
+                        ),
+                    );
+                }
+            } else if let Some(columns) = self.schema.get(&table) {
+                for col in columns {
+                    if col.typed(self.dialect).0.is_none() {
+                        self.diag.record(
+                            NameRule::UnknownType,
+                            format!(
+                                "column `{table}.{}` has type `{}`, which has no Python type",
+                                col.name, col.sql_type
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// A star that expanded to an unknown `*`: a view whose own query could not be typed
     /// says so; for a CTE or derived table that query explains it.
     pub(super) fn explain_view_star(&self, reference: Option<&str>, scope: &Scope) {

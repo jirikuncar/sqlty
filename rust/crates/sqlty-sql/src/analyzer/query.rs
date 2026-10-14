@@ -238,6 +238,7 @@ impl<'a> Analyzer<'a> {
                 if columns.iter().any(Column::is_unknown_star) {
                     self.explain_view_star(reference, scope);
                 }
+                self.explain_untyped_star_columns(reference, scope);
                 columns
             }
             None => {
