@@ -6,37 +6,43 @@
 //! their values. Everything that computes a new value from its inputs ([`strip`]) goes back
 //! to the plain type, so a set is always a superset of the values an expression can take.
 
-use super::*;
+use std::rc::Rc;
+
 use crate::values::{self, Value as Lit};
+
+use super::dialect::SqlDialect;
+use super::operators::common_type;
+use super::python_type;
+use super::typed::Typed;
 
 /// A string or integer constant.
 pub(super) fn constant(value: Lit) -> Typed {
-    (values::render(&[value]), None)
+    Typed::new(values::render(&[value]), None)
 }
 
 /// The values `typed` is limited to, when it is a `Literal`.
 pub(super) fn value_set(typed: &Typed) -> Option<Vec<Lit>> {
-    typed.0.as_deref().and_then(values::parse)
+    typed.python().and_then(values::parse)
 }
 
 /// The Python type with a `Literal` collapsed to `str` or `int`, for code that tells
 /// constants by their Python type.
 pub(super) fn python_kind(typed: &Typed) -> Option<&str> {
-    let python = typed.0.as_deref()?;
+    let python = typed.python()?;
     Some(values::base(python).unwrap_or(python))
 }
 
 /// `typed` without its value set: what a computation over it gives.
 pub(super) fn strip(typed: Typed, dialect: SqlDialect) -> Typed {
-    let Some(kind) = typed.0.as_deref().and_then(values::base) else {
+    let Some(kind) = typed.python().and_then(values::base) else {
         return typed;
     };
-    match typed.1 {
-        None => (Some(kind.to_string()), None),
-        Some(sql_type) => match python_type(&sql_type, dialect) {
-            Some(python) => (Some(python), Some(sql_type)),
-            // A user-defined enum has no plain Python type.
-            None => (None, Some(sql_type)),
+    match typed.sql {
+        None => Typed::python_only(kind),
+        // A user-defined enum has no plain Python type.
+        Some(sql_type) => Typed {
+            python: python_type(&sql_type, dialect).map(Rc::from),
+            sql: Some(sql_type),
         },
     }
 }
@@ -60,10 +66,13 @@ pub(super) fn merge(left: &Typed, right: &Typed, dialect: SqlDialect) -> Option<
     if let (Some(a), Some(b)) = (known_left, known_right) {
         let all = values::union(a, b);
         // An enum keeps every label it has; other sets widen past the cap.
-        let enum_type = plain.0.is_none() && plain.1.is_some();
+        let enum_type = plain.python.is_none() && plain.sql.is_some();
         if enum_type || all.len() <= values::MAX_VALUES {
             if let Some(literal) = values::render(&all) {
-                return Some(Some((Some(literal), plain.1)));
+                return Some(Some(Typed {
+                    python: Some(Rc::from(literal)),
+                    sql: plain.sql,
+                }));
             }
         }
     }

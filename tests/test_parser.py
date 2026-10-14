@@ -140,7 +140,8 @@ def _type_table() -> dict[str, str]:
         Path(__file__).resolve().parent.parent / "rust/crates/sqlty-sql/src/analyzer/mod.rs"
     ).read_text()
     constants = dict(re.findall(r'const (\w+): &str = "([\w. |]+)";', source))
-    table = source[source.index("static SQL_TO_PYTHON_TYPE") : source.index("static STAR_ITEM")]
+    start = source.index("static SQL_TO_PYTHON_TYPE")
+    table = source[start : source.index("\n});", start)]
     pairs = re.findall(r'\("(\w+)", (?:"([\w.]+)"|(\w+))\)', table)
     return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
 

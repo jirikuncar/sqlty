@@ -6,7 +6,22 @@
 //! expressions the analyzer does not read are [`Nullability::Unknown`], which row types treat
 //! as non-optional.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{
+    AccessExpr, BinaryOperator, CastKind, Expr, FunctionArguments, Ident, JoinOperator, Query,
+    Select, SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins, Value,
+};
+
+use super::dialect::SqlDialect;
+use super::functions::{function_name, positional_args};
+use super::hashing::{ExprKey, FxHashSet};
+use super::literals::python_kind;
+use super::memo::Reporting;
+use super::names::split_access;
+use super::query::Analyzer;
+use super::registry::{lookup, Behavior};
+use super::scope::{table_scope, Scope};
 
 /// Whether a column can be NULL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -32,25 +47,29 @@ impl Nullability {
 }
 
 /// What a SELECT's FROM and conditions tell about NULLs.
-#[derive(Clone, Default)]
+///
+/// The lists are shared between the facts of a query and those of the expressions and
+/// subqueries inside it, which mostly add nothing: cloning is a reference count, and a list
+/// is copied only when something is added to a shared one.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Facts {
     /// References of relations an outer join null-extends: all their columns can be NULL.
-    null_extended: Vec<String>,
+    null_extended: Rc<Vec<String>>,
     /// `(reference, column)` pairs the conditions in force rule out as NULL.
-    pub(super) non_null: Vec<(String, String)>,
+    pub(super) non_null: Rc<Vec<(String, String)>>,
     /// References whose relation has a row in each result row: a null-extended relation
     /// with a column the conditions rule out as NULL cannot be the all-NULL row.
-    pub(super) present: Vec<String>,
-    /// Expressions (as printed) the conditions rule out as NULL, such as `doc -> 'k'`
-    /// after `doc ? 'k'`.
-    pub(super) non_null_exprs: HashSet<String>,
+    pub(super) present: Rc<Vec<String>>,
+    /// Expressions the conditions rule out as NULL, such as `doc -> 'k'` after `doc ? 'k'`.
+    /// Compared structurally (ignoring spans), not by their printed form.
+    pub(super) non_null_exprs: Rc<FxHashSet<ExprKey>>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
     /// `(reference, column)` pairs that `ROLLUP`, `CUBE`, `GROUPING SETS` or `WITH ROLLUP`
     /// turn into NULL in their subtotal rows.
-    rolled_up: Vec<(String, String)>,
-    /// Other grouping expressions (as printed) such subtotal rows set to NULL.
-    rolled_up_exprs: HashSet<String>,
+    rolled_up: Rc<Vec<(String, String)>>,
+    /// Other grouping expressions such subtotal rows set to NULL.
+    rolled_up_exprs: Rc<FxHashSet<ExprKey>>,
 }
 
 impl Facts {
@@ -93,24 +112,31 @@ impl Facts {
 
     /// Forget what is known about relations a nested SELECT defines itself.
     pub(super) fn without(&mut self, scope: &Scope) {
-        let shadowed = |r: &String| scope.iter().any(|(s, _)| s == r);
-        self.null_extended.retain(|r| !shadowed(r));
-        self.non_null.retain(|(r, _)| !shadowed(r));
-        self.present.retain(|r| !shadowed(r));
-        self.rolled_up.retain(|(r, _)| !shadowed(r));
-        // A printed expression does not say which relation its names belong to, and the
-        // nested SELECT may bind them to its own: none of them carries over.
-        self.non_null_exprs.clear();
-        self.rolled_up_exprs.clear();
+        let shadowed = |r: &String| scope.iter().any(|source| source.reference == *r);
+        // Rebuilding a list only when it has something to forget keeps shared ones shared.
+        fn forget<T: Clone>(list: &mut Rc<Vec<T>>, gone: impl Fn(&T) -> bool) {
+            if list.iter().any(&gone) {
+                Rc::make_mut(list).retain(|item| !gone(item));
+            }
+        }
+        forget(&mut self.null_extended, |r| shadowed(r));
+        forget(&mut self.non_null, |(r, _)| shadowed(r));
+        forget(&mut self.present, |r| shadowed(r));
+        forget(&mut self.rolled_up, |(r, _)| shadowed(r));
+        // An expression does not say which relation its names belong to, and the nested
+        // SELECT may bind them to its own: none of them carries over.
+        self.non_null_exprs = Rc::default();
+        self.rolled_up_exprs = Rc::default();
     }
 
     /// These facts without the grouping subtotals: what an aggregate reads is the rows of
     /// a group, not its subtotal row.
     fn ungrouped_rows(&self) -> Facts {
-        let mut facts = self.clone();
-        facts.rolled_up.clear();
-        facts.rolled_up_exprs.clear();
-        facts
+        Facts {
+            rolled_up: Rc::default(),
+            rolled_up_exprs: Rc::default(),
+            ..self.clone()
+        }
     }
 }
 
@@ -159,7 +185,7 @@ fn factor_references(
         // The reference the scope of the SELECT gives the relation.
         other => table_scope(other, dialect)
             .into_iter()
-            .map(|(reference, _)| reference)
+            .map(|source| source.reference)
             .collect(),
     }
 }
@@ -190,111 +216,6 @@ fn all_nullable(parts: impl IntoIterator<Item = Nullability>) -> Nullability {
     result
 }
 
-/// Aggregate functions, whose result over no rows is NULL (except `COUNT`).
-const AGGREGATES: &[&str] = &[
-    "SUM",
-    "AVG",
-    "MIN",
-    "MAX",
-    "STDDEV",
-    "STDDEV_POP",
-    "STDDEV_SAMP",
-    "VARIANCE",
-    "VAR_POP",
-    "VAR_SAMP",
-    "BOOL_AND",
-    "BOOL_OR",
-    "EVERY",
-    "BIT_AND",
-    "BIT_OR",
-    "BIT_XOR",
-    "ANY_VALUE",
-    "STRING_AGG",
-    "GROUP_CONCAT",
-    "ARRAY_AGG",
-    "JSON_AGG",
-    "JSONB_AGG",
-    "JSON_OBJECT_AGG",
-    "JSONB_OBJECT_AGG",
-    "JSON_ARRAYAGG",
-    "JSON_OBJECTAGG",
-    "XMLAGG",
-    "PERCENTILE_CONT",
-    "PERCENTILE_DISC",
-    "MODE",
-    "CORR",
-    "COVAR_POP",
-    "COVAR_SAMP",
-    "REGR_SLOPE",
-    "REGR_INTERCEPT",
-    "REGR_R2",
-    "REGR_AVGX",
-    "REGR_AVGY",
-    "REGR_SXX",
-    "REGR_SXY",
-    "REGR_SYY",
-    "TOTAL",
-];
-
-/// Aggregates that give NULL for a group of rows too: too few non-null rows for a sample
-/// statistic, a constant input for a correlation, or only NULLs to take a percentile of.
-const NULL_ON_FEW_ROWS: &[&str] = &[
-    "STDDEV",
-    "STDDEV_SAMP",
-    "VARIANCE",
-    "VAR_SAMP",
-    "PERCENTILE_CONT",
-    "PERCENTILE_DISC",
-    "MODE",
-    "CORR",
-    "COVAR_POP",
-    "COVAR_SAMP",
-    "REGR_SLOPE",
-    "REGR_INTERCEPT",
-    "REGR_R2",
-    "REGR_AVGX",
-    "REGR_AVGY",
-    "REGR_SXX",
-    "REGR_SXY",
-    "REGR_SYY",
-];
-
-/// Aggregates whose group of one or more rows always gives a value, whatever the rows hold.
-pub(super) const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
-    "ARRAY_AGG",
-    "JSON_AGG",
-    "JSONB_AGG",
-    "JSON_OBJECT_AGG",
-    "JSONB_OBJECT_AGG",
-    "JSON_ARRAYAGG",
-    "JSON_OBJECTAGG",
-    "XMLAGG",
-    "TOTAL",
-];
-
-/// Functions that can return NULL for non-null arguments.
-const ALWAYS_NULLABLE: &[&str] = &[
-    "NULLIF",
-    "REGEXP_MATCH",
-    "REGEXP_SUBSTR",
-    "REGEXP_INSTR",
-    "ARRAY_LENGTH",
-    "ARRAY_UPPER",
-    "ARRAY_LOWER",
-    "ARRAY_POSITION",
-    "JSON_EXTRACT",
-    "JSON_EXTRACT_PATH",
-    "JSON_EXTRACT_PATH_TEXT",
-    "JSONB_EXTRACT_PATH",
-    "JSONB_EXTRACT_PATH_TEXT",
-    "JSONB_PATH_QUERY_FIRST",
-    "JSON_VALUE",
-    "JSON_QUERY",
-    "NTH_VALUE",
-    // An array can hold NULL elements.
-    "UNNEST",
-];
-
 /// Whether the frame of a window always holds the current row. The default frame does; a
 /// spelled-out one must start at or before the current row and end at or after it.
 fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
@@ -308,36 +229,6 @@ fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
     }
 }
 
-/// Window and other functions that never return NULL.
-const NEVER_NULL: &[&str] = &[
-    "ROW_NUMBER",
-    "RANK",
-    "DENSE_RANK",
-    "NTILE",
-    "PERCENT_RANK",
-    "CUME_DIST",
-    "NOW",
-    "CURRENT_TIMESTAMP",
-    "CURRENT_DATE",
-    "CURRENT_TIME",
-    "LOCALTIME",
-    "LOCALTIMESTAMP",
-    "RANDOM",
-    "RAND",
-    "GEN_RANDOM_UUID",
-    "UUID",
-    "UUID_GENERATE_V4",
-    "JSON_BUILD_OBJECT",
-    "JSONB_BUILD_OBJECT",
-    "JSON_BUILD_ARRAY",
-    "JSONB_BUILD_ARRAY",
-    "NUM_NULLS",
-    "NUM_NONNULLS",
-    "JSON_OBJECT",
-    "JSON_ARRAY",
-    "ROW",
-];
-
 /// Whether `expr` holds an aggregate call outside any window or subquery.
 fn contains_aggregate(expr: &Expr) -> bool {
     match expr {
@@ -348,7 +239,7 @@ fn contains_aggregate(expr: &Expr) -> bool {
             (func.over.is_none()
                 && !scalar_min_max
                 && (matches!(name.as_str(), "COUNT" | "REGR_COUNT")
-                    || AGGREGATES.contains(&name.as_str())))
+                    || lookup(&name).is_some_and(|info| info.is_aggregate())))
                 || args.into_iter().any(contains_aggregate)
         }
         Expr::Nested(inner)
@@ -383,16 +274,6 @@ fn is_nonzero_number(expr: &Expr) -> bool {
         },
         _ => false,
     }
-}
-
-/// The upper-case name of a function, without its schema.
-fn function_name(func: &sqlparser::ast::Function) -> String {
-    func.name
-        .0
-        .last()
-        .and_then(|part| part.as_ident())
-        .map(|ident| ident.value.to_uppercase())
-        .unwrap_or_default()
 }
 
 /// Grouping expressions that a subtotal row sets to NULL: those inside `ROLLUP`, `CUBE` and
@@ -457,15 +338,15 @@ impl<'a> Analyzer<'a> {
     pub(super) fn select_facts(&self, select: &Select, scope: &Scope) -> Facts {
         let mut facts = self.facts.clone();
         facts.without(scope);
-        facts
-            .null_extended
-            .extend(null_extended(&select.from, self.dialect));
+        Rc::make_mut(&mut facts.null_extended).extend(null_extended(&select.from, self.dialect));
         facts.grouped = is_grouped(select);
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {
-                Some((reference, _, column)) => facts.rolled_up.push((reference, column)),
+                Some((reference, _, column)) => {
+                    Rc::make_mut(&mut facts.rolled_up).push((reference, column));
+                }
                 None => {
-                    facts.rolled_up_exprs.insert(expr.to_string());
+                    Rc::make_mut(&mut facts.rolled_up_exprs).insert(ExprKey::of(expr));
                 }
             }
         }
@@ -484,11 +365,14 @@ impl<'a> Analyzer<'a> {
 
     /// Whether `expr` can be NULL under `facts`.
     pub(super) fn nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
-        if !facts.non_null_exprs.is_empty() && facts.non_null_exprs.contains(&expr.to_string()) {
-            return Nullability::NonNull;
-        }
-        if !facts.rolled_up_exprs.is_empty() && facts.rolled_up_exprs.contains(&expr.to_string()) {
-            return Nullability::Nullable;
+        if !facts.non_null_exprs.is_empty() || !facts.rolled_up_exprs.is_empty() {
+            let key = ExprKey::of(expr);
+            if facts.non_null_exprs.contains(&key) {
+                return Nullability::NonNull;
+            }
+            if facts.rolled_up_exprs.contains(&key) {
+                return Nullability::Nullable;
+            }
         }
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
@@ -496,20 +380,11 @@ impl<'a> Analyzer<'a> {
             Expr::Cast {
                 expr: inner, kind, ..
             } => match kind {
-                sqlparser::ast::CastKind::TryCast | sqlparser::ast::CastKind::SafeCast => {
-                    Nullability::Nullable
-                }
+                CastKind::TryCast | CastKind::SafeCast => Nullability::Nullable,
                 _ => of(inner),
             },
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
-                match self.locate_column(expr, scope) {
-                    Some((reference, table, column)) => facts.column(
-                        &reference,
-                        &column,
-                        self.declared_nullability(&table, &column),
-                    ),
-                    None => Nullability::Unknown,
-                }
+                self.column_nullability(expr, scope, facts)
             }
             Expr::Value(value) => match value.value {
                 Value::Null => Nullability::Nullable,
@@ -533,29 +408,7 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotDistinctFrom(..) => Nullability::NonNull,
             Expr::UnaryOp { expr: inner, .. } => of(inner),
             Expr::BinaryOp { left, op, right } => {
-                use BinaryOperator::*;
-                match op {
-                    // The right side is read where the left one is true (AND) or false (OR).
-                    And | Or => {
-                        let known = if *op == And {
-                            self.learn(left, true, scope)
-                        } else {
-                            self.learn_not_true(left, scope, facts)
-                        };
-                        any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
-                    }
-                    // MySQL's null-safe equality; a vector distance in PostgreSQL.
-                    Spaceship if self.dialect == SqlDialect::MySql => Nullability::NonNull,
-                    // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
-                    Divide | Modulo | MyIntegerDivide
-                        if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
-                    {
-                        Nullability::Nullable
-                    }
-                    // JSON accessors yield NULL for a missing key or a JSON null.
-                    Arrow | LongArrow | HashArrow | HashLongArrow => Nullability::Nullable,
-                    _ => any_nullable([of(left), of(right)]),
-                }
+                self.binary_nullability(left, op, right, scope, facts)
             }
             Expr::Between {
                 expr: inner,
@@ -611,24 +464,13 @@ impl<'a> Analyzer<'a> {
                 substring_from,
                 substring_for,
                 ..
-            } => {
-                // PostgreSQL's `substring(s FROM 'pattern')` is NULL when nothing matches.
-                let by_pattern = self.dialect == SqlDialect::Postgres
-                    && substring_from.as_deref().is_some_and(
-                        |from| !matches!(self.expr(from, scope), Ok(typed) if python_kind(&typed) == Some("int")),
-                    );
-                let missed = if by_pattern {
-                    Nullability::Nullable
-                } else {
-                    Nullability::NonNull
-                };
-                any_nullable(
-                    std::iter::once(of(inner))
-                        .chain([missed])
-                        .chain(substring_from.as_deref().map(of))
-                        .chain(substring_for.as_deref().map(of)),
-                )
-            }
+            } => self.substring_nullability(
+                inner,
+                substring_from.as_deref(),
+                substring_for.as_deref(),
+                scope,
+                facts,
+            ),
             Expr::Trim {
                 expr: inner,
                 trim_what,
@@ -660,31 +502,107 @@ impl<'a> Analyzer<'a> {
                 facts,
             ),
             Expr::CompoundFieldAccess { root, access_chain } => {
-                let (mut result, chain) = match (root.as_ref(), access_chain.as_slice()) {
-                    (
-                        Expr::Identifier(table),
-                        [AccessExpr::Dot(Expr::Identifier(column)), rest @ ..],
-                    ) => {
-                        let column = Expr::CompoundIdentifier(vec![table.clone(), column.clone()]);
-                        (of(&column), rest)
-                    }
-                    _ => (of(root), access_chain.as_slice()),
-                };
-                for access in chain {
-                    result = match access {
-                        // An index past the end reads as NULL.
-                        AccessExpr::Subscript(Subscript::Index { .. }) => Nullability::Nullable,
-                        AccessExpr::Subscript(Subscript::Slice { .. }) => result,
-                        // A field of a row can hold NULL; a NULL row has only NULL fields.
-                        AccessExpr::Dot(_) if result == Nullability::Nullable => result,
-                        AccessExpr::Dot(_) => Nullability::Unknown,
-                    };
-                }
-                result
+                self.access_nullability(root, access_chain, scope, facts)
             }
             Expr::Function(func) => self.function_nullability(func, scope, facts),
             _ => Nullability::Unknown,
         }
+    }
+
+    /// A column reference: what its source declares, narrowed by `facts`.
+    fn column_nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
+        match self.locate_column(expr, scope) {
+            Some((reference, table, column)) => facts.column(
+                &reference,
+                &column,
+                self.declared_nullability(&table, &column),
+            ),
+            None => Nullability::Unknown,
+        }
+    }
+
+    fn binary_nullability(
+        &self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Nullability {
+        use BinaryOperator::*;
+        let of = |inner: &Expr| self.nullability(inner, scope, facts);
+        match op {
+            // The right side is read where the left one is true (AND) or false (OR).
+            And | Or => {
+                let known = if *op == And {
+                    self.learn(left, true, scope)
+                } else {
+                    self.learn_not_true(left, scope, facts)
+                };
+                any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
+            }
+            // MySQL's null-safe equality; a vector distance in PostgreSQL.
+            Spaceship if self.dialect == SqlDialect::MySql => Nullability::NonNull,
+            // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
+            Divide | Modulo | MyIntegerDivide
+                if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
+            {
+                Nullability::Nullable
+            }
+            // JSON accessors yield NULL for a missing key or a JSON null.
+            Arrow | LongArrow | HashArrow | HashLongArrow => Nullability::Nullable,
+            _ => any_nullable([of(left), of(right)]),
+        }
+    }
+
+    fn substring_nullability(
+        &self,
+        inner: &Expr,
+        from: Option<&Expr>,
+        length: Option<&Expr>,
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Nullability {
+        let of = |inner: &Expr| self.nullability(inner, scope, facts);
+        // PostgreSQL's `substring(s FROM 'pattern')` is NULL when nothing matches.
+        let by_pattern = self.dialect == SqlDialect::Postgres
+            && from.is_some_and(|from| {
+                !matches!(self.expr(from, scope), Ok(typed) if python_kind(&typed) == Some("int"))
+            });
+        let missed = if by_pattern {
+            Nullability::Nullable
+        } else {
+            Nullability::NonNull
+        };
+        any_nullable(
+            std::iter::once(of(inner))
+                .chain([missed])
+                .chain(from.map(of))
+                .chain(length.map(of)),
+        )
+    }
+
+    /// `col[1].field`: reading past an array's end or a row's field.
+    fn access_nullability(
+        &self,
+        root: &Expr,
+        access_chain: &[AccessExpr],
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Nullability {
+        let (root, chain) = split_access(root, access_chain);
+        let mut result = self.nullability(&root, scope, facts);
+        for access in chain {
+            result = match access {
+                // An index past the end reads as NULL.
+                AccessExpr::Subscript(Subscript::Index { .. }) => Nullability::Nullable,
+                AccessExpr::Subscript(Subscript::Slice { .. }) => result,
+                // A field of a row can hold NULL; a NULL row has only NULL fields.
+                AccessExpr::Dot(_) if result == Nullability::Nullable => result,
+                AccessExpr::Dot(_) => Nullability::Unknown,
+            };
+        }
+        result
     }
 
     /// Whether the elements of an array, or the rows of a subquery, can be NULL: a non-null
@@ -705,9 +623,7 @@ impl<'a> Analyzer<'a> {
 
     /// Nullability of the first column of a subquery, as its own query reads it.
     fn subquery_column(&self, query: &Query, scope: &Scope) -> Nullability {
-        let mut inner = self.correlated(scope);
-        inner.diag = Diagnostics::default();
-        match inner.query_columns(query) {
+        match &*self.subquery_columns(query, scope, Reporting::Silent) {
             Ok(Some(columns)) => columns
                 .first()
                 .map_or(Nullability::Unknown, |col| col.nullability),
@@ -754,6 +670,7 @@ impl<'a> Analyzer<'a> {
         facts: &Facts,
     ) -> Nullability {
         let name = function_name(func);
+        let info = lookup(&name);
         let args = positional_args(&func.args);
         let all_positional = match &func.args {
             FunctionArguments::List(list) => list.args.len() == args.len(),
@@ -770,10 +687,11 @@ impl<'a> Analyzer<'a> {
         if matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2 {
             return any_nullable(args.iter().map(|arg| of(arg)));
         }
-        if AGGREGATES.contains(&name.as_str()) {
+        let behavior = info.map_or(Behavior::Scalar, |info| info.behavior);
+        if behavior != Behavior::Scalar {
             // A window function over its frame sees the current row, unless the frame is
             // spelled out.
-            if NULL_ON_FEW_ROWS.contains(&name.as_str()) {
+            if behavior == Behavior::NullOnFewRows {
                 return Nullability::Nullable;
             }
             let framed = match &func.over {
@@ -786,7 +704,7 @@ impl<'a> Analyzer<'a> {
             } else {
                 !facts.grouped
             } || func.filter.is_some();
-            let arg = if ALWAYS_VALUED_AGGREGATES.contains(&name.as_str()) {
+            let arg = if behavior == Behavior::AlwaysValued {
                 Nullability::NonNull
             } else {
                 let rows = facts.ungrouped_rows();
@@ -804,7 +722,7 @@ impl<'a> Analyzer<'a> {
         if name == "CURRENT_SETTING" && args.len() == 2 {
             return Nullability::Nullable;
         }
-        if ALWAYS_NULLABLE.contains(&name.as_str()) {
+        if info.is_some_and(|info| info.always_nullable) {
             return Nullability::Nullable;
         }
         match name.as_str() {
@@ -829,8 +747,10 @@ impl<'a> Analyzer<'a> {
             "CONCAT" => any_nullable(args.iter().map(|arg| of(arg))),
             // Only a NULL separator gives NULL.
             "CONCAT_WS" => first(),
-            name if NEVER_NULL.contains(&name) => Nullability::NonNull,
-            name if self.returns(name).is_some() && all_positional => {
+            _ if info.is_some_and(|info| info.never_null) => Nullability::NonNull,
+            _ if info.is_some_and(|info| info.returns(self.dialect).is_some())
+                && all_positional =>
+            {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }
             // A user-defined function may or may not be strict.
@@ -842,6 +762,7 @@ impl<'a> Analyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::{analyze_select, load_schema};
 
     const SCHEMA: &str =
         "CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b TEXT NOT NULL, c TEXT);

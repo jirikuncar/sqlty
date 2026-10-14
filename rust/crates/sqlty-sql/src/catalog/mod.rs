@@ -615,11 +615,11 @@ mod tests {
             let mut best = std::time::Duration::MAX;
             let mut builds = 0;
             for _ in 0..15 {
-                super::resolve::BUILDS.with(|count| count.set(0));
+                resolve::BUILDS.with(|count| count.set(0));
                 let start = std::time::Instant::now();
                 let catalog = pg(sql);
                 best = best.min(start.elapsed());
-                builds = super::resolve::BUILDS.with(std::cell::Cell::get);
+                builds = resolve::BUILDS.with(std::cell::Cell::get);
                 assert!(catalog.table("t0").is_some());
             }
             println!("perf {name:28} best of 15: {best:>10.2?}  build() calls: {builds}");
@@ -722,7 +722,7 @@ mod tests {
     /// Functions do not force the catalog to be built again.
     #[test]
     fn test_functions_and_noop_alters_do_not_rebuild_the_catalog() {
-        super::resolve::BUILDS.with(|count| count.set(0));
+        resolve::BUILDS.with(|count| count.set(0));
         let _ = pg("CREATE TABLE t (id int);
             CREATE VIEW v1 AS SELECT id FROM t;
             CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
@@ -732,6 +732,6 @@ mod tests {
             CREATE VIEW v2 AS SELECT id FROM t;
             DROP FUNCTION f();");
         // One build for the first view, one at the end of the load.
-        assert_eq!(super::resolve::BUILDS.with(std::cell::Cell::get), 2);
+        assert_eq!(resolve::BUILDS.with(std::cell::Cell::get), 2);
     }
 }

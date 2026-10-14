@@ -6,14 +6,32 @@
 //! used where nothing says what it is stays untyped.
 
 use std::collections::BTreeMap;
+use std::ops::ControlFlow;
+use std::rc::Rc;
 
+use sqlparser::ast::{
+    visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
+    FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
+    TableFactor, TableObject, TableWithJoins, Value,
+};
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Function, Insert, LimitClause, OnConflictAction, OnInsert, Query,
     UpdateTableFromKind, Visit, Visitor,
 };
 
-use super::*;
+use crate::catalog::fold;
 use crate::placeholders::{self, Styles};
+
+use super::dialect::SqlDialect;
+use super::expr::{array_element, from_sql_type};
+use super::names::{object_name, table_key};
+use super::nullability::Nullability;
+use super::preprocess::{parse, parser_input};
+use super::query::{rename_columns, Analyzer, Column};
+use super::registry::lookup;
+use super::scope::{relations, Scope, Source};
+use super::typed::Typed;
+use super::SchemaData;
 
 /// A query parameter: `$N` in the rewritten query, and what its context says about it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,7 +81,7 @@ impl Hints {
     /// The type of an explicit cast.
     fn add_cast(&mut self, index: usize, typed: Typed) {
         let hint = self.0.entry(index).or_default();
-        if hint.typed.0.is_none() && typed.0.is_some() {
+        if hint.typed.python.is_none() && typed.python.is_some() {
             hint.typed = typed;
             hint.cast = true;
         }
@@ -71,9 +89,9 @@ impl Hints {
 
     fn add(&mut self, index: usize, mut typed: Typed, nullability: Nullability) {
         let hint = self.0.entry(index).or_default();
-        if hint.typed.0.is_none() && typed.0.is_some() {
+        if hint.typed.python.is_none() && typed.python.is_some() {
             // A parameter is compared with a value set, not limited to it: `str`, not `Literal`.
-            typed.0 = typed.0.map(|python| widen(&python));
+            typed.python = typed.python.map(|python| Rc::from(widen(&python)));
             hint.typed = typed;
         }
         if hint.nullability == Nullability::Unknown {
@@ -133,8 +151,8 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
                 Param {
                     index,
                     name: names.get(index - 1).cloned().flatten(),
-                    python_type: hint.typed.0,
-                    sql_type: hint.typed.1,
+                    python_type: hint.typed.python.map(|ty| ty.to_string()),
+                    sql_type: hint.typed.sql.map(|ty| ty.to_string()),
                     nullability: hint.nullability,
                     cast: hint.cast,
                 }
@@ -160,7 +178,7 @@ fn placeholder_index(expr: &Expr) -> Option<usize> {
 }
 
 fn is_typed(typed: &Typed) -> bool {
-    typed.0.is_some()
+    typed.python.is_some()
 }
 
 /// The comparisons whose operands share a type.
@@ -169,41 +187,9 @@ fn is_comparison(op: &BinaryOperator) -> bool {
     matches!(op, Eq | NotEq | Lt | LtEq | Gt | GtEq | Spaceship)
 }
 
-/// Positions of text and integer arguments of functions with a known signature.
-const SIGNATURES: &[(&[&str], &[&str])] = &[
-    (
-        &[
-            "LOWER",
-            "UPPER",
-            "TRIM",
-            "LTRIM",
-            "RTRIM",
-            "BTRIM",
-            "INITCAP",
-            "LENGTH",
-            "CHAR_LENGTH",
-            "REVERSE",
-            "MD5",
-            "ASCII",
-        ],
-        &["TEXT"],
-    ),
-    (&["REPLACE", "TRANSLATE"], &["TEXT", "TEXT", "TEXT"]),
-    (&["STRPOS", "STARTS_WITH"], &["TEXT", "TEXT"]),
-    (&["SPLIT_PART"], &["TEXT", "TEXT", "INT"]),
-    (&["LEFT", "RIGHT", "REPEAT"], &["TEXT", "INT"]),
-    (&["LPAD", "RPAD"], &["TEXT", "INT", "TEXT"]),
-    (&["SUBSTR"], &["TEXT", "INT", "INT"]),
-    (&["DATE_TRUNC"], &["TEXT"]),
-    (&["TO_CHAR"], &["", "TEXT"]),
-];
-
-/// Functions whose arguments share one type.
-const SAME_TYPE: &[&str] = &["COALESCE", "NULLIF", "GREATEST", "LEAST", "IFNULL"];
-
 impl<'a> Analyzer<'a> {
     fn param_typed(&self, sql_type: &str) -> Typed {
-        from_sql_type(sql_type.to_string(), self.dialect)
+        from_sql_type(sql_type, self.dialect)
     }
 
     pub(super) fn statement_params(&self, stmt: &Statement, out: &mut Hints) {
@@ -333,7 +319,7 @@ impl<'a> Analyzer<'a> {
             return;
         };
         let table = table_key(name, self.dialect);
-        let scope = vec![(object_name(name), table.clone())];
+        let scope = vec![Source::named(object_name(name), table.clone())];
         let targets: Vec<String> = if insert.columns.is_empty() {
             self.schema
                 .table(&table)
@@ -463,8 +449,12 @@ impl<'a> Analyzer<'a> {
         let Some(index) = placeholder_index(array) else {
             return;
         };
-        if let Ok((Some(python), sql)) = self.expr(element, scope) {
-            let typed = (
+        if let Ok(Typed {
+            python: Some(python),
+            sql,
+        }) = self.expr(element, scope)
+        {
+            let typed = Typed::new(
                 Some(format!("list[{python}]")),
                 sql.map(|sql| format!("ARRAY<{sql}>")),
             );
@@ -487,11 +477,11 @@ impl<'a> Analyzer<'a> {
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
                 self.hint_array(right, left, scope, out);
                 if let Some(index) = placeholder_index(left) {
-                    if let Ok((_, Some(sql))) = self.expr(right, scope) {
+                    if let Ok(Typed { sql: Some(sql), .. }) = self.expr(right, scope) {
                         if let Some(element) = array_element(&sql) {
                             out.add(
                                 index,
-                                from_sql_type(element.to_string(), self.dialect),
+                                from_sql_type(element, self.dialect),
                                 Nullability::Unknown,
                             );
                         }
@@ -520,7 +510,8 @@ impl<'a> Analyzer<'a> {
                 if let Some(index) = placeholder_index(expr) {
                     if let Ok(Some(columns)) = self.correlated(scope).query_columns(subquery) {
                         if let [column] = columns.as_slice() {
-                            let typed = (column.python_type.clone(), column.sql_type.clone());
+                            let typed =
+                                Typed::new(column.python_type.clone(), column.sql_type.clone());
                             if is_typed(&typed) {
                                 out.add(index, typed, Nullability::Unknown);
                             }
@@ -563,17 +554,15 @@ impl<'a> Analyzer<'a> {
             })
             .collect();
         let name = object_name(&function.name).to_uppercase();
-        if SAME_TYPE.contains(&name.as_str()) {
+        let info = lookup(&name);
+        if info.is_some_and(|info| info.same_type) {
             for placeholder in args.iter().flatten() {
                 for other in args.iter().flatten() {
                     self.hint_pair(placeholder, other, scope, out);
                 }
             }
-        } else if let Some((_, types)) = SIGNATURES
-            .iter()
-            .find(|(names, _)| names.contains(&name.as_str()))
-        {
-            for (arg, sql_type) in args.iter().zip(*types) {
+        } else if let Some(types) = info.and_then(|info| info.signature) {
+            for (arg, sql_type) in args.iter().zip(types) {
                 if let (Some(index), false) = (arg.and_then(placeholder_index), sql_type.is_empty())
                 {
                     out.add(index, self.param_typed(sql_type), Nullability::Unknown);
@@ -668,6 +657,7 @@ impl Visitor for Walker<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::load_schema;
 
     const SCHEMA: &str = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, \
                           age INTEGER, born DATE, tags TEXT[], uid UUID NOT NULL);
