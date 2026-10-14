@@ -131,7 +131,8 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
   ` - ` (the H1 title excluded).
 - Setup is inherited by nested headings, code is not: an unlabelled `toml`
   block is `[tool.sqlty]` config (unknown keys and rules are errors); a
-  `` `schema.sql`: `` label before a block makes it a file.
+  `` `schema.sql`: `` label before a block makes it a file; a labelled `.py`
+  file is a helper module (`pkg/db.py` is `pkg.db`) for `# error:` checks.
 - Each block with assertions is checked on its own, together with the
   assertion-free python blocks right before it (literate setup); later
   blocks are not part of it. Prose may sit between blocks.
