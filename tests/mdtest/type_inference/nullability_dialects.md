@@ -158,3 +158,69 @@ CREATE TABLE m (id INTEGER NOT NULL PRIMARY KEY, x INTEGER NOT NULL, y INTEGER N
 SELECT x / y, x % y, x / 2, x % 2 FROM m
 -- inferred: tuple[int | None, int | None, int, int]
 ```
+
+## SQLite: only an INTEGER PRIMARY KEY is never NULL
+
+SQLite lets a PRIMARY KEY column hold NULL, unless it is declared NOT NULL, the table is
+`WITHOUT ROWID` or `STRICT`, or it is the sole column of type `INTEGER`, which is the rowid.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE rowid_key (id INTEGER PRIMARY KEY);
+CREATE TABLE text_key (code TEXT PRIMARY KEY);
+CREATE TABLE int_key (n INT PRIMARY KEY);
+CREATE TABLE declared_key (code TEXT NOT NULL PRIMARY KEY);
+CREATE TABLE table_key (a INTEGER, b INTEGER, c INTEGER, PRIMARY KEY (a, b));
+CREATE TABLE single_key (a INTEGER, PRIMARY KEY (a));
+CREATE TABLE no_rowid (code TEXT PRIMARY KEY) WITHOUT ROWID;
+CREATE TABLE strict_key (code TEXT PRIMARY KEY) STRICT;
+```
+
+```sql
+SELECT id FROM rowid_key
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT code FROM text_key
+-- inferred: tuple[str | None]
+```
+
+`INT` is not the rowid alias.
+
+```sql
+SELECT n FROM int_key
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT code FROM declared_key
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT a, b, c FROM table_key
+-- inferred: tuple[int | None, int | None, int | None]
+```
+
+```sql
+SELECT a FROM single_key
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT code FROM no_rowid
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT code FROM strict_key
+-- inferred: tuple[str]
+```

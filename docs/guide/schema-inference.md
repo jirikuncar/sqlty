@@ -87,7 +87,9 @@ total = "--sql\nSELECT count(*), max(total) FROM orders"
 
 What makes a column nullable or not:
 
-- **Schema.** `NOT NULL` and `PRIMARY KEY` columns are non-null; others are nullable.
+- **Schema.** `NOT NULL` and `PRIMARY KEY` columns are non-null; others are nullable. In
+  SQLite a `PRIMARY KEY` column is non-null only if it is `INTEGER`, `NOT NULL`, or in a
+  `WITHOUT ROWID` or `STRICT` table.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
   is nullable.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
