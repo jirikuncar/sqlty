@@ -239,7 +239,7 @@ fn contains_aggregate(expr: &Expr) -> bool {
             (func.over.is_none()
                 && !scalar_min_max
                 && (matches!(name.as_str(), "COUNT" | "REGR_COUNT")
-                    || lookup(&name).is_some_and(|info| info.is_aggregate())))
+                    || lookup(&name).is_some_and(super::registry::FunctionInfo::is_aggregate)))
                 || args.into_iter().any(contains_aggregate)
         }
         Expr::Nested(inner)
