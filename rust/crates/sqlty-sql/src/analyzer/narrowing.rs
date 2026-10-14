@@ -232,6 +232,16 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// What is proven not NULL where `cond` is not true: false, or NULL. Only a condition
+    /// that cannot be NULL tells anything, as a row that fails `a > 5` may hold a NULL `a`.
+    pub(super) fn learn_not_true(&self, cond: &Expr, scope: &Scope, facts: &Facts) -> Learned {
+        if self.nullability(cond, scope, facts) == Nullability::NonNull {
+            self.learn(cond, false, scope)
+        } else {
+            Learned::default()
+        }
+    }
+
     /// What is not NULL when `expr` is not NULL.
     fn proven(&self, expr: &Expr, scope: &Scope) -> Learned {
         use BinaryOperator::*;

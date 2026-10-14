@@ -402,7 +402,11 @@ impl<'a> Analyzer<'a> {
                 match op {
                     // The right side is read where the left one is true (AND) or false (OR).
                     And | Or => {
-                        let known = self.learn(left, *op == And, scope);
+                        let known = if *op == And {
+                            self.learn(left, true, scope)
+                        } else {
+                            self.learn_not_true(left, scope, facts)
+                        };
                         any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
                     }
                     // MySQL's null-safe equality.
@@ -560,7 +564,8 @@ impl<'a> Analyzer<'a> {
             };
             let taken = skipped.with(self.learn(&condition, true, scope));
             results.push(self.nullability(&when.result, scope, &taken));
-            skipped = skipped.with(self.learn(&condition, false, scope));
+            let unmatched = self.learn_not_true(&condition, scope, &skipped);
+            skipped = skipped.with(unmatched);
         }
         // Without ELSE, a row no WHEN matches yields NULL.
         results.push(else_result.map_or(Nullability::Nullable, |expr| {
