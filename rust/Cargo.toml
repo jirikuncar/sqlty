@@ -46,9 +46,11 @@ unnested_or_patterns = "warn"
 unused_lifetimes = "warn"
 unused_qualifications = "warn"
 
-# Applies to wheels: maturin builds sqlty-ext inside this workspace.
+# Wheels published to PyPI: `maturin build --profile dist`. Plain `release` (what `uv sync`
+# and `maturin develop --release` use) stays quick to rebuild.
 # No panic = "abort": PyO3 turns panics into Python exceptions.
-[profile.release]
+[profile.dist]
+inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = true

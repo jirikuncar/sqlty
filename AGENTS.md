@@ -51,7 +51,9 @@ Two layers, both in the Makefile:
 
 - `make bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
   is end-to-end: CLI wall time and RSS on a synthetic project, gated by
-  `benchmarks/baseline.json`. Needs a release build (`maturin develop --release`).
+  `benchmarks/baseline.json`. Needs a release build (`maturin develop --release`). Published wheels use
+  the slower `dist` profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so budgets
+  carry some headroom over local release numbers.
 - `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
   load (270 tables with functions), analyzer per query kind, and
   `check_source`/`rewrite_source` on 1k/4k queries. Use it to find where time
