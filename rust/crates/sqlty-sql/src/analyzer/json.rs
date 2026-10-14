@@ -293,7 +293,7 @@ impl<'a> Analyzer<'a> {
         let mut fields: Vec<JsonField> = Vec::new();
         let mut values: Vec<JsonValue> = Vec::new();
         let mut literal_keys = true;
-        for pair in args.chunks_exact(2) {
+        for pair in args.as_chunks::<2>().0 {
             let value = self.json_value(pair[1], scope)?;
             match string_literal(pair[0]) {
                 // The last of repeated keys wins, as in `jsonb`.

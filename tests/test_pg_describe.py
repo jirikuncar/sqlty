@@ -133,14 +133,25 @@ def _normalise(sql_type: str) -> str:
     return SQL_TO_PG.get(base, base.lower())
 
 
-def compare(ours: core.ColumnInfo, name: str, server_type: str, server_kind: str) -> str | None:
-    """Why sqlty's column differs from the server's, or ``None`` when they agree."""
+def compare(
+    ours: core.ColumnInfo,
+    name: str,
+    server_type: str,
+    server_kind: str,
+    domains: dict[str, str] | None = None,
+) -> str | None:
+    """Why sqlty's column differs from the server's, or ``None`` when they agree.
+
+    The server describes a domain column by its base type, so ``domains`` maps each
+    domain name to that base type.
+    """
     if ours.name != name:
         return f"name {ours.name!r}, server says {name!r}"
     if server_kind in {"d", "e", "c"}:  # domain, enum, composite
         return None
     if ours.sql_type is not None:
         expected = _normalise(ours.sql_type)
+        expected = (domains or {}).get(expected, expected)
         if expected != server_type:
             return f"column {name!r}: type {ours.sql_type} ({expected}), server says {server_type}"
         return None
@@ -219,6 +230,15 @@ def schemas(conn: Any) -> Schemas:
     return Schemas(conn)
 
 
+def load_domains(conn: Any) -> dict[str, str]:
+    """``domain name -> base type name`` for the domains the loaded schema defines."""
+    rows = conn.execute(
+        "SELECT d.typname, b.typname FROM pg_type d JOIN pg_type b ON b.oid = d.typbasetype "
+        "WHERE d.typtype = 'd'"
+    ).fetchall()
+    return dict(rows)
+
+
 def describe(conn: Any, query: str) -> list[tuple[str, int]]:
     """Names and type OIDs of a query's columns; the query is prepared, not run."""
     from psycopg import pq
@@ -252,13 +272,14 @@ def test_matches_server(
     if any(oid not in pg_types for _, oid in server):
         # Types the schema just created (enums, domains) have oids the fixture never saw.
         pg_types.update(load_pg_types(conn))
+    domains = load_domains(conn)
     problems: list[str] = []
     if len(ours) != len(server):
         problems.append(f"{len(ours)} columns, server says {len(server)}")
     else:
         for column, (name, oid) in zip(ours, server, strict=True):
             server_type, kind = pg_types.get(oid, (f"oid {oid}", "b"))
-            if problem := compare(column, name, server_type, kind):
+            if problem := compare(column, name, server_type, kind, domains):
                 problems.append(problem)
     if problems:
         if (why := _known_difference(case.id)) is not None:
