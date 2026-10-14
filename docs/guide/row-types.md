@@ -229,6 +229,36 @@ bad = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 field's names unknown: it is not reported as missing, and `extra="forbid"` no
 longer reports columns without a field.
 
+## Pydantic lax mode
+
+A Pydantic model or `pydantic.dataclasses.dataclass` converts values in its
+default lax mode, so its fields also accept the columns Pydantic converts: a
+`Decimal` or `float` column for `int`, an `int` or `float` column for
+`Decimal`, an `int` column for `bool` and a `date` column for `datetime`.
+Value-dependent conversions (a whole `Decimal`, 0 or 1 for `bool`) are
+accepted because the schema cannot rule them out. Strict mode keeps reporting
+them: `ConfigDict(strict=True)` (or `class Config: strict = True`),
+`Field(strict=True)`, `Annotated[int, Strict()]` and the `StrictInt`,
+`StrictFloat`, `StrictBool` and `StrictStr` types. TypedDict, NamedTuple and
+dataclass rows are not converted.
+
+```python
+from pydantic import BaseModel, ConfigDict, Field
+from sqlty import SQL
+
+class Totals(BaseModel):
+    total: int
+
+class StrictTotals(BaseModel):
+    model_config = ConfigDict(strict=True)
+    total: int
+    count: int = Field(strict=False)
+
+ok = SQL[Totals]("--sql\nSELECT sum(id::BIGINT) AS total FROM users")
+# error: [column-type-mismatch] "StrictTotals.total is int but query column 'total' infers decimal.Decimal"
+bad = SQL[StrictTotals]("--sql\nSELECT sum(id::BIGINT) AS total, sum(id::BIGINT) AS count FROM users")
+```
+
 ## Defaults in `Annotated`
 
 A field whose `Annotated` metadata holds `Field(default=...)` or

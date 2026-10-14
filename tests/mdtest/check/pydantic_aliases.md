@@ -98,9 +98,9 @@ from pydantic import BaseModel, Field
 from sqlty import SQL
 
 class User(BaseModel):
-    user_id: bool = Field(alias="id")
+    user_id: str = Field(alias="id")
 
-# error: [column-type-mismatch] "User.user_id is bool but query column 'id' infers int"
+# error: [column-type-mismatch] "User.user_id is str but query column 'id' infers int"
 query = SQL[User]("--sql\nSELECT id FROM users")
 ```
 

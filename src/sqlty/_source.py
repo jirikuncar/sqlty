@@ -12,6 +12,7 @@ Usage:
     parsed.classes          # every ClassDef node
     parsed.calls            # every Call node
     parsed.typing_aliases   # local names of typing members: {'t': 'typing', 'A': 'Any'}
+    parsed.imported_names   # absolute imports, local name to dotted name: {'D': 'decimal.Decimal'}
     parsed.ignores          # {line: _Ignore} for "# sqlty: ignore" comments
 
 Pass the object wherever a function takes ``source: str | ParsedSource``
@@ -324,6 +325,25 @@ class ParsedSource:
                     a.asname or a.name: a.name for a in node.names if a.name in _TYPING_MODULES
                 }
         return aliases
+
+    @functools.cached_property
+    def imported_names(self) -> dict[str, str]:
+        """Local names bound by absolute imports, to the dotted names they stand for.
+
+        Example:
+            >>> ParsedSource("import a.b, c as d\\nfrom e.f import g as h").imported_names
+            {'a': 'a', 'd': 'c', 'h': 'e.f.g'}
+        """
+        names: dict[str, str] = {}
+        for node in self.imports:
+            if isinstance(node, ast.ImportFrom):
+                if node.module and not node.level:
+                    names |= {a.asname or a.name: f"{node.module}.{a.name}" for a in node.names}
+            else:
+                for a in node.names:
+                    root = a.name.partition(".")[0]
+                    names[a.asname or root] = a.name if a.asname else root
+        return names
 
     @functools.cached_property
     def marker_names(self) -> tuple[set[str], set[str]]:

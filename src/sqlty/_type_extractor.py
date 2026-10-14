@@ -57,7 +57,8 @@ class TypeInfo:
     ``columns`` maps each accepted column name (field name or validation alias)
     to its field, ``opaque`` names the fields whose validation names are not
     statically known (``AliasChoices``, ``alias_generator``) and ``forbid``
-    is ``extra="forbid"``.
+    is ``extra="forbid"``. ``lax`` names the fields of a Pydantic model or
+    dataclass that accept lax-mode conversions (not strict).
     """
 
     __slots__ = (
@@ -79,6 +80,7 @@ class TypeInfo:
         "columns",
         "opaque",
         "forbid",
+        "lax",
     )
 
     def __init__(
@@ -111,6 +113,7 @@ class TypeInfo:
         self.columns: dict[str, str] = {}
         self.opaque: frozenset[str] = frozenset()
         self.forbid = False
+        self.lax: frozenset[str] = frozenset()
 
     def field_for(self, column: str) -> str | None:
         """The field a query column fills, by name (a Pydantic alias counts); None if none does."""
@@ -213,6 +216,7 @@ def extract_type_definitions(
         return {}
 
     aliases = parsed.typing_aliases
+    imports = parsed.imported_names
     newtypes = _newtype_assignments(tree, aliases)
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
@@ -260,7 +264,9 @@ def extract_type_definitions(
         info.lineno = node.lineno
         if kind == "BaseModel":
             _set_pydantic_names(info, node)
-        info.field_types = _ast_key_types(nodes, aliases, newtypes)
+        if (config := _pydantic_config(node, kind, imports)) is not None:
+            info.lax = _lax_fields(node, config, aliases, imports)
+        info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
         hints = None
         if (fields or is_typeddict) and (
             resolved := _resolve_class(nodes, import_stmts, parsed.text, helpers)
@@ -302,8 +308,8 @@ def check_type_compatibility(
     Uses runtime type objects when available (``resolved_hints``), else the
     types resolved from source (``field_types``). ``Any``, unions and the
     ``int`` -> ``float`` promotion are accepted; narrower fields (``bool`` for
-    an ``int`` column) are not. Annotations neither path can resolve or decide
-    count as compatible.
+    an ``int`` column) are not, unless the field is ``lax`` (see `_LAX_FROM`).
+    Annotations neither path can resolve or decide count as compatible.
 
     Args:
         user_type: The user-defined type info.
@@ -332,7 +338,8 @@ def check_type_compatibility(
         field = user_type.extra_items_hint or user_type.extra_items_type
     else:
         return column_python_type is None
-    return _accepts(field, annotation, column_python_type)
+    lax = column_name in user_type.lax
+    return _accepts(field, annotation, column_python_type, _LAX_FROM if lax else _PROMOTED_FROM)
 
 
 def field_accepts(annotation: str, column_python_type: str | None) -> bool:
@@ -348,10 +355,15 @@ def field_accepts(annotation: str, column_python_type: str | None) -> bool:
     return _accepts(_annotation_type(annotation), annotation, column_python_type)
 
 
-def _accepts(field: typing.Any, annotation: str, column_python_type: str | None) -> bool:
+def _accepts(
+    field: typing.Any,
+    annotation: str,
+    column_python_type: str | None,
+    promotions: dict[type, tuple[type, ...]] | None = None,
+) -> bool:
     if not column_python_type:
         return True
-    fits = _is_subtype(_column_type(column_python_type), _erase(field))
+    fits = _is_subtype(_column_type(column_python_type), _erase(field), promotions)
     return fits is not False
 
 
@@ -755,6 +767,14 @@ def _own_extra_type(cls: type, namespace: dict[str, object]) -> typing.Any:
 
 _NEVER = (typing.Never, typing.NoReturn)
 _PROMOTED_FROM: dict[type, tuple[type, ...]] = {float: (int,), complex: (int, float)}
+# Pydantic lax mode; https://docs.pydantic.dev/latest/concepts/conversion_table/
+_LAX_FROM: dict[type, tuple[type, ...]] = _PROMOTED_FROM | {
+    int: (decimal.Decimal, float),
+    decimal.Decimal: (int, float),
+    bool: (int,),
+    datetime.datetime: (datetime.date,),
+    datetime.date: (datetime.datetime,),
+}
 
 
 def _union_members(tp: typing.Any) -> list[typing.Any]:
@@ -767,12 +787,14 @@ def _is_plain(tp: typing.Any) -> bool:
     return isinstance(tp, type) and not typing.get_args(tp)
 
 
-def _is_subtype(src: typing.Any, dst: typing.Any) -> bool | None:
+def _is_subtype(
+    src: typing.Any, dst: typing.Any, promotions: dict[type, tuple[type, ...]] | None = None
+) -> bool | None:
     """Whether ``src`` is assignable to ``dst``; None when that can't be decided.
 
-    Only plain classes and unions of them are judged, by subclassing plus the
-    ``int`` -> ``float`` -> ``complex`` promotion. Generics, literals, forward
-    references and unknown (None) types are undecided.
+    Only plain classes and unions of them are judged, by subclassing plus
+    ``promotions`` (default: ``int`` -> ``float`` -> ``complex``). Generics,
+    literals, forward references and unknown (None) types are undecided.
 
     Example:
         >>> _is_subtype(bool, int | str), _is_subtype(int, float), _is_subtype(float, int)
@@ -787,7 +809,7 @@ def _is_subtype(src: typing.Any, dst: typing.Any) -> bool | None:
     targets = _union_members(dst)
     result: bool | None = True
     for member in _union_members(src):
-        fits = _member_fits(member, targets)
+        fits = _member_fits(member, targets, promotions or _PROMOTED_FROM)
         if fits is False:
             return False
         if fits is None:
@@ -810,7 +832,9 @@ def _erase(tp: typing.Any) -> typing.Any:
     return origin if isinstance(origin, type) else tp
 
 
-def _member_fits(src: typing.Any, targets: list[typing.Any]) -> bool | None:
+def _member_fits(
+    src: typing.Any, targets: list[typing.Any], promotions: dict[type, tuple[type, ...]]
+) -> bool | None:
     # ``typing.Any`` is a class on 3.11+, so it must be caught before ``issubclass``.
     if src is typing.Any or src in _NEVER:
         return True
@@ -826,7 +850,7 @@ def _member_fits(src: typing.Any, targets: list[typing.Any]) -> bool | None:
             decided = False
             continue
         try:
-            if issubclass(src, (dst, *_PROMOTED_FROM.get(dst, ()))):
+            if issubclass(src, (dst, *promotions.get(dst, ()))):
                 return True
         except TypeError:
             decided = False
@@ -1107,10 +1131,32 @@ _TYPING_GENERICS: dict[str, typing.Any] = {
     "FrozenSet": frozenset,
     "Tuple": tuple,
 }
+_STRICT_TYPES: dict[str, type] = {
+    "StrictInt": int,
+    "StrictFloat": float,
+    "StrictBool": bool,
+    "StrictStr": str,
+    "StrictBytes": bytes,
+}
+_STRICT_NAMES = {
+    f"{m}.{n}": t for m in ("pydantic", "pydantic.types") for n, t in _STRICT_TYPES.items()
+}
+_IMPORTED_TYPES: dict[str, typing.Any] = {
+    "decimal.Decimal": decimal.Decimal,
+    "datetime.date": datetime.date,
+    "datetime.datetime": datetime.datetime,
+    "datetime.time": datetime.time,
+    "datetime.timedelta": datetime.timedelta,
+    "uuid.UUID": uuid.UUID,
+    **_STRICT_NAMES,
+}
 
 
 def _ast_type(
-    node: ast.expr, aliases: dict[str, str], newtypes: dict[str, ast.Assign] | None = None
+    node: ast.expr,
+    aliases: dict[str, str],
+    newtypes: dict[str, ast.Assign] | None = None,
+    imports: dict[str, str] | None = None,
 ) -> typing.Any:
     """Builtin scalars and generics, ``Any``, ``Never``, NewTypes and their unions from source; None if unknown.
 
@@ -1121,13 +1167,17 @@ def _ast_type(
     ``Tuple``) resolve to their builtins only when imported from ``typing``
     or ``typing_extensions``.
     ``newtypes`` maps names to their ``NewType`` assignments (see `_newtype_assignments`).
+    With ``imports`` (see ``ParsedSource.imported_names``), the ``decimal``,
+    ``datetime`` and ``uuid`` types and Pydantic's ``Strict*`` aliases resolve too.
     """
     newtypes = newtypes or {}
     if isinstance(node, ast.Constant) and node.value is None:
         return type(None)
+    if imports and (tp := _IMPORTED_TYPES.get(_qualname(node, imports) or "")):
+        return tp
     if isinstance(node, ast.Name) and (assign := newtypes.get(node.id)):
         others = {k: v for k, v in newtypes.items() if k != node.id}
-        supertype = _ast_type(typing.cast(ast.Call, assign.value).args[1], aliases, others)
+        supertype = _ast_type(typing.cast(ast.Call, assign.value).args[1], aliases, others, imports)
         return None if supertype is None else typing.NewType(node.id, supertype)  # ty: ignore[invalid-newtype]
     if isinstance(node, ast.Name):
         known = _AST_TYPES | _TYPING_GENERICS if node.id in aliases else _AST_TYPES
@@ -1140,14 +1190,15 @@ def _ast_type(
             node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice,
             aliases,
             newtypes,
+            imports,
         )
     if (
         isinstance(node, ast.Subscript)
-        and (origin := _ast_type(node.value, aliases, newtypes)) in _GENERICS
+        and (origin := _ast_type(node.value, aliases, newtypes, imports)) in _GENERICS
     ):
         args = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
         return types.GenericAlias(
-            origin, tuple(_ast_type(a, aliases, newtypes) or typing.Any for a in args)
+            origin, tuple(_ast_type(a, aliases, newtypes, imports) or typing.Any for a in args)
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         members = [node.left, node.right]
@@ -1157,7 +1208,7 @@ def _ast_type(
         members = list(node.slice.elts) if isinstance(node.slice, ast.Tuple) else [node.slice]
     else:
         return None
-    resolved = [_ast_type(m, aliases, newtypes) for m in members]
+    resolved = [_ast_type(m, aliases, newtypes, imports) for m in members]
     return None if None in resolved else functools.reduce(operator.or_, resolved)
 
 
@@ -1173,12 +1224,15 @@ def _annotation_type(annotation: str) -> typing.Any:
 
 
 def _ast_key_types(
-    nodes: list[ast.ClassDef], aliases: dict[str, str], newtypes: dict[str, ast.Assign]
+    nodes: list[ast.ClassDef],
+    aliases: dict[str, str],
+    newtypes: dict[str, ast.Assign],
+    imports: dict[str, str] | None = None,
 ) -> dict[str, typing.Any]:
     """Key types of a TypedDict lineage (bases first) from source, as by ``_ast_type``."""
     return {
         item.target.id: _ast_type(
-            _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes
+            _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes, imports
         )
         for node in nodes
         for item in node.body
@@ -1188,6 +1242,20 @@ def _ast_key_types(
 
 def _is_name(node: ast.expr, name: str, aliases: dict[str, str]) -> bool:
     return (n := _get_name(node)) is not None and aliases.get(n, n) == name
+
+
+def _qualname(node: ast.expr, imports: dict[str, str]) -> str | None:
+    """The dotted name ``node`` spells, its first part resolved through ``imports``.
+
+    Example:
+        >>> _qualname(ast.parse("dt.date", mode="eval").body, {"dt": "datetime"})
+        'datetime.date'
+    """
+    if isinstance(node, ast.Name):
+        return imports.get(node.id, node.id)
+    if isinstance(node, ast.Attribute) and (base := _qualname(node.value, imports)):
+        return f"{base}.{node.attr}"
+    return None
 
 
 def _get_name(node: ast.expr) -> str | None:
@@ -1291,8 +1359,8 @@ def _metadata_defaults(node: ast.ClassDef, aliases: dict[str, str]) -> list[str]
     ]
 
 
-def _config_options(node: ast.ClassDef) -> dict[str, ast.expr]:
-    """Pydantic config of ``node``: ``model_config = ConfigDict(...)`` / ``{...}`` or ``class Config``."""
+def _config_options(node: ast.ClassDef, config: ast.expr | None = None) -> dict[str, ast.expr]:
+    """Pydantic config of ``node``: ``model_config`` / ``__pydantic_config__ = ConfigDict(...)`` / ``{...}``, ``class Config`` or ``config``."""
     options: dict[str, ast.expr] = {}
 
     def read(value: ast.expr | None) -> None:
@@ -1307,14 +1375,16 @@ def _config_options(node: ast.ClassDef) -> dict[str, ast.expr]:
                 }
             )
 
+    read(config)
+    names = ("model_config", "__pydantic_config__")
     for item in node.body:
         if (
             isinstance(item, ast.Assign)
-            and any(isinstance(t, ast.Name) and t.id == "model_config" for t in item.targets)
+            and any(isinstance(t, ast.Name) and t.id in names for t in item.targets)
             or (
                 isinstance(item, ast.AnnAssign)
                 and isinstance(item.target, ast.Name)
-                and item.target.id == "model_config"
+                and item.target.id in names
             )
         ):
             read(item.value)
@@ -1329,6 +1399,68 @@ def _config_options(node: ast.ClassDef) -> dict[str, ast.expr]:
 
 def _is_true(node: ast.expr | None) -> bool:
     return isinstance(node, ast.Constant) and node.value is True
+
+
+def _pydantic_config(
+    node: ast.ClassDef, kind: str, imports: dict[str, str]
+) -> dict[str, ast.expr] | None:
+    """Config of a Pydantic model or ``pydantic.dataclasses.dataclass``; None for other rows."""
+    if kind == "BaseModel":
+        return _config_options(node)
+    for decorator in node.decorator_list:
+        call = decorator if isinstance(decorator, ast.Call) else None
+        if _qualname(call.func if call else decorator, imports) == "pydantic.dataclasses.dataclass":
+            keywords = call.keywords if call else []
+            return _config_options(
+                node, next((k.value for k in keywords if k.arg == "config"), None)
+            )
+    return None
+
+
+def _strict(call: ast.Call) -> bool | None:
+    """``strict`` set by ``Field(strict=...)`` or ``Strict(...)``; None if unset."""
+    name = _get_name(call.func)
+    if name not in ("Field", "Strict"):
+        return None
+    value = next((k.value for k in call.keywords if k.arg == "strict"), None)
+    if name == "Strict":
+        value = call.args[0] if call.args else value or ast.Constant(True)
+    return (
+        value.value if isinstance(value, ast.Constant) and isinstance(value.value, bool) else None
+    )
+
+
+def _lax_fields(
+    node: ast.ClassDef,
+    config: dict[str, ast.expr],
+    aliases: dict[str, str],
+    imports: dict[str, str],
+) -> frozenset[str]:
+    """Fields of a Pydantic row that are not strict, by ``config``, ``Field``, ``Strict()`` or ``Strict*`` types."""
+    model = _is_true(config.get("strict"))
+    lax: set[str] = set()
+    for item in node.body:
+        if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
+            continue
+        annotation, metadata = item.annotation, [item.value]
+        while isinstance(annotation, ast.Subscript):
+            name = _get_name(annotation.value)
+            name = aliases.get(name, name) if name else None
+            if name == "Annotated" and isinstance(annotation.slice, ast.Tuple):
+                metadata[:0] = annotation.slice.elts[1:]
+                annotation = annotation.slice.elts[0]
+            elif name in (*_QUALIFIERS, "Optional"):
+                annotation = annotation.slice
+            else:
+                break
+        members = [annotation]
+        while isinstance(top := members[-1], ast.BinOp) and isinstance(top.op, ast.BitOr):
+            members[-1:] = [top.right, top.left]
+        found = [s for m in metadata if isinstance(m, ast.Call) and (s := _strict(m)) is not None]
+        typed = any(_qualname(m, imports) in _STRICT_NAMES for m in members)
+        if not (typed or (found[-1] if found else model)):
+            lax.add(item.target.id)
+    return frozenset(lax)
 
 
 def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
