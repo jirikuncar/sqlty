@@ -2,7 +2,8 @@
 
 sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI uses, for each
 file, the nearest `pyproject.toml` above it; the magic codec searches from the
-current directory. Command-line flags override the file. Unknown keys are ignored.
+current directory. Command-line flags override the file. An unknown key, rule or
+severity is an error (exit 2) that names the file and suggests the closest match.
 
 In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
 package's packaging-only `pyproject.toml` in a monorepo does not hide the
@@ -36,6 +37,7 @@ query_param = "query"
 | [`untyped`](#untyped) | `rewrite` |
 | [`type-modules`](#type-modules) | `check` |
 | [`functions`](#functions) | `check` ([helpers](../guide/helpers.md#helpers-you-cannot-annotate)) |
+| [`exclude`, `extend-exclude`](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` |
 
 ## `dialect`
 
@@ -126,3 +128,19 @@ query_param = "query"
 | `return_type_param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it. `check` compares it with the query columns |
 
 Entries without `import_path` or `query_param` are skipped with a warning.
+
+## `exclude` and `extend-exclude`
+
+Directories the CLI walks skip these globs. `exclude` replaces the defaults
+(`.git`, `.hg`, `.svn`, `.venv`, `venv`, `.tox`, `.nox`, `node_modules`,
+`site-packages`, `__pypackages__`, `dist`, `_build`, `buck-out`, and the tool
+caches such as `.mypy_cache`, `.pytest_cache`, `.ruff_cache`); `extend-exclude`
+adds to whichever list applies. A glob without a slash matches a file or
+directory name at any depth; one with a slash matches the path relative to
+the `pyproject.toml` that holds it, and `**` recurses. Files named on the
+command line are always processed.
+
+```toml
+[tool.sqlty]
+extend-exclude = ["migrations", "gen/*.py"]
+```

@@ -208,10 +208,10 @@ def test_ignored_and_prose_blocks(tmp_path: Path) -> None:
     ("text", "message"),
     [
         ("## A\n\n```toml\n[sqlty]\n```\n", "config must be a [tool.sqlty] table"),
-        ("## A\n\n```toml\n[tool.sqlty]\ncodec = 1\n```\n", "unknown [tool.sqlty] keys: codec"),
+        ("## A\n\n```toml\n[tool.sqlty]\ncodec = 1\n```\n", "unknown key 'codec' in [tool.sqlty]"),
         (
             "## A\n\n```toml\n[tool.sqlty.rules]\nnope = 'warn'\n```\n",
-            "invalid rule setting nope = 'warn'",
+            "unknown rule 'nope' in [tool.sqlty.rules]",
         ),
         ("## A\n\n<!-- mdtest:nope -->\n", "unknown directive mdtest:nope"),
         ("## A\n\n```py\n# inferred: x\n```\n", "write `-- inferred:` inside the sql block"),

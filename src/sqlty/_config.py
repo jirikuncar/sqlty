@@ -1,6 +1,7 @@
 """Configuration loading from pyproject.toml."""
 
 import copy
+import difflib
 import glob
 import logging
 from functools import lru_cache
@@ -8,6 +9,101 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 SchemaSpec = str | list[str]
+
+TOOL_KEYS = ("dialect", "schema", "rules", "import-style", "untyped", "type-modules", "functions")
+"""Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
+
+DISCOVERY_KEYS = ("exclude", "extend-exclude")
+"""``[tool.sqlty]`` keys that pick the files to process."""
+
+FUNCTION_KEYS = ("import_path", "query_param", "return_type_param")
+
+DEFAULT_EXCLUDE = (
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+)
+"""Directories skipped when walking a directory, unless ``exclude`` replaces them."""
+
+
+class ConfigError(Exception):
+    """A user error in configuration or command-line paths; the CLI prints it and exits 2."""
+
+
+def _suggest(name: str, choices: tuple[str, ...] | list[str]) -> str:
+    close = difflib.get_close_matches(name, choices, n=1)
+    return f" (did you mean {close[0]!r}?)" if close else ""
+
+
+def validate_tool_table(table: dict[str, Any], source: str) -> None:
+    """Raise ``ConfigError`` for an unknown key, rule or severity in a ``[tool.sqlty]`` table.
+
+    ``source`` names the file in the message. Shared by the CLI and the mdtest runner.
+
+    Example:
+        >>> validate_tool_table({"dialect": "mysql"}, "pyproject.toml")
+        >>> validate_tool_table({"import_style": "x"}, "pyproject.toml")  # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        sqlty._config.ConfigError: pyproject.toml: unknown key 'import_style' in [tool.sqlty] (did you mean 'import-style'?); ...
+    """
+    from sqlty._lint import RULES, Severity
+
+    keys = (*TOOL_KEYS, *DISCOVERY_KEYS)
+    for key in table:
+        if key not in keys:
+            raise ConfigError(
+                f"{source}: unknown key {key!r} in [tool.sqlty]{_suggest(key, keys)}; "
+                f"expected one of: {', '.join(keys)}"
+            )
+    rules = table.get("rules", {})
+    if not isinstance(rules, dict):
+        raise ConfigError(f"{source}: [tool.sqlty] rules must be a table of rule = severity")
+    severities = [s.value for s in Severity]
+    for rule, severity in rules.items():
+        if rule not in RULES:
+            raise ConfigError(
+                f"{source}: unknown rule {rule!r} in [tool.sqlty.rules]"
+                f"{_suggest(rule, list(RULES))}; run `sqlty rule` for the list"
+            )
+        if severity not in severities:
+            raise ConfigError(
+                f"{source}: invalid severity {severity!r} for rule {rule!r} in "
+                f"[tool.sqlty.rules]; expected one of: {', '.join(severities)}"
+            )
+    for function in table.get("functions", []):
+        if isinstance(function, dict):
+            for key in function:
+                if key not in FUNCTION_KEYS:
+                    raise ConfigError(
+                        f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
+                        f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
+                    )
+    for key in DISCOVERY_KEYS:
+        value = table.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise ConfigError(f"{source}: [tool.sqlty] {key} must be a list of glob strings")
 
 
 class FunctionConfigComplete(TypedDict, total=False):
@@ -34,6 +130,7 @@ class SQLTyConfig(TypedDict, total=False):
         import-style = "from sqlty import SQL"
         untyped = "sentinel"
         type-modules = ["myapp.types"]
+        extend-exclude = ["migrations"]
 
         [tool.sqlty.rules]
         select-star = "ignore"
@@ -50,6 +147,8 @@ class SQLTyConfig(TypedDict, total=False):
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
     type_modules: list[str]  # modules whose imports may run to resolve row types
+    exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
+    extend_exclude: list[str]  # globs excluded in addition to the above
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
 
@@ -112,6 +211,8 @@ def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
         if pyproject_path.exists():
             try:
                 config = _parse_pyproject_cached(pyproject_path, pyproject_path.stat().st_mtime_ns)
+            except ConfigError:
+                raise
             except Exception as e:
                 logging.getLogger(__name__).warning("Failed to parse %s: %s", pyproject_path, e)
                 return {}, None
@@ -152,7 +253,13 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     if tool_config is None:
         return None
 
+    validate_tool_table(tool_config, str(pyproject_path))
     config: SQLTyConfig = {}
+
+    if "exclude" in tool_config:
+        config["exclude"] = list(tool_config["exclude"])
+    if "extend-exclude" in tool_config:
+        config["extend_exclude"] = list(tool_config["extend-exclude"])
 
     # Parse each configuration option
     if "dialect" in tool_config:

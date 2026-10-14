@@ -41,17 +41,6 @@ PY_KINDS: tuple[Kind, ...] = (
     "decoded",
 )
 DIRECTIVES = frozenset({"skip", "xfail"})
-CONFIG_KEYS = frozenset(
-    {
-        "dialect",
-        "schema",
-        "import-style",
-        "untyped",
-        "type-modules",
-        "rules",
-        "functions",
-    }
-)
 
 _PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)}):(?: (.*))?$")
 _SQL_ASSERTION = re.compile(rf"^(\s*)--\s+({'|'.join(SQL_KINDS)}):(?: (.*))?$")
@@ -308,7 +297,7 @@ def _append(assertions: list[Assertion], new: Assertion) -> None:
 
 
 def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
-    from sqlty._lint import RULES, Severity
+    from sqlty._config import ConfigError, validate_tool_table
 
     try:
         config = tomllib.loads(content)
@@ -317,12 +306,10 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
     if set(config) != {"tool"} or set(config["tool"]) != {"sqlty"}:
         raise fail(line, "config must be a [tool.sqlty] table")
     settings = config["tool"]["sqlty"]
-    if unknown := set(settings) - CONFIG_KEYS:
-        raise fail(line, f"unknown [tool.sqlty] keys: {', '.join(sorted(unknown))}")
-    severities = {s.value for s in Severity}
-    for rule, severity in settings.get("rules", {}).items():
-        if rule not in RULES or severity not in severities:
-            raise fail(line, f"invalid rule setting {rule} = {severity!r}")
+    try:
+        validate_tool_table(settings, "config")
+    except ConfigError as e:
+        raise fail(line, str(e).removeprefix("config: ")) from None
     return config
 
 
