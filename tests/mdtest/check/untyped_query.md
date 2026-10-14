@@ -8,7 +8,7 @@ make the row type known.
 
 ```python
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Inferable query suggests the row type
@@ -26,7 +26,7 @@ untyped-query = "ignore"
 ```
 
 ```python
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # error:
 ```
 
@@ -41,7 +41,7 @@ untyped-query = "warn"
 
 ```python
 # error: [untyped-query] "sqlty.SQL[sqlty.UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
+q = sqlty.SQL[sqlty.UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Sentinel: uninferable rows are stale until rewritten
@@ -56,8 +56,8 @@ untyped = "sentinel"
 
 ```python
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
-q = "--sql\nVALUES (1, 2)"
+q = "--sql\nSELECT x, y FROM pairs"
 # fixed: from sqlty import SQL
 # fixed: from sqlty import UNTYPED
-# fixed: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+# fixed: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```

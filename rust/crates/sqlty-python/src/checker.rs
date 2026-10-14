@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_untyped_rows_are_stale_with_sentinel() {
-        let source = r#"q = "--sql\nVALUES (1, 2)""#;
+        let source = r#"q = "--sql\nSELECT x, y FROM pairs""#;
         assert!(check_source(source, "postgres", &None, None, None, false, &[]).is_empty());
         let diags = check_source(source, "postgres", &None, None, None, true, &[]);
         assert_eq!(diags[0].rule, "stale-rewrite");
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_untyped_query() {
-        let source = r#"q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")"#;
+        let source = r#"q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")"#;
         let diags = check_source(source, "postgres", &None, None, None, false, &[]);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].rule, "untyped-query");

@@ -8,8 +8,8 @@ the `UNTYPED` import once nothing references it.
 ```python
 from sqlty import SQL
 from sqlty import UNTYPED
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-# stripped: q = "--sql\nVALUES (1, 2)"
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
+# stripped: q = "--sql\nSELECT x, y FROM pairs"
 ```
 
 ## Strip keeps UNTYPED import while still referenced
@@ -17,10 +17,10 @@ q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
 ```python
 from sqlty import SQL
 from sqlty import UNTYPED
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 assert row_form(q) is UNTYPED
 # stripped: from sqlty import UNTYPED
-# stripped: q = "--sql\nVALUES (1, 2)"
+# stripped: q = "--sql\nSELECT x, y FROM pairs"
 # stripped: assert row_form(q) is UNTYPED
 ```
 
@@ -34,15 +34,15 @@ untyped = "sentinel"
 ### Rewrite
 
 ```python
-q = "--sql\nVALUES (1, 2)"
-# rewritten: q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = "--sql\nSELECT x, y FROM pairs"
+# rewritten: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ### Strip
 
 ```python
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
-# stripped: q = "--sql\nVALUES (1, 2)"
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
+# stripped: q = "--sql\nSELECT x, y FROM pairs"
 ```
 
 ## Strip with module import
@@ -54,6 +54,6 @@ import-style = "import sqlty"
 
 ```python
 import sqlty
-q = sqlty.SQL[sqlty.UNTYPED]("--sql\nVALUES (1, 2)")
-# stripped: q = "--sql\nVALUES (1, 2)"
+q = sqlty.SQL[sqlty.UNTYPED]("--sql\nSELECT x, y FROM pairs")
+# stripped: q = "--sql\nSELECT x, y FROM pairs"
 ```

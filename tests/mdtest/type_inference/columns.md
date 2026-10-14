@@ -287,8 +287,8 @@ SELECT id::INTEGER, created_at::TIMESTAMP, birth_date::DATE FROM users
 
 ```sql
 SELECT TRIM(name), SUBSTRING(name FROM 1 FOR 2), POSITION('a' IN name) FROM users
--- columns: btrim: str (None)
--- columns: substring: str (None)
+-- columns: btrim: str (TEXT)
+-- columns: substring: str (TEXT)
 -- columns: position: int (None)
 ```
 

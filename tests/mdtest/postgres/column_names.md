@@ -40,5 +40,39 @@ SELECT id::BIGINT, users.name, lower(email), COALESCE(email, 'x'), CASE WHEN id 
 -- columns: case: int | None (None)
 -- columns: exists: bool (BOOLEAN)
 -- columns: ?column?: str (None)
--- columns: ?column?: bool (None)
+-- columns: bool: bool (None)
+```
+
+## Cast targets
+
+A cast names its column after the value when the value has a name, and after the
+target type otherwise. `TRUE` is a cast of a string to `bool`, so it is named `bool`.
+
+```sql
+SELECT id::INT, 1::INT, 'a'::TEXT, 'a'::TEXT::INT, id::VARCHAR(5), 1::DECIMAL(5, 2), 1::DOUBLE PRECISION, 1::REAL, '1 day'::INTERVAL, now()::DATE FROM users
+-- columns: id: int (INT)
+-- columns: int4: int (INT)
+-- columns: text: str (TEXT)
+-- columns: int4: int (INT)
+-- columns: id: str (VARCHAR(5))
+-- columns: numeric: decimal.Decimal (DECIMAL(5, 2))
+-- columns: float8: float (DOUBLE)
+-- columns: float4: float (FLOAT)
+-- columns: interval: datetime.timedelta (INTERVAL)
+-- columns: now: datetime.date (DATE)
+```
+
+## Keywords with a name
+
+```sql
+SELECT ROW(1, 2), TRIM(LEADING 'x' FROM name), TRIM(TRAILING 'x' FROM name), TRIM(name), EXTRACT(YEAR FROM created_at), ARRAY[1], -id, id IS NULL, FALSE FROM users
+-- columns: row: None (None)
+-- columns: ltrim: str (TEXT)
+-- columns: rtrim: str (TEXT)
+-- columns: btrim: str (TEXT)
+-- columns: extract: decimal.Decimal | None (DECIMAL)
+-- columns: array: list[int] (ARRAY<INT>)
+-- columns: ?column?: int (INT)
+-- columns: ?column?: bool (BOOLEAN)
+-- columns: bool: bool (None)
 ```

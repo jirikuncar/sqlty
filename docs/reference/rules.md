@@ -423,7 +423,7 @@ Default: ignore. A cast target or schema column type with no Python type.
 ### unsupported-syntax
 
 Default: ignore. A construct that parses but that sqlty does not type: an
-expression without a typing rule, `VALUES`, `*` over a `USING` join, a column
+expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
 of a table function. `NULL` and placeholders are not reported.
 
 ## Rewrite rules
@@ -512,7 +512,7 @@ known, the message suggests it.
 
 ```python
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
-q = SQL[UNTYPED]("--sql\nVALUES (1, 2)")
+q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 Fix: add casts or schema entries; `sqlty check --fix` then writes the row

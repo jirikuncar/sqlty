@@ -105,7 +105,7 @@ SELECT 1.5 AS amount UNION ALL SELECT amount FROM events
 ## Different categories are unknown
 
 ```sql
-SELECT amount FROM events UNION SELECT 'none'
+SELECT amount FROM events UNION SELECT 'none'::text
 -- columns: amount: None (None)
 ```
 

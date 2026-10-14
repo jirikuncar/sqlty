@@ -9,8 +9,8 @@ from sqlty._cli import SettingsResolver, build_parser, main
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
     """``untyped`` comes from [tool.sqlty]; ``--untyped`` overrides it."""
-    source = 'q = "--sql\\nVALUES (1, 2)"\n'
-    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nVALUES (1, 2)")\n'
+    source = 'q = "--sql\\nSELECT x, y FROM pairs"\n'
+    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nSELECT x, y FROM pairs")\n'
     target = tmp_path / "q.py"
     monkeypatch.chdir(tmp_path)
 

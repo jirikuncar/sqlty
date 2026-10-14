@@ -102,9 +102,12 @@ row type unknown: the string is left as it is (`SQL[UNTYPED]` with
 [`untyped = "sentinel"`](untyped.md)) and `sqlty check` skips the column.
 Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
 wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
-`greatest`, `unnest` and the advisory locks are typed too; `COALESCE`,
-`GREATEST` and `LEAST` take the first argument of known type, skipping `NULL`
-and placeholders. Cast the whole expression to type it:
+`greatest`, `unnest` and the advisory locks are typed too. In PostgreSQL, `CASE`,
+`COALESCE`, `GREATEST`, `LEAST`, `VALUES`, `ARRAY[...]` and `UNION` resolve one type
+for their inputs as the server does: string literals and `NULL` take the type of
+the others, and numbers promote, so `COALESCE(int_col, 1.5)` is `numeric`. In the
+other dialects `COALESCE`, `GREATEST` and `LEAST` take the first argument of known
+type, skipping `NULL` and placeholders. Cast the whole expression to type it:
 
 ```python
 unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
@@ -115,8 +118,10 @@ typed = "--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t
 
 An unaliased column is named as PostgreSQL names it: the column (also under a
 cast), the function (`count`, `max`, `now`), the array of a subscript (`tags[1]`
-is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, else
-`?column?`. Alias columns that a row type matches by name.
+is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, the
+target of a cast of an unnamed value (`1::int` is `int4`, `'a'::text` is `text`,
+`true` is `bool`), else `?column?`. A `VALUES` list has the columns `column1`,
+`column2`, .... Alias columns that a row type matches by name.
 
 A column that can be NULL is typed `T | None`; see
 [Nullability](schema-inference.md#nullability). Annotate the field of a

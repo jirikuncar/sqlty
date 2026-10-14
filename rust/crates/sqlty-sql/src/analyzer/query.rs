@@ -168,6 +168,9 @@ impl<'a> Analyzer<'a> {
             branches.push(match branch {
                 SetExpr::Select(select) => Some(self.select_columns(select)?),
                 SetExpr::Query(query) => self.query_columns(query)?,
+                SetExpr::Values(values) if self.dialect == SqlDialect::Postgres => {
+                    Some(self.values_columns(values)?)
+                }
                 other => {
                     if self.diag.enabled() {
                         self.diag.record(
@@ -222,6 +225,40 @@ impl<'a> Analyzer<'a> {
             column.nullability = nullability;
         }
         Ok(Some(columns))
+    }
+
+    /// Columns of a `VALUES` list: `column1`, `column2`, ..., each typed by the common
+    /// type of its rows (`VALUES (1), (2.5)` is `NUMERIC`) and nullable when a row's is.
+    fn values_columns(&self, values: &sqlparser::ast::Values) -> Inferred<Vec<Column>> {
+        let (analyzer, scope) = self.scope_of(&[])?;
+        let width = values.rows.first().map_or(0, |row| row.content.len());
+        let mut columns = Vec::with_capacity(width);
+        for index in 0..width {
+            let mut types = Vec::new();
+            let mut nullability = Nullability::NonNull;
+            for row in values.rows.iter().filter(|row| row.content.len() == width) {
+                let expr = &row.content[index];
+                types.push(analyzer.expr(expr, &scope)?);
+                nullability = match (
+                    nullability,
+                    analyzer.nullability(expr, &scope, &analyzer.facts),
+                ) {
+                    (Nullability::Nullable, _) | (_, Nullability::Nullable) => {
+                        Nullability::Nullable
+                    }
+                    (Nullability::NonNull, Nullability::NonNull) => Nullability::NonNull,
+                    _ => Nullability::Unknown,
+                };
+            }
+            let (python_type, sql_type) = common_of(types, self.dialect).unwrap_or((None, None));
+            columns.push(Column {
+                name: format!("column{}", index + 1),
+                python_type,
+                sql_type,
+                nullability,
+            });
+        }
+        Ok(columns)
     }
 
     /// One column per result column; a star may yield several, or one unknown `*`

@@ -31,8 +31,17 @@ impl<'a> Analyzer<'a> {
             }
             StringConcat if self.dialect != SqlDialect::MySql => {
                 let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+                let array =
+                    |t: &Typed| t.1.as_deref().is_some_and(|ty| array_element(ty).is_some());
                 if l.1.as_deref() == Some("JSONB") || r.1.as_deref() == Some("JSONB") {
                     sql("JSONB")
+                } else if self.dialect == SqlDialect::Postgres && (array(&l) || array(&r)) {
+                    // `anyarray || anyarray`, `anyarray || elem` and `elem || anyarray`.
+                    Ok(match (array(&l), array(&r)) {
+                        (true, true) => common_type(l, r, self.dialect).unwrap_or((None, None)),
+                        (true, false) => l,
+                        _ => r,
+                    })
                 } else if is_text(&l) || is_text(&r) {
                     sql("TEXT")
                 } else {
@@ -46,6 +55,25 @@ impl<'a> Analyzer<'a> {
                     "DECIMAL"
                 } else {
                     "DOUBLE"
+                })
+            }
+            BitwiseAnd | BitwiseOr | PGBitwiseXor | PGBitwiseShiftLeft | PGBitwiseShiftRight
+                if self.dialect == SqlDialect::Postgres =>
+            {
+                // Integer operands: the wider type; a shift keeps its left operand's type.
+                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+                let integer = |t: &Typed| {
+                    operand_type(t)
+                        .and_then(numeric_rank)
+                        .filter(|rank| *rank <= 2)
+                };
+                let shift = matches!(op, PGBitwiseShiftLeft | PGBitwiseShiftRight);
+                Ok(match (integer(&l), integer(&r)) {
+                    (Some(a), Some(b)) => {
+                        let rank = if shift { a } else { a.max(b) };
+                        from_sql_type(NUMERIC_RANKS[rank][0].to_string(), self.dialect)
+                    }
+                    _ => (None, None),
                 })
             }
             Plus | Minus | Multiply | Divide | Modulo => {
@@ -129,6 +157,13 @@ pub(super) fn arithmetic(
         (Some("DATE"), Some("INT" | "SMALLINT")) if matches!(op, Plus | Minus) => {
             Some("DATE".to_string())
         }
+        (Some("INT" | "SMALLINT"), Some("DATE")) if *op == Plus => Some("DATE".to_string()),
+        (Some("DATE"), Some("TIME")) if *op == Plus => Some("TIMESTAMP".to_string()),
+        (Some("TIME"), Some("INTERVAL")) if matches!(op, Plus | Minus) => Some("TIME".to_string()),
+        (Some("TIME"), Some("TIME")) if *op == Minus => Some("INTERVAL".to_string()),
+        (Some("INTERVAL"), Some(n)) if *op == Divide && numeric_rank(n).is_some() => {
+            Some("INTERVAL".to_string())
+        }
         (Some(a), Some(b))
             if *op == Minus && a == b && matches!(a, "TIMESTAMP" | "TIMESTAMPTZ") =>
         {
@@ -155,11 +190,32 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
     if right == (None, None) || left == right {
         return Some(left);
     }
-    if left == (None, None) || (left.1.is_none() && left.0 == right.0) {
+    if left == (None, None) {
         return Some(right);
     }
-    if right.1.is_none() && left.0 == right.0 {
-        return Some(left);
+    let postgres = dialect == SqlDialect::Postgres;
+    if postgres {
+        // A string literal has the type `unknown`, which takes the other input's type.
+        match (is_unknown_literal(&left), is_unknown_literal(&right)) {
+            (true, false) => return Some(right),
+            (false, true) => return Some(left),
+            _ => {}
+        }
+    }
+    // An integer literal is an `integer`, so it widens a `smallint`.
+    let widens = |literal: &Typed, other: &Typed| {
+        postgres
+            && literal.1.is_none()
+            && literal.0.as_deref() == Some("int")
+            && operand_type(other) == Some("SMALLINT")
+    };
+    if !widens(&left, &right) && !widens(&right, &left) {
+        if left.1.is_none() && left.0 == right.0 {
+            return Some(right);
+        }
+        if right.1.is_none() && left.0 == right.0 {
+            return Some(left);
+        }
     }
     if let (Some(x), Some(y)) = (
         left.1.as_deref().and_then(array_element),
@@ -188,6 +244,24 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
         return None;
     };
     Some(from_sql_type(common.to_string(), dialect))
+}
+
+/// A string literal: PostgreSQL types it `unknown` until the other inputs decide.
+pub(super) fn is_unknown_literal(typed: &Typed) -> bool {
+    typed.1.is_none() && typed.0.as_deref() == Some("str")
+}
+
+/// The common type of the branches of a `CASE`, the arguments of `COALESCE`, `GREATEST`
+/// or `LEAST`, or the elements of a `VALUES` column, following PostgreSQL: untyped inputs
+/// yield to the others, numbers promote and `COALESCE(int_col, 1.5)` is a `NUMERIC`.
+/// Inputs that cannot be unified (PostgreSQL rejects them) give `None`.
+pub(super) fn common_of(
+    types: impl IntoIterator<Item = Typed>,
+    dialect: SqlDialect,
+) -> Option<Typed> {
+    types
+        .into_iter()
+        .try_fold((None, None), |acc, typed| common_type(acc, typed, dialect))
 }
 
 /// The type category of a set operation's input; literals know only their Python type.
