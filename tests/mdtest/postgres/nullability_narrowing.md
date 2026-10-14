@@ -129,22 +129,19 @@ SELECT age, max(total) FROM users JOIN orders ON orders.user_id = users.id GROUP
 -- inferred: tuple[int, decimal.Decimal]
 ```
 
-## A JSON key test narrows the accessor
+## A JSON key test does not narrow the accessor
 
-`doc ? 'key'` holds only when the key exists, so `doc -> 'key'` cannot be NULL (the text
-accessor `->>` still is for a JSON `null`).
-
-```sql
-SELECT prefs -> 'theme', prefs ->> 'theme', prefs -> 'lang' FROM users WHERE prefs ? 'theme'
--- inferred: tuple[typing.Any, str | None, typing.Any]
-```
+`doc ? 'key'` is also true for an array that holds the string `'key'`, and `doc -> 'key'` is
+NULL there, so the accessor stays optional. The column itself is narrowed.
 
 `typing.Any` already admits `None`, so a column check uses a cast to see it:
 
 ```sql
 SELECT (prefs -> 'theme')::TEXT, (prefs ->> 'theme')::TEXT, (prefs -> 'lang')::TEXT FROM users WHERE prefs ? 'theme'
--- inferred: tuple[str, str | None, str | None]
+-- inferred: tuple[str | None, str | None, str | None]
 ```
+
+Testing the accessor itself narrows it:
 
 ```sql
 SELECT (prefs -> 'theme')::TEXT FROM users WHERE (prefs -> 'theme') IS NOT NULL

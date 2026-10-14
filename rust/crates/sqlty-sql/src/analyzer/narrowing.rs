@@ -229,21 +229,6 @@ impl<'a> Analyzer<'a> {
             | Expr::IsFalse(_)
             | Expr::IsNotTrue(_)
             | Expr::IsNotFalse(_) => Learned::default(),
-            // `doc ? 'key'` holds only when the key is there: `doc -> 'key'` is not NULL.
-            Expr::BinaryOp {
-                left,
-                op: Question,
-                right,
-            } if truth && self.dialect == SqlDialect::Postgres => {
-                let accessor = Expr::BinaryOp {
-                    left: left.clone(),
-                    op: Arrow,
-                    right: right.clone(),
-                };
-                let mut learned = self.proven(cond, scope);
-                learned.exprs.push(accessor.to_string());
-                learned
-            }
             // An empty subquery or array makes `x IN (...)` false and `x NOT IN (...)` true
             // for a NULL `x`: only `x IN (...)` being true proves `x` is there.
             Expr::InSubquery {
@@ -458,10 +443,12 @@ mod tests {
     }
 
     #[test]
-    fn test_json_key_test_narrows_the_accessor() {
+    fn test_json_key_test_does_not_narrow_the_accessor() {
+        // `doc ? 'k'` is also true for an array holding the string 'k', where `doc -> 'k'`
+        // is NULL.
         assert_eq!(
             marks("SELECT doc -> 'k', doc ->> 'k', doc -> 'j' FROM t WHERE doc ? 'k'"),
-            "-NN"
+            "NNN"
         );
         assert_eq!(
             marks("SELECT doc -> 'k' FROM t WHERE doc -> 'k' IS NOT NULL"),
