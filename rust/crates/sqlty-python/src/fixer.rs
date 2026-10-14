@@ -7,7 +7,6 @@ use std::collections::{BTreeSet, HashMap};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::analyzer::{expand_star, Schema};
 use crate::checker::{refines_tuple, RuleConfig, INLINE_SQL_COMMENT_CONTENT};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
@@ -15,6 +14,7 @@ use crate::rewriter::{
     ImportStyle, LineIndex, Suppressed, TYPE_MODULES,
 };
 use crate::tokens::{tokenize, wrapper_calls};
+use sqlty_sql::analyzer::{expand_star, Schema};
 
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 

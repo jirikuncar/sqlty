@@ -1,11 +1,9 @@
 //! sqlty._core — the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
 
-mod analyzer;
-mod checker;
-mod ddl;
-mod fixer;
-mod rewriter;
-mod tokens;
+use sqlty_python::checker;
+use sqlty_python::fixer;
+use sqlty_python::rewriter;
+use sqlty_sql::analyzer;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

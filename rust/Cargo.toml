@@ -1,5 +1,8 @@
-[package]
-name = "sqlty-core"
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
@@ -7,12 +10,10 @@ license = "MIT"
 repository = "https://github.com/jirikuncar/sqlty"
 publish = false
 
-[lib]
-name = "_core"
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
+[workspace.dependencies]
 pyo3 = { version = "0.29", features = ["extension-module"] }
 sqlparser = { version = "0.63", features = ["visitor"] }
 regex = "1"
 once_cell = "1"
+sqlty-sql = { path = "crates/sqlty-sql" }
+sqlty-python = { path = "crates/sqlty-python" }

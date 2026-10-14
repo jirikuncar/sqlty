@@ -8,7 +8,7 @@
 use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Kind {
+pub enum Kind {
     /// A string literal, with its prefix.
     Str,
     Comment,
@@ -22,7 +22,7 @@ pub(crate) enum Kind {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Token {
+pub struct Token {
     pub kind: Kind,
     pub span: Range<usize>,
     /// Bracket depth; a bracket and its match share it.
@@ -178,7 +178,7 @@ fn lex(source: &str, i: usize) -> (Kind, usize) {
 }
 
 /// End of the string literal starting at `pos`, prefix included.
-pub(crate) fn string_at(source: &str, pos: usize) -> Option<usize> {
+pub fn string_at(source: &str, pos: usize) -> Option<usize> {
     match source[pos..].starts_with(|c: char| !c.is_whitespace()) {
         true => Some(lex(source, pos))
             .filter(|(kind, _)| *kind == Kind::Str)
@@ -189,7 +189,7 @@ pub(crate) fn string_at(source: &str, pos: usize) -> Option<usize> {
 
 /// Tokens of `source`; whitespace, line continuations and line breaks inside
 /// brackets are skipped.
-pub(crate) fn tokenize(source: &str) -> Vec<Token> {
+pub fn tokenize(source: &str) -> Vec<Token> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let (mut i, mut depth) = (0, 0usize);
@@ -237,7 +237,7 @@ pub(crate) fn tokenize(source: &str) -> Vec<Token> {
 }
 
 /// Spans of plain string literals (no prefix but `u`), outside comments.
-pub(crate) fn string_literals(source: &str) -> Vec<(usize, usize)> {
+pub fn string_literals(source: &str) -> Vec<(usize, usize)> {
     tokenize(source)
         .into_iter()
         .filter(|t| t.is_plain(source))
@@ -299,7 +299,7 @@ fn needs_brackets(source: &str, tokens: &[Token], a: usize, b: usize) -> bool {
 
 /// Implicitly concatenated string literals, as token indices: runs of strings
 /// with only comments between, on one logical line.
-pub(crate) fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
+pub fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut open = false;
     for (i, token) in tokens.iter().enumerate() {
@@ -327,7 +327,7 @@ pub(crate) fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
 }
 
 /// The concatenated content of string literals.
-pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
+pub fn content(source: &str, spans: &[Range<usize>]) -> String {
     spans
         .iter()
         .map(|span| {
@@ -339,7 +339,7 @@ pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
 }
 
 /// A `{wrapper}[T](...)` call.
-pub(crate) struct Call {
+pub struct Call {
     pub span: Range<usize>,
     /// `T`, between the brackets.
     pub annotation: Range<usize>,
@@ -380,7 +380,7 @@ impl Call {
 }
 
 /// Every `{wrapper}[T](...)` and `mod.{wrapper}[T](...)` call in `source`, in source order.
-pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Vec<Call> {
+pub fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Vec<Call> {
     let dotted = format!(".{wrapper}");
     let mut calls = Vec::new();
     for (i, token) in tokens.iter().enumerate() {

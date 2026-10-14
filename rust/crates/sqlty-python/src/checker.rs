@@ -16,13 +16,13 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::analyzer::{parse_error, Schema};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, ends_marker_line, extract_string_content, marked_query, skipped_rule,
     string_literals, strip_line_break, wraps, ImportStyle, LineIndex,
 };
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls};
+use sqlty_sql::analyzer::{parse_error, Schema};
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -46,7 +46,7 @@ const INLINE_SQL_COMMENT: &str = concat!(
 );
 
 /// String content starting with `INLINE_SQL_COMMENT`.
-pub(crate) static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
+pub static INLINE_SQL_COMMENT_CONTENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
@@ -296,7 +296,7 @@ fn skipped_message(rule: &str) -> String {
 }
 
 /// Message of `unparsed-query`, given sqlparser's error (see `analyzer::parse_error`).
-pub(crate) fn unparsed_message(error: &str) -> String {
+pub fn unparsed_message(error: &str) -> String {
     format!("query does not parse: {error}")
 }
 
@@ -381,7 +381,7 @@ pub fn wrapped_queries(
 /// or `tuple[int, list[int]]`), so it is not stale.
 ///
 /// Element types are not checked.
-pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
+pub fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     fn balanced(args: &str) -> bool {
         let mut depth = 0i32;
         args.bytes().all(|byte| {
