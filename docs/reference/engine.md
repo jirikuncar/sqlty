@@ -6,7 +6,7 @@ extension, built with [PyO3](https://pyo3.rs) and
 [maturin](https://www.maturin.rs), parsing SQL with
 [sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs). The CLI,
 the [`sqlty.core`](python-api.md#sqltycore) functions, the
-[magic codec](../guide/magic-codec.md) and [stub generation](../guide/stubs.md)
+[magic codec](../guide/magic-codec.md)
 all use it.
 
 Python handles what needs the Python runtime: resolving row types such as

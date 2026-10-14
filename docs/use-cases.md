@@ -39,15 +39,6 @@ imported, with no rewrite step. `SQL[T]` and `row_form` work the same way in
 a notebook cell; the codec itself applies only to files that declare
 `# coding: sqlty`.
 
-## Typed data-access helpers
-
-Your code calls a helper such as `sql("SELECT ...")` or
-`fetch_all("SELECT ...")` instead of building strings. sqlty records the
-literals passed to it and writes a `.pyi` stub with one overload per query,
-so each call site gets its own return type.
-
-Start with [Generated stubs](guide/stubs.md).
-
 ## Guardrails for AI-generated SQL
 
 Code assistants write plausible SQL whose result does not match the code

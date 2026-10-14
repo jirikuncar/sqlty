@@ -38,8 +38,7 @@ compiles the Rust extension, so the first run needs a Rust toolchain
 `sqlty-check` fails the commit only for rules with severity `error`; drift
 such as [`stale-type`](../reference/rules.md#stale-type) is a warning unless
 you promote it (see [below](#fail-on-drift-and-mismatches)). The `sqlty` hook
-id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files and
-no longer generates stubs.
+id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files.
 
 To skip the build or reuse the `sqlty` already installed in your
 environment, use local hooks instead:
@@ -128,17 +127,6 @@ jobs:
       - run: uv sync
       - run: uv run sqlty rewrite --check .
       - run: uv run sqlty check .
-```
-
-## Generated stubs
-
-There is no command that checks [generated stubs](../guide/stubs.md). To keep
-them current, run the test suite with `SQLTY_AUTO_GENERATE=1` and fail if a
-stub changed:
-
-```bash
-SQLTY_AUTO_GENERATE=1 uv run pytest
-git diff --exit-code -- '*.pyi'
 ```
 
 ## Keeping sources stripped

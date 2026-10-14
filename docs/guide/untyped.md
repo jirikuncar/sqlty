@@ -69,10 +69,3 @@ users = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")
 
 `sqlty rewrite` does not replace an existing wrapper; `sqlty check --fix`
 does. See [Editing queries](writing-queries.md#editing-queries).
-
-## Generated stubs
-
-The same setting applies to the [`.pyi` stubs](stubs.md) generated for
-`@sqlty` helpers: uninferable queries get a `SQL[UNTYPED]` overload, and the
-catch-all `(query: str)` overload returns `SQL[UNTYPED]` instead of `str`.
-See [Generated stubs](stubs.md#untyped-calls).
