@@ -413,6 +413,16 @@ annotated `T | None` is accepted for a column that cannot be NULL: only
 [`redundant-optional`](../reference/rules.md#redundant-optional), off by default, reports
 that.
 
+## Literal columns
+
+A column with known values (an enum, a `CHECK (col IN (...))`, a `CASE` over constants; see
+[Literal values](schema-inference.md#literal-values)) infers a `typing.Literal`. A field
+annotated `str` or `int` takes it. A field annotated with a `Literal` must list every value:
+a missing one is [`literal-mismatch`](../reference/rules.md#literal-mismatch), an error by
+default. Values the `Literal` lists that the column never takes are
+[`redundant-literal`](../reference/rules.md#redundant-literal), off by default, because one
+alias often serves several queries that each return some of its values.
+
 ## Limitations
 
 - The row type must be defined in the same file as the `SQL[T](...)` call.

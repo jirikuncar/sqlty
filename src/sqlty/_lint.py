@@ -13,6 +13,8 @@ Configuration via pyproject.toml:
     column-name-mismatch = "warn"       # default
     nullable-mismatch = "error"         # default
     redundant-optional = "ignore"       # default
+    literal-mismatch = "error"          # default
+    redundant-literal = "ignore"        # default
     typeddict-key-mismatch = "error"    # default
     typeddict-inheritance = "error"     # default
     select-star = "warn"                # default
@@ -112,6 +114,18 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="Row type field is optional but its query column cannot be NULL",
+    ),
+    "literal-mismatch": LintRule(
+        name="literal-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Row type field is a Literal that does not cover the values its column can take",
+    ),
+    "redundant-literal": LintRule(
+        name="redundant-literal",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Row type field is a Literal that lists values its column can never take",
     ),
     "select-star": LintRule(
         name="select-star",
