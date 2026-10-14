@@ -161,7 +161,14 @@ SELECT m, p, tags FROM a UNION SELECT m, p, tags FROM b
 -- inferred: tuple[typing.Literal['happy', 'sad'], int, list[str]]
 ```
 
+Arrays resolve by their elements.
+
 ```sql
 SELECT ids FROM a UNION SELECT ids FROM b
--- columns: ids: None (None)
+-- columns: ids: list[int] (ARRAY<BIGINT>)
+```
+
+```sql
+SELECT tags FROM a UNION SELECT ids FROM b
+-- columns: tags: None (None)
 ```

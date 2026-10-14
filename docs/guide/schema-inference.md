@@ -85,8 +85,8 @@ adults = "--sql\nSELECT user_id, user_name FROM adults"
 
 `UNION`, `INTERSECT` and `EXCEPT` type each column across all branches, as
 PostgreSQL does: `NULL`, placeholders and columns of unknown type yield to the
-other branches, numbers promote to the wider type, and types of different
-categories leave the column unknown. Names come from the leftmost branch.
+other branches, numbers promote to the wider type, arrays resolve by their
+elements, and types of different categories leave the column unknown. Names come from the leftmost branch.
 
 ```toml
 [tool.sqlty]

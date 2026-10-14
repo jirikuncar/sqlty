@@ -1957,26 +1957,31 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => {
-                let mut common: Option<String> = None;
+                let mut common: Option<Typed> = None;
                 for elem in &array.elem {
                     if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
                         continue;
                     }
-                    let typed = self.expr(elem, scope)?;
-                    let Some(elem) = typed
-                        .1
-                        .clone()
-                        .or_else(|| operand_type(&typed).map(String::from))
-                        .or_else(|| (typed.0.as_deref() == Some("str")).then(|| "TEXT".into()))
-                    else {
-                        return Ok((None, None));
+                    let mut typed = self.expr(elem, scope)?;
+                    if let Some(inner) = typed.1.as_deref().and_then(array_element) {
+                        typed = from_sql_type(inner.to_string(), self.dialect);
+                    }
+                    common = match common {
+                        _ if typed.0.is_none() => None,
+                        Some(common) => common_type(common, typed, self.dialect),
+                        None => Some(typed),
                     };
-                    let elem = array_element(&elem).unwrap_or(&elem).to_string();
-                    if common.get_or_insert_with(|| elem.clone()) != &elem {
+                    if common.is_none() {
                         return Ok((None, None));
                     }
                 }
-                Ok(common.map_or((None, None), |elem| {
+                let elem = common.and_then(|typed| {
+                    typed
+                        .1
+                        .clone()
+                        .or_else(|| category(&typed).map(String::from))
+                });
+                Ok(elem.map_or((None, None), |elem| {
                     from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
                 }))
             }
@@ -2289,6 +2294,7 @@ fn operand_type(typed: &Typed) -> Option<&str> {
         (Some(sql_type), _) => Some(type_base(sql_type)),
         (None, Some("int")) => Some("INT"),
         (None, Some("float")) => Some("DOUBLE"),
+        (None, Some(DECIMAL)) => Some("DECIMAL"),
         _ => None,
     }
 }
@@ -2375,7 +2381,8 @@ fn set_branches(body: &SetExpr) -> Vec<&SetExpr> {
 
 /// The type of a set operation's column whose branches have types `left` and `right`,
 /// following PostgreSQL: an unknown type yields to the other, numbers promote to the
-/// wider type, text and timestamps to the preferred one; other mixes conflict (`None`).
+/// wider type, text and timestamps to the preferred one, arrays by their elements;
+/// other mixes conflict (`None`).
 fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Option<Typed> {
     if right.0.is_none() || left == right {
         return Some(left);
@@ -2385,6 +2392,14 @@ fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Option<Typed> 
     }
     if right.1.is_none() && left.0 == right.0 {
         return Some(left);
+    }
+    if let (Some(x), Some(y)) = (
+        left.1.as_deref().and_then(array_element),
+        right.1.as_deref().and_then(array_element),
+    ) {
+        let elem = |ty: &str| from_sql_type(ty.to_string(), dialect);
+        let elem = common_type(elem(x), elem(y), dialect)?.1?;
+        return Some(from_sql_type(format!("ARRAY<{elem}>"), dialect));
     }
     let (a, b) = (category(&left)?, category(&right)?);
     const TEMPORAL: [&str; 3] = ["DATE", "TIMESTAMP", "TIMESTAMPTZ"];
@@ -2410,7 +2425,6 @@ fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Option<Typed> 
 /// The type category of a set operation's input; literals know only their Python type.
 fn category(typed: &Typed) -> Option<&str> {
     match (typed.1.as_deref(), typed.0.as_deref()) {
-        (None, Some(DECIMAL)) => Some("DECIMAL"),
         (None, Some("str")) => Some("TEXT"),
         _ => operand_type(typed),
     }
@@ -2827,6 +2841,10 @@ mod tests {
                  SELECT n FROM r"
             ),
             types(&["BIGINT"])
+        );
+        assert_eq!(
+            sql_types("SELECT ARRAY[n], n * 1.5 FROM a UNION SELECT ARRAY[n], n FROM b"),
+            types(&["ARRAY<BIGINT>", "DECIMAL"])
         );
     }
 }
