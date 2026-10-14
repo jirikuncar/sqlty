@@ -18,6 +18,7 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
 from sqlty._core import (
@@ -34,8 +35,10 @@ from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
+from sqlty._drivers import find_driver_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES
+from sqlty._params import mismatch
 from sqlty._source import ParsedSource, is_any
 
 if TYPE_CHECKING:
@@ -111,6 +114,47 @@ def json_shapes(
     except RuntimeError:
         return []
     return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
+
+
+class ParamInfo(NamedTuple):
+    """A query parameter. ``name`` is set for ``%(name)s`` and ``:name``; types are ``None`` when unknown.
+
+    ``nullable`` is ``False`` when ``None`` cannot be passed (the parameter is stored in a
+    ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
+    ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
+    accepts any value.
+    """
+
+    number: int
+    name: str | None
+    python_type: str | None
+    sql_type: str | None
+    nullable: bool | None
+    cast: bool = False
+
+
+def analyze_params(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[ParamInfo] | None:
+    """Parameters of a query with the type each takes from its context, or ``None`` when it doesn't parse.
+
+    Placeholders are ``%s``, ``%(name)s``, ``$1``, ``?`` and ``:name`` (``?`` outside
+    PostgreSQL, ``:name`` in SQLite). A parameter takes its type from the column it is
+    compared with or stored in, a cast, ``LIMIT``, ``IN`` lists, function arguments or an
+    array (``= ANY(%s)`` is ``list[T]``). ``number`` is 1-based, in order of appearance; a
+    named parameter used twice is one.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
+        >>> analyze_params("SELECT name FROM users WHERE id = %s AND age > %(min)s", schema_sql=schema)
+        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False)]
+        >>> [(p.python_type, p.nullable) for p in analyze_params("INSERT INTO users (id, name, age) VALUES ($1, $2, $3)", schema_sql=schema)]
+        [('int', False), ('str', False), ('int', True)]
+        >>> analyze_params("SELECT 1 FROM users WHERE id = ANY(%s)", schema_sql=schema)[0].python_type
+        'list[int]'
+    """
+    params = _analyze_params(sql, dialect=dialect, schema_sql=schema_sql)
+    return None if params is None else [ParamInfo(*param) for param in params]
 
 
 def query_diagnostics(
@@ -291,6 +335,7 @@ def _check_diagnostics(
         else []
     )
     found = find_helper_calls(parsed, helpers, module)
+    driver_calls = find_driver_calls(parsed)
     calls = [call for call in found if call.query is not None]
     queries = [
         (line, name, query)
@@ -301,7 +346,7 @@ def _check_diagnostics(
         )
         if not name.startswith("tuple[")
     ]
-    if not (queries or found):
+    if not (queries or found or driver_calls):
         return diagnostics
     rule_config = RuleConfig(overrides=rules)
 
@@ -333,6 +378,14 @@ def _check_diagnostics(
         if key not in unparsed:
             unparsed[key] = ast.unparse(row)
         return unparsed[key]
+
+    if rule_config.is_enabled("param-type-mismatch") or rule_config.is_enabled(
+        "param-count-mismatch"
+    ):
+        for call in [*calls, *driver_calls]:
+            if call.params is not None:
+                for rule, message in _param_diagnostics(call, dialect, schema_sql):
+                    report(rule, message, call.line)
 
     rows = [unparse(call.row) if call.row else None for call in calls]
     named = [(call.line, row, call.query) for call, row in zip(calls, rows, strict=True) if row]
@@ -454,6 +507,51 @@ def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
     if columns is not None and all(column.python_type is not None for column in columns):
         return "typed"
     return "partially typed"
+
+
+def _param_diagnostics(
+    call: HelperCall, dialect: str, schema_sql: str | None
+) -> list[tuple[str, str]]:
+    """``(rule, message)`` for the arguments a call passes for its query's placeholders."""
+    assert call.query is not None and call.params is not None
+    params = analyze_params(call.query, dialect=dialect, schema_sql=schema_sql)
+    if params is None:
+        return []
+    named = bool(params) and all(p.name is not None for p in params)
+    positional = all(p.name is None for p in params)
+    passed = {arg.key: arg for arg in call.params}
+    by_key: dict[int | str, ParamInfo] = {
+        (p.name if named and p.name else p.number): p for p in params
+    }
+    by_name = bool(passed) and all(isinstance(key, str) for key in passed)
+    if (named and passed and not by_name) or (positional and by_name):
+        return []
+    found: list[tuple[str, str]] = []
+    if positional and len(passed) != len(by_key):
+        found.append(
+            (
+                "param-count-mismatch",
+                f"query has {len(by_key)} parameter{'' if len(by_key) == 1 else 's'}, "
+                f"the call passes {len(passed)}",
+            )
+        )
+    elif named and (missing := [f"'{key}'" for key in by_key if key not in passed]):
+        found.append(
+            (
+                "param-count-mismatch",
+                f"call is missing parameter{'' if len(missing) == 1 else 's'} {', '.join(missing)}",
+            )
+        )
+    # sqlite3 is dynamically typed, and a cast converts whatever it is given.
+    typed = dialect.lower() != "sqlite"
+    for key, arg in passed.items():
+        if (param := by_key.get(key)) is None:
+            continue
+        label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
+        if arg.type == "None" or (typed and not param.cast):
+            if problem := mismatch(param.python_type, param.nullable, arg.type):
+                found.append(("param-type-mismatch", f"{label} {problem}"))
+    return found
 
 
 def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[_RowColumn] | None:

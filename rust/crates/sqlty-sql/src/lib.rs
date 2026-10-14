@@ -5,4 +5,5 @@ pub(crate) mod catalog;
 pub(crate) mod ddl;
 pub mod diagnostics;
 pub mod json;
+pub mod placeholders;
 pub(crate) mod values;

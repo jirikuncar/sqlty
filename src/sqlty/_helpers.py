@@ -18,10 +18,16 @@ import re
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
+from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
 
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
+# Names that mark where a helper takes the query's parameters: a ``params`` argument holding
+# a sequence or mapping, ``*args`` (asyncpg), or ``**params``.
+_PARAMS_ARGUMENT = frozenset({"params", "parameters", "args"})
+_PARAMS_VARIADIC = frozenset({"args", "params", "parameters"})
+_PARAMS_KEYWORDS = frozenset({"params", "parameters"})
 
 
 @dataclass(frozen=True)
@@ -41,18 +47,25 @@ class Helper:
     query: str
     row: str | None
     kind: str = "function"
+    params: str | None = None
+    rest: str | None = None
+    named: str | None = None
 
 
 class HelperCall(NamedTuple):
     """A call passing a query to a helper's query parameter.
 
     ``query`` is ``None`` for a psycopg composition with a part that is not a literal.
+    ``params`` holds the arguments the call passes for the query's placeholders, with the
+    type of each where the source states it, or ``None`` when the helper takes no parameters
+    or the call does not spell them out.
     """
 
     line: int
     query: str | None
     row: ast.expr | None
     typing_aliases: dict[str, str]
+    params: tuple[ParamArg, ...] | None = None
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -145,6 +158,7 @@ def _helper(
     args = node.args
     positional = [*args.posonlyargs, *args.args]
     keywords = [*args.args, *args.kwonlyargs]
+    names = [a.arg for a in [*positional, *args.kwonlyargs]]
     if kind in ("instance", "class") and positional:
         keywords = [a for a in keywords if a is not positional[0]]
         positional = positional[1:]
@@ -155,6 +169,9 @@ def _helper(
         query=query,
         row=row,
         kind=kind,
+        params=next((n for n in names if n in _PARAMS_ARGUMENT and n not in (query, row)), None),
+        rest=args.vararg.arg if args.vararg and args.vararg.arg in _PARAMS_VARIADIC else None,
+        named=args.kwarg.arg if args.kwarg and args.kwarg.arg in _PARAMS_KEYWORDS else None,
     )
 
 
@@ -164,7 +181,7 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
     Example:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
         >>> index_functions(src)["f"]
-        Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function')
+        Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None)
     """
     parsed = ParsedSource.of(source)
     annotated, marker = parsed.marker_names
@@ -389,6 +406,37 @@ def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | N
     return None
 
 
+def _call_params(
+    helper: Helper, call: ast.Call, parsed: ParsedSource
+) -> tuple[ParamArg, ...] | None:
+    """The arguments ``call`` passes for the placeholders of its query, or ``None`` when not spelled out.
+
+    A helper takes them as a ``params`` argument (a tuple or list literal, or a dict literal
+    of string keys), as ``*args``, or as ``**params``.
+    """
+    stack = parsed.scopes_of(call)
+
+    def typed(key: int | str, value: ast.expr) -> ParamArg:
+        return ParamArg(key, arg_type(value, parsed, stack))
+
+    if helper.params is not None:
+        arg = _argument(helper, call, helper.params)
+        return literal_params(arg, parsed, stack)
+    if helper.rest is not None:
+        if any(isinstance(arg, ast.Starred) for arg in call.args):
+            return None
+        return tuple(typed(i, arg) for i, arg in enumerate(call.args[len(helper.positional) :], 1))
+    if helper.named is not None:
+        if any(keyword.arg is None for keyword in call.keywords):
+            return None
+        return tuple(
+            typed(keyword.arg, keyword.value)
+            for keyword in call.keywords
+            if keyword.arg is not None and keyword.arg not in helper.keywords
+        )
+    return None
+
+
 def find_helper_calls(
     source: str | ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
 ) -> list[HelperCall]:
@@ -497,7 +545,13 @@ def find_helper_calls(
         query = _argument(helper, node, helper.query)
         if isinstance(query, ast.Constant) and isinstance(query.value, str):
             calls.append(
-                HelperCall(node.lineno, query.value, _argument(helper, node, helper.row), aliases)
+                HelperCall(
+                    node.lineno,
+                    query.value,
+                    _argument(helper, node, helper.row),
+                    aliases,
+                    _call_params(helper, node, parsed),
+                )
             )
         elif scan is not None and query is not None:
             pending.append((node, helper, query))
@@ -505,5 +559,13 @@ def find_helper_calls(
         assert scan is not None
         if (text := scan.render(query, resolve_fragment)) is not None:
             row = _argument(helper, node, helper.row)
-            calls.append(HelperCall(node.lineno, None if text == UNCHECKED else text, row, aliases))
+            calls.append(
+                HelperCall(
+                    node.lineno,
+                    None if text == UNCHECKED else text,
+                    row,
+                    aliases,
+                    _call_params(helper, node, parsed),
+                )
+            )
     return sorted(calls, key=lambda call: call.line)

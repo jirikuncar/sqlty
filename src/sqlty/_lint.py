@@ -35,6 +35,8 @@ Configuration via pyproject.toml:
     unknown-type = "ignore"             # default
     unsupported-syntax = "ignore"       # default
     unused-ignore = "ignore"            # default
+    param-count-mismatch = "error"      # default
+    param-type-mismatch = "error"       # default
 """
 
 from __future__ import annotations
@@ -235,6 +237,18 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="Query parses, but a construct in it is not typed, so the row type is not trusted",
+    ),
+    "param-count-mismatch": LintRule(
+        name="param-count-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="A call passes a different number of parameters, or different names, than its query has placeholders",
+    ),
+    "param-type-mismatch": LintRule(
+        name="param-type-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="A call passes an argument whose type can't be the type its query parameter takes",
     ),
     "unused-ignore": LintRule(
         name="unused-ignore",

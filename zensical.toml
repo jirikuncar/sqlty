@@ -25,6 +25,7 @@ nav = [
     { "Row types" = "guide/row-types.md" },
     { "JSON shapes" = "guide/json-shapes.md" },
     { "Query helpers" = "guide/helpers.md" },
+    { "Query parameters" = "guide/parameters.md" },
     { "psycopg" = "guide/psycopg.md" },
     { "Generated stubs" = "guide/stubs.md" },
     { "Magic codec" = "guide/magic-codec.md" },
