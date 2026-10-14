@@ -201,111 +201,6 @@ fn all_nullable(parts: impl IntoIterator<Item = Nullability>) -> Nullability {
     result
 }
 
-/// Aggregate functions, whose result over no rows is NULL (except `COUNT`).
-const AGGREGATES: &[&str] = &[
-    "SUM",
-    "AVG",
-    "MIN",
-    "MAX",
-    "STDDEV",
-    "STDDEV_POP",
-    "STDDEV_SAMP",
-    "VARIANCE",
-    "VAR_POP",
-    "VAR_SAMP",
-    "BOOL_AND",
-    "BOOL_OR",
-    "EVERY",
-    "BIT_AND",
-    "BIT_OR",
-    "BIT_XOR",
-    "ANY_VALUE",
-    "STRING_AGG",
-    "GROUP_CONCAT",
-    "ARRAY_AGG",
-    "JSON_AGG",
-    "JSONB_AGG",
-    "JSON_OBJECT_AGG",
-    "JSONB_OBJECT_AGG",
-    "JSON_ARRAYAGG",
-    "JSON_OBJECTAGG",
-    "XMLAGG",
-    "PERCENTILE_CONT",
-    "PERCENTILE_DISC",
-    "MODE",
-    "CORR",
-    "COVAR_POP",
-    "COVAR_SAMP",
-    "REGR_SLOPE",
-    "REGR_INTERCEPT",
-    "REGR_R2",
-    "REGR_AVGX",
-    "REGR_AVGY",
-    "REGR_SXX",
-    "REGR_SXY",
-    "REGR_SYY",
-    "TOTAL",
-];
-
-/// Aggregates that give NULL for a group of rows too: too few non-null rows for a sample
-/// statistic, a constant input for a correlation, or only NULLs to take a percentile of.
-const NULL_ON_FEW_ROWS: &[&str] = &[
-    "STDDEV",
-    "STDDEV_SAMP",
-    "VARIANCE",
-    "VAR_SAMP",
-    "PERCENTILE_CONT",
-    "PERCENTILE_DISC",
-    "MODE",
-    "CORR",
-    "COVAR_POP",
-    "COVAR_SAMP",
-    "REGR_SLOPE",
-    "REGR_INTERCEPT",
-    "REGR_R2",
-    "REGR_AVGX",
-    "REGR_AVGY",
-    "REGR_SXX",
-    "REGR_SXY",
-    "REGR_SYY",
-];
-
-/// Aggregates whose group of one or more rows always gives a value, whatever the rows hold.
-pub(super) const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
-    "ARRAY_AGG",
-    "JSON_AGG",
-    "JSONB_AGG",
-    "JSON_OBJECT_AGG",
-    "JSONB_OBJECT_AGG",
-    "JSON_ARRAYAGG",
-    "JSON_OBJECTAGG",
-    "XMLAGG",
-    "TOTAL",
-];
-
-/// Functions that can return NULL for non-null arguments.
-const ALWAYS_NULLABLE: &[&str] = &[
-    "NULLIF",
-    "REGEXP_MATCH",
-    "REGEXP_SUBSTR",
-    "REGEXP_INSTR",
-    "ARRAY_LENGTH",
-    "ARRAY_UPPER",
-    "ARRAY_LOWER",
-    "ARRAY_POSITION",
-    "JSON_EXTRACT",
-    "JSON_EXTRACT_PATH",
-    "JSON_EXTRACT_PATH_TEXT",
-    "JSONB_EXTRACT_PATH",
-    "JSONB_EXTRACT_PATH_TEXT",
-    "JSONB_PATH_QUERY_FIRST",
-    "JSON_VALUE",
-    "JSON_QUERY",
-    "NTH_VALUE",
-    // An array can hold NULL elements.
-    "UNNEST",
-];
-
 /// Whether the frame of a window always holds the current row. The default frame does; a
 /// spelled-out one must start at or before the current row and end at or after it.
 fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
@@ -319,36 +214,6 @@ fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
     }
 }
 
-/// Window and other functions that never return NULL.
-const NEVER_NULL: &[&str] = &[
-    "ROW_NUMBER",
-    "RANK",
-    "DENSE_RANK",
-    "NTILE",
-    "PERCENT_RANK",
-    "CUME_DIST",
-    "NOW",
-    "CURRENT_TIMESTAMP",
-    "CURRENT_DATE",
-    "CURRENT_TIME",
-    "LOCALTIME",
-    "LOCALTIMESTAMP",
-    "RANDOM",
-    "RAND",
-    "GEN_RANDOM_UUID",
-    "UUID",
-    "UUID_GENERATE_V4",
-    "JSON_BUILD_OBJECT",
-    "JSONB_BUILD_OBJECT",
-    "JSON_BUILD_ARRAY",
-    "JSONB_BUILD_ARRAY",
-    "NUM_NULLS",
-    "NUM_NONNULLS",
-    "JSON_OBJECT",
-    "JSON_ARRAY",
-    "ROW",
-];
-
 /// Whether `expr` holds an aggregate call outside any window or subquery.
 fn contains_aggregate(expr: &Expr) -> bool {
     match expr {
@@ -359,7 +224,7 @@ fn contains_aggregate(expr: &Expr) -> bool {
             (func.over.is_none()
                 && !scalar_min_max
                 && (matches!(name.as_str(), "COUNT" | "REGR_COUNT")
-                    || AGGREGATES.contains(&name.as_str())))
+                    || lookup(&name).is_some_and(|info| info.is_aggregate())))
                 || args.into_iter().any(contains_aggregate)
         }
         Expr::Nested(inner)
@@ -394,16 +259,6 @@ fn is_nonzero_number(expr: &Expr) -> bool {
         },
         _ => false,
     }
-}
-
-/// The upper-case name of a function, without its schema.
-fn function_name(func: &sqlparser::ast::Function) -> String {
-    func.name
-        .0
-        .last()
-        .and_then(|part| part.as_ident())
-        .map(|ident| ident.value.to_uppercase())
-        .unwrap_or_default()
 }
 
 /// Grouping expressions that a subtotal row sets to NULL: those inside `ROLLUP`, `CUBE` and
@@ -766,6 +621,7 @@ impl<'a> Analyzer<'a> {
         facts: &Facts,
     ) -> Nullability {
         let name = function_name(func);
+        let info = lookup(&name);
         let args = positional_args(&func.args);
         let all_positional = match &func.args {
             FunctionArguments::List(list) => list.args.len() == args.len(),
@@ -782,10 +638,11 @@ impl<'a> Analyzer<'a> {
         if matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2 {
             return any_nullable(args.iter().map(|arg| of(arg)));
         }
-        if AGGREGATES.contains(&name.as_str()) {
+        let behavior = info.map_or(Behavior::Scalar, |info| info.behavior);
+        if behavior != Behavior::Scalar {
             // A window function over its frame sees the current row, unless the frame is
             // spelled out.
-            if NULL_ON_FEW_ROWS.contains(&name.as_str()) {
+            if behavior == Behavior::NullOnFewRows {
                 return Nullability::Nullable;
             }
             let framed = match &func.over {
@@ -798,7 +655,7 @@ impl<'a> Analyzer<'a> {
             } else {
                 !facts.grouped
             } || func.filter.is_some();
-            let arg = if ALWAYS_VALUED_AGGREGATES.contains(&name.as_str()) {
+            let arg = if behavior == Behavior::AlwaysValued {
                 Nullability::NonNull
             } else {
                 let rows = facts.ungrouped_rows();
@@ -816,7 +673,7 @@ impl<'a> Analyzer<'a> {
         if name == "CURRENT_SETTING" && args.len() == 2 {
             return Nullability::Nullable;
         }
-        if ALWAYS_NULLABLE.contains(&name.as_str()) {
+        if info.is_some_and(|info| info.always_nullable) {
             return Nullability::Nullable;
         }
         match name.as_str() {
@@ -841,8 +698,10 @@ impl<'a> Analyzer<'a> {
             "CONCAT" => any_nullable(args.iter().map(|arg| of(arg))),
             // Only a NULL separator gives NULL.
             "CONCAT_WS" => first(),
-            name if NEVER_NULL.contains(&name) => Nullability::NonNull,
-            name if self.returns(name).is_some() && all_positional => {
+            _ if info.is_some_and(|info| info.never_null) => Nullability::NonNull,
+            _ if info.is_some_and(|info| info.returns(self.dialect).is_some())
+                && all_positional =>
+            {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }
             // A user-defined function may or may not be strict.

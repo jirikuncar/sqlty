@@ -169,38 +169,6 @@ fn is_comparison(op: &BinaryOperator) -> bool {
     matches!(op, Eq | NotEq | Lt | LtEq | Gt | GtEq | Spaceship)
 }
 
-/// Positions of text and integer arguments of functions with a known signature.
-const SIGNATURES: &[(&[&str], &[&str])] = &[
-    (
-        &[
-            "LOWER",
-            "UPPER",
-            "TRIM",
-            "LTRIM",
-            "RTRIM",
-            "BTRIM",
-            "INITCAP",
-            "LENGTH",
-            "CHAR_LENGTH",
-            "REVERSE",
-            "MD5",
-            "ASCII",
-        ],
-        &["TEXT"],
-    ),
-    (&["REPLACE", "TRANSLATE"], &["TEXT", "TEXT", "TEXT"]),
-    (&["STRPOS", "STARTS_WITH"], &["TEXT", "TEXT"]),
-    (&["SPLIT_PART"], &["TEXT", "TEXT", "INT"]),
-    (&["LEFT", "RIGHT", "REPEAT"], &["TEXT", "INT"]),
-    (&["LPAD", "RPAD"], &["TEXT", "INT", "TEXT"]),
-    (&["SUBSTR"], &["TEXT", "INT", "INT"]),
-    (&["DATE_TRUNC"], &["TEXT"]),
-    (&["TO_CHAR"], &["", "TEXT"]),
-];
-
-/// Functions whose arguments share one type.
-const SAME_TYPE: &[&str] = &["COALESCE", "NULLIF", "GREATEST", "LEAST", "IFNULL"];
-
 impl<'a> Analyzer<'a> {
     fn param_typed(&self, sql_type: &str) -> Typed {
         from_sql_type(sql_type, self.dialect)
@@ -568,17 +536,15 @@ impl<'a> Analyzer<'a> {
             })
             .collect();
         let name = object_name(&function.name).to_uppercase();
-        if SAME_TYPE.contains(&name.as_str()) {
+        let info = lookup(&name);
+        if info.is_some_and(|info| info.same_type) {
             for placeholder in args.iter().flatten() {
                 for other in args.iter().flatten() {
                     self.hint_pair(placeholder, other, scope, out);
                 }
             }
-        } else if let Some((_, types)) = SIGNATURES
-            .iter()
-            .find(|(names, _)| names.contains(&name.as_str()))
-        {
-            for (arg, sql_type) in args.iter().zip(*types) {
+        } else if let Some(types) = info.and_then(|info| info.signature) {
+            for (arg, sql_type) in args.iter().zip(types) {
                 if let (Some(index), false) = (arg.and_then(placeholder_index), sql_type.is_empty())
                 {
                     out.add(index, self.param_typed(sql_type), Nullability::Unknown);

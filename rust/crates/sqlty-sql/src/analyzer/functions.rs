@@ -378,19 +378,15 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     (&["DATE_TRUNC"], Returns::Trunc(1)),
 ];
 
-pub(super) fn function_table(
-    entries: &'static [(&[&'static str], Returns)],
-) -> HashMap<&'static str, Returns> {
-    entries
-        .iter()
-        .flat_map(|(names, returns)| names.iter().map(move |name| (*name, *returns)))
-        .collect()
+/// The upper-case name of a function, without its schema.
+pub(super) fn function_name(func: &sqlparser::ast::Function) -> String {
+    func.name
+        .0
+        .last()
+        .and_then(|part| part.as_ident())
+        .map(|ident| ident.value.to_uppercase())
+        .unwrap_or_default()
 }
-
-pub(super) static FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
-    LazyLock::new(|| function_table(COMMON_FUNCTIONS));
-pub(super) static POSTGRES_FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
-    LazyLock::new(|| function_table(POSTGRES_FUNCTIONS));
 
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
 pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
@@ -408,11 +404,9 @@ pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
 }
 
 impl<'a> Analyzer<'a> {
+    /// How the result type of the built-in function `name` (upper case) follows from its arguments.
     pub(super) fn returns(&self, name: &str) -> Option<Returns> {
-        let postgres = (self.dialect == SqlDialect::Postgres)
-            .then(|| POSTGRES_FUNCTION_TYPES.get(name))
-            .flatten();
-        postgres.or_else(|| FUNCTION_TYPES.get(name)).copied()
+        lookup(name)?.returns(self.dialect)
     }
 
     /// Result type of a call to a function that [`Returns`] describes, given its arguments.

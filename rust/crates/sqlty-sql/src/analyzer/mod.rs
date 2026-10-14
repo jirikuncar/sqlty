@@ -41,6 +41,7 @@ mod nullability;
 mod operators;
 mod params;
 mod query;
+mod registry;
 mod resolve;
 mod scope;
 mod typed;
@@ -55,6 +56,7 @@ use names::*;
 use nullability::*;
 use operators::*;
 use query::*;
+use registry::{lookup, Behavior};
 
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
