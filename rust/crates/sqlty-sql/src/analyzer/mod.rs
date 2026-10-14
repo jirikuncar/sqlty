@@ -656,10 +656,12 @@ pub(crate) fn typed(sql_type: String, python_type: Option<String>, dialect: SqlD
 
 impl Column {
     /// The Python type as written in a row type: `T | None` for a column that can be NULL,
-    /// else `python_type`. `Any` already admits `None`.
+    /// else `python_type`. `Any`, `None` and `T | None` already admit `None`.
     pub fn display_type(&self) -> Option<String> {
         let python_type = self.python_type.as_deref()?;
-        Some(if self.nullable() && python_type != ANY {
+        let admits_none =
+            python_type == ANY || python_type == "None" || python_type.ends_with(" | None");
+        Some(if self.nullable() && !admits_none {
             format!("{python_type} | None")
         } else {
             python_type.to_string()

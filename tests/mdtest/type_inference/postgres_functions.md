@@ -39,7 +39,7 @@ FROM users
 
 ```sql
 SELECT pg_advisory_xact_lock(%(key)s)
--- inferred: tuple[None | None]
+-- inferred: tuple[None]
 ```
 
 ## Boolean and fixed-type functions
