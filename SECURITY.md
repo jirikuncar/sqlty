@@ -10,8 +10,8 @@ Do not open a public issue. Report it privately through
 [GitHub private vulnerability reporting](https://github.com/jirikuncar/sqlty/security/advisories/new).
 
 Include the affected version, a minimal reproduction and the impact you expect.
-You will get a response within 7 days. Once a fix is released, the advisory is
-published with credit to the reporter unless you ask otherwise.
+Once a fix is released, the advisory is published with credit to the reporter
+unless you ask otherwise.
 
 ## Scope
 

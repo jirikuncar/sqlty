@@ -1,7 +1,6 @@
 # AGENTS.md — Development conventions for AI agents and contributors
 
 Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run and debug tests.
-`CLAUDE.md` imports this file; edit conventions here.
 
 ## Quick reference
 
