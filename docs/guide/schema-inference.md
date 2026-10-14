@@ -81,6 +81,32 @@ adults = "--sql\nSELECT user_id, user_name FROM adults"
 # rewritten: adults = SQL[tuple[int, str]]("--sql\nSELECT user_id, user_name FROM adults")
 ```
 
+## Set operations
+
+`UNION`, `INTERSECT` and `EXCEPT` type each column across all branches, as
+PostgreSQL does: `NULL`, placeholders and columns of unknown type yield to the
+other branches, numbers promote to the wider type, and types of different
+categories leave the column unknown. Names come from the leftmost branch.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (amount INTEGER NOT NULL);
+CREATE TABLE archived_events (amount BIGINT NOT NULL);
+```
+
+```python
+totals = "--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u"
+# rewritten: import decimal
+# rewritten: totals = SQL[tuple[decimal.Decimal]]("--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u")
+```
+
 ## Domains and enums
 
 A column typed by a `CREATE DOMAIN` gets the domain's base type; domains over
