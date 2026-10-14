@@ -365,12 +365,11 @@ impl Call {
         self.plain.then(|| content(source, &self.strings))
     }
 
-    /// Whether `T` is `Any`, `typing.Any` or `typing_extensions.Any`: an explicit opt-out of checks.
-    pub fn is_any(&self, source: &str) -> bool {
-        matches!(
-            source[self.annotation.clone()].trim(),
-            "Any" | "typing.Any" | "typing_extensions.Any"
-        )
+    /// Whether `T` is one of `any_annotations`, the spellings of `typing.Any` in the
+    /// module: an explicit opt-out of checks.
+    pub fn is_any(&self, source: &str, any_annotations: &[String]) -> bool {
+        let annotation = source[self.annotation.clone()].trim();
+        any_annotations.iter().any(|any| any == annotation)
     }
 
     /// The source of the argument's literals, from the first to the last.

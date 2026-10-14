@@ -6,8 +6,9 @@ Default severity: **warn**
 
 Flags `--sql` queries that are not plain string literals: a raw or bytes
 string, alone or implicitly concatenated with others, or a `SQL[T](...)`
-argument that holds anything besides string literals. `SQL[Any](...)` is not
-flagged, nor is a psycopg composition passed to a helper whose row type is `Any`.
+argument that holds anything besides string literals. `SQL[Any](...)`, with
+`typing.Any` under any import name, is not flagged, nor is a psycopg
+composition passed to a helper whose row type is `Any`.
 
 ## Why is this bad?
 
