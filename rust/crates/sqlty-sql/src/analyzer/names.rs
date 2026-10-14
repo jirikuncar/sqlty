@@ -1,5 +1,7 @@
 //! Output-column names, following PostgreSQL's naming of unaliased expressions.
 
+use std::borrow::Cow;
+
 use sqlparser::ast::TrimWhereField;
 use sqlparser::ast::{AccessExpr, DataType, Expr, Ident, ObjectName, Query, SelectItem};
 
@@ -178,5 +180,24 @@ fn scalar_subquery_name(query: &Query) -> (String, Strength) {
         Some(SelectItem::UnnamedExpr(expr)) => name_strength(expr),
         Some(SelectItem::ExprWithAlias { alias, .. }) => (alias.value.clone(), Strength::Named),
         _ => (String::new(), Strength::None),
+    }
+}
+
+/// A compound access `t.col[1].field`: sqlparser reads `t.col` in it as an identifier followed
+/// by a dot access. Returns the column reference `t.col` and the accesses that follow it, or
+/// `root` and the whole chain when the access does not start that way.
+pub(super) fn split_access<'e>(
+    root: &'e Expr,
+    chain: &'e [AccessExpr],
+) -> (Cow<'e, Expr>, &'e [AccessExpr]) {
+    match (root, chain) {
+        (Expr::Identifier(table), [AccessExpr::Dot(Expr::Identifier(column)), rest @ ..]) => (
+            Cow::Owned(Expr::CompoundIdentifier(vec![
+                table.clone(),
+                column.clone(),
+            ])),
+            rest,
+        ),
+        _ => (Cow::Borrowed(root), chain),
     }
 }

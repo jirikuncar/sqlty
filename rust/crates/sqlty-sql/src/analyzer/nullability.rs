@@ -9,8 +9,8 @@
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    AccessExpr, BinaryOperator, Expr, FunctionArguments, Ident, JoinOperator, Query, Select,
-    SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins, Value,
+    AccessExpr, BinaryOperator, CastKind, Expr, FunctionArguments, Ident, JoinOperator, Query,
+    Select, SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins, Value,
 };
 
 use super::dialect::SqlDialect;
@@ -18,6 +18,7 @@ use super::functions::{function_name, positional_args};
 use super::hashing::{ExprKey, FxHashSet};
 use super::literals::python_kind;
 use super::memo::Reporting;
+use super::names::split_access;
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::{table_scope, Scope};
@@ -379,20 +380,11 @@ impl<'a> Analyzer<'a> {
             Expr::Cast {
                 expr: inner, kind, ..
             } => match kind {
-                sqlparser::ast::CastKind::TryCast | sqlparser::ast::CastKind::SafeCast => {
-                    Nullability::Nullable
-                }
+                CastKind::TryCast | CastKind::SafeCast => Nullability::Nullable,
                 _ => of(inner),
             },
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
-                match self.locate_column(expr, scope) {
-                    Some((reference, table, column)) => facts.column(
-                        &reference,
-                        &column,
-                        self.declared_nullability(&table, &column),
-                    ),
-                    None => Nullability::Unknown,
-                }
+                self.column_nullability(expr, scope, facts)
             }
             Expr::Value(value) => match value.value {
                 Value::Null => Nullability::Nullable,
@@ -416,29 +408,7 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotDistinctFrom(..) => Nullability::NonNull,
             Expr::UnaryOp { expr: inner, .. } => of(inner),
             Expr::BinaryOp { left, op, right } => {
-                use BinaryOperator::*;
-                match op {
-                    // The right side is read where the left one is true (AND) or false (OR).
-                    And | Or => {
-                        let known = if *op == And {
-                            self.learn(left, true, scope)
-                        } else {
-                            self.learn_not_true(left, scope, facts)
-                        };
-                        any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
-                    }
-                    // MySQL's null-safe equality; a vector distance in PostgreSQL.
-                    Spaceship if self.dialect == SqlDialect::MySql => Nullability::NonNull,
-                    // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
-                    Divide | Modulo | MyIntegerDivide
-                        if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
-                    {
-                        Nullability::Nullable
-                    }
-                    // JSON accessors yield NULL for a missing key or a JSON null.
-                    Arrow | LongArrow | HashArrow | HashLongArrow => Nullability::Nullable,
-                    _ => any_nullable([of(left), of(right)]),
-                }
+                self.binary_nullability(left, op, right, scope, facts)
             }
             Expr::Between {
                 expr: inner,
@@ -494,24 +464,13 @@ impl<'a> Analyzer<'a> {
                 substring_from,
                 substring_for,
                 ..
-            } => {
-                // PostgreSQL's `substring(s FROM 'pattern')` is NULL when nothing matches.
-                let by_pattern = self.dialect == SqlDialect::Postgres
-                    && substring_from.as_deref().is_some_and(
-                        |from| !matches!(self.expr(from, scope), Ok(typed) if python_kind(&typed) == Some("int")),
-                    );
-                let missed = if by_pattern {
-                    Nullability::Nullable
-                } else {
-                    Nullability::NonNull
-                };
-                any_nullable(
-                    std::iter::once(of(inner))
-                        .chain([missed])
-                        .chain(substring_from.as_deref().map(of))
-                        .chain(substring_for.as_deref().map(of)),
-                )
-            }
+            } => self.substring_nullability(
+                inner,
+                substring_from.as_deref(),
+                substring_for.as_deref(),
+                scope,
+                facts,
+            ),
             Expr::Trim {
                 expr: inner,
                 trim_what,
@@ -543,31 +502,107 @@ impl<'a> Analyzer<'a> {
                 facts,
             ),
             Expr::CompoundFieldAccess { root, access_chain } => {
-                let (mut result, chain) = match (root.as_ref(), access_chain.as_slice()) {
-                    (
-                        Expr::Identifier(table),
-                        [AccessExpr::Dot(Expr::Identifier(column)), rest @ ..],
-                    ) => {
-                        let column = Expr::CompoundIdentifier(vec![table.clone(), column.clone()]);
-                        (of(&column), rest)
-                    }
-                    _ => (of(root), access_chain.as_slice()),
-                };
-                for access in chain {
-                    result = match access {
-                        // An index past the end reads as NULL.
-                        AccessExpr::Subscript(Subscript::Index { .. }) => Nullability::Nullable,
-                        AccessExpr::Subscript(Subscript::Slice { .. }) => result,
-                        // A field of a row can hold NULL; a NULL row has only NULL fields.
-                        AccessExpr::Dot(_) if result == Nullability::Nullable => result,
-                        AccessExpr::Dot(_) => Nullability::Unknown,
-                    };
-                }
-                result
+                self.access_nullability(root, access_chain, scope, facts)
             }
             Expr::Function(func) => self.function_nullability(func, scope, facts),
             _ => Nullability::Unknown,
         }
+    }
+
+    /// A column reference: what its source declares, narrowed by `facts`.
+    fn column_nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
+        match self.locate_column(expr, scope) {
+            Some((reference, table, column)) => facts.column(
+                &reference,
+                &column,
+                self.declared_nullability(&table, &column),
+            ),
+            None => Nullability::Unknown,
+        }
+    }
+
+    fn binary_nullability(
+        &self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Nullability {
+        use BinaryOperator::*;
+        let of = |inner: &Expr| self.nullability(inner, scope, facts);
+        match op {
+            // The right side is read where the left one is true (AND) or false (OR).
+            And | Or => {
+                let known = if *op == And {
+                    self.learn(left, true, scope)
+                } else {
+                    self.learn_not_true(left, scope, facts)
+                };
+                any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
+            }
+            // MySQL's null-safe equality; a vector distance in PostgreSQL.
+            Spaceship if self.dialect == SqlDialect::MySql => Nullability::NonNull,
+            // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
+            Divide | Modulo | MyIntegerDivide
+                if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
+            {
+                Nullability::Nullable
+            }
+            // JSON accessors yield NULL for a missing key or a JSON null.
+            Arrow | LongArrow | HashArrow | HashLongArrow => Nullability::Nullable,
+            _ => any_nullable([of(left), of(right)]),
+        }
+    }
+
+    fn substring_nullability(
+        &self,
+        inner: &Expr,
+        from: Option<&Expr>,
+        length: Option<&Expr>,
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Nullability {
+        let of = |inner: &Expr| self.nullability(inner, scope, facts);
+        // PostgreSQL's `substring(s FROM 'pattern')` is NULL when nothing matches.
+        let by_pattern = self.dialect == SqlDialect::Postgres
+            && from.is_some_and(|from| {
+                !matches!(self.expr(from, scope), Ok(typed) if python_kind(&typed) == Some("int"))
+            });
+        let missed = if by_pattern {
+            Nullability::Nullable
+        } else {
+            Nullability::NonNull
+        };
+        any_nullable(
+            std::iter::once(of(inner))
+                .chain([missed])
+                .chain(from.map(of))
+                .chain(length.map(of)),
+        )
+    }
+
+    /// `col[1].field`: reading past an array's end or a row's field.
+    fn access_nullability(
+        &self,
+        root: &Expr,
+        access_chain: &[AccessExpr],
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Nullability {
+        let (root, chain) = split_access(root, access_chain);
+        let mut result = self.nullability(&root, scope, facts);
+        for access in chain {
+            result = match access {
+                // An index past the end reads as NULL.
+                AccessExpr::Subscript(Subscript::Index { .. }) => Nullability::Nullable,
+                AccessExpr::Subscript(Subscript::Slice { .. }) => result,
+                // A field of a row can hold NULL; a NULL row has only NULL fields.
+                AccessExpr::Dot(_) if result == Nullability::Nullable => result,
+                AccessExpr::Dot(_) => Nullability::Unknown,
+            };
+        }
+        result
     }
 
     /// Whether the elements of an array, or the rows of a subquery, can be NULL: a non-null
