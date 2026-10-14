@@ -24,6 +24,29 @@ pub(super) fn table_scope(factor: &TableFactor) -> Scope {
     }
 }
 
+/// sqlparser reads PostgreSQL's `FROM ONLY a` as a table `only` aliased `a`; this is the
+/// table `a` it means.
+fn only_table(factor: &TableFactor) -> Option<TableFactor> {
+    let TableFactor::Table {
+        name,
+        alias: Some(alias),
+        ..
+    } = factor
+    else {
+        return None;
+    };
+    let unquoted_only = matches!(name.0.as_slice(), [part]
+        if part.as_ident().is_some_and(|i| i.quote_style.is_none() && i.value.eq_ignore_ascii_case("only")));
+    if !unquoted_only || !alias.columns.is_empty() {
+        return None;
+    }
+    let mut table = factor.clone();
+    if let TableFactor::Table { name, alias, .. } = &mut table {
+        *name = ObjectName::from(vec![alias.take()?.name]);
+    }
+    Some(table)
+}
+
 /// Marks a scope source whose columns the analyzer does not know: a table function,
 /// `UNNEST`, a system catalog, an unaliased subquery. The key reads `(?description)`.
 pub(super) fn is_opaque(table: &str) -> bool {
@@ -254,6 +277,8 @@ impl<'a> Analyzer<'a> {
         analyzer.merged = merged_columns(from);
         let mut scope = Scope::new();
         for factor in relations(from) {
+            let only = only_table(factor);
+            let factor = only.as_ref().unwrap_or(factor);
             match factor {
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
                     let table = object_name(name);

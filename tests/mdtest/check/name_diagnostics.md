@@ -370,3 +370,69 @@ b = SQL[tuple[object]]("--sql\nSELECT day FROM opaque")
 # error: [unknown-column] "column `nope` does not exist in `typed`"
 c = SQL[tuple[int]]("--sql\nSELECT nope FROM typed")
 ```
+
+## System columns and ONLY
+
+Columns every table has, and PostgreSQL's `FROM ONLY`, are not unknown.
+
+### postgres
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-table = "error"
+unknown-column = "error"
+unsupported-syntax = "error"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, int]]("--sql\nSELECT oid, tableoid FROM users")
+# error:
+b = SQL[tuple[object, object, object, object, object]]("--sql\nSELECT ctid, xmin, xmax, cmin, cmax FROM users")
+# error:
+c = SQL[tuple[int, int]]("--sql\nSELECT u.id, u.oid FROM users u")
+# error:
+d = SQL[tuple[int]]("--sql\nSELECT id FROM ONLY users")
+# error:
+e = SQL[tuple[int]]("--sql\nSELECT users.id FROM ONLY users")
+# error: [unknown-column] "column `rowid` does not exist in `users`"
+f = SQL[tuple[int]]("--sql\nSELECT rowid FROM users")
+```
+
+### sqlite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-table = "error"
+unknown-column = "error"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, int, int]]("--sql\nSELECT rowid, oid, _rowid_ FROM users")
+# error: [unknown-column] "column `ctid` does not exist in `users`"
+b = SQL[tuple[int]]("--sql\nSELECT ctid FROM users")
+```

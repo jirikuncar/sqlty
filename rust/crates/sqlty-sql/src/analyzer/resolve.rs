@@ -67,16 +67,30 @@ impl<'a> Analyzer<'a> {
                 .find(|col| col.name.to_lowercase() == column)
                 .map(|col| ((col.python_type.clone(), col.sql_type.clone()), origin));
         }
-        self.schema
-            .get(table)?
-            .iter()
-            .find(|col| col.name == column)
-            .map(|col| {
-                (
-                    col.typed(self.dialect),
-                    Origin::Schema(format!("{table}.{column}")),
-                )
-            })
+        let columns = self.schema.get(table)?;
+        match columns.iter().find(|col| col.name == column) {
+            Some(col) => Some((
+                col.typed(self.dialect),
+                Origin::Schema(format!("{table}.{column}")),
+            )),
+            None => self
+                .system_column(column)
+                .map(|typed| (typed, Origin::Local)),
+        }
+    }
+
+    /// A column every table has without declaring it: SQLite's `rowid`, PostgreSQL's
+    /// `oid`, `ctid`, `xmin`... Typed where obvious, else known but untyped.
+    fn system_column(&self, column: &str) -> Option<Typed> {
+        let int = || (Some("int".to_string()), Some("INT".to_string()));
+        match (self.dialect, column) {
+            (SqlDialect::Sqlite, "rowid" | "oid" | "_rowid_") => Some(int()),
+            (SqlDialect::Postgres, "oid" | "tableoid") => Some(int()),
+            (SqlDialect::Postgres, "ctid" | "xmin" | "xmax" | "cmin" | "cmax") => {
+                Some((None, None))
+            }
+            _ => None,
+        }
     }
 
     /// Type of a column: its qualifier's source, else the first source having it, the
