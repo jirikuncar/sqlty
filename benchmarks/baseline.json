@@ -67,5 +67,74 @@
       "analyze_select.subquery": 17.2,
       "analyze_select.view": 13.6
     }
+  },
+  "Linux-ci": {
+    "calibration_s": 0.01703,
+    "meta": {
+      "files": 8000,
+      "generate_s": 0.29,
+      "machine": "x86_64",
+      "platform": "Linux",
+      "python": "3.15.0",
+      "queries": 2400,
+      "size": "ci",
+      "tables": 400
+    },
+    "metrics": {
+      "check": {
+        "exit": 0,
+        "rss_mb": 209.5,
+        "wall_s": 2.0582
+      },
+      "rewrite_check": {
+        "exit": 1,
+        "rss_mb": 62.3,
+        "wall_s": 0.6891
+      },
+      "schema_load": {
+        "exit": 0,
+        "rss_mb": 55.1,
+        "wall_s": 0.4629
+      },
+      "schema_load_unresolved_alters": {
+        "exit": 0,
+        "rss_mb": 59.5,
+        "wall_s": 0.0924
+      }
+    },
+    "micro_us": {
+      "analyze_params.aggregate": 15.0,
+      "analyze_params.array_param": 10.2,
+      "analyze_params.cte": 26.0,
+      "analyze_params.full_join": 13.8,
+      "analyze_params.function": 11.2,
+      "analyze_params.join": 18.2,
+      "analyze_params.json": 21.5,
+      "analyze_params.lateral": 25.5,
+      "analyze_params.left_join": 14.8,
+      "analyze_params.literal": 9.8,
+      "analyze_params.named_params": 11.9,
+      "analyze_params.params": 12.9,
+      "analyze_params.recursive_cte": 31.1,
+      "analyze_params.right_join": 14.0,
+      "analyze_params.subquery": 14.6,
+      "analyze_params.view": 9.7,
+      "analyze_select.aggregate": 20.6,
+      "analyze_select.array_param": 12.0,
+      "analyze_select.cte": 27.7,
+      "analyze_select.full_join": 17.5,
+      "analyze_select.function": 12.0,
+      "analyze_select.join": 25.9,
+      "analyze_select.json": 30.1,
+      "analyze_select.lateral": 26.5,
+      "analyze_select.left_join": 19.5,
+      "analyze_select.literal": 14.9,
+      "analyze_select.named_params": 15.2,
+      "analyze_select.params": 17.7,
+      "analyze_select.recursive_cte": 35.0,
+      "analyze_select.right_join": 17.6,
+      "analyze_select.subquery": 18.0,
+      "analyze_select.view": 13.3
+    }
   }
 }
