@@ -246,7 +246,7 @@ WITH RECURSIVE r(x, y) AS (
     SELECT y, NULL FROM r WHERE x < 5
 )
 SELECT x, y FROM r
--- inferred: tuple[typing.Literal[1] | None, typing.Literal[1] | None]
+-- inferred: tuple[int | None, int | None]
 ```
 
 A shift that spreads NULL over several rounds is followed to the end.
@@ -258,7 +258,7 @@ WITH RECURSIVE r(x, y, z) AS (
     SELECT y, z, NULL FROM r WHERE x < 5
 )
 SELECT x, y, z FROM r
--- inferred: tuple[typing.Literal[1] | None, typing.Literal[1] | None, typing.Literal[1] | None]
+-- inferred: tuple[int | None, int | None, int | None]
 ```
 
 A column that stays non-null in both terms is non-null.
@@ -270,7 +270,7 @@ WITH RECURSIVE r(n, m) AS (
     SELECT n + 1, m FROM r WHERE n < 5
 )
 SELECT n, m FROM r
--- inferred: tuple[int, typing.Literal[1]]
+-- inferred: tuple[int, int]
 ```
 
 ## A nested SELECT does not inherit conditions on expressions it rebinds

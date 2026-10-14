@@ -251,7 +251,7 @@ def test_decoded_coding_declaration_on_line_two():
     assert text.splitlines() == [
         "#!/usr/bin/env python",
         "# -*- coding: utf-8 -*-",
-        'import typing; from sqlty import SQL; q = SQL[tuple[typing.Literal[1]]]("--sql\\nSELECT 1")',
+        'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1")',
     ]
 
 

@@ -1075,11 +1075,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             "-- sql\r\nSELECT 1",
         ] {
             let inferred = infer_sql_content(content, "postgres", None);
-            assert_eq!(
-                inferred.as_deref(),
-                Some("tuple[typing.Literal[1]]"),
-                "{content}"
-            );
+            assert_eq!(inferred.as_deref(), Some("tuple[int]"), "{content}");
         }
         for content in ["--sql SELECT 1", "-- sql SELECT 1", r"-- sqlx\nSELECT 1"] {
             assert_eq!(

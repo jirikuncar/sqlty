@@ -956,7 +956,7 @@ mod tests {
             infer_type("--sql\nSELECT 1 AS x", "mysql", None)
                 .unwrap()
                 .as_deref(),
-            Some("tuple[typing.Literal[1]]")
+            Some("tuple[int]")
         );
         // Schema DDL is not a query: a `%s` there is not a placeholder.
         assert!(load_schema("CREATE TABLE t (a INT DEFAULT %s)", "postgres").is_empty());

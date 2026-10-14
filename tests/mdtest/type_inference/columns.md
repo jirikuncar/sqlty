@@ -308,5 +308,5 @@ SELECT NULLIF(a::INTEGER, 0), my_fn(b), COUNT(*), count(c), LOWER(d), json_build
 -- columns: json_build_object: typing.Any (JSON)
 -- columns: ?column?: bool (BOOLEAN)
 -- columns: ?column?: None (None)
--- columns: ?column?: typing.Literal[-1] (None)
+-- columns: ?column?: int (None)
 ```

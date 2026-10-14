@@ -155,8 +155,8 @@ A marker line may end with an escaped `\r\n`, as with `\n`.
 ```python
 a = "--sql\r\nSELECT 1 AS n"
 b = "--sql\nSELECT 1 AS n"
-# rewritten: a = SQL[tuple[typing.Literal[1]]]("--sql\r\nSELECT 1 AS n")
-# rewritten: b = SQL[tuple[typing.Literal[1]]]("--sql\nSELECT 1 AS n")
+# rewritten: a = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
+# rewritten: b = SQL[tuple[int]]("--sql\nSELECT 1 AS n")
 ```
 
 ## `SELECT *` without a schema stays unwrapped

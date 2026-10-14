@@ -306,7 +306,16 @@ impl<'a> Analyzer<'a> {
                 }
             };
             let explained = self.diag.explained();
-            let (python_type, sql_type) = self.expr(expr, scope)?;
+            let mut typed = self.expr(expr, scope)?;
+            // A bare integer column (`SELECT 1`) stays `int`; only strings are spelled as
+            // a `Literal` there. Integer sets still come from `CASE`, `CHECK` and the like.
+            if matches!(
+                crate::values::constant(expr),
+                Some(crate::values::Value::Int(_))
+            ) {
+                typed = strip(typed, self.dialect);
+            }
+            let (python_type, sql_type) = typed;
             if python_type.is_none()
                 && self.diag.enabled()
                 && self.diag.explained() == explained

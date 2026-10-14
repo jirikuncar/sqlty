@@ -140,7 +140,8 @@ Known values come from:
   arm lists values (`col IS NULL` arms add none).
 - **Domains.** `CREATE DOMAIN d AS text CHECK (VALUE IN (...))`; a domain over a domain
   keeps the values both allow, and a cast to the domain has them too.
-- **Constants and expressions over them.** `SELECT 'paid'`, `CASE` whose branches are all
+- **Constants and expressions over them.** `SELECT 'paid'` (a bare integer such as
+  `SELECT 1` stays `int`), `CASE` whose branches are all
   constants, `COALESCE(col, 'none')`, `UNION` (the union of the values), `VALUES`, and
   `MIN`, `MAX`, `NULLIF`, `LAG` and `FIRST_VALUE` of a column with values.
 - **Views, CTEs and subqueries** carry the values of the columns they select.
@@ -185,8 +186,8 @@ values the `Literal` misses, and [`redundant-literal`](../reference/rules.md#red
 ### Upgrading
 
 `sqlty rewrite` and `sqlty check --fix` now write `typing.Literal[...]` where the values
-are known: constants (`SELECT 1` is `tuple[typing.Literal[1]]`), `CASE` over constants,
-`CHECK`ed columns and MySQL `ENUM` columns. Existing wrappers that spell `str` or `int` for
+are known: string constants (`SELECT 'paid'`; `SELECT 1` stays `int`), `CASE` over
+constants, `CHECK`ed columns and MySQL `ENUM` columns. Existing wrappers that spell `str` or `int` for
 those columns stay valid and are not `stale-type`; an annotation of a different type is.
 A row type field that is a `Literal` missing values is now a `literal-mismatch` error; add
 the values, annotate `str`, or lower the rule while you migrate:

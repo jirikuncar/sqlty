@@ -1,6 +1,7 @@
 # Literal value sets
 
-A constant is a `typing.Literal` of its value, and `CASE`, `COALESCE`, `UNION` and
+A string constant column is a `typing.Literal` of its value (a bare integer such as
+`SELECT 1` stays `int`), and `CASE`, `COALESCE`, `UNION` and
 `VALUES` over constants unite the values of their branches. An expression that computes a
 new value (arithmetic, a function) is the plain type again, so a set is always a superset
 of what the expression can return. A set of more than 32 values widens to `str` or `int`.
@@ -10,8 +11,8 @@ of what the expression can return. A set of more than 32 values widens to `str` 
 ```sql
 SELECT 'paid' AS status, 3 AS n, -1 AS offset
 -- columns: status: typing.Literal['paid'] (None)
--- columns: n: typing.Literal[3] (None)
--- columns: offset: typing.Literal[-1] (None)
+-- columns: n: int (None)
+-- columns: offset: int (None)
 ```
 
 Other constants keep their types.
@@ -103,7 +104,7 @@ SELECT kind FROM kinds
 ```sql
 SELECT (SELECT 'x') AS one, k FROM (SELECT 7 AS k) t
 -- columns: one: typing.Literal['x'] (None)
--- columns: k: typing.Literal[7] (None)
+-- columns: k: int (None)
 ```
 
 ## Computing a value gives the plain type
@@ -123,37 +124,37 @@ FROM (SELECT 1 AS n, 'a' AS s) t
 ```sql
 SELECT SUM(n) AS total, MAX(n) AS biggest FROM (SELECT 1 AS n) t
 -- columns: total: int | None (BIGINT)
--- columns: biggest: typing.Literal[1] | None (None)
+-- columns: biggest: int | None (None)
 ```
 
 ## More than 32 values widen
 
 ```sql
-SELECT 1 AS n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6
-UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12
-UNION SELECT 13 UNION SELECT 14 UNION SELECT 15 UNION SELECT 16 UNION SELECT 17
-UNION SELECT 18 UNION SELECT 19 UNION SELECT 20 UNION SELECT 21 UNION SELECT 22
-UNION SELECT 23 UNION SELECT 24 UNION SELECT 25 UNION SELECT 26 UNION SELECT 27
-UNION SELECT 28 UNION SELECT 29 UNION SELECT 30 UNION SELECT 31 UNION SELECT 32
-UNION SELECT 33
--- columns: n: int (None)
+SELECT 'v1' AS n UNION SELECT 'v2' UNION SELECT 'v3' UNION SELECT 'v4' UNION SELECT 'v5' UNION SELECT 'v6'
+UNION SELECT 'v7' UNION SELECT 'v8' UNION SELECT 'v9' UNION SELECT 'v10' UNION SELECT 'v11' UNION SELECT 'v12'
+UNION SELECT 'v13' UNION SELECT 'v14' UNION SELECT 'v15' UNION SELECT 'v16' UNION SELECT 'v17'
+UNION SELECT 'v18' UNION SELECT 'v19' UNION SELECT 'v20' UNION SELECT 'v21' UNION SELECT 'v22'
+UNION SELECT 'v23' UNION SELECT 'v24' UNION SELECT 'v25' UNION SELECT 'v26' UNION SELECT 'v27'
+UNION SELECT 'v28' UNION SELECT 'v29' UNION SELECT 'v30' UNION SELECT 'v31' UNION SELECT 'v32'
+UNION SELECT 'v33'
+-- columns: n: str (None)
 ```
 
 ```sql
-SELECT 1 AS n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6
-UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12
-UNION SELECT 13 UNION SELECT 14 UNION SELECT 15 UNION SELECT 16 UNION SELECT 17
-UNION SELECT 18 UNION SELECT 19 UNION SELECT 20 UNION SELECT 21 UNION SELECT 22
-UNION SELECT 23 UNION SELECT 24 UNION SELECT 25 UNION SELECT 26 UNION SELECT 27
-UNION SELECT 28 UNION SELECT 29 UNION SELECT 30 UNION SELECT 31 UNION SELECT 32
--- columns: n: typing.Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] (None)
+SELECT 'v1' AS n UNION SELECT 'v2' UNION SELECT 'v3' UNION SELECT 'v4' UNION SELECT 'v5' UNION SELECT 'v6'
+UNION SELECT 'v7' UNION SELECT 'v8' UNION SELECT 'v9' UNION SELECT 'v10' UNION SELECT 'v11' UNION SELECT 'v12'
+UNION SELECT 'v13' UNION SELECT 'v14' UNION SELECT 'v15' UNION SELECT 'v16' UNION SELECT 'v17'
+UNION SELECT 'v18' UNION SELECT 'v19' UNION SELECT 'v20' UNION SELECT 'v21' UNION SELECT 'v22'
+UNION SELECT 'v23' UNION SELECT 'v24' UNION SELECT 'v25' UNION SELECT 'v26' UNION SELECT 'v27'
+UNION SELECT 'v28' UNION SELECT 'v29' UNION SELECT 'v30' UNION SELECT 'v31' UNION SELECT 'v32'
+-- columns: n: typing.Literal['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26', 'v27', 'v28', 'v29', 'v30', 'v31', 'v32'] (None)
 ```
 
 ## Rewrite spells the values
 
 ```python
 q = "--sql\nSELECT 'paid' AS status, 1 AS n"
-# rewritten: q = SQL[tuple[typing.Literal['paid'], typing.Literal[1]]]("--sql\nSELECT 'paid' AS status, 1 AS n")
+# rewritten: q = SQL[tuple[typing.Literal['paid'], int]]("--sql\nSELECT 'paid' AS status, 1 AS n")
 ```
 
 ## Dialects
