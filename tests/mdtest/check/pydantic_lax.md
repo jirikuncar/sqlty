@@ -401,3 +401,49 @@ plain = SQL[Plain]("--sql\nSELECT sum(records) AS total FROM usage")
 # error: [column-type-mismatch] "Tuple.total is int but query column 'total' infers decimal.Decimal"
 named = SQL[Tuple]("--sql\nSELECT sum(records) AS total FROM usage")
 ```
+
+## Strict members of a union
+
+```python
+from typing import Annotated, Union
+from pydantic import BaseModel, Strict, StrictInt
+from sqlty import SQL
+
+class Usage(BaseModel):
+    total: Annotated[int, Strict()] | None
+    records: Union[StrictInt, None]
+
+# error: [column-type-mismatch] "Usage.total is Annotated[int, Strict()] but query column 'total' infers decimal.Decimal"
+# error: [column-type-mismatch] "Usage.records is Union[StrictInt, None] but query column 'records' infers decimal.Decimal"
+query = SQL[Usage]("--sql\nSELECT sum(records) AS total, sum(records) AS records FROM usage")
+```
+
+## Strict class keyword
+
+```python
+from pydantic import BaseModel
+from sqlty import SQL
+
+class Usage(BaseModel, strict=True):
+    total: int
+
+# error: [column-type-mismatch]
+query = SQL[Usage]("--sql\nSELECT sum(records) AS total FROM usage")
+```
+
+## A nested import does not rebind a module-level name
+
+```python
+from dataclasses import dataclass
+from sqlty import SQL
+
+def convert() -> None:
+    from pydantic.dataclasses import dataclass
+
+@dataclass
+class Plain:
+    total: int
+
+# error: [column-type-mismatch]
+plain = SQL[Plain]("--sql\nSELECT sum(records) AS total FROM usage")
+```

@@ -773,7 +773,6 @@ _LAX_FROM: dict[type, tuple[type, ...]] = _PROMOTED_FROM | {
     decimal.Decimal: (int, float),
     bool: (int,),
     datetime.datetime: (datetime.date,),
-    datetime.date: (datetime.datetime,),
 }
 
 
@@ -1375,6 +1374,7 @@ def _config_options(node: ast.ClassDef, config: ast.expr | None = None) -> dict[
                 }
             )
 
+    options.update({k.arg: k.value for k in node.keywords if k.arg})
     read(config)
     names = ("model_config", "__pydantic_config__")
     for item in node.body:
@@ -1442,20 +1442,26 @@ def _lax_fields(
     for item in node.body:
         if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
             continue
-        annotation, metadata = item.annotation, [item.value]
-        while isinstance(annotation, ast.Subscript):
-            name = _get_name(annotation.value)
+        pending, members = [item.annotation], []
+        metadata: list[ast.expr | None] = []
+        while pending:
+            annotation = pending.pop()
+            name = _get_name(annotation.value) if isinstance(annotation, ast.Subscript) else None
             name = aliases.get(name, name) if name else None
-            if name == "Annotated" and isinstance(annotation.slice, ast.Tuple):
+            if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+                pending += [annotation.left, annotation.right]
+            elif not isinstance(annotation, ast.Subscript):
+                members.append(annotation)
+            elif name == "Annotated" and isinstance(annotation.slice, ast.Tuple):
                 metadata[:0] = annotation.slice.elts[1:]
-                annotation = annotation.slice.elts[0]
+                pending.append(annotation.slice.elts[0])
             elif name in (*_QUALIFIERS, "Optional"):
-                annotation = annotation.slice
+                pending.append(annotation.slice)
+            elif name == "Union" and isinstance(annotation.slice, ast.Tuple):
+                pending += annotation.slice.elts
             else:
-                break
-        members = [annotation]
-        while isinstance(top := members[-1], ast.BinOp) and isinstance(top.op, ast.BitOr):
-            members[-1:] = [top.right, top.left]
+                members.append(annotation)
+        metadata.append(item.value)
         found = [s for m in metadata if isinstance(m, ast.Call) and (s := _strict(m)) is not None]
         typed = any(_qualname(m, imports) in _STRICT_NAMES for m in members)
         if not (typed or (found[-1] if found else model)):

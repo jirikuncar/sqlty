@@ -328,7 +328,7 @@ class ParsedSource:
 
     @functools.cached_property
     def imported_names(self) -> dict[str, str]:
-        """Local names bound by absolute imports, to the dotted names they stand for.
+        """Local names bound by absolute imports, to the dotted names they stand for; the outermost binding wins.
 
         Example:
             >>> ParsedSource("import a.b, c as d\\nfrom e.f import g as h").imported_names
@@ -338,11 +338,12 @@ class ParsedSource:
         for node in self.imports:
             if isinstance(node, ast.ImportFrom):
                 if node.module and not node.level:
-                    names |= {a.asname or a.name: f"{node.module}.{a.name}" for a in node.names}
+                    for a in node.names:
+                        names.setdefault(a.asname or a.name, f"{node.module}.{a.name}")
             else:
                 for a in node.names:
                     root = a.name.partition(".")[0]
-                    names[a.asname or root] = a.name if a.asname else root
+                    names.setdefault(a.asname or root, a.name if a.asname else root)
         return names
 
     @functools.cached_property
