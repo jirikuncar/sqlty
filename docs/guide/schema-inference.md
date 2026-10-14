@@ -171,14 +171,17 @@ A computed value (arithmetic, `upper(col)`, `col || 'x'`, `SUM`) is the plain `s
 `int` again, so the values are always a superset of what the query can return. A set of
 more than 32 values is not tracked: the column is the plain type. Not tracked either: a
 `CHECK` in MySQL (before 8.0.16 it is parsed and ignored), `CHAR(n)` columns (the database
-pads them), a `CHECK ... NOT VALID`, and a `WHERE col = 'x'` that narrows the column. After
-`ALTER TABLE ... DROP CONSTRAINT` the table's columns lose their values, as constraints are
-not followed by name, and an `ALTER DOMAIN` that changes a constraint leaves the domain's
+pads them), columns with a collation that may equate strings (`COLLATE NOCASE`, any
+`COLLATE` but `BINARY`, `C` and `POSIX`) and `citext`, a `CHECK ... NOT VALID`, and a `WHERE col = 'x'` that narrows the column. After
+`ALTER TABLE ... DROP CONSTRAINT` the table's columns, and the text and integer columns of
+the views declared so far, lose their values, as constraints are not followed by name; a MySQL
+`ALTER TABLE ... MODIFY` or `CHANGE` makes the table unknown, and an `ALTER DOMAIN` that changes a constraint leaves the domain's
 type unknown.
 
 A field annotated `str` (or `int`) still accepts such a column, and `sqlty check` does
 not call that annotation stale. A field annotated with a `Literal` is compared with the
-values: [`literal-mismatch`](../reference/rules.md#literal-mismatch) (an error) reports
+values (also for an item of a `SQL[tuple[...]]` wrapper, where `Literal` annotations are
+compared as sets, so quotes and order do not matter): [`literal-mismatch`](../reference/rules.md#literal-mismatch) (an error) reports
 values the `Literal` misses, and [`redundant-literal`](../reference/rules.md#redundant-literal)
 (off by default) values it lists that the column never takes. See
 [Row types](row-types.md#literal-columns).

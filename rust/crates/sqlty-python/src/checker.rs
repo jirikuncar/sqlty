@@ -234,7 +234,10 @@ pub fn check_source(
             continue;
         }
 
-        if annotated.starts_with("tuple[") && rule_config.is_enabled(Rule::StaleType) {
+        let literals = rule_config.is_enabled(Rule::LiteralMismatch)
+            || rule_config.is_enabled(Rule::RedundantLiteral);
+        if annotated.starts_with("tuple[") && (rule_config.is_enabled(Rule::StaleType) || literals)
+        {
             if let Some(current) = infer_from_sql_content(&sql_content, dialect, schema) {
                 if !refines_tuple(annotated, &current) {
                     report(
@@ -242,6 +245,9 @@ pub fn check_source(
                         format!("SQL[{}] should be SQL[{}]", annotated, current),
                         line_num,
                     );
+                }
+                for (rule, message) in literal_findings(annotated, &current) {
+                    report(rule, message, line_num);
                 }
             }
         }
@@ -372,6 +378,204 @@ pub fn wrapped_queries(
         .collect()
 }
 
+/// The items of a `tuple[...]` type, split at its top-level commas.
+fn tuple_items(ty: &str) -> Option<Vec<&str>> {
+    let inner = ty.strip_prefix("tuple[")?.strip_suffix(']')?;
+    let (mut items, mut depth, mut start) = (Vec::new(), 0i32, 0);
+    for (i, byte) in inner.bytes().enumerate() {
+        match byte {
+            b'[' => depth += 1,
+            b']' => depth -= 1,
+            b',' if depth == 0 => {
+                items.push(inner[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    items.push(inner[start..].trim());
+    Some(items)
+}
+
+/// A member of a `Literal`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Lit {
+    Str(String),
+    Int(i64),
+}
+
+impl Lit {
+    fn show(&self) -> String {
+        match self {
+            Lit::Str(text) => format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'")),
+            Lit::Int(number) => number.to_string(),
+        }
+    }
+}
+
+/// `text` split at `sep` outside brackets and quotes.
+fn split_top(text: &str, sep: char) -> Vec<&str> {
+    let (mut parts, mut depth, mut quote, mut start) = (Vec::new(), 0i32, None, 0);
+    let mut escaped = false;
+    for (at, ch) in text.char_indices() {
+        if let Some(open) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == open {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            c if c == sep && depth == 0 => {
+                parts.push(text[start..at].trim());
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(text[start..].trim());
+    parts
+}
+
+fn literal_member(text: &str) -> Option<Lit> {
+    let Some(quote) = text.chars().next().filter(|c| matches!(c, '\'' | '"')) else {
+        return text.parse().ok().map(Lit::Int);
+    };
+    let inner = text.strip_prefix(quote)?.strip_suffix(quote)?;
+    let (mut out, mut chars) = (String::new(), inner.chars());
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next()? {
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            other => out.push(other),
+        }
+    }
+    Some(Lit::Str(out))
+}
+
+fn collect_literals(
+    ty: &str,
+    values: &mut Vec<Lit>,
+    optional: &mut bool,
+    found: &mut bool,
+) -> Option<()> {
+    for part in split_top(ty, '|') {
+        if part == "None" {
+            *optional = true;
+        } else if let Some(inner) = part
+            .strip_prefix("Optional[")
+            .and_then(|rest| rest.strip_suffix(']'))
+        {
+            *optional = true;
+            collect_literals(inner, values, optional, found)?;
+        } else {
+            let inner = part
+                .strip_suffix(']')?
+                .split_once('[')
+                .filter(|(head, _)| head.rsplit('.').next() == Some("Literal"))?
+                .1;
+            for item in split_top(inner, ',') {
+                let item = literal_member(item)?;
+                if !values.contains(&item) {
+                    values.push(item);
+                }
+            }
+            *found = true;
+        }
+    }
+    Some(())
+}
+
+/// The values of a `Literal` annotation or inferred type, and whether it is also `None`:
+/// `Literal['a', "b"]`, `typing.Literal[1] | None`, `Optional[Literal['a']]`. Quotes,
+/// order, repeats and the module spelling do not matter. `None` for any other type.
+fn literal_set(ty: &str) -> Option<(Vec<Lit>, bool)> {
+    let (mut values, mut optional, mut found) = (Vec::new(), false, false);
+    collect_literals(ty, &mut values, &mut optional, &mut found)?;
+    found.then_some((values, optional))
+}
+
+/// An annotated item and an inferred item that are both `Literal`s.
+struct LiteralPair {
+    annotated: Vec<Lit>,
+    inferred: Vec<Lit>,
+    same_nullability: bool,
+}
+
+fn literal_pair(annotated: &str, inferred: &str) -> Option<LiteralPair> {
+    let (annotated, a_none) = literal_set(annotated)?;
+    let (inferred, i_none) = literal_set(inferred)?;
+    Some(LiteralPair {
+        annotated,
+        inferred,
+        same_nullability: a_none == i_none,
+    })
+}
+
+/// `literal-mismatch` and `redundant-literal` for the `Literal` items of a `tuple[...]`
+/// annotation, against the inferred row type. Items whose nullability differs are
+/// `stale-type`'s.
+fn literal_findings(annotated: &str, inferred: &str) -> Vec<(Rule, String)> {
+    let (Some(ours), Some(theirs)) = (tuple_items(annotated), tuple_items(inferred)) else {
+        return Vec::new();
+    };
+    if ours.len() != theirs.len() {
+        return Vec::new();
+    }
+    let show = |values: &[&Lit]| {
+        values
+            .iter()
+            .map(|v| v.show())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut found = Vec::new();
+    for (at, (a, i)) in ours.iter().zip(&theirs).enumerate() {
+        let Some(pair) = literal_pair(a, i).filter(|pair| pair.same_nullability) else {
+            continue;
+        };
+        let missing: Vec<&Lit> = pair
+            .inferred
+            .iter()
+            .filter(|v| !pair.annotated.contains(v))
+            .collect();
+        let extra: Vec<&Lit> = pair
+            .annotated
+            .iter()
+            .filter(|v| !pair.inferred.contains(v))
+            .collect();
+        if !missing.is_empty() {
+            found.push((
+                Rule::LiteralMismatch,
+                format!(
+                    "SQL[{annotated}] item {at} is {a} but its query column can be {}",
+                    show(&missing)
+                ),
+            ));
+        } else if !extra.is_empty() {
+            found.push((
+                Rule::RedundantLiteral,
+                format!(
+                    "SQL[{annotated}] item {at} is {a} but its query column is never {}",
+                    show(&extra)
+                ),
+            ));
+        }
+    }
+    found
+}
+
 /// Whether the annotation `a` is the `str` or `int` that an inferred `typing.Literal[...]`
 /// item `i` (optionally `| None`) is a subtype of: less precise, but not stale.
 fn covers_literal(a: &str, i: &str) -> bool {
@@ -408,29 +612,13 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
             depth >= 0
         }) && depth == 0
     }
-    fn items(ty: &str) -> Option<Vec<&str>> {
-        let inner = ty.strip_prefix("tuple[")?.strip_suffix(']')?;
-        let (mut items, mut depth, mut start) = (Vec::new(), 0i32, 0);
-        for (i, byte) in inner.bytes().enumerate() {
-            match byte {
-                b'[' => depth += 1,
-                b']' => depth -= 1,
-                b',' if depth == 0 => {
-                    items.push(inner[start..i].trim());
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        items.push(inner[start..].trim());
-        Some(items)
-    }
-    match (items(annotated), items(inferred)) {
+    match (tuple_items(annotated), tuple_items(inferred)) {
         (Some(ours), Some(theirs)) if ours.len() == theirs.len() => {
             ours.iter().zip(&theirs).all(|(a, i)| {
                 let base = i.split('[').next().unwrap_or(i);
                 a == i
                     || covers_literal(a, i)
+                    || literal_pair(a, i).is_some_and(|pair| pair.same_nullability)
                     || *i == "typing.Any"
                     || (["list", "dict", "set", "frozenset", "tuple"].contains(&base)
                         && a.strip_prefix(base)

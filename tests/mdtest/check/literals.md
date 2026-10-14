@@ -262,3 +262,81 @@ class Order(TypedDict):
 q = SQL[Order]("--sql\nSELECT status FROM orders")
 # error:
 ```
+
+## SQL[tuple[...]] rows
+
+A `Literal` item of a `SQL[tuple[...]]` wrapper is compared with the inferred values by set,
+so quotes, order, the module spelling and repeats do not make it stale.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```python
+from typing import Literal
+
+from sqlty import SQL
+
+a = SQL[tuple[int, Literal["pending", "paid", "refunded"]]]("--sql\nSELECT id, status FROM orders")
+b = SQL[tuple[int, Literal['refunded', 'paid', 'pending', 'paid']]]("--sql\nSELECT id, status FROM orders")
+c = SQL[tuple[int, typing.Literal["paid", "pending", "refunded"]]]("--sql\nSELECT id, status FROM orders")
+d = SQL[tuple[Literal[1, 2, 3] | None]]("--sql\nSELECT priority FROM orders")
+# error:
+```
+
+`check --fix` leaves them alone.
+
+```python
+from typing import Literal
+
+from sqlty import SQL
+
+a = SQL[tuple[Literal["paid", "pending", "refunded"]]]("--sql\nSELECT status FROM orders")
+# fixed: from typing import Literal
+# fixed:
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[Literal["paid", "pending", "refunded"]]]("--sql\nSELECT status FROM orders")
+```
+
+A `Literal` that misses a value is `literal-mismatch`, not `stale-type`.
+
+```python
+from typing import Literal
+
+from sqlty import SQL
+
+# error: [literal-mismatch] "but its query column can be 'paid', 'refunded'"
+q = SQL[tuple[int, Literal["pending"]]]("--sql\nSELECT id, status FROM orders")
+```
+
+One that differs in `None` is stale.
+
+```python
+from typing import Literal
+
+from sqlty import SQL
+
+# error: [stale-type] "should be SQL[tuple[typing.Literal[1, 2, 3] | None]]"
+q = SQL[tuple[Literal[1, 2, 3]]]("--sql\nSELECT priority FROM orders")
+```
+
+`redundant-literal`, when enabled, reports values the column never takes.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+redundant-literal = "warn"
+```
+
+```python
+from typing import Literal
+
+from sqlty import SQL
+
+# error: [redundant-literal] "but its query column is never 'void'"
+q = SQL[tuple[Literal["pending", "paid", "refunded", "void"]]]("--sql\nSELECT status FROM orders")
+```
