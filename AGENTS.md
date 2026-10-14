@@ -2,6 +2,27 @@
 
 Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run and debug tests.
 
+## Quick reference
+
+```bash
+uv sync --all-groups               # install
+uv run pytest                      # all tests
+make test-mdtest                   # mdtest only
+make update-mdtest                 # update mdtest assertions
+make typecheck                     # mypy + ty on src and examples
+uv run pre-commit run --all-files  # all hooks (run before every commit)
+```
+
+- `SQL[T]` is a `str` subclass. It works anywhere a string works.
+- Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
+- Review rules for pull requests live in [REVIEW.md](REVIEW.md).
+
+## AI disclosure
+
+Follow the [AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions)
+policy: end every commit message with a `Co-Authored-By:` trailer naming the
+agent, and say in the pull request description which agent was used and for what.
+
 ## Running tests
 
 ```bash

@@ -1,6 +1,8 @@
 # SQLTy
 
-[![Python 3.15+](https://img.shields.io/badge/python-3.15+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/sqlty.svg)](https://pypi.org/project/sqlty/)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://github.com/jirikuncar/sqlty/actions/workflows/tests.yml/badge.svg)](https://github.com/jirikuncar/sqlty/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Your SQL already knows its types. SQLTy tells Python.
@@ -11,7 +13,8 @@ correct.
 
 **Documentation: [jirikuncar.github.io/sqlty](https://jirikuncar.github.io/sqlty/)**
 
-> **Experimental.** APIs and configuration may change. Feedback welcome.
+> **Beta.** APIs and configuration may change before 1.0. Feedback welcome in
+> [GitHub Issues](https://github.com/jirikuncar/sqlty/issues).
 
 ## How it works
 
@@ -149,8 +152,16 @@ SQL parsing, type inference and source rewriting run in a Rust engine
 
 ## Contributing
 
-See [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md)
-for setup, testing and contribution guidelines.
+See [CONTRIBUTING.md](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md)
+and [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md).
+
+## AI disclosure
+
+SQLTy is developed with AI coding agents, mainly Claude Code. Every change is
+reviewed by a maintainer and covered by the test suite; commits written with an
+agent carry a `Co-Authored-By` trailer. Contributors follow the
+[AI-assisted contributions](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md#ai-assisted-contributions)
+policy.
 
 ## License
 
