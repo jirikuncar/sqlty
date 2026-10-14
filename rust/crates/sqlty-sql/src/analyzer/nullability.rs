@@ -360,6 +360,18 @@ fn contains_aggregate(expr: &Expr) -> bool {
     }
 }
 
+/// Whether `expr` is a number literal other than zero.
+fn is_nonzero_number(expr: &Expr) -> bool {
+    match expr {
+        Expr::Nested(inner) => is_nonzero_number(inner),
+        Expr::Value(value) => match &value.value {
+            Value::Number(digits, _) => digits.parse::<f64>().is_ok_and(|n| n != 0.0),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 /// The upper-case name of a function, without its schema.
 fn function_name(func: &sqlparser::ast::Function) -> String {
     func.name
@@ -507,6 +519,12 @@ impl<'a> Analyzer<'a> {
                     }
                     // MySQL's null-safe equality.
                     Spaceship => Nullability::NonNull,
+                    // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
+                    Divide | Modulo | MyIntegerDivide
+                        if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
+                    {
+                        Nullability::Nullable
+                    }
                     // JSON accessors yield NULL for a missing key or a JSON null.
                     Arrow | LongArrow | HashArrow | HashLongArrow => Nullability::Nullable,
                     _ => any_nullable([of(left), of(right)]),
@@ -736,6 +754,11 @@ impl<'a> Analyzer<'a> {
                 _ => Nullability::Nullable,
             },
             // A frame without the current row can be empty.
+            // The remainder by zero is NULL in SQLite and MySQL.
+            "MOD" if !postgres && args.get(1).is_some_and(|d| is_nonzero_number(d)) => {
+                any_nullable(args.iter().map(|arg| of(arg)))
+            }
+            "MOD" if !postgres => Nullability::Nullable,
             "FIRST_VALUE" | "LAST_VALUE" if frame_holds_current_row(&func.over) => first(),
             "FIRST_VALUE" | "LAST_VALUE" => Nullability::Nullable,
             // PostgreSQL's and SQLite's concat skip NULLs.
@@ -877,6 +900,25 @@ mod tests {
             "--"
         );
         assert_eq!(marks("SELECT user_defined(1) FROM t"), "?");
+    }
+
+    #[test]
+    fn test_division_by_zero_is_null_outside_postgres() {
+        let sql = "SELECT b / 2, b / b, id % id, id % 2, mod(id, id), mod(id, 2), id DIV id, id DIV 2, id <=> a FROM u2";
+        let schema = "CREATE TABLE u2 (id INT NOT NULL, b INT NOT NULL, a INT);";
+        assert_eq!(marks_with(sql, "mysql", schema), "-NN-N-N--");
+        assert_eq!(
+            marks_with(
+                "SELECT b / 2, b / b, id % id, id % 2 FROM u2",
+                "sqlite",
+                schema
+            ),
+            "-NN-"
+        );
+        assert_eq!(
+            marks_with("SELECT b / b, id % id FROM u2", "postgres", schema),
+            "--"
+        );
     }
 
     #[test]

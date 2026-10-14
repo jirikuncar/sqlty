@@ -117,3 +117,44 @@ CREATE TABLE sales (id INT NOT NULL PRIMARY KEY, region VARCHAR(20) NOT NULL, am
 SELECT CAST(region AS CHAR), count(*), sum(amount) FROM sales GROUP BY region WITH ROLLUP
 -- inferred: tuple[str | None, int, int | None]
 ```
+
+## Division and modulo by zero are NULL in MySQL and SQLite
+
+PostgreSQL raises an error on a division by zero. MySQL and SQLite return NULL, so the
+result is optional even for NOT NULL operands, unless the divisor is a non-zero literal.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE m (id INT NOT NULL PRIMARY KEY, x INT NOT NULL, y INT NOT NULL);
+```
+
+```sql
+SELECT x / y, x % y, x / 2, x % 2, id + y FROM m
+-- inferred: tuple[decimal.Decimal | None, int | None, decimal.Decimal, int, int]
+```
+
+## SQLite division and modulo by zero
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE m (id INTEGER NOT NULL PRIMARY KEY, x INTEGER NOT NULL, y INTEGER NOT NULL);
+```
+
+```sql
+SELECT x / y, x % y, x / 2, x % 2 FROM m
+-- inferred: tuple[int | None, int | None, int, int]
+```

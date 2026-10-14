@@ -149,3 +149,10 @@ SELECT last_value(id) OVER w FROM t WINDOW w AS (ORDER BY id)
 SELECT lag(id) OVER (ORDER BY id), lag(id, 1, 0) OVER (ORDER BY id), lead(id, 1, NULL) OVER (ORDER BY id), lead(a, 1, 0) OVER (ORDER BY id) FROM t
 -- inferred: tuple[int | None, int, int | None, int | None]
 ```
+
+## Division by zero raises, so it is not NULL
+
+```sql
+SELECT id / g, id % g FROM t
+-- inferred: tuple[int, int]
+```
