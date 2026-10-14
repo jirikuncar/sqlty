@@ -24,3 +24,10 @@ needless_pass_by_value = "warn"
 redundant_clone = "warn"
 manual_let_else = "warn"
 semicolon_if_nothing_returned = "warn"
+
+# Applies to wheels: maturin builds sqlty-ext inside this workspace.
+# No panic = "abort": PyO3 turns panics into Python exceptions.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
