@@ -98,6 +98,10 @@ impl Facts {
         self.non_null.retain(|(r, _)| !shadowed(r));
         self.present.retain(|r| !shadowed(r));
         self.rolled_up.retain(|(r, _)| !shadowed(r));
+        // A printed expression does not say which relation its names belong to, and the
+        // nested SELECT may bind them to its own: none of them carries over.
+        self.non_null_exprs.clear();
+        self.rolled_up_exprs.clear();
     }
 
     /// These facts without the grouping subtotals: what an aggregate reads is the rows of

@@ -19,6 +19,7 @@ CREATE TABLE t (
     nums INTEGER[] NOT NULL,
     doc JSONB NOT NULL
 );
+CREATE TABLE u (id INTEGER PRIMARY KEY, a INTEGER);
 ```
 
 ## CASE: a WHEN that does not match also covers NULL
@@ -270,4 +271,18 @@ WITH RECURSIVE r(n, m) AS (
 )
 SELECT n, m FROM r
 -- inferred: tuple[int, int]
+```
+
+## A nested SELECT does not inherit conditions on expressions it rebinds
+
+`t.a + 1 > 0` rules out NULL for the outer `t`, but the subquery's own `t` is another table.
+
+```sql
+SELECT t.id IN (SELECT t.a + 1 FROM u t) FROM t WHERE t.a + 1 > 0
+-- inferred: tuple[bool | None]
+```
+
+```sql
+SELECT t.id IN (SELECT t.a + 1 FROM u t) FROM t
+-- inferred: tuple[bool | None]
 ```
