@@ -1,6 +1,6 @@
 """Tests for sqlty.row_form and the psycopg row factory helpers.
 
-Database tests run when ``SQLTY_TEST_PG_DSN`` points to a PostgreSQL server.
+Database tests run when ``SQLTY_PG_DSN`` points to a PostgreSQL server.
 """
 
 from __future__ import annotations
@@ -77,9 +77,9 @@ def test_row_factory_unsupported(form: Any) -> None:
 
 @pytest.fixture(scope="module")
 def conn() -> Any:
-    dsn = os.environ.get("SQLTY_TEST_PG_DSN")
+    dsn = os.environ.get("SQLTY_PG_DSN")
     if not dsn:
-        pytest.skip("SQLTY_TEST_PG_DSN not set")
+        pytest.skip("SQLTY_PG_DSN not set")
     with psycopg.connect(dsn) as conn:
         yield conn
 
