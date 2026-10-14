@@ -115,15 +115,48 @@ q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
 # stripped: q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
 ```
 
-`SQL[Any]` opts out explicitly, so it is not reported.
+`SQL[Any]` opts out explicitly, so it is not reported. `Any` is resolved
+through the module's `typing` imports, aliases and `Annotated` included.
 
 ```python
 import typing
-from typing import Any
+import typing_extensions as te
+from typing import Annotated, Any
+from typing import Any as A
 from sqlty import SQL
 
 q = SQL[Any]("--sql\nSELECT 1::INTEGER" + suffix)
 r = SQL[typing.Any](r"--sql\nSELECT 1::INTEGER")
+s = SQL[A]("--sql\nSELECT 1::INTEGER" + suffix)
+t = SQL[te.Any]("--sql\nSELECT 1::INTEGER" + suffix)
+u = SQL[Annotated[Any, "dynamic"]]("--sql\nSELECT 1::INTEGER" + suffix)
+```
+
+## A name `Any` that is not `typing.Any` does not opt out
+
+```python
+from sqlty import SQL
+
+class Any: ...
+
+# error: [unchecked-query] "--sql query is not plain string literals, so it is not checked or rewritten"
+q = SQL[Any]("--sql\nSELECT 1::INTEGER" + suffix)
+# error: [unchecked-query] "--sql query is not plain string literals, so it is not checked or rewritten"
+r = SQL[models.Any]("--sql\nSELECT 1::INTEGER" + suffix)
+```
+
+## `SQL[Any]` still reports interpolated strings
+
+Only `unchecked-query` is skipped.
+
+```python
+from typing import Any
+from sqlty import SQL
+
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+q = SQL[Any](f"--sql\nSELECT {column} FROM users")
+# error: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+r = SQL[Any](t"--sql\nSELECT {column} FROM users")
 ```
 
 ## Interpolated or raw parts skip the whole concatenation

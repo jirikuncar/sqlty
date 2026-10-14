@@ -59,6 +59,44 @@ class _Ignore:
     rules: tuple[str, ...] | None
 
 
+def is_any(node: ast.expr, aliases: dict[str, str]) -> bool:
+    """Whether ``node`` is ``typing.Any``, quoted or in ``Annotated`` too.
+
+    ``aliases`` is ``ParsedSource.typing_aliases``, so a bare ``Any`` that was
+    not imported from ``typing`` is not one.
+
+    Example:
+        >>> aliases = ParsedSource("import typing as t\\nfrom typing import Any as A").typing_aliases
+        >>> [is_any(ast.parse(s, mode="eval").body, aliases) for s in ("A", "t.Any", "'A'", "t.Annotated[A, 1]", "Any")]
+        [True, True, True, True, False]
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            node = ast.parse(node.value, mode="eval").body
+        except SyntaxError:
+            return False
+    if (
+        isinstance(node, ast.Subscript)
+        and _typing_name(node.value, aliases) == "Annotated"
+        and isinstance(node.slice, ast.Tuple)
+    ):
+        return is_any(node.slice.elts[0], aliases)
+    return _typing_name(node, aliases) == "Any"
+
+
+def _typing_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    """The ``typing`` member ``node`` names, if any."""
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id)
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and aliases.get(node.value.id) in _TYPING_MODULES
+    ):
+        return node.attr
+    return None
+
+
 def _wrapper_name(import_style: str | None) -> str | None:
     """How the engine spells the wrapper for ``import_style``; ``None`` when it rejects it."""
     style = (import_style or "").strip()
@@ -385,6 +423,29 @@ class ParsedSource:
         prefix = "from sqlty import SQL as "
         style = (import_style or "").strip()
         return (style[len(prefix) :].strip() if style.startswith(prefix) else "SQL") in self.text
+
+    def any_annotations(self, import_style: str | None = None) -> list[str]:
+        """Source of each ``T`` in ``SQL[T](...)`` that is ``typing.Any`` (see ``is_any``).
+
+        Example:
+            >>> ParsedSource("import typing as t\\nq = SQL[t.Any](x)\\nr = SQL[int](y)").any_annotations()
+            ['t.Any']
+        """
+        wrapper = _wrapper_name(import_style)
+        if wrapper is None or "Any" not in self.text or not self.may_wrap(import_style):
+            return []
+        aliases = self.typing_aliases
+        annotations = set()
+        for call in self.calls:
+            func = call.func
+            if not isinstance(func, ast.Subscript) or not is_any(func.slice, aliases):
+                continue
+            name = ast.unparse(func.value)
+            if (name == wrapper or name.endswith(f".{wrapper}")) and (
+                segment := ast.get_source_segment(self.text, func.slice)
+            ):
+                annotations.add(segment)
+        return sorted(annotations)
 
     def may_need_rust_check(self, import_style: str | None = None) -> bool:
         """Whether the Rust checker can report anything for the text.
