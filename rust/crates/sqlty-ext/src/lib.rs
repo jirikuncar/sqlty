@@ -306,13 +306,17 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 
 /// Check Python source for SQL type issues.
 ///
+/// `any_calls` are the byte offsets of the `SQL[T](...)` calls whose `T` is
+/// `typing.Any`; they are not reported as `unchecked-query`.
+///
 /// Returns:
 ///     List of diagnostic dicts with keys: rule, message, severity, line
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
+#[allow(clippy::too_many_arguments)]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
@@ -321,6 +325,7 @@ fn check_source<'py>(
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
+    any_calls: Vec<usize>,
 ) -> PyResult<Bound<'py, PyList>> {
     check_import_style(import_style)?;
     let diagnostics = checker::check_source(
@@ -330,6 +335,7 @@ fn check_source<'py>(
         rules,
         import_style,
         untyped,
+        &any_calls,
     );
     let list = PyList::empty(py);
     for diag in diagnostics {
@@ -365,15 +371,20 @@ fn wrapped_queries(
 /// `kind` is `"query"` with the `--sql` text (marker included), or the rule that
 /// skips the string (`fstring-skipped`, `tstring-skipped`, `unchecked-query`), with
 /// empty text. Queries passed to an `Annotated[LiteralString, SQL]` helper are not
-/// included, except those carrying the marker.
+/// included, except those carrying the marker. `any_calls` is as for
+/// `check_source`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, import_style = None))]
-fn query_sites(source: &str, import_style: Option<&str>) -> PyResult<Vec<(usize, String, String)>> {
+#[pyo3(signature = (source, *, import_style = None, any_calls = vec![]))]
+fn query_sites(
+    source: &str,
+    import_style: Option<&str>,
+    any_calls: Vec<usize>,
+) -> PyResult<Vec<(usize, String, String)>> {
     check_import_style(import_style)?;
-    Ok(checker::query_sites(source, import_style)
+    Ok(checker::query_sites(source, import_style, &any_calls)
         .into_iter()
         .map(|(line, kind, text)| (line, kind.to_string(), text))
         .collect())

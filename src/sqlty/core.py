@@ -36,7 +36,7 @@ from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES
-from sqlty._source import ParsedSource
+from sqlty._source import ParsedSource, is_any
 
 if TYPE_CHECKING:
     from sqlty._helpers import HelperCall
@@ -259,6 +259,7 @@ def _check_diagnostics(
             rules=rules,
             import_style=import_style,
             untyped=untyped,
+            any_calls=parsed.any_calls(import_style),
         )
         if parsed.may_need_rust_check(import_style)
         else []
@@ -389,7 +390,9 @@ def query_statistics(
     """
     parsed = ParsedSource.of(source, module)
     counts: Counter[str] = Counter()
-    for _, kind, text in _query_sites(parsed.text, import_style=import_style):
+    for _, kind, text in _query_sites(
+        parsed.text, import_style=import_style, any_calls=parsed.any_calls(import_style)
+    ):
         if kind != "query":
             counts[kind] += 1
         elif outcome := _outcome(text, dialect, schema_sql):
@@ -406,10 +409,8 @@ def query_statistics(
 
 
 def _is_any(call: HelperCall) -> bool:
-    """Whether the row type is ``Any``: an explicit opt-out of checks."""
-    from sqlty._type_extractor import _ast_type
-
-    return call.row is not None and _ast_type(call.row, call.typing_aliases) is typing.Any
+    """Whether the row type is ``typing.Any``: an explicit opt-out of checks."""
+    return call.row is not None and is_any(call.row, call.typing_aliases)
 
 
 def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
