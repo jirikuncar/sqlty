@@ -178,8 +178,8 @@ def test_package_reexports(project, capsys):
 def test_configured_functions(project, capsys):
     """`[[tool.sqlty.functions]]` registers helpers without annotations."""
     entries = "".join(
-        f'[[tool.sqlty.functions]]\nimport_path = "{path}"\nquery_param = "sql"\n'
-        'return_type_param = "form"\n'
+        f'[[tool.sqlty.functions]]\nimport-path = "{path}"\nquery-param = "sql"\n'
+        'return-type-param = "form"\n'
         for path in ("pkg.plain.run", "pkg.plain.Db.get", "lib.run")
     )
     (project / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n' + entries)

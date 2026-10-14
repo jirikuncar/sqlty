@@ -97,7 +97,11 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
         ("[tool.sqlty.rules]\nnope = 'warn'\n", "unknown rule 'nope'"),
         ("[tool.sqlty.rules]\nstale-typ = 'warn'\n", "did you mean 'stale-type'?"),
         ("[tool.sqlty.rules]\nstale-type = 'loud'\n", "invalid severity 'loud'"),
-        ("[[tool.sqlty.functions]]\nimport_path = 'a.b'\nquery = 'q'\n", "unknown key 'query'"),
+        ("[[tool.sqlty.functions]]\nimport-path = 'a.b'\nquery = 'q'\n", "unknown key 'query'"),
+        (
+            "[[tool.sqlty.functions]]\nimport_path = 'a.b'\nquery-param = 'q'\n",
+            "did you mean 'import-path'?",
+        ),
         ("[tool.sqlty]\nexclude = 'build'\n", "exclude must be a list of glob strings"),
     ],
 )

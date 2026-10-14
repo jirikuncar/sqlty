@@ -24,8 +24,8 @@ select-star = "ignore"
 stale-type = "error"
 
 [[tool.sqlty.functions]]
-import_path = "db.sql"
-query_param = "query"
+import-path = "db.sql"
+query-param = "query"
 ```
 
 | Key | Used by |
@@ -117,17 +117,17 @@ without editing the signature (a method is `"pkg.db.Db.fetch_all"`):
 
 ```toml
 [[tool.sqlty.functions]]
-import_path = "db.fetch_all"
-query_param = "query"
+import-path = "db.fetch_all"
+query-param = "query"
 ```
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `import_path` | yes | Module path and function name, e.g. `"app.db.sql"`. Use `"__main__.sql"` or the file name for a script run directly |
-| `query_param` | yes | Name of the parameter that holds the query |
-| `return_type_param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it. `check` compares it with the query columns |
+| `import-path` | yes | Module path and function name, e.g. `"app.db.sql"`. Use `"__main__.sql"` or the file name for a script run directly |
+| `query-param` | yes | Name of the parameter that holds the query |
+| `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it. `check` compares it with the query columns |
 
-Entries without `import_path` or `query_param` are skipped with a warning.
+Entries without `import-path` or `query-param` are skipped with a warning.
 
 ## `exclude` and `extend-exclude`
 

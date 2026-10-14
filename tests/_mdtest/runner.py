@@ -147,7 +147,7 @@ class Run:
         for module, text in modules.items():
             index.add(module.removesuffix(".__init__"), core.ParsedSource(text, module))
         for f in functions:
-            index.register(f["import_path"], f["query_param"], f.get("return_type_param"))
+            index.register(f["import-path"], f["query-param"], f.get("return-type-param"))
         return index
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:

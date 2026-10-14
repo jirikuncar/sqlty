@@ -16,7 +16,7 @@ TOOL_KEYS = ("dialect", "schema", "rules", "import-style", "untyped", "type-modu
 DISCOVERY_KEYS = ("exclude", "extend-exclude")
 """``[tool.sqlty]`` keys that pick the files to process."""
 
-FUNCTION_KEYS = ("import_path", "query_param", "return_type_param")
+FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
 
 DEFAULT_EXCLUDE = (
     ".bzr",
@@ -109,7 +109,8 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
 class FunctionConfigComplete(TypedDict, total=False):
     """A ``[[tool.sqlty.functions]]`` entry: a helper whose string argument is a query.
 
-    ``import_path`` and ``query_param`` are required; ``return_type_param`` is optional.
+    In TOML the keys are ``import-path`` and ``query-param`` (required) and
+    ``return-type-param`` (optional); here they are the snake_case fields below.
     """
 
     import_path: str  # Full import path, e.g. "module.function_name" (required)
@@ -137,8 +138,8 @@ class SQLTyConfig(TypedDict, total=False):
         stale-type = "error"
 
         [[tool.sqlty.functions]]
-        import_path = "db.query"
-        query_param = "sql"
+        import-path = "db.query"
+        query-param = "sql"
     """
 
     dialect: str
@@ -294,7 +295,7 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
                 continue
 
             # Validate required fields
-            if "import_path" not in func_config or "query_param" not in func_config:
+            if "import-path" not in func_config or "query-param" not in func_config:
                 logging.getLogger(__name__).warning(
                     "Skipping function config missing required fields: %s", func_config
                 )
@@ -302,13 +303,13 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
 
             # Build function config with all fields
             function_dict: dict[str, Any] = {
-                "import_path": str(func_config["import_path"]),
-                "query_param": str(func_config["query_param"]),
+                "import_path": str(func_config["import-path"]),
+                "query_param": str(func_config["query-param"]),
             }
 
-            # Optional return_type_param field
-            if "return_type_param" in func_config:
-                function_dict["return_type_param"] = str(func_config["return_type_param"])
+            # Optional return-type-param field
+            if "return-type-param" in func_config:
+                function_dict["return_type_param"] = str(func_config["return-type-param"])
 
             # Cast to FunctionConfigComplete after all fields are set
             function = cast(FunctionConfigComplete, function_dict)
