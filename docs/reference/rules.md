@@ -314,12 +314,13 @@ counts such queries as unparsed whether or not the rule is enabled.
 ## Name rules
 
 These six rules explain why a result column is untyped: with all of them
-enabled, no column is left untyped without a diagnostic. They are off by
+enabled and a schema configured, no column is left untyped without a diagnostic. They are off by
 default because they report code that passes today. The
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to enable
-them. Tables, columns and ambiguity are only judged when a
-[schema](../guide/schema-inference.md) is configured, and only in the
-`postgres`, `mysql` and `sqlite` dialects.
+them. All but `unsupported-syntax` are only judged when a
+[schema](../guide/schema-inference.md) is configured, because without one every
+table, column, function and type is unknown. Tables, columns and ambiguity are
+checked only in the `postgres`, `mysql` and `sqlite` dialects.
 
 ### unknown-table
 
@@ -340,7 +341,7 @@ has. Columns merged by `USING` or `NATURAL` are not ambiguous.
 ### unknown-function
 
 Default: ignore. A function call sqlty cannot type because it does not know
-the function. Needs no schema.
+the function.
 
 ### unknown-type
 

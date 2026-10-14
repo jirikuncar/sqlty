@@ -41,6 +41,8 @@ pub struct NameDiagnostic {
 
 #[derive(Default)]
 struct Inner {
+    /// Whether anything is collected; the analyzer skips the work of explaining otherwise.
+    enabled: bool,
     items: Vec<NameDiagnostic>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
@@ -51,13 +53,30 @@ struct Inner {
 pub struct Diagnostics(Rc<RefCell<Inner>>);
 
 impl Diagnostics {
+    /// A sink that collects; the default one drops everything, and callers that only want
+    /// types pay nothing for diagnostics.
+    pub fn collecting() -> Self {
+        Diagnostics(Rc::new(RefCell::new(Inner {
+            enabled: true,
+            ..Inner::default()
+        })))
+    }
+
+    /// Whether diagnostics are collected. Guard the building of messages with it.
+    pub fn enabled(&self) -> bool {
+        self.0.borrow().enabled
+    }
+
     /// Record a diagnostic (once per rule and message).
     pub fn record(&self, rule: NameRule, message: impl Into<String>) {
+        let mut inner = self.0.borrow_mut();
+        if !inner.enabled {
+            return;
+        }
         let item = NameDiagnostic {
             rule,
             message: message.into(),
         };
-        let mut inner = self.0.borrow_mut();
         inner.explained += 1;
         if !inner.items.contains(&item) {
             inner.items.push(item);
@@ -67,7 +86,10 @@ impl Diagnostics {
     /// Account for an untyped result whose reason is reported elsewhere or is not a
     /// problem to report (an unknown table already flagged, a missing schema).
     pub fn explain_silently(&self) {
-        self.0.borrow_mut().explained += 1;
+        let mut inner = self.0.borrow_mut();
+        if inner.enabled {
+            inner.explained += 1;
+        }
     }
 
     /// How many untyped results are accounted for; unchanged across an expression

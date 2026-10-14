@@ -44,4 +44,4 @@ Off by default, because it reports code that passes today. Enable it:
 unknown-type = "warn"
 ```
 
-A cast does not need a schema to be reported, so a cast to an enum is reported until the enum is declared in one. `error` makes `sqlty check` fail on it.
+Only checked when a schema with tables is configured: without one every enum and domain would be unknown. A cast to an enum is reported until the enum is declared in the schema. `error` makes `sqlty check` fail on it.

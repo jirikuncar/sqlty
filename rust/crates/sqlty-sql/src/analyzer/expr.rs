@@ -67,11 +67,15 @@ impl<'a> Analyzer<'a> {
                     Some(python_type) => (Some(python_type), Some(sql_type)),
                     None => from_sql_type(sql_type, self.dialect),
                 };
-                if typed.0.is_none() {
-                    self.diag.record(
-                        NameRule::UnknownType,
-                        format!("type `{data_type}` has no Python type"),
-                    );
+                if typed.0.is_none() && self.diag.enabled() {
+                    if self.schema.is_empty() {
+                        self.diag.explain_silently();
+                    } else {
+                        self.diag.record(
+                            NameRule::UnknownType,
+                            format!("type `{data_type}` has no Python type"),
+                        );
+                    }
                 }
                 Ok(typed)
             }
@@ -209,13 +213,19 @@ impl<'a> Analyzer<'a> {
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
                         None => {
-                            self.diag.record(
-                                NameRule::UnknownFunction,
-                                format!(
-                                    "function `{}` is not known to sqlty, so its result is untyped",
-                                    func.name.to_string().to_lowercase()
-                                ),
-                            );
+                            if self.diag.enabled() {
+                                if self.schema.is_empty() {
+                                    self.diag.explain_silently();
+                                } else {
+                                    self.diag.record(
+                                        NameRule::UnknownFunction,
+                                        format!(
+                                            "function `{}` is not known to sqlty, so its result is untyped",
+                                            func.name.to_string().to_lowercase()
+                                        ),
+                                    );
+                                }
+                            }
                             Ok((None, None))
                         }
                     },

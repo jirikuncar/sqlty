@@ -298,6 +298,8 @@ a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(),
 unknown-table = "error"
 unknown-column = "error"
 ambiguous-column = "error"
+unknown-function = "error"
+unknown-type = "error"
 ```
 
 ```python
@@ -307,6 +309,10 @@ from sqlty import SQL
 a = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")
 # error:
 b = SQL[tuple[int]]("--sql\nSELECT id FROM a JOIN b ON a.x = b.x")
+# error:
+c = SQL[tuple[int]]("--sql\nSELECT my_udf(1)")
+# error:
+d = SQL[tuple[str]]("--sql\nSELECT 'x'::mood")
 ```
 
 ## Other dialects

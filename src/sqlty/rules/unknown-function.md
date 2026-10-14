@@ -7,15 +7,24 @@ Default severity: **ignore**
 Reports a function call whose result sqlty cannot type because it does not know the function. The column is left untyped.
 
 ```toml
+[tool.sqlty]
+schema = "schema.sql"
+
 [tool.sqlty.rules]
 unknown-function = "warn"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
 ```
 
 ```python
 from sqlty import SQL
 
 # error: [unknown-function] "function `my_udf` is not known to sqlty"
-q = SQL[tuple[int]]("--sql\nSELECT my_udf(1)")
+q = SQL[tuple[int]]("--sql\nSELECT my_udf(id) FROM users")
 ```
 
 ## Why is this bad?
@@ -35,4 +44,4 @@ Off by default, because it reports code that passes today. Enable it:
 unknown-function = "warn"
 ```
 
-Unlike the name rules, this one does not need a schema. User-defined functions in the schema file are not read yet, so they are reported too. `error` makes `sqlty check` fail on it.
+Only checked when a schema with tables is configured: without one every user function would be unknown. User-defined functions in the schema file are not read yet, so they are reported too. `error` makes `sqlty check` fail on it.

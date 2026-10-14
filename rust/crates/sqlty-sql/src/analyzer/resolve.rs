@@ -40,6 +40,9 @@ impl<'a> Analyzer<'a> {
 
     /// Records `unknown-table` when a FROM item names no schema table, view or CTE.
     pub(super) fn check_table(&self, table: &str) {
+        if !self.diag.enabled() {
+            return;
+        }
         if is_opaque(table) || self.knows_table(table) {
             return;
         }
@@ -53,6 +56,15 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// `table.column`, built only when diagnostics are collected.
+    fn label(&self, table: &str, column: &str) -> String {
+        if self.diag.enabled() {
+            format!("{table}.{column}")
+        } else {
+            String::new()
+        }
+    }
+
     /// A column of one source: `(type, schema column)`, the latter set when a schema table
     /// holds it (`table.column`), for type diagnostics.
     fn lookup_column(&self, table: &str, column: &str) -> Option<(Typed, Origin)> {
@@ -60,7 +72,7 @@ impl<'a> Analyzer<'a> {
             let origin = if self.virtuals.contains_key(table) {
                 Origin::Local
             } else {
-                Origin::View(format!("{table}.{column}"))
+                Origin::View(self.label(table, column))
             };
             return columns
                 .iter()
@@ -71,7 +83,7 @@ impl<'a> Analyzer<'a> {
         match columns.iter().find(|col| col.name == column) {
             Some(col) => Some((
                 col.typed(self.dialect),
-                Origin::Schema(format!("{table}.{column}")),
+                Origin::Schema(self.label(table, column)),
             )),
             None => self
                 .system_column(column)
@@ -123,7 +135,7 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_column(expr, scope) {
             Some((typed, origin)) => {
-                if typed.0.is_none() {
+                if typed.0.is_none() && self.diag.enabled() {
                     match (origin, &typed.1) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
                             NameRule::UnknownType,
@@ -154,7 +166,7 @@ impl<'a> Analyzer<'a> {
     /// `ambiguous-column`: an unqualified column in more than one FROM source. Columns
     /// merged by `USING` (and every column of a `NATURAL` join) are single.
     fn check_ambiguous(&self, ident: &Ident, scope: &Scope) {
-        if !self.judges_names() {
+        if !self.diag.enabled() || !self.judges_names() {
             return;
         }
         let column = ident.value.to_lowercase();
@@ -185,6 +197,9 @@ impl<'a> Analyzer<'a> {
 
     /// Records the reason a column reference found no column.
     fn explain_unresolved(&self, expr: &Expr, scope: &Scope) {
+        if !self.diag.enabled() {
+            return;
+        }
         let (qualifier, column) = match expr {
             Expr::Identifier(ident) => (None, ident),
             Expr::CompoundIdentifier(parts) if parts.len() >= 2 => (
@@ -275,6 +290,9 @@ impl<'a> Analyzer<'a> {
     /// The columns a star lists that have no Python type: a schema column of an unmapped
     /// type, or a view column its own query left untyped.
     pub(super) fn explain_untyped_star_columns(&self, reference: Option<&str>, scope: &Scope) {
+        if !self.diag.enabled() {
+            return;
+        }
         let reference = reference.map(str::to_lowercase);
         for table in Self::star_tables(reference.as_deref(), scope) {
             if self.virtuals.contains_key(&table) {
@@ -312,6 +330,9 @@ impl<'a> Analyzer<'a> {
     /// A star that expanded to an unknown `*`: a view whose own query could not be typed
     /// says so; for a CTE or derived table that query explains it.
     pub(super) fn explain_view_star(&self, reference: Option<&str>, scope: &Scope) {
+        if !self.diag.enabled() {
+            return;
+        }
         let reference = reference.map(str::to_lowercase);
         let views: Vec<String> = Self::star_tables(reference.as_deref(), scope)
             .into_iter()
@@ -338,6 +359,9 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         from: Option<&[TableWithJoins]>,
     ) {
+        if !self.diag.enabled() {
+            return;
+        }
         let reference = reference.map(str::to_lowercase);
         let tables = Self::star_tables(reference.as_deref(), scope);
         if let Some(table) = tables.iter().find(|table| is_opaque(table)) {

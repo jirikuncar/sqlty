@@ -125,10 +125,12 @@ impl<'a> Analyzer<'a> {
                 SetExpr::Select(select) => Some(self.select_columns(select)?),
                 SetExpr::Query(query) => self.query_columns(query)?,
                 other => {
-                    self.diag.record(
-                        NameRule::UnsupportedSyntax,
-                        format!("{} is not typed", set_expr_kind(other)),
-                    );
+                    if self.diag.enabled() {
+                        self.diag.record(
+                            NameRule::UnsupportedSyntax,
+                            format!("{} is not typed", set_expr_kind(other)),
+                        );
+                    }
                     None
                 }
             });
@@ -152,7 +154,7 @@ impl<'a> Analyzer<'a> {
             }
         }
         for (column, common) in columns.iter_mut().zip(types) {
-            if common.is_none() {
+            if common.is_none() && self.diag.enabled() {
                 self.diag.record(
                     NameRule::UnsupportedSyntax,
                     format!(
@@ -207,7 +209,11 @@ impl<'a> Analyzer<'a> {
             };
             let explained = self.diag.explained();
             let (python_type, sql_type) = self.expr(expr, scope)?;
-            if python_type.is_none() && self.diag.explained() == explained && !is_wild(expr) {
+            if python_type.is_none()
+                && self.diag.enabled()
+                && self.diag.explained() == explained
+                && !is_wild(expr)
+            {
                 self.diag.record(
                     NameRule::UnsupportedSyntax,
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),

@@ -17,8 +17,8 @@ by default, because they report code that passes today.
 ## Enable them
 
 Set the rules you want in `[tool.sqlty.rules]`, to `"warn"` to print them or
-`"error"` to fail `sqlty check`. Table, column and ambiguity rules need a
-[schema](schema-inference.md): without one every name is unknown, so they stay
+`"error"` to fail `sqlty check`. All rules but `unsupported-syntax` need a
+[schema](schema-inference.md): without one every name, function and type is unknown, so they stay
 silent.
 
 ```toml

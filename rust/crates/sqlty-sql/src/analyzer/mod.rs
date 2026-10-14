@@ -861,7 +861,8 @@ pub fn analyze_with_diagnostics(
     let Some(stmt) = parse_first(sql, dialect) else {
         return (Ok(None), Vec::new());
     };
-    let analyzer = Analyzer::new(schema.as_deref().unwrap_or(&empty), dialect);
+    let mut analyzer = Analyzer::new(schema.as_deref().unwrap_or(&empty), dialect);
+    analyzer.diag = Diagnostics::collecting();
     let columns = analyzer.statement_columns(&stmt);
     (columns, analyzer.diag.items())
 }
