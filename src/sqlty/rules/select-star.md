@@ -12,7 +12,7 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);
 ```
 
 ## What it does
@@ -30,7 +30,6 @@ table silently changes what the query returns at runtime.
 from sqlty import SQL
 
 # error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
-# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int | None, str | None]]"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
 
@@ -44,7 +43,7 @@ from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int | None, str | None]]("--sql\nSELECT id::INT, name::TEXT FROM users")
+# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
 Queries with escapes or quotes inside the string, queries split over several

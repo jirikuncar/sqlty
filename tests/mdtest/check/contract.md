@@ -97,11 +97,11 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INTEGER);
+CREATE TABLE users (id INTEGER NOT NULL);
 ```
 
 ```python
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int | None]]; run sqlty check --fix"
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 q = SQL[UNTYPED]("--sql\nSELECT id FROM users")
 ```
 
@@ -378,7 +378,7 @@ q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```
 
-### `CREATE TABLE users (id INT);`
+### `CREATE TABLE users (id INT NOT NULL);`
 
 ```toml
 [tool.sqlty]
@@ -388,12 +388,12 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INT);
+CREATE TABLE users (id INT NOT NULL);
 ```
 
 ```python
 # error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int | None]]"
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```
 
