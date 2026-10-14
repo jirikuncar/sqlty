@@ -552,4 +552,64 @@ mod tests {
         );
         assert_eq!(c.table("u").unwrap()[0].sql_type, "FEEL");
     }
+
+    /// A synthetic schema of `tables` tables, 12 columns each, a view over every third
+    /// table, one enum and one domain. `head` goes first; `every_ten` follows each tenth table, with
+    /// `{n}` replaced by the table number.
+    fn synthetic(tables: usize, every_ten: &str, head: &str) -> String {
+        let mut sql = String::from(
+            "CREATE TYPE mood AS ENUM ('a', 'b', 'c');\nCREATE DOMAIN pct AS integer CHECK (VALUE >= 0);\n",
+        );
+        sql.push_str(head);
+        for t in 0..tables {
+            sql.push_str(&format!("CREATE TABLE t{t} (\n  id serial PRIMARY KEY,\n"));
+            sql.push_str("  name text NOT NULL,\n  mood mood,\n  share pct,\n  born date,\n");
+            sql.push_str("  seen timestamptz,\n  score numeric(10, 2),\n  tags text[],\n");
+            sql.push_str("  meta jsonb,\n  active boolean NOT NULL DEFAULT true,\n");
+            sql.push_str("  ref_id integer,\n  note varchar(40)\n);\n");
+            if t % 3 == 0 {
+                sql.push_str(&format!(
+                    "CREATE VIEW v{t} AS SELECT id, name, mood, share FROM t{t};\n"
+                ));
+            }
+            if t % 10 == 9 {
+                sql.push_str(&every_ten.replace("{n}", &t.to_string()));
+            }
+        }
+        sql
+    }
+
+    /// Timing of loading a 270-table schema. Run with
+    /// `cargo test --release -p sqlty-sql -- --ignored --nocapture perf_`.
+    #[test]
+    #[ignore = "timing, run by hand in release mode"]
+    fn perf_synthetic_schema_load() {
+        let function =
+            "CREATE FUNCTION f{n}(a integer) RETURNS integer LANGUAGE sql AS 'SELECT 1';\n";
+        let cases = [
+            ("no functions", synthetic(270, "", "")),
+            ("function every 10 tables", synthetic(270, function, "")),
+            (
+                "plus one SETOF function",
+                synthetic(
+                    270,
+                    function,
+                    "CREATE FUNCTION rows() RETURNS SETOF integer LANGUAGE sql AS 'SELECT 1';\n",
+                ),
+            ),
+        ];
+        for (name, sql) in &cases {
+            let mut best = std::time::Duration::MAX;
+            let mut builds = 0;
+            for _ in 0..15 {
+                super::resolve::BUILDS.with(|count| count.set(0));
+                let start = std::time::Instant::now();
+                let catalog = pg(sql);
+                best = best.min(start.elapsed());
+                builds = super::resolve::BUILDS.with(std::cell::Cell::get);
+                assert!(catalog.table("t0").is_some());
+            }
+            println!("perf {name:28} best of 15: {best:>10.2?}  build() calls: {builds}");
+        }
+    }
 }

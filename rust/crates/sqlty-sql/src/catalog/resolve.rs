@@ -15,6 +15,12 @@ use super::loader::{Loader, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{Catalog, Function, FunctionReturn, Relation, SchemaColumn, UserType, BUILTIN_SCHEMAS};
 
+#[cfg(test)]
+thread_local! {
+    /// How many times `Loader::build` ran on this thread; read by the timing test.
+    pub(super) static BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Loader {
     /// The catalog as it stands now.
     pub(super) fn snapshot(&mut self) -> &Catalog {
@@ -23,6 +29,8 @@ impl Loader {
     }
 
     pub(super) fn build(&self) -> Catalog {
+        #[cfg(test)]
+        BUILDS.with(|count| count.set(count.get() + 1));
         let dialect = self.dialect;
         let path = self.search_path.clone();
         let mut user_types: HashMap<String, UserType> = HashMap::new();
