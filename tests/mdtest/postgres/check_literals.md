@@ -368,3 +368,79 @@ CREATE TABLE orders (
     note TEXT
 );
 ```
+
+## Collations and citext
+
+A collation may equate different strings (a nondeterministic one, `citext`), so the values a
+`CHECK` lists do not bound the stored ones. `"C"` and `POSIX` are exact.
+
+`schema.sql`:
+
+```sql
+CREATE DOMAIN loose AS text COLLATE "und-x-icu" CHECK (VALUE IN ('a', 'b'));
+CREATE DOMAIN exact AS text COLLATE "C" CHECK (VALUE IN ('a', 'b'));
+CREATE DOMAIN folded AS citext CHECK (VALUE IN ('a', 'b'));
+CREATE DOMAIN tight AS text CHECK (VALUE IN ('a', 'b'));
+CREATE TABLE t (
+    id INTEGER PRIMARY KEY,
+    a TEXT COLLATE "und-x-icu" CHECK (a IN ('a', 'b')),
+    b TEXT COLLATE "C" CHECK (b IN ('a', 'b')),
+    c loose,
+    d exact,
+    e folded,
+    f tight COLLATE "und-x-icu",
+    g tight
+);
+```
+
+```sql
+SELECT a, b, c, d, e, f, g FROM t
+-- columns: a: str | None (TEXT)
+-- columns: b: typing.Literal['a', 'b'] | None (TEXT)
+-- columns: c: str | None (TEXT)
+-- columns: d: str | None (TEXT)
+-- columns: e: str | None (CITEXT)
+-- columns: f: str | None (TEXT)
+-- columns: g: typing.Literal['a', 'b'] | None (TEXT)
+```
+
+## Repeated values
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT CHECK (a IN ('x', 'y', 'x')), b INTEGER CHECK (b = ANY (ARRAY[1, 1, 2])));
+```
+
+```sql
+SELECT a, b FROM t
+-- columns: a: typing.Literal['x', 'y'] | None (TEXT)
+-- columns: b: typing.Literal[1, 2] | None (INT)
+```
+
+## Views over a table whose constraint is dropped
+
+A view typed while the `CHECK` held would keep its values, so dropping a constraint widens the
+text and integer columns of the existing views. Enum labels and constants stay.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE mood AS ENUM ('sad', 'ok');
+CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT CHECK (s IN ('a', 'b')), m mood);
+CREATE VIEW v AS SELECT s, m, 'k' AS kind FROM t;
+ALTER TABLE t DROP CONSTRAINT t_s_check;
+CREATE VIEW w AS SELECT s FROM t;
+```
+
+```sql
+SELECT s, m, kind FROM v
+-- columns: s: str | None (TEXT)
+-- columns: m: typing.Literal['sad', 'ok'] | None (MOOD)
+-- columns: kind: typing.Literal['k'] (None)
+```
+
+```sql
+SELECT s FROM w
+-- columns: s: str | None (TEXT)
+```

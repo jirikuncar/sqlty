@@ -62,3 +62,27 @@ CREATE TABLE orders (
     kind ENUM('a', 'b')
 );
 ```
+
+## ALTER TABLE MODIFY and CHANGE
+
+MySQL `ALTER TABLE` is not followed, but `MODIFY` and `CHANGE` retype a column, so the table
+becomes unknown rather than keep the old `ENUM` labels.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY, a ENUM('x', 'y') NOT NULL);
+CREATE TABLE u (id INT PRIMARY KEY, a ENUM('x', 'y') NOT NULL);
+ALTER TABLE t MODIFY a ENUM('x', 'y', 'z') NOT NULL;
+ALTER TABLE u ADD COLUMN b INT;
+```
+
+```sql
+SELECT a FROM t
+-- columns: a: typing.Literal['x', 'y', 'z'] (ENUM('X', 'Y', 'Z'))
+```
+
+```sql
+SELECT a FROM u
+-- columns: a: typing.Literal['x', 'y'] (ENUM('X', 'Y'))
+```

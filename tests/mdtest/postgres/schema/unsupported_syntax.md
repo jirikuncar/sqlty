@@ -97,10 +97,10 @@ DROP TABLE orders;
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int | None, str | None]
+-- inferred: tuple[int | None, str | None, int | None]
 ```
 
 ```sql
 SELECT total FROM shop.orders
--- inferred: tuple[decimal.Decimal | None]
+-- inferred: None
 ```

@@ -58,3 +58,26 @@ q = "--sql\nSELECT status FROM orders"
 ```sql
 CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT NOT NULL CHECK (status IN ('pending', 'paid')));
 ```
+
+## COLLATE NOCASE does not bound the values
+
+A column compared case-insensitively stores and returns `'A'` for `CHECK (s IN ('a', 'b'))`,
+so only a binary collation keeps the values.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (
+    id INTEGER PRIMARY KEY,
+    nocase TEXT COLLATE NOCASE CHECK (nocase IN ('a', 'b')),
+    plain TEXT COLLATE BINARY CHECK (plain IN ('a', 'b')),
+    dup TEXT CHECK (dup IN ('a', 'b', 'a'))
+);
+```
+
+```sql
+SELECT nocase, plain, dup FROM t
+-- columns: nocase: str | None (TEXT)
+-- columns: plain: typing.Literal['a', 'b'] | None (TEXT)
+-- columns: dup: typing.Literal['a', 'b'] | None (TEXT)
+```

@@ -188,7 +188,11 @@ pub(crate) fn check_values(expr: &Expr, is_target: &dyn Fn(&Ident) -> bool) -> O
             expr: column,
             list,
             negated: false,
-        } if is_column(column, is_target) => list.iter().map(constant).collect(),
+        } if is_column(column, is_target) => list
+            .iter()
+            .map(constant)
+            .collect::<Option<Vec<_>>>()
+            .map(|all| union(Vec::new(), all)),
         Expr::AnyOp {
             left,
             compare_op: BinaryOperator::Eq,
@@ -202,7 +206,12 @@ pub(crate) fn check_values(expr: &Expr, is_target: &dyn Fn(&Ident) -> bool) -> O
 fn array_constants(expr: &Expr) -> Option<Vec<Value>> {
     match expr {
         Expr::Nested(inner) | Expr::Cast { expr: inner, .. } => array_constants(inner),
-        Expr::Array(array) => array.elem.iter().map(constant).collect(),
+        Expr::Array(array) => array
+            .elem
+            .iter()
+            .map(constant)
+            .collect::<Option<Vec<_>>>()
+            .map(|all| union(Vec::new(), all)),
         _ => None,
     }
 }
@@ -303,6 +312,12 @@ mod tests {
             check("(status)::text = ANY ((ARRAY['a'::text, 'b'::text])::text[])"),
             Some(strs(&["a", "b"]))
         );
+    }
+
+    #[test]
+    fn check_in_list_drops_duplicates() {
+        assert_eq!(check("status IN ('a', 'b', 'a')"), Some(strs(&["a", "b"])));
+        assert_eq!(check("status = ANY (ARRAY['a', 'a'])"), Some(strs(&["a"])));
     }
 
     #[test]
