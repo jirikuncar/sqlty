@@ -1,0 +1,212 @@
+//! Columns as the loader holds them before resolution: declared types, `CHECK`-derived
+//! allowed values and nullability.
+//!
+//! Nothing here looks types up in the catalog; [`super::resolve`] does that.
+
+use sqlparser::ast::{ColumnDef, ColumnOption, DataType, Expr, GeneratedAs, ObjectName};
+
+use crate::analyzer::SqlDialect;
+use crate::values::{self, Value};
+
+use super::names::fold;
+use super::names::parts;
+
+#[derive(Clone, PartialEq)]
+pub(super) struct RawColumn {
+    pub(super) name: String,
+    pub(super) ident: String,
+    pub(super) ty: DataType,
+    pub(super) not_null: bool,
+    /// The values a `CHECK` constraint limits the column to, when it lists them.
+    pub(super) values: Option<Vec<Value>>,
+    /// Compared with a collation that may equate different strings (`NOCASE`, `_ci`):
+    /// the stored values are not the ones a `CHECK` or a domain lists.
+    pub(super) collated: bool,
+}
+
+impl RawColumn {
+    pub(super) fn checks(&self) -> Checks<'_> {
+        Checks {
+            values: self.values.as_deref(),
+            collated: self.collated,
+        }
+    }
+}
+
+/// What constraints say about a column's values.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Checks<'a> {
+    pub(super) values: Option<&'a [Value]>,
+    pub(super) collated: bool,
+}
+
+impl Checks<'_> {
+    /// The Python type of a column: its `CHECK` values narrow a `Literal`, a collation
+    /// removes the ones a domain gave (an enum's labels are exact either way).
+    pub(super) fn apply(
+        self,
+        python: Option<String>,
+        sql_type: &str,
+        is_enum: bool,
+    ) -> Option<String> {
+        if self.collated && !is_enum {
+            return None;
+        }
+        narrowed(python, sql_type, self.values)
+    }
+}
+
+/// Whether a collation name may equate different strings; `BINARY`, `C` and `POSIX` do not.
+pub(super) fn loose_collation(name: &ObjectName) -> bool {
+    let last = name.0.last().map(|part| {
+        part.to_string()
+            .trim_matches(['"', '`', '\''])
+            .to_lowercase()
+    });
+    !matches!(
+        last.as_deref(),
+        Some("binary" | "c" | "posix" | "ucs_basic")
+    )
+}
+
+pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
+    let serial = matches!(&column.data_type, DataType::Custom(name, _)
+        if parts(name, dialect).last().is_some_and(|n| matches!(n.as_str(), "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8")));
+    let not_null = serial
+        || column.options.iter().any(|option| {
+            matches!(
+                option.option,
+                ColumnOption::NotNull | ColumnOption::PrimaryKey(_)
+            ) || matches!(
+                &option.option,
+                ColumnOption::Generated {
+                    generated_as: GeneratedAs::Always | GeneratedAs::ByDefault,
+                    generation_expr: None,
+                    ..
+                }
+            )
+        });
+    let name = fold(&column.name, dialect);
+    // MySQL before 8.0.16 parses `CHECK` and ignores it.
+    let collated = column.options.iter().any(
+        |option| matches!(&option.option, ColumnOption::Collation(name) if loose_collation(name)),
+    );
+    let values = column
+        .options
+        .iter()
+        .filter(|_| !collated)
+        .filter_map(|option| match &option.option {
+            ColumnOption::Check(check) if dialect != SqlDialect::MySql => {
+                values::check_values(&check.expr, &|ident| fold(ident, dialect) == name)
+            }
+            _ => None,
+        })
+        .reduce(|a, b| values::intersect(a, &b));
+    RawColumn {
+        name,
+        ident: match column.name.quote_style {
+            Some(_) => column.name.to_string(),
+            None => column.name.value.to_lowercase(),
+        },
+        ty: column.data_type.clone(),
+        not_null,
+        values,
+        collated,
+    }
+}
+
+/// Narrow `existing` by the values of another `CHECK`.
+pub(super) fn add_values(existing: &mut Option<Vec<Value>>, found: Option<Vec<Value>>) {
+    *existing = match (existing.take(), found) {
+        (Some(a), Some(b)) => Some(values::intersect(a, &b)),
+        (a, b) => a.or(b),
+    };
+}
+
+/// Apply a table-level `CHECK` to the column it limits.
+pub(super) fn apply_check(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
+    if dialect == SqlDialect::MySql {
+        return;
+    }
+    for column in columns {
+        let found = values::check_values(expr, &|ident| fold(ident, dialect) == column.name);
+        add_values(&mut column.values, found);
+    }
+}
+
+/// The Python type of a column of `sql_type` that a `CHECK` limits to `checked`: a
+/// `Literal` of at most [`values::MAX_VALUES`] strings for a text column or integers for an
+/// integer column. `python` (an enum's `Literal`) is kept, and narrowed by `checked`.
+pub(super) fn narrowed(
+    python: Option<String>,
+    sql_type: &str,
+    checked: Option<&[Value]>,
+) -> Option<String> {
+    let Some(checked) = checked else {
+        return python;
+    };
+    if let Some(current) = python.as_deref().and_then(values::parse) {
+        let both = values::intersect(current, checked);
+        return values::render(&both).or(python);
+    }
+    if python.is_some() || checked.len() > values::MAX_VALUES {
+        return python;
+    }
+    let name = sql_type.split(['(', '<']).next().unwrap_or_default().trim();
+    let fits = match checked.first()? {
+        Value::Str(_) => matches!(name, "TEXT" | "VARCHAR"),
+        Value::Int(_) => matches!(
+            name,
+            "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
+        ),
+    };
+    if fits {
+        values::render(checked)
+    } else {
+        None
+    }
+}
+
+/// Add `column`, or replace the same-named one in place (inherited columns merge).
+pub(super) fn merge_column(columns: &mut Vec<RawColumn>, column: RawColumn) {
+    match columns.iter_mut().find(|c| c.name == column.name) {
+        Some(existing) => {
+            let not_null = existing.not_null || column.not_null;
+            let collated = existing.collated || column.collated;
+            let mut checked = existing.values.take();
+            add_values(&mut checked, column.values.clone());
+            *existing = column;
+            existing.not_null = not_null;
+            existing.values = checked;
+            existing.collated |= collated;
+        }
+        None => columns.push(column),
+    }
+}
+
+/// Whether a column of this type is SQLite's rowid when it is the primary key: only the
+/// type name `INTEGER`, not `INT`.
+pub(super) fn is_rowid_type(ty: &DataType) -> bool {
+    matches!(ty, DataType::Integer(None))
+}
+
+pub(super) fn column_named<'a>(
+    columns: &'a [RawColumn],
+    expr: &Expr,
+    dialect: SqlDialect,
+) -> Option<&'a RawColumn> {
+    let Expr::Identifier(ident) = expr else {
+        return None;
+    };
+    let name = fold(ident, dialect);
+    columns.iter().find(|c| c.name == name)
+}
+
+pub(super) fn mark_not_null(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
+    if let Expr::Identifier(ident) = expr {
+        let name = fold(ident, dialect);
+        if let Some(column) = columns.iter_mut().find(|c| c.name == name) {
+            column.not_null = true;
+        }
+    }
+}

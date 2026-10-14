@@ -1,0 +1,277 @@
+//! `ALTER TABLE` and `ALTER TYPE`: how each operation changes a raw table or type.
+//!
+//! An operation this module cannot follow gives up the object (see `AlterFail`) rather
+//! than guessing.
+
+use sqlparser::ast::{
+    AlterColumnOperation, AlterTable, AlterTableOperation, AlterType, AlterTypeAddValuePosition,
+    AlterTypeOperation, DataType, Ident, ObjectName, RenameTableNameKind, TableConstraint,
+};
+
+use crate::analyzer::SqlDialect;
+
+use super::columns::{apply_check, mark_not_null, raw_column};
+use super::loader::{AlterFail, Loader, RawTable, Rel, TypeDef};
+use super::names::{fold, key_of, parts};
+
+impl Loader {
+    /// Returns `false` when the table (or a column it changes) is not defined yet.
+    pub(super) fn alter_table(&mut self, alter: &AlterTable, path: &[String]) -> bool {
+        let Some(key) = self.table_key(&parts(&alter.name, self.dialect), path) else {
+            return alter.if_exists;
+        };
+        let Some(Rel::Table(root)) = self.relations.get(&key) else {
+            return true;
+        };
+        let mut root = root.clone();
+        let mut rename = None;
+        let mut failed = None;
+        for op in &alter.operations {
+            if let Err(fail) = alter_op(&mut root, op, true, &mut rename, self.dialect) {
+                failed = Some(fail);
+                break;
+            }
+        }
+        if matches!(failed, Some(AlterFail::Missing)) {
+            return false;
+        }
+        let unsupported = failed.is_some();
+        if unsupported {
+            self.skipped.push(("table", alter.name.to_string()));
+        }
+        let mut changed = vec![(key.clone(), root)];
+        if !alter.only {
+            for child in self.descendants(&key) {
+                let Some(Rel::Table(table)) = self.relations.get(&child) else {
+                    continue;
+                };
+                let mut table = table.clone();
+                for op in &alter.operations {
+                    let _ = alter_op(&mut table, op, false, &mut None, self.dialect);
+                }
+                changed.push((child, table));
+            }
+        }
+        for (name, mut table) in changed {
+            table.unknown |= unsupported;
+            // An `ALTER` that changes nothing (owner, a foreign key, a default) leaves
+            // the resolved relation as it is.
+            if matches!(self.relations.get(&name), Some(Rel::Table(old)) if *old == table) {
+                continue;
+            }
+            self.set_relation(name, Some(Rel::Table(table)));
+        }
+        // Views were typed against the constraints the table had.
+        if alter
+            .operations
+            .iter()
+            .any(|op| matches!(op, AlterTableOperation::DropConstraint { .. }))
+        {
+            self.forget_view_values();
+        }
+        if let Some(new_name) = rename {
+            let (schema, _) = key.split_once('.').unwrap_or(("public", ""));
+            let new_key = match parts(&new_name, self.dialect).as_slice() {
+                [only] => format!("{schema}.{only}"),
+                other => key_of(other, self.dialect),
+            };
+            self.cache = None;
+            if let Some(table) = self.relations.remove(&key) {
+                self.relations.insert(new_key.clone(), table);
+            }
+            for rel in self.relations.values_mut() {
+                if let Rel::Table(table) = rel {
+                    for parent in &mut table.parents {
+                        if *parent == key {
+                            parent.clone_from(&new_key);
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    pub(super) fn alter_type(&mut self, alter: &AlterType, path: &[String]) -> bool {
+        let Some(key) = self.lookup(&self.types, &parts(&alter.name, self.dialect), path) else {
+            return false;
+        };
+        self.cache = None;
+        match (&alter.operation, self.types.get_mut(&key)) {
+            (AlterTypeOperation::AddValue(add), Some(TypeDef::Enum(labels))) => {
+                let value = add.value.value.clone();
+                if !labels.contains(&value) {
+                    let at = add.position.as_ref().and_then(|position| {
+                        let (anchor, after) = match position {
+                            AlterTypeAddValuePosition::Before(anchor) => (anchor, 0),
+                            AlterTypeAddValuePosition::After(anchor) => (anchor, 1),
+                        };
+                        labels
+                            .iter()
+                            .position(|label| *label == anchor.value)
+                            .map(|at| at + after)
+                    });
+                    labels.insert(at.unwrap_or(labels.len()), value);
+                }
+            }
+            (AlterTypeOperation::RenameValue(rename), Some(TypeDef::Enum(labels))) => {
+                match labels.iter_mut().find(|label| **label == rename.from.value) {
+                    Some(label) => label.clone_from(&rename.to.value),
+                    None => return false,
+                }
+            }
+            (AlterTypeOperation::Rename(rename), Some(_)) => {
+                let schema = key.split_once('.').map_or("public", |(schema, _)| schema);
+                let new_key = format!("{schema}.{}", fold(&rename.new_name, self.dialect));
+                if let Some(def) = self.types.remove(&key) {
+                    for target in self.type_aliases.values_mut() {
+                        if *target == key {
+                            target.clone_from(&new_key);
+                        }
+                    }
+                    self.type_aliases.remove(&new_key);
+                    self.type_aliases.insert(key, new_key.clone());
+                    self.types.insert(new_key, def);
+                }
+            }
+            (_, Some(def)) => {
+                *def = TypeDef::Unknown;
+                self.skipped.push(("type", alter.name.to_string()));
+            }
+            _ => {}
+        }
+        true
+    }
+}
+
+/// Apply one `ALTER TABLE` operation to `table`. `strict` fails on a missing column
+/// (the table the statement names); the tables below it skip what does not apply.
+pub(super) fn alter_op(
+    table: &mut RawTable,
+    op: &AlterTableOperation,
+    strict: bool,
+    rename: &mut Option<ObjectName>,
+    dialect: SqlDialect,
+) -> Result<(), AlterFail> {
+    let missing = || {
+        if strict {
+            Err(AlterFail::Missing)
+        } else {
+            Ok(())
+        }
+    };
+    let position = |table: &RawTable, name: &Ident| {
+        let name = fold(name, dialect);
+        table.columns.iter().position(|c| c.name == name)
+    };
+    match op {
+        AlterTableOperation::AddColumn {
+            column_def,
+            column_position,
+            ..
+        } => {
+            // `FIRST` / `AFTER` put the column somewhere in the middle.
+            if column_def.data_type == DataType::Unspecified || column_position.is_some() {
+                return Err(AlterFail::Unsupported);
+            }
+            if position(table, &column_def.name).is_none() {
+                table.columns.push(raw_column(column_def, dialect));
+            }
+        }
+        AlterTableOperation::DropColumn {
+            column_names,
+            if_exists,
+            ..
+        } => {
+            for name in column_names {
+                match position(table, name) {
+                    Some(at) => {
+                        table.columns.remove(at);
+                    }
+                    None if !if_exists => missing()?,
+                    None => {}
+                }
+            }
+        }
+        AlterTableOperation::RenameColumn {
+            old_column_name,
+            new_column_name,
+        } => match position(table, old_column_name) {
+            Some(at) => {
+                let column = &mut table.columns[at];
+                column.name = fold(new_column_name, dialect);
+                column.ident = match new_column_name.quote_style {
+                    Some(_) => new_column_name.to_string(),
+                    None => column.name.clone(),
+                };
+            }
+            None => missing()?,
+        },
+        AlterTableOperation::RenameTable { table_name } => {
+            if strict {
+                let (RenameTableNameKind::As(name) | RenameTableNameKind::To(name)) = table_name;
+                *rename = Some(name.clone());
+            }
+        }
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            let Some(at) = position(table, column_name) else {
+                return missing();
+            };
+            match op {
+                AlterColumnOperation::SetNotNull => table.columns[at].not_null = true,
+                AlterColumnOperation::DropNotNull => table.columns[at].not_null = false,
+                AlterColumnOperation::SetDataType { data_type, .. } => {
+                    table.columns[at].ty = data_type.clone();
+                    table.columns[at].values = None;
+                }
+                AlterColumnOperation::SetDefault { .. }
+                | AlterColumnOperation::DropDefault
+                | AlterColumnOperation::AddGenerated { .. } => {}
+            }
+        }
+        AlterTableOperation::AddConstraint {
+            constraint: TableConstraint::PrimaryKey(pk),
+            ..
+        } => {
+            for index_column in &pk.columns {
+                mark_not_null(&mut table.columns, &index_column.column.expr, dialect);
+            }
+        }
+        // A `CHECK` added `NOT VALID` does not hold for the rows already there.
+        AlterTableOperation::AddConstraint {
+            constraint: TableConstraint::Check(check),
+            not_valid: false,
+        } => apply_check(&mut table.columns, &check.expr, dialect),
+        // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
+        AlterTableOperation::DropConstraint { .. } => {
+            for column in &mut table.columns {
+                column.values = None;
+            }
+        }
+        AlterTableOperation::ChangeColumn { .. }
+        | AlterTableOperation::ModifyColumn { .. }
+        | AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
+        // Storage, options, tablespace, triggers, RLS, partitions, comments and the like
+        // never change a column.
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Whether an `ALTER TABLE` that sqlparser cannot read may change the table's columns,
+/// by the words after the table name. Constraints, storage, ownership, triggers, RLS,
+/// partitions, tablespaces and comments cannot.
+pub(super) fn changes_columns(action: &[String], mentions_type: bool) -> bool {
+    let word = |i: usize| action.get(i).map_or("", String::as_str);
+    match word(0) {
+        "add" | "drop" => !matches!(
+            word(1),
+            "constraint" | "primary" | "unique" | "check" | "foreign" | "exclude"
+        ),
+        "rename" => word(1) != "constraint",
+        "alter" => mentions_type,
+        "set" => word(1) == "schema",
+        "of" => true,
+        _ => false,
+    }
+}
