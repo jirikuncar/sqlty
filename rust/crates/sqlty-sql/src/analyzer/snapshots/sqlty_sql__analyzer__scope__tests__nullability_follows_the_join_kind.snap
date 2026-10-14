@@ -1,0 +1,33 @@
+---
+source: crates/sqlty-sql/src/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT a.id, b.id AS bid FROM a LEFT JOIN b ON a.id = b.id
+id: int | INT | NonNull
+bid: int | INT | Nullable
+
+SELECT a.id, b.id AS bid FROM a RIGHT JOIN b ON a.id = b.id
+id: int | INT | Nullable
+bid: int | INT | NonNull
+
+SELECT a.id, b.id AS bid FROM a FULL JOIN b ON a.id = b.id
+id: int | INT | Nullable
+bid: int | INT | Nullable
+
+SELECT a.id, b.id AS bid FROM a INNER JOIN b ON a.id = b.id
+id: int | INT | NonNull
+bid: int | INT | NonNull
+
+SELECT id FROM a LEFT JOIN b USING (id)
+id: int | INT | NonNull
+
+SELECT id FROM a RIGHT JOIN b USING (id)
+id: int | INT | Nullable
+
+SELECT b.* FROM a LEFT JOIN b ON true
+id: int | INT | Nullable
+y: str | TEXT | Nullable
+shared: str | TEXT | Nullable
+
+SELECT c.z FROM a LEFT JOIN b ON true LEFT JOIN c ON true
+z: str | TEXT | Nullable

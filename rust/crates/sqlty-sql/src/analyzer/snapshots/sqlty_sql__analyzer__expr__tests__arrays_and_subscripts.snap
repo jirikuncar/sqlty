@@ -1,0 +1,37 @@
+---
+source: crates/sqlty-sql/src/analyzer/expr.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT ARRAY[1, 2, 3] AS a, ARRAY[1, 2.5] AS b, ARRAY['a', 'b'] AS c
+a: list[int] | ARRAY<INT> | NonNull
+b: list[decimal.Decimal] | ARRAY<DECIMAL> | NonNull
+c: list[str] | ARRAY<TEXT> | NonNull
+
+SELECT ARRAY[i, n] AS a, ARRAY[]::INT[] AS b, ARRAY[ARRAY[1], ARRAY[2]] AS c FROM t
+a: list[int] | ARRAY<INT> | NonNull
+b: list[int] | ARRAY<INT> | NonNull
+c: list[int] | ARRAY<INT> | NonNull
+
+SELECT ARRAY[1, 'a'] AS a
+a: list[int] | ARRAY<INT> | NonNull
+
+SELECT arr[1] AS a, grid[1][2] AS b, arr[1:2] AS c, (arr)[1] AS d FROM t
+a: int | INT | Nullable
+b: int | INT | Nullable
+c: list[int] | ARRAY<INT> | NonNull
+d: int | INT | Nullable
+
+SELECT txt[1] AS a, i[1] AS b FROM t
+a: ? | ? | Nullable
+b: ? | ? | Nullable
+[unsupported-syntax] expression `txt[1]` is not typed
+[unsupported-syntax] expression `i[1]` is not typed
+
+SELECT ARRAY(SELECT i FROM t) AS a
+a: ? | ? | Unknown
+[unknown-function] function `array` is not known to sqlty, so its result is untyped
+
+SELECT i = ANY(arr) AS a, arr @> ARRAY[1] AS b, arr || 4 AS c FROM t
+a: bool | BOOLEAN | Nullable
+b: bool | BOOLEAN | NonNull
+c: list[int] | ARRAY<INT> | NonNull

@@ -1,0 +1,27 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT id FROM b UNION SELECT id FROM a
+id: int | BIGINT | Nullable
+
+SELECT id FROM a UNION SELECT id FROM a
+id: int | INT | NonNull
+
+SELECT id FROM b INTERSECT SELECT id FROM a
+id: int | BIGINT | NonNull
+
+SELECT id FROM b INTERSECT SELECT id FROM b
+id: int | BIGINT | Nullable
+
+SELECT id FROM a EXCEPT SELECT id FROM b
+id: int | BIGINT | NonNull
+
+SELECT id FROM b EXCEPT SELECT id FROM a
+id: int | BIGINT | Nullable
+
+SELECT label FROM a UNION ALL SELECT label FROM b
+label: str | TEXT | Nullable
+
+(SELECT id FROM a) UNION (SELECT id FROM b)
+id: int | BIGINT | Nullable

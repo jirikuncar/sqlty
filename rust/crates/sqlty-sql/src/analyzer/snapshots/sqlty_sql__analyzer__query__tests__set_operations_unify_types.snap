@@ -1,0 +1,30 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT id, label FROM a UNION SELECT id, label FROM b
+id: int | BIGINT | Nullable
+label: str | TEXT | Nullable
+
+SELECT id, score FROM a UNION ALL SELECT id, score FROM b
+id: int | BIGINT | Nullable
+score: float | DOUBLE | Nullable
+
+SELECT id FROM a UNION SELECT flag FROM c
+id: ? | ? | NonNull
+[unsupported-syntax] set operation branches disagree on the type of column `id`
+
+SELECT id FROM a UNION SELECT 1
+id: int | INT | NonNull
+
+SELECT id FROM a UNION SELECT NULL
+id: int | INT | Nullable
+
+SELECT NULL AS x UNION SELECT 1
+x: int | ? | Nullable
+
+SELECT id FROM a UNION SELECT id, label FROM b
+id: int | INT | Unknown
+
+SELECT id FROM a UNION SELECT id FROM b UNION SELECT id FROM c
+id: int | BIGINT | Nullable

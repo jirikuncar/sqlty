@@ -71,9 +71,13 @@ fn mysql_marker_lines(scan: &Scan) -> Vec<usize> {
 
 /// A diagnostic result from checking source code.
 pub struct Diagnostic {
+    /// The rule that fired.
     pub rule: Rule,
+    /// What is wrong, for the user.
     pub message: String,
+    /// How loudly the rule reports, as configured.
     pub severity: Severity,
+    /// 1-based line of the source the diagnostic points at.
     pub line: usize,
 }
 

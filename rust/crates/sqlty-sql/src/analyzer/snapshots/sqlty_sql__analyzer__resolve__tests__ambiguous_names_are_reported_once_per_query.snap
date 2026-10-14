@@ -1,0 +1,30 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT id FROM users, orders
+id: int | INT | NonNull
+[ambiguous-column] column reference `id` is ambiguous: `users`, `orders` all have it
+
+SELECT note FROM users JOIN orders ON true
+note: str | TEXT | Nullable
+[ambiguous-column] column reference `note` is ambiguous: `users`, `orders` all have it
+
+SELECT id, note FROM users, orders
+id: int | INT | NonNull
+note: str | TEXT | Nullable
+[ambiguous-column] column reference `id` is ambiguous: `users`, `orders` all have it
+[ambiguous-column] column reference `note` is ambiguous: `users`, `orders` all have it
+
+SELECT id FROM users u1, users u2
+id: int | INT | NonNull
+[ambiguous-column] column reference `id` is ambiguous: `u1`, `u2` all have it
+
+SELECT id FROM users JOIN orders USING (id)
+id: int | INT | NonNull
+
+SELECT note FROM users NATURAL JOIN orders
+note: str | TEXT | Nullable
+
+SELECT users.id FROM users, orders
+id: int | INT | NonNull

@@ -15,7 +15,7 @@ use super::query::{Analyzer, Column};
 use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
 
 /// Load schema from CREATE TABLE, VIEW, DOMAIN and TYPE ... AS ENUM statements; in
-/// PostgreSQL also ALTER, DROP, search_path and functions (see [`crate::catalog`]).
+/// PostgreSQL also ALTER, DROP, search_path and functions (see `crate::catalog`).
 /// Returns the `(kind, name)` of the tables that could not be parsed even without
 /// their constraints and of the views that could not be parsed.
 pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<SkippedObject>) {

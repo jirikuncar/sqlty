@@ -1,0 +1,29 @@
+---
+source: crates/sqlty-sql/src/analyzer/expr.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT 1 AS a, -1 AS b, +1 AS c, 1.5 AS d, 'x' AS e, true AS f, NULL AS g
+a: int | ? | NonNull
+b: int | ? | NonNull
+c: int | ? | NonNull
+d: decimal.Decimal | ? | NonNull
+e: typing.Literal['x'] | ? | NonNull
+f: bool | ? | NonNull
+g: ? | ? | Nullable
+
+SELECT -i AS a, @ i AS b, ~i AS c, NOT true AS d FROM t
+a: int | INT | NonNull
+b: int | INT | NonNull
+c: int | INT | NonNull
+d: bool | BOOLEAN | NonNull
+
+SELECT 1e3 AS a, 0x1F AS b, X'ff' AS c, E'a\nb' AS d, $$dollar$$ AS e
+a: decimal.Decimal | ? | NonNull
+b: str | ? | NonNull
+c: str | ? | NonNull
+d: str | ? | NonNull
+e: str | ? | NonNull
+
+SELECT $1 AS a, $1::INT AS b
+a: ? | ? | Unknown
+b: int | INT | Unknown

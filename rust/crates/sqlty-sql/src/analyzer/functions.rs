@@ -573,3 +573,164 @@ pub(super) fn sum_type(typed: Typed, dialect: SqlDialect) -> Typed {
     };
     from_sql_type(widened, dialect)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use sqlparser::ast::Function;
+
+    use super::super::test_support::{expr, reports};
+    use super::*;
+
+    fn call(sql: &str) -> Function {
+        match expr(sql) {
+            Expr::Function(func) => func,
+            other => panic!("not a call: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_names_are_upper_case_without_the_schema() {
+        assert_eq!(function_name(&call("lower(x)")), "LOWER");
+        assert_eq!(function_name(&call("pg_catalog.Lower(x)")), "LOWER");
+        assert_eq!(function_name(&call("\"MyFn\"(x)")), "MYFN");
+    }
+
+    #[test]
+    fn positional_args_stop_at_the_first_star_or_named_argument() {
+        let args = |sql: &str| {
+            positional_args(&call(sql).args)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(args("f(a, b + 1)"), ["a", "b + 1"]);
+        assert!(args("count(*)").is_empty());
+        assert_eq!(args("f(a, b => 1, c)"), ["a"]);
+        assert!(args("now()").is_empty());
+    }
+
+    #[test]
+    fn positional_args_of_a_function_without_a_list_are_empty() {
+        let Expr::Function(func) = expr("current_timestamp") else {
+            panic!("expected a function");
+        };
+        assert!(positional_args(&func.args).is_empty());
+    }
+
+    #[test]
+    fn function_tables_have_upper_case_names() {
+        for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
+            for name in table.iter().flat_map(|(names, _)| names.iter()) {
+                assert_eq!(*name, name.to_uppercase(), "{name} is not upper case");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "bug: GREATEST and LEAST are listed in two POSTGRES_FUNCTIONS entries (Same(0) and FirstKnown)"]
+    fn function_tables_list_a_name_once() {
+        for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
+            let mut seen = HashSet::new();
+            for name in table.iter().flat_map(|(names, _)| names.iter()) {
+                assert!(seen.insert(*name), "{name} is listed twice");
+            }
+        }
+    }
+
+    #[test]
+    fn sum_widens_in_postgres() {
+        let widen = |sql: &str| {
+            let typed = Typed::of_sql(sql, SqlDialect::Postgres);
+            sum_type(typed, SqlDialect::Postgres)
+                .sql()
+                .map(str::to_string)
+        };
+        assert_eq!(widen("SMALLINT").as_deref(), Some("BIGINT"));
+        assert_eq!(widen("INT").as_deref(), Some("BIGINT"));
+        assert_eq!(widen("BIGINT").as_deref(), Some("DECIMAL"));
+        assert_eq!(widen("DECIMAL(10, 2)").as_deref(), Some("DECIMAL"));
+        assert_eq!(widen("FLOAT").as_deref(), Some("FLOAT"));
+        assert_eq!(widen("DOUBLE").as_deref(), Some("DOUBLE"));
+        assert_eq!(widen("INTERVAL").as_deref(), Some("INTERVAL"));
+        assert_eq!(widen("TEXT").as_deref(), Some("TEXT"));
+    }
+
+    const DDL: &str = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT NOT NULL, \
+                       n NUMERIC(10, 2) NOT NULL, f DOUBLE PRECISION, txt TEXT, \
+                       d DATE, ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ, iv INTERVAL, \
+                       arr INT[] NOT NULL, tags TEXT[], r INT4RANGE, j JSONB)";
+
+    #[test]
+    fn aggregates_in_postgres() {
+        let queries = [
+            "SELECT count(*) AS a, count(txt) AS b, count(DISTINCT i) AS c FROM t",
+            "SELECT sum(i) AS a, sum(s) AS b, sum(b) AS c, sum(n) AS d, sum(f) AS e FROM t",
+            "SELECT min(i) AS a, max(txt) AS b, min(d) AS c, max(ts) AS d FROM t",
+            "SELECT avg(i) AS a, avg(f) AS b, avg(n) AS c, avg(iv) AS d FROM t",
+            "SELECT sum(i) FILTER (WHERE i > 1) AS a FROM t",
+            "SELECT array_agg(i) AS a, string_agg(txt, ',') AS b, bool_and(i > 1) AS c FROM t",
+            "SELECT sum(nope) FROM t",
+            "SELECT sum(i::BIGINT) AS a, sum(unknown_fn(i)) AS b FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn return_types_follow_the_argument() {
+        let queries = [
+            "SELECT abs(i) AS a, abs(n) AS b, abs(f) AS c, abs(s) AS d FROM t",
+            "SELECT round(n) AS a, round(n, 1) AS b, round(f) AS c, round(i) AS d FROM t",
+            "SELECT sqrt(i) AS a, sqrt(n) AS b, ceil(f) AS c, sign(n) AS d FROM t",
+            "SELECT length(txt) AS a, lower(txt) AS b, concat(txt, i) AS c, substr(txt, 1) AS d FROM t",
+            "SELECT coalesce(s, 1) AS a, coalesce(i, 1.5) AS b, coalesce(txt, 'x') AS c, coalesce(NULL, NULL) AS d FROM t",
+            "SELECT greatest(i, b) AS a, least(i, 1) AS b, nullif(i, 0) AS c FROM t",
+            "SELECT now() AS a, current_date AS b, date_trunc('day', tz) AS c, date_trunc('day', d) AS d FROM t",
+            "SELECT extract(year FROM ts) AS a, age(ts) AS b, date_part('day', ts) AS c FROM t",
+            "SELECT lag(i) OVER () AS a, lag(i, 1, 0) OVER () AS b, row_number() OVER () AS c FROM t",
+            "SELECT lower(r) AS a, upper(r) AS b, array_length(arr, 1) AS c, unnest(arr) AS d FROM t",
+            "SELECT arr[1] AS a, tags[1] AS b, array_append(arr, 1) AS c, array_agg(txt) AS d FROM t GROUP BY txt",
+            "SELECT gen_random_uuid() AS a, md5(txt) AS b, random() AS c, pg_sleep(1) AS d FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    #[ignore = "bug: MySQL SUM of an integer column is DECIMAL (MySQL reference manual, aggregate functions), but sum_type widens only in PostgreSQL"]
+    fn mysql_sum_of_an_integer_is_decimal() {
+        let report = super::super::test_support::report(
+            "SELECT sum(i) AS total FROM t",
+            "mysql",
+            Some("CREATE TABLE t (i INT NOT NULL)"),
+        );
+        assert!(
+            report.starts_with("total: decimal.Decimal | DECIMAL"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn unknown_functions_are_untyped_and_explained() {
+        let queries = [
+            "SELECT definitely_not_a_function(i) AS a FROM t",
+            "SELECT public.also_missing(i) AS a FROM t",
+            "SELECT now() AS ok, mystery() AS bad FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn function_availability_differs_by_dialect() {
+        let queries = [
+            "SELECT ifnull(i, 0) AS a, concat_ws(',', txt, txt) AS b, if(i > 1, 1, 0) AS c FROM t",
+            "SELECT date_format(ts, '%Y') AS a, curdate() AS b, group_concat(txt) AS c FROM t",
+            "SELECT avg(i) AS a, sum(i) AS b, round(n, 1) AS c, stddev(i) AS d FROM t",
+        ];
+        let ddl = "CREATE TABLE t (i INT NOT NULL, txt VARCHAR(10), ts DATETIME, \
+                   n DECIMAL(10, 2) NOT NULL)";
+        let mysql = reports(&queries, "mysql", Some(ddl));
+        let postgres = reports(&queries, "postgres", None);
+        insta::assert_snapshot!(format!("mysql:\n{mysql}\npostgres:\n{postgres}"));
+    }
+}

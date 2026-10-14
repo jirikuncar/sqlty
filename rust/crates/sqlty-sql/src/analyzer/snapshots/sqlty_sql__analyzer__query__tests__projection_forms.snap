@@ -1,0 +1,42 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT 1, 'x', true, NULL
+?column?: int | ? | NonNull
+?column?: typing.Literal['x'] | ? | NonNull
+?column?: bool | ? | NonNull
+?column?: ? | ? | Nullable
+
+SELECT id, id AS again, label l FROM a
+id: int | INT | NonNull
+again: int | INT | NonNull
+l: str | TEXT | Nullable
+
+SELECT DISTINCT label FROM a
+label: str | TEXT | Nullable
+
+SELECT a.id, count(*) AS n FROM a GROUP BY a.id HAVING count(*) > 1 ORDER BY n DESC LIMIT 3
+id: int | INT | NonNull
+n: int | BIGINT | NonNull
+
+SELECT id FROM a ORDER BY label OFFSET 1
+id: int | INT | NonNull
+
+SELECT row_number() OVER (ORDER BY id) AS rn, sum(score) OVER () AS total FROM a
+rn: int | BIGINT | NonNull
+total: decimal.Decimal | DECIMAL | NonNull
+
+SELECT (SELECT 1) AS one, (SELECT label FROM a LIMIT 1) AS lbl
+one: int | ? | NonNull
+lbl: str | TEXT | Nullable
+
+SELECT
+no rows
+
+SELECT FROM a
+
+SELECT * FROM a FOR UPDATE
+id: int | INT | NonNull
+label: str | TEXT | Nullable
+score: decimal.Decimal | DECIMAL(5, 2) | NonNull

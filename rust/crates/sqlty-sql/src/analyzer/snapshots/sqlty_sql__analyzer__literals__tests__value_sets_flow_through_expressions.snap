@@ -1,0 +1,43 @@
+---
+source: crates/sqlty-sql/src/analyzer/literals.rs
+expression: "reports(&queries, \"postgres\", Some(ddl))"
+---
+SELECT 'a' AS c, 1 AS d
+c: typing.Literal['a'] | ? | NonNull
+d: int | ? | NonNull
+
+SELECT CASE WHEN n = 1 THEN 'x' ELSE 'y' END AS c FROM t
+c: typing.Literal['x', 'y'] | ? | NonNull
+
+SELECT CASE WHEN n = 1 THEN 'x' END AS c FROM t
+c: typing.Literal['x'] | ? | Nullable
+
+SELECT COALESCE(status, 'other') AS c FROM t
+c: typing.Literal['new', 'done', 'other'] | TEXT | NonNull
+
+SELECT 'a' AS c UNION SELECT 'b'
+c: typing.Literal['a', 'b'] | ? | NonNull
+
+SELECT status FROM t UNION ALL SELECT 'other'
+status: typing.Literal['new', 'done', 'other'] | TEXT | NonNull
+
+SELECT n FROM t UNION SELECT 3
+n: int | INT | NonNull
+
+SELECT status || 'x' AS c, lower(status) AS d, upper('a') AS e FROM t
+c: str | TEXT | NonNull
+d: str | TEXT | NonNull
+e: str | TEXT | NonNull
+
+SELECT status, n + 1 AS next FROM t
+status: typing.Literal['new', 'done'] | TEXT | NonNull
+next: int | INT | NonNull
+
+SELECT * FROM (VALUES ('a'), ('b')) AS v(c)
+c: typing.Literal['a', 'b'] | ? | NonNull
+
+SELECT * FROM (VALUES ('a'), (1)) AS v(c)
+c: int | ? | NonNull
+
+SELECT NULLIF(status, 'new') AS c FROM t
+c: typing.Literal['new', 'done'] | TEXT | Nullable

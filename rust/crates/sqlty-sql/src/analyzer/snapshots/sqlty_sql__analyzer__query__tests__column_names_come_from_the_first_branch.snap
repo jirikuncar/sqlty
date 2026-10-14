@@ -1,0 +1,9 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT id AS first FROM a UNION SELECT id AS second FROM b
+first: int | BIGINT | Nullable
+
+SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3
+n: int | ? | NonNull

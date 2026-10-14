@@ -526,3 +526,267 @@ impl<'a> Analyzer<'a> {
         Some(columns.into_iter().flatten().cloned().collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::{SetExpr, Statement};
+
+    use super::super::test_support::{reports, statement};
+    use super::*;
+
+    fn from_of(sql: &str) -> Vec<TableWithJoins> {
+        let Statement::Query(query) = statement(sql, SqlDialect::Postgres) else {
+            panic!("not a query");
+        };
+        let SetExpr::Select(select) = *query.body else {
+            panic!("not a select");
+        };
+        select.from
+    }
+
+    fn scope_of(sql: &str) -> Vec<String> {
+        let from = from_of(sql);
+        relations(&from)
+            .flat_map(|factor| table_scope(factor, SqlDialect::Postgres))
+            .map(|source| format!("{}={:?}", source.reference, source.table))
+            .collect()
+    }
+
+    #[test]
+    fn named_tables_are_read_by_alias_or_name() {
+        assert_eq!(scope_of("SELECT 1 FROM Users"), ["users=Named(\"users\")"]);
+        assert_eq!(scope_of("SELECT 1 FROM users AS U"), ["u=Named(\"users\")"]);
+        assert_eq!(
+            scope_of("SELECT 1 FROM public.users"),
+            ["users=Named(\"public.users\")"]
+        );
+    }
+
+    #[test]
+    fn sources_that_cannot_be_read_are_opaque() {
+        assert_eq!(
+            scope_of("SELECT 1 FROM generate_series(1, 3) AS g"),
+            ["g=Opaque(\"table function generate_series\")"]
+        );
+        assert_eq!(
+            scope_of("SELECT 1 FROM (SELECT 1)"),
+            ["=Opaque(\"subquery without an alias\")"]
+        );
+        assert_eq!(
+            scope_of("SELECT 1 FROM unnest(ARRAY[1]) AS u"),
+            ["u=Opaque(\"UNNEST\")"]
+        );
+    }
+
+    #[test]
+    fn only_is_a_modifier_not_a_table() {
+        let from = from_of("SELECT 1 FROM ONLY a");
+        let TableFactor::Table { name, alias, .. } = &from[0].relation else {
+            panic!("not a table");
+        };
+        assert_eq!(object_name(name), "only");
+        assert!(alias.is_some());
+        let table = only_table(&from[0].relation).expect("rewritten to the table a");
+        assert_eq!(relation_name(&table).as_deref(), Some("a"));
+        assert!(only_table(&from_of("SELECT 1 FROM a")[0].relation).is_none());
+    }
+
+    #[test]
+    fn relations_lists_joins_and_looks_inside_unaliased_parentheses() {
+        let names = |sql: &str| {
+            let from = from_of(sql);
+            relations(&from)
+                .filter_map(relation_name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("SELECT 1 FROM a, b"), ["a", "b"]);
+        assert_eq!(
+            names("SELECT 1 FROM a JOIN b ON true LEFT JOIN c ON true"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(
+            names("SELECT 1 FROM (a JOIN b ON true) JOIN c ON true"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(names("SELECT 1 FROM (SELECT 1) AS s, a"), ["s", "a"]);
+    }
+
+    #[test]
+    fn relation_name_is_the_alias_or_table_name() {
+        let name = |sql: &str| relation_name(&from_of(sql)[0].relation);
+        assert_eq!(name("SELECT 1 FROM Public.T").as_deref(), Some("t"));
+        assert_eq!(name("SELECT 1 FROM t AS X").as_deref(), Some("x"));
+        assert_eq!(name("SELECT 1 FROM (SELECT 1) AS Q").as_deref(), Some("q"));
+        assert_eq!(name("SELECT 1 FROM (SELECT 1)"), None);
+        assert_eq!(
+            name("SELECT 1 FROM generate_series(1, 2)"),
+            Some("generate_series".into())
+        );
+    }
+
+    #[test]
+    fn merging_joins_are_using_and_natural() {
+        let merging = |sql: &str| any_merging_join(&from_of(sql));
+        assert!(merging("SELECT 1 FROM a JOIN b USING (id)"));
+        assert!(merging("SELECT 1 FROM a NATURAL JOIN b"));
+        assert!(merging(
+            "SELECT 1 FROM (a JOIN b USING (id)) JOIN c ON true"
+        ));
+        assert!(!merging("SELECT 1 FROM a JOIN b ON a.id = b.id"));
+        assert!(!merging("SELECT 1 FROM a, b"));
+        assert!(!merging("SELECT 1 FROM a CROSS JOIN b"));
+    }
+
+    #[test]
+    fn merged_columns_lists_using_columns_and_marks_natural() {
+        let merged = |sql: &str| merged_columns(&from_of(sql), SqlDialect::Postgres);
+        assert_eq!(
+            merged("SELECT 1 FROM a JOIN b USING (Id, kind)"),
+            ["id", "kind"]
+        );
+        assert_eq!(merged("SELECT 1 FROM a NATURAL JOIN b"), ["*"]);
+        assert_eq!(
+            merged("SELECT 1 FROM (a JOIN b USING (x)) JOIN c USING (y)"),
+            ["y", "x"]
+        );
+        assert!(merged("SELECT 1 FROM a JOIN b ON true").is_empty());
+    }
+
+    #[test]
+    fn resolve_finds_an_alias_or_falls_back_to_the_name() {
+        let scope = vec![
+            Source::named("u".into(), "users".into()),
+            Source {
+                reference: "g".into(),
+                table: Table::Opaque("table function".into()),
+            },
+        ];
+        assert_eq!(resolve("U", &scope), Table::Named("users".into()));
+        assert_eq!(resolve("g", &scope), Table::Opaque("table function".into()));
+        assert_eq!(resolve("Other", &scope), Table::Named("other".into()));
+    }
+
+    #[test]
+    fn table_describes_what_it_cannot_read() {
+        assert_eq!(Table::Named("t".into()).named(), Some("t"));
+        assert_eq!(Table::Named("t".into()).opaque_description(), None);
+        assert_eq!(Table::Opaque("UNNEST".into()).named(), None);
+        assert_eq!(
+            Table::Opaque("UNNEST".into()).opaque_description(),
+            Some("UNNEST")
+        );
+        assert_eq!(
+            Table::ExtraSources.opaque_description(),
+            Some("tables joined to the target with FROM or USING")
+        );
+    }
+
+    #[test]
+    fn virtuals_share_until_inserted_into() {
+        let mut first = Virtuals::default();
+        assert!(!first.contains_key("c"));
+        first.insert("c".into(), vec![Column::unknown("a")]);
+        let second = first.clone();
+        first.insert("d".into(), Vec::new());
+        assert!(second.contains_key("c"));
+        assert!(!second.contains_key("d"));
+        assert_eq!(first.get("c").map(<[Column]>::len), Some(1));
+        assert!(first.get("d").is_some_and(<[Column]>::is_empty));
+    }
+
+    const DDL: &str = "CREATE TABLE a (id INT NOT NULL, x TEXT NOT NULL, shared TEXT); \
+                       CREATE TABLE b (id INT NOT NULL, y TEXT, shared TEXT NOT NULL); \
+                       CREATE TABLE c (id INT, z TEXT NOT NULL); \
+                       CREATE VIEW v AS SELECT id, x FROM a";
+
+    #[test]
+    fn star_expansion_over_joins() {
+        let queries = [
+            "SELECT * FROM a",
+            "SELECT * FROM a JOIN b ON a.id = b.id",
+            "SELECT * FROM a JOIN b USING (id)",
+            "SELECT * FROM a NATURAL JOIN b",
+            "SELECT a.*, b.y FROM a, b",
+            "SELECT b.* FROM a JOIN b ON true",
+            "SELECT * FROM a, b, c",
+            "SELECT * FROM (a JOIN b USING (id)) JOIN c USING (id)",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn nullability_follows_the_join_kind() {
+        let queries = [
+            "SELECT a.id, b.id AS bid FROM a LEFT JOIN b ON a.id = b.id",
+            "SELECT a.id, b.id AS bid FROM a RIGHT JOIN b ON a.id = b.id",
+            "SELECT a.id, b.id AS bid FROM a FULL JOIN b ON a.id = b.id",
+            "SELECT a.id, b.id AS bid FROM a INNER JOIN b ON a.id = b.id",
+            "SELECT id FROM a LEFT JOIN b USING (id)",
+            "SELECT id FROM a RIGHT JOIN b USING (id)",
+            "SELECT b.* FROM a LEFT JOIN b ON true",
+            "SELECT c.z FROM a LEFT JOIN b ON true LEFT JOIN c ON true",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn derived_tables_ctes_and_views() {
+        let queries = [
+            "SELECT * FROM (SELECT id, x FROM a) AS d",
+            "SELECT d.n FROM (SELECT id AS n FROM a) AS d",
+            "SELECT * FROM (SELECT id, x FROM a) AS d(k, v)",
+            "WITH w AS (SELECT id FROM a) SELECT * FROM w",
+            "WITH w(k) AS (SELECT id FROM a) SELECT k FROM w",
+            "WITH a AS (SELECT 1 AS only_here) SELECT * FROM a",
+            "SELECT * FROM v",
+            "WITH v AS (SELECT 'shadow'::TEXT AS s) SELECT * FROM v",
+            "SELECT * FROM (SELECT 1)",
+            "SELECT s.* FROM (SELECT 1 AS one) AS s",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn opaque_sources_explain_themselves() {
+        let queries = [
+            "SELECT * FROM generate_series(1, 3) AS g",
+            "SELECT g FROM generate_series(1, 3) AS g",
+            "SELECT * FROM unnest(ARRAY[1, 2]) AS u(n)",
+            "SELECT * FROM pg_catalog.pg_tables",
+            "SELECT tablename FROM pg_tables",
+            "SELECT a.id, g FROM a, generate_series(1, 3) AS g",
+            "SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l",
+            "SELECT * FROM missing",
+            "SELECT * FROM missing AS m JOIN a ON true",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn correlated_subqueries_see_the_outer_scope() {
+        let queries = [
+            "SELECT (SELECT max(b.id) FROM b WHERE b.id = a.id) AS m FROM a",
+            "SELECT (SELECT x) AS m FROM a",
+            "SELECT EXISTS (SELECT 1 FROM b WHERE b.id = a.id) AS e FROM a",
+            "SELECT * FROM a WHERE id IN (SELECT id FROM b WHERE b.shared = a.shared)",
+            "SELECT (SELECT y FROM b WHERE b.id = a.nope) AS m FROM a",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn table_names_fold_by_dialect() {
+        let ddl_postgres = "CREATE TABLE \"Mixed\" (id INT NOT NULL); CREATE TABLE lower (id INT)";
+        let queries = [
+            "SELECT id FROM \"Mixed\"",
+            "SELECT id FROM Mixed",
+            "SELECT id FROM LOWER",
+            "SELECT id FROM public.lower",
+            "SELECT id FROM other.lower",
+        ];
+        let postgres = reports(&queries, "postgres", Some(ddl_postgres));
+        let ddl_mysql = "CREATE TABLE Mixed (id INT NOT NULL)";
+        let mysql = reports(&queries[..2], "mysql", Some(ddl_mysql));
+        insta::assert_snapshot!(format!("postgres:\n{postgres}\nmysql:\n{mysql}"));
+    }
+}

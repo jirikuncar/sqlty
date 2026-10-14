@@ -42,6 +42,7 @@ pub struct Param {
     pub name: Option<String>,
     /// Python type of the value to pass; `list[T]` for an array. `None` when unknown.
     pub python_type: Option<String>,
+    /// The SQL type of the parameter, when known.
     pub sql_type: Option<String>,
     /// [`Nullability::NonNull`] when `None` cannot be passed (it is stored in a `NOT NULL`
     /// column), [`Nullability::Nullable`] when it can, else [`Nullability::Unknown`].

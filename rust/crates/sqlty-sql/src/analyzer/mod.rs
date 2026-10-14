@@ -33,6 +33,8 @@ mod resolve;
 mod scope;
 mod star_expand;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
 mod typed;
 
@@ -145,6 +147,7 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
 
 pub use crate::catalog::{Catalog as SchemaData, SchemaColumn};
 
+/// A loaded schema, shared so callers can cache it across queries.
 pub type Schema = Arc<SchemaData>;
 
 impl SchemaColumn {
@@ -169,7 +172,12 @@ type Inferred<T> = Result<T, InferError>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InferError {
     /// `SUM(column)` names a column that is not in the schema table it reads.
-    SumColumnNotInSchema { column: String, table: String },
+    SumColumnNotInSchema {
+        /// The column as the query spells it.
+        column: String,
+        /// The schema table the column was looked up in.
+        table: String,
+    },
 }
 
 impl fmt::Display for InferError {

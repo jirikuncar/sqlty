@@ -1,0 +1,45 @@
+---
+source: crates/sqlty-sql/src/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT * FROM generate_series(1, 3) AS g
+*: ? | ? | Unknown
+[unsupported-syntax] `*` reads table function generate_series, which sqlty does not read the columns of
+
+SELECT g FROM generate_series(1, 3) AS g
+g: ? | ? | Unknown
+
+SELECT * FROM unnest(ARRAY[1, 2]) AS u(n)
+*: ? | ? | Unknown
+[unsupported-syntax] `*` reads UNNEST, which sqlty does not read the columns of
+
+SELECT * FROM pg_catalog.pg_tables
+schemaname: str | NAME | Nullable
+tablename: str | NAME | Nullable
+tableowner: str | NAME | Nullable
+tablespace: str | NAME | Nullable
+hasindexes: bool | BOOLEAN | Nullable
+hasrules: bool | BOOLEAN | Nullable
+hastriggers: bool | BOOLEAN | Nullable
+rowsecurity: bool | BOOLEAN | Nullable
+
+SELECT tablename FROM pg_tables
+tablename: str | NAME | Nullable
+
+SELECT a.id, g FROM a, generate_series(1, 3) AS g
+id: int | INT | NonNull
+g: ? | ? | Unknown
+
+SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l
+id: int | INT | NonNull
+x: str | TEXT | NonNull
+shared: str | TEXT | Nullable
+next: int | INT | NonNull
+
+SELECT * FROM missing
+*: ? | ? | Unknown
+[unknown-table] table `missing` is not defined in the schema
+
+SELECT * FROM missing AS m JOIN a ON true
+*: ? | ? | Unknown
+[unknown-table] table `missing` is not defined in the schema

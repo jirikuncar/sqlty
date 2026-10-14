@@ -1,0 +1,38 @@
+---
+source: crates/sqlty-sql/src/analyzer/expr.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT EXTRACT(YEAR FROM ts) AS a, POSITION('a' IN txt) AS b, TRIM(txt) AS c FROM t
+a: decimal.Decimal | DECIMAL | NonNull
+b: int | ? | Nullable
+c: str | TEXT | Nullable
+
+SELECT SUBSTRING(txt FROM 1 FOR 2) AS a, CEIL(1.5) AS b, FLOOR(i) AS c FROM t
+a: str | TEXT | Nullable
+b: decimal.Decimal | DECIMAL | NonNull
+c: float | DOUBLE | NonNull
+
+SELECT ts AT TIME ZONE 'UTC' AS a, tz AT TIME ZONE 'UTC' AS b, i AT TIME ZONE 'UTC' AS c FROM t
+a: datetime.datetime | TIMESTAMPTZ | Unknown
+b: datetime.datetime | TIMESTAMP | Unknown
+c: ? | ? | Unknown
+[unsupported-syntax] expression `i AT TIME ZONE 'UTC'` is not typed
+
+SELECT EXISTS (SELECT 1) AS a, i IN (SELECT i FROM t) AS b, i BETWEEN 1 AND 3 AS c FROM t
+a: bool | BOOLEAN | NonNull
+b: bool | BOOLEAN | NonNull
+c: bool | BOOLEAN | NonNull
+
+SELECT (SELECT max(i) FROM t) AS a, (SELECT i, n FROM t) AS b
+a: int | INT | Nullable
+b: int | INT | Nullable
+
+SELECT txt ILIKE 'a%' AS a, txt SIMILAR TO 'a' AS b, txt ~ 'a' AS c FROM t
+a: bool | BOOLEAN | Nullable
+b: bool | BOOLEAN | Nullable
+c: bool | BOOLEAN | Nullable
+
+SELECT i IS DISTINCT FROM n AS a, n IS NOT NULL AS b, (i > 1) IS TRUE AS c FROM t
+a: bool | BOOLEAN | NonNull
+b: bool | BOOLEAN | NonNull
+c: bool | BOOLEAN | NonNull

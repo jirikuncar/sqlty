@@ -1,0 +1,34 @@
+---
+source: crates/sqlty-sql/src/analyzer/names.rs
+expression: "rendered.join(\"\\n\")"
+---
+x => x
+t.x => x
+"Mixed" => Mixed
+x::int => x
+'a'::text => text
+'a'::text::int => int4
+1::int => int4
+1::bigint => int8
+1::double precision => float8
+1::varchar(10) => varchar
+1::timestamp with time zone => timestamptz
+count(*) => count
+pg_catalog.lower(x) => lower
+case when x then 1 end => case
+case when x then 1 else y end => y
+exists (select 1) => exists
+array[1, 2] => array
+row(1, 2) => row
+(select x from t) => x
+(select x as y from t) => y
+(t.col).field => field
+extract(year from x) => extract
+trim(leading 'a' from x) => ltrim
+trim(x) => btrim
+substring(x from 1) => substring
+interval '1 day' => interval
+x + 1 => ?column?
+-x => ?column?
+1 => ?column?
+'literal' => ?column?

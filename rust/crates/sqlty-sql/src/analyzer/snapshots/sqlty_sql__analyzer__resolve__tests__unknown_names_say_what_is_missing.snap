@@ -1,0 +1,43 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT nope FROM users
+nope: ? | ? | Unknown
+[unknown-column] column `nope` does not exist in `users`
+
+SELECT users.nope FROM users
+nope: ? | ? | Unknown
+[unknown-column] column `nope` does not exist in `users`
+
+SELECT x.name FROM users
+name: ? | ? | Unknown
+[unknown-table] `x` is not a table or alias in the FROM clause
+
+SELECT nope FROM missing
+nope: ? | ? | Unknown
+[unknown-table] table `missing` is not defined in the schema
+
+SELECT missing.col FROM missing
+col: ? | ? | Unknown
+[unknown-table] table `missing` is not defined in the schema
+
+SELECT nope FROM users JOIN orders ON true
+nope: ? | ? | Unknown
+[unknown-column] column `nope` does not exist in `users`, `orders`
+
+SELECT name, nope FROM user_names
+name: str | TEXT | NonNull
+nope: ? | ? | Unknown
+[unknown-column] column `nope` does not exist in `user_names`
+
+SELECT nope
+nope: ? | ? | Unknown
+[unknown-column] column `nope` does not exist: the query has no FROM
+
+SELECT users.* , nope.* FROM users
+id: int | INT | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+*: ? | ? | Unknown
+[unknown-table] `nope` in `nope.*` is not a table or alias in the FROM clause

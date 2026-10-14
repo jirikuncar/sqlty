@@ -1,0 +1,48 @@
+---
+source: crates/sqlty-sql/src/analyzer/dml.rs
+expression: "reports(&queries, \"postgres\", Some(ddl))"
+---
+INSERT INTO t (name) VALUES ('a') RETURNING id, name, note
+id: int | SERIAL | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+
+INSERT INTO t (name) VALUES ('a') RETURNING *
+id: int | SERIAL | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+
+INSERT INTO t (name) VALUES ('a') RETURNING id AS new_id, upper(name) AS shout
+new_id: int | SERIAL | NonNull
+shout: str | TEXT | NonNull
+
+UPDATE t SET note = 'x' RETURNING *
+id: int | SERIAL | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+
+UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING *
+id: int | SERIAL | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+
+UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING t.id, extra
+id: int | SERIAL | NonNull
+extra: ? | ? | Unknown
+[unsupported-syntax] column `extra` may come from tables joined to the target with FROM or USING, which sqlty does not read the columns of
+
+DELETE FROM t USING u WHERE t.id = u.id RETURNING t.*
+id: int | SERIAL | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+
+DELETE FROM t WHERE id = 1 RETURNING nope
+nope: ? | ? | Unknown
+[unknown-column] column `nope` does not exist in `t`
+
+INSERT INTO t (name) VALUES ('a')
+no rows
+
+INSERT INTO missing (a) VALUES (1) RETURNING a
+a: ? | ? | Unknown
+[unknown-table] table `missing` is not defined in the schema

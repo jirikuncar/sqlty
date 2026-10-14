@@ -1,0 +1,25 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT * FROM missing
+*: ? | ? | Unknown
+[unknown-table] table `missing` is not defined in the schema
+
+SELECT users.* FROM users, missing
+id: int | INT | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+[unknown-table] table `missing` is not defined in the schema
+
+SELECT * FROM users, generate_series(1, 2) AS g
+*: ? | ? | Unknown
+[unsupported-syntax] `*` reads table function generate_series, which sqlty does not read the columns of
+
+SELECT nope.* FROM users
+*: ? | ? | Unknown
+[unknown-table] `nope` in `nope.*` is not a table or alias in the FROM clause
+
+SELECT * FROM users JOIN orders USING (id)
+*: ? | ? | Unknown
+[unsupported-syntax] `*` over a USING or NATURAL join merges columns, so it is not expanded

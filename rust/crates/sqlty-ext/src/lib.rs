@@ -1,4 +1,23 @@
-//! sqlty._core — the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
+//! `sqlty._core`: the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
+//!
+//! This crate is only the Python binding. The analysis lives in `sqlty-sql` and the source
+//! handling in `sqlty-python`; each `#[pyfunction]` here converts its arguments, releases the
+//! GIL (`Python::detach`) while the engine runs, and converts the result to tuples and lists
+//! that `sqlty/core.py` wraps into dataclasses.
+//!
+//! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
+//!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
+//! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
+//!   `wrapped_queries`, `query_sites`.
+//! - Schema: `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
+//!
+//! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
+//! threads, because callers pass the same few schemas call after call. The stub
+//! `sqlty/_core.pyi` must match the signatures here.
+//!
+//! The crate is a `cdylib`, so it has no Rust API and no doc tests; the unit tests cover
+//! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
+//! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
 use sqlty_python::checker;
 use sqlty_python::fixer;
@@ -560,4 +579,115 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(sql: &str, dialect: &str) -> CachedSchema {
+        let (schema, skipped) = analyzer::load_schema_with_skipped(sql, dialect);
+        (
+            sql.to_string(),
+            dialect.to_string(),
+            Arc::new(LoadedSchema { schema, skipped }),
+        )
+    }
+
+    #[test]
+    fn nullable_maps_the_three_states() {
+        assert_eq!(nullable(analyzer::Nullability::Nullable), Some(true));
+        assert_eq!(nullable(analyzer::Nullability::NonNull), Some(false));
+        assert_eq!(nullable(analyzer::Nullability::Unknown), None);
+    }
+
+    #[test]
+    fn cache_hit_moves_the_entry_to_the_front() {
+        let mut cache = vec![
+            entry("CREATE TABLE a (x INT)", "postgres"),
+            entry("CREATE TABLE b (x INT)", "postgres"),
+            entry("CREATE TABLE c (x INT)", "postgres"),
+        ];
+        let hit = cache_hit(&mut cache, "CREATE TABLE c (x INT)", "postgres");
+        assert!(hit.is_some());
+        let order: Vec<&str> = cache.iter().map(|(sql, _, _)| sql.as_str()).collect();
+        assert_eq!(
+            order,
+            [
+                "CREATE TABLE c (x INT)",
+                "CREATE TABLE a (x INT)",
+                "CREATE TABLE b (x INT)"
+            ]
+        );
+    }
+
+    #[test]
+    fn cache_hit_needs_the_same_sql_and_dialect() {
+        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
+        assert!(cache_hit(&mut cache, "CREATE TABLE a (x INT)", "mysql").is_none());
+        assert!(cache_hit(&mut cache, "CREATE TABLE a (y INT)", "postgres").is_none());
+        assert!(cache_hit(&mut [], "CREATE TABLE a (x INT)", "postgres").is_none());
+    }
+
+    #[test]
+    fn cache_hit_shares_the_parsed_schema() {
+        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
+        let first = cache_hit(&mut cache, "CREATE TABLE a (x INT)", "postgres").unwrap();
+        let second = cache_hit(&mut cache, "CREATE TABLE a (x INT)", "postgres").unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    /// One test, because the cache is a process-wide static: a test filling it would evict
+    /// the entries another test expects to find.
+    #[test]
+    fn cached_schema_parses_once_and_keeps_a_bounded_number() {
+        let sql = "CREATE TABLE sqlty_ext_cache_once (x INT)";
+        let first = cached_schema(sql, "postgres");
+        assert!(Arc::ptr_eq(&first, &cached_schema(sql, "postgres")));
+        assert!(!Arc::ptr_eq(&first, &cached_schema(sql, "mysql")));
+
+        for n in 0..SCHEMAS_KEPT * 2 {
+            cached_schema(
+                &format!("CREATE TABLE sqlty_ext_bound_{n} (x INT)"),
+                "postgres",
+            );
+        }
+        assert!(lock_schemas().len() <= SCHEMAS_KEPT);
+    }
+
+    #[test]
+    fn schema_is_absent_without_schema_sql() {
+        assert!(schema(None, "postgres").is_none());
+        assert!(schema(Some("CREATE TABLE sqlty_ext_present (x INT)"), "postgres").is_some());
+    }
+
+    #[test]
+    fn schema_for_skips_sources_that_cannot_hold_a_query() {
+        let ddl = Some("CREATE TABLE sqlty_ext_for (x INT)");
+        assert!(schema_for("print('hello')", ddl, "postgres").is_none());
+        assert!(schema_for("q = SQL[int]('SELECT 1')", ddl, "postgres").is_some());
+        assert!(schema_for("x = '--SQL\\nSELECT 1'", ddl, "postgres").is_some());
+        assert!(schema_for("SQL", None, "postgres").is_none());
+        assert!(schema_for("", ddl, "postgres").is_none());
+    }
+
+    #[test]
+    fn skipped_objects_lists_what_the_schema_could_not_parse() {
+        let sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;";
+        let all = skipped_objects(sql, "postgres", None);
+        assert!(
+            all.iter().all(|(_, name)| name != "sqlty_ext_ok"),
+            "a parsed table is not skipped: {all:?}"
+        );
+        let tables = skipped_objects(sql, "postgres", Some("table"));
+        let views = skipped_objects(sql, "postgres", Some("view"));
+        assert!(views.is_empty());
+        assert_eq!(tables, all);
+    }
+
+    #[test]
+    fn errors_render_the_message_of_their_source() {
+        let error = Error::from(ConfigError::ImportStyle("nope".to_string()));
+        assert_eq!(error.to_string(), "Unsupported import-style: 'nope'");
+    }
 }

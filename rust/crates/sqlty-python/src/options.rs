@@ -8,8 +8,10 @@ use crate::rules::RuleConfigError;
 /// A setting the caller passed that sqlty does not support.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
+    /// The `import-style` setting is not one of the supported spellings.
     #[error("Unsupported import-style: '{0}'")]
     ImportStyle(String),
+    /// A rule or severity override is not known.
     #[error(transparent)]
     Rules(#[from] RuleConfigError),
 }
@@ -25,6 +27,7 @@ pub struct Dialect<'a> {
 }
 
 impl<'a> Dialect<'a> {
+    /// A dialect from the name the user configured (`postgres`, `mysql`, ...).
     pub fn new(name: &'a str) -> Self {
         Self {
             name,
@@ -45,8 +48,11 @@ impl<'a> Dialect<'a> {
 
 /// What check, rewrite and fix are told besides the source.
 pub struct Options<'a> {
+    /// The dialect queries are parsed with.
     pub dialect: Dialect<'a>,
+    /// The schema queries are read against, when there is one.
     pub schema: Option<&'a SchemaData>,
+    /// How the `SQL` wrapper is imported and spelled.
     pub style: ImportStyle,
     /// Wrap row-returning queries of unknown row type as `SQL[UNTYPED]`.
     pub untyped: bool,

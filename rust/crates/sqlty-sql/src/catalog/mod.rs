@@ -58,6 +58,7 @@ pub struct SchemaColumn {
     pub name: String,
     /// The name as SQL spells it, quotes kept, for `SELECT *` expansion.
     pub ident: String,
+    /// The canonical SQL type of the column.
     pub sql_type: String,
     /// The Python type when it is not the one `sql_type` maps to (an enum's `Literal`).
     pub python_type: Option<String>,
@@ -108,7 +109,7 @@ enum Relation {
     Unknown,
 }
 
-/// The resolved schema: what the analyzer reads. Built by [`load`]; shared, so caching it
+/// The resolved schema: what the analyzer reads. Built by `load`; shared, so caching it
 /// is cheap.
 #[derive(Default)]
 pub struct Catalog {

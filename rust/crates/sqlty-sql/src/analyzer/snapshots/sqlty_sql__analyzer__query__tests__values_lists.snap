@@ -1,0 +1,32 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "format!(\"postgres:\\n{postgres}\\nmysql:\\n{mysql}\")"
+---
+postgres:
+VALUES (1, 'a'), (2, 'b')
+column1: typing.Literal[1, 2] | ? | NonNull
+column2: typing.Literal['a', 'b'] | ? | NonNull
+
+VALUES (1), (2.5)
+column1: decimal.Decimal | DECIMAL | NonNull
+
+VALUES (1), (NULL)
+column1: typing.Literal[1] | ? | Nullable
+
+VALUES (1), (1, 2)
+column1: typing.Literal[1] | ? | NonNull
+
+SELECT * FROM (VALUES (1, 'a')) AS v(n, s)
+n: typing.Literal[1] | ? | NonNull
+s: typing.Literal['a'] | ? | NonNull
+
+SELECT column1 FROM (VALUES (1)) AS v
+column1: typing.Literal[1] | ? | NonNull
+
+VALUES (1) UNION SELECT id FROM a
+column1: int | INT | NonNull
+
+mysql:
+VALUES (1, 'a'), (2, 'b')
+no rows
+[unsupported-syntax] a VALUES list is not typed

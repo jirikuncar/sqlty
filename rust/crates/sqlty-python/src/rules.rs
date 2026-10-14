@@ -12,29 +12,53 @@ use sqlty_sql::diagnostics::NameRule;
 /// so every rule name Python may configure parses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Rule {
+    /// The row type has a different number of fields than the query has columns.
     ColumnCountMismatch,
+    /// A row type field cannot hold its column's values.
     ColumnTypeMismatch,
+    /// A `NamedTuple` field name differs from its column name.
     ColumnNameMismatch,
+    /// The columns do not fit the fields of a TypedDict, dataclass or model.
     TypeddictKeyMismatch,
+    /// A TypedDict subclass breaks a closed or `extra_items` base (PEP 728).
     TypeddictInheritance,
+    /// A field is not optional but its column can be NULL.
     NullableMismatch,
+    /// A field cannot hold the JSON its column builds.
     JsonShapeMismatch,
+    /// A field is optional but its column cannot be NULL.
     RedundantOptional,
+    /// A `Literal` field does not cover the values of its column.
     LiteralMismatch,
+    /// A `Literal` field lists values its column never takes.
     RedundantLiteral,
+    /// `SELECT *`, which the fixer expands.
     SelectStar,
+    /// `SELECT *` with no schema to expand it.
     SelectStarNoSchema,
+    /// A `--sql` string that is not wrapped in `SQL[T](...)`.
     StaleRewrite,
+    /// A `SQL[tuple[...]]` that neither matches nor refines the inferred row type.
     StaleType,
+    /// A `--sql` marker under MySQL, which rejects it.
     MysqlSqlMarker,
+    /// `"--sql SELECT ..."`: the whole query is a SQL comment.
     InlineSqlComment,
+    /// An f-string with `--sql`, which cannot be rewritten.
     FstringSkipped,
+    /// A t-string with `--sql`, which cannot be rewritten.
     TstringSkipped,
+    /// A `--sql` query that is not plain string literals.
     UncheckedQuery,
+    /// A `SQL[UNTYPED]` query.
     UntypedQuery,
+    /// A query that does not parse, so it cannot be checked.
     UnparsedQuery,
+    /// A `# sqlty: ignore` comment that suppresses nothing.
     UnusedIgnore,
+    /// A call passes a different number of parameters than its query has.
     ParamCountMismatch,
+    /// A call passes an argument its query's parameter cannot take.
     ParamTypeMismatch,
     /// A rule explaining why a column is untyped.
     Name(NameRule),
@@ -146,8 +170,11 @@ impl Rule {
 /// How loudly a rule reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Severity {
+    /// Reported as an error: the check fails.
     Error,
+    /// Reported as a warning.
     Warn,
+    /// Not reported.
     Ignore,
 }
 
@@ -162,6 +189,7 @@ impl Severity {
         }
     }
 
+    /// The name [`Severity::parse`] reads back: `error`, `warn` or `ignore`.
     pub fn as_str(self) -> &'static str {
         match self {
             Severity::Error => "error",
@@ -174,10 +202,17 @@ impl Severity {
 /// A rule name or severity in the overrides that sqlty does not know.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RuleConfigError {
+    /// The overrides name a rule that does not exist.
     #[error("unknown rule: {0}")]
     UnknownRule(String),
+    /// The overrides give a rule a severity other than `error`, `warn` or `ignore`.
     #[error("unknown severity for rule {rule}: {severity} (expected error, warn or ignore)")]
-    UnknownSeverity { rule: String, severity: String },
+    UnknownSeverity {
+        /// The rule the severity was given to.
+        rule: String,
+        /// The severity as written.
+        severity: String,
+    },
 }
 
 /// Rule severity configuration: the defaults plus the user's overrides.
