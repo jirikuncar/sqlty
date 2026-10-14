@@ -615,7 +615,7 @@ impl<'a> Analyzer<'a> {
                 // PostgreSQL's `substring(s FROM 'pattern')` is NULL when nothing matches.
                 let by_pattern = self.dialect == SqlDialect::Postgres
                     && substring_from.as_deref().is_some_and(
-                        |from| !matches!(self.expr(from, scope), Ok((Some(t), _)) if t == "int"),
+                        |from| !matches!(self.expr(from, scope), Ok(typed) if python_kind(&typed) == Some("int")),
                     );
                 let missed = if by_pattern {
                     Nullability::Nullable

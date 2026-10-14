@@ -386,6 +386,82 @@ def _member_admits_none(member: typing.Any) -> bool | None:
     return None
 
 
+def column_literal_values(python_type: str) -> list[str | int] | None:
+    """The values of an inferred ``Literal`` column type, ``None`` when it is not one.
+
+    ``None`` members (a nullable column) are left out; nullability is checked separately.
+
+    Example:
+        >>> column_literal_values("typing.Literal['a', 'b'] | None")
+        ['a', 'b']
+        >>> column_literal_values("typing.Literal[1, 2]")
+        [1, 2]
+        >>> column_literal_values("str") is None
+        True
+    """
+    try:
+        tree = ast.parse(python_type, mode="eval").body
+    except SyntaxError:
+        return None
+    members = [tree]
+    while any(isinstance(m, ast.BinOp) and isinstance(m.op, ast.BitOr) for m in members):
+        members = [
+            part
+            for m in members
+            for part in ((m.left, m.right) if isinstance(m, ast.BinOp) else (m,))
+        ]
+    values: list[str | int] = []
+    for member in members:
+        if isinstance(member, ast.Constant) and member.value is None:
+            continue
+        if not (
+            isinstance(member, ast.Subscript)
+            and isinstance(member.value, ast.Attribute)
+            and ast.unparse(member.value) == "typing.Literal"
+        ):
+            return None
+        items = member.slice.elts if isinstance(member.slice, ast.Tuple) else [member.slice]
+        for item in items:
+            if not (isinstance(item, ast.Constant) and isinstance(item.value, (str, int))):
+                return None
+            values.append(item.value)
+    return values or None
+
+
+def declared_literal_values(tp: typing.Any, inferred: list[str | int]) -> set[str | int] | None:
+    """The values a resolved annotation admits for a column that takes ``inferred``.
+
+    ``None`` when the annotation also takes values by class (``str`` for string values,
+    ``int`` for integers, ``Any``), or when it can't be told (an enum or other user class,
+    an unresolved name): only an annotation made of ``Literal`` members and ``None`` is a set.
+
+    Example:
+        >>> declared_literal_values(typing.Literal["a", "b"] | None, ["a"]) == {"a", "b"}
+        True
+        >>> declared_literal_values(str, ["a"]) is None
+        True
+        >>> declared_literal_values(typing.Literal[1], ["a"]) == {1}
+        True
+    """
+    covering: tuple[type, ...] = (str,) if isinstance(inferred[0], str) else (int, float, complex)
+    admitted: set[str | int] = set()
+    for member in _union_members(tp):
+        while isinstance(member, typing.NewType):
+            member = member.__supertype__
+        if member is type(None) or member is None:
+            continue
+        if typing.get_origin(member) is typing.Literal:
+            admitted.update(a for a in typing.get_args(member) if isinstance(a, (str, int)))
+        elif (
+            member is typing.Any
+            or member is object
+            or member in covering
+            or not (isinstance(member, type) and member.__module__ == "builtins")
+        ):
+            return None
+    return admitted
+
+
 def is_optional(tp: typing.Any) -> bool:
     """Whether a resolved annotation spells ``None`` out: ``Optional[X]`` or ``X | None``.
 
@@ -1266,6 +1342,12 @@ def _ast_type(
             newtypes,
             imports,
         )
+    if isinstance(node, ast.Subscript) and _is_name(node.value, "Literal", aliases):
+        items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        if all(isinstance(i, ast.Constant) and isinstance(i.value, (str, int)) for i in items):
+            literal: typing.Any = typing.Literal
+            return literal[tuple(typing.cast(ast.Constant, i).value for i in items)]
+        return None
     if (
         isinstance(node, ast.Subscript)
         and (origin := _ast_type(node.value, aliases, newtypes, imports)) in _GENERICS

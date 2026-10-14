@@ -9,8 +9,10 @@ pub(super) enum Returns {
     Sql(&'static str),
     /// `void`: Python `None`.
     Void,
-    /// The type of an argument.
+    /// The type of an argument, whatever value it computes.
     Arg(usize),
+    /// An argument's type and values: the function returns one of its argument's values.
+    Same(usize),
     /// The element type of an array argument.
     Elem(usize),
     /// An array of an argument's type.
@@ -330,13 +332,6 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "MOD",
             "GREATEST",
             "LEAST",
-            "NULLIF",
-            "FIRST_VALUE",
-            "LAST_VALUE",
-            "NTH_VALUE",
-            "LAG",
-            "LEAD",
-            "ANY_VALUE",
             "ARRAY_APPEND",
             "ARRAY_CAT",
             "ARRAY_REMOVE",
@@ -344,6 +339,18 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "GENERATE_SERIES",
         ],
         Arg(0),
+    ),
+    (
+        &[
+            "NULLIF",
+            "FIRST_VALUE",
+            "LAST_VALUE",
+            "NTH_VALUE",
+            "LAG",
+            "LEAD",
+            "ANY_VALUE",
+        ],
+        Returns::Same(0),
     ),
     (&["GREATEST", "LEAST"], Returns::FirstKnown),
     (&["ARRAY_PREPEND"], Arg(1)),
@@ -423,7 +430,10 @@ impl<'a> Analyzer<'a> {
         match returns {
             Returns::Sql(name) => sql(name),
             Returns::Void => Ok((Some("None".to_string()), Some("VOID".to_string()))),
-            Returns::Arg(i) => arg(i),
+            Returns::Arg(i) => Ok(strip(arg(i)?, self.dialect)),
+            // `LAG(x, 1, 'default')` can also return the default.
+            Returns::Same(i) if args.len() >= 3 => Ok(strip(arg(i)?, self.dialect)),
+            Returns::Same(i) => arg(i),
             Returns::FirstKnown => {
                 let mut typed_args = Vec::with_capacity(args.len());
                 for expr in args {
@@ -434,10 +444,17 @@ impl<'a> Analyzer<'a> {
                         return Ok(common);
                     }
                 }
-                Ok(typed_args
-                    .into_iter()
+                let first = typed_args
+                    .iter()
                     .find(|typed| typed.0.is_some())
-                    .unwrap_or((None, None)))
+                    .cloned()
+                    .unwrap_or((None, None));
+                // `COALESCE(checked_column, 'other')` takes any of the arguments' values.
+                if value_set(&first).is_some() {
+                    return Ok(common_of(typed_args, self.dialect)
+                        .unwrap_or_else(|| strip(first, self.dialect)));
+                }
+                Ok(first)
             }
             Returns::Elem(i) => Ok(self.element_typed(arg(i)?.1.as_deref())),
             Returns::ArrayOf(i) => {
@@ -495,7 +512,10 @@ impl<'a> Analyzer<'a> {
         arg: Option<&Expr>,
         scope: &Scope,
     ) -> Inferred<Typed> {
-        let typed = arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope))?;
+        let mut typed = arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope))?;
+        if name == "SUM" {
+            typed = strip(typed, self.dialect);
+        }
         let numeric = || {
             Ok((
                 Some(decimal_type(self.dialect).to_string()),

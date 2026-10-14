@@ -57,7 +57,7 @@ A string literal is `unknown` and takes the other argument's type; `NULL` is ign
 SELECT COALESCE(n, '1'), COALESCE(v, 'x'), COALESCE(NULL, 1), COALESCE(a, ARRAY[1]) FROM t
 -- columns: coalesce: decimal.Decimal (DECIMAL(10, 2))
 -- columns: coalesce: str (VARCHAR(10))
--- columns: coalesce: int (None)
+-- columns: coalesce: typing.Literal[1] (None)
 -- columns: coalesce: list[int] (ARRAY<INT>)
 ```
 
@@ -80,7 +80,7 @@ SELECT CASE WHEN i > 1 THEN 1 ELSE 2.5 END, CASE WHEN i > 1 THEN i ELSE b END, C
 -- columns: case: decimal.Decimal (DECIMAL)
 -- columns: b: int (BIGINT)
 -- columns: tx: str (TEXT)
--- columns: case: int | None (None)
+-- columns: case: typing.Literal[1] | None (None)
 ```
 
 ## ARRAY
@@ -99,19 +99,19 @@ Columns are `column1`, `column2`, ... typed by their common type.
 ```sql
 VALUES (1, 'a'), (2.5, 'b')
 -- columns: column1: decimal.Decimal (DECIMAL)
--- columns: column2: str (None)
+-- columns: column2: typing.Literal['a', 'b'] (None)
 ```
 
 ```sql
 VALUES (1, NULL), (2, 'b')
--- columns: column1: int (None)
--- columns: column2: str | None (None)
+-- columns: column1: typing.Literal[1, 2] (None)
+-- columns: column2: typing.Literal['b'] | None (None)
 ```
 
 ```sql
 SELECT x, y FROM (VALUES (1, 2), (3, 4)) AS v (x, y)
--- columns: x: int (None)
--- columns: y: int (None)
+-- columns: x: typing.Literal[1, 3] (None)
+-- columns: y: typing.Literal[2, 4] (None)
 ```
 
 ## Set operations

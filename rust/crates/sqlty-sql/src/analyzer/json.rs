@@ -419,6 +419,8 @@ impl<'a> Analyzer<'a> {
             None | Some(ANY) => JsonShape::Any,
             Some("bool") => JsonShape::Boolean,
             Some("int") => JsonShape::Integer,
+            // A value set is its `str` or `int` base.
+            Some(python) if crate::values::base(python) == Some("int") => JsonShape::Integer,
             Some("float" | DECIMAL) => JsonShape::Number,
             Some(python) if is_container(python) => JsonShape::Any,
             // Text, dates, UUIDs, enums, ...: converted to strings.

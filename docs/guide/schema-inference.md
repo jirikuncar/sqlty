@@ -126,6 +126,80 @@ row type fields, filter the NULLs in the query, or lower the rule while you migr
 nullable-mismatch = "warn"
 ```
 
+## Literal values
+
+When the values of a column are known and few, its type is a `typing.Literal` of them
+instead of `str` or `int`, so a type checker can tell `"paid"` from any other string.
+Known values come from:
+
+- **Enums.** `CREATE TYPE ... AS ENUM` (PostgreSQL) and MySQL `ENUM('a', 'b')` columns.
+- **`CHECK` constraints.** `CHECK (col IN (...))`, `CHECK (col = 'a' OR col = 'b')` and
+  `CHECK (col = ANY (ARRAY[...]))` (also with the casts `pg_dump` writes), on a column or
+  the table, in PostgreSQL and SQLite, for `TEXT`, `VARCHAR` and integer columns. A
+  `CHECK ... AND ...` contributes the conditions it understands, an `OR` only when every
+  arm lists values (`col IS NULL` arms add none).
+- **Domains.** `CREATE DOMAIN d AS text CHECK (VALUE IN (...))`; a domain over a domain
+  keeps the values both allow, and a cast to the domain has them too.
+- **Constants and expressions over them.** `SELECT 'paid'` (a bare integer such as
+  `SELECT 1` stays `int`), `CASE` whose branches are all
+  constants, `COALESCE(col, 'none')`, `UNION` (the union of the values), `VALUES`, and
+  `MIN`, `MAX`, `NULLIF`, `LAG` and `FIRST_VALUE` of a column with values.
+- **Views, CTEs and subqueries** carry the values of the columns they select.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'refunded')),
+    note TEXT
+);
+```
+
+```python
+orders = "--sql\nSELECT status, note, CASE WHEN id > 1 THEN 'late' ELSE 'early' END AS timing FROM orders"
+# rewritten: orders = SQL[tuple[typing.Literal['pending', 'paid', 'refunded'], str | None, typing.Literal['late', 'early']]]("--sql\nSELECT status, note, CASE WHEN id > 1 THEN 'late' ELSE 'early' END AS timing FROM orders")
+```
+
+A computed value (arithmetic, `upper(col)`, `col || 'x'`, `SUM`) is the plain `str` or
+`int` again, so the values are always a superset of what the query can return. A set of
+more than 32 values is not tracked: the column is the plain type. Not tracked either: a
+`CHECK` in MySQL (before 8.0.16 it is parsed and ignored), `CHAR(n)` columns (the database
+pads them), columns with a collation that may equate strings (`COLLATE NOCASE`, any
+`COLLATE` but `BINARY`, `C` and `POSIX`) and `citext`, a `CHECK ... NOT VALID`, and a `WHERE col = 'x'` that narrows the column. After
+`ALTER TABLE ... DROP CONSTRAINT` the table's columns, and the text and integer columns of
+the views declared so far, lose their values, as constraints are not followed by name; a MySQL
+`ALTER TABLE ... MODIFY` or `CHANGE` makes the table unknown, and an `ALTER DOMAIN` that changes a constraint leaves the domain's
+type unknown.
+
+A field annotated `str` (or `int`) still accepts such a column, and `sqlty check` does
+not call that annotation stale. A field annotated with a `Literal` is compared with the
+values (also for an item of a `SQL[tuple[...]]` wrapper, where `Literal` annotations are
+compared as sets, so quotes and order do not matter): [`literal-mismatch`](../reference/rules.md#literal-mismatch) (an error) reports
+values the `Literal` misses, and [`redundant-literal`](../reference/rules.md#redundant-literal)
+(off by default) values it lists that the column never takes. See
+[Row types](row-types.md#literal-columns).
+
+### Upgrading
+
+`sqlty rewrite` and `sqlty check --fix` now write `typing.Literal[...]` where the values
+are known: string constants (`SELECT 'paid'`; `SELECT 1` stays `int`), `CASE` over
+constants, `CHECK`ed columns and MySQL `ENUM` columns. Existing wrappers that spell `str` or `int` for
+those columns stay valid and are not `stale-type`; an annotation of a different type is.
+A row type field that is a `Literal` missing values is now a `literal-mismatch` error; add
+the values, annotate `str`, or lower the rule while you migrate:
+
+```toml
+[tool.sqlty.rules]
+literal-mismatch = "warn"
+```
+
 ## Views
 
 A `CREATE VIEW` (or `CREATE OR REPLACE VIEW`, `CREATE MATERIALIZED VIEW`) in
@@ -208,7 +282,7 @@ orders = "--sql\nSELECT discount, status FROM orders"
 ```
 
 A field annotated `str` still accepts an enum column, and a `Literal[...]` field
-is not checked against the labels.
+is checked against the labels; see [Literal values](#literal-values).
 
 ## Migrations, schemas and functions
 
@@ -398,7 +472,7 @@ orders = "-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `order
 with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: import decimal
-# rewritten: orders = SQL[tuple[int, decimal.Decimal | None, int | None, str | None, typing.Any, datetime.datetime | None]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
+# rewritten: orders = SQL[tuple[int, decimal.Decimal | None, int | None, typing.Literal['new', 'paid'] | None, typing.Any, datetime.datetime | None]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
 # rewritten: with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 # rewritten: casts = SQL[tuple[int | None, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```

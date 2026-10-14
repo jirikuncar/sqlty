@@ -21,6 +21,8 @@ pub enum Rule {
     NullableMismatch,
     JsonShapeMismatch,
     RedundantOptional,
+    LiteralMismatch,
+    RedundantLiteral,
     SelectStar,
     SelectStarNoSchema,
     StaleRewrite,
@@ -39,7 +41,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 26] = [
+    pub const ALL: [Rule; 28] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -48,6 +50,8 @@ impl Rule {
         Rule::NullableMismatch,
         Rule::JsonShapeMismatch,
         Rule::RedundantOptional,
+        Rule::LiteralMismatch,
+        Rule::RedundantLiteral,
         Rule::SelectStar,
         Rule::SelectStarNoSchema,
         Rule::StaleRewrite,
@@ -79,6 +83,8 @@ impl Rule {
             Rule::NullableMismatch => "nullable-mismatch",
             Rule::JsonShapeMismatch => "json-shape-mismatch",
             Rule::RedundantOptional => "redundant-optional",
+            Rule::LiteralMismatch => "literal-mismatch",
+            Rule::RedundantLiteral => "redundant-literal",
             Rule::SelectStar => "select-star",
             Rule::SelectStarNoSchema => "select-star-no-schema",
             Rule::StaleRewrite => "stale-rewrite",
@@ -109,6 +115,7 @@ impl Rule {
             | Rule::TypeddictInheritance
             | Rule::NullableMismatch
             | Rule::JsonShapeMismatch
+            | Rule::LiteralMismatch
             | Rule::SelectStarNoSchema => Severity::Error,
             Rule::ColumnNameMismatch
             | Rule::SelectStar
@@ -120,9 +127,11 @@ impl Rule {
             | Rule::TstringSkipped
             | Rule::UncheckedQuery
             | Rule::UntypedQuery => Severity::Warn,
-            Rule::RedundantOptional | Rule::UnparsedQuery | Rule::UnusedIgnore | Rule::Name(_) => {
-                Severity::Ignore
-            }
+            Rule::RedundantOptional
+            | Rule::RedundantLiteral
+            | Rule::UnparsedQuery
+            | Rule::UnusedIgnore
+            | Rule::Name(_) => Severity::Ignore,
         }
     }
 }

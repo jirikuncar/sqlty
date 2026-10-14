@@ -529,6 +529,61 @@ def _json_diagnostics(
     ]
 
 
+def _literal_diagnostics(
+    label: str,
+    declared: typing.Any,
+    col: _RowColumn,
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """``literal-mismatch`` and ``redundant-literal`` for one field and its column.
+
+    Reported only when the annotation is made of ``Literal`` members (and ``None``) and the
+    column's values are known: ``str``, ``int``, ``Any`` or an enum take any value, so
+    there is nothing to compare.
+    """
+    from sqlty._type_extractor import _type_repr, column_literal_values, declared_literal_values
+
+    if declared is None or not col.python_type:
+        return []
+    inferred = column_literal_values(col.python_type)
+    if inferred is None:
+        return []
+    admitted = declared_literal_values(declared, inferred)
+    if admitted is None:
+        return []
+    missing = [v for v in inferred if v not in admitted]
+    if missing and rules.is_enabled("literal-mismatch"):
+        return [
+            (
+                "literal-mismatch",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' "
+                f"can be {', '.join(map(repr, missing))}",
+            )
+        ]
+    extra = sorted((v for v in admitted if v not in inferred), key=repr)
+    if not missing and extra and rules.is_enabled("redundant-literal"):
+        return [
+            (
+                "redundant-literal",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' "
+                f"is never {', '.join(map(repr, extra))}",
+            )
+        ]
+    return []
+
+
+def _field_diagnostics(
+    label: str,
+    declared: typing.Any,
+    col: _RowColumn,
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """Nullability and value-set diagnostics for one field and its column."""
+    return _nullability_diagnostics(label, declared, col, rules) + _literal_diagnostics(
+        label, declared, col, rules
+    )
+
+
 class _RowShape(NamedTuple):
     """The row type of helper calls, resolved once per file for every call that spells it."""
 
@@ -601,7 +656,7 @@ def _value_diagnostics(
                 )
             )
         else:
-            found.extend(_nullability_diagnostics(item, resolved, col, rules))
+            found.extend(_field_diagnostics(item, resolved, col, rules))
     return found
 
 
@@ -716,7 +771,7 @@ def _structural_diagnostics(
                     f"'{col.name}' infers {col.python_type}",
                 )
             ]
-        return _nullability_diagnostics(
+        return _field_diagnostics(
             f"{type_name}.{field}", field_type(info, field), col, rules
         ) + _json_diagnostics(
             f"{type_name}.{field}", info.annotations.get(field), col, type_defs, info.aliases, rules

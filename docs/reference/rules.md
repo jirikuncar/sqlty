@@ -20,6 +20,8 @@ stale-type = "error"
 | [`nullable-mismatch`](#nullable-mismatch) | Row type | error | no | Row type field is not optional but its column can be NULL |
 | [`json-shape-mismatch`](#json-shape-mismatch) | Row type | error | no | Row type field can't hold the JSON its column builds |
 | [`redundant-optional`](#redundant-optional) | Row type | ignore | no | Row type field is optional but its column cannot be NULL |
+| [`literal-mismatch`](#literal-mismatch) | Row type | error | no | Row type field is a `Literal` that does not cover its column's values |
+| [`redundant-literal`](#redundant-literal) | Row type | ignore | no | Row type field is a `Literal` that lists values its column never takes |
 | [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the fields of a TypedDict, dataclass or Pydantic model |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
 | [`select-star-no-schema`](#select-star-no-schema) | Query | error | no | `SELECT *` with no schema to expand it |
@@ -42,7 +44,9 @@ stale-type = "error"
 | [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
 
 `nullable-mismatch` and `redundant-optional` check nullability; see
-[Nullability](../guide/schema-inference.md#nullability).
+[Nullability](../guide/schema-inference.md#nullability). `literal-mismatch` and
+`redundant-literal` check `Literal` annotations against the values a column can
+take; see [Literal values](../guide/schema-inference.md#literal-values).
 
 `sqlty check --fix` applies the fixable rules; `sqlty rule NAME` prints a
 rule's page.
@@ -252,6 +256,80 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 
 Fix: drop the `| None`.
+
+### literal-mismatch
+
+Default: error. A row type field is a `Literal` that does not cover every
+value its query column can take: the values of an enum, of a `CHECK (col IN
+(...))` constraint, of a `CASE` over constants and the like. Fields typed `str`,
+`int`, `Any` or an enum class take any value and are not reported; see `sqlty
+rule literal-mismatch`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'refunded'))
+);
+```
+
+```python
+from typing import Literal, TypedDict
+from sqlty import SQL
+
+class Order(TypedDict):
+    id: int
+    status: Literal["pending", "paid"]
+
+# error: [literal-mismatch] "Order.status is Literal['pending', 'paid'] but query column 'status' can be 'refunded'"
+q = SQL[Order]("--sql\nSELECT id, status FROM orders")
+```
+
+Fix: add the missing values to the `Literal`, or annotate `str`.
+
+### redundant-literal
+
+Default: ignore. The strict side of `literal-mismatch`: the `Literal` lists
+values the column can never take. A wider `Literal` is correct, only looser than
+needed (one alias often serves many queries), so the rule stays off until enabled
+in `[tool.sqlty.rules]`; see `sqlty rule redundant-literal`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+redundant-literal = "warn"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid'))
+);
+```
+
+```python
+from typing import Literal, TypedDict
+from sqlty import SQL
+
+class Order(TypedDict):
+    id: int
+    status: Literal["pending", "paid", "refunded"]
+
+# error: [redundant-literal] "Order.status is Literal['pending', 'paid', 'refunded'] but query column 'status' is never 'refunded'"
+q = SQL[Order]("--sql\nSELECT id, status FROM orders")
+```
+
+Fix: drop the extra values.
 
 ### typeddict-key-mismatch
 

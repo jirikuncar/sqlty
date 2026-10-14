@@ -62,7 +62,7 @@ SELECT * FROM items
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
 variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
-in the expansion; an `ENUM` is a `str`.
+in the expansion; an `ENUM` column is a `typing.Literal` of its labels.
 Unmapped types such as `BIT`, `SET` and spatial `POINT` are unknown, so a
 query selecting one has no row type.
 
@@ -96,7 +96,7 @@ SELECT * FROM items
 
 ```sql
 SELECT a, c, d, e, g, h, i FROM items
--- inferred: tuple[float | None, datetime.datetime | None, datetime.datetime | None, str | None, typing.Any, bytes | None, str | None]
+-- inferred: tuple[float | None, datetime.datetime | None, datetime.datetime | None, typing.Literal['x', 'y'] | None, typing.Any, bytes | None, str | None]
 ```
 
 ## Unsigned NUMERIC and FIXED are rejected

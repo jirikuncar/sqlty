@@ -26,8 +26,9 @@ use std::rc::Rc;
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterTypeOperation, ArgMode, ArrayElemTypeDef,
     ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind, CreateView,
-    DataType, Expr, FunctionReturnType, GeneratedAs, Ident, ObjectName, ObjectType, Query,
-    RenameTableNameKind, Statement, TableConstraint, UserDefinedTypeRepresentation, Visit, Visitor,
+    DataType, EnumMember, Expr, FunctionReturnType, GeneratedAs, Ident, ObjectName, ObjectType,
+    Query, RenameTableNameKind, Statement, TableConstraint, UserDefinedTypeRepresentation, Visit,
+    Visitor,
 };
 use sqlparser::parser::Parser;
 use std::sync::LazyLock;
@@ -36,6 +37,7 @@ use crate::analyzer::{
     canonical_type, parse_ddl, typed, view_columns, Column, SkippedObject, SqlDialect,
 };
 use crate::ddl;
+use crate::values::{self, Value};
 
 /// `(python_type, sql_type)`; `None` is unknown.
 pub(crate) type Typed = (Option<String>, Option<String>);
@@ -274,6 +276,19 @@ fn resolve_with(
             python.map(|ty| format!("list[{ty}]")),
         );
     }
+    if let (DataType::Enum(members, _), false) = (dt, dialect == SqlDialect::Postgres) {
+        // MySQL `ENUM('a', 'b')`.
+        let labels: Vec<String> = members
+            .iter()
+            .map(|member| match member {
+                EnumMember::Name(name) | EnumMember::NamedValue(name, _) => name.clone(),
+            })
+            .collect();
+        return (
+            canonical_type(dt, dialect),
+            (!labels.is_empty()).then(|| literal_of(&labels)),
+        );
+    }
     match type_key(dt, dialect).and_then(|name| user(&name)) {
         Some(found) => (found.sql_type, found.python_type),
         None => (canonical_type(dt, dialect), None),
@@ -342,6 +357,51 @@ struct RawColumn {
     ident: String,
     ty: DataType,
     not_null: bool,
+    /// The values a `CHECK` constraint limits the column to, when it lists them.
+    values: Option<Vec<Value>>,
+    /// Compared with a collation that may equate different strings (`NOCASE`, `_ci`):
+    /// the stored values are not the ones a `CHECK` or a domain lists.
+    collated: bool,
+}
+
+impl RawColumn {
+    fn checks(&self) -> Checks<'_> {
+        Checks {
+            values: self.values.as_deref(),
+            collated: self.collated,
+        }
+    }
+}
+
+/// What constraints say about a column's values.
+#[derive(Clone, Copy, Default)]
+struct Checks<'a> {
+    values: Option<&'a [Value]>,
+    collated: bool,
+}
+
+impl Checks<'_> {
+    /// The Python type of a column: its `CHECK` values narrow a `Literal`, a collation
+    /// removes the ones a domain gave (an enum's labels are exact either way).
+    fn apply(self, python: Option<String>, sql_type: &str, is_enum: bool) -> Option<String> {
+        if self.collated && !is_enum {
+            return None;
+        }
+        narrowed(python, sql_type, self.values)
+    }
+}
+
+/// Whether a collation name may equate different strings; `BINARY`, `C` and `POSIX` do not.
+fn loose_collation(name: &ObjectName) -> bool {
+    let last = name.0.last().map(|part| {
+        part.to_string()
+            .trim_matches(['"', '`', '\''])
+            .to_lowercase()
+    });
+    !matches!(
+        last.as_deref(),
+        Some("binary" | "c" | "posix" | "ucs_basic")
+    )
 }
 
 #[derive(Clone, Default)]
@@ -360,7 +420,8 @@ enum Rel {
 
 #[derive(Clone)]
 enum TypeDef {
-    Domain(DataType),
+    /// The base type, and the values a `CHECK (VALUE IN (...))` limits it to.
+    Domain(DataType, Option<Vec<Value>>),
     Enum(Vec<String>),
     Composite(Vec<(String, DataType)>),
     /// Altered in a way this module cannot follow.
@@ -383,7 +444,7 @@ enum RawReturn {
 enum OpKind {
     Table(Box<CreateTable>, Vec<Vec<String>>),
     View(Box<CreateView>),
-    Domain(ObjectName, DataType),
+    Domain(ObjectName, DataType, Option<Vec<Value>>),
     Type(ObjectName, TypeDef),
     AlterTable(Box<sqlparser::ast::AlterTable>),
     AlterType(sqlparser::ast::AlterType),
@@ -548,11 +609,12 @@ impl Loader {
         let blocked = match &op.kind {
             OpKind::Table(create, likes) => !self.create_table(create, likes, &path),
             OpKind::View(view) => !self.create_view(view, &path, force),
-            OpKind::Domain(name, base) => {
+            OpKind::Domain(name, base, values) => {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
-                self.types.insert(key, TypeDef::Domain(base.clone()));
+                self.types
+                    .insert(key, TypeDef::Domain(base.clone(), values.clone()));
                 false
             }
             OpKind::Type(name, def) => {
@@ -682,6 +744,9 @@ impl Loader {
             }
         }
         for constraint in &create.constraints {
+            if let TableConstraint::Check(check) = constraint {
+                apply_check(&mut table.columns, &check.expr, self.dialect);
+            }
             if let TableConstraint::PrimaryKey(pk) = constraint {
                 if loose_keys
                     && !(pk.columns.len() == 1
@@ -815,6 +880,14 @@ impl Loader {
             table.unknown |= unsupported;
             self.set_relation(name, Some(Rel::Table(table)));
         }
+        // Views were typed against the constraints the table had.
+        if alter
+            .operations
+            .iter()
+            .any(|op| matches!(op, AlterTableOperation::DropConstraint { .. }))
+        {
+            self.forget_view_values();
+        }
         if let Some(new_name) = rename {
             let (schema, _) = key.split_once('.').unwrap_or(("public", ""));
             let new_key = match parts(&new_name, self.dialect).as_slice() {
@@ -836,6 +909,30 @@ impl Loader {
             }
         }
         true
+    }
+
+    /// Widen the `Literal` columns that views took from text and integer columns to
+    /// `str` / `int`: a dropped `CHECK` may have bounded them. Enum labels and constants
+    /// stay.
+    fn forget_view_values(&mut self) {
+        self.cache = None;
+        let dialect = self.dialect;
+        for rel in self.relations.values_mut() {
+            let Rel::View(columns) = rel else { continue };
+            for column in columns {
+                let (Some(python), Some(sql)) = (&column.python_type, &column.sql_type) else {
+                    continue;
+                };
+                let name = sql.split(['(', '<']).next().unwrap_or_default().trim();
+                let checkable = matches!(
+                    name,
+                    "TEXT" | "VARCHAR" | "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
+                );
+                if checkable && values::parse(python).is_some() {
+                    column.python_type = typed(sql.clone(), None, dialect).0;
+                }
+            }
+        }
     }
 
     /// Set (or, with `None`, remove) one relation, keeping the resolved catalog current
@@ -1171,20 +1268,22 @@ impl Loader {
         let lookup = |name: &str| -> Option<UserType> {
             lookup_key(&user_types, &path, name).and_then(|key| user_types.get(key).cloned())
         };
-        let column = |name: &str, ident: &str, ty: &DataType, not_null: bool| {
-            let (sql_type, python_type) = resolve_with(ty, &lookup, dialect);
-            let allowed_values = type_key(ty, dialect)
-                .and_then(|name| lookup(&name))
-                .and_then(|user| user.allowed_values);
-            SchemaColumn {
-                name: name.to_string(),
-                ident: ident.to_string(),
-                sql_type,
-                python_type,
-                not_null,
-                allowed_values,
-            }
-        };
+        let column =
+            |name: &str, ident: &str, ty: &DataType, not_null: bool, checked: Checks<'_>| {
+                let (sql_type, python_type) = resolve_with(ty, &lookup, dialect);
+                let allowed_values = type_key(ty, dialect)
+                    .and_then(|name| lookup(&name))
+                    .and_then(|user| user.allowed_values);
+                let python_type = checked.apply(python_type, &sql_type, allowed_values.is_some());
+                SchemaColumn {
+                    name: name.to_string(),
+                    ident: ident.to_string(),
+                    sql_type,
+                    python_type,
+                    not_null,
+                    allowed_values,
+                }
+            };
         let mut relations = HashMap::new();
         let mut user_relations = 0;
         for (key, rel) in &self.relations {
@@ -1202,7 +1301,7 @@ impl Loader {
                         table
                             .columns
                             .iter()
-                            .map(|c| column(&c.name, &c.ident, &c.ty, c.not_null))
+                            .map(|c| column(&c.name, &c.ident, &c.ty, c.not_null, c.checks()))
                             .collect(),
                     ),
                     Rel::View(columns) => Relation::View(columns.clone()),
@@ -1217,7 +1316,7 @@ impl Loader {
                     key.clone(),
                     fields
                         .iter()
-                        .map(|(name, ty)| column(name, name, ty, false))
+                        .map(|(name, ty)| column(name, name, ty, false, Checks::default()))
                         .collect(),
                 )),
                 _ => None,
@@ -1239,7 +1338,7 @@ impl Loader {
                     RawReturn::Rows(columns) => FunctionReturn::Rows(
                         columns
                             .iter()
-                            .map(|(name, ty)| column(name, name, ty, false))
+                            .map(|(name, ty)| column(name, name, ty, false, Checks::default()))
                             .collect(),
                     ),
                     RawReturn::Scalar(ty) | RawReturn::SetOf(ty) => {
@@ -1320,16 +1419,18 @@ impl Loader {
                 python_type: None,
                 allowed_values: None,
             },
-            TypeDef::Domain(base) => {
+            TypeDef::Domain(base, own) => {
                 let inner = type_key(base, self.dialect)
                     .filter(|_| depth < 16)
                     .and_then(|name| lookup_key(&self.types, path, &name))
                     .and_then(|inner| self.resolve_user_type(inner, path, depth + 1));
-                inner.unwrap_or_else(|| UserType {
+                let mut user = inner.unwrap_or_else(|| UserType {
                     sql_type: canonical_type(base, self.dialect),
                     python_type: None,
                     allowed_values: None,
-                })
+                });
+                user.python_type = narrowed(user.python_type, &user.sql_type, own.as_deref());
+                user
             }
         })
     }
@@ -1343,11 +1444,13 @@ fn schema_column(
     ident: &str,
     ty: &DataType,
     not_null: bool,
+    checked: Checks<'_>,
 ) -> SchemaColumn {
     let (sql_type, python_type) = catalog.resolve_type(ty, dialect);
     let allowed_values = type_key(ty, dialect)
         .and_then(|name| catalog.user_type(&name))
         .and_then(|user| user.allowed_values.clone());
+    let python_type = checked.apply(python_type, &sql_type, allowed_values.is_some());
     SchemaColumn {
         name: name.to_string(),
         ident: ident.to_string(),
@@ -1365,7 +1468,17 @@ fn resolve_rel(catalog: &Catalog, dialect: SqlDialect, rel: &Rel) -> Relation {
             table
                 .columns
                 .iter()
-                .map(|c| schema_column(catalog, dialect, &c.name, &c.ident, &c.ty, c.not_null))
+                .map(|c| {
+                    schema_column(
+                        catalog,
+                        dialect,
+                        &c.name,
+                        &c.ident,
+                        &c.ty,
+                        c.not_null,
+                        c.checks(),
+                    )
+                })
                 .collect(),
         ),
         Rel::View(columns) => Relation::View(columns.clone()),
@@ -1374,11 +1487,8 @@ fn resolve_rel(catalog: &Catalog, dialect: SqlDialect, rel: &Rel) -> Relation {
 
 /// The labels of an enum as a `typing.Literal`.
 fn literal_of(labels: &[String]) -> String {
-    let labels: Vec<String> = labels
-        .iter()
-        .map(|label| format!("'{}'", label.replace('\\', "\\\\").replace('\'', "\\'")))
-        .collect();
-    format!("typing.Literal[{}]", labels.join(", "))
+    let labels: Vec<Value> = labels.iter().cloned().map(Value::Str).collect();
+    values::render(&labels).unwrap_or_default()
 }
 
 fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
@@ -1398,14 +1508,80 @@ fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
                 }
             )
         });
+    let name = fold(&column.name, dialect);
+    // MySQL before 8.0.16 parses `CHECK` and ignores it.
+    let collated = column.options.iter().any(
+        |option| matches!(&option.option, ColumnOption::Collation(name) if loose_collation(name)),
+    );
+    let values = column
+        .options
+        .iter()
+        .filter(|_| !collated)
+        .filter_map(|option| match &option.option {
+            ColumnOption::Check(check) if dialect != SqlDialect::MySql => {
+                values::check_values(&check.expr, &|ident| fold(ident, dialect) == name)
+            }
+            _ => None,
+        })
+        .reduce(|a, b| values::intersect(a, &b));
     RawColumn {
-        name: fold(&column.name, dialect),
+        name,
         ident: match column.name.quote_style {
             Some(_) => column.name.to_string(),
             None => column.name.value.to_lowercase(),
         },
         ty: column.data_type.clone(),
         not_null,
+        values,
+        collated,
+    }
+}
+
+/// Narrow `existing` by the values of another `CHECK`.
+fn add_values(existing: &mut Option<Vec<Value>>, found: Option<Vec<Value>>) {
+    *existing = match (existing.take(), found) {
+        (Some(a), Some(b)) => Some(values::intersect(a, &b)),
+        (a, b) => a.or(b),
+    };
+}
+
+/// Apply a table-level `CHECK` to the column it limits.
+fn apply_check(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
+    if dialect == SqlDialect::MySql {
+        return;
+    }
+    for column in columns {
+        let found = values::check_values(expr, &|ident| fold(ident, dialect) == column.name);
+        add_values(&mut column.values, found);
+    }
+}
+
+/// The Python type of a column of `sql_type` that a `CHECK` limits to `checked`: a
+/// `Literal` of at most [`values::MAX_VALUES`] strings for a text column or integers for an
+/// integer column. `python` (an enum's `Literal`) is kept, and narrowed by `checked`.
+fn narrowed(python: Option<String>, sql_type: &str, checked: Option<&[Value]>) -> Option<String> {
+    let Some(checked) = checked else {
+        return python;
+    };
+    if let Some(current) = python.as_deref().and_then(values::parse) {
+        let both = values::intersect(current, checked);
+        return values::render(&both).or(python);
+    }
+    if python.is_some() || checked.len() > values::MAX_VALUES {
+        return python;
+    }
+    let name = sql_type.split(['(', '<']).next().unwrap_or_default().trim();
+    let fits = match checked.first()? {
+        Value::Str(_) => matches!(name, "TEXT" | "VARCHAR"),
+        Value::Int(_) => matches!(
+            name,
+            "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
+        ),
+    };
+    if fits {
+        values::render(checked)
+    } else {
+        None
     }
 }
 
@@ -1414,8 +1590,13 @@ fn merge_column(columns: &mut Vec<RawColumn>, column: RawColumn) {
     match columns.iter_mut().find(|c| c.name == column.name) {
         Some(existing) => {
             let not_null = existing.not_null || column.not_null;
+            let collated = existing.collated || column.collated;
+            let mut checked = existing.values.take();
+            add_values(&mut checked, column.values.clone());
             *existing = column;
             existing.not_null = not_null;
+            existing.values = checked;
+            existing.collated |= collated;
         }
         None => columns.push(column),
     }
@@ -1469,8 +1650,13 @@ fn alter_op(
         table.columns.iter().position(|c| c.name == name)
     };
     match op {
-        AlterTableOperation::AddColumn { column_def, .. } => {
-            if column_def.data_type == DataType::Unspecified {
+        AlterTableOperation::AddColumn {
+            column_def,
+            column_position,
+            ..
+        } => {
+            // `FIRST` / `AFTER` put the column somewhere in the middle.
+            if column_def.data_type == DataType::Unspecified || column_position.is_some() {
                 return Err(AlterFail::Unsupported);
             }
             if position(table, &column_def.name).is_none() {
@@ -1521,6 +1707,7 @@ fn alter_op(
                 AlterColumnOperation::DropNotNull => table.columns[at].not_null = false,
                 AlterColumnOperation::SetDataType { data_type, .. } => {
                     table.columns[at].ty = data_type.clone();
+                    table.columns[at].values = None;
                 }
                 AlterColumnOperation::SetDefault { .. }
                 | AlterColumnOperation::DropDefault
@@ -1533,6 +1720,17 @@ fn alter_op(
         } => {
             for index_column in &pk.columns {
                 mark_not_null(&mut table.columns, &index_column.column.expr, dialect);
+            }
+        }
+        // A `CHECK` added `NOT VALID` does not hold for the rows already there.
+        AlterTableOperation::AddConstraint {
+            constraint: TableConstraint::Check(check),
+            not_valid: false,
+        } => apply_check(&mut table.columns, &check.expr, dialect),
+        // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
+        AlterTableOperation::DropConstraint { .. } => {
+            for column in &mut table.columns {
+                column.values = None;
             }
         }
         AlterTableOperation::ChangeColumn { .. }
@@ -1624,7 +1822,24 @@ fn read_statements(
                 Some((name, base))
             });
             if let Some((name, base)) = parsed {
-                push(OpKind::Domain(name, base));
+                let mut checked = None;
+                // A collation may equate strings, so the listed values do not bound them.
+                let checks = if stmt.has_word("collate") {
+                    Vec::new()
+                } else {
+                    stmt.domain_checks()
+                };
+                for text in checks {
+                    let found = parse_part(&text)
+                        .and_then(|mut parser| parser.parse_expr().ok())
+                        .and_then(|expr| {
+                            values::check_values(&expr, &|ident| {
+                                ident.value.eq_ignore_ascii_case("value")
+                            })
+                        });
+                    add_values(&mut checked, found);
+                }
+                push(OpKind::Domain(name, base, checked));
             }
         } else if stmt.creates("type") {
             if let Some(Statement::CreateType {
@@ -1669,6 +1884,17 @@ fn read_statements(
             }
         } else if postgres {
             read_alter_or_drop(stmt, dialect, &mut push);
+        } else if let Some((kind, name, action)) = stmt.target_and_action("alter") {
+            // Other dialects do not follow `ALTER TABLE`, but a `MODIFY` or `CHANGE` retypes
+            // a column, and a stale type or `ENUM` would be wrong: the table is unknown.
+            if kind == "table"
+                && matches!(
+                    action.first().map(String::as_str),
+                    Some("modify" | "change")
+                )
+            {
+                push(OpKind::Taint(Taint::Relation, name));
+            }
         }
     }
     ops
@@ -1691,6 +1917,10 @@ fn read_alter_or_drop(stmt: &ddl::Statement, dialect: SqlDialect, push: &mut imp
             ("table", _) if !changes_columns(&action, stmt.has_word("type")) => {}
             ("table", _) => push(OpKind::Taint(Taint::Relation, name)),
             ("type", Some(Statement::AlterType(alter))) => push(OpKind::AlterType(alter)),
+            // A constraint added to or dropped from a domain changes the values it allows.
+            ("domain", _) if action.iter().any(|w| w == "constraint") => {
+                push(OpKind::Taint(Taint::Type, name));
+            }
             ("type", _) if action.first().is_some_and(|w| w == "owner") => {}
             ("type", _) => push(OpKind::Taint(Taint::Type, name)),
             ("view", _) if action.first().is_some_and(|w| w == "rename") => {
