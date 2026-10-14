@@ -13,10 +13,10 @@ pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
             args: None,
             ..
         } => {
-            let reference = alias
-                .as_ref()
-                .map(|alias| alias.name.value.to_lowercase())
-                .unwrap_or_else(|| object_name(name));
+            let reference = alias.as_ref().map_or_else(
+                || object_name(name),
+                |alias| alias.name.value.to_lowercase(),
+            );
             vec![(reference, table_key(name, dialect))]
         }
         other => vec![opaque_source(other)],

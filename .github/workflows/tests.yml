@@ -34,7 +34,7 @@ jobs:
           --health-retries 10
 
     env:
-      SQLTY_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
 
     steps:
       - uses: actions/checkout@v7

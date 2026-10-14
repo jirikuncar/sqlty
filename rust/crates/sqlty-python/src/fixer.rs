@@ -23,7 +23,9 @@ const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 /// `\bname\b`, compiled once per name: the few import styles in use repeat call after call.
 fn word_regex(name: &str) -> Regex {
     static CACHE: LazyLock<Mutex<HashMap<String, Regex>>> = LazyLock::new(Mutex::default);
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache
         .entry(name.to_string())
         .or_insert_with(|| Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap())

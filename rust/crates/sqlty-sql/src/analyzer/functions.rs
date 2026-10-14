@@ -428,9 +428,9 @@ impl<'a> Analyzer<'a> {
         };
         let sql = |name: &str| Ok(from_sql_type(name.to_string(), self.dialect));
         match returns {
-            Returns::Sql(name) => sql(name),
+            Sql(name) => sql(name),
             Returns::Void => Ok((Some("None".to_string()), Some("VOID".to_string()))),
-            Returns::Arg(i) => Ok(strip(arg(i)?, self.dialect)),
+            Arg(i) => Ok(strip(arg(i)?, self.dialect)),
             // `LAG(x, 1, 'default')` can also return the default.
             Returns::Same(i) if args.len() >= 3 => Ok(strip(arg(i)?, self.dialect)),
             Returns::Same(i) => arg(i),
@@ -456,7 +456,7 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(first)
             }
-            Returns::Elem(i) => Ok(self.element_typed(arg(i)?.1.as_deref())),
+            Elem(i) => Ok(self.element_typed(arg(i)?.1.as_deref())),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
                 let elem = typed

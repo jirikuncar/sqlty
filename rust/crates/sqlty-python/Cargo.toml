@@ -13,5 +13,4 @@ workspace = true
 
 [dependencies]
 sqlty-sql.workspace = true
-sqlparser.workspace = true
 regex.workspace = true
