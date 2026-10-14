@@ -11,6 +11,7 @@ Commands:
 from __future__ import annotations
 
 import functools
+import gc
 import logging
 import sys
 from dataclasses import dataclass
@@ -271,6 +272,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
     from sqlty._source import ParsedSource
     from sqlty.core import HelperIndex, check_source, fix_source, query_statistics
 
+    # Parsed trees stay alive for cross-module lookups: collect young objects only, as mypy does.
+    gc.set_threshold(200_000, 30, 30)
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
 
