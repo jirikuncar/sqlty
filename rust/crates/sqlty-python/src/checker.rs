@@ -14,6 +14,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::options::Options;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, ends_marker_line, extract_string_content, marked_query, strip_line_break, wraps,
@@ -22,7 +23,7 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
-use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, SchemaData};
+use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error};
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
@@ -79,30 +80,23 @@ pub struct Diagnostic {
 /// Check Python source code for SQL type issues.
 pub fn check_source(
     source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    rule_config: &RuleConfig,
-    import_style: Option<&str>,
-    untyped: bool,
+    options: &Options,
+    rules: &RuleConfig,
     any_calls: &[usize],
 ) -> Vec<Diagnostic> {
-    let style = ImportStyle::or_default(import_style);
-    let scan = Scan::new(source, &style.wrapper_name);
+    let scan = Scan::new(source, &options.style.wrapper_name);
     let mut checker = Checker {
         scan: &scan,
-        dialect,
-        schema,
-        rules: rule_config,
-        untyped_name: style.untyped_name(),
-        style: &style,
+        options,
+        rules,
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
     };
-    if dialect.eq_ignore_ascii_case("mysql") {
+    if options.dialect.is_mysql() {
         checker.mysql_markers();
     }
-    if rule_config.is_enabled(Rule::StaleRewrite) {
-        checker.stale_rewrites(untyped);
+    if rules.is_enabled(Rule::StaleRewrite) {
+        checker.stale_rewrites();
     }
     checker.unwrapped_strings();
     checker.wrapped_calls();
@@ -113,11 +107,8 @@ pub fn check_source(
 /// diagnostics found so far.
 struct Checker<'a> {
     scan: &'a Scan<'a>,
-    dialect: &'a str,
-    schema: Option<&'a SchemaData>,
+    options: &'a Options<'a>,
     rules: &'a RuleConfig,
-    style: &'a ImportStyle,
-    untyped_name: String,
     /// Offsets of the calls whose `T` is `typing.Any`, ascending.
     any_calls: Vec<usize>,
     diagnostics: Vec<Diagnostic>,
@@ -147,16 +138,9 @@ impl Checker<'_> {
     }
 
     /// `--sql` strings that `rewrite` would wrap.
-    fn stale_rewrites(&mut self, untyped: bool) {
+    fn stale_rewrites(&mut self) {
         let scan = self.scan;
-        for (start, _, _) in wraps(
-            scan,
-            self.dialect,
-            self.schema,
-            self.style,
-            untyped,
-            &|_| false,
-        ) {
+        for (start, _, _) in wraps(scan, self.options, &|_| false) {
             self.report(
                 Rule::StaleRewrite,
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
@@ -214,8 +198,8 @@ impl Checker<'_> {
             self.report(Rule::InlineSqlComment, INLINE_MESSAGE.to_string(), line);
         }
         if self.rules.is_enabled(Rule::UnparsedQuery) {
-            if let Some(error) =
-                marked_query(sql_content).and_then(|sql| parse_error(&sql, self.dialect))
+            if let Some(error) = marked_query(sql_content)
+                .and_then(|sql| parse_error(&sql, self.options.dialect.name()))
             {
                 self.report(Rule::UnparsedQuery, unparsed_message(&error), line);
             }
@@ -253,7 +237,9 @@ impl Checker<'_> {
             return;
         }
         if let Some(query) = marked_query(sql_content) {
-            for found in analyze_with_diagnostics(&query, self.dialect, self.schema).1 {
+            for found in
+                analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema).1
+            {
                 self.report(Rule::Name(found.rule), found.message, line);
             }
         }
@@ -264,7 +250,7 @@ impl Checker<'_> {
         if !(upper.contains("SELECT *") || upper.contains("SELECT\n*")) {
             return;
         }
-        if self.schema.is_some() {
+        if self.options.schema.is_some() {
             self.report(
                 Rule::SelectStar,
                 "SELECT * used — expand to explicit column list (joins need a manual edit)"
@@ -283,11 +269,16 @@ impl Checker<'_> {
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
         let annotated = &self.scan.source()[call.annotation.clone()];
-        let wrapper = &self.style.wrapper_name;
-        if annotated == self.untyped_name {
-            let untyped = format!("{}[{}]", wrapper, self.untyped_name);
+        let wrapper = &self.options.style.wrapper_name;
+        let untyped_name = self.options.style.untyped_name();
+        if annotated == untyped_name {
+            let untyped = format!("{}[{}]", wrapper, untyped_name);
             // A `*` the schema cannot resolve infers no type, so none is guessed.
-            let message = match infer_from_sql_content(sql_content, self.dialect, self.schema) {
+            let message = match infer_from_sql_content(
+                sql_content,
+                self.options.dialect.name(),
+                self.options.schema,
+            ) {
                 Some(current) => format!(
                     "{} can now be {}[{}]; run sqlty check --fix",
                     untyped, wrapper, current
@@ -308,7 +299,11 @@ impl Checker<'_> {
         {
             return;
         }
-        if let Some(current) = infer_from_sql_content(sql_content, self.dialect, self.schema) {
+        if let Some(current) = infer_from_sql_content(
+            sql_content,
+            self.options.dialect.name(),
+            self.options.schema,
+        ) {
             if !refines_tuple(annotated, &current) {
                 self.report(
                     Rule::StaleType,
@@ -372,12 +367,11 @@ impl SiteKind {
 /// Each query `sqlty check` sees, as `(line, kind, text)` for `--statistics`.
 pub fn query_sites(
     source: &str,
-    import_style: Option<&str>,
+    style: &ImportStyle,
     any_calls: &[usize],
 ) -> Vec<(usize, SiteKind, String)> {
     let any_calls = sorted(any_calls);
-    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
-    let scan = Scan::new(source, &wrapper_name);
+    let scan = Scan::new(source, &style.wrapper_name);
     let mut sites = Vec::new();
     let mut skipped: Vec<usize> = Vec::new();
     for group in scan.groups() {
@@ -434,12 +428,8 @@ fn holds_start(starts: &[usize], span: &Range<usize>) -> bool {
 
 /// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
 /// without its marker, `None` unless the call holds a marked string literal.
-pub fn wrapped_queries(
-    source: &str,
-    import_style: Option<&str>,
-) -> Vec<(usize, String, Option<String>)> {
-    let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
-    let scan = Scan::new(source, &wrapper_name);
+pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String, Option<String>)> {
+    let scan = Scan::new(source, &style.wrapper_name);
     scan.calls
         .iter()
         .map(|call| {
@@ -712,7 +702,27 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::options::Dialect;
+    use sqlty_sql::analyzer::SchemaData;
     use std::collections::HashMap;
+
+    fn check_source(
+        source: &str,
+        dialect: &str,
+        schema: Option<&SchemaData>,
+        rules: &RuleConfig,
+        style: Option<&str>,
+        untyped: bool,
+        any_calls: &[usize],
+    ) -> Vec<Diagnostic> {
+        let options = Options {
+            dialect: Dialect::new(dialect),
+            schema,
+            style: ImportStyle::or_default(style),
+            untyped,
+        };
+        super::check_source(source, &options, rules, any_calls)
+    }
 
     fn override_rule(rule: &str, severity: &str) -> RuleConfig {
         let overrides = HashMap::from([(rule.to_string(), severity.to_string())]);
@@ -1115,7 +1125,7 @@ mod tests {
             )),
             [1, 2, 3]
         );
-        let sites = query_sites(source, None, &any);
+        let sites = query_sites(source, &ImportStyle::default(), &any);
         assert_eq!(sites.iter().map(|s| s.0).collect::<Vec<_>>(), [3]);
     }
 
@@ -1172,10 +1182,11 @@ r = SQL[T](
 )
 s = SQL[T]("plain")
 "#;
-        let queries: Vec<(usize, Option<String>)> = wrapped_queries(source, None)
-            .into_iter()
-            .map(|(line, _, query)| (line, query))
-            .collect();
+        let queries: Vec<(usize, Option<String>)> =
+            wrapped_queries(source, &ImportStyle::default())
+                .into_iter()
+                .map(|(line, _, query)| (line, query))
+                .collect();
         assert_eq!(
             queries,
             vec![

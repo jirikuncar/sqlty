@@ -5,7 +5,6 @@
 //! and the checker and fixer only deal with enums.
 
 use std::collections::HashMap;
-use std::fmt;
 
 use sqlty_sql::diagnostics::NameRule;
 
@@ -173,25 +172,13 @@ impl Severity {
 }
 
 /// A rule name or severity in the overrides that sqlty does not know.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RuleConfigError {
+    #[error("unknown rule: {0}")]
     UnknownRule(String),
+    #[error("unknown severity for rule {rule}: {severity} (expected error, warn or ignore)")]
     UnknownSeverity { rule: String, severity: String },
 }
-
-impl fmt::Display for RuleConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RuleConfigError::UnknownRule(rule) => write!(f, "unknown rule: {rule}"),
-            RuleConfigError::UnknownSeverity { rule, severity } => write!(
-                f,
-                "unknown severity for rule {rule}: {severity} (expected error, warn or ignore)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for RuleConfigError {}
 
 /// Rule severity configuration: the defaults plus the user's overrides.
 #[derive(Clone, Debug, Default)]

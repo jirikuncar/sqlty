@@ -2,6 +2,7 @@
 
 pub mod checker;
 pub mod fixer;
+pub mod options;
 pub mod rewriter;
 pub mod rules;
 pub(crate) mod scan;

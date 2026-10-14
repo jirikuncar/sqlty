@@ -9,6 +9,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use crate::checker::{refines_tuple, INLINE_SQL_COMMENT_CONTENT};
+use crate::options::Options;
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, line_ending, rewrite_scan, splice, suppresses, ImportStyle, LineIndex,
@@ -39,15 +40,13 @@ static SQL_PREFIX: LazyLock<Regex> =
 /// the rule reports (`suppressed`, by line of `source`) suppresses that rule.
 pub fn fix_source(
     source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    import_style: Option<&str>,
-    untyped: bool,
+    options: &Options,
     rules: &RuleConfig,
     mut suppressed: Suppressed,
 ) -> String {
     let enabled = |rule: Rule| rules.is_enabled(rule);
-    let style = ImportStyle::or_default(import_style);
+    let (dialect, schema) = (options.dialect.name(), options.schema);
+    let style = &options.style;
     let wrapper = &style.wrapper_name;
     // Each phase reads one scan; the source is scanned again only after a phase edits it.
     let mut scan = Scan::new(source, wrapper);
@@ -56,15 +55,14 @@ pub fn fix_source(
             scan = Scan::new(fixed, wrapper);
         }
     }
-    if dialect.eq_ignore_ascii_case("mysql") && enabled(Rule::MysqlSqlMarker) {
+    if options.dialect.is_mysql() && enabled(Rule::MysqlSqlMarker) {
         if let Some(fixed) = fix_mysql_markers(&scan, &suppressed) {
             scan = Scan::new(fixed, wrapper);
         }
     }
     if enabled(Rule::StaleRewrite) {
         let skip = |line| suppresses(&suppressed, line, Rule::StaleRewrite);
-        if let Some(rewritten) = rewrite_scan(&scan, dialect, schema, &style, untyped, false, &skip)
-        {
+        if let Some(rewritten) = rewrite_scan(&scan, options, false, &skip) {
             suppressed = shift_lines(suppressed, scan.source(), &rewritten);
             scan = Scan::new(rewritten, wrapper);
         }
@@ -126,7 +124,7 @@ pub fn fix_source(
     if fixed == source {
         return scan.into_source().into_owned();
     }
-    fix_imports(fixed, &style, &introduced)
+    fix_imports(fixed, style, &introduced)
 }
 
 /// `"--sql SELECT ..."` to `"--sql\nSELECT ..."` in plain string literals that
@@ -275,15 +273,8 @@ mod tests {
     use super::*;
 
     fn fix(source: &str) -> String {
-        fix_source(
-            source,
-            "postgres",
-            None,
-            None,
-            false,
-            &RuleConfig::default(),
-            Suppressed::new(),
-        )
+        let options = Options::new("postgres", None, None, false).unwrap();
+        fix_source(source, &options, &RuleConfig::default(), Suppressed::new())
     }
 
     #[test]
