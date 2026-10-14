@@ -7,6 +7,16 @@
 
 use super::*;
 
+/// Where a resolved column comes from, for explaining why it is untyped.
+pub(super) enum Origin {
+    /// A schema table's column, as `table.column`.
+    Schema(String),
+    /// A schema view's column, as `view.column`.
+    View(String),
+    /// A CTE or derived table of the query, whose own query explains it.
+    Local,
+}
+
 /// Sources a name can resolve to: the FROM clause, then enclosing queries (correlation).
 fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s (String, String)> {
     scope.iter().chain(outer.iter())
@@ -45,27 +55,33 @@ impl<'a> Analyzer<'a> {
 
     /// A column of one source: `(type, schema column)`, the latter set when a schema table
     /// holds it (`table.column`), for type diagnostics.
-    fn lookup_column(&self, table: &str, column: &str) -> Option<(Typed, Option<String>)> {
+    fn lookup_column(&self, table: &str, column: &str) -> Option<(Typed, Origin)> {
         if let Some(columns) = self.virtual_columns(table) {
+            let origin = if self.virtuals.contains_key(table) {
+                Origin::Local
+            } else {
+                Origin::View(format!("{table}.{column}"))
+            };
             return columns
                 .iter()
                 .find(|col| col.name.to_lowercase() == column)
-                .map(|col| ((col.python_type.clone(), col.sql_type.clone()), None));
+                .map(|col| ((col.python_type.clone(), col.sql_type.clone()), origin));
         }
         self.schema
             .get(table)?
             .iter()
             .find(|col| col.name == column)
-            .map(|col| (col.typed(self.dialect), Some(format!("{table}.{column}"))))
+            .map(|col| {
+                (
+                    col.typed(self.dialect),
+                    Origin::Schema(format!("{table}.{column}")),
+                )
+            })
     }
 
     /// Type of a column: its qualifier's source, else the first source having it, the
     /// FROM clause before enclosing queries.
-    pub(super) fn resolve_column(
-        &self,
-        expr: &Expr,
-        scope: &Scope,
-    ) -> Option<(Typed, Option<String>)> {
+    pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<(Typed, Origin)> {
         match expr {
             Expr::Identifier(ident) => {
                 let column = ident.value.to_lowercase();
@@ -92,10 +108,10 @@ impl<'a> Analyzer<'a> {
             self.check_ambiguous(ident, scope);
         }
         match self.resolve_column(expr, scope) {
-            Some((typed, from_schema)) => {
+            Some((typed, origin)) => {
                 if typed.0.is_none() {
-                    match (from_schema, &typed.1) {
-                        (Some(column), sql_type) => self.diag.record(
+                    match (origin, &typed.1) {
+                        (Origin::Schema(column), sql_type) => self.diag.record(
                             NameRule::UnknownType,
                             format!(
                                 "column `{column}` has type {}, which has no Python type",
@@ -104,8 +120,12 @@ impl<'a> Analyzer<'a> {
                                     .map_or("unknown".to_string(), |ty| format!("`{ty}`"))
                             ),
                         ),
+                        (Origin::View(column), _) => self.diag.record(
+                            NameRule::UnsupportedSyntax,
+                            format!("view column `{column}` is not typed by the view's query"),
+                        ),
                         // Typed in the CTE or subquery that defines it; reported there.
-                        (None, _) => self.diag.explain_silently(),
+                        (Origin::Local, _) => self.diag.explain_silently(),
                     }
                 }
                 typed
@@ -238,6 +258,28 @@ impl<'a> Analyzer<'a> {
         self.diag.record(NameRule::UnknownColumn, message);
     }
 
+    /// A star that expanded to an unknown `*`: a view whose own query could not be typed
+    /// says so; for a CTE or derived table that query explains it.
+    pub(super) fn explain_view_star(&self, reference: Option<&str>, scope: &Scope) {
+        let reference = reference.map(str::to_lowercase);
+        let views: Vec<String> = Self::star_tables(reference.as_deref(), scope)
+            .into_iter()
+            .filter(|table| {
+                !self.virtuals.contains_key(table) && self.virtual_columns(table).is_some()
+            })
+            .collect();
+        if views.is_empty() {
+            return self.diag.explain_silently();
+        }
+        self.diag.record(
+            NameRule::UnsupportedSyntax,
+            format!(
+                "`*` reads view `{}`, whose columns are not typed",
+                views.join("`, `")
+            ),
+        );
+    }
+
     /// Records why a `*` or `t.*` stayed unresolved.
     pub(super) fn explain_star(
         &self,
@@ -279,7 +321,7 @@ impl<'a> Analyzer<'a> {
             self.virtual_columns(table)
                 .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
         }) {
-            return self.diag.explain_silently();
+            return self.explain_view_star(reference.as_deref(), scope);
         }
         self.diag.record(
             NameRule::UnsupportedSyntax,

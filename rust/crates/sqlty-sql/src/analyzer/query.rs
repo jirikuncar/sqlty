@@ -234,7 +234,12 @@ impl<'a> Analyzer<'a> {
             .then(|| self.star_columns(reference, scope))
             .flatten()
         {
-            Some(columns) => columns,
+            Some(columns) => {
+                if columns.iter().any(Column::is_unknown_star) {
+                    self.explain_view_star(reference, scope);
+                }
+                columns
+            }
             None => {
                 self.explain_star(reference, scope, from);
                 vec![Column::unknown("*")]
