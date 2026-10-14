@@ -3,6 +3,8 @@
 //! `Loader::build` resolves everything; `schema_column` and `resolve_rel` resolve
 //! one relation when the loader updates the cached catalog in place.
 
+use std::sync::Arc;
+
 use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{ArrayElemTypeDef, DataType, EnumMember};
@@ -44,25 +46,11 @@ impl Loader {
                 user_types.entry(old.clone()).or_insert(user);
             }
         }
-        let lookup = |name: &str| -> Option<UserType> {
-            lookup_key(&user_types, &path, name).and_then(|key| user_types.get(key).cloned())
+        let resolver = Resolver {
+            types: &user_types,
+            path: &path,
+            dialect,
         };
-        let column =
-            |name: &str, ident: &str, ty: &DataType, not_null: bool, checked: Checks<'_>| {
-                let (sql_type, python_type) = resolve_with(ty, &lookup, dialect);
-                let allowed_values = type_key(ty, dialect)
-                    .and_then(|name| lookup(&name))
-                    .and_then(|user| user.allowed_values);
-                let python_type = checked.apply(python_type, &sql_type, allowed_values.is_some());
-                SchemaColumn {
-                    name: name.to_string(),
-                    ident: ident.to_string(),
-                    sql_type,
-                    python_type,
-                    not_null,
-                    allowed_values,
-                }
-            };
         let mut relations = FxHashMap::default();
         let mut user_relations = 0;
         for (key, rel) in &self.relations {
@@ -72,20 +60,7 @@ impl Loader {
             {
                 user_relations += 1;
             }
-            relations.insert(
-                key.clone(),
-                match rel {
-                    Rel::Table(table) if table.unknown => Relation::Unknown,
-                    Rel::Table(table) => Relation::Table(
-                        table
-                            .columns
-                            .iter()
-                            .map(|c| column(&c.name, &c.ident, &c.ty, c.not_null, c.checks()))
-                            .collect(),
-                    ),
-                    Rel::View(columns) => Relation::View(columns.clone()),
-                },
-            );
+            relations.insert(key.clone(), resolver.relation(rel));
         }
         let mut composites: FxHashMap<String, Vec<SchemaColumn>> = self
             .types
@@ -95,7 +70,7 @@ impl Loader {
                     key.clone(),
                     fields
                         .iter()
-                        .map(|(name, ty)| column(name, name, ty, false, Checks::default()))
+                        .map(|(name, ty)| resolver.column(name, name, ty, false, Checks::default()))
                         .collect(),
                 )),
                 _ => None,
@@ -117,7 +92,9 @@ impl Loader {
                     RawReturn::Rows(columns) => FunctionReturn::Rows(
                         columns
                             .iter()
-                            .map(|(name, ty)| column(name, name, ty, false, Checks::default()))
+                            .map(|(name, ty)| {
+                                resolver.column(name, name, ty, false, Checks::default())
+                            })
                             .collect(),
                     ),
                     RawReturn::Scalar(ty) | RawReturn::SetOf(ty) => {
@@ -133,7 +110,11 @@ impl Loader {
                         match rows {
                             Some(columns) => FunctionReturn::Rows(columns),
                             None => {
-                                let (sql, python) = resolve_with(ty, &lookup, dialect);
+                                let Resolved {
+                                    sql_type: sql,
+                                    python_type: python,
+                                    ..
+                                } = resolver.resolve(ty);
                                 let value = if sql == "VOID" {
                                     (Some("None".to_string()), Some(sql))
                                 } else {
@@ -191,7 +172,7 @@ impl Loader {
             TypeDef::Enum(labels) => UserType {
                 sql_type: short,
                 python_type: (!labels.is_empty()).then(|| literal_of(labels)),
-                allowed_values: Some(labels.clone()),
+                allowed_values: Some(labels.as_slice().into()),
             },
             TypeDef::Composite(_) => UserType {
                 sql_type: short,
@@ -220,98 +201,126 @@ impl Loader {
     }
 }
 
-/// `dt` as `(sql_type, python_type)`, user types looked up by `user`.
-pub(super) fn resolve_with(
-    dt: &DataType,
-    user: &dyn Fn(&str) -> Option<UserType>,
-    dialect: SqlDialect,
-) -> (String, Option<String>) {
-    if let DataType::Array(
-        ArrayElemTypeDef::AngleBracket(inner)
-        | ArrayElemTypeDef::Parenthesis(inner)
-        | ArrayElemTypeDef::Qualified(inner, _)
-        | ArrayElemTypeDef::SquareBracket(inner, _),
-    ) = dt
-    {
-        let (sql, python) = resolve_with(inner, user, dialect);
-        let size = match dt {
-            DataType::Array(
-                ArrayElemTypeDef::SquareBracket(_, Some(size))
-                | ArrayElemTypeDef::Qualified(_, Some(size)),
-            ) => format!("[{size}]"),
-            _ => String::new(),
-        };
-        let python = python.or_else(|| typed(sql.clone(), None, dialect).0);
-        return (
-            format!("ARRAY<{sql}>{size}"),
-            python.map(|ty| format!("list[{ty}]")),
-        );
-    }
-    if let (DataType::Enum(members, _), false) = (dt, dialect == SqlDialect::Postgres) {
-        // MySQL `ENUM('a', 'b')`.
-        let labels: Vec<String> = members
-            .iter()
-            .map(|member| match member {
-                EnumMember::Name(name) | EnumMember::NamedValue(name, _) => name.clone(),
-            })
-            .collect();
-        return (
-            canonical_type(dt, dialect),
-            (!labels.is_empty()).then(|| literal_of(&labels)),
-        );
-    }
-    match type_key(dt, dialect).and_then(|name| user(&name)) {
-        Some(found) => (found.sql_type, found.python_type),
-        None => (canonical_type(dt, dialect), None),
-    }
+/// Resolves declared column types against the user types of one catalog.
+///
+/// `build` and the in-place update of a cached catalog share it, so a column resolves
+/// the same either way.
+pub(super) struct Resolver<'a> {
+    pub(super) types: &'a FxHashMap<String, UserType>,
+    pub(super) path: &'a [String],
+    pub(super) dialect: SqlDialect,
 }
 
-/// A column declared `ty`, resolved against `catalog`.
-pub(super) fn schema_column(
-    catalog: &Catalog,
-    dialect: SqlDialect,
-    name: &str,
-    ident: &str,
-    ty: &DataType,
-    not_null: bool,
-    checked: Checks<'_>,
-) -> SchemaColumn {
-    let (sql_type, python_type) = catalog.resolve_type(ty, dialect);
-    let allowed_values = type_key(ty, dialect)
-        .and_then(|name| catalog.user_type(&name))
-        .and_then(|user| user.allowed_values.clone());
-    let python_type = checked.apply(python_type, &sql_type, allowed_values.is_some());
-    SchemaColumn {
-        name: name.to_string(),
-        ident: ident.to_string(),
-        sql_type,
-        python_type,
-        not_null,
-        allowed_values,
-    }
+/// A declared type as columns show it.
+pub(super) struct Resolved<'a> {
+    pub(super) sql_type: String,
+    pub(super) python_type: Option<String>,
+    /// The labels of the enum the type is.
+    pub(super) allowed_values: Option<&'a Arc<[String]>>,
 }
 
-pub(super) fn resolve_rel(catalog: &Catalog, dialect: SqlDialect, rel: &Rel) -> Relation {
-    match rel {
-        Rel::Table(table) if table.unknown => Relation::Unknown,
-        Rel::Table(table) => Relation::Table(
-            table
-                .columns
+impl<'a> Resolver<'a> {
+    /// The user type a lookup name (such as `app.percent`) finds along the search path.
+    pub(super) fn user_type(&self, name: &str) -> Option<&'a UserType> {
+        let types = self.types;
+        lookup_key(types, self.path, name).and_then(|key| types.get(key))
+    }
+
+    /// `dt` as SQL and Python types; user types are looked up once.
+    pub(super) fn resolve(&self, dt: &DataType) -> Resolved<'a> {
+        let dialect = self.dialect;
+        if let DataType::Array(
+            ArrayElemTypeDef::AngleBracket(inner)
+            | ArrayElemTypeDef::Parenthesis(inner)
+            | ArrayElemTypeDef::Qualified(inner, _)
+            | ArrayElemTypeDef::SquareBracket(inner, _),
+        ) = dt
+        {
+            let Resolved {
+                sql_type: sql,
+                python_type: python,
+                ..
+            } = self.resolve(inner);
+            let size = match dt {
+                DataType::Array(
+                    ArrayElemTypeDef::SquareBracket(_, Some(size))
+                    | ArrayElemTypeDef::Qualified(_, Some(size)),
+                ) => format!("[{size}]"),
+                _ => String::new(),
+            };
+            let python = python.or_else(|| typed(sql.clone(), None, dialect).0);
+            return Resolved {
+                sql_type: format!("ARRAY<{sql}>{size}"),
+                python_type: python.map(|ty| format!("list[{ty}]")),
+                allowed_values: None,
+            };
+        }
+        if let (DataType::Enum(members, _), false) = (dt, dialect == SqlDialect::Postgres) {
+            // MySQL `ENUM('a', 'b')`.
+            let labels: Vec<String> = members
                 .iter()
-                .map(|c| {
-                    schema_column(
-                        catalog,
-                        dialect,
-                        &c.name,
-                        &c.ident,
-                        &c.ty,
-                        c.not_null,
-                        c.checks(),
-                    )
+                .map(|member| match member {
+                    EnumMember::Name(name) | EnumMember::NamedValue(name, _) => name.clone(),
                 })
-                .collect(),
-        ),
-        Rel::View(columns) => Relation::View(columns.clone()),
+                .collect();
+            return Resolved {
+                sql_type: canonical_type(dt, dialect),
+                python_type: (!labels.is_empty()).then(|| literal_of(&labels)),
+                allowed_values: None,
+            };
+        }
+        match type_key(dt, dialect).and_then(|name| self.user_type(&name)) {
+            Some(found) => Resolved {
+                sql_type: found.sql_type.clone(),
+                python_type: found.python_type.clone(),
+                allowed_values: found.allowed_values.as_ref(),
+            },
+            None => Resolved {
+                sql_type: canonical_type(dt, dialect),
+                python_type: None,
+                allowed_values: None,
+            },
+        }
+    }
+
+    /// A column declared `ty`.
+    pub(super) fn column(
+        &self,
+        name: &str,
+        ident: &str,
+        ty: &DataType,
+        not_null: bool,
+        checked: Checks<'_>,
+    ) -> SchemaColumn {
+        let resolved = self.resolve(ty);
+        let python_type = checked.apply(
+            resolved.python_type,
+            &resolved.sql_type,
+            resolved.allowed_values.is_some(),
+        );
+        SchemaColumn {
+            name: name.to_string(),
+            ident: ident.to_string(),
+            sql_type: resolved.sql_type,
+            python_type,
+            not_null,
+            allowed_values: resolved.allowed_values.cloned(),
+        }
+    }
+
+    /// A raw relation as the catalog holds it.
+    pub(super) fn relation(&self, rel: &Rel) -> Relation {
+        match rel {
+            Rel::Table(table) if table.unknown => Relation::Unknown,
+            Rel::Table(table) => Relation::Table(
+                table
+                    .columns
+                    .iter()
+                    .map(|c| self.column(&c.name, &c.ident, &c.ty, c.not_null, c.checks()))
+                    .collect(),
+            ),
+            Rel::View(columns) => Relation::View(columns.clone()),
+        }
     }
 }
 

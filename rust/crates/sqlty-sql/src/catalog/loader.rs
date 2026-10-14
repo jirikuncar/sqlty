@@ -21,7 +21,6 @@ use super::columns::{
     apply_check, column_named, is_rowid_type, mark_not_null, merge_column, raw_column, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new};
-use super::resolve::resolve_rel;
 use super::{Catalog, BUILTIN_SCHEMAS};
 
 #[derive(Clone, Default)]
@@ -478,9 +477,10 @@ impl Loader {
     pub(super) fn set_relation(&mut self, key: String, rel: Option<Rel>) {
         let dialect = self.dialect;
         let resolved = match &self.cache {
-            Some(cache) if !self.setof_functions => {
-                Some(rel.as_ref().map(|rel| resolve_rel(cache, dialect, rel)))
-            }
+            Some(cache) if !self.setof_functions => Some(
+                rel.as_ref()
+                    .map(|rel| cache.resolver(dialect).relation(rel)),
+            ),
             _ => None,
         };
         match rel {

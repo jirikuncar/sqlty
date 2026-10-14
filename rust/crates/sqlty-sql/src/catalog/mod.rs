@@ -39,14 +39,14 @@ pub(crate) use names::fold;
 pub(crate) use read::load;
 
 use rustc_hash::FxHashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use sqlparser::ast::DataType;
 
 use crate::analyzer::{Column, SqlDialect};
 
 use names::lookup_key;
-use resolve::resolve_with;
+use resolve::Resolver;
 
 /// `(python_type, sql_type)`; `None` is unknown.
 pub(crate) type Typed = (Option<String>, Option<String>);
@@ -65,7 +65,7 @@ pub struct SchemaColumn {
     /// inference yet.
     pub not_null: bool,
     /// The labels of the enum the column has, `None` for other types.
-    pub allowed_values: Option<Vec<String>>,
+    pub allowed_values: Option<Arc<[String]>>,
 }
 
 /// A domain, enum or composite type as its columns see it: the SQL type they show (a
@@ -76,7 +76,7 @@ pub(crate) struct UserType {
     pub sql_type: String,
     pub python_type: Option<String>,
     /// An enum's labels.
-    pub allowed_values: Option<Vec<String>>,
+    pub allowed_values: Option<Arc<[String]>>,
 }
 
 /// What a function returns.
@@ -225,6 +225,15 @@ impl Catalog {
         self.user_relations == 0
     }
 
+    /// Resolves declared types against this catalog's user types.
+    fn resolver(&self, dialect: SqlDialect) -> Resolver<'_> {
+        Resolver {
+            types: &self.types,
+            path: &self.search_path,
+            dialect,
+        }
+    }
+
     /// The SQL type of a column declared `dt`, and its Python type when a domain or enum
     /// sets it. Domains and enums resolve through the catalog.
     pub(crate) fn resolve_type(
@@ -232,7 +241,8 @@ impl Catalog {
         dt: &DataType,
         dialect: SqlDialect,
     ) -> (String, Option<String>) {
-        resolve_with(dt, &|name| self.user_type(name).cloned(), dialect)
+        let resolved = self.resolver(dialect).resolve(dt);
+        (resolved.sql_type, resolved.python_type)
     }
 }
 
