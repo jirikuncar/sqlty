@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import sqlty.core as core
+from sqlty.core import json_shapes
 
 
 class TestParser:
@@ -202,3 +203,7 @@ def test_check_source_typeddict_inheritance_lines(imports: str):
         (5 + offset, "Middle cannot add key 'name' to closed base Base"),
         (9 + offset, "Other cannot set closed=False: base Base is closed"),
     ]
+
+
+def test_json_shapes_of_a_broken_query_is_empty() -> None:
+    assert json_shapes("SELEC (") == []

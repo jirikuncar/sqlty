@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
 
 import pytest
 
 from sqlty import _config
-from sqlty._config import load_config
+from sqlty._config import ConfigError, load_config, validate_tool_table
 
 
 def test_parses_each_pyproject_once(tmp_path, monkeypatch):
@@ -122,3 +124,31 @@ def test_exclude_settings_are_loaded(tmp_path):
     config, _ = load_config(tmp_path)
 
     assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
+
+
+def test_rules_must_be_a_table() -> None:
+    with pytest.raises(ConfigError, match="rules must be a table"):
+        validate_tool_table({"rules": ["select-star"]}, "pyproject.toml")
+
+
+def test_unreadable_pyproject_is_skipped_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
+    with caplog.at_level(logging.WARNING):
+        config, root = load_config(tmp_path)
+    assert (config, root) == ({}, None)
+    assert "Failed to parse" in caplog.text
+
+
+def test_incomplete_function_entries_are_skipped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nfunctions = ["junk", {import-path = "db.run"},'
+        ' {import-path = "db.ok", query-param = "q"}]\n'
+    )
+    with caplog.at_level(logging.WARNING):
+        config, _ = load_config(tmp_path)
+    assert config["functions"] == [{"import_path": "db.ok", "query_param": "q"}]
+    assert "missing required fields" in caplog.text
