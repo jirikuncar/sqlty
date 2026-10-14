@@ -13,8 +13,10 @@ from __future__ import annotations
 import fnmatch
 import functools
 import gc
+import glob
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -460,23 +462,48 @@ def _exclusions(directory: Path) -> tuple[Path, tuple[str, ...]]:
     return (config_dir or directory.resolve()), patterns
 
 
-def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
-    """Whether ``path`` matches a glob, relative to ``base``.
+@functools.cache
+def _exclude_matchers(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    """Compiled ``(name, relative path)`` matchers for exclude globs; built once per pattern set.
 
     A glob without a slash matches a file or directory name at any depth;
-    otherwise it matches the path relative to ``base``.
+    every glob also matches the path relative to the config directory.
     """
+    names: list[str] = []
+    paths: list[str] = []
+    for pattern in patterns:
+        pattern = pattern.strip("/")
+        if "/" not in pattern:
+            names.append(fnmatch.translate(pattern))
+        paths.append(glob.translate(pattern, recursive=True, include_hidden=True))
+    never = r"(?!)"
+    return (
+        re.compile("|".join(names) or never, re.DOTALL),
+        re.compile("|".join(paths) or never, re.DOTALL),
+    )
+
+
+def _is_excluded_entry(
+    name: str, relative_dir: PurePosixPath | None, patterns: tuple[str, ...]
+) -> bool:
+    """Whether the entry ``name`` of ``relative_dir`` matches an exclude glob.
+
+    ``relative_dir`` is the resolved parent relative to the config directory, or
+    ``None`` when it lies outside it (nothing is excluded then).
+    """
+    if relative_dir is None:
+        return False
+    by_name, by_path = _exclude_matchers(patterns)
+    return bool(by_name.match(name) or by_path.match((relative_dir / name).as_posix()))
+
+
+def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
+    """Whether ``path`` matches an exclude glob, relative to ``base`` (``_walk`` batches this per directory)."""
     resolved = path.resolve()
     if not resolved.is_relative_to(base):
         return False
     relative = PurePosixPath(resolved.relative_to(base).as_posix())
-    for pattern in patterns:
-        pattern = pattern.strip("/")
-        if "/" not in pattern and fnmatch.fnmatchcase(path.name, pattern):
-            return True
-        if relative.full_match(pattern):
-            return True
-    return False
+    return _is_excluded_entry(relative.name, relative.parent, patterns)
 
 
 def _walk(root: Path) -> list[Path]:
@@ -485,11 +512,17 @@ def _walk(root: Path) -> list[Path]:
     for directory, dirnames, filenames in os.walk(root):
         current = Path(directory)
         base, patterns = _exclusions(current)
-        dirnames[:] = sorted(d for d in dirnames if not _is_excluded(current / d, base, patterns))
+        resolved = current.resolve()
+        relative = (
+            PurePosixPath(resolved.relative_to(base).as_posix())
+            if resolved.is_relative_to(base)
+            else None
+        )
+        dirnames[:] = sorted(d for d in dirnames if not _is_excluded_entry(d, relative, patterns))
         found.extend(
             current / name
             for name in sorted(filenames)
-            if name.endswith(".py") and not _is_excluded(current / name, base, patterns)
+            if name.endswith(".py") and not _is_excluded_entry(name, relative, patterns)
         )
     return sorted(found)
 

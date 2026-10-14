@@ -476,3 +476,33 @@ def test_exclude_glob_outside_the_config_directory_never_matches(tmp_path: Path)
     project.mkdir()
     outside = tmp_path / "other" / "gen.py"
     assert not _is_excluded(outside, project.resolve(), ("gen.py", "other"))
+
+
+def test_walk_compiles_exclude_globs_once_per_pattern_set(tmp_path: Path) -> None:
+    """Guards the large-project walk: matching must not rebuild globs per file."""
+    from sqlty._cli import _collect_python_files, _exclude_matchers
+
+    for d in range(5):
+        (tmp_path / f"pkg{d}").mkdir()
+        for n in range(20):
+            (tmp_path / f"pkg{d}" / f"m{n}.py").write_text("")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "x.py").write_text("")
+    _exclude_matchers.cache_clear()
+    files = _collect_python_files([tmp_path])
+    assert len(files) == 100
+    assert _exclude_matchers.cache_info().misses == 1
+
+
+def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path) -> None:
+    from sqlty._cli import _collect_python_files
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nexclude = ["gen_*.py", "build/**", "a/b"]\n'
+    )
+    for rel in ("keep.py", "gen_x.py", "sub/gen_y.py", "build/z.py", "a/b/c.py", "a/d.py"):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+    found = {p.relative_to(tmp_path).as_posix() for p in _collect_python_files([tmp_path])}
+    assert found == {"keep.py", "a/d.py"}
