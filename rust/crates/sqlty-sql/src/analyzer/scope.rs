@@ -218,11 +218,29 @@ pub(super) fn resolve(reference: &str, scope: &Scope) -> String {
 
 /// Output columns of the CTEs and derived tables in scope, by table key: a CTE's
 /// name, or `(alias)` for a derived table.
-pub(super) type Virtuals = HashMap<String, Vec<Column>>;
+///
+/// Cloned for every SELECT, subquery and CTE the analyzer descends into, so the map and its
+/// column lists are shared; an insert copies the map (pointers only) when it is shared.
+#[derive(Clone, Default)]
+pub(super) struct Virtuals(Rc<HashMap<String, Rc<[Column]>>>);
+
+impl Virtuals {
+    pub(super) fn get(&self, table: &str) -> Option<&[Column]> {
+        self.0.get(table).map(|columns| &**columns)
+    }
+
+    pub(super) fn contains_key(&self, table: &str) -> bool {
+        self.0.contains_key(table)
+    }
+
+    pub(super) fn insert(&mut self, table: String, columns: Vec<Column>) {
+        Rc::make_mut(&mut self.0).insert(table, columns.into());
+    }
+}
 
 impl<'a> Analyzer<'a> {
     /// Columns of a CTE, derived table or schema view; a CTE hides a view of its name.
-    pub(super) fn virtual_columns(&self, table: &str) -> Option<&Vec<Column>> {
+    pub(super) fn virtual_columns(&self, table: &str) -> Option<&[Column]> {
         self.virtuals.get(table).or_else(|| self.schema.view(table))
     }
 
@@ -272,7 +290,7 @@ impl<'a> Analyzer<'a> {
     /// An analyzer for a subquery of an expression: its names may refer to `scope`.
     pub(super) fn correlated(&self, scope: &Scope) -> Analyzer<'a> {
         let mut inner = self.clone();
-        inner.outer = [scope.clone(), self.outer.clone()].concat();
+        inner.outer = Rc::new([scope.as_slice(), self.outer.as_slice()].concat());
         inner
     }
 
@@ -280,7 +298,7 @@ impl<'a> Analyzer<'a> {
     /// `LATERAL` subquery is analyzed with the relations before it.
     pub(super) fn scope_of(&self, from: &[TableWithJoins]) -> Inferred<(Analyzer<'a>, Scope)> {
         let mut analyzer = self.clone();
-        analyzer.merged = merged_columns(from, analyzer.dialect);
+        analyzer.merged = merged_columns(from, analyzer.dialect).into();
         let mut scope = Scope::new();
         for factor in relations(from) {
             let only = only_table(factor);
@@ -321,7 +339,7 @@ impl<'a> Analyzer<'a> {
                 } => {
                     // A LATERAL subquery reads the relations before it.
                     let mut inner = analyzer.clone();
-                    inner.outer = [scope.clone(), analyzer.outer.clone()].concat();
+                    inner.outer = Rc::new([scope.as_slice(), analyzer.outer.as_slice()].concat());
                     let mut columns = inner
                         .query_columns(subquery)?
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
@@ -408,22 +426,25 @@ impl<'a> Analyzer<'a> {
         let columns = sources
             .iter()
             .map(|(reference, table)| {
-                let mut columns = self.virtual_columns(table).cloned().or_else(|| {
-                    self.schema.table(table).map(|columns| {
-                        columns
-                            .iter()
-                            .map(|col| {
-                                let (python_type, sql_type) = col.typed(self.dialect);
-                                Column {
-                                    name: col.name.clone(),
-                                    python_type,
-                                    sql_type,
-                                    nullability: Nullability::declared(col.not_null),
-                                }
-                            })
-                            .collect()
-                    })
-                })?;
+                let mut columns = self
+                    .virtual_columns(table)
+                    .map(<[Column]>::to_vec)
+                    .or_else(|| {
+                        self.schema.table(table).map(|columns| {
+                            columns
+                                .iter()
+                                .map(|col| {
+                                    let (python_type, sql_type) = col.typed(self.dialect);
+                                    Column {
+                                        name: col.name.clone(),
+                                        python_type,
+                                        sql_type,
+                                        nullability: Nullability::declared(col.not_null),
+                                    }
+                                })
+                                .collect()
+                        })
+                    })?;
                 for column in &mut columns {
                     let key = self.column_key(reference, &column.name, scope);
                     column.nullability = self.facts.column(reference, &key, column.nullability);

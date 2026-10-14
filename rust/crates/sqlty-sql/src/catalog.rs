@@ -179,7 +179,7 @@ impl Catalog {
     }
 
     /// Output columns of the view `name`.
-    pub(crate) fn view(&self, name: &str) -> Option<&Vec<Column>> {
+    pub(crate) fn view(&self, name: &str) -> Option<&[Column]> {
         match self.find(name)? {
             Relation::View(columns) => Some(columns),
             _ => None,

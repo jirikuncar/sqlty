@@ -52,9 +52,9 @@ pub(super) struct Analyzer<'a> {
     /// Why results are untyped, shared with the analyzers of subqueries and CTEs.
     pub(super) diag: Diagnostics,
     /// FROM sources of the enclosing queries, for correlated subqueries and `LATERAL`.
-    pub(super) outer: Scope,
+    pub(super) outer: Rc<Scope>,
     /// Columns the joins of this SELECT merge (`USING`, `NATURAL`), so they are not ambiguous.
-    pub(super) merged: Vec<String>,
+    pub(super) merged: Rc<[String]>,
     /// What is known about NULLs in the SELECT being analyzed: null-extended relations
     /// and columns its conditions rule out as NULL.
     pub(super) facts: Facts,
@@ -65,10 +65,10 @@ impl<'a> Analyzer<'a> {
         Analyzer {
             schema,
             dialect,
-            virtuals: HashMap::new(),
+            virtuals: Virtuals::default(),
             diag: Diagnostics::default(),
-            outer: Scope::new(),
-            merged: Vec::new(),
+            outer: Rc::default(),
+            merged: Rc::default(),
             facts: Facts::default(),
         }
     }
@@ -115,7 +115,10 @@ impl<'a> Analyzer<'a> {
                     if !recursive {
                         break;
                     }
-                    let known: Vec<Nullability> = inner.virtuals[&name]
+                    let known: Vec<Nullability> = inner
+                        .virtuals
+                        .get(&name)
+                        .unwrap_or_default()
                         .iter()
                         .map(|col| col.nullability)
                         .collect();

@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::ControlFlow;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic, NameRule};
