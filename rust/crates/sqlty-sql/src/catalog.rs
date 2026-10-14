@@ -397,8 +397,11 @@ struct Loader {
     /// Functions whose latest definition could not be read.
     unknown_functions: HashSet<String>,
     search_path: Vec<String>,
-    /// The resolved catalog, kept while only views were added since it was built.
+    /// The resolved catalog; a change to one relation updates it in place, any other
+    /// change drops it to be built again.
     cache: Option<Catalog>,
+    /// Some function returns `SETOF table`, so its rows follow the table.
+    setof_functions: bool,
 }
 
 /// Table-level key of a name seen under `path`.
@@ -420,6 +423,7 @@ impl Loader {
             unknown_functions: HashSet::new(),
             search_path: vec!["public".to_string()],
             cache: None,
+            setof_functions: false,
         }
     }
 
@@ -543,14 +547,13 @@ impl Loader {
         if let OpKind::Table(create, _) = &op.kind {
             // A table built from one that never appears: it exists, shape unknown.
             let key = self.new_key(&create.name, &path);
-            self.relations.insert(
+            self.set_relation(
                 key,
-                Rel::Table(RawTable {
+                Some(Rel::Table(RawTable {
                     unknown: true,
                     ..RawTable::default()
-                }),
+                })),
             );
-            self.cache = None;
         }
     }
 
@@ -615,8 +618,7 @@ impl Loader {
             }
         }
         if create.query.is_none() && !table.columns.is_empty() {
-            self.relations.insert(key, Rel::Table(table));
-            self.cache = None;
+            self.set_relation(key, Some(Rel::Table(table)));
         }
         true
     }
@@ -635,13 +637,7 @@ impl Loader {
         if !force && undefined_calls && columns.iter().any(|c| c.python_type.is_none()) {
             return false;
         }
-        if let Some(cache) = self.cache.as_mut() {
-            cache
-                .relations
-                .insert(key.clone(), Relation::View(columns.clone()));
-            cache.user_relations += 1;
-        }
-        self.relations.insert(key, Rel::View(columns));
+        self.set_relation(key, Some(Rel::View(columns)));
         true
     }
 
@@ -731,7 +727,7 @@ impl Loader {
         }
         for (name, mut table) in changed {
             table.unknown |= unsupported;
-            self.relations.insert(name, Rel::Table(table));
+            self.set_relation(name, Some(Rel::Table(table)));
         }
         if let Some(new_name) = rename {
             let (schema, _) = key.split_once('.').unwrap_or(("public", ""));
@@ -739,6 +735,7 @@ impl Loader {
                 [only] => format!("{schema}.{only}"),
                 other => key_of(other, self.dialect),
             };
+            self.cache = None;
             if let Some(table) = self.relations.remove(&key) {
                 self.relations.insert(new_key.clone(), table);
             }
@@ -752,8 +749,45 @@ impl Loader {
                 }
             }
         }
-        self.cache = None;
         true
+    }
+
+    /// Set (or, with `None`, remove) one relation, keeping the resolved catalog current
+    /// without building it again.
+    fn set_relation(&mut self, key: String, rel: Option<Rel>) {
+        let dialect = self.dialect;
+        let resolved = match &self.cache {
+            Some(cache) if !self.setof_functions => {
+                Some(rel.as_ref().map(|rel| resolve_rel(cache, dialect, rel)))
+            }
+            _ => None,
+        };
+        match rel {
+            Some(rel) => self.relations.insert(key.clone(), rel),
+            None => self.relations.remove(&key),
+        };
+        let Some(resolved) = resolved else {
+            self.cache = None;
+            return;
+        };
+        let Some(cache) = self.cache.as_mut() else {
+            return;
+        };
+        let user = !BUILTIN_SCHEMAS
+            .iter()
+            .any(|schema| key.starts_with(&format!("{schema}.")));
+        match resolved {
+            Some(relation) => {
+                if cache.relations.insert(key, relation).is_none() && user {
+                    cache.user_relations += 1;
+                }
+            }
+            None => {
+                if cache.relations.remove(&key).is_some() && user {
+                    cache.user_relations -= 1;
+                }
+            }
+        }
     }
 
     /// Tables that inherit from or are partitions of `key`, nested ones included.
@@ -817,7 +851,6 @@ impl Loader {
     }
 
     fn taint(&mut self, what: Taint, name: &[String], path: &[String]) -> bool {
-        self.cache = None;
         match what {
             Taint::Relation => match self.lookup(&self.relations, name, path) {
                 Some(key) => {
@@ -826,13 +859,13 @@ impl Loader {
                         _ => Vec::new(),
                     };
                     for name in std::iter::once(key.clone()).chain(self.descendants(&key)) {
-                        self.relations.insert(
+                        self.set_relation(
                             name,
-                            Rel::Table(RawTable {
+                            Some(Rel::Table(RawTable {
                                 unknown: true,
                                 parents: parents.clone(),
                                 ..RawTable::default()
-                            }),
+                            })),
                         );
                     }
                     true
@@ -841,6 +874,7 @@ impl Loader {
             },
             Taint::Type => match self.lookup(&self.types, name, path) {
                 Some(key) => {
+                    self.cache = None;
                     self.types.insert(key, TypeDef::Unknown);
                     true
                 }
@@ -852,6 +886,7 @@ impl Loader {
                         .map(|last| format!("{}.{last}", self.default_schema(path)))
                 });
                 if let Some(key) = key {
+                    self.cache = None;
                     self.functions.entry(key.clone()).or_default();
                     self.unknown_functions.insert(key);
                 }
@@ -863,7 +898,15 @@ impl Loader {
     // ---- DROP -----------------------------------------------------------------------
 
     fn drop_objects(&mut self, stmt: &Statement, path: &[String]) {
-        self.cache = None;
+        if !matches!(
+            stmt,
+            Statement::Drop {
+                object_type: ObjectType::Table | ObjectType::View | ObjectType::MaterializedView,
+                ..
+            }
+        ) {
+            self.cache = None;
+        }
         match stmt {
             Statement::Drop {
                 object_type, names, ..
@@ -873,7 +916,7 @@ impl Loader {
                     match object_type {
                         ObjectType::Table | ObjectType::View | ObjectType::MaterializedView => {
                             if let Some(key) = self.lookup(&self.relations, &name_parts, path) {
-                                self.relations.remove(&key);
+                                self.set_relation(key, None);
                             }
                         }
                         ObjectType::Type => {
@@ -963,7 +1006,10 @@ impl Loader {
             Some(FunctionReturnType::DataType(dt)) if outs.len() < 2 => {
                 RawReturn::Scalar(dt.clone())
             }
-            Some(FunctionReturnType::SetOf(dt)) => RawReturn::SetOf(dt.clone()),
+            Some(FunctionReturnType::SetOf(dt)) => {
+                self.setof_functions = true;
+                RawReturn::SetOf(dt.clone())
+            }
             _ if outs.len() >= 2 => RawReturn::Rows(outs),
             _ if outs.len() == 1 => RawReturn::Scalar(outs[0].1.clone()),
             _ => {
@@ -1165,6 +1211,43 @@ impl Loader {
                 })
             }
         })
+    }
+}
+
+/// A column declared `ty`, resolved against `catalog`.
+fn schema_column(
+    catalog: &Catalog,
+    dialect: SqlDialect,
+    name: &str,
+    ident: &str,
+    ty: &DataType,
+    not_null: bool,
+) -> SchemaColumn {
+    let (sql_type, python_type) = catalog.resolve_type(ty, dialect);
+    let allowed_values = type_key(ty, dialect)
+        .and_then(|name| catalog.user_type(&name))
+        .and_then(|user| user.allowed_values.clone());
+    SchemaColumn {
+        name: name.to_string(),
+        ident: ident.to_string(),
+        sql_type,
+        python_type,
+        not_null,
+        allowed_values,
+    }
+}
+
+fn resolve_rel(catalog: &Catalog, dialect: SqlDialect, rel: &Rel) -> Relation {
+    match rel {
+        Rel::Table(table) if table.unknown => Relation::Unknown,
+        Rel::Table(table) => Relation::Table(
+            table
+                .columns
+                .iter()
+                .map(|c| schema_column(catalog, dialect, &c.name, &c.ident, &c.ty, c.not_null))
+                .collect(),
+        ),
+        Rel::View(columns) => Relation::View(columns.clone()),
     }
 }
 
@@ -1776,5 +1859,27 @@ mod tests {
         }
         let catalog = assert_fast(&sql);
         assert_eq!(cols(&catalog, "t1999"), ["id:INT"]);
+    }
+
+    #[test]
+    fn test_many_views_over_altered_tables_load_fast() {
+        let mut sql = String::new();
+        for i in 0..2000 {
+            sql += &format!("CREATE TABLE t{i} (id int);\n");
+            sql += &format!("ALTER TABLE t{i} ADD COLUMN c int;\n");
+            sql += &format!("CREATE VIEW v{i} AS SELECT * FROM t{i};\n");
+        }
+        let catalog = assert_fast(&sql);
+        assert_eq!(catalog.view("v1999").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_view_chain_loads_fast() {
+        let mut sql = String::from("CREATE TABLE v0 (id int);\n");
+        for i in 1..1500 {
+            sql += &format!("CREATE VIEW v{i} AS SELECT id FROM v{};\n", i - 1);
+        }
+        let catalog = assert_fast(&sql);
+        assert_eq!(catalog.view("v1499").unwrap().len(), 1);
     }
 }
