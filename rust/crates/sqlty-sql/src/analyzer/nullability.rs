@@ -282,6 +282,8 @@ const ALWAYS_NULLABLE: &[&str] = &[
     "JSON_VALUE",
     "JSON_QUERY",
     "NTH_VALUE",
+    // An array can hold NULL elements.
+    "UNNEST",
 ];
 
 /// Whether the frame of a window always holds the current row. The default frame does; a
@@ -548,7 +550,10 @@ impl<'a> Analyzer<'a> {
                 expr: inner,
                 array_expr,
                 ..
-            } => any_nullable([of(inner), of(array_expr)]),
+            } => any_nullable([
+                of(inner),
+                self.element_nullability(array_expr, scope, facts),
+            ]),
             Expr::Like {
                 expr: inner,
                 pattern,
@@ -570,7 +575,7 @@ impl<'a> Analyzer<'a> {
                 ..
             } => any_nullable([of(inner), of(pattern)]),
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
-                any_nullable([of(left), of(right)])
+                any_nullable([of(left), self.element_nullability(right, scope, facts)])
             }
             Expr::Extract { expr: inner, .. }
             | Expr::Ceil { expr: inner, .. }
@@ -641,6 +646,22 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Function(func) => self.function_nullability(func, scope, facts),
             _ => Nullability::Unknown,
+        }
+    }
+
+    /// Whether the elements of an array, or the rows of a subquery, can be NULL: a non-null
+    /// array still holds NULL elements, unless it is spelled out here.
+    fn element_nullability(&self, set: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
+        match set {
+            Expr::Nested(inner) => self.element_nullability(inner, scope, facts),
+            Expr::Array(array) => any_nullable(
+                array
+                    .elem
+                    .iter()
+                    .map(|elem| self.nullability(elem, scope, facts)),
+            ),
+            Expr::Subquery(query) => self.subquery_column(query, scope),
+            _ => Nullability::Nullable,
         }
     }
 
@@ -922,6 +943,20 @@ mod tests {
                 schema
             ),
             "--N"
+        );
+    }
+
+    #[test]
+    fn test_array_elements_can_be_null() {
+        let schema = "CREATE TABLE d (id INT NOT NULL, nums INT[] NOT NULL);";
+        let run = |sql: &str| marks_with(sql, "postgres", schema);
+        assert_eq!(
+            run("SELECT id = ANY (nums), id = ALL (nums), id IN (SELECT unnest(nums)), unnest(nums) FROM d"),
+            "NNNN"
+        );
+        assert_eq!(
+            run("SELECT id = ANY (ARRAY[1, 2]), id = ANY (ARRAY[1, NULL]), id < ALL (ARRAY[id]) FROM d"),
+            "-N-"
         );
     }
 

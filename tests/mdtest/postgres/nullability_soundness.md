@@ -16,6 +16,7 @@ CREATE TABLE t (
     a INTEGER,
     g INTEGER NOT NULL,
     tags TEXT[] NOT NULL,
+    nums INTEGER[] NOT NULL,
     doc JSONB NOT NULL
 );
 ```
@@ -165,4 +166,25 @@ NULL operand.
 ```sql
 SELECT CAST(a <=> g AS TEXT), CAST(g <=> g AS TEXT) FROM t
 -- inferred: tuple[str | None, str]
+```
+
+## Array elements can be NULL
+
+A NOT NULL array still holds NULL elements, so a comparison against them can be NULL.
+
+```sql
+SELECT g = ANY (nums), g = ALL (nums), unnest(nums) FROM t
+-- inferred: tuple[bool | None, bool | None, int | None]
+```
+
+```sql
+SELECT g IN (SELECT unnest(nums)) FROM t
+-- inferred: tuple[bool | None]
+```
+
+An array spelled out lists its elements.
+
+```sql
+SELECT g = ANY (ARRAY[1, 2]), g = ANY (ARRAY[1, a]) FROM t
+-- inferred: tuple[bool, bool | None]
 ```
