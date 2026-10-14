@@ -194,6 +194,11 @@ A name written `schema.table` looks in that schema. A bare name follows the
 `public`), then the one schema that defines the name. A bare name defined in
 several schemas, none on the path, is unknown rather than guessed.
 
+As in PostgreSQL, `pg_catalog` is searched first, so a user table named like a
+system relation (`CREATE TABLE pg_class (...)`) is reached as `public.pg_class`;
+a bare `pg_class` is the system one. Other `pg_*` names, such as `pg_orders`,
+are ordinary tables in every dialect.
+
 Nullability (`NOT NULL`, `PRIMARY KEY`) is recorded but does not change the
 inferred types yet.
 
@@ -201,6 +206,9 @@ sqlty does not guess where it cannot follow. A table changed by a statement it
 cannot read (for instance `ALTER TABLE ... SET SCHEMA`), or built from a table
 the schema never defines (`LIKE`, `INHERITS`, `PARTITION OF`), has an unknown
 shape: its columns get no type, and `SELECT *` over it is left alone.
+Actions that cannot change columns (constraints, storage options, ownership,
+triggers, partitions, tablespaces) never do this. `sqlty check` warns about each
+table or type it had to leave unknown.
 `CREATE TABLE ... AS`, `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
 tables as they are where the view is created. MySQL and SQLite read `CREATE`

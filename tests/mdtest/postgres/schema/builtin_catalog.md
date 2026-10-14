@@ -102,3 +102,85 @@ CREATE TABLE users (id INTEGER PRIMARY KEY);
 SELECT relname FROM pg_class
 -- inferred: None
 ```
+
+## A user table named like a system relation
+
+As in PostgreSQL, `pg_catalog` comes first on the search path, so a bare `pg_class`
+is the system one; the user's is `public.pg_class`.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE pg_class (x INTEGER);
+```
+
+```sql
+SELECT relname FROM pg_class
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT x FROM public.pg_class
+-- inferred: tuple[int]
+```
+
+## A table with a pg_ prefix that is not a system relation
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE pg_orders (id INTEGER, total NUMERIC(10, 2));
+```
+
+```sql
+SELECT id, total FROM pg_orders
+-- inferred: tuple[int, decimal.Decimal]
+```
+
+## The same table in SQLite and MySQL
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE pg_orders (id INTEGER, total REAL);
+CREATE TABLE pg_class (x INTEGER);
+```
+
+```sql
+SELECT id, total FROM pg_orders
+-- inferred: tuple[int, float]
+```
+
+```sql
+SELECT x FROM pg_class
+-- inferred: tuple[int]
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT id, total FROM pg_orders
+-- inferred: tuple[int, float]
+```
