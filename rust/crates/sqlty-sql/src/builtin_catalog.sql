@@ -14,13 +14,13 @@ CREATE TABLE pg_catalog.pg_class (
     relpartbound pg_node_tree);
 CREATE TABLE pg_catalog.pg_attribute (
     attrelid oid NOT NULL, attname name NOT NULL, atttypid oid NOT NULL, attlen int2 NOT NULL,
-    attnum int2 NOT NULL, atttypmod int4 NOT NULL, attndims int2 NOT NULL,
-    attbyval bool NOT NULL, attalign "char" NOT NULL, attstorage "char" NOT NULL,
-    attcompression "char" NOT NULL, attnotnull bool NOT NULL, atthasdef bool NOT NULL,
-    atthasmissing bool NOT NULL, attidentity "char" NOT NULL, attgenerated "char" NOT NULL,
-    attisdropped bool NOT NULL, attislocal bool NOT NULL, attinhcount int2 NOT NULL,
-    attcollation oid NOT NULL, attstattarget int2, attacl aclitem[], attoptions text[],
-    attfdwoptions text[]);
+    attnum int2 NOT NULL, attcacheoff int4 NOT NULL, atttypmod int4 NOT NULL,
+    attndims int2 NOT NULL, attbyval bool NOT NULL, attalign "char" NOT NULL,
+    attstorage "char" NOT NULL, attcompression "char" NOT NULL, attnotnull bool NOT NULL,
+    atthasdef bool NOT NULL, atthasmissing bool NOT NULL, attidentity "char" NOT NULL,
+    attgenerated "char" NOT NULL, attisdropped bool NOT NULL, attislocal bool NOT NULL,
+    attinhcount int2 NOT NULL, attcollation oid NOT NULL, attstattarget int2,
+    attacl aclitem[], attoptions text[], attfdwoptions text[], attmissingval anyarray);
 CREATE TABLE pg_catalog.pg_type (
     oid oid NOT NULL, typname name NOT NULL, typnamespace oid NOT NULL, typowner oid NOT NULL,
     typlen int2 NOT NULL, typbyval bool NOT NULL, typtype "char" NOT NULL,
@@ -72,36 +72,36 @@ CREATE TABLE pg_catalog.pg_description (
     objoid oid NOT NULL, classoid oid NOT NULL, objsubid int4 NOT NULL,
     description text NOT NULL);
 CREATE TABLE pg_catalog.pg_roles (
-    rolname name NOT NULL, rolsuper bool NOT NULL, rolinherit bool NOT NULL,
-    rolcreaterole bool NOT NULL, rolcreatedb bool NOT NULL, rolcanlogin bool NOT NULL,
-    rolreplication bool NOT NULL, rolconnlimit int4 NOT NULL, rolpassword text,
-    rolvaliduntil timestamptz, rolbypassrls bool NOT NULL, rolconfig text[],
-    oid oid NOT NULL);
+    rolname name, rolsuper bool, rolinherit bool,
+    rolcreaterole bool, rolcreatedb bool, rolcanlogin bool,
+    rolreplication bool, rolconnlimit int4, rolpassword text,
+    rolvaliduntil timestamptz, rolbypassrls bool, rolconfig text[],
+    oid oid);
 CREATE TABLE pg_catalog.pg_settings (
-    name text NOT NULL, setting text, unit text, category text, short_desc text,
-    extra_desc text, context text NOT NULL, vartype text NOT NULL, source text NOT NULL,
+    name text, setting text, unit text, category text, short_desc text,
+    extra_desc text, context text, vartype text, source text,
     min_val text, max_val text, enumvals text[], boot_val text, reset_val text,
-    sourcefile text, sourceline int4, pending_restart bool NOT NULL);
+    sourcefile text, sourceline int4, pending_restart bool);
 CREATE TABLE pg_catalog.pg_stat_activity (
-    datid oid, datname name, pid int4 NOT NULL, leader_pid int4, usesysid oid, usename name,
+    datid oid, datname name, pid int4, leader_pid int4, usesysid oid, usename name,
     application_name text, client_addr inet, client_hostname text, client_port int4,
     backend_start timestamptz, xact_start timestamptz, query_start timestamptz,
     state_change timestamptz, wait_event_type text, wait_event text, state text,
     backend_xid xid, backend_xmin xid, query_id int8, query text, backend_type text);
 CREATE TABLE pg_catalog.pg_tables (
-    schemaname name, tablename name NOT NULL, tableowner name NOT NULL, tablespace name,
-    hasindexes bool NOT NULL, hasrules bool NOT NULL, hastriggers bool NOT NULL,
-    rowsecurity bool NOT NULL);
+    schemaname name, tablename name, tableowner name, tablespace name,
+    hasindexes bool, hasrules bool, hastriggers bool,
+    rowsecurity bool);
 CREATE TABLE pg_catalog.pg_views (
-    schemaname name, viewname name NOT NULL, viewowner name NOT NULL, definition text);
+    schemaname name, viewname name, viewowner name, definition text);
 CREATE TABLE pg_catalog.pg_indexes (
-    schemaname name, tablename name NOT NULL, indexname name NOT NULL, tablespace name,
+    schemaname name, tablename name, indexname name, tablespace name,
     indexdef text);
 CREATE TABLE pg_catalog.pg_sequences (
-    schemaname name, sequencename name NOT NULL, sequenceowner name NOT NULL,
-    data_type regtype NOT NULL, start_value int8 NOT NULL, min_value int8 NOT NULL,
-    max_value int8 NOT NULL, increment_by int8 NOT NULL, cycle bool NOT NULL,
-    cache_size int8 NOT NULL, last_value int8);
+    schemaname name, sequencename name, sequenceowner name,
+    data_type regtype, start_value int8, min_value int8,
+    max_value int8, increment_by int8, cycle bool,
+    cache_size int8, last_value int8);
 CREATE TABLE information_schema.schemata (
     catalog_name name, schema_name name, schema_owner name,
     default_character_set_catalog name, default_character_set_schema name,

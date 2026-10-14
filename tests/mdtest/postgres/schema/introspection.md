@@ -1,8 +1,7 @@
 # Introspection queries
 
 Typical queries over `pg_catalog` and `information_schema` get the PostgreSQL
-column types: `oid`, `regproc`, `regclass` and `xid` are `int`, `name` and `"char"`
-are `str`, `int2vector` and `oidvector` are `list[int]`. A column the catalog
+column types: `oid` is `int`; `name`, `"char"`, `reg*`, `xid` and the vector types are `str`, as psycopg loads them. A column the catalog
 declares `NOT NULL` is not optional.
 
 ```toml
@@ -15,12 +14,12 @@ dialect = "postgres"
 ```sql
 SELECT c.relname, i.indisunique, i.indisprimary, i.indkey, i.indexprs, i.indpred
 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
--- inferred: tuple[str, bool, bool, list[int], str | None, str | None]
+-- inferred: tuple[str, bool, bool, str, str | None, str | None]
 ```
 
 ```sql
 SELECT schemaname, tablename, indexname, indexdef FROM pg_indexes
--- inferred: tuple[str | None, str, str, str | None]
+-- inferred: tuple[str | None, str | None, str | None, str | None]
 ```
 
 ## Enums
@@ -65,7 +64,7 @@ FROM information_schema.columns
 ```sql
 SELECT proname, prokind, proargtypes, proallargtypes, proargmodes, proargnames, prosrc
 FROM pg_proc
--- inferred: tuple[str, str, list[int], list[int] | None, list[str] | None, list[str] | None, str]
+-- inferred: tuple[str, str, str, list[int] | None, list[str] | None, list[str] | None, str]
 ```
 
 ```sql
@@ -89,34 +88,34 @@ SELECT objoid, objsubid, description FROM pg_description
 
 ```sql
 SELECT rolname, rolsuper, rolconnlimit, rolvaliduntil, rolconfig FROM pg_roles
--- inferred: tuple[str, bool, int, datetime.datetime | None, list[str] | None]
+-- inferred: tuple[str | None, bool | None, int | None, datetime.datetime | None, list[str] | None]
 ```
 
 ```sql
 SELECT name, setting, vartype, enumvals, pending_restart FROM pg_settings
--- inferred: tuple[str, str | None, str, list[str] | None, bool]
+-- inferred: tuple[str | None, str | None, str | None, list[str] | None, bool | None]
 ```
 
 ```sql
 SELECT pid, usename, client_addr, backend_xid, query_start, state FROM pg_stat_activity
--- inferred: tuple[int, str | None, ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface | None, int | None, datetime.datetime | None, str | None]
+-- inferred: tuple[int | None, str | None, ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface | None, str | None, datetime.datetime | None, str | None]
 ```
 
 ## Tables, views, sequences and schemas
 
 ```sql
 SELECT schemaname, tablename, tableowner, hasindexes FROM pg_tables
--- inferred: tuple[str | None, str, str, bool]
+-- inferred: tuple[str | None, str | None, str | None, bool | None]
 ```
 
 ```sql
 SELECT viewname, definition FROM pg_views
--- inferred: tuple[str, str | None]
+-- inferred: tuple[str | None, str | None]
 ```
 
 ```sql
 SELECT sequencename, data_type, increment_by, last_value FROM pg_sequences
--- inferred: tuple[str, int, int, int | None]
+-- inferred: tuple[str | None, str | None, int | None, int | None]
 ```
 
 ```sql
@@ -134,12 +133,12 @@ SELECT table_name, view_definition, is_updatable FROM information_schema.views
 ```sql
 SELECT n.nspname, n.nspacl, t.typtype, t.typinput, t.typacl
 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
--- inferred: tuple[str, list[str] | None, str, int, list[str] | None]
+-- inferred: tuple[str, list[str] | None, str, str, list[str] | None]
 ```
 
 ```sql
 SELECT relkind, relfrozenxid, relacl, relpartbound FROM pg_class
--- inferred: tuple[str, int, list[str] | None, str | None]
+-- inferred: tuple[str, str, list[str] | None, str | None]
 ```
 
 ## Typos and unmodelled relations

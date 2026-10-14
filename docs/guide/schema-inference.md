@@ -229,10 +229,10 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
   `pg_attrdef`, `pg_depend`, `pg_description`, `pg_roles`, `pg_settings`,
   `pg_stat_activity`, `pg_tables`, `pg_views`, `pg_indexes`, `pg_sequences`, and
   in `information_schema` `schemata`, `tables`, `views`, `columns`, `routines`,
-  `key_column_usage` and `table_constraints`. `oid`, `regproc`, `regclass`,
-  `regtype` and `xid` columns are `int`; `name` and `"char"` are `str`;
-  `int2vector` and `oidvector` are `list[int]`; `pg_node_tree` and `aclitem` are
-  `str`. Other `pg_*` relations are not read (see
+  `key_column_usage` and `table_constraints`. Types follow psycopg 3, which loads only `oid` specially: `oid` is
+  `int`, and `name`, `"char"`, `reg*`, `xid`, `int2vector`, `oidvector`,
+  `pg_node_tree` and `aclitem` are `str`. Columns of the system views
+  (`pg_settings`, `pg_tables`, ..., all of `information_schema`) are nullable. Other `pg_*` relations are not read (see
   [name diagnostics](name-diagnostics.md)).
 
 ```toml
