@@ -9,6 +9,7 @@ uv sync --all-groups               # install
 uv run pytest                      # all tests
 make test-mdtest                   # mdtest only
 make update-mdtest                 # update mdtest assertions
+make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
 make typecheck                     # mypy + ty on src and examples
 uv run pre-commit run --all-files  # all hooks (run before every commit)
 ```
@@ -135,6 +136,7 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 |-------------|-----------|-------------|
 | Type inference | `tests/mdtest/type_inference/` | `basic_types.md` |
 | SQL dialects | `tests/mdtest/postgres/`, `mysql/`, `sqlite/` | `select.md` |
+| Nullability | `tests/mdtest/nullability/` | `inference.md` |
 | Rewriting | `tests/mdtest/rewrite/` | `basic_rewrite.md` |
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
@@ -247,6 +249,9 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 - README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
+- `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
+  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
+  parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
   matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the

@@ -1,8 +1,10 @@
 # CLI
 
+<!-- generated:cli-usage -->
 ```
 sqlty [-h] [--version] {rewrite,strip,check,rule,version} ...
 ```
+<!-- /generated:cli-usage -->
 
 ```bash
 sqlty rewrite .   # "--sql\n..." -> SQL[T]("--sql\n...")
@@ -31,14 +33,16 @@ nearest `pyproject.toml` above it that has one; see
 
 `rewrite`, `strip` and `check` accept:
 
+<!-- generated:cli-options-common -->
 | Option | Description |
 |--------|-------------|
-| `paths ...` | Files or directories to process (default: `.`) |
-| `--dialect {postgres,sqlite,mysql}` | SQL dialect; overrides `dialect` in `pyproject.toml` (default: that key, else `postgres`) |
-| `--schema SCHEMA` | Schema `.sql` file, directory or glob; repeat for several, joined in order. Overrides `schema` in `pyproject.toml` |
-| `-v`, `--verbose` | Print each file `rewrite` or `strip` changes |
+| `-h`, `--help` | show this help message and exit |
+| `paths ...` | Files or directories (default: .); each file uses its nearest pyproject.toml |
+| `--dialect {postgres,sqlite,mysql}` | SQL dialect (default: [tool.sqlty] dialect, else postgres) |
+| `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
+| `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes |
 | `-q`, `--quiet` | Suppress non-error output |
-| `-h`, `--help` | Show help and exit |
+<!-- /generated:cli-options-common -->
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
 
@@ -52,17 +56,22 @@ skipped and reported on stderr (`fstring-skipped`, `tstring-skipped`,
 `unchecked-query`) unless `-q` is given or the rule is set to `ignore`; they
 never change the exit code.
 
+<!-- generated:cli-usage-rewrite -->
 ```
-sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
-              [-v] [-q] [--check] [--diff] [--untyped {skip,sentinel}]
+sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}]
+              [--schema SCHEMA] [-v] [-q] [--check] [--diff]
+              [--untyped {skip,sentinel}]
               [paths ...]
 ```
+<!-- /generated:cli-usage-rewrite -->
 
+<!-- generated:cli-options-rewrite -->
 | Option | Description |
 |--------|-------------|
 | `--check` | Do not modify files; print `Would rewrite <file>` and exit 1 if any file needs rewriting |
 | `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
-| `--untyped {skip,sentinel}` | Row-returning queries of unknown row type: leave unwrapped (`skip`, default) or wrap as `SQL[UNTYPED](...)` (`sentinel`). Overrides `untyped` in `pyproject.toml` |
+| `--untyped {skip,sentinel}` | Row-returning queries of unknown row type: leave unwrapped (skip, default) or wrap as `SQL[UNTYPED](...)` (sentinel). Config: untyped in [tool.sqlty] |
+<!-- /generated:cli-options-rewrite -->
 
 Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when files would change.
 
@@ -76,16 +85,20 @@ call's parentheses allow), the parentheses stay: `SQL[T]("..."  # c\n)` becomes
 (`SQL[T]("--sql..." + x)`) is left in place, as is a dotted `mod.SQL[T](...)`,
 which `check` still checks.
 
+<!-- generated:cli-usage-strip -->
 ```
 sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
             [-v] [-q] [--check] [--diff]
             [paths ...]
 ```
+<!-- /generated:cli-usage-strip -->
 
+<!-- generated:cli-options-strip -->
 | Option | Description |
 |--------|-------------|
 | `--check` | Do not modify files; print `Would strip <file>` and exit 1 if any file would change |
 | `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
+<!-- /generated:cli-options-strip -->
 
 Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when files would change.
 
@@ -99,16 +112,20 @@ queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, st
 Found 1 warning(s)
 ```
 
+<!-- generated:cli-usage-check -->
 ```
 sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
             [-v] [-q] [--fix] [--statistics]
             [paths ...]
 ```
+<!-- /generated:cli-usage-check -->
 
+<!-- generated:cli-options-check -->
 | Option | Description |
 |--------|-------------|
-| `--fix` | Apply the [fixable rules](rules.md), write the files, then report what remains |
+| `--fix` | Apply the fixable rules (see `sqlty rule`), write the files, then report what remains |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
+<!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
 
@@ -132,9 +149,11 @@ Exit code: 1 if any diagnostic has severity `error`; warnings alone exit 0.
 
 Print a rule's documentation, or list every rule with its default severity.
 
+<!-- generated:cli-usage-rule -->
 ```
 sqlty rule [-h] [name]
 ```
+<!-- /generated:cli-usage-rule -->
 
 ## `sqlty version`
 

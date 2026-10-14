@@ -6,7 +6,7 @@ import glob
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict, cast
 
 SchemaSpec = str | list[str]
 
@@ -17,6 +17,105 @@ DISCOVERY_KEYS = ("exclude", "extend-exclude")
 """``[tool.sqlty]`` keys that pick the files to process."""
 
 FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
+
+
+class KeyDoc(NamedTuple):
+    """Reference documentation of one configuration key.
+
+    ``docs/reference/configuration.md`` renders its tables from these entries
+    (``make generate-docs``); ``tests/test_docs.py`` fails when the page drifts.
+    """
+
+    type: str
+    default: str
+    used_by: str
+    summary: str
+    required: bool = False
+
+
+KEY_DOCS: dict[str, KeyDoc] = {
+    "dialect": KeyDoc(
+        '`"postgres"`, `"sqlite"`, `"mysql"`',
+        '`"postgres"`',
+        "`rewrite`, `check`",
+        "SQL dialect of queries and schema",
+    ),
+    "schema": KeyDoc(
+        "string or list of strings",
+        "none",
+        "`rewrite`, `check`",
+        "Schema `.sql` files, directories or globs, relative to `pyproject.toml`",
+    ),
+    "rules": KeyDoc(
+        "table of rule = severity",
+        "per-rule defaults",
+        "`check`",
+        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`',
+    ),
+    "import-style": KeyDoc(
+        "string",
+        '`"from sqlty import SQL"`',
+        "`rewrite`, `strip`, `check`, magic codec",
+        "How rewritten code imports and spells the wrapper",
+    ),
+    "untyped": KeyDoc(
+        '`"skip"`, `"sentinel"`',
+        '`"skip"`',
+        "`rewrite`",
+        "Whether queries of unknown row type are wrapped as `SQL[UNTYPED]`",
+    ),
+    "type-modules": KeyDoc(
+        "list of strings",
+        "`[]`",
+        "`check`",
+        "Modules `check` may import to resolve row type fields",
+    ),
+    "functions": KeyDoc(
+        "array of tables",
+        "`[]`",
+        "`check`",
+        "Helper functions whose string argument is a query",
+    ),
+    "exclude": KeyDoc(
+        "list of globs",
+        "see [Default excludes](#exclude-and-extend-exclude)",
+        "`rewrite`, `strip`, `check`",
+        "Globs skipped while walking a directory; replaces the default list",
+    ),
+    "extend-exclude": KeyDoc(
+        "list of globs",
+        "`[]`",
+        "`rewrite`, `strip`, `check`",
+        "Globs skipped in addition to `exclude` or the defaults",
+    ),
+}
+"""Reference docs per key of ``[tool.sqlty]``, in documentation order."""
+
+FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
+    "import-path": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        'Module path and function name, e.g. `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. '
+        'Use `"__main__.sql"` or the file name for a script run directly',
+        required=True,
+    ),
+    "query-param": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        "Name of the parameter that holds the query",
+        required=True,
+    ),
+    "return-type-param": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        "Parameter whose argument, such as `return_tp=int`, is the row type of that call "
+        "instead of an inferred one; `check` compares it with the query columns",
+    ),
+}
+"""Reference docs per key of a ``[[tool.sqlty.functions]]`` entry."""
 
 DEFAULT_EXCLUDE = (
     ".bzr",

@@ -1,4 +1,4 @@
-# Nullability checks
+# Nullability: lint checks against row types
 
 `nullable-mismatch` reports a row field that is not optional for a column that can be
 NULL; `redundant-optional` (opt-in) reports an optional field for a column that cannot be.

@@ -1,4 +1,4 @@
-# Nullability inference
+# Nullability: inference (all dialects)
 
 A column that can be NULL infers `T | None`: a schema column without `NOT NULL` or
 `PRIMARY KEY`, a column of the optional side of an outer join, an expression that can yield

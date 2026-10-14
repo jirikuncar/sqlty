@@ -1,4 +1,4 @@
-# Nullability of set operations and DML (PostgreSQL)
+# Nullability: set operations and DML (PostgreSQL)
 
 ```toml
 [tool.sqlty]

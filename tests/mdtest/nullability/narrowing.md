@@ -1,4 +1,4 @@
-# Narrowing nullability by conditions (PostgreSQL)
+# Nullability: narrowing by conditions (PostgreSQL)
 
 A row that survives a condition NULL cannot satisfy has a non-null column there.
 `WHERE`, `HAVING` and the `ON` of inner joins narrow the columns they

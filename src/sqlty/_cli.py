@@ -96,18 +96,19 @@ def build_parser() -> argparse.ArgumentParser:
     rewrite_parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit 1 if files need rewriting (don't modify files)",
+        help="Do not modify files; print `Would rewrite <file>` and exit 1 if any file needs "
+        "rewriting",
     )
     rewrite_parser.add_argument(
         "--diff",
         action="store_true",
-        help="Show diff without applying changes",
+        help="Print a unified diff instead of modifying files; exit 1 if any file would change",
     )
     rewrite_parser.add_argument(
         "--untyped",
         choices=["skip", "sentinel"],
         help="Row-returning queries of unknown row type: leave unwrapped (skip, default) "
-        "or wrap as SQL[UNTYPED](...) (sentinel). Config: untyped in [tool.sqlty]",
+        "or wrap as `SQL[UNTYPED](...)` (sentinel). Config: untyped in [tool.sqlty]",
     )
 
     # --- strip ---
@@ -119,12 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
     strip_parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit 1 if files contain SQL[T](...) wrappers",
+        help="Do not modify files; print `Would strip <file>` and exit 1 if any file would change",
     )
     strip_parser.add_argument(
         "--diff",
         action="store_true",
-        help="Show diff without applying changes",
+        help="Print a unified diff instead of modifying files; exit 1 if any file would change",
     )
 
     # --- check ---
@@ -136,13 +137,13 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Fix what can be fixed (the rules `sqlty rule` marks fixable, e.g. stale-rewrite, "
-        "stale-type, select-star with a schema), then report the rest",
+        help="Apply the fixable rules (see `sqlty rule`), write the files, then report what remains",
     )
     check_parser.add_argument(
         "--statistics",
         action="store_true",
-        help="After the diagnostics, count queries typed, partially typed, unparsed and skipped",
+        help="After the summary, print how many queries were typed, partially typed, unparsed "
+        "and skipped",
     )
 
     # --- rule ---
@@ -177,7 +178,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Schema .sql file, directory or glob for every path; repeat for several "
         "(default: [tool.sqlty] schema per project)",
     )
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Print each file that rewrite, strip or check --fix changes",
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
 
 

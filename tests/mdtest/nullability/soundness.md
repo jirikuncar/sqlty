@@ -1,4 +1,4 @@
-# Nullability: no false non-null (PostgreSQL)
+# Nullability: soundness, no false non-null (PostgreSQL)
 
 Where NULL can occur, the column is optional. These are the cases where a looser
 reading would call a nullable value non-null.

@@ -28,16 +28,19 @@ import-path = "db.sql"
 query-param = "query"
 ```
 
-| Key | Used by |
-|-----|---------|
-| [`dialect`](#dialect) | `rewrite`, `check` |
-| [`schema`](#schema) | `rewrite`, `check` |
-| [`rules`](#rules) | `check` |
-| [`import-style`](#import-style) | `rewrite`, `strip`, `check`, magic codec |
-| [`untyped`](#untyped) | `rewrite` |
-| [`type-modules`](#type-modules) | `check` |
-| [`functions`](#functions) | `check` ([helpers](../guide/helpers.md#helpers-you-cannot-annotate)) |
-| [`exclude`, `extend-exclude`](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` |
+<!-- generated:config-keys -->
+| Key | Type | Default | Used by | Summary |
+|-----|------|---------|---------|---------|
+| [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
+| [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to `pyproject.toml` |
+| [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
+| [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
+| [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
+| [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
+| [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
+| [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
+| [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
+<!-- /generated:config-keys -->
 
 ## `dialect`
 
@@ -121,21 +124,28 @@ import-path = "db.fetch_all"
 query-param = "query"
 ```
 
+<!-- generated:config-function-keys -->
 | Key | Required | Description |
 |-----|----------|-------------|
-| `import-path` | yes | Module path and function name, e.g. `"app.db.sql"`. Use `"__main__.sql"` or the file name for a script run directly |
+| `import-path` | yes | Module path and function name, e.g. `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. Use `"__main__.sql"` or the file name for a script run directly |
 | `query-param` | yes | Name of the parameter that holds the query |
-| `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it. `check` compares it with the query columns |
+| `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is the row type of that call instead of an inferred one; `check` compares it with the query columns |
+<!-- /generated:config-function-keys -->
 
 Entries without `import-path` or `query-param` are skipped with a warning.
 
 ## `exclude` and `extend-exclude`
 
-Directories the CLI walks skip these globs. `exclude` replaces the defaults
-(`.git`, `.hg`, `.svn`, `.venv`, `venv`, `.tox`, `.nox`, `node_modules`,
-`site-packages`, `__pypackages__`, `dist`, `_build`, `buck-out`, and the tool
-caches such as `.mypy_cache`, `.pytest_cache`, `.ruff_cache`); `extend-exclude`
-adds to whichever list applies. A glob without a slash matches a file or
+Directories the CLI walks skip these globs. `exclude` replaces the default
+list; `extend-exclude` adds to whichever list applies.
+
+The default excludes are:
+
+<!-- generated:config-default-excludes -->
+`.bzr`, `.direnv`, `.eggs`, `.git`, `.git-rewrite`, `.hg`, `.ipynb_checkpoints`, `.mypy_cache`, `.nox`, `.pants.d`, `.pyenv`, `.pytest_cache`, `.pytype`, `.ruff_cache`, `.svn`, `.tox`, `.venv`, `.vscode`, `__pypackages__`, `_build`, `buck-out`, `dist`, `node_modules`, `site-packages`, `venv`
+<!-- /generated:config-default-excludes -->
+
+A glob without a slash matches a file or
 directory name at any depth; one with a slash matches the path relative to
 the `pyproject.toml` that holds it, and `**` recurses. Files named on the
 command line are always processed.

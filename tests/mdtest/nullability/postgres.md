@@ -1,4 +1,4 @@
-# Nullability of expressions (PostgreSQL)
+# Nullability: PostgreSQL expressions
 
 An expression that can be NULL infers `T | None`. Expressions
 sqlty cannot read stay non-optional.

@@ -1,4 +1,4 @@
-# Nullability of expressions (MySQL and SQLite)
+# Nullability: MySQL and SQLite expressions
 
 The rules that do not depend on PostgreSQL syntax hold in every dialect; the ones
 that differ follow each database.
