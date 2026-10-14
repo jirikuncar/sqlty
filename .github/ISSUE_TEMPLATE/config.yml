@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/jirikuncar/sqlty/security/advisories/new
+    about: Report vulnerabilities privately, not as issues.
+  - name: Documentation
+    url: https://jirikuncar.github.io/sqlty/
+    about: Guides and reference.

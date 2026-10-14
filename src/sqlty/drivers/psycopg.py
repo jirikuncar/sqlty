@@ -1,7 +1,13 @@
 """Typed psycopg3 helpers driven by the row type of ``SQL[T]``."""
 
+import sys
 from collections.abc import Mapping, Sequence
-from typing import Any, LiteralString, TypeForm, cast, get_origin, is_typeddict, overload
+from typing import Any, LiteralString, cast, get_origin, is_typeddict, overload
+
+if sys.version_info >= (3, 15):
+    from typing import TypeForm
+else:
+    from typing_extensions import TypeForm
 
 from psycopg import Connection, Cursor
 from psycopg.abc import Params

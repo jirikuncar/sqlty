@@ -124,6 +124,8 @@ return_type_param = "form"
 the one holding the row type. When `pkg.db` is among the checked paths, both are
 looked up in the definition, so calls may pass them by position; otherwise
 they are checked only when passed by keyword (`fetch_all(query="...", form=int)`).
+For an `@overload`ed helper, positions come from the implementation, or from the
+first overload naming both parameters when the implementation does not.
 
 ## Helpers in other modules
 

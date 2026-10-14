@@ -142,6 +142,20 @@ def by_column(column: str) -> list[int]:
     return fetch_all(sql.SQL("SELECT {} FROM users").format(sql.Identifier(column)), int)
 ```
 
+`Any` as the row type opts out explicitly, so it is not reported:
+
+```python
+from typing import Annotated, Any, LiteralString
+from psycopg import sql
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: type[T], /) -> list[T]: ...
+
+def by_column(column: str) -> list[Any]:
+    # error:
+    return fetch_all(sql.SQL("SELECT {} FROM users").format(sql.Identifier(column)), Any)
+```
+
 A query that is no psycopg composition is skipped silently:
 
 ```python

@@ -1,0 +1,47 @@
+name: Bug report
+description: sqlty infers a wrong type, reports a wrong diagnostic, crashes or rewrites incorrectly.
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal Python source, SQL schema and `[tool.sqlty]` config, plus the command you ran.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Full command output or traceback.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: sqlty version
+      description: Output of `sqlty version`.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, SQL dialect.
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI disclosure
+      description: Was this report written with an AI tool? See CONTRIBUTING.md.
+      options:
+        - "No"
+        - "Yes, and I verified the reproduction myself"
+    validations:
+      required: true

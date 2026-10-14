@@ -120,6 +120,24 @@ class Run:
         extra = {"from sqlty import UNTYPED"} if style.startswith("from ") else set()
         return {"import datetime", "import typing", "import uuid", style, *extra}
 
+    @cached_property
+    def _helpers(self) -> core.HelperIndex | None:
+        """Labelled ``.py`` files as modules (``pkg/db.py`` is ``pkg.db``), plus ``functions``."""
+        modules = {
+            path.removesuffix(".py").replace("/", "."): text
+            for path, text in self.section.files.items()
+            if path.endswith(".py")
+        }
+        functions = self.section.settings.get("functions", [])
+        if not modules and not functions:
+            return None
+        index = core.HelperIndex()
+        for module, text in modules.items():
+            index.add(module.removesuffix(".__init__"), core.ParsedSource(text, module))
+        for f in functions:
+            index.register(f["import_path"], f["query_param"], f.get("return_type_param"))
+        return index
+
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
         diagnostics = [
@@ -132,6 +150,7 @@ class Run:
                 import_style=self.import_style,
                 untyped=self.untyped,
                 type_modules=self.type_modules,
+                helpers=self._helpers,
             )
         ]
         expected = [a for a in assertions if a.expected]

@@ -115,6 +115,17 @@ q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
 # stripped: q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER" + suffix)
 ```
 
+`SQL[Any]` opts out explicitly, so it is not reported.
+
+```python
+import typing
+from typing import Any
+from sqlty import SQL
+
+q = SQL[Any]("--sql\nSELECT 1::INTEGER" + suffix)
+r = SQL[typing.Any](r"--sql\nSELECT 1::INTEGER")
+```
+
 ## Interpolated or raw parts skip the whole concatenation
 
 ```python

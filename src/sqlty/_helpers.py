@@ -107,12 +107,22 @@ def _row_param(args: ast.arguments, returns: ast.expr | None) -> str | None:
     return None
 
 
+def _parameters(args: ast.arguments) -> set[str]:
+    return {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+
+
 def _kind(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     """``static``, ``class`` or ``instance`` for a method, by its decorators."""
     names = {_dotted(d) for d in node.decorator_list}
     if "staticmethod" in names:
         return "static"
     return "class" if "classmethod" in names else "instance"
+
+
+def _rank(node: ast.FunctionDef | ast.AsyncFunctionDef, complete: bool) -> tuple[bool, bool]:
+    """Sort key among definitions of one name: complete first, then non-``@overload``."""
+    overload = any((_dotted(d) or "").rpartition(".")[2] == "overload" for d in node.decorator_list)
+    return not complete, overload
 
 
 def _definitions(
@@ -160,7 +170,7 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
     annotated, marker = parsed.marker_names
     if not annotated or not marker:
         return {}
-    found: dict[str, Helper] = {}
+    found: dict[str, tuple[tuple[bool, bool], Helper]] = {}
     for name, node, kind in _definitions(parsed):
         args = node.args
         query = next(
@@ -172,8 +182,11 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
             None,
         )
         if query is not None:
-            found[name] = _helper(name, node, kind, query, _row_param(args, node.returns))
-    return found
+            row = _row_param(args, node.returns)
+            rank = _rank(node, row is not None)
+            if name not in found or rank < found[name][0]:
+                found[name] = rank, _helper(name, node, kind, query, row)
+    return {name: helper for name, (_, helper) in found.items()}
 
 
 class HelperIndex:
@@ -237,7 +250,8 @@ class HelperIndex:
 
         Used for ``[[tool.sqlty.functions]]``: the function needs no marked parameter. Its
         positional parameters are read from the definition when ``pkg.mod`` is indexed;
-        otherwise ``query`` and ``row`` can only be passed by keyword.
+        otherwise ``query`` and ``row`` can only be passed by keyword. Of ``@overload``
+        definitions, the first naming both is used unless the implementation names them.
 
         Example:
             >>> index = HelperIndex()
@@ -250,8 +264,10 @@ class HelperIndex:
         for i in known[:1] or [i for i in (len(parts) - 1, len(parts) - 2) if i > 0]:
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
             parsed = self.sources.get(module)
-            definition = next(
-                (d for d in _definitions(parsed) if d[0] == name) if parsed else iter(()), None
+            definition = min(
+                (d for d in (_definitions(parsed) if parsed else []) if d[0] == name),
+                key=lambda d: _rank(d[1], {query, row} - {None} <= _parameters(d[1].args)),
+                default=None,
             )
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)

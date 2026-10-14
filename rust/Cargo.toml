@@ -2,6 +2,9 @@
 name = "sqlty-core"
 version = "0.1.0"
 edition = "2021"
+description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
+license = "MIT"
+repository = "https://github.com/jirikuncar/sqlty"
 publish = false
 
 [lib]

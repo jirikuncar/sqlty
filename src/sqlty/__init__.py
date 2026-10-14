@@ -2,8 +2,15 @@
 
 import importlib.metadata
 import os
+import sys
 from collections.abc import Callable
-from typing import TypeForm, get_args, overload
+from typing import get_args, overload
+
+if sys.version_info >= (3, 15):
+    from typing import TypeForm
+else:
+    from typing_extensions import Sentinel as sentinel
+    from typing_extensions import TypeForm
 
 try:
     __version__ = importlib.metadata.version(__name__)

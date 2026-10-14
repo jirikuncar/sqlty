@@ -36,6 +36,7 @@ from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
+    from sqlty._helpers import HelperCall
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import TypeInfo
 
@@ -253,7 +254,7 @@ def _check_diagnostics(
             )
 
     for call in found:
-        if call.query is None:
+        if call.query is None and not _is_any(call):
             report(
                 "unchecked-query",
                 "psycopg query is not built from literals only, so it is not checked",
@@ -350,12 +351,20 @@ def query_statistics(
             counts[outcome] += 1
     for call in find_helper_calls(parsed, helpers, module):
         if call.query is None:
-            counts["unchecked-query"] += 1
+            if not _is_any(call):
+                counts["unchecked-query"] += 1
         elif not _MARKER.match(call.query) and (
             outcome := _outcome(call.query, dialect, schema_sql)
         ):
             counts[outcome] += 1
     return counts
+
+
+def _is_any(call: HelperCall) -> bool:
+    """Whether the row type is ``Any``: an explicit opt-out of checks."""
+    from sqlty._type_extractor import _ast_type
+
+    return call.row is not None and _ast_type(call.row, call.typing_aliases) is typing.Any
 
 
 def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:

@@ -2,6 +2,27 @@
 
 Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run and debug tests.
 
+## Quick reference
+
+```bash
+uv sync --all-groups               # install
+uv run pytest                      # all tests
+make test-mdtest                   # mdtest only
+make update-mdtest                 # update mdtest assertions
+make typecheck                     # mypy + ty on src and examples
+uv run pre-commit run --all-files  # all hooks (run before every commit)
+```
+
+- `SQL[T]` is a `str` subclass. It works anywhere a string works.
+- Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
+- Review rules for pull requests live in [REVIEW.md](REVIEW.md).
+
+## AI disclosure
+
+Follow the [AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions)
+policy: end every commit message with a `Co-Authored-By:` trailer naming the
+agent, and say in the pull request description which agent was used and for what.
+
 ## Running tests
 
 ```bash
@@ -110,7 +131,8 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
   ` - ` (the H1 title excluded).
 - Setup is inherited by nested headings, code is not: an unlabelled `toml`
   block is `[tool.sqlty]` config (unknown keys and rules are errors); a
-  `` `schema.sql`: `` label before a block makes it a file.
+  `` `schema.sql`: `` label before a block makes it a file; a labelled `.py`
+  file is a helper module (`pkg/db.py` is `pkg.db`) for `# error:` checks.
 - Each block with assertions is checked on its own, together with the
   assertion-free python blocks right before it (literate setup); later
   blocks are not part of it. Prose may sit between blocks.
