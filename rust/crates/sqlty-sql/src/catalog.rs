@@ -181,11 +181,6 @@ impl Catalog {
         }
     }
 
-    /// Whether `name` is a table or view, whatever its shape.
-    pub fn has_relation(&self, name: &str) -> bool {
-        self.find(name).is_some()
-    }
-
     /// The domain or enum `name`; for a domain, its base type.
     pub fn user_type(&self, name: &str) -> Option<&UserType> {
         lookup_key(&self.types, &self.search_path, self.norm(name))
@@ -289,7 +284,7 @@ fn key_of(parts: &[String], dialect: SqlDialect) -> String {
 }
 
 /// The name a lookup uses: `schema.name` or `name` in PostgreSQL, `name` elsewhere.
-pub fn name_key(name: &ObjectName, dialect: SqlDialect) -> String {
+fn name_key(name: &ObjectName, dialect: SqlDialect) -> String {
     key_of(&parts(name), dialect)
 }
 
@@ -1766,7 +1761,7 @@ mod tests {
     fn test_unknown_like_source_leaves_unknown_shape() {
         let c = pg("CREATE TABLE copy (LIKE missing);");
         assert!(c.table("copy").is_none());
-        assert!(c.has_relation("copy"));
+        assert!(c.find("copy").is_some());
     }
 
     #[test]
