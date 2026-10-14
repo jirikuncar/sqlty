@@ -76,3 +76,39 @@ SELECT g, id, max(id) FROM t GROUP BY id, ROLLUP (g)
 SELECT g FROM t WHERE g > 1 GROUP BY ROLLUP (g)
 -- inferred: tuple[int | None]
 ```
+
+## A negated IN or ANY does not narrow
+
+Over an empty subquery or array, `NOT IN` is true and `= ANY` is false for a NULL `a`.
+
+```sql
+SELECT a FROM t WHERE a NOT IN (SELECT g FROM t WHERE g > 100)
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT a FROM t WHERE NOT (a = ANY (ARRAY[1, 2]))
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT a FROM t WHERE NOT (a IN (SELECT g FROM t))
+-- inferred: tuple[int | None]
+```
+
+The positive forms still narrow, and so does a list.
+
+```sql
+SELECT a, id FROM t WHERE a IN (SELECT g FROM t)
+-- inferred: tuple[int, int]
+```
+
+```sql
+SELECT a FROM t WHERE a = ANY (ARRAY[1, 2])
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT a FROM t WHERE a NOT IN (1, 2)
+-- inferred: tuple[int]
+```

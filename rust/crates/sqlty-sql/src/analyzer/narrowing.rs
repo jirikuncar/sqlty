@@ -222,6 +222,31 @@ impl<'a> Analyzer<'a> {
                 learned.exprs.push(accessor.to_string());
                 learned
             }
+            // An empty subquery or array makes `x IN (...)` false and `x NOT IN (...)` true
+            // for a NULL `x`: only `x IN (...)` being true proves `x` is there.
+            Expr::InSubquery {
+                expr: inner,
+                negated,
+                ..
+            }
+            | Expr::InUnnest {
+                expr: inner,
+                negated,
+                ..
+            } => {
+                if truth != *negated {
+                    self.proven(inner, scope)
+                } else {
+                    Learned::default()
+                }
+            }
+            Expr::AnyOp { left, .. } => {
+                if truth {
+                    self.proven(left, scope)
+                } else {
+                    Learned::default()
+                }
+            }
             Expr::AllOp { .. } | Expr::IsNotDistinctFrom(..) | Expr::IsDistinctFrom(..) => {
                 Learned::default()
             }
@@ -277,10 +302,9 @@ impl<'a> Analyzer<'a> {
                         .union(learned);
                 }
             },
-            Expr::InList { expr: inner, .. }
-            | Expr::InSubquery { expr: inner, .. }
-            | Expr::InUnnest { expr: inner, .. } => return self.proven(inner, scope),
-            Expr::AnyOp { left, .. } => return self.proven(left, scope),
+            Expr::InList { expr: inner, .. } => return self.proven(inner, scope),
+            // Over an empty set they are false or true, not NULL, whatever the left side is.
+            Expr::InSubquery { .. } | Expr::InUnnest { .. } | Expr::AnyOp { .. } => return learned,
             Expr::Between {
                 expr: inner,
                 low,
