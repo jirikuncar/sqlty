@@ -81,6 +81,34 @@ impl Loader {
                 composites.entry(old.clone()).or_insert(fields);
             }
         }
+        let (functions, unknown_functions) = self.build_functions(&resolver, &relations);
+        Catalog {
+            relations,
+            types: user_types,
+            composites,
+            functions,
+            unknown_functions,
+            type_names: self
+                .types
+                .keys()
+                .chain(self.type_aliases.keys())
+                .map(|key| (key.clone(), ()))
+                .collect(),
+            search_path: path,
+            user_relations,
+            postgres: self.postgres,
+        }
+    }
+
+    /// The function part of the catalog: overloads of known shape, and the keys of those
+    /// of unknown shape. It reads user types (through `resolver`) and `SETOF table`
+    /// functions read `relations`, so a change to either may need it again.
+    pub(super) fn build_functions(
+        &self,
+        resolver: &Resolver<'_>,
+        relations: &FxHashMap<String, Relation>,
+    ) -> (FxHashMap<String, Vec<Function>>, FxHashMap<String, ()>) {
+        let (path, dialect) = (resolver.path, resolver.dialect);
         let mut functions = FxHashMap::default();
         for (key, overloads) in &self.functions {
             if self.unknown_functions.contains(key) {
@@ -100,9 +128,7 @@ impl Loader {
                     RawReturn::Scalar(ty) | RawReturn::SetOf(ty) => {
                         let rows = type_key(ty, dialect)
                             .filter(|_| matches!(f.returns, RawReturn::SetOf(_)))
-                            .and_then(|name| {
-                                lookup_key(&relations, &path, &name).map(str::to_string)
-                            })
+                            .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                             .and_then(|key| match relations.get(&key) {
                                 Some(Relation::Table(columns)) => Some(columns.clone()),
                                 _ => None,
@@ -137,26 +163,25 @@ impl Loader {
             }
             functions.insert(key.clone(), built);
         }
-        Catalog {
-            relations,
-            types: user_types,
-            composites,
-            functions,
-            unknown_functions: self
-                .unknown_functions
-                .iter()
-                .map(|key| (key.clone(), ()))
-                .collect(),
-            type_names: self
-                .types
-                .keys()
-                .chain(self.type_aliases.keys())
-                .map(|key| (key.clone(), ()))
-                .collect(),
-            search_path: path,
-            user_relations,
-            postgres: self.postgres,
-        }
+        let unknown = self
+            .unknown_functions
+            .iter()
+            .map(|key| (key.clone(), ()))
+            .collect();
+        (functions, unknown)
+    }
+
+    /// Resolve the functions of the cached catalog again, leaving its relations and
+    /// types as they are.
+    pub(super) fn refresh_functions(&mut self) {
+        let Some(mut cache) = self.cache.take() else {
+            return;
+        };
+        let (functions, unknown) =
+            self.build_functions(&cache.resolver(self.dialect), &cache.relations);
+        cache.functions = functions;
+        cache.unknown_functions = unknown;
+        self.cache = Some(cache);
     }
 
     /// The type a domain, enum or composite `key` gives its columns; domains over other

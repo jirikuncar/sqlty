@@ -11,7 +11,7 @@ use crate::values::{self, Value};
 use super::names::fold;
 use super::names::parts;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RawColumn {
     pub(super) name: String,
     pub(super) ident: String,

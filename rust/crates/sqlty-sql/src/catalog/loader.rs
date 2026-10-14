@@ -20,10 +20,10 @@ use crate::values::{self, Value};
 use super::columns::{
     apply_check, column_named, is_rowid_type, mark_not_null, merge_column, raw_column, RawColumn,
 };
-use super::names::{fold, key_of, lookup_key, parts, schema_for_new};
+use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
 use super::{Catalog, BUILTIN_SCHEMAS};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub(super) struct RawTable {
     pub(super) columns: Vec<RawColumn>,
     /// Tables it inherits from or is a partition of.
@@ -112,8 +112,9 @@ pub(super) struct Loader {
     pub(super) type_aliases: FxHashMap<String, String>,
     /// Objects whose columns or types the loader could not follow.
     pub(super) skipped: Vec<SkippedObject>,
-    /// Some function returns `SETOF table`, so its rows follow the table.
-    pub(super) setof_functions: bool,
+    /// Type names `SETOF` functions return: a function returning a table has its rows follow
+    /// the table, so a change to a relation with one of these names refreshes the functions.
+    pub(super) setof_names: FxHashSet<String>,
 }
 
 impl Loader {
@@ -129,7 +130,7 @@ impl Loader {
             cache: None,
             skipped: Vec::new(),
             type_aliases: FxHashMap::default(),
-            setof_functions: false,
+            setof_names: FxHashSet::default(),
         }
     }
 
@@ -476,27 +477,22 @@ impl Loader {
     /// without building it again.
     pub(super) fn set_relation(&mut self, key: String, rel: Option<Rel>) {
         let dialect = self.dialect;
-        let resolved = match &self.cache {
-            Some(cache) if !self.setof_functions => Some(
-                rel.as_ref()
-                    .map(|rel| cache.resolver(dialect).relation(rel)),
-            ),
-            _ => None,
-        };
+        let resolved = self.cache.as_ref().map(|cache| {
+            rel.as_ref()
+                .map(|rel| cache.resolver(dialect).relation(rel))
+        });
         match rel {
             Some(rel) => self.relations.insert(key.clone(), rel),
             None => self.relations.remove(&key),
         };
-        let Some(resolved) = resolved else {
-            self.cache = None;
-            return;
-        };
-        let Some(cache) = self.cache.as_mut() else {
+        let (Some(resolved), Some(cache)) = (resolved, self.cache.as_mut()) else {
             return;
         };
         let user = !BUILTIN_SCHEMAS
             .iter()
             .any(|schema| key.starts_with(&format!("{schema}.")));
+        let bare = key.split_once('.').map_or(key.as_str(), |(_, name)| name);
+        let feeds_functions = self.setof_names.contains(&key) || self.setof_names.contains(bare);
         match resolved {
             Some(relation) => {
                 if cache.relations.insert(key, relation).is_none() && user {
@@ -508,6 +504,9 @@ impl Loader {
                     cache.user_relations -= 1;
                 }
             }
+        }
+        if feeds_functions {
+            self.refresh_functions();
         }
     }
 
@@ -567,9 +566,9 @@ impl Loader {
                 });
                 if let Some(key) = key {
                     self.skipped.push(("function", name.join(".")));
-                    self.cache = None;
                     self.functions.entry(key.clone()).or_default();
                     self.unknown_functions.insert(key);
+                    self.refresh_functions();
                 }
                 true
             }
@@ -579,12 +578,14 @@ impl Loader {
     // ---- DROP -----------------------------------------------------------------------
 
     pub(super) fn drop_objects(&mut self, stmt: &Statement, path: &[String]) {
+        // Dropping a relation or a function updates the cached catalog in place; anything
+        // else (types, schemas) may change what columns resolve to.
         if !matches!(
             stmt,
             Statement::Drop {
                 object_type: ObjectType::Table | ObjectType::View | ObjectType::MaterializedView,
                 ..
-            }
+            } | Statement::DropFunction(_)
         ) {
             self.cache = None;
         }
@@ -653,6 +654,7 @@ impl Loader {
                         }
                     }
                 }
+                self.refresh_functions();
             }
             _ => {}
         }
@@ -691,7 +693,7 @@ impl Loader {
                 RawReturn::Scalar(dt.clone())
             }
             Some(FunctionReturnType::SetOf(dt)) => {
-                self.setof_functions = true;
+                self.setof_names.extend(type_key(dt, self.dialect));
                 RawReturn::SetOf(dt.clone())
             }
             _ if outs.len() >= 2 => RawReturn::Rows(outs),
@@ -699,6 +701,7 @@ impl Loader {
             _ => {
                 self.functions.entry(key.clone()).or_default();
                 self.unknown_functions.insert(key);
+                self.refresh_functions();
                 return;
             }
         };
@@ -725,6 +728,6 @@ impl Loader {
         let wanted = signature(&function);
         overloads.retain(|f| signature(f) != wanted);
         overloads.push(function);
-        self.cache = None;
+        self.refresh_functions();
     }
 }

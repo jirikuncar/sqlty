@@ -677,4 +677,61 @@ mod tests {
             }
         }
     }
+
+    fn view_cols(catalog: &Catalog, view: &str) -> Vec<String> {
+        catalog
+            .view(view)
+            .unwrap_or_else(|| panic!("no view {view}"))
+            .iter()
+            .map(|c| format!("{}:{}", c.name, c.sql_type.as_deref().unwrap_or("?")))
+            .collect()
+    }
+
+    /// A view created after the catalog was cached sees what the statements before it
+    /// did to functions, exactly as if the catalog had been built from scratch.
+    #[test]
+    fn test_views_see_functions_changed_after_the_cache_was_built() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
+            CREATE VIEW v2 AS SELECT f() AS x;
+            CREATE OR REPLACE FUNCTION f() RETURNS text LANGUAGE sql AS 'select 1';
+            CREATE VIEW v3 AS SELECT f() AS x;
+            DROP FUNCTION f();
+            CREATE VIEW v4 AS SELECT f() AS x;");
+        assert_eq!(view_cols(&c, "v2"), ["x:INT"]);
+        assert_eq!(view_cols(&c, "v3"), ["x:TEXT"]);
+        assert_eq!(view_cols(&c, "v4"), ["x:?"]);
+    }
+
+    /// `SETOF table` functions follow later changes to the table without a rebuild.
+    #[test]
+    fn test_setof_table_function_follows_alter_after_the_cache_was_built() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE FUNCTION rows() RETURNS SETOF t LANGUAGE sql AS 'select 1';
+            CREATE VIEW v1 AS SELECT * FROM rows();
+            ALTER TABLE t ADD COLUMN name text;
+            CREATE VIEW v2 AS SELECT * FROM rows();
+            ALTER TABLE t OWNER TO app;
+            CREATE VIEW v3 AS SELECT * FROM rows();");
+        assert_eq!(view_cols(&c, "v1"), ["id:INT"]);
+        assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
+        assert_eq!(view_cols(&c, "v3"), ["id:INT", "name:TEXT"]);
+    }
+
+    /// Functions do not force the catalog to be built again.
+    #[test]
+    fn test_functions_and_noop_alters_do_not_rebuild_the_catalog() {
+        super::resolve::BUILDS.with(|count| count.set(0));
+        let _ = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
+            CREATE FUNCTION g() RETURNS SETOF t LANGUAGE sql AS 'select 1';
+            ALTER TABLE t OWNER TO app;
+            ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES t (id);
+            CREATE VIEW v2 AS SELECT id FROM t;
+            DROP FUNCTION f();");
+        // One build for the first view, one at the end of the load.
+        assert_eq!(super::resolve::BUILDS.with(std::cell::Cell::get), 2);
+    }
 }

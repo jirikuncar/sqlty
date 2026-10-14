@@ -54,6 +54,11 @@ impl Loader {
         }
         for (name, mut table) in changed {
             table.unknown |= unsupported;
+            // An `ALTER` that changes nothing (owner, a foreign key, a default) leaves
+            // the resolved relation as it is.
+            if matches!(self.relations.get(&name), Some(Rel::Table(old)) if *old == table) {
+                continue;
+            }
             self.set_relation(name, Some(Rel::Table(table)));
         }
         // Views were typed against the constraints the table had.
