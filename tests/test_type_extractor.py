@@ -14,15 +14,13 @@ import pytest
 
 from sqlty._type_extractor import (
     TypeInfo,
-    _consistent,
-    _erase,
-    _is_subtype,
-    _newtype_assignments,
     check_type_compatibility,
     extract_type_definitions,
     field_accepts,
     parse_tuple_annotation,
 )
+from sqlty._type_extractor.ast_fields import _newtype_assignments
+from sqlty._type_extractor.subtype import _consistent, _erase, _is_subtype
 from sqlty.core import check_source
 
 TYPING = "typing" if sys.version_info >= (3, 15) else "typing_extensions"
@@ -33,7 +31,7 @@ def extract(source: str, *, runtime: bool) -> dict[str, TypeInfo]:
     with (
         contextlib.nullcontext()
         if runtime
-        else mock.patch("sqlty._type_extractor._resolve_class", return_value=None)
+        else mock.patch("sqlty._type_extractor.extract._resolve_class", return_value=None)
     ):
         return extract_type_definitions(source)
 

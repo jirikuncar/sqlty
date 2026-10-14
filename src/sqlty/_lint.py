@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TypedDict
 
 from sqlty._core import name_rules
 
@@ -259,19 +259,16 @@ RULES: dict[str, LintRule] = {
 }
 
 
-@dataclass
-class Diagnostic:
-    """A single lint diagnostic emitted by the checker."""
+class Diagnostic(TypedDict):
+    """One ``check_source`` result: a plain dict, so ``diag["rule"]`` keeps working.
+
+    ``severity`` is ``"error"`` or ``"warn"``; ``line`` is 1-based.
+    """
 
     rule: str
     message: str
-    severity: Severity
-    line: int | None = None
-    col: int | None = None
-
-    def __str__(self) -> str:
-        loc = f":{self.line}" if self.line else ""
-        return f"[{self.rule}]{loc} {self.message}"
+    severity: str
+    line: int
 
 
 class RuleConfig:
@@ -304,12 +301,6 @@ class RuleConfig:
     def is_enabled(self, rule_name: str) -> bool:
         """Check if a rule is enabled (not ignored)."""
         return self.severity(rule_name) != Severity.IGNORE
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> RuleConfig:
-        """Create RuleConfig from a [tool.sqlty] config dict."""
-        rules = config.get("rules", {})
-        return cls(overrides=rules)
 
 
 def rule_doc(name: str) -> str:
