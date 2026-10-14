@@ -110,8 +110,7 @@ one = Db.fetch_one("SELECT name FROM users", int)
 ## Helpers you cannot annotate
 
 A helper whose signature you cannot edit (a library, generated code) is
-registered in `pyproject.toml` instead, with the entry that
-[stub generation](stubs.md) also reads:
+registered in `pyproject.toml` instead:
 
 ```toml
 [[tool.sqlty.functions]]

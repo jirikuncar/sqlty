@@ -45,12 +45,10 @@ CONFIG_KEYS = frozenset(
     {
         "dialect",
         "schema",
-        "schemas",
         "import-style",
         "untyped",
         "type-modules",
         "rules",
-        "format-command",
         "functions",
     }
 )

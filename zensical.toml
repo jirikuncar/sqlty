@@ -27,7 +27,6 @@ nav = [
     { "Query helpers" = "guide/helpers.md" },
     { "Query parameters" = "guide/parameters.md" },
     { "psycopg" = "guide/psycopg.md" },
-    { "Generated stubs" = "guide/stubs.md" },
     { "Magic codec" = "guide/magic-codec.md" },
   ] },
   { "Recipes" = [

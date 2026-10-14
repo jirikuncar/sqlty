@@ -134,11 +134,9 @@ Print `sqlty <version>` and exit. `sqlty --version` does the same.
 | Command | Description |
 |---------|-------------|
 | `python -m sqlty.magic FILE` | Print the source the [magic codec](../guide/magic-codec.md) produces for `FILE` |
-| `python -m sqlty.registries [PATH]` | List functions registered in `[[tool.sqlty.functions]]` found under `PATH`, as `file:function` |
 
 ## Environment variables
 
 | Variable | Effect |
 |----------|--------|
-| `SQLTY_AUTO_GENERATE=1` | Generate `.pyi` stubs for registered `@sqlty` helpers at runtime (`1`, `true`, `yes`); see [Generated stubs](../guide/stubs.md) |
 | `SQLTY_NO_MAGIC` | Any non-empty value (even `0`) stops `sqlty.magic` from registering the magic codec on import |

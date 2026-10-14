@@ -1,7 +1,7 @@
 [project]
 name = "sqlty"
 dynamic = ["version"]
-description = "Type-safe SQL queries for Python with automatic stub generation"
+description = "Type-safe SQL queries for Python"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
@@ -14,7 +14,6 @@ keywords = [
     "type-safety",
     "static-analysis",
     "code-generation",
-    "stub-files",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -31,7 +30,7 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["asttokens>=3.0.0", "typing-extensions>=4.15.0; python_version < '3.15'"]
+dependencies = ["typing-extensions>=4.15.0; python_version < '3.15'"]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"

@@ -10,52 +10,15 @@ from typing import Any, TypedDict, cast
 SchemaSpec = str | list[str]
 
 
-class FunctionConfig(TypedDict, total=False):
-    """Configuration for a specific function to track.
+class FunctionConfigComplete(TypedDict, total=False):
+    """A ``[[tool.sqlty.functions]]`` entry: a helper whose string argument is a query.
 
-    Example:
-        {
-            "import_path": "db.pg_fetchvalue",
-            "query_param": "query",
-            "return_type_param": "return_tp",
-            "schema": "path/to/schema.sql",
-            "return_type_template": "list[{sqlty}]",
-            "imports": ["from typing import Any"]
-        }
-
-    Note: Class methods (e.g., "module.Class.method") are not currently supported.
-          Use module-level functions instead.
+    ``import_path`` and ``query_param`` are required; ``return_type_param`` is optional.
     """
 
-    import_path: (
-        str  # Full import path to the function, e.g., "module.submodule.function_name" (required)
-    )
-    query_param: str  # Name of the parameter containing the SQL query (required)
-    return_type_param: str  # Name of the parameter specifying the return type (optional)
-    schema: SchemaSpec  # Schema file, directory or glob, or a list of them (optional)
-    return_type_template: str  # Template for return type with {sqlty} placeholder (optional)
-    self_type_template: (
-        str  # TODO: Template for self parameter - currently not supported for methods (optional)
-    )
-    imports: list[str]  # List of import statements needed for the stub (optional)
-
-
-# Define required fields separately for type checking
-class _FunctionConfigRequired(TypedDict):
-    """Required fields for FunctionConfig."""
-
-    import_path: str
-    query_param: str
-
-
-class FunctionConfigComplete(_FunctionConfigRequired, total=False):
-    """Complete FunctionConfig with optional fields."""
-
-    return_type_param: str
-    schema: SchemaSpec
-    return_type_template: str
-    self_type_template: str
-    imports: list[str]
+    import_path: str  # Full import path, e.g. "module.function_name" (required)
+    query_param: str  # Parameter holding the SQL query (required)
+    return_type_param: str  # Parameter holding the row type (optional)
 
 
 class SQLTyConfig(TypedDict, total=False):
@@ -83,9 +46,7 @@ class SQLTyConfig(TypedDict, total=False):
 
     dialect: str
     schema: SchemaSpec  # Schema file, directory or glob, or a list of them
-    schemas: dict[str, SchemaSpec]  # registry_name -> schema entries
     rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
-    format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
     type_modules: list[str]  # modules whose imports may run to resolve row types
@@ -197,10 +158,6 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     if "dialect" in tool_config:
         config["dialect"] = str(tool_config["dialect"])
 
-    if "schemas" in tool_config and isinstance(tool_config["schemas"], dict):
-        # Convert all values to strings
-        config["schemas"] = {k: _schema_spec(v) for k, v in tool_config["schemas"].items()}
-
     # Single schema path (top-level convenience key)
     if "schema" in tool_config:
         config["schema"] = _schema_spec(tool_config["schema"])
@@ -208,10 +165,6 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     # Rule severity overrides: [tool.sqlty.rules]
     if "rules" in tool_config and isinstance(tool_config["rules"], dict):
         config["rules"] = {str(k): str(v) for k, v in tool_config["rules"].items()}
-
-    # Allow hyphenated key in pyproject: format-command
-    if "format-command" in tool_config:
-        config["format_command"] = str(tool_config["format-command"])  # expects {filename}
 
     # Allow hyphenated key in pyproject: import-style
     if "import-style" in tool_config:
@@ -250,27 +203,6 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
             if "return_type_param" in func_config:
                 function_dict["return_type_param"] = str(func_config["return_type_param"])
 
-            # Optional schema field
-            if "schema" in func_config:
-                function_dict["schema"] = _schema_spec(func_config["schema"])
-
-            # Optional return_type_template field
-            if "return_type_template" in func_config:
-                function_dict["return_type_template"] = str(func_config["return_type_template"])
-
-            # Optional self_type_template field
-            if "self_type_template" in func_config:
-                function_dict["self_type_template"] = str(func_config["self_type_template"])
-
-            # Optional imports field
-            if "imports" in func_config:
-                imports_value = func_config["imports"]
-                if isinstance(imports_value, list):
-                    function_dict["imports"] = [str(imp) for imp in imports_value]
-                elif isinstance(imports_value, str):
-                    # Support single string import
-                    function_dict["imports"] = [str(imports_value)]
-
             # Cast to FunctionConfigComplete after all fields are set
             function = cast(FunctionConfigComplete, function_dict)
             functions.append(function)
@@ -279,32 +211,3 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
             config["functions"] = functions
 
     return config
-
-
-def merge_config(config: SQLTyConfig, cli_args: dict[str, Any]) -> SQLTyConfig:
-    """Merge configuration from pyproject.toml with CLI arguments.
-
-    CLI arguments take precedence over config file.
-
-    Args:
-        config: Configuration from pyproject.toml
-        cli_args: Configuration from CLI arguments (non-None values only)
-
-    Returns:
-        Merged configuration
-    """
-    merged: SQLTyConfig = config.copy()
-
-    # CLI arguments override config file
-    if cli_args.get("dialect") is not None:
-        merged["dialect"] = str(cli_args["dialect"])
-    if cli_args.get("format_command") is not None:
-        merged["format_command"] = str(cli_args["format_command"])  # expects {filename}
-
-    # For schemas, merge CLI schema mappings with config schemas
-    if "schemas" in cli_args and cli_args["schemas"]:
-        merged_schemas = config.get("schemas", {}).copy()
-        merged_schemas.update(cli_args["schemas"])
-        merged["schemas"] = merged_schemas
-
-    return merged
