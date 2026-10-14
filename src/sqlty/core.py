@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
 from sqlty._core import (
@@ -85,6 +86,44 @@ def analyze_select(
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
+
+
+class ParamInfo(NamedTuple):
+    """A query parameter. ``name`` is set for ``%(name)s`` and ``:name``; types are ``None`` when unknown.
+
+    ``nullable`` is ``False`` when ``None`` cannot be passed (the parameter is stored in a
+    ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
+    """
+
+    number: int
+    name: str | None
+    python_type: str | None
+    sql_type: str | None
+    nullable: bool | None
+
+
+def analyze_params(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+) -> list[ParamInfo] | None:
+    """Parameters of a query with the type each takes from its context, or ``None`` when it doesn't parse.
+
+    Placeholders are ``%s``, ``%(name)s``, ``$1``, ``?`` and ``:name`` (``?`` outside
+    PostgreSQL, ``:name`` in SQLite). A parameter takes its type from the column it is
+    compared with or stored in, a cast, ``LIMIT``, ``IN`` lists, function arguments or an
+    array (``= ANY(%s)`` is ``list[T]``). ``number`` is 1-based, in order of appearance; a
+    named parameter used twice is one.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
+        >>> analyze_params("SELECT name FROM users WHERE id = %s AND age > %(min)s", schema_sql=schema)
+        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None)]
+        >>> [(p.python_type, p.nullable) for p in analyze_params("INSERT INTO users (id, name, age) VALUES ($1, $2, $3)", schema_sql=schema)]
+        [('int', False), ('str', False), ('int', True)]
+        >>> analyze_params("SELECT 1 FROM users WHERE id = ANY(%s)", schema_sql=schema)[0].python_type
+        'list[int]'
+    """
+    params = _analyze_params(sql, dialect=dialect, schema_sql=schema_sql)
+    return None if params is None else [ParamInfo(*param) for param in params]
 
 
 def query_diagnostics(

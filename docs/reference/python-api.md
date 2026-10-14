@@ -123,6 +123,7 @@ rows and `ValueError` when the row has more than one column.
 
 ```python
 from sqlty.core import (
+    analyze_params,
     analyze_select,
     check_source,
     expand_star,
@@ -151,10 +152,27 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 q = "--sql\nSELECT 1::INTEGER"
 ```
 
+`analyze_params` types each placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`)
+from its context. `nullable` is `False` for a parameter stored in a `NOT NULL`
+column, so `None` is not a valid argument:
+
+```pycon
+>>> from sqlty.core import analyze_params
+>>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
+>>> for p in analyze_params("INSERT INTO users (id, name, age) VALUES (%s, %s, %s)", schema_sql=schema):
+...     print(p.number, p.python_type, p.nullable)
+1 int False
+2 str False
+3 int True
+>>> analyze_params("SELECT name FROM users WHERE id = ANY(%(ids)s)", schema_sql=schema)
+[ParamInfo(number=1, name='ids', python_type='list[int]', sql_type='ARRAY<INT>', nullable=None)]
+```
+
 | Function | Returns |
 |----------|---------|
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
 | `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
+| `analyze_params(sql, *, dialect="postgres", schema_sql=None)` | Query parameters as `ParamInfo(number, name, python_type, sql_type, nullable)`, or `None` |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |

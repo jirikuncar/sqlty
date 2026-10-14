@@ -34,6 +34,7 @@ mod names;
 mod narrowing;
 mod nullability;
 mod operators;
+mod params;
 mod query;
 mod resolve;
 mod scope;
@@ -47,6 +48,7 @@ use operators::*;
 use query::*;
 
 pub use nullability::Nullability;
+pub use params::{analyze_params, Param};
 pub use query::Column;
 use scope::*;
 

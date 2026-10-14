@@ -17,6 +17,13 @@ use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 type NullableColumnTuple = (String, Option<String>, Option<String>, Option<bool>);
+type ParamTuple = (
+    usize,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+);
 
 /// A parsed schema and the tables and views it could not parse.
 struct LoadedSchema {
@@ -175,6 +182,38 @@ fn analyze_columns(
             })
             .collect()
     }))
+}
+
+/// Parameters of a query as `(index, name, python_type, sql_type, nullable)` tuples.
+///
+/// A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) takes its type from its context: the
+/// column it is compared with or stored in, a cast, `LIMIT`, `= ANY(%s)`. `index` is
+/// 1-based; `name` is set for named placeholders. `nullable` is False when the parameter is
+/// stored in a `NOT NULL` column, True for a nullable one, None when not known. Types are
+/// None when the context does not say. Returns None when the query doesn't parse.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn analyze_params(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Vec<ParamTuple>> {
+    let params = analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())?;
+    Some(
+        params
+            .into_iter()
+            .map(|param| {
+                let nullable = match param.nullability {
+                    analyzer::Nullability::Nullable => Some(true),
+                    analyzer::Nullability::NonNull => Some(false),
+                    analyzer::Nullability::Unknown => None,
+                };
+                (
+                    param.index,
+                    param.name,
+                    param.python_type,
+                    param.sql_type,
+                    nullable,
+                )
+            })
+            .collect(),
+    )
 }
 
 /// The rules `query_diagnostics` reports, which are off by default.
@@ -433,6 +472,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
