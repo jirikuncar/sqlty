@@ -35,7 +35,7 @@ impl<'a> Analyzer<'a> {
 
     /// Whether a CTE, view or subquery column called `name` is the one `column` (folded)
     /// names: PostgreSQL compares exactly, the other dialects ignore case.
-    fn same_column(&self, name: &str, column: &str) -> bool {
+    pub(super) fn same_column(&self, name: &str, column: &str) -> bool {
         if self.dialect == SqlDialect::Postgres {
             name == column
         } else {

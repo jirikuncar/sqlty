@@ -76,7 +76,7 @@ impl<'a> Analyzer<'a> {
     /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a
     /// `pg_catalog.` qualifier names the same built-in, and a quoted name that is not lower
     /// case (`"LOWER"`) is no built-in at all.
-    fn builtin_name(&self, name: &ObjectName) -> String {
+    pub(super) fn builtin_name(&self, name: &ObjectName) -> String {
         if self.dialect != SqlDialect::Postgres {
             return name.to_string().to_uppercase();
         }

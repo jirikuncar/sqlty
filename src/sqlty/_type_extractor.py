@@ -58,7 +58,10 @@ class TypeInfo:
     to its field, ``opaque`` names the fields whose validation names are not
     statically known (``AliasChoices``, ``alias_generator``) and ``forbid``
     is ``extra="forbid"``. ``lax`` names the fields of a Pydantic model or
-    dataclass that accept lax-mode conversions (not strict).
+    dataclass that accept lax-mode conversions (not strict). ``annotations`` holds
+    each field's annotation from source, qualifiers stripped and ``| None`` kept, and
+    ``aliases`` the typing names of the source it was read from (see
+    ``ParsedSource.typing_aliases``); JSON shapes are checked against them.
     """
 
     __slots__ = (
@@ -82,6 +85,8 @@ class TypeInfo:
         "opaque",
         "forbid",
         "lax",
+        "annotations",
+        "aliases",
     )
 
     def __init__(
@@ -116,6 +121,8 @@ class TypeInfo:
         self.opaque: frozenset[str] = frozenset()
         self.forbid = False
         self.lax: frozenset[str] = frozenset()
+        self.annotations: dict[str, ast.expr] = {}
+        self.aliases: dict[str, str] = {}
 
     def field_for(self, column: str) -> str | None:
         """The field a query column fills, by name (a Pydantic alias counts); None if none does."""
@@ -269,6 +276,8 @@ def extract_type_definitions(
         if (config := _pydantic_config(node, kind, imports)) is not None:
             info.lax = _lax_fields(node, config, aliases, imports)
         info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
+        info.annotations = _ast_annotations(nodes, aliases)
+        info.aliases = aliases
         hints = None
         if (fields or is_typeddict) and (
             resolved := _resolve_class(nodes, import_stmts, parsed.text, helpers)
@@ -1299,6 +1308,16 @@ def _ast_key_types(
         item.target.id: _ast_type(
             _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes, imports
         )
+        for node in nodes
+        for item in node.body
+        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+    }
+
+
+def _ast_annotations(nodes: list[ast.ClassDef], aliases: dict[str, str]) -> dict[str, ast.expr]:
+    """Field annotations of a class lineage (bases first), qualifiers stripped, ``| None`` kept."""
+    return {
+        item.target.id: _unwrap_qualifiers_ast(item.annotation, aliases)[0]
         for node in nodes
         for item in node.body
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)

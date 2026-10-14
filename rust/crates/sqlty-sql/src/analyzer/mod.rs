@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic, NameRule};
+use crate::json::{JsonField, JsonShape, JsonValue};
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, AccessExpr, ArrayElemTypeDef, BinaryOperator, DataType, Expr, FromTable,
@@ -30,6 +31,7 @@ use std::sync::LazyLock;
 mod dml;
 mod expr;
 mod functions;
+mod json;
 mod names;
 mod narrowing;
 mod nullability;

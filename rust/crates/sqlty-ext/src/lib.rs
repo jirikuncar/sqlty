@@ -16,7 +16,13 @@ use rewriter::ImportStyle;
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
-type NullableColumnTuple = (String, Option<String>, Option<String>, Option<bool>);
+type NullableColumnTuple = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<String>,
+);
 
 /// A parsed schema and the tables and views it could not parse.
 struct LoadedSchema {
@@ -144,7 +150,7 @@ fn analyze_select(
     }))
 }
 
-/// Result columns of a query as `(name, python_type, sql_type, nullable)` tuples.
+/// Result columns of a query as `(name, python_type, sql_type, nullable, json_shape)` tuples.
 ///
 /// `python_type` is never spelled `T | None` here, unlike in `analyze_select`: `nullable` says
 /// whether the column can be NULL (True), cannot (False), or is not known (None: an
@@ -171,7 +177,13 @@ fn analyze_columns(
                     analyzer::Nullability::NonNull => Some(false),
                     analyzer::Nullability::Unknown => None,
                 };
-                (col.name, col.python_type, col.sql_type, nullable)
+                (
+                    col.name,
+                    col.python_type,
+                    col.sql_type,
+                    nullable,
+                    col.json.map(|shape| shape.to_json()),
+                )
             })
             .collect()
     }))
