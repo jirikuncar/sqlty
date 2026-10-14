@@ -15,7 +15,7 @@ import re
 import typing
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
@@ -37,7 +37,7 @@ from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._drivers import find_driver_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
-from sqlty._lint import NAME_RULES
+from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import mismatch
 from sqlty._source import ParsedSource, is_any
 
@@ -248,7 +248,7 @@ def check_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
-) -> list[dict[str, str | int | None]]:
+) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
     A column that can be NULL infers as ``T | None`` (``stale-type`` compares against
@@ -316,24 +316,25 @@ def _check_diagnostics(
     helpers: HelperIndex | None,
     module: str | None,
     type_modules: Iterable[str] | None = None,
-) -> list[dict[str, str | int | None]]:
+) -> list[Diagnostic]:
     """Every diagnostic before inline suppression."""
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import extract_type_definitions
 
-    diagnostics = (
-        _check_source(
-            parsed.text,
-            dialect=dialect,
-            schema_sql=schema_sql,
-            rules=rules,
-            import_style=import_style,
-            untyped=untyped,
-            any_calls=parsed.any_calls(import_style),
+    diagnostics: list[Diagnostic] = []
+    if parsed.may_need_rust_check(import_style):
+        diagnostics = cast(
+            "list[Diagnostic]",
+            _check_source(
+                parsed.text,
+                dialect=dialect,
+                schema_sql=schema_sql,
+                rules=rules,
+                import_style=import_style,
+                untyped=untyped,
+                any_calls=parsed.any_calls(import_style),
+            ),
         )
-        if parsed.may_need_rust_check(import_style)
-        else []
-    )
     found = find_helper_calls(parsed, helpers, module)
     driver_calls = find_driver_calls(parsed)
     calls = [call for call in found if call.query is not None]
@@ -760,9 +761,9 @@ def _value_diagnostics(
 
 def _apply_suppressions(
     parsed: ParsedSource,
-    diagnostics: list[dict[str, str | int | None]],
+    diagnostics: list[Diagnostic],
     rules: dict[str, str] | None,
-) -> list[dict[str, str | int | None]]:
+) -> list[Diagnostic]:
     """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
     from sqlty._lint import RuleConfig
 
@@ -770,15 +771,14 @@ def _apply_suppressions(
     if not ignores:
         return diagnostics
 
-    kept: list[dict[str, str | int | None]] = []
+    kept: list[Diagnostic] = []
     used: set[tuple[int, str | None]] = set()
     for diag in diagnostics:
-        line = diag["line"]
-        ignore = ignores.get(line) if isinstance(line, int) else None
+        ignore = ignores.get(diag["line"])
         if ignore is None or (ignore.rules is not None and diag["rule"] not in ignore.rules):
             kept.append(diag)
         else:
-            used.add((ignore.line, None if ignore.rules is None else str(diag["rule"])))
+            used.add((ignore.line, None if ignore.rules is None else diag["rule"]))
 
     rule_config = RuleConfig(overrides=rules)
     if rule_config.is_enabled("unused-ignore"):

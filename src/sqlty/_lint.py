@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TypedDict
 
 from sqlty._core import name_rules
 
@@ -256,6 +257,18 @@ RULES: dict[str, LintRule] = {
         description="# sqlty: ignore comment, or rule in one, that suppresses no diagnostic",
     ),
 }
+
+
+class Diagnostic(TypedDict):
+    """One ``check_source`` result: a plain dict, so ``diag["rule"]`` keeps working.
+
+    ``severity`` is ``"error"`` or ``"warn"``; ``line`` is 1-based.
+    """
+
+    rule: str
+    message: str
+    severity: str
+    line: int
 
 
 class RuleConfig:
