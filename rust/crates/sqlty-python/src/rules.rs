@@ -19,6 +19,7 @@ pub enum Rule {
     TypeddictKeyMismatch,
     TypeddictInheritance,
     NullableMismatch,
+    JsonShapeMismatch,
     RedundantOptional,
     SelectStar,
     SelectStarNoSchema,
@@ -38,13 +39,14 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 25] = [
+    pub const ALL: [Rule; 26] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
         Rule::TypeddictKeyMismatch,
         Rule::TypeddictInheritance,
         Rule::NullableMismatch,
+        Rule::JsonShapeMismatch,
         Rule::RedundantOptional,
         Rule::SelectStar,
         Rule::SelectStarNoSchema,
@@ -75,6 +77,7 @@ impl Rule {
             Rule::TypeddictKeyMismatch => "typeddict-key-mismatch",
             Rule::TypeddictInheritance => "typeddict-inheritance",
             Rule::NullableMismatch => "nullable-mismatch",
+            Rule::JsonShapeMismatch => "json-shape-mismatch",
             Rule::RedundantOptional => "redundant-optional",
             Rule::SelectStar => "select-star",
             Rule::SelectStarNoSchema => "select-star-no-schema",
@@ -105,6 +108,7 @@ impl Rule {
             | Rule::TypeddictKeyMismatch
             | Rule::TypeddictInheritance
             | Rule::NullableMismatch
+            | Rule::JsonShapeMismatch
             | Rule::SelectStarNoSchema => Severity::Error,
             Rule::ColumnNameMismatch
             | Rule::SelectStar

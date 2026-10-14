@@ -12,6 +12,7 @@ Configuration via pyproject.toml:
     column-type-mismatch = "error"      # default
     column-name-mismatch = "warn"       # default
     nullable-mismatch = "error"         # default
+    json-shape-mismatch = "error"       # default
     redundant-optional = "ignore"       # default
     typeddict-key-mismatch = "error"    # default
     typeddict-inheritance = "error"     # default
@@ -106,6 +107,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="Row type field is not optional but its query column can be NULL",
+    ),
+    "json-shape-mismatch": LintRule(
+        name="json-shape-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Row type field cannot hold the JSON a query column builds",
     ),
     "redundant-optional": LintRule(
         name="redundant-optional",

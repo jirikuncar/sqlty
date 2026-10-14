@@ -14,7 +14,7 @@ import ast
 import re
 import typing
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_columns as _analyze_columns
@@ -101,8 +101,8 @@ def json_shapes(
     Example:
         >>> json_shapes("SELECT jsonb_build_object('id', 1, 'name', 'x') AS doc")
         [('doc', '{id: integer, name: string}')]
-        >>> json_shapes("SELECT coalesce(jsonb_agg(x::TEXT), '[]') AS xs FROM t")
-        [('xs', '[string | null]')]
+        >>> json_shapes("SELECT coalesce(jsonb_agg(1), '[]') AS xs")
+        [('xs', '[integer]')]
     """
     from sqlty._json_shape import render
 
@@ -378,7 +378,9 @@ def _check_diagnostics(
     for line, name, query in user_queries:
         if (columns := _columns(query, dialect, schema_sql)) is None:
             continue
-        for rule, message in _structural_diagnostics(name, type_defs[name], columns, rule_config):
+        for rule, message in _structural_diagnostics(
+            name, type_defs[name], columns, rule_config, type_defs
+        ):
             report(rule, message, line)
 
     shapes: dict[str, _RowShape | None] = {}
@@ -389,7 +391,7 @@ def _check_diagnostics(
             continue
         if row not in shapes:
             shapes[row] = _row_shape(call.row, row, call.typing_aliases)
-        for rule, message in _value_diagnostics(shapes[row], columns, rule_config):
+        for rule, message in _value_diagnostics(shapes[row], columns, rule_config, type_defs):
             report(rule, message, call.line)
     return diagnostics
 
@@ -498,13 +500,43 @@ def _nullability_diagnostics(
     return []
 
 
+def _json_diagnostics(
+    label: str,
+    annotation: ast.expr | None,
+    col: _RowColumn,
+    type_defs: Mapping[str, TypeInfo],
+    aliases: Mapping[str, str],
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """``json-shape-mismatch`` for one field and a JSON column of known shape.
+
+    ``label`` reads ``<field>`` or ``<row> item <i>`` and is followed by ``is <annotation>``.
+    An annotation that can't be read is never reported.
+    """
+    from sqlty._json_shape import json_problems, summarize
+
+    if col.json_shape is None or annotation is None or not rules.is_enabled("json-shape-mismatch"):
+        return []
+    problems = json_problems(col.json_shape, annotation, type_defs, aliases, col.name)
+    if not problems:
+        return []
+    return [
+        (
+            "json-shape-mismatch",
+            f"{label} is {ast.unparse(annotation)} but query column '{col.name}' builds JSON "
+            f"that does not fit: {summarize(problems)}",
+        )
+    ]
+
+
 class _RowShape(NamedTuple):
     """The row type of helper calls, resolved once per file for every call that spells it."""
 
     text: str
     is_tuple: bool
-    targets: list[tuple[str, str, typing.Any]]
+    targets: list[tuple[str, str, typing.Any, ast.expr]]
     accepts: dict[tuple[int, str], bool]
+    aliases: Mapping[str, str]
 
 
 def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape | None:
@@ -521,18 +553,21 @@ def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape |
             return None
         annotations = [ast.unparse(item) for item in items]
         targets = [
-            (f"{text} item {i} is {annotation}", annotation, _ast_type(item, aliases))
+            (f"{text} item {i} is {annotation}", annotation, _ast_type(item, aliases), item)
             for i, (item, annotation) in enumerate(zip(items, annotations, strict=True))
         ]
-        return _RowShape(text, True, targets, {})
+        return _RowShape(text, True, targets, {}, aliases)
     resolved = _ast_type(row, aliases)
     if resolved is None or resolved in _CONTAINERS or typing.get_args(resolved):
         return None
-    return _RowShape(text, False, [(f"{text} is expected", text, resolved)], {})
+    return _RowShape(text, False, [(f"{text} is expected", text, resolved, row)], {}, aliases)
 
 
 def _value_diagnostics(
-    shape: _RowShape | None, columns: list[_RowColumn], rules: RuleConfig
+    shape: _RowShape | None,
+    columns: list[_RowColumn],
+    rules: RuleConfig,
+    type_defs: Mapping[str, TypeInfo],
 ) -> list[tuple[str, str]]:
     """Compare the row type of a helper call with the query columns."""
     from sqlty._type_extractor import _accepts
@@ -548,9 +583,11 @@ def _value_diagnostics(
             )
         ]
     found = []
-    for i, ((label, annotation, resolved), col) in enumerate(
+    for i, ((label, annotation, resolved, node), col) in enumerate(
         zip(shape.targets, columns, strict=True)
     ):
+        item = f"{shape.text} item {i}" if shape.is_tuple else "row type"
+        found.extend(_json_diagnostics(item, node, col, type_defs, shape.aliases, rules))
         if resolved is None or not col.python_type:
             continue
         key = (i, col.python_type)
@@ -564,7 +601,6 @@ def _value_diagnostics(
                 )
             )
         else:
-            item = f"{shape.text} item {i}" if shape.is_tuple else "row type"
             found.extend(_nullability_diagnostics(item, resolved, col, rules))
     return found
 
@@ -630,7 +666,11 @@ def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list
 
 
 def _structural_diagnostics(
-    type_name: str, info: TypeInfo, columns: list[_RowColumn], rules: RuleConfig
+    type_name: str,
+    info: TypeInfo,
+    columns: list[_RowColumn],
+    rules: RuleConfig,
+    type_defs: Mapping[str, TypeInfo],
 ) -> list[tuple[str, str]]:
     """Compare a user type with query columns, returning ``(rule, message)`` pairs.
 
@@ -640,7 +680,9 @@ def _structural_diagnostics(
     violation, except that Pydantic models ignore it and only ``extra_items``
     admits it (type-checked against it). Key-set violations are
     ``typeddict-key-mismatch``. NamedTuples match by position.
-    A reported count mismatch suppresses the per-column checks.
+    A reported count mismatch suppresses the per-column checks. A column that builds JSON
+    of a known shape is also checked against the field's annotation, nested types looked up
+    in ``type_defs`` (``json-shape-mismatch``).
     """
     from sqlty._type_extractor import check_type_compatibility, field_type
 
@@ -674,7 +716,11 @@ def _structural_diagnostics(
                     f"'{col.name}' infers {col.python_type}",
                 )
             ]
-        return _nullability_diagnostics(f"{type_name}.{field}", field_type(info, field), col, rules)
+        return _nullability_diagnostics(
+            f"{type_name}.{field}", field_type(info, field), col, rules
+        ) + _json_diagnostics(
+            f"{type_name}.{field}", info.annotations.get(field), col, type_defs, info.aliases, rules
+        )
 
     if not by_name:
         pairs = list(zip(fields, columns, strict=False))

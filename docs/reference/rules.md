@@ -18,6 +18,7 @@ stale-type = "error"
 | [`column-type-mismatch`](#column-type-mismatch) | Row type | error | no | Row type field can't hold its column's values |
 | [`column-name-mismatch`](#column-name-mismatch) | Row type | warn | no | `NamedTuple` field name differs from its column name |
 | [`nullable-mismatch`](#nullable-mismatch) | Row type | error | no | Row type field is not optional but its column can be NULL |
+| [`json-shape-mismatch`](#json-shape-mismatch) | Row type | error | no | Row type field can't hold the JSON its column builds |
 | [`redundant-optional`](#redundant-optional) | Row type | ignore | no | Row type field is optional but its column cannot be NULL |
 | [`typeddict-key-mismatch`](#typeddict-key-mismatch) | Row type | error | no | Columns don't fit the fields of a TypedDict, dataclass or Pydantic model |
 | [`typeddict-inheritance`](#typeddict-inheritance) | Row type | error | no | TypedDict subclass breaks a closed or `extra_items` base (PEP 728) |
@@ -179,6 +180,43 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 
 Fix: annotate `name: str | None`, or filter or `COALESCE` the NULLs away.
+
+### json-shape-mismatch
+
+Default: error. A column built with `jsonb_build_object()`, `jsonb_agg()`, `to_jsonb()` and
+the like has a known JSON shape, which the row type field must be able to hold: nested
+`TypedDict`s, `list[...]` and `dict[str, ...]` are followed. Scalars of the wrong type,
+members that can be `null`, required keys the query may omit and undeclared keys are
+reported with their path. Columns of unknown shape and fields typed `Any` are not
+reported; see [JSON shapes](../guide/json-shapes.md) and `sqlty rule json-shape-mismatch`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (id INTEGER PRIMARY KEY, total NUMERIC(10, 2) NOT NULL);
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Doc(TypedDict):
+    id: int
+    total: int
+
+class Order(TypedDict):
+    doc: Doc
+
+# error: [json-shape-mismatch] "Order.doc is Doc but query column 'doc' builds JSON that does not fit: doc.total is int but the query builds a number"
+q = SQL[Order]("--sql\nSELECT jsonb_build_object('id', id, 'total', total) AS doc FROM orders")
+```
+
+Fix: annotate `total: float`, or cast the value in the query.
 
 ### redundant-optional
 
