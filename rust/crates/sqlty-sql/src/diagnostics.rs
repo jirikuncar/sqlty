@@ -102,6 +102,14 @@ impl Diagnostics {
         }
     }
 
+    /// Account for `count` untyped results a memoized analysis explained when it first ran.
+    pub(crate) fn add_explained(&self, count: usize) {
+        let mut inner = self.0.borrow_mut();
+        if inner.enabled {
+            inner.explained += count;
+        }
+    }
+
     /// How many untyped results are accounted for; unchanged across an expression
     /// that went untyped means nothing explains it.
     pub(crate) fn explained(&self) -> usize {

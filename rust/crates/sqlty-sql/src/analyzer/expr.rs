@@ -292,11 +292,14 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
-            Expr::Subquery(query) => Ok(self
-                .correlated(scope)
-                .query_columns(query)?
-                .and_then(|columns| columns.into_iter().next())
-                .map_or((None, None), |col| (col.python_type, col.sql_type))),
+            Expr::Subquery(query) => {
+                Ok(
+                    first_column(&self.subquery_columns(query, scope, Reporting::Record))?
+                        .map_or((None, None), |col| {
+                            (col.python_type.clone(), col.sql_type.clone())
+                        }),
+                )
+            }
             Expr::Case {
                 conditions,
                 else_result,

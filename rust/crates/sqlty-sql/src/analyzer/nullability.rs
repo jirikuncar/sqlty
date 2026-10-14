@@ -32,7 +32,7 @@ impl Nullability {
 }
 
 /// What a SELECT's FROM and conditions tell about NULLs.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Facts {
     /// References of relations an outer join null-extends: all their columns can be NULL.
     null_extended: Vec<String>,
@@ -705,9 +705,7 @@ impl<'a> Analyzer<'a> {
 
     /// Nullability of the first column of a subquery, as its own query reads it.
     fn subquery_column(&self, query: &Query, scope: &Scope) -> Nullability {
-        let mut inner = self.correlated(scope);
-        inner.diag = Diagnostics::default();
-        match inner.query_columns(query) {
+        match &*self.subquery_columns(query, scope, Reporting::Silent) {
             Ok(Some(columns)) => columns
                 .first()
                 .map_or(Nullability::Unknown, |col| col.nullability),

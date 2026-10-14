@@ -222,19 +222,24 @@ pub(super) fn resolve(reference: &str, scope: &Scope) -> String {
 /// Cloned for every SELECT, subquery and CTE the analyzer descends into, so the map and its
 /// column lists are shared; an insert copies the map (pointers only) when it is shared.
 #[derive(Clone, Default)]
-pub(super) struct Virtuals(Rc<HashMap<String, Rc<[Column]>>>);
+pub(super) struct Virtuals {
+    tables: Rc<HashMap<String, Rc<[Column]>>>,
+    /// Subqueries analyzed against exactly these tables; any insert starts a fresh memo.
+    pub(super) memo: SubqueryMemo,
+}
 
 impl Virtuals {
     pub(super) fn get(&self, table: &str) -> Option<&[Column]> {
-        self.0.get(table).map(|columns| &**columns)
+        self.tables.get(table).map(|columns| &**columns)
     }
 
     pub(super) fn contains_key(&self, table: &str) -> bool {
-        self.0.contains_key(table)
+        self.tables.contains_key(table)
     }
 
     pub(super) fn insert(&mut self, table: String, columns: Vec<Column>) {
-        Rc::make_mut(&mut self.0).insert(table, columns.into());
+        Rc::make_mut(&mut self.tables).insert(table, columns.into());
+        self.memo = SubqueryMemo::default();
     }
 }
 

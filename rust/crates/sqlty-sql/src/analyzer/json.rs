@@ -138,12 +138,13 @@ impl<'a> Analyzer<'a> {
                 ..
             } if is_json_type(data_type) => self.json_operand(inner, scope),
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_shape(expr, scope)),
-            Expr::Subquery(query) => Ok(self
-                .correlated(scope)
-                .query_columns(query)?
-                .and_then(|columns| columns.into_iter().next())
-                .and_then(|col| col.json)
-                .unwrap_or(JsonShape::Any)),
+            Expr::Subquery(query) => {
+                Ok(
+                    first_column(&self.subquery_columns(query, scope, Reporting::Record))?
+                        .and_then(|col| col.json.clone())
+                        .unwrap_or(JsonShape::Any),
+                )
+            }
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::Arrow,
