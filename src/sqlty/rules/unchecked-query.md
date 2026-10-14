@@ -6,7 +6,8 @@ Default severity: **warn**
 
 Flags `--sql` queries that are not plain string literals: a raw or bytes
 string, alone or implicitly concatenated with others, or a `SQL[T](...)`
-argument that holds anything besides string literals.
+argument that holds anything besides string literals. `SQL[Any](...)` is not
+flagged, nor is a psycopg composition passed to a helper whose row type is `Any`.
 
 ## Why is this bad?
 
@@ -27,4 +28,6 @@ r = r"--sql\nSELECT id::INTEGER FROM users WHERE name ~ '\d'"
 ## Fix
 
 Write the query as one plain literal, or as implicitly concatenated plain
-literals, and pass values as query parameters.
+literals, and pass values as query parameters. A query that must stay dynamic
+can opt out with `SQL[Any](...)`, or `Any` as the row type of a helper called
+with a psycopg composition.
