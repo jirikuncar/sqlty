@@ -517,8 +517,8 @@ impl<'a> Analyzer<'a> {
                         };
                         any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
                     }
-                    // MySQL's null-safe equality.
-                    Spaceship => Nullability::NonNull,
+                    // MySQL's null-safe equality; a vector distance in PostgreSQL.
+                    Spaceship if self.dialect == SqlDialect::MySql => Nullability::NonNull,
                     // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
                     Divide | Modulo | MyIntegerDivide
                         if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
@@ -916,8 +916,12 @@ mod tests {
             "-NN-"
         );
         assert_eq!(
-            marks_with("SELECT b / b, id % id FROM u2", "postgres", schema),
-            "--"
+            marks_with(
+                "SELECT b / b, id % id, id <=> a FROM u2",
+                "postgres",
+                schema
+            ),
+            "--N"
         );
     }
 

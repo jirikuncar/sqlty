@@ -156,3 +156,13 @@ SELECT lag(id) OVER (ORDER BY id), lag(id, 1, 0) OVER (ORDER BY id), lead(id, 1,
 SELECT id / g, id % g FROM t
 -- inferred: tuple[int, int]
 ```
+
+## The pgvector distance operator is strict
+
+`<=>` is null-safe equality only in MySQL. In PostgreSQL it is a strict operator, NULL for a
+NULL operand.
+
+```sql
+SELECT CAST(a <=> g AS TEXT), CAST(g <=> g AS TEXT) FROM t
+-- inferred: tuple[str | None, str]
+```
