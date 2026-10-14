@@ -6,6 +6,7 @@
 //! `DECIMAL(10, 2)`), as `SELECT *` expansion writes them back into queries.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -160,7 +161,29 @@ impl SchemaColumn {
 pub type SkippedObject = (&'static str, String);
 
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
-type Inferred<T> = Result<T, String>;
+type Inferred<T> = Result<T, InferError>;
+
+/// Why a query's types cannot be inferred at all, as opposed to being unknown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InferError {
+    /// `SUM(column)` names a column that is not in the schema table it reads.
+    SumColumnNotInSchema { column: String, table: String },
+}
+
+impl fmt::Display for InferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InferError::SumColumnNotInSchema { column, table } => write!(
+                f,
+                "Column '{column}' not found in table '{table}' in schema. \
+                 If you want to query columns not in the schema, use an explicit cast: \
+                 SUM({column}::TYPE)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InferError {}
 
 /// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -827,6 +850,18 @@ mod tests {
 
     fn infer(sql: &str) -> Option<String> {
         infer_type(sql, "postgres", &None).unwrap()
+    }
+
+    #[test]
+    fn sum_of_a_column_missing_from_the_schema_is_an_error() {
+        let (schema, _) = load_schema_with_skipped("CREATE TABLE users (id INT)", "postgres");
+        let error =
+            infer_type("SELECT SUM(nope) FROM users", "postgres", &Some(schema)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Column 'nope' not found in table 'users' in schema. If you want to query \
+             columns not in the schema, use an explicit cast: SUM(nope::TYPE)"
+        );
     }
 
     #[test]

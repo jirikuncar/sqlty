@@ -96,7 +96,7 @@ fn rule_config(rules: Option<HashMap<String, String>>) -> PyResult<RuleConfig> {
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
     analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
-        .map_err(PyRuntimeError::new_err)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -113,7 +113,7 @@ fn analyze_select(
     schema_sql: Option<&str>,
 ) -> PyResult<Option<Vec<ColumnTuple>>> {
     let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
-        .map_err(PyRuntimeError::new_err)?;
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(columns.map(|columns| {
         columns
             .into_iter()
@@ -139,7 +139,7 @@ fn analyze_columns(
     schema_sql: Option<&str>,
 ) -> PyResult<Option<Vec<NullableColumnTuple>>> {
     let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
-        .map_err(PyRuntimeError::new_err)?;
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(columns.map(|columns| {
         columns
             .into_iter()
