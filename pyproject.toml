@@ -85,6 +85,7 @@ mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md"]
 markers = [
     "e2e: end-to-end tests (subprocess + inline-snapshot)",
     "slow: slow tests that can be skipped with -m 'not slow'",
+    "pg: needs a PostgreSQL server (SQLTY_PG_DSN); skipped without it",
 ]
 
 [tool.coverage.run]
