@@ -130,6 +130,11 @@ r = SQL[typing.Any](r"--sql\nSELECT 1::INTEGER")
 s = SQL[A]("--sql\nSELECT 1::INTEGER" + suffix)
 t = SQL[te.Any]("--sql\nSELECT 1::INTEGER" + suffix)
 u = SQL[Annotated[Any, "dynamic"]]("--sql\nSELECT 1::INTEGER" + suffix)
+v = SQL[(Any)]("--sql\nSELECT 1::INTEGER" + suffix)
+w = SQL[
+    Any  # dynamic
+]("--sql\nSELECT 1::INTEGER" + suffix)
+ž = "ř"; x = SQL[Any]("--sql\nSELECT 1::INTEGER" + suffix)
 ```
 
 ## A name `Any` that is not `typing.Any` does not opt out

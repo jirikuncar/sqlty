@@ -223,7 +223,7 @@ def _check_diagnostics(
             rules=rules,
             import_style=import_style,
             untyped=untyped,
-            any_annotations=parsed.any_annotations(import_style),
+            any_calls=parsed.any_calls(import_style),
         )
         if parsed.may_need_rust_check(import_style)
         else []
@@ -332,7 +332,7 @@ def query_statistics(
     parsed = ParsedSource.of(source, module)
     counts: Counter[str] = Counter()
     for _, kind, text in _query_sites(
-        parsed.text, import_style=import_style, any_annotations=parsed.any_annotations(import_style)
+        parsed.text, import_style=import_style, any_calls=parsed.any_calls(import_style)
     ):
         if kind != "query":
             counts[kind] += 1

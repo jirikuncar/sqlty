@@ -9,7 +9,7 @@
 //! - `untyped-query`: `SQL[UNTYPED]` query has no inferable row type
 //! - `fstring-skipped` / `tstring-skipped`: interpolated `--sql` strings are never rewritten
 //! - `unchecked-query`: a `--sql` string that is not plain literals (raw, bytes, `SQL[T](q + x)`),
-//!   unless its wrapper's `T` is one of `any_annotations`
+//!   unless the wrapper call is one of `any_calls`
 
 use std::collections::HashMap;
 
@@ -123,7 +123,7 @@ pub fn check_source(
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
-    any_annotations: &[String],
+    any_calls: &[usize],
 ) -> Vec<Diagnostic> {
     let rule_config = RuleConfig::new(rules);
     let unparsed_enabled = rule_config.is_enabled("unparsed-query");
@@ -172,8 +172,7 @@ pub fn check_source(
             .iter()
             .find(|call| call.span.start <= first.span.start && first.span.end <= call.span.end);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
-            if !(rule == "unchecked-query"
-                && enclosing.is_some_and(|call| call.is_any(source, any_annotations)))
+            if !(rule == "unchecked-query" && enclosing.is_some_and(|call| call.is_any(any_calls)))
             {
                 report(rule, skipped_message(rule), line);
             }
@@ -205,7 +204,7 @@ pub fn check_source(
                     .is_some_and(|prefix| prefix.contains(['f', 'F', 't', 'T']))
             });
             if !interpolated
-                && !call.is_any(source, any_annotations)
+                && !call.is_any(any_calls)
                 && after_marker(&content(source, &call.strings)).is_some()
             {
                 report(
@@ -308,7 +307,7 @@ pub(crate) fn unparsed_message(error: &str) -> String {
 pub fn query_sites(
     source: &str,
     import_style: Option<&str>,
-    any_annotations: &[String],
+    any_calls: &[usize],
 ) -> Vec<(usize, &'static str, String)> {
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     let lines = LineIndex::new(source);
@@ -325,8 +324,7 @@ pub fn query_sites(
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             let last = &tokens[group[group.len() - 1]];
             skipped.push(first.span.start..last.span.end);
-            if !(rule == "unchecked-query"
-                && enclosing.is_some_and(|call| call.is_any(source, any_annotations)))
+            if !(rule == "unchecked-query" && enclosing.is_some_and(|call| call.is_any(any_calls)))
             {
                 sites.push((line, rule, String::new()));
             }
@@ -349,7 +347,7 @@ pub fn query_sites(
                 }
             }
             None if after_marker(&content(source, &call.strings)).is_some()
-                && !call.is_any(source, any_annotations)
+                && !call.is_any(any_calls)
                 && !skipped.iter().any(|span| call.span.contains(&span.start)) =>
             {
                 sites.push((line, "unchecked-query", String::new()));
@@ -661,9 +659,13 @@ mod tests {
     }
 
     #[test]
-    fn test_any_annotations_skip_unchecked_query() {
-        let source = "a = SQL[A](\"--sql\\nSELECT 1\" + x)\nb = SQL[A](r\"--sql\\nSELECT 1\")\nc = SQL[B](\"--sql\\nSELECT 1\" + x)\n";
-        let any = ["A".to_string()];
+    fn test_any_calls_skip_unchecked_query() {
+        let source = "a = SQL[A](\"--sql\\nSELECT 1\" + x)\nb = SQL[A](r\"--sql\\nSELECT 1\")\nc = SQL[A](\"--sql\\nSELECT 1\" + x)\n";
+        let any: Vec<usize> = source
+            .match_indices("SQL")
+            .map(|(i, _)| i)
+            .take(2)
+            .collect();
         let lines = |diags: Vec<Diagnostic>| diags.into_iter().map(|d| d.line).collect::<Vec<_>>();
         assert_eq!(
             lines(check_source(

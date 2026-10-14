@@ -39,6 +39,7 @@ from __future__ import annotations
 import ast
 import functools
 import io
+import itertools
 import re
 import tokenize
 from dataclasses import dataclass
@@ -73,7 +74,7 @@ def is_any(node: ast.expr, aliases: dict[str, str]) -> bool:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         try:
             node = ast.parse(node.value, mode="eval").body
-        except SyntaxError:
+        except SyntaxError, ValueError:
             return False
     if (
         isinstance(node, ast.Subscript)
@@ -424,28 +425,28 @@ class ParsedSource:
         style = (import_style or "").strip()
         return (style[len(prefix) :].strip() if style.startswith(prefix) else "SQL") in self.text
 
-    def any_annotations(self, import_style: str | None = None) -> list[str]:
-        """Source of each ``T`` in ``SQL[T](...)`` that is ``typing.Any`` (see ``is_any``).
+    def any_calls(self, import_style: str | None = None) -> list[int]:
+        """Byte offset of each ``SQL[T](...)`` call whose ``T`` is ``typing.Any`` (see ``is_any``).
 
         Example:
-            >>> ParsedSource("import typing as t\\nq = SQL[t.Any](x)\\nr = SQL[int](y)").any_annotations()
-            ['t.Any']
+            >>> ParsedSource("import typing as t\\nq = SQL[t.Any](x)\\nr = SQL[int](y)").any_calls()
+            [23]
         """
         wrapper = _wrapper_name(import_style)
         if wrapper is None or "Any" not in self.text or not self.may_wrap(import_style):
             return []
         aliases = self.typing_aliases
-        annotations = set()
+        lines = self.text.encode().splitlines(keepends=True)
+        starts = list(itertools.accumulate(map(len, lines), initial=0))
+        offsets = []
         for call in self.calls:
             func = call.func
             if not isinstance(func, ast.Subscript) or not is_any(func.slice, aliases):
                 continue
             name = ast.unparse(func.value)
-            if (name == wrapper or name.endswith(f".{wrapper}")) and (
-                segment := ast.get_source_segment(self.text, func.slice)
-            ):
-                annotations.add(segment)
-        return sorted(annotations)
+            if name == wrapper or name.endswith(f".{wrapper}"):
+                offsets.append(starts[func.value.lineno - 1] + func.value.col_offset)
+        return sorted(offsets)
 
     def may_need_rust_check(self, import_style: str | None = None) -> bool:
         """Whether the Rust checker can report anything for the text.
