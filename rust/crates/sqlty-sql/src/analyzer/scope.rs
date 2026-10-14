@@ -231,11 +231,15 @@ impl<'a> Analyzer<'a> {
             name,
             python_type,
             sql_type,
+            nullability: Nullability::Unknown,
         };
         Some(match self.schema.function(&table_key(name), args)? {
             FunctionReturn::Rows(columns) => columns
                 .iter()
-                .map(|col| column(col.name.clone(), col.typed(self.dialect)))
+                .map(|col| Column {
+                    nullability: Nullability::declared(col.not_null),
+                    ..column(col.name.clone(), col.typed(self.dialect))
+                })
                 .collect(),
             FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed) => {
                 vec![column(object_name(name), typed.clone())]
@@ -366,16 +370,24 @@ impl<'a> Analyzer<'a> {
             })
     }
 
-    /// Tables a star reads: the one `reference` names, or every scope table.
-    pub(super) fn star_tables(reference: Option<&str>, scope: &Scope) -> Vec<String> {
+    /// `(reference, table)` pairs a star reads: the one `reference` names, or every scope table.
+    pub(super) fn star_sources(reference: Option<&str>, scope: &Scope) -> Vec<(String, String)> {
         match reference {
-            Some(reference) => vec![resolve(reference, scope)],
+            Some(reference) => vec![(reference.to_lowercase(), resolve(reference, scope))],
             None => scope
                 .iter()
-                .map(|(_, table)| table.clone())
-                .filter(|table| table != EXTRA_SOURCES)
+                .filter(|(_, table)| table != EXTRA_SOURCES)
+                .cloned()
                 .collect(),
         }
+    }
+
+    /// Tables a star reads: the one `reference` names, or every scope table.
+    pub(super) fn star_tables(reference: Option<&str>, scope: &Scope) -> Vec<String> {
+        Self::star_sources(reference, scope)
+            .into_iter()
+            .map(|(_, table)| table)
+            .collect()
     }
 
     /// Expand `*` (all scope tables) or `t.*` from the sources, or `None` if unknown.
@@ -384,14 +396,14 @@ impl<'a> Analyzer<'a> {
         reference: Option<&str>,
         scope: &Scope,
     ) -> Option<Vec<Column>> {
-        let tables = Self::star_tables(reference, scope);
-        if tables.is_empty() {
+        let sources = Self::star_sources(reference, scope);
+        if sources.is_empty() {
             return None;
         }
-        let columns = tables
+        let columns = sources
             .iter()
-            .map(|table| {
-                self.virtual_columns(table).cloned().or_else(|| {
+            .map(|(reference, table)| {
+                let mut columns = self.virtual_columns(table).cloned().or_else(|| {
                     self.schema.table(table).map(|columns| {
                         columns
                             .iter()
@@ -401,11 +413,18 @@ impl<'a> Analyzer<'a> {
                                     name: col.name.clone(),
                                     python_type,
                                     sql_type,
+                                    nullability: Nullability::declared(col.not_null),
                                 }
                             })
                             .collect()
                     })
-                })
+                })?;
+                for column in &mut columns {
+                    column.nullability =
+                        self.facts
+                            .column(reference, &column.name, column.nullability);
+                }
+                Some(columns)
             })
             .collect::<Option<Vec<Vec<Column>>>>()?;
         Some(columns.into_iter().flatten().collect())

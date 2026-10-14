@@ -13,11 +13,15 @@ pub(super) fn leftmost_select(body: &SetExpr) -> Option<&Select> {
 }
 
 /// A result column: name, Python type and SQL type; unknown types are `None`.
+///
+/// `nullability` is kept next to the type, never inside it. Callers decide whether to
+/// show it (preview mode); only [`Nullability::Nullable`] makes a type optional.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
     pub python_type: Option<String>,
     pub sql_type: Option<String>,
+    pub nullability: Nullability,
 }
 
 impl Column {
@@ -26,7 +30,13 @@ impl Column {
             name: name.to_string(),
             python_type: None,
             sql_type: None,
+            nullability: Nullability::Unknown,
         }
+    }
+
+    /// Whether the column can be NULL; unknown nullability counts as no.
+    pub fn nullable(&self) -> bool {
+        self.nullability == Nullability::Nullable
     }
 
     pub(super) fn is_unknown_star(&self) -> bool {
@@ -45,6 +55,9 @@ pub(super) struct Analyzer<'a> {
     pub(super) outer: Scope,
     /// Columns the joins of this SELECT merge (`USING`, `NATURAL`), so they are not ambiguous.
     pub(super) merged: Vec<String>,
+    /// What is known about NULLs in the SELECT being analyzed: null-extended relations
+    /// and columns its conditions rule out as NULL.
+    pub(super) facts: Facts,
 }
 
 impl<'a> Analyzer<'a> {
@@ -56,6 +69,7 @@ impl<'a> Analyzer<'a> {
             diag: Diagnostics::default(),
             outer: Scope::new(),
             merged: Vec::new(),
+            facts: Facts::default(),
         }
     }
 
@@ -111,7 +125,8 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(super) fn select_columns(&self, select: &Select) -> Inferred<Vec<Column>> {
-        let (analyzer, scope) = self.scope_of(&select.from)?;
+        let (mut analyzer, scope) = self.scope_of(&select.from)?;
+        analyzer.facts = analyzer.select_facts(select, &scope);
         analyzer.projection(&select.projection, &scope, Some(&select.from))
     }
 
@@ -219,10 +234,12 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
+            let nullability = self.nullability(expr, scope, &self.facts);
             columns.push(Column {
                 name,
                 python_type,
                 sql_type,
+                nullability,
             });
         }
         Ok(columns)

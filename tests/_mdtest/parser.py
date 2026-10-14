@@ -46,6 +46,7 @@ CONFIG_KEYS = frozenset(
         "schemas",
         "import-style",
         "untyped",
+        "preview",
         "type-modules",
         "rules",
         "format-command",

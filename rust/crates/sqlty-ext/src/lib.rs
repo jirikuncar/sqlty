@@ -15,6 +15,7 @@ use pyo3::types::{PyDict, PyList};
 use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
+type NullableColumnTuple = (String, Option<String>, Option<String>, Option<bool>);
 
 type CachedSchema = (
     String,
@@ -86,10 +87,17 @@ fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
-fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
-    analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
-        .map_err(PyRuntimeError::new_err)
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None, preview = false))]
+fn infer_type(
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+    preview: bool,
+) -> PyResult<Option<String>> {
+    analyzer::with_preview(preview, || {
+        analyzer::infer_type(sql, dialect, &schema(schema_sql, dialect))
+    })
+    .map_err(PyRuntimeError::new_err)
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -99,18 +107,54 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Op
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None, preview = false))]
 fn analyze_select(
     sql: &str,
     dialect: &str,
     schema_sql: Option<&str>,
+    preview: bool,
 ) -> PyResult<Option<Vec<ColumnTuple>>> {
+    let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
+        .map_err(PyRuntimeError::new_err)?;
+    Ok(columns.map(|columns| {
+        analyzer::with_preview(preview, || {
+            columns
+                .into_iter()
+                .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
+                .collect()
+        })
+    }))
+}
+
+/// Result columns of a query as `(name, python_type, sql_type, nullable)` tuples.
+///
+/// `python_type` is never spelled `T | None`, whatever the preview mode: `nullable` says
+/// whether the column can be NULL (True), cannot (False), or is not known (None: an
+/// unresolved column, an unknown function), so row types can be judged against it.
+/// Returns None when the query returns no rows or doesn't parse.
+///
+/// Raises:
+///     RuntimeError: SUM(column) names a column missing from a schema table
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn analyze_columns(
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> PyResult<Option<Vec<NullableColumnTuple>>> {
     let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
         .map_err(PyRuntimeError::new_err)?;
     Ok(columns.map(|columns| {
         columns
             .into_iter()
-            .map(|col| (col.name, col.python_type, col.sql_type))
+            .map(|col| {
+                let nullable = match col.nullability {
+                    analyzer::Nullability::Nullable => Some(true),
+                    analyzer::Nullability::NonNull => Some(false),
+                    analyzer::Nullability::Unknown => None,
+                };
+                (col.name, col.python_type, col.sql_type, nullable)
+            })
             .collect()
     }))
 }
@@ -197,7 +241,7 @@ fn returns_rows(sql: &str, dialect: &str) -> bool {
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false, preview = false))]
 fn rewrite_source(
     source: &str,
     dialect: &str,
@@ -205,16 +249,19 @@ fn rewrite_source(
     import_style: Option<&str>,
     untyped: bool,
     keep_lines: bool,
+    preview: bool,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
-    Ok(rewriter::rewrite_source_with(
-        source,
-        dialect,
-        &schema_for(source, schema_sql, dialect),
-        import_style,
-        untyped,
-        keep_lines,
-    ))
+    Ok(analyzer::with_preview(preview, || {
+        rewriter::rewrite_source_with(
+            source,
+            dialect,
+            &schema_for(source, schema_sql, dialect),
+            import_style,
+            untyped,
+            keep_lines,
+        )
+    }))
 }
 
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
@@ -238,7 +285,8 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None, preview = false))]
+#[allow(clippy::too_many_arguments)]
 fn fix_source(
     source: &str,
     dialect: &str,
@@ -247,17 +295,20 @@ fn fix_source(
     untyped: bool,
     rules: Option<HashMap<String, String>>,
     suppressed: Option<rewriter::Suppressed>,
+    preview: bool,
 ) -> PyResult<String> {
     check_import_style(import_style)?;
-    Ok(fixer::fix_source(
-        source,
-        dialect,
-        &schema_for(source, schema_sql, dialect),
-        import_style,
-        untyped,
-        rules,
-        suppressed.unwrap_or_default(),
-    ))
+    Ok(analyzer::with_preview(preview, || {
+        fixer::fix_source(
+            source,
+            dialect,
+            &schema_for(source, schema_sql, dialect),
+            import_style,
+            untyped,
+            rules,
+            suppressed.unwrap_or_default(),
+        )
+    }))
 }
 
 /// Expand SELECT * into explicit column list.
@@ -278,7 +329,8 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false))]
+#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, preview = false))]
+#[allow(clippy::too_many_arguments)]
 fn check_source<'py>(
     py: Python<'py>,
     source: &str,
@@ -287,16 +339,19 @@ fn check_source<'py>(
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
+    preview: bool,
 ) -> PyResult<Bound<'py, PyList>> {
     check_import_style(import_style)?;
-    let diagnostics = checker::check_source(
-        source,
-        dialect,
-        &schema_for(source, schema_sql, dialect),
-        rules,
-        import_style,
-        untyped,
-    );
+    let diagnostics = analyzer::with_preview(preview, || {
+        checker::check_source(
+            source,
+            dialect,
+            &schema_for(source, schema_sql, dialect),
+            rules,
+            import_style,
+            untyped,
+        )
+    });
     let list = PyList::empty(py);
     for diag in diagnostics {
         let dict = PyDict::new(py);
@@ -349,6 +404,7 @@ fn query_sites(source: &str, import_style: Option<&str>) -> PyResult<Vec<(usize,
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;

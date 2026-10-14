@@ -5,13 +5,21 @@ def infer_type(
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
+    preview: bool = False,
 ) -> str | None: ...
 def analyze_select(
     sql: str,
     *,
     dialect: str = "postgres",
     schema_sql: str | None = None,
+    preview: bool = False,
 ) -> list[tuple[str, str | None, str | None]] | None: ...
+def analyze_columns(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[str, str | None, str | None, bool | None]] | None: ...
 def query_diagnostics(
     sql: str,
     *,
@@ -29,6 +37,7 @@ def rewrite_source(
     import_style: str | None = None,
     untyped: bool = False,
     keep_lines: bool = False,
+    preview: bool = False,
 ) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def fix_source(
@@ -40,6 +49,7 @@ def fix_source(
     untyped: bool = False,
     rules: dict[str, str] | None = None,
     suppressed: dict[int, list[str] | None] | None = None,
+    preview: bool = False,
 ) -> str: ...
 def expand_star(
     sql: str,
@@ -55,6 +65,7 @@ def check_source(
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
     untyped: bool = False,
+    preview: bool = False,
 ) -> list[dict[str, str | int | None]]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None

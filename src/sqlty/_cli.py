@@ -73,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
         help='Rewrite "--sql\\n..." strings into SQL[T]("--sql\\n...") calls',
     )
     _add_common_args(rewrite_parser)
+    _add_preview_arg(rewrite_parser)
     rewrite_parser.add_argument(
         "--check",
         action="store_true",
@@ -113,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lint: validate SQL type annotations and detect issues",
     )
     _add_common_args(check_parser)
+    _add_preview_arg(check_parser)
     check_parser.add_argument(
         "--fix",
         action="store_true",
@@ -161,6 +163,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
 
 
+def _add_preview_arg(parser: argparse.ArgumentParser) -> None:
+    """Add ``--preview``, shared by the commands that infer or compare row types."""
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        default=None,
+        help="Opt in to behavior planned for the next minor release: nullable columns "
+        "infer as `T | None` and nullable-mismatch is an error. Config: preview = true "
+        "in [tool.sqlty]. Changes rewrite output, so stale-type flags old annotations",
+    )
+
+
 # --- Command implementations ---
 
 _SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query")
@@ -192,6 +206,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             schema_sql=settings.schema_sql,
             import_style=settings.import_style,
             untyped=settings.untyped,
+            preview=settings.preview,
         )
         if not args.quiet:
             skipped_only = dict.fromkeys(RULES, "ignore") | {
@@ -322,6 +337,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 rules=settings.rules,
+                preview=settings.preview,
             )
             if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")
@@ -336,6 +352,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             rules=settings.rules,
             import_style=settings.import_style,
             untyped=settings.untyped,
+            preview=settings.preview,
             helpers=file_helpers,
             type_modules=settings.type_modules,
         )
@@ -476,6 +493,7 @@ class Settings:
     schema_sql: str | None = None
     import_style: str | None = None
     untyped: bool = False
+    preview: bool = False
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
@@ -539,6 +557,7 @@ class SettingsResolver:
             schema_sql=schema_sql,
             import_style=import_style,
             untyped=untyped == "sentinel",
+            preview=bool(getattr(args, "preview", False) or config.get("preview", False)),
             rules=config.get("rules"),
             type_modules=tuple(config.get("type_modules", ())),
             functions=tuple(

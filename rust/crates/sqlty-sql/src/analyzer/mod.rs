@@ -29,6 +29,7 @@ mod dml;
 mod expr;
 mod functions;
 mod names;
+mod nullability;
 mod operators;
 mod query;
 mod resolve;
@@ -38,9 +39,11 @@ use dml::*;
 use expr::*;
 use functions::*;
 use names::*;
+use nullability::*;
 use operators::*;
 use query::*;
 
+pub use nullability::Nullability;
 pub use query::Column;
 use scope::*;
 
@@ -595,15 +598,48 @@ pub(crate) fn typed(sql_type: String, python_type: Option<String>, dialect: SqlD
     }
 }
 
+thread_local! {
+    static PREVIEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with preview mode on or off: in preview mode [`infer_type`] and
+/// [`Column::display_type`] spell nullable columns `T | None`. Off by default, so output
+/// is unchanged unless a caller opts in. The setting is per thread and restored on exit.
+pub fn with_preview<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PREVIEW.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(PREVIEW.with(|cell| cell.replace(on)));
+    f()
+}
+
+/// Whether preview mode is on for the running call; see [`with_preview`].
+pub fn preview() -> bool {
+    PREVIEW.with(|cell| cell.get())
+}
+
+impl Column {
+    /// The Python type as written in a row type: `T | None` for a nullable column in
+    /// preview mode, else `python_type`. `Any` already admits `None`.
+    pub fn display_type(&self) -> Option<String> {
+        let python_type = self.python_type.as_deref()?;
+        Some(if self.nullable() && preview() && python_type != ANY {
+            format!("{python_type} | None")
+        } else {
+            python_type.to_string()
+        })
+    }
+}
+
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
     let columns = analyze_select(sql, dialect, schema)?;
     // A column of unknown type, `*` the schema cannot resolve included, leaves the row type unknown.
     Ok(columns.and_then(|columns| {
-        let types: Option<Vec<&str>> = columns
-            .iter()
-            .map(|col| col.python_type.as_deref())
-            .collect();
+        let types: Option<Vec<String>> = columns.iter().map(Column::display_type).collect();
         let types = types?;
         Some(if types.is_empty() {
             "tuple[()]".to_string()

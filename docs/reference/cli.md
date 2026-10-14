@@ -44,6 +44,7 @@ never change the exit code.
 ```
 sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
               [-v] [-q] [--check] [--diff] [--untyped {skip,sentinel}]
+              [--preview]
               [paths ...]
 ```
 
@@ -52,6 +53,7 @@ sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 | `--check` | Do not modify files; print `Would rewrite <file>` and exit 1 if any file needs rewriting |
 | `--diff` | Print a unified diff instead of modifying files |
 | `--untyped {skip,sentinel}` | Row-returning queries of unknown row type: leave unwrapped (`skip`, default) or wrap as `SQL[UNTYPED](...)` (`sentinel`). Overrides `untyped` in `pyproject.toml` |
+| `--preview` | Opt in to [preview](configuration.md#preview) behavior: nullable columns are written `T \| None`. Same as `preview = true` in `pyproject.toml` |
 
 Exit code: 0, or 1 with `--check` when files would change.
 
@@ -90,7 +92,7 @@ Found 1 warning(s)
 
 ```
 sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
-            [-v] [-q] [--fix] [--statistics]
+            [-v] [-q] [--fix] [--statistics] [--preview]
             [paths ...]
 ```
 
@@ -98,6 +100,7 @@ sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 |--------|-------------|
 | `--fix` | Apply the [fixable rules](rules.md), write the files, then report what remains |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
+| `--preview` | Opt in to [preview](configuration.md#preview) behavior: nullable columns infer `T \| None`, so `stale-type` compares against it, and `nullable-mismatch` is an error. Same as `preview = true` in `pyproject.toml` |
 
 With `--statistics`, the last line counts the queries of the checked files:
 

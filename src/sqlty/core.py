@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, NamedTuple
 
+from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
 from sqlty._core import (
@@ -56,19 +57,37 @@ class ColumnInfo(NamedTuple):
     sql_type: str | None
 
 
+class _RowColumn(NamedTuple):
+    """A result column with whether it can be NULL (``None`` when unknown), for row type checks."""
+
+    name: str
+    python_type: str | None
+    sql_type: str | None
+    nullable: bool | None
+
+
 def analyze_select(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+    preview: bool = False,
 ) -> list[ColumnInfo] | None:
     """Result columns of a query, or ``None`` when it returns no rows or doesn't parse.
+
+    With ``preview``, a column that can be NULL has a ``T | None`` Python type.
 
     Example:
         >>> analyze_select("SELECT id::INTEGER, COUNT(*) AS n FROM users")
         [ColumnInfo(name='id', python_type='int', sql_type='INT'), ColumnInfo(name='n', python_type='int', sql_type='BIGINT')]
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema, preview=True)]
+        ['int', 'str | None']
 
     Raises:
         RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
-    columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
+    columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql, preview=preview)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
 
 
@@ -122,6 +141,7 @@ def fix_source(
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
+    preview: bool = False,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
@@ -144,6 +164,7 @@ def fix_source(
         import_style=import_style,
         untyped=untyped,
         rules=rules,
+        preview=preview,
         suppressed={
             line: None if ignore.rules is None else list(ignore.rules)
             for line, ignore in parsed.ignores.items()
@@ -160,11 +181,15 @@ def check_source(
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
     untyped: bool = False,
+    preview: bool = False,
     helpers: HelperIndex | None = None,
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
 ) -> list[dict[str, str | int | None]]:
     """Check Python source for SQL type issues.
+
+    With ``preview``, nullable columns infer as ``T | None`` (so ``stale-type`` compares
+    against that) and ``nullable-mismatch`` is an error unless ``rules`` says otherwise.
 
     When ``SQL[UserType](...)`` names a type defined in the same source,
     structural checks (column count, type, name, TypedDict keys) run instead
@@ -210,6 +235,7 @@ def check_source(
         rules=rules,
         import_style=import_style,
         untyped=untyped,
+        preview=preview,
         helpers=helpers,
         module=module or parsed.module,
         type_modules=type_modules,
@@ -225,6 +251,7 @@ def _check_diagnostics(
     rules: dict[str, str] | None,
     import_style: str | None,
     untyped: bool,
+    preview: bool,
     helpers: HelperIndex | None,
     module: str | None,
     type_modules: Iterable[str] | None = None,
@@ -241,6 +268,7 @@ def _check_diagnostics(
             rules=rules,
             import_style=import_style,
             untyped=untyped,
+            preview=preview,
         )
         if parsed.may_need_rust_check(import_style)
         else []
@@ -258,7 +286,7 @@ def _check_diagnostics(
     ]
     if not (queries or found):
         return diagnostics
-    rule_config = RuleConfig(overrides=rules)
+    rule_config = RuleConfig(overrides=rules, preview=preview)
 
     def report(rule: str, message: str, line: int) -> None:
         if rule_config.is_enabled(rule):
@@ -344,7 +372,7 @@ def _check_diagnostics(
             continue
         if row not in shapes:
             shapes[row] = _row_shape(call.row, row, call.typing_aliases)
-        for rule, message in _value_diagnostics(shapes[row], columns):
+        for rule, message in _value_diagnostics(shapes[row], columns, rule_config):
             report(rule, message, call.line)
     return diagnostics
 
@@ -409,14 +437,48 @@ def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
     return "partially typed"
 
 
-def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[ColumnInfo] | None:
-    """Columns of a query, ``None`` when it has none or cannot be analysed."""
+def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[_RowColumn] | None:
+    """Columns of a query and whether each can be NULL; ``None`` when it has none or cannot be analysed."""
     if query is None:
         return None
     try:
-        return analyze_select(query, dialect=dialect, schema_sql=schema_sql) or None
+        columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
     except RuntimeError:
         return None
+    return [_RowColumn(*column) for column in columns] if columns else None
+
+
+def _nullability_diagnostics(
+    label: str,
+    declared: typing.Any,
+    col: _RowColumn,
+    rules: RuleConfig,
+) -> list[tuple[str, str]]:
+    """``nullable-mismatch`` and ``redundant-optional`` for one field and its column.
+
+    ``label`` reads ``<field>`` or ``<row> item <i>``, and is followed by ``is <annotation>``;
+    ``declared`` is the resolved annotation. A column of unknown nullability, or an
+    annotation that can't be resolved, is never reported.
+    """
+    from sqlty._type_extractor import _type_repr, admits_none, is_optional
+
+    if col.nullable is None or declared is None:
+        return []
+    if col.nullable and rules.is_enabled("nullable-mismatch") and admits_none(declared) is False:
+        return [
+            (
+                "nullable-mismatch",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' can be NULL",
+            )
+        ]
+    if not col.nullable and rules.is_enabled("redundant-optional") and is_optional(declared):
+        return [
+            (
+                "redundant-optional",
+                f"{label} is {_type_repr(declared)} but query column '{col.name}' is never NULL",
+            )
+        ]
+    return []
 
 
 class _RowShape(NamedTuple):
@@ -452,7 +514,9 @@ def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape |
     return _RowShape(text, False, [(f"{text} is expected", text, resolved)], {})
 
 
-def _value_diagnostics(shape: _RowShape | None, columns: list[ColumnInfo]) -> list[tuple[str, str]]:
+def _value_diagnostics(
+    shape: _RowShape | None, columns: list[_RowColumn], rules: RuleConfig
+) -> list[tuple[str, str]]:
     """Compare the row type of a helper call with the query columns."""
     from sqlty._type_extractor import _accepts
 
@@ -482,6 +546,9 @@ def _value_diagnostics(shape: _RowShape | None, columns: list[ColumnInfo]) -> li
                     f"{label} but query column '{col.name}' infers {col.python_type}",
                 )
             )
+        else:
+            item = f"{shape.text} item {i}" if shape.is_tuple else "row type"
+            found.extend(_nullability_diagnostics(item, resolved, col, rules))
     return found
 
 
@@ -546,7 +613,7 @@ def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list
 
 
 def _structural_diagnostics(
-    type_name: str, info: TypeInfo, columns: list[ColumnInfo], rules: RuleConfig
+    type_name: str, info: TypeInfo, columns: list[_RowColumn], rules: RuleConfig
 ) -> list[tuple[str, str]]:
     """Compare a user type with query columns, returning ``(rule, message)`` pairs.
 
@@ -558,7 +625,7 @@ def _structural_diagnostics(
     ``typeddict-key-mismatch``. NamedTuples match by position.
     A reported count mismatch suppresses the per-column checks.
     """
-    from sqlty._type_extractor import check_type_compatibility
+    from sqlty._type_extractor import check_type_compatibility, field_type
 
     fields = info.fields
     declared = dict(fields)
@@ -580,17 +647,17 @@ def _structural_diagnostics(
             )
         ]
 
-    def type_mismatch(field: str, col: ColumnInfo) -> list[tuple[str, str]]:
-        if not col.python_type or check_type_compatibility(info, field, col.python_type):
-            return []
+    def type_mismatch(field: str, col: _RowColumn) -> list[tuple[str, str]]:
         declared_type = declared.get(field) or f"extra_items {info.extra_items}"
-        return [
-            (
-                "column-type-mismatch",
-                f"{type_name}.{field} is {declared_type} but query column "
-                f"'{col.name}' infers {col.python_type}",
-            )
-        ]
+        if col.python_type and not check_type_compatibility(info, field, col.python_type):
+            return [
+                (
+                    "column-type-mismatch",
+                    f"{type_name}.{field} is {declared_type} but query column "
+                    f"'{col.name}' infers {col.python_type}",
+                )
+            ]
+        return _nullability_diagnostics(f"{type_name}.{field}", field_type(info, field), col, rules)
 
     if not by_name:
         pairs = list(zip(fields, columns, strict=False))
