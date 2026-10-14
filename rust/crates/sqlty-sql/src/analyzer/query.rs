@@ -150,6 +150,7 @@ impl<'a> Analyzer<'a> {
                 }
             });
         }
+        let combined = branches.len() > 1;
         let mut branches = branches.into_iter();
         let Some(mut columns) = branches.next().flatten() else {
             return Ok(None);
@@ -179,6 +180,9 @@ impl<'a> Analyzer<'a> {
                 );
             }
             (column.python_type, column.sql_type) = common.unwrap_or((None, None));
+            if combined {
+                column.nullability = Nullability::Unknown;
+            }
         }
         Ok(Some(columns))
     }
