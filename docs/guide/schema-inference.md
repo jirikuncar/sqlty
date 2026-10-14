@@ -223,9 +223,17 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
   `SETOF`, or the columns of `RETURNS TABLE (...)` in `FROM`. Overloads are told
   apart by their number of arguments, and a built-in function of the same name
   wins.
-- `pg_catalog` and `information_schema` relations (`pg_class`, `pg_namespace`,
-  `pg_attribute`, `pg_type`, `information_schema.tables` and `.columns`) are
-  always known.
+- `pg_catalog` and `information_schema` relations are always known, with their
+  PostgreSQL column types and `NOT NULL` columns: `pg_class`, `pg_namespace`,
+  `pg_attribute`, `pg_type`, `pg_index`, `pg_constraint`, `pg_enum`, `pg_proc`,
+  `pg_attrdef`, `pg_depend`, `pg_description`, `pg_roles`, `pg_settings`,
+  `pg_stat_activity`, `pg_tables`, `pg_views`, `pg_indexes`, `pg_sequences`, and
+  in `information_schema` `schemata`, `tables`, `views`, `columns`, `routines`,
+  `key_column_usage` and `table_constraints`. `oid`, `regproc`, `regclass`,
+  `regtype` and `xid` columns are `int`; `name` and `"char"` are `str`;
+  `int2vector` and `oidvector` are `list[int]`; `pg_node_tree` and `aclitem` are
+  `str`. Other `pg_*` relations are not read (see
+  [name diagnostics](name-diagnostics.md)).
 
 ```toml
 [tool.sqlty]

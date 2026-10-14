@@ -71,8 +71,9 @@ The rules resolve the names a query defines, so these are not false positives:
 - Table functions (`generate_series`, `unnest`). Their columns are not read, so a
   column taken from one is reported as `unsupported-syntax` instead of guessed.
 - PostgreSQL system catalogs. The common ones (`pg_class`, `pg_attribute`,
-  `pg_type`, `pg_namespace`, `information_schema.tables` and `.columns`) have typed
-  columns; other `pg_catalog` / `information_schema` / `pg_*` relations are not
+  `pg_type`, `pg_namespace`, `pg_index`, `pg_constraint`, `pg_proc`,
+  `information_schema.tables` and `.columns`, [the full list](schema-inference.md#migrations-schemas-and-functions))
+  have typed columns; other `pg_catalog` / `information_schema` / `pg_*` relations are not
   read, with the same `unsupported-syntax` report. A table the schema defines
   always wins, whatever its name starts with.
 - Functions and types the schema defines (`CREATE FUNCTION`, `CREATE TYPE`,

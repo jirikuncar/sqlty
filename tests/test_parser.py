@@ -141,7 +141,7 @@ def _type_table() -> dict[str, str]:
     ).read_text()
     constants = dict(re.findall(r'const (\w+): &str = "([\w. |]+)";', source))
     table = source[source.index("static SQL_TO_PYTHON_TYPE") : source.index("static STAR_ITEM")]
-    pairs = re.findall(r'\("(\w+)", (?:"([\w.]+)"|(\w+))\)', table)
+    pairs = re.findall(r'\("(\w+)", (?:"([\w.\[\]]+)"|(\w+))\)', table)
     return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
 
 

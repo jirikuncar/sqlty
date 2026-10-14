@@ -196,8 +196,8 @@ a = SQL[tuple[int]]("--sql\nSELECT g FROM generate_series(1, 3) AS g")
 b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
 # error:
 c = SQL[tuple[int]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
-# error: [unsupported-syntax] "column `indexrelid` may come from system catalog pg_index"
-d = SQL[tuple[int]]("--sql\nSELECT indexrelid FROM pg_index")
+# error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger"
+d = SQL[tuple[int]]("--sql\nSELECT tgrelid FROM pg_trigger")
 ```
 
 #### System catalogs
