@@ -236,15 +236,6 @@ pub(crate) fn tokenize(source: &str) -> Vec<Token> {
     tokens
 }
 
-/// Spans of plain string literals (no prefix but `u`), outside comments.
-pub(crate) fn string_literals(source: &str) -> Vec<(usize, usize)> {
-    tokenize(source)
-        .into_iter()
-        .filter(|t| t.is_plain(source))
-        .map(|t| (t.span.start, t.span.end))
-        .collect()
-}
-
 fn is_op(source: &str, tokens: &[Token], i: usize, op: &str) -> bool {
     tokens
         .get(i)
@@ -401,10 +392,13 @@ impl Calls {
     /// Calls start in ascending order, so the first call reaching `end` is the only
     /// candidate: any later call starts after it, and so after `start` if it does.
     pub(crate) fn enclosing(&self, start: usize, end: usize) -> Option<&Call> {
+        self.enclosing_index(start, end).map(|i| &self.calls[i])
+    }
+
+    /// Index of [`Calls::enclosing`].
+    pub(crate) fn enclosing_index(&self, start: usize, end: usize) -> Option<usize> {
         let first = self.reach.partition_point(|&reach| reach < end);
-        self.calls
-            .get(first)
-            .filter(|call| call.span.start <= start)
+        (self.calls.get(first)?.span.start <= start).then_some(first)
     }
 }
 
@@ -503,6 +497,7 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ca
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan::Scan;
 
     fn calls(source: &str) -> Calls {
         wrapper_calls(source, &tokenize(source), "SQL")
@@ -531,8 +526,8 @@ mod tests {
     #[test]
     fn test_string_literals_skip_past_prefixed_strings() {
         let source = "# it's\nf = f\"a\" + br'\\'\"' + 'it\\'s' + u\"c\"\nh = \"b\"\n";
-        let spans: Vec<&str> = string_literals(source)
-            .into_iter()
+        let spans: Vec<&str> = Scan::new(source, "SQL")
+            .plain_literals()
             .map(|(start, end)| &source[start..end])
             .collect();
         assert_eq!(spans, vec!["'it\\'s'", "u\"c\"", "\"b\""]);
