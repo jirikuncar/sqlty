@@ -25,6 +25,8 @@ from sqlty._type_extractor import (
 )
 from sqlty.core import check_source
 
+TYPING = "typing" if sys.version_info >= (3, 15) else "typing_extensions"
+
 
 def extract(source: str, *, runtime: bool) -> dict[str, TypeInfo]:
     """Extract types, without runtime resolution (the AST fallback) when ``runtime`` is false."""
@@ -491,7 +493,7 @@ class TestTypedDictQualifiers:
 
     SOURCE = """\
 {imports}
-from typing import Never, NotRequired, ReadOnly, TypedDict
+from {typing} import Never, NotRequired, ReadOnly, TypedDict
 
 class Row(TypedDict, closed=True):
     id: ReadOnly[int]
@@ -517,7 +519,7 @@ class Reopened(Extra, closed=False):
 """
 
     def _extract(self, runtime: bool) -> dict[str, TypeInfo]:
-        return extract(self.SOURCE.format(imports=""), runtime=runtime)
+        return extract(self.SOURCE.format(imports="", typing=TYPING), runtime=runtime)
 
     @pytest.mark.parametrize("runtime", [True, False])
     def test_runtime_and_ast_agree(self, runtime: bool):
@@ -560,7 +562,7 @@ class Reopened(Extra, closed=False):
 
 INHERITANCE_SOURCE = """\
 {imports}
-from typing import NotRequired, ReadOnly, TypedDict
+from {typing} import NotRequired, ReadOnly, TypedDict
 
 class Closed(TypedDict, closed=True):
     id: int
@@ -618,13 +620,13 @@ class TestTypedDictInheritance:
     @pytest.mark.parametrize("runtime", [True, False])
     @pytest.mark.parametrize("name", list(CASES))
     def test_errors(self, name: str, runtime: bool):
-        types = extract(INHERITANCE_SOURCE.format(imports=""), runtime=runtime)
+        types = extract(INHERITANCE_SOURCE.format(imports="", typing=TYPING), runtime=runtime)
         assert (types[name].resolved_hints is not None) is runtime
         assert types[name].errors == self.CASES[name]
 
     @pytest.mark.parametrize("runtime", [True, False])
     def test_rejected_override_keeps_base_openness(self, runtime: bool):
-        types = extract(INHERITANCE_SOURCE.format(imports=""), runtime=runtime)
+        types = extract(INHERITANCE_SOURCE.format(imports="", typing=TYPING), runtime=runtime)
         widens, seals, retypes = types["Widens"], types["Seals"], types["Retypes"]
         assert widens.closed and widens.extra_items is None and widens.owner == "Closed"
         for info in (seals, retypes):

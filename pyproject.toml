@@ -3,7 +3,7 @@ name = "sqlty"
 dynamic = ["version"]
 description = "Type-safe SQL queries for Python with automatic stub generation"
 readme = "README.md"
-requires-python = ">=3.15"
+requires-python = ">=3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Jiri Kuncar", email = "jiri.kuncar@gmail.com" }]
@@ -22,6 +22,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3.15",
     "Programming Language :: Rust",
     "Programming Language :: SQL",
@@ -30,7 +31,7 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["asttokens>=3.0.0"]
+dependencies = ["asttokens>=3.0.0", "typing-extensions>=4.15.0; python_version < '3.15'"]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"
@@ -123,7 +124,7 @@ root = ["./src", "./examples"]
 include = ["src", "examples"]
 
 [tool.ruff]
-target-version = "py315"
+target-version = "py314"
 line-length = 100
 # Markdown code blocks are test data (mdtest, README) and must not be reformatted.
 extend-exclude = ["tests/typechecks", "*.md"]

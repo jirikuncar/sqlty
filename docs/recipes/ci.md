@@ -18,21 +18,19 @@ files as arguments:
 ```yaml
 # .pre-commit-config.yaml
 default_language_version:
-  python: python3.15  # sqlty requires Python >= 3.15
+  python: python3.14  # sqlty requires Python >= 3.14
 repos:
   - repo: https://github.com/jirikuncar/sqlty
-    rev: <commit SHA>  # pre-commit autoupdate --bleeding-edge --freeze
+    rev: v0.1.0
     hooks:
       - id: sqlty-rewrite
       - id: sqlty-check
 ```
 
-No release includes these hooks yet (`v0.0.1.dev1` predates them), so pin
-`rev` to a commit: `pre-commit autoupdate --bleeding-edge --freeze` fills in
-the current one. pre-commit builds the hook environment with the Python it
-runs on unless told otherwise, and sqlty needs 3.15: keep
-`default_language_version`, or set `language_version: python3.15` on each
-hook. pre-commit installs sqlty from source into that environment, which
+`pre-commit autoupdate` moves `rev` to the latest release. pre-commit
+builds the hook environment with the Python it runs on unless told otherwise,
+and sqlty needs 3.14 or newer: keep `default_language_version`, or set
+`language_version` on each hook. pre-commit installs sqlty from source into that environment, which
 compiles the Rust extension, so the first run needs a Rust toolchain
 (`cargo`) and takes a few minutes. Pass options with `args`, for example
 `args: [--dialect, sqlite]`.

@@ -4,7 +4,7 @@ This guide covers development setup and workflows for SQLTy.
 
 ## Prerequisites
 
-- Python 3.15+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 - [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the `cargo-fmt` pre-commit hook)
 

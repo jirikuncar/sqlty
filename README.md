@@ -1,7 +1,7 @@
 # SQLTy
 
 [![PyPI](https://img.shields.io/pypi/v/sqlty.svg)](https://pypi.org/project/sqlty/)
-[![Python 3.15+](https://img.shields.io/badge/python-3.15+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://github.com/jirikuncar/sqlty/actions/workflows/tests.yml/badge.svg)](https://github.com/jirikuncar/sqlty/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
