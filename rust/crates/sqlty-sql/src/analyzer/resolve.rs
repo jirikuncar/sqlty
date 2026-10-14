@@ -18,8 +18,49 @@ pub(super) enum Origin {
 }
 
 /// Sources a name can resolve to: the FROM clause, then enclosing queries (correlation).
-fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s (String, String)> {
+fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s Source> {
     scope.iter().chain(outer.iter())
+}
+
+/// A column found in one source, borrowed from where it is declared.
+enum ColumnRef<'s> {
+    /// A column of a CTE, derived table or table function (`local`), or of a schema view.
+    Virtual { column: &'s Column, local: bool },
+    /// A column of a schema table.
+    Schema(&'s SchemaColumn),
+    /// A column every table has without declaring it.
+    System(Typed),
+}
+
+impl ColumnRef<'_> {
+    fn typed(&self, dialect: SqlDialect) -> Typed {
+        match self {
+            ColumnRef::Virtual { column, .. } => column.typed(),
+            ColumnRef::Schema(column) => column.typed(dialect),
+            ColumnRef::System(typed) => typed.clone(),
+        }
+    }
+
+    /// Whether the source says the column can be NULL: a schema column lacking `NOT NULL` /
+    /// `PRIMARY KEY`, or a column its CTE, view or derived table marks nullable.
+    fn nullability(&self) -> Nullability {
+        match self {
+            ColumnRef::Virtual { column, .. } => column.nullability,
+            ColumnRef::Schema(column) => Nullability::declared(column.not_null),
+            ColumnRef::System(_) => Nullability::NonNull,
+        }
+    }
+}
+
+/// A column reference resolved to the source it reads.
+struct Resolved<'s> {
+    /// The alias or table name the source is read by.
+    reference: String,
+    /// The key of the source's table.
+    table: String,
+    /// The column, as the resolver names it (case folded).
+    column: String,
+    found: ColumnRef<'s>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -49,11 +90,14 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Records `unknown-table` when a FROM item names no schema table, view or CTE.
-    pub(super) fn check_table(&self, table: &str) {
+    pub(super) fn check_table(&self, table: &Table) {
         if !self.diag.enabled() {
             return;
         }
-        if is_opaque(table) || self.knows_table(table) || self.schema.defines(table) {
+        let Some(table) = table.named() else {
+            return;
+        };
+        if self.knows_table(table) || self.schema.defines(table) {
             return;
         }
         if self.judges_names() {
@@ -75,29 +119,30 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// A column of one source: `(type, schema column)`, the latter set when a schema table
-    /// holds it (`table.column`), for type diagnostics.
-    fn lookup_column(&self, table: &str, column: &str) -> Option<(Typed, Origin)> {
+    /// A column of one source, when it has it.
+    fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
         if let Some(columns) = self.virtual_columns(table) {
-            let origin = if self.virtuals.contains_key(table) {
-                Origin::Local
-            } else {
-                Origin::View(self.label(table, column))
-            };
             return columns
                 .iter()
                 .find(|col| self.same_column(&col.name, column))
-                .map(|col| (col.typed(), origin));
+                .map(|column| ColumnRef::Virtual {
+                    column,
+                    local: self.virtuals.contains_key(table),
+                });
         }
         let columns = self.schema.table(table)?;
         match columns.iter().find(|col| col.name == column) {
-            Some(col) => Some((
-                col.typed(self.dialect),
-                Origin::Schema(self.label(table, column)),
-            )),
-            None => self
-                .system_column(column)
-                .map(|typed| (typed, Origin::Local)),
+            Some(col) => Some(ColumnRef::Schema(col)),
+            None => self.system_column(column).map(ColumnRef::System),
+        }
+    }
+
+    /// Where a column found in `table` comes from, for explaining why it is untyped.
+    fn origin(&self, found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+        match found {
+            ColumnRef::Virtual { local: false, .. } => Origin::View(self.label(table, column)),
+            ColumnRef::Schema(_) => Origin::Schema(self.label(table, column)),
+            ColumnRef::Virtual { .. } | ColumnRef::System(_) => Origin::Local,
         }
     }
 
@@ -119,6 +164,50 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The source a column reference reads and the column in it: its qualifier's source, else
+    /// the first source having it, the FROM clause before enclosing queries.
+    fn resolve_reference(&self, expr: &Expr, scope: &Scope) -> Option<Resolved<'_>> {
+        match expr {
+            Expr::Identifier(ident) => {
+                let column = fold(ident, self.dialect);
+                sources(scope, &self.outer).find_map(|source| {
+                    let found = self.find_column(source.table.named()?, &column)?;
+                    Some(Resolved {
+                        reference: source.reference.clone(),
+                        table: source.table.named()?.to_string(),
+                        column: column.clone(),
+                        found,
+                    })
+                })
+            }
+            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
+                let qualifier = parts[parts.len() - 2].value.to_lowercase();
+                let column = fold(&parts[parts.len() - 1], self.dialect);
+                for sources in [scope, &self.outer] {
+                    if sources.iter().any(|source| source.reference == qualifier) {
+                        let table = resolve(&qualifier, sources);
+                        let table = table.named()?;
+                        let found = self.find_column(table, &column)?;
+                        return Some(Resolved {
+                            reference: qualifier,
+                            table: table.to_string(),
+                            column,
+                            found,
+                        });
+                    }
+                }
+                let found = self.find_column(&qualifier, &column)?;
+                Some(Resolved {
+                    reference: qualifier.clone(),
+                    table: qualifier,
+                    column,
+                    found,
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// `(reference, table, column)` of the source a column reference reads, found as
     /// [`Self::resolve_column`] finds it.
     pub(super) fn locate_column(
@@ -126,71 +215,22 @@ impl<'a> Analyzer<'a> {
         expr: &Expr,
         scope: &Scope,
     ) -> Option<(String, String, String)> {
-        match expr {
-            Expr::Identifier(ident) => {
-                let column = fold(ident, self.dialect);
-                sources(scope, &self.outer).find_map(|(reference, table)| {
-                    self.lookup_column(table, &column)?;
-                    Some((reference.clone(), table.clone(), column.clone()))
-                })
-            }
-            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
-                let qualifier = parts[parts.len() - 2].value.to_lowercase();
-                let column = fold(&parts[parts.len() - 1], self.dialect);
-                for sources in [scope, &self.outer] {
-                    if sources.iter().any(|(reference, _)| *reference == qualifier) {
-                        let table = resolve(&qualifier, sources);
-                        self.lookup_column(&table, &column)?;
-                        return Some((qualifier, table, column));
-                    }
-                }
-                self.lookup_column(&qualifier, &column)?;
-                Some((qualifier.clone(), qualifier, column))
-            }
-            _ => None,
-        }
+        let found = self.resolve_reference(expr, scope)?;
+        Some((found.reference, found.table, found.column))
     }
 
-    /// Whether the source says `column` of `table` can be NULL: a schema column lacking
-    /// `NOT NULL` / `PRIMARY KEY`, or a column its CTE, view or derived table marks nullable.
+    /// Whether the source says `column` of `table` can be NULL (see [`ColumnRef`]).
     pub(super) fn declared_nullability(&self, table: &str, column: &str) -> Nullability {
-        if let Some(columns) = self.virtual_columns(table) {
-            return columns
-                .iter()
-                .find(|col| self.same_column(&col.name, column))
-                .map_or(Nullability::Unknown, |col| col.nullability);
-        }
-        let Some(columns) = self.schema.table(table) else {
-            return Nullability::Unknown;
-        };
-        match columns.iter().find(|col| col.name == column) {
-            Some(col) => Nullability::declared(col.not_null),
-            None if self.system_column(column).is_some() => Nullability::NonNull,
-            None => Nullability::Unknown,
-        }
+        self.find_column(table, column)
+            .map_or(Nullability::Unknown, |found| found.nullability())
     }
 
     /// Type of a column: its qualifier's source, else the first source having it, the
     /// FROM clause before enclosing queries.
     pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<(Typed, Origin)> {
-        match expr {
-            Expr::Identifier(ident) => {
-                let column = fold(ident, self.dialect);
-                sources(scope, &self.outer)
-                    .find_map(|(_, table)| self.lookup_column(table, &column))
-            }
-            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
-                let qualifier = parts[parts.len() - 2].value.to_lowercase();
-                let column = fold(&parts[parts.len() - 1], self.dialect);
-                for sources in [scope, &self.outer] {
-                    if sources.iter().any(|(reference, _)| *reference == qualifier) {
-                        return self.lookup_column(&resolve(&qualifier, sources), &column);
-                    }
-                }
-                self.lookup_column(&qualifier, &column)
-            }
-            _ => None,
-        }
+        let resolved = self.resolve_reference(expr, scope)?;
+        let origin = self.origin(&resolved.found, &resolved.table, &resolved.column);
+        Some((resolved.found.typed(self.dialect), origin))
     }
 
     /// Typed column reference, recording why when it is untyped.
@@ -244,8 +284,13 @@ impl<'a> Analyzer<'a> {
         }
         let mut references: Vec<&str> = scope
             .iter()
-            .filter(|(_, table)| self.lookup_column(table, &column).is_some())
-            .map(|(reference, _)| reference.as_str())
+            .filter(|source| {
+                source
+                    .table
+                    .named()
+                    .is_some_and(|table| self.find_column(table, &column).is_some())
+            })
+            .map(|source| source.reference.as_str())
             .collect();
         references.dedup();
         if references.len() > 1 {
@@ -275,34 +320,35 @@ impl<'a> Analyzer<'a> {
         };
         let name = fold(column, self.dialect);
         let unqualified = qualifier.is_none();
-        let all: Vec<&(String, String)> = sources(scope, &self.outer).collect();
+        let all: Vec<&Source> = sources(scope, &self.outer).collect();
         // SQLite and MySQL read an unresolved "double-quoted" name as a string literal.
         if unqualified && column.quote_style == Some('"') && self.dialect != SqlDialect::Postgres {
             return self.diag.explain_silently();
         }
         // A whole-row reference: `SELECT t FROM users t`.
-        if unqualified && all.iter().any(|(reference, _)| *reference == name) {
+        if unqualified && all.iter().any(|source| source.reference == name) {
             return self.diag.explain_silently();
         }
-        let candidates: Vec<&&(String, String)> = match &qualifier {
-            Some(qualifier) => all.iter().filter(|(r, _)| r == qualifier).collect(),
+        let candidates: Vec<&&Source> = match &qualifier {
+            Some(qualifier) => all
+                .iter()
+                .filter(|source| source.reference == *qualifier)
+                .collect(),
             None => all.iter().collect(),
         };
         // A qualifier no FROM item names may still be an alias inside an opaque source.
-        let pool: &[&(String, String)] = if candidates.is_empty() { &all } else { &[] };
+        let pool: &[&Source] = if candidates.is_empty() { &all } else { &[] };
         let opaque = candidates
             .iter()
             .map(|source| **source)
             .chain(pool.iter().copied())
-            .map(|(_, table)| table)
-            .find(|table| is_opaque(table));
-        if let Some(table) = opaque {
+            .find_map(|source| source.table.opaque_description());
+        if let Some(description) = opaque {
             return self.diag.record(
                 NameRule::UnsupportedSyntax,
                 format!(
-                    "column `{}` may come from {}, which sqlty does not read the columns of",
+                    "column `{}` may come from {description}, which sqlty does not read the columns of",
                     column.value,
-                    opaque_description(table)
                 ),
             );
         }
@@ -322,18 +368,20 @@ impl<'a> Analyzer<'a> {
             }
         }
         // Columns of a source that is itself unknown are explained where it is declared.
-        let unreadable = candidates.iter().any(|(_, table)| {
-            !self.knows_table(table)
-                || self
-                    .virtual_columns(table)
-                    .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
+        let unreadable = candidates.iter().any(|source| {
+            source.table.named().is_none_or(|table| {
+                !self.knows_table(table)
+                    || self
+                        .virtual_columns(table)
+                        .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
+            })
         });
         if unreadable {
             return self.diag.explain_silently();
         }
         let tables: Vec<&str> = candidates
             .iter()
-            .map(|(reference, _)| reference.as_str())
+            .map(|source| source.reference.as_str())
             .collect();
         let message = match (&qualifier, tables.is_empty()) {
             (Some(qualifier), _) => {
@@ -360,10 +408,13 @@ impl<'a> Analyzer<'a> {
         }
         let reference = reference.map(str::to_lowercase);
         for table in Self::star_tables(reference.as_deref(), scope) {
-            if self.virtuals.contains_key(&table) {
+            let Some(table) = table.named() else {
+                continue;
+            };
+            if self.virtuals.contains_key(table) {
                 continue;
             }
-            if let Some(columns) = self.virtual_columns(&table) {
+            if let Some(columns) = self.virtual_columns(table) {
                 for col in columns
                     .iter()
                     .filter(|c| c.python_type.is_none() && !c.is_unknown_star())
@@ -376,7 +427,7 @@ impl<'a> Analyzer<'a> {
                         ),
                     );
                 }
-            } else if let Some(columns) = self.schema.table(&table) {
+            } else if let Some(columns) = self.schema.table(table) {
                 for col in columns {
                     if col.typed(self.dialect).python.is_none() {
                         self.diag.record(
@@ -400,10 +451,12 @@ impl<'a> Analyzer<'a> {
         }
         let reference = reference.map(str::to_lowercase);
         let views: Vec<String> = Self::star_tables(reference.as_deref(), scope)
-            .into_iter()
+            .iter()
+            .filter_map(Table::named)
             .filter(|table| {
                 !self.virtuals.contains_key(table) && self.virtual_columns(table).is_some()
             })
+            .map(str::to_string)
             .collect();
         if views.is_empty() {
             return self.diag.explain_silently();
@@ -429,20 +482,17 @@ impl<'a> Analyzer<'a> {
         }
         let reference = reference.map(str::to_lowercase);
         let tables = Self::star_tables(reference.as_deref(), scope);
-        if let Some(table) = tables.iter().find(|table| is_opaque(table)) {
+        if let Some(description) = tables.iter().find_map(Table::opaque_description) {
             return self.diag.record(
                 NameRule::UnsupportedSyntax,
-                format!(
-                    "`*` reads {}, which sqlty does not read the columns of",
-                    opaque_description(table)
-                ),
+                format!("`*` reads {description}, which sqlty does not read the columns of"),
             );
         }
         if !self.judges_names() {
             return self.diag.explain_silently();
         }
         if let Some(reference) = &reference {
-            if !scope.iter().any(|(alias, _)| alias == reference) {
+            if !scope.iter().any(|source| source.reference == *reference) {
                 return self.diag.record(
                     NameRule::UnknownTable,
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
@@ -454,10 +504,14 @@ impl<'a> Analyzer<'a> {
                 "`*` over a USING or NATURAL join merges columns, so it is not expanded",
             );
         }
-        if tables.iter().any(|table| !self.knows_table(table)) || scope.is_empty() {
+        if tables
+            .iter()
+            .any(|table| table.named().is_none_or(|table| !self.knows_table(table)))
+            || scope.is_empty()
+        {
             return self.diag.explain_silently();
         }
-        if tables.iter().any(|table| {
+        if tables.iter().filter_map(Table::named).any(|table| {
             self.virtual_columns(table)
                 .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
         }) {

@@ -2,8 +2,59 @@
 
 use super::*;
 
-/// `(reference, table)` pairs for the tables a statement reads, in query order.
-pub(super) type Scope = Vec<(String, String)>;
+/// What a name in the query can refer to: a FROM item under the name it is read by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Source {
+    /// The alias, or the table name when there is none, lower-cased; empty for a source that
+    /// cannot be named.
+    pub(super) reference: String,
+    pub(super) table: Table,
+}
+
+/// The relation behind a [`Source`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Table {
+    /// A schema table or view, a CTE (by its name), or a derived table or table function
+    /// (by `(alias)`): anything whose columns can be looked up.
+    Named(String),
+    /// A source whose columns the analyzer does not read: a table function, `UNNEST`, a
+    /// system catalog, an unaliased subquery. Holds what it is, for messages.
+    Opaque(String),
+    /// The tables of a DML statement's `FROM`/`USING`: they hide columns from RETURNING
+    /// names, but `RETURNING *` lists the target table only.
+    ExtraSources,
+}
+
+impl Table {
+    /// The key the columns of a [`Table::Named`] source are looked up by.
+    pub(super) fn named(&self) -> Option<&str> {
+        match self {
+            Table::Named(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// What a source is whose columns are not read, for messages.
+    pub(super) fn opaque_description(&self) -> Option<&str> {
+        match self {
+            Table::Named(_) => None,
+            Table::Opaque(description) => Some(description),
+            Table::ExtraSources => Some("tables joined to the target with FROM or USING"),
+        }
+    }
+}
+
+impl Source {
+    pub(super) fn named(reference: String, key: String) -> Self {
+        Source {
+            reference,
+            table: Table::Named(key),
+        }
+    }
+}
+
+/// The sources a statement reads, in query order.
+pub(super) type Scope = Vec<Source>;
 
 pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
     match factor {
@@ -17,7 +68,7 @@ pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
                 .as_ref()
                 .map(|alias| alias.name.value.to_lowercase())
                 .unwrap_or_else(|| object_name(name));
-            vec![(reference, table_key(name, dialect))]
+            vec![Source::named(reference, table_key(name, dialect))]
         }
         other => vec![opaque_source(other)],
     }
@@ -46,26 +97,8 @@ fn only_table(factor: &TableFactor) -> Option<TableFactor> {
     Some(table)
 }
 
-/// Marks a scope source whose columns the analyzer does not know: a table function,
-/// `UNNEST`, a system catalog, an unaliased subquery. The key reads `(?description)`.
-pub(super) fn is_opaque(table: &str) -> bool {
-    table.starts_with("(?")
-}
-
-/// The tables of a DML statement's `FROM`/`USING`: they hide columns from RETURNING names,
-/// but `RETURNING *` lists the target table only.
-pub(super) const EXTRA_SOURCES: &str = "(?tables joined to the target with FROM or USING)";
-
-/// What an opaque source is, for messages.
-pub(super) fn opaque_description(table: &str) -> &str {
-    table
-        .strip_prefix("(?")
-        .and_then(|rest| rest.strip_suffix(')'))
-        .unwrap_or(table)
-}
-
-/// `(alias, key)` of a FROM item the analyzer cannot read the columns of.
-pub(super) fn opaque_source(factor: &TableFactor) -> (String, String) {
+/// A FROM item the analyzer cannot read the columns of.
+pub(super) fn opaque_source(factor: &TableFactor) -> Source {
     let (alias, description) = match factor {
         TableFactor::Table {
             name,
@@ -88,7 +121,10 @@ pub(super) fn opaque_source(factor: &TableFactor) -> (String, String) {
         .as_ref()
         .map(|alias| alias.name.value.to_lowercase())
         .unwrap_or_default();
-    (reference, format!("(?{description})"))
+    Source {
+        reference,
+        table: Table::Opaque(description),
+    }
 }
 
 /// Sources of a SELECT: each FROM relation followed by its joins (`FROM a, b` counts two),
@@ -207,13 +243,12 @@ fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
 }
 
 /// The table an alias (or table name) refers to.
-pub(super) fn resolve(reference: &str, scope: &Scope) -> String {
+pub(super) fn resolve(reference: &str, scope: &Scope) -> Table {
     let reference = reference.to_lowercase();
     scope
         .iter()
-        .find(|(alias, _)| *alias == reference)
-        .map(|(_, table)| table.clone())
-        .unwrap_or(reference)
+        .find(|source| source.reference == reference)
+        .map_or(Table::Named(reference), |source| source.table.clone())
 }
 
 /// Output columns of the CTEs and derived tables in scope, by table key: a CTE's
@@ -326,7 +361,7 @@ impl<'a> Analyzer<'a> {
                     );
                     let table = format!("({reference})");
                     analyzer.virtuals.insert(table.clone(), columns);
-                    scope.push((reference, table));
+                    scope.push(Source::named(reference, table));
                 }
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
                     let table = table_key(name, self.dialect);
@@ -334,7 +369,7 @@ impl<'a> Analyzer<'a> {
                         || object_name(name),
                         |alias| alias.name.value.to_lowercase(),
                     );
-                    scope.push((reference, table));
+                    scope.push(Source::named(reference, table));
                 }
                 TableFactor::Derived {
                     subquery,
@@ -351,7 +386,7 @@ impl<'a> Analyzer<'a> {
                     let reference = alias.name.value.to_lowercase();
                     let table = format!("({reference})");
                     analyzer.virtuals.insert(table.clone(), columns);
-                    scope.push((reference, table));
+                    scope.push(Source::named(reference, table));
                 }
                 other => {
                     let entries = match other {
@@ -360,8 +395,8 @@ impl<'a> Analyzer<'a> {
                         } if analyzer.is_system_catalog(name) => vec![opaque_source(other)],
                         _ => table_scope(other, analyzer.dialect),
                     };
-                    for (_, table) in &entries {
-                        analyzer.check_table(table);
+                    for source in &entries {
+                        analyzer.check_table(&source.table);
                     }
                     scope.extend(entries);
                 }
@@ -397,23 +432,26 @@ impl<'a> Analyzer<'a> {
             })
     }
 
-    /// `(reference, table)` pairs a star reads: the one `reference` names, or every scope table.
-    pub(super) fn star_sources(reference: Option<&str>, scope: &Scope) -> Vec<(String, String)> {
+    /// Sources a star reads: the one `reference` names, or every scope table.
+    pub(super) fn star_sources(reference: Option<&str>, scope: &Scope) -> Vec<Source> {
         match reference {
-            Some(reference) => vec![(reference.to_lowercase(), resolve(reference, scope))],
+            Some(reference) => vec![Source {
+                reference: reference.to_lowercase(),
+                table: resolve(reference, scope),
+            }],
             None => scope
                 .iter()
-                .filter(|(_, table)| table != EXTRA_SOURCES)
+                .filter(|source| source.table != Table::ExtraSources)
                 .cloned()
                 .collect(),
         }
     }
 
     /// Tables a star reads: the one `reference` names, or every scope table.
-    pub(super) fn star_tables(reference: Option<&str>, scope: &Scope) -> Vec<String> {
+    pub(super) fn star_tables(reference: Option<&str>, scope: &Scope) -> Vec<Table> {
         Self::star_sources(reference, scope)
             .into_iter()
-            .map(|(_, table)| table)
+            .map(|source| source.table)
             .collect()
     }
 
@@ -429,7 +467,8 @@ impl<'a> Analyzer<'a> {
         }
         let columns = sources
             .iter()
-            .map(|(reference, table)| {
+            .map(|Source { reference, table }| {
+                let table = table.named()?;
                 let mut columns = self
                     .virtual_columns(table)
                     .map(<[Column]>::to_vec)
@@ -469,7 +508,7 @@ impl<'a> Analyzer<'a> {
         }
         let columns = tables
             .iter()
-            .map(|table| self.schema.table(table))
+            .map(|table| self.schema.table(table.named()?))
             .collect::<Option<Vec<_>>>()?;
         Some(columns.into_iter().flatten().cloned().collect())
     }

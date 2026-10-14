@@ -97,7 +97,7 @@ impl Facts {
 
     /// Forget what is known about relations a nested SELECT defines itself.
     pub(super) fn without(&mut self, scope: &Scope) {
-        let shadowed = |r: &String| scope.iter().any(|(s, _)| s == r);
+        let shadowed = |r: &String| scope.iter().any(|source| source.reference == *r);
         // Rebuilding a list only when it has something to forget keeps shared ones shared.
         fn forget<T: Clone>(list: &mut Rc<Vec<T>>, gone: impl Fn(&T) -> bool) {
             if list.iter().any(&gone) {
@@ -170,7 +170,7 @@ fn factor_references(
         // The reference the scope of the SELECT gives the relation.
         other => table_scope(other, dialect)
             .into_iter()
-            .map(|(reference, _)| reference)
+            .map(|source| source.reference)
             .collect(),
     }
 }

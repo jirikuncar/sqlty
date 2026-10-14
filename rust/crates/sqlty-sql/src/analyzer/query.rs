@@ -99,8 +99,8 @@ impl<'a> Analyzer<'a> {
             _ => match returning(stmt) {
                 Some(items) => {
                     let scope = dml_scope(stmt, self.dialect);
-                    for (_, table) in &scope {
-                        self.check_table(table);
+                    for source in &scope {
+                        self.check_table(&source.table);
                     }
                     self.projection(items, &scope, None).map(non_empty)
                 }

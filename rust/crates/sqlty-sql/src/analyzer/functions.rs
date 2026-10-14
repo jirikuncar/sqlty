@@ -530,12 +530,15 @@ impl<'a> Analyzer<'a> {
             return numeric();
         }
         let (table, column) = match arg {
-            Some(Expr::Identifier(ident)) => (scope[0].1.clone(), &ident.value),
+            Some(Expr::Identifier(ident)) => (scope[0].table.clone(), &ident.value),
             Some(Expr::CompoundIdentifier(parts)) if parts.len() >= 2 => (
                 resolve(&parts[parts.len() - 2].value, scope),
                 &parts[parts.len() - 1].value,
             ),
             _ => return numeric(),
+        };
+        let Some(table) = table.named().map(str::to_string) else {
+            return numeric();
         };
         if self.schema.table(&table).is_some() && self.virtual_columns(&table).is_none() {
             return Err(InferError::SumColumnNotInSchema {

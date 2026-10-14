@@ -301,7 +301,7 @@ impl<'a> Analyzer<'a> {
             return;
         };
         let table = table_key(name, self.dialect);
-        let scope = vec![(object_name(name), table.clone())];
+        let scope = vec![Source::named(object_name(name), table.clone())];
         let targets: Vec<String> = if insert.columns.is_empty() {
             self.schema
                 .table(&table)

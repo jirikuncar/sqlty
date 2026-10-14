@@ -38,7 +38,9 @@ pub(super) fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
 pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
     match stmt {
         Statement::Insert(insert) => match &insert.table {
-            TableObject::TableName(name) => vec![(object_name(name), table_key(name, dialect))],
+            TableObject::TableName(name) => {
+                vec![Source::named(object_name(name), table_key(name, dialect))]
+            }
             _ => Vec::new(),
         },
         Statement::Update(update) => {
@@ -71,6 +73,9 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
 
 /// RETURNING may read the tables of `FROM`, `USING` and `MERGE ... USING`, which are not
 /// resolved here.
-fn other_sources() -> (String, String) {
-    (String::new(), EXTRA_SOURCES.to_string())
+fn other_sources() -> Source {
+    Source {
+        reference: String::new(),
+        table: Table::ExtraSources,
+    }
 }
