@@ -12,7 +12,7 @@ pub(super) fn table_scope(factor: &TableFactor) -> Scope {
             alias,
             args: None,
             ..
-        } if !is_system_catalog(name) => {
+        } => {
             let table = object_name(name);
             let reference = alias
                 .as_ref()
@@ -69,9 +69,9 @@ pub(super) fn opaque_source(factor: &TableFactor) -> (String, String) {
     (reference, format!("(?{description})"))
 }
 
-/// `pg_catalog.x`, `information_schema.x` and PostgreSQL's `pg_*` relations are not in
-/// user schemas, so they are never reported as unknown tables.
-pub(super) fn is_system_catalog(name: &ObjectName) -> bool {
+/// `pg_catalog.x`, `information_schema.x` and `pg_*` relations: PostgreSQL's system
+/// catalogs. Only a stand-in until the catalog models them; see `Analyzer::is_system_catalog`.
+fn system_catalog_name(name: &ObjectName) -> bool {
     let part = |i: usize| {
         name.0
             .get(i)
@@ -232,6 +232,14 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Whether `name` is a PostgreSQL system relation the schema does not define: a table
+    /// of the user schema always wins, and other dialects have no such relations.
+    pub(super) fn is_system_catalog(&self, name: &ObjectName) -> bool {
+        self.dialect == SqlDialect::Postgres
+            && system_catalog_name(name)
+            && self.schema.get(&object_name(name)).is_none()
+    }
+
     /// An analyzer for a subquery of an expression: its names may refer to `scope`.
     pub(super) fn correlated(&self, scope: &Scope) -> Analyzer<'a> {
         let mut inner = self.clone();
@@ -272,7 +280,12 @@ impl<'a> Analyzer<'a> {
                     scope.push((reference, table));
                 }
                 other => {
-                    let entries = table_scope(other);
+                    let entries = match other {
+                        TableFactor::Table {
+                            name, args: None, ..
+                        } if analyzer.is_system_catalog(name) => vec![opaque_source(other)],
+                        _ => table_scope(other),
+                    };
                     for (_, table) in &entries {
                         analyzer.check_table(table);
                     }
