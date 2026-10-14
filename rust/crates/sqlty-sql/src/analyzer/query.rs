@@ -13,11 +13,15 @@ pub(super) fn leftmost_select(body: &SetExpr) -> Option<&Select> {
 }
 
 /// A result column: name, Python type and SQL type; unknown types are `None`.
+///
+/// `nullability` is kept next to the type, never inside it. Callers decide whether to
+/// spell it (see [`Column::display_type`]); only [`Nullability::Nullable`] makes a type optional.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
     pub python_type: Option<String>,
     pub sql_type: Option<String>,
+    pub nullability: Nullability,
 }
 
 impl Column {
@@ -26,7 +30,13 @@ impl Column {
             name: name.to_string(),
             python_type: None,
             sql_type: None,
+            nullability: Nullability::Unknown,
         }
+    }
+
+    /// Whether the column can be NULL; unknown nullability counts as no.
+    pub fn nullable(&self) -> bool {
+        self.nullability == Nullability::Nullable
     }
 
     pub(super) fn is_unknown_star(&self) -> bool {
@@ -45,6 +55,9 @@ pub(super) struct Analyzer<'a> {
     pub(super) outer: Scope,
     /// Columns the joins of this SELECT merge (`USING`, `NATURAL`), so they are not ambiguous.
     pub(super) merged: Vec<String>,
+    /// What is known about NULLs in the SELECT being analyzed: null-extended relations
+    /// and columns its conditions rule out as NULL.
+    pub(super) facts: Facts,
 }
 
 impl<'a> Analyzer<'a> {
@@ -56,6 +69,7 @@ impl<'a> Analyzer<'a> {
             diag: Diagnostics::default(),
             outer: Scope::new(),
             merged: Vec::new(),
+            facts: Facts::default(),
         }
     }
 
@@ -80,6 +94,7 @@ impl<'a> Analyzer<'a> {
             let mut inner = self.clone();
             for cte in &with.cte_tables {
                 let name = cte.alias.name.value.to_lowercase();
+                let mut recursive = false;
                 if let (true, SetExpr::SetOperation { left, .. }) =
                     (with.recursive, cte.query.body.as_ref())
                 {
@@ -87,12 +102,40 @@ impl<'a> Analyzer<'a> {
                         let mut seed = inner.select_columns(select)?;
                         rename_columns(&mut seed, &cte.alias);
                         inner.virtuals.insert(name.clone(), seed);
+                        recursive = true;
                     }
                 }
                 let mut columns = inner
                     .query_columns(&cte.query)?
                     .unwrap_or_else(|| vec![Column::unknown("*")]);
                 rename_columns(&mut columns, &cte.alias);
+                // A column of a recursive CTE is non-null only if it is in the anchor and in
+                // the recursive term reading the rows so far: repeat until nothing changes.
+                for round in 0..=columns.len() + 1 {
+                    if !recursive {
+                        break;
+                    }
+                    let known: Vec<Nullability> = inner.virtuals[&name]
+                        .iter()
+                        .map(|col| col.nullability)
+                        .collect();
+                    let now: Vec<Nullability> = columns.iter().map(|col| col.nullability).collect();
+                    if known == now {
+                        break;
+                    }
+                    if round > columns.len() {
+                        // Not settling: no column is known to be non-null.
+                        for col in &mut columns {
+                            col.nullability = Nullability::Nullable;
+                        }
+                        break;
+                    }
+                    inner.virtuals.insert(name.clone(), columns);
+                    columns = inner
+                        .query_columns(&cte.query)?
+                        .unwrap_or_else(|| vec![Column::unknown("*")]);
+                    rename_columns(&mut columns, &cte.alias);
+                }
                 inner.virtuals.insert(name, columns);
             }
             return inner.query_body(query);
@@ -111,7 +154,8 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(super) fn select_columns(&self, select: &Select) -> Inferred<Vec<Column>> {
-        let (analyzer, scope) = self.scope_of(&select.from)?;
+        let (mut analyzer, scope) = self.scope_of(&select.from)?;
+        analyzer.facts = analyzer.select_facts(select, &scope);
         analyzer.projection(&select.projection, &scope, Some(&select.from))
     }
 
@@ -135,6 +179,15 @@ impl<'a> Analyzer<'a> {
                 }
             });
         }
+        let shapes: Vec<Option<Vec<Nullability>>> = branches
+            .iter()
+            .map(|b| {
+                b.as_ref()
+                    .map(|cols| cols.iter().map(|c| c.nullability).collect())
+            })
+            .collect();
+        let width = branches.first().and_then(|b| b.as_ref()).map(Vec::len);
+        let nullability = set_nullability(body, &mut shapes.into_iter(), width);
         let mut branches = branches.into_iter();
         let Some(mut columns) = branches.next().flatten() else {
             return Ok(None);
@@ -164,6 +217,9 @@ impl<'a> Analyzer<'a> {
                 );
             }
             (column.python_type, column.sql_type) = common.unwrap_or((None, None));
+        }
+        for (column, nullability) in columns.iter_mut().zip(nullability) {
+            column.nullability = nullability;
         }
         Ok(Some(columns))
     }
@@ -219,10 +275,12 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
+            let nullability = self.nullability(expr, scope, &self.facts);
             columns.push(Column {
                 name,
                 python_type,
                 sql_type,
+                nullability,
             });
         }
         Ok(columns)
@@ -252,6 +310,51 @@ impl<'a> Analyzer<'a> {
                 vec![Column::unknown("*")]
             }
         }
+    }
+}
+
+/// Nullability of a set operation's columns, folding the branches' (taken from `shapes`
+/// in `set_branches` order): UNION is nullable if either side is, INTERSECT only if both
+/// are, EXCEPT follows its left side. A branch of another width or one not analyzed
+/// leaves its columns unknown.
+fn set_nullability(
+    body: &SetExpr,
+    shapes: &mut std::vec::IntoIter<Option<Vec<Nullability>>>,
+    width: Option<usize>,
+) -> Vec<Nullability> {
+    use sqlparser::ast::SetOperator;
+    let unknown = || vec![Nullability::Unknown; width.unwrap_or(0)];
+    match body {
+        SetExpr::SetOperation {
+            op, left, right, ..
+        } => {
+            let left = set_nullability(left, shapes, width);
+            let right = set_nullability(right, shapes, width);
+            left.into_iter()
+                .zip(right)
+                .map(|(l, r)| match (op, l, r) {
+                    (SetOperator::Except | SetOperator::Minus, l, _) => l,
+                    (SetOperator::Intersect, Nullability::Nullable, Nullability::Nullable) => {
+                        Nullability::Nullable
+                    }
+                    (SetOperator::Intersect, Nullability::NonNull, _)
+                    | (SetOperator::Intersect, _, Nullability::NonNull) => Nullability::NonNull,
+                    (SetOperator::Intersect, _, _) => Nullability::Unknown,
+                    (_, Nullability::Nullable, _) | (_, _, Nullability::Nullable) => {
+                        Nullability::Nullable
+                    }
+                    (_, Nullability::NonNull, Nullability::NonNull) => Nullability::NonNull,
+                    _ => Nullability::Unknown,
+                })
+                .collect()
+        }
+        SetExpr::Query(query) if query.with.is_none() => {
+            set_nullability(&query.body, shapes, width)
+        }
+        _ => match shapes.next().flatten() {
+            Some(shape) if Some(shape.len()) == width => shape,
+            _ => unknown(),
+        },
     }
 }
 

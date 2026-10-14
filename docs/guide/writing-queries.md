@@ -118,8 +118,9 @@ cast), the function (`count`, `max`, `now`), the array of a subscript (`tags[1]`
 is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, else
 `?column?`. Alias columns that a row type matches by name.
 
-Row types are never optional: a nullable column is typed as its base type.
-Annotate a [row type](row-types.md) with `T | None` when you need it.
+A column that can be NULL is typed `T | None`; see
+[Nullability](schema-inference.md#nullability). Annotate the field of a
+[row type](row-types.md) the same way.
 
 ## Which statements are wrapped
 

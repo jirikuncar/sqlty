@@ -43,7 +43,7 @@ SELECT id FROM users WHERE id = %(id)s FOR KEY SHARE
 
 ```sql
 SELECT u.id, o.status FROM users u JOIN orders o ON o.user_id = u.id FOR UPDATE OF u, o
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Empty target list locks rows without returning columns

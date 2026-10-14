@@ -21,12 +21,12 @@ CREATE TABLE IF NOT EXISTS orders (id INTEGER);
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ```sql
 SELECT * FROM orders
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## CREATE VIEW IF NOT EXISTS and OR REPLACE
@@ -43,12 +43,12 @@ CREATE OR REPLACE VIEW names AS SELECT id, name FROM users;
 
 ```sql
 SELECT * FROM ids
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ```sql
 SELECT * FROM names
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## CREATE OR REPLACE FUNCTION

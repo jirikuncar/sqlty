@@ -12,7 +12,7 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);
 ```
 
 ## What it does

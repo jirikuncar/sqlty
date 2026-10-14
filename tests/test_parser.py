@@ -21,7 +21,7 @@ class TestParser:
                 "postgres",
                 "tuple[list[int], list[list[str]], list[int]]",
             ),
-            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[int]"),
+            ("SELECT (x::INT[])[1] FROM t", "postgres", "tuple[int | None]"),
             ("SELECT x::INT[y] FROM t", "postgres", None),
             ("SELECT x::INT[1+1] FROM t", "postgres", None),
             ("SELECT x::INT ARRAY, y::TEXT FROM t", "postgres", "tuple[list[int], str]"),
@@ -149,7 +149,7 @@ def _type_table() -> dict[str, str]:
 @pytest.mark.parametrize(("sql_type", "python_type"), sorted(_type_table().items()))
 def test_type_names(sql_type: str, python_type: str, dialect: str):
     """A mapped type name, cast or in a schema, is its Python type."""
-    schema = f"CREATE TABLE t (c {sql_type});"
+    schema = f"CREATE TABLE t (c {sql_type} NOT NULL);"
     cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
     assert cast == column == f"tuple[{python_type}]"

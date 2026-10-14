@@ -66,6 +66,7 @@ class TypeInfo:
         "fields",
         "kind",
         "resolved_hints",
+        "declared_hints",
         "required",
         "closed",
         "extra_items",
@@ -106,6 +107,7 @@ class TypeInfo:
         self.extra_items_readonly = False
         self.extra_items_type: typing.Any = None
         self.field_types: dict[str, typing.Any] = {}
+        self.declared_hints: dict[str, typing.Any] = {}  # runtime hints, ``| None`` kept
         self.owner = name
         self.lineno = 0
         self.bases: list[str] = []
@@ -273,6 +275,7 @@ def extract_type_definitions(
         ):
             cls, namespace = resolved
             hints = _type_hints(cls, namespace)
+            info.declared_hints = hints
             info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
         if is_typeddict:
             info.bases = [p.name for p in parents]
@@ -340,6 +343,69 @@ def check_type_compatibility(
         return column_python_type is None
     lax = column_name in user_type.lax
     return _accepts(field, annotation, column_python_type, _LAX_FROM if lax else _PROMOTED_FROM)
+
+
+def admits_none(tp: typing.Any) -> bool | None:
+    """Whether a resolved annotation admits ``None``; ``None`` when it can't be told.
+
+    ``Optional[X]``, ``X | None``, ``Any``, ``object`` and ``Literal[None]`` admit it;
+    plain classes, generics and ``NewType`` of those don't. A forward reference or a
+    name that failed to resolve is undecided.
+
+    Example:
+        >>> admits_none(int), admits_none(int | None), admits_none(typing.Any), admits_none(None)
+        (False, True, True, None)
+    """
+    if tp is None:
+        return None
+    verdicts = [_member_admits_none(member) for member in _union_members(tp)]
+    if True in verdicts:
+        return True
+    return None if None in verdicts else False
+
+
+def _member_admits_none(member: typing.Any) -> bool | None:
+    if member is type(None) or member is None or member is typing.Any or member is object:
+        return True
+    if isinstance(member, typing.NewType):
+        return admits_none(member.__supertype__)
+    origin = typing.get_origin(member)
+    if origin is typing.Literal:
+        return None in typing.get_args(member)
+    if isinstance(member, type) or isinstance(origin, type):
+        return False
+    return None
+
+
+def is_optional(tp: typing.Any) -> bool:
+    """Whether a resolved annotation spells ``None`` out: ``Optional[X]`` or ``X | None``.
+
+    ``Any`` and ``object`` admit ``None`` but are not optional in this sense.
+
+    Example:
+        >>> is_optional(int | None), is_optional(typing.Optional[str]), is_optional(typing.Any)
+        (True, True, False)
+    """
+    members = _union_members(tp)
+    return len(members) > 1 and any(m is type(None) for m in members)
+
+
+def field_type(user_type: TypeInfo, column_name: str) -> typing.Any:
+    """The resolved annotation of the field of ``user_type`` that holds ``column_name``.
+
+    Resolved as `check_type_compatibility` resolves it, but with ``| None`` kept (type
+    compatibility ignores it, since every column may be NULL); ``None`` when the field is
+    unknown or its annotation can't be resolved.
+    """
+    declared = dict(user_type.fields)
+    if column_name in declared:
+        hints = user_type.declared_hints
+        return (
+            hints[column_name] if column_name in hints else user_type.field_types.get(column_name)
+        )
+    if user_type.extra_items is not None:
+        return user_type.extra_items_type
+    return None
 
 
 def field_accepts(annotation: str, column_python_type: str | None) -> bool:

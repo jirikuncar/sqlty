@@ -19,12 +19,12 @@ CREATE TABLE crm.accounts (id INTEGER, name TEXT);
 
 ```sql
 SELECT id, balance FROM billing.accounts
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int | None, decimal.Decimal | None]
 ```
 
 ```sql
 SELECT id, name FROM crm.accounts
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 Without a `search_path` entry that decides, a bare name with two candidates is
@@ -51,12 +51,12 @@ CREATE TABLE crm.accounts (id INTEGER, name TEXT);
 
 ```sql
 SELECT * FROM accounts
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int | None, decimal.Decimal | None]
 ```
 
 ```sql
 SELECT * FROM public.accounts
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## The search_path at the end of the file decides bare names
@@ -72,12 +72,12 @@ CREATE TABLE accounts (id INTEGER, balance NUMERIC(10, 2));
 
 ```sql
 SELECT * FROM accounts
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int | None, decimal.Decimal | None]
 ```
 
 ```sql
 SELECT * FROM crm.accounts
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## pg_dump style set_config
@@ -91,7 +91,7 @@ CREATE TABLE public.users (id INTEGER, name TEXT);
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## A schema with one definition needs no search_path
@@ -108,12 +108,12 @@ CREATE TABLE app.checkins (id INTEGER, mood mood);
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ```sql
 SELECT mood FROM checkins
--- inferred: tuple[typing.Literal['ok', 'bad']]
+-- inferred: tuple[typing.Literal['ok', 'bad'] | None]
 ```
 
 ## Qualified types and views
@@ -129,12 +129,12 @@ CREATE VIEW a.v AS SELECT ka FROM t;
 
 ```sql
 SELECT ka, kb FROM t
--- inferred: tuple[typing.Literal['x', 'y'], typing.Literal['p', 'q']]
+-- inferred: tuple[typing.Literal['x', 'y'] | None, typing.Literal['p', 'q'] | None]
 ```
 
 ```sql
 SELECT ka FROM a.v
--- inferred: tuple[typing.Literal['x', 'y']]
+-- inferred: tuple[typing.Literal['x', 'y'] | None]
 ```
 
 ## Table names in other schemas do not match

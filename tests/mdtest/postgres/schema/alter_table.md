@@ -21,7 +21,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ, ADD COLUMN IF
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, int, datetime.datetime]
+-- inferred: tuple[int, str | None, int, datetime.datetime | None]
 ```
 
 ## DROP COLUMN
@@ -36,7 +36,7 @@ ALTER TABLE users DROP COLUMN IF EXISTS never_existed;
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## RENAME COLUMN
@@ -50,7 +50,7 @@ ALTER TABLE users RENAME COLUMN full_name TO name;
 
 ```sql
 SELECT id, name FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## ALTER COLUMN TYPE
@@ -65,7 +65,7 @@ ALTER TABLE events ALTER COLUMN payload TYPE JSONB USING payload::jsonb;
 
 ```sql
 SELECT * FROM events
--- inferred: tuple[int, typing.Any, datetime.datetime]
+-- inferred: tuple[int | None, typing.Any, datetime.datetime | None]
 ```
 
 ## SET and DROP NOT NULL, defaults
@@ -84,7 +84,7 @@ ALTER TABLE users ALTER COLUMN age SET DEFAULT 0;
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, int]
+-- inferred: tuple[int, str | None, int | None]
 ```
 
 ## RENAME TO
@@ -98,7 +98,7 @@ ALTER TABLE accounts RENAME TO wallets;
 
 ```sql
 SELECT id, balance FROM wallets
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int | None, decimal.Decimal | None]
 ```
 
 ## ONLY, IF EXISTS and statements without a table
@@ -115,7 +115,7 @@ ALTER TABLE ONLY users ADD COLUMN y TEXT;
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ## Constraints and ownership change no column
@@ -133,7 +133,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Used in a view
@@ -150,5 +150,5 @@ ALTER TABLE users ADD COLUMN age INTEGER;
 
 ```sql
 SELECT * FROM names
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```

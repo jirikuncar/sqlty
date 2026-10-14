@@ -14,21 +14,21 @@ SELECT 1, 1.5, 'text', TRUE, NULL
 
 ```sql
 SELECT COUNT(*) AS total, SUM(amount) AS revenue FROM orders
--- inferred: tuple[int, decimal.Decimal]
+-- inferred: tuple[int, decimal.Decimal | None]
 ```
 
 ## AVG of integers is Decimal
 
 ```sql
 SELECT AVG(quantity::INTEGER) FROM orders
--- inferred: tuple[decimal.Decimal]
+-- inferred: tuple[decimal.Decimal | None]
 ```
 
 ## MIN and MAX keep the argument type
 
 ```sql
 SELECT MIN(placed::DATE), MAX(quantity::INTEGER) FROM orders
--- inferred: tuple[datetime.date, int]
+-- inferred: tuple[datetime.date | None, int | None]
 ```
 
 ## COALESCE takes the first argument's type
@@ -63,7 +63,7 @@ SELECT EXISTS (SELECT 1 FROM orders), id IN (SELECT user_id FROM orders) FROM us
 
 ```sql
 SELECT (SELECT MAX(total::INTEGER) FROM orders) AS best FROM users
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## Window and JSON functions

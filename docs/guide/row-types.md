@@ -254,8 +254,10 @@ class StrictTotals(BaseModel):
     total: int
     count: int = Field(strict=False)
 
+# error: [nullable-mismatch] "Totals.total is int but query column 'total' can be NULL"
 ok = SQL[Totals]("--sql\nSELECT sum(id::BIGINT) AS total FROM users")
 # error: [column-type-mismatch] "StrictTotals.total is int but query column 'total' infers decimal.Decimal"
+# error: [nullable-mismatch] "StrictTotals.count is int but query column 'count' can be NULL"
 bad = SQL[StrictTotals]("--sql\nSELECT sum(id::BIGINT) AS total, sum(id::BIGINT) AS count FROM users")
 ```
 
@@ -401,6 +403,15 @@ Only an instance built as `SQL[T](...)` carries `T`. A plain string,
 operations such as `query + " LIMIT 1"` do not: `row_form` raises
 `TypeError` for them unless you pass a default. The
 [psycopg helpers](psycopg.md) use `row_form` to pick a row factory.
+
+## Nullable columns
+
+A column that can be NULL infers `T | None` (see
+[Nullability](schema-inference.md#nullability)). A field that is not optional is
+[`nullable-mismatch`](../reference/rules.md#nullable-mismatch), an error by default. A field
+annotated `T | None` is accepted for a column that cannot be NULL: only
+[`redundant-optional`](../reference/rules.md#redundant-optional), off by default, reports
+that.
 
 ## Limitations
 

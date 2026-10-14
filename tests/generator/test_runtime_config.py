@@ -76,7 +76,7 @@ def test_schema_precedence(tmp_path: Path) -> None:
     > top-level ``schema``."""
     types = {"function": "INTEGER", "fqn": "TEXT", "decorator": "DATE", "module": "BOOLEAN"}
     for name, id_type in [*types.items(), ("global", "BYTEA")]:
-        (tmp_path / f"{name}.sql").write_text(f"CREATE TABLE users (id {id_type});\n")
+        (tmp_path / f"{name}.sql").write_text(f"CREATE TABLE users (id {id_type} NOT NULL);\n")
     plain = APP.replace("id, name", "id")
     decorated = plain.replace("@sqlty\n", '@sqlty(schema="decorator.sql")\n')
     top = '[tool.sqlty]\nschema = "global.sql"\n\n'
@@ -96,8 +96,8 @@ def test_schema_precedence(tmp_path: Path) -> None:
 
 def test_same_function_name_in_two_modules(tmp_path: Path) -> None:
     """Configs match on ``module.function``, so ``db.sql`` and ``analytics.sql`` stay apart."""
-    (tmp_path / "db.sql").write_text("CREATE TABLE t (id INTEGER);\n")
-    (tmp_path / "analytics.sql").write_text("CREATE TABLE t (id TEXT);\n")
+    (tmp_path / "db.sql").write_text("CREATE TABLE t (id INTEGER NOT NULL);\n")
+    (tmp_path / "analytics.sql").write_text("CREATE TABLE t (id TEXT NOT NULL);\n")
     (tmp_path / "db.py").write_text(
         "from sqlty import sqlty\n\n\n@sqlty\ndef sql(query: str) -> object:\n"
         "    return query\n\n\nsql('SELECT id FROM t')\n"

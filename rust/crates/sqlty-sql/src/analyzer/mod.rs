@@ -29,6 +29,8 @@ mod dml;
 mod expr;
 mod functions;
 mod names;
+mod narrowing;
+mod nullability;
 mod operators;
 mod query;
 mod resolve;
@@ -38,9 +40,11 @@ use dml::*;
 use expr::*;
 use functions::*;
 use names::*;
+use nullability::*;
 use operators::*;
 use query::*;
 
+pub use nullability::Nullability;
 pub use query::Column;
 use scope::*;
 
@@ -595,15 +599,25 @@ pub(crate) fn typed(sql_type: String, python_type: Option<String>, dialect: SqlD
     }
 }
 
+impl Column {
+    /// The Python type as written in a row type: `T | None` for a column that can be NULL,
+    /// else `python_type`. `Any` already admits `None`.
+    pub fn display_type(&self) -> Option<String> {
+        let python_type = self.python_type.as_deref()?;
+        Some(if self.nullable() && python_type != ANY {
+            format!("{python_type} | None")
+        } else {
+            python_type.to_string()
+        })
+    }
+}
+
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(sql: &str, dialect: &str, schema: &Option<Schema>) -> Inferred<Option<String>> {
     let columns = analyze_select(sql, dialect, schema)?;
     // A column of unknown type, `*` the schema cannot resolve included, leaves the row type unknown.
     Ok(columns.and_then(|columns| {
-        let types: Option<Vec<&str>> = columns
-            .iter()
-            .map(|col| col.python_type.as_deref())
-            .collect();
+        let types: Option<Vec<String>> = columns.iter().map(Column::display_type).collect();
         let types = types?;
         Some(if types.is_empty() {
             "tuple[()]".to_string()
@@ -822,7 +836,7 @@ mod tests {
     #[test]
     fn test_schema_order_and_canonical_types() {
         let schema = Some(load_schema(
-            "CREATE TABLE users (id INTEGER, score NUMERIC(10,2), tags TEXT[])",
+            "CREATE TABLE users (id INTEGER NOT NULL, score NUMERIC(10,2) NOT NULL, tags TEXT[] NOT NULL)",
             "postgres",
         ));
         assert_eq!(
@@ -978,7 +992,7 @@ mod tests {
     #[test]
     fn test_ctes_and_derived_tables() {
         let schema = Some(load_schema(
-            "CREATE TABLE users (id INTEGER, name TEXT, born DATE)",
+            "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, born DATE NOT NULL)",
             "postgres",
         ));
         let infer = |sql: &str| infer_type(sql, "postgres", &schema).unwrap();

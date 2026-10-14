@@ -40,7 +40,7 @@ CREATE TABLE tasks (id INTEGER PRIMARY KEY, status task_status);
 
 ```sql
 SELECT status FROM tasks
--- inferred: tuple[typing.Literal['new', 'finished']]
+-- inferred: tuple[typing.Literal['new', 'finished'] | None]
 ```
 
 ## A renamed enum keeps the columns that use it
@@ -66,7 +66,7 @@ SELECT mood FROM checkins
 
 ```sql
 SELECT feel FROM notes
--- inferred: tuple[typing.Literal['happy', 'sad', 'ok']]
+-- inferred: tuple[typing.Literal['happy', 'sad', 'ok'] | None]
 ```
 
 ## An ALTER TYPE the catalog cannot follow
@@ -94,7 +94,7 @@ SELECT (p).a FROM t
 
 ```sql
 SELECT (o).a FROM t
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ```sql
@@ -104,7 +104,7 @@ SELECT s FROM t
 
 ```sql
 SELECT k FROM t
--- inferred: tuple[typing.Literal['x', 'y']]
+-- inferred: tuple[typing.Literal['x', 'y'] | None]
 ```
 
 ## DROP TABLE and DROP VIEW
@@ -134,7 +134,7 @@ SELECT name FROM names
 
 ```sql
 SELECT name FROM users
--- inferred: tuple[str]
+-- inferred: tuple[str | None]
 ```
 
 ## DROP and CREATE again
@@ -151,7 +151,7 @@ CREATE TABLE users (id TEXT, name TEXT);
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[str, str]
+-- inferred: tuple[str | None, str | None]
 ```
 
 ## DROP TYPE and DROP DOMAIN
@@ -188,5 +188,5 @@ SELECT id FROM scratch.tmp
 
 ```sql
 SELECT id FROM users
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```

@@ -15,6 +15,7 @@ use pyo3::types::{PyDict, PyList};
 use rewriter::ImportStyle;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
+type NullableColumnTuple = (String, Option<String>, Option<String>, Option<bool>);
 
 type CachedSchema = (
     String,
@@ -110,7 +111,40 @@ fn analyze_select(
     Ok(columns.map(|columns| {
         columns
             .into_iter()
-            .map(|col| (col.name, col.python_type, col.sql_type))
+            .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
+            .collect()
+    }))
+}
+
+/// Result columns of a query as `(name, python_type, sql_type, nullable)` tuples.
+///
+/// `python_type` is never spelled `T | None` here, unlike in `analyze_select`: `nullable` says
+/// whether the column can be NULL (True), cannot (False), or is not known (None: an
+/// unresolved column, an unknown function), so row types can be judged against it.
+/// Returns None when the query returns no rows or doesn't parse.
+///
+/// Raises:
+///     RuntimeError: SUM(column) names a column missing from a schema table
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn analyze_columns(
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> PyResult<Option<Vec<NullableColumnTuple>>> {
+    let columns = analyzer::analyze_select(sql, dialect, &schema(schema_sql, dialect))
+        .map_err(PyRuntimeError::new_err)?;
+    Ok(columns.map(|columns| {
+        columns
+            .into_iter()
+            .map(|col| {
+                let nullable = match col.nullability {
+                    analyzer::Nullability::Nullable => Some(true),
+                    analyzer::Nullability::NonNull => Some(false),
+                    analyzer::Nullability::Unknown => None,
+                };
+                (col.name, col.python_type, col.sql_type, nullable)
+            })
             .collect()
     }))
 }
@@ -360,6 +394,7 @@ fn query_sites(
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;

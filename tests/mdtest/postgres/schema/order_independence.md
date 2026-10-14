@@ -22,7 +22,7 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, str, int]
+-- inferred: tuple[int, str | None, int | None]
 ```
 
 ## A rename and an add that need the other
@@ -37,7 +37,7 @@ CREATE TABLE users (id INTEGER);
 
 ```sql
 SELECT * FROM users
--- inferred: tuple[int, int]
+-- inferred: tuple[int | None, int | None]
 ```
 
 ## Views before their tables and before each other
@@ -52,7 +52,7 @@ CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT, age INTEGER);
 
 ```sql
 SELECT id, name FROM adults
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## Types after the tables that use them
@@ -68,7 +68,7 @@ CREATE TYPE order_status AS ENUM ('new', 'paid');
 
 ```sql
 SELECT * FROM orders
--- inferred: tuple[int, typing.Literal['new', 'paid', 'refunded'], int]
+-- inferred: tuple[int | None, typing.Literal['new', 'paid', 'refunded'] | None, int | None]
 ```
 
 ## A view over something the schema never defines

@@ -25,6 +25,7 @@ CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
 ```python
 from sqlty import SQL
 
+# error:
 q = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")
 ```
 
@@ -161,11 +162,11 @@ d = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT c.id FROM c"
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[int, str]]("--sql\nSELECT u.id, t.title FROM users u JOIN teams t ON t.id = u.team_id")
+a = SQL[tuple[int, str | None]]("--sql\nSELECT u.id, t.title FROM users u JOIN teams t ON t.id = u.team_id")
 # error:
 b = SQL[tuple[int]]("--sql\nSELECT users.id FROM users, orders")
 # error:
-c = SQL[tuple[int]]("--sql\nSELECT o.id FROM users u JOIN orders o ON o.user_id = u.id")
+c = SQL[tuple[int | None]]("--sql\nSELECT o.id FROM users u JOIN orders o ON o.user_id = u.id")
 ```
 
 #### Subquery and derived columns
@@ -213,7 +214,7 @@ from sqlty import SQL
 # error:
 a = SQL[tuple[str]]("--sql\nSELECT relname FROM pg_class")
 # error:
-b = SQL[tuple[str]]("--sql\nSELECT table_name FROM information_schema.tables")
+b = SQL[tuple[str | None]]("--sql\nSELECT table_name FROM information_schema.tables")
 # error:
 c = SQL[tuple[int, str]]("--sql\nSELECT c.oid, c.relname FROM pg_catalog.pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace")
 # error: [unknown-column] "column `nope` does not exist in `pg_class`"
@@ -229,7 +230,7 @@ from sqlty import SQL
 # error:
 a = SQL[tuple[int, int]]("--sql\nSELECT u.id, l.n FROM users u, LATERAL (SELECT count(*) AS n FROM orders o WHERE o.user_id = u.id) l")
 # error:
-b = SQL[tuple[decimal.Decimal]]("--sql\nSELECT l.total FROM users u CROSS JOIN LATERAL (SELECT o.total FROM orders o WHERE o.user_id = u.id) l")
+b = SQL[tuple[decimal.Decimal | None]]("--sql\nSELECT l.total FROM users u CROSS JOIN LATERAL (SELECT o.total FROM orders o WHERE o.user_id = u.id) l")
 ```
 
 #### USING and NATURAL joins
@@ -242,7 +243,7 @@ a = SQL[tuple[int]]("--sql\nSELECT id FROM users JOIN teams USING (id)")
 # error:
 b = SQL[tuple[int]]("--sql\nSELECT id FROM users NATURAL JOIN teams")
 # error:
-c = SQL[tuple[int, str, str]]("--sql\nSELECT u.id, u.name, t.title FROM users u JOIN teams t USING (id)")
+c = SQL[tuple[int, str, str | None]]("--sql\nSELECT u.id, u.name, t.title FROM users u JOIN teams t USING (id)")
 ```
 
 #### Correlated subqueries
@@ -252,7 +253,7 @@ import decimal
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[decimal.Decimal]]("--sql\nSELECT (SELECT max(o.total) FROM orders o WHERE o.user_id = u.id) FROM users u")
+a = SQL[tuple[decimal.Decimal | None]]("--sql\nSELECT (SELECT max(o.total) FROM orders o WHERE o.user_id = u.id) FROM users u")
 # error:
 b = SQL[tuple[str]]("--sql\nSELECT (SELECT u.name) FROM users u")
 ```
@@ -263,7 +264,7 @@ b = SQL[tuple[str]]("--sql\nSELECT (SELECT u.name) FROM users u")
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[str]]('--sql\nSELECT "Mixed" FROM users')
+a = SQL[tuple[str | None]]('--sql\nSELECT "Mixed" FROM users')
 # error:
 b = SQL[tuple[int, str]]("--sql\nSELECT U.ID, NAME FROM Users U")
 # error:
@@ -387,7 +388,7 @@ CREATE VIEW opaque AS SELECT id, DATE '2020-01-01' AS day FROM users;
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM typed")
+a = SQL[tuple[int | None, str | None]]("--sql\nSELECT id, name FROM typed")
 # error: [unsupported-syntax] "view column `opaque.day` is not typed"
 b = SQL[tuple[object]]("--sql\nSELECT day FROM opaque")
 # error: [unknown-column] "column `nope` does not exist in `typed`"
@@ -424,11 +425,11 @@ a = SQL[tuple[int, int]]("--sql\nSELECT oid, tableoid FROM users")
 # error:
 b = SQL[tuple[object, object, object, object, object]]("--sql\nSELECT ctid, xmin, xmax, cmin, cmax FROM users")
 # error:
-c = SQL[tuple[int, int]]("--sql\nSELECT u.id, u.oid FROM users u")
+c = SQL[tuple[int | None, int]]("--sql\nSELECT u.id, u.oid FROM users u")
 # error:
-d = SQL[tuple[int]]("--sql\nSELECT id FROM ONLY users")
+d = SQL[tuple[int | None]]("--sql\nSELECT id FROM ONLY users")
 # error:
-e = SQL[tuple[int]]("--sql\nSELECT users.id FROM ONLY users")
+e = SQL[tuple[int | None]]("--sql\nSELECT users.id FROM ONLY users")
 # error: [unknown-column] "column `rowid` does not exist in `users`"
 f = SQL[tuple[int]]("--sql\nSELECT rowid FROM users")
 ```

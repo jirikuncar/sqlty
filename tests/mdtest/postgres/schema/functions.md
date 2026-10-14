@@ -126,17 +126,17 @@ CREATE FUNCTION bounds(IN a integer, OUT lo integer, OUT hi integer)
 
 ```sql
 SELECT * FROM active_users('2024-01-01')
--- inferred: tuple[int, str, datetime.datetime]
+-- inferred: tuple[int | None, str | None, datetime.datetime | None]
 ```
 
 ```sql
 SELECT u.id, u.seen FROM active_users('2024-01-01') AS u
--- inferred: tuple[int, datetime.datetime]
+-- inferred: tuple[int | None, datetime.datetime | None]
 ```
 
 ```sql
 SELECT * FROM all_users()
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ```sql
@@ -146,7 +146,7 @@ SELECT * FROM ids()
 
 ```sql
 SELECT lo, hi FROM bounds(3)
--- inferred: tuple[int, int]
+-- inferred: tuple[int | None, int | None]
 ```
 
 ## A function whose definition sqlparser cannot read

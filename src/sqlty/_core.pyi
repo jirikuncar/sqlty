@@ -12,6 +12,12 @@ def analyze_select(
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> list[tuple[str, str | None, str | None]] | None: ...
+def analyze_columns(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[str, str | None, str | None, bool | None]] | None: ...
 def query_diagnostics(
     sql: str,
     *,

@@ -105,6 +105,55 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// `(reference, table, column)` of the source a column reference reads, found as
+    /// [`Self::resolve_column`] finds it.
+    pub(super) fn locate_column(
+        &self,
+        expr: &Expr,
+        scope: &Scope,
+    ) -> Option<(String, String, String)> {
+        match expr {
+            Expr::Identifier(ident) => {
+                let column = ident.value.to_lowercase();
+                sources(scope, &self.outer).find_map(|(reference, table)| {
+                    self.lookup_column(table, &column)?;
+                    Some((reference.clone(), table.clone(), column.clone()))
+                })
+            }
+            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
+                let qualifier = parts[parts.len() - 2].value.to_lowercase();
+                let column = parts[parts.len() - 1].value.to_lowercase();
+                for sources in [scope, &self.outer] {
+                    if sources.iter().any(|(reference, _)| *reference == qualifier) {
+                        let table = resolve(&qualifier, sources);
+                        self.lookup_column(&table, &column)?;
+                        return Some((qualifier, table, column));
+                    }
+                }
+                self.lookup_column(&qualifier, &column)?;
+                Some((qualifier.clone(), qualifier, column))
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether the source says `column` of `table` can be NULL: a schema column lacking
+    /// `NOT NULL` / `PRIMARY KEY`, or a column its CTE, view or derived table marks nullable.
+    pub(super) fn declared_nullability(&self, table: &str, column: &str) -> Nullability {
+        if let Some(columns) = self.virtual_columns(table) {
+            return columns
+                .iter()
+                .find(|col| col.name.to_lowercase() == column)
+                .map_or(Nullability::Unknown, |col| col.nullability);
+        }
+        self.schema
+            .table(table)
+            .and_then(|columns| columns.iter().find(|col| col.name == column))
+            .map_or(Nullability::Unknown, |col| {
+                Nullability::declared(col.not_null)
+            })
+    }
+
     /// Type of a column: its qualifier's source, else the first source having it, the
     /// FROM clause before enclosing queries.
     pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<(Typed, Origin)> {

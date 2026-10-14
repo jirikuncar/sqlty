@@ -173,5 +173,5 @@ schema = "schema.sql"
 
 ```sql
 SELECT id, name FROM users WHERE id = ?
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```

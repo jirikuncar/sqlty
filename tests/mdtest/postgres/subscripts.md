@@ -22,7 +22,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT tags[1] FROM (SELECT ARRAY[name] AS tags FROM users) AS t
--- columns: tags: str (TEXT)
+-- columns: tags: str | None (TEXT)
 ```
 
 ## Subscripts and slices of a schema column
@@ -31,11 +31,11 @@ An element has the element type; a slice keeps the array type. A cast keeps the 
 
 ```sql
 SELECT tags[1], users.tags[2], tags[1:2], tags[1]::TEXT, (tags)[1] FROM users
--- columns: tags: str (TEXT)
--- columns: tags: str (TEXT)
+-- columns: tags: str | None (TEXT)
+-- columns: tags: str | None (TEXT)
 -- columns: tags: list[str] (ARRAY<TEXT>)
--- columns: tags: str (TEXT)
--- columns: tags: str (TEXT)
+-- columns: tags: str | None (TEXT)
+-- columns: tags: str | None (TEXT)
 ```
 
 ## Field access of a composite
@@ -44,8 +44,8 @@ The field names the column, and a known composite types it.
 
 ```sql
 SELECT (home).street, (users.home).zip FROM users
--- columns: street: str (TEXT)
--- columns: zip: int (INT)
+-- columns: street: str | None (TEXT)
+-- columns: zip: int | None (INT)
 ```
 
 ## ARRAY literals resolve a common element type

@@ -11,6 +11,8 @@ Configuration via pyproject.toml:
     column-count-mismatch = "error"     # default
     column-type-mismatch = "error"      # default
     column-name-mismatch = "warn"       # default
+    nullable-mismatch = "error"         # default
+    redundant-optional = "ignore"       # default
     typeddict-key-mismatch = "error"    # default
     typeddict-inheritance = "error"     # default
     select-star = "warn"                # default
@@ -98,6 +100,18 @@ RULES: dict[str, LintRule] = {
             "TypedDict subclass changes openness or adds keys a closed or extra_items base "
             "forbids (PEP 728)"
         ),
+    ),
+    "nullable-mismatch": LintRule(
+        name="nullable-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Row type field is not optional but its query column can be NULL",
+    ),
+    "redundant-optional": LintRule(
+        name="redundant-optional",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Row type field is optional but its query column cannot be NULL",
     ),
     "select-star": LintRule(
         name="select-star",

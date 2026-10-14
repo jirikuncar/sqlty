@@ -141,7 +141,7 @@ Use them to build your own tooling:
 >>> from sqlty.core import infer_type, rewrite_source, strip_source
 >>> infer_type("SELECT id::INTEGER, name::TEXT FROM users")
 'tuple[int, str]'
->>> infer_type("SELECT id FROM users", schema_sql="CREATE TABLE users (id INTEGER);")
+>>> infer_type("SELECT id FROM users", schema_sql="CREATE TABLE users (id INTEGER NOT NULL);")
 'tuple[int]'
 >>> source = rewrite_source('q = "--sql\\nSELECT 1::INTEGER"')
 >>> print(source)

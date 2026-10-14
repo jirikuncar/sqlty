@@ -652,8 +652,37 @@ impl Loader {
                 merge_column(&mut table.columns, raw_column(column));
             }
         }
+        // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
+        // as the sole `INTEGER` column, which is the rowid.
+        let loose_keys =
+            self.dialect == SqlDialect::Sqlite && !create.without_rowid && !create.strict;
+        if loose_keys {
+            for def in &create.columns {
+                let keyed = def
+                    .options
+                    .iter()
+                    .any(|o| matches!(o.option, ColumnOption::PrimaryKey(_)));
+                let declared = def
+                    .options
+                    .iter()
+                    .any(|o| matches!(o.option, ColumnOption::NotNull));
+                let name = def.name.value.to_lowercase();
+                if let Some(column) = table.columns.iter_mut().find(|c| c.name == name) {
+                    if keyed && !declared && !is_rowid_type(&def.data_type) {
+                        column.not_null = false;
+                    }
+                }
+            }
+        }
         for constraint in &create.constraints {
             if let TableConstraint::PrimaryKey(pk) = constraint {
+                if loose_keys
+                    && !(pk.columns.len() == 1
+                        && column_named(&table.columns, &pk.columns[0].column.expr)
+                            .is_some_and(|c| is_rowid_type(&c.ty)))
+                {
+                    continue;
+                }
                 for index_column in &pk.columns {
                     mark_not_null(&mut table.columns, &index_column.column.expr);
                 }
@@ -1380,6 +1409,20 @@ fn merge_column(columns: &mut Vec<RawColumn>, column: RawColumn) {
         }
         None => columns.push(column),
     }
+}
+
+/// Whether a column of this type is SQLite's rowid when it is the primary key: only the
+/// type name `INTEGER`, not `INT`.
+fn is_rowid_type(ty: &DataType) -> bool {
+    matches!(ty, DataType::Integer(None))
+}
+
+fn column_named<'a>(columns: &'a [RawColumn], expr: &Expr) -> Option<&'a RawColumn> {
+    let Expr::Identifier(ident) = expr else {
+        return None;
+    };
+    let name = ident.value.to_lowercase();
+    columns.iter().find(|c| c.name == name)
 }
 
 fn mark_not_null(columns: &mut [RawColumn], expr: &Expr) {

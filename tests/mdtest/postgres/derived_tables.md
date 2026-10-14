@@ -38,7 +38,7 @@ SELECT id, name FROM recent
 ```sql
 WITH a AS (SELECT id, email FROM users), b AS (SELECT email FROM a)
 SELECT email FROM b
--- inferred: tuple[str]
+-- inferred: tuple[str | None]
 ```
 
 ## CTE column alias list
@@ -54,7 +54,7 @@ SELECT label, uid FROM r
 ```sql
 WITH r AS (SELECT id, created_at FROM users)
 SELECT * FROM r
--- inferred: tuple[int, datetime.datetime]
+-- inferred: tuple[int, datetime.datetime | None]
 ```
 
 ## Recursive CTE uses the non-recursive term
@@ -77,7 +77,7 @@ WITH new_user AS (
     RETURNING id, name, email
 )
 SELECT id, name, email FROM new_user
--- inferred: tuple[int, str, str]
+-- inferred: tuple[int, str, str | None]
 ```
 
 ## Derived table
@@ -98,7 +98,7 @@ SELECT x, y FROM (SELECT id, name FROM users) AS t(x, y)
 
 ```sql
 SELECT t.* FROM (SELECT name, created_at FROM users) AS t
--- inferred: tuple[str, datetime.datetime]
+-- inferred: tuple[str, datetime.datetime | None]
 ```
 
 ## LATERAL join
@@ -107,7 +107,7 @@ SELECT t.* FROM (SELECT name, created_at FROM users) AS t
 SELECT u.id, o.status
 FROM users u
 JOIN LATERAL (SELECT status FROM orders WHERE user_id = u.id LIMIT 1) o ON true
--- inferred: tuple[int, str]
+-- inferred: tuple[int, str | None]
 ```
 
 ## A CTE shadows a schema table of the same name
