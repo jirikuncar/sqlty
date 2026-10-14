@@ -1967,7 +1967,7 @@ impl<'a> Analyzer<'a> {
                         typed = from_sql_type(inner.to_string(), self.dialect);
                     }
                     common = match common {
-                        _ if typed.0.is_none() => None,
+                        _ if typed == (None, None) => None,
                         Some(common) => common_type(common, typed, self.dialect),
                         None => Some(typed),
                     };
@@ -2384,10 +2384,10 @@ fn set_branches(body: &SetExpr) -> Vec<&SetExpr> {
 /// wider type, text and timestamps to the preferred one, arrays by their elements;
 /// other mixes conflict (`None`).
 fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Option<Typed> {
-    if right.0.is_none() || left == right {
+    if right == (None, None) || left == right {
         return Some(left);
     }
-    if left.0.is_none() || (left.1.is_none() && left.0 == right.0) {
+    if left == (None, None) || (left.1.is_none() && left.0 == right.0) {
         return Some(right);
     }
     if right.1.is_none() && left.0 == right.0 {
@@ -2797,7 +2797,8 @@ mod tests {
     fn test_set_operation_types() {
         let schema = Some(load_schema(
             "CREATE TABLE a (n INTEGER, t TEXT, d DATE);\
-             CREATE TABLE b (n BIGINT, t VARCHAR(5), d TIMESTAMP);",
+             CREATE TABLE b (n BIGINT, t VARCHAR(5), d TIMESTAMP);\
+             CREATE TABLE c (g GEOMETRY);",
             "postgres",
         ));
         let sql_types = |sql: &str| -> Vec<Option<String>> {
@@ -2841,6 +2842,10 @@ mod tests {
                  SELECT n FROM r"
             ),
             types(&["BIGINT"])
+        );
+        assert_eq!(
+            sql_types("SELECT g, ARRAY[g] FROM c UNION SELECT n, ARRAY[g] FROM a, c"),
+            types(&["", "ARRAY<GEOMETRY>"])
         );
         assert_eq!(
             sql_types("SELECT ARRAY[n], n * 1.5 FROM a UNION SELECT ARRAY[n], n FROM b"),
