@@ -149,8 +149,16 @@ SQL parsing, type inference and source rewriting run in a Rust engine
 
 ## Contributing
 
-See [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md)
-for setup, testing and contribution guidelines.
+See [CONTRIBUTING.md](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md)
+and [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md).
+
+## AI disclosure
+
+SQLTy is developed with AI coding agents, mainly Claude Code. Every change is
+reviewed by a maintainer and covered by the test suite; commits written with an
+agent carry a `Co-Authored-By` trailer. Contributors follow the
+[AI-assisted contributions](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md#ai-assisted-contributions)
+policy.
 
 ## License
 

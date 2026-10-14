@@ -93,7 +93,7 @@ def test_examples_are_rewritten(example: Path) -> None:
 
 
 MARKDOWN = sorted(
-    {ROOT / name for name in ("README.md", "AGENTS.md", "DEVELOPMENT.md", "CLAUDE.md")}
+    {*ROOT.glob("*.md"), *ROOT.glob(".github/*.md")}
     | {*ROOT.glob("docs/**/*.md"), *RULE_DOCS.glob("*.md"), *ROOT.glob("examples/*/README.md")}
 )
 
