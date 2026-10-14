@@ -14,13 +14,13 @@ use std::collections::HashMap;
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub use crate::tokens::string_literals;
+pub(crate) use crate::tokens::string_literals;
 use crate::tokens::{content, string_at, string_groups, tokenize, wrapper_calls, Kind, Token};
 use sqlty_sql::analyzer::{infer_type, returns_rows, Schema};
 use std::ops::Range;
 
 /// Standard-library modules inferred row types are spelled with.
-pub const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipaddress", "typing"];
+pub(crate) const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipaddress", "typing"];
 
 // ---------------------------------------------------------------------------
 // Regex patterns
@@ -30,7 +30,11 @@ static CODING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#.*?coding[:=]")
 
 /// Why rewrite leaves a string group alone although it holds a `--sql` string:
 /// `fstring-skipped`, `tstring-skipped`, or `unchecked-query` for a raw or bytes part.
-pub fn skipped_rule(source: &str, tokens: &[Token], group: &[usize]) -> Option<&'static str> {
+pub(crate) fn skipped_rule(
+    source: &str,
+    tokens: &[Token],
+    group: &[usize],
+) -> Option<&'static str> {
     let prefixes: String = group.iter().map(|&i| tokens[i].prefix(source)).collect();
     let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
     if prefixes.trim_matches('u').is_empty() || after_marker(&content(source, &spans)).is_none() {
@@ -90,12 +94,12 @@ impl ImportStyle {
     }
 
     /// [`ImportStyle::parse`], with the default for an unsupported style.
-    pub fn or_default(style: Option<&str>) -> Self {
+    pub(crate) fn or_default(style: Option<&str>) -> Self {
         Self::parse(style).unwrap_or_default()
     }
 
     /// How `UNTYPED` is spelled: "UNTYPED" or "sqlty.UNTYPED".
-    pub fn untyped_name(&self) -> String {
+    pub(crate) fn untyped_name(&self) -> String {
         match self.wrapper_name.rsplit_once('.') {
             Some((module, _)) => format!("{}.UNTYPED", module),
             None => "UNTYPED".to_string(),
@@ -103,7 +107,7 @@ impl ImportStyle {
     }
 
     /// Import line `UNTYPED` needs, or `None` when the module is imported.
-    pub fn untyped_import(&self) -> Option<&'static str> {
+    pub(crate) fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
     }
 }
@@ -118,7 +122,7 @@ impl ImportStyle {
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
 /// With `untyped`, row-returning queries of unknown row type become `SQL[UNTYPED](...)`.
 #[cfg(test)]
-pub fn rewrite_source(
+pub(crate) fn rewrite_source(
     source: &str,
     dialect: &str,
     schema: &Option<Schema>,
@@ -149,7 +153,7 @@ pub fn rewrite_source_with(
 }
 
 /// [`rewrite_source_with`], leaving alone the strings that start on a line `skip` accepts.
-pub fn rewrite_source_skipping(
+pub(crate) fn rewrite_source_skipping(
     source: &str,
     dialect: &str,
     schema: &Option<Schema>,
@@ -221,7 +225,7 @@ pub fn rewrite_source_skipping(
 }
 
 /// Line ending of the line at `at`, else of the line before it.
-pub fn line_ending(source: &str, at: usize) -> &'static str {
+pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
     let end = source[at..]
         .find('\n')
         .map(|i| at + i)
@@ -250,7 +254,7 @@ fn in_composed_sql(source: &str, tokens: &[Token], first: usize) -> bool {
 /// a wrapper call (`mod.SQL[...]` included), the argument of a psycopg `SQL(...)`,
 /// groups with a prefixed string, and
 /// every group on a line that holds an f- or t-string `--sql` group.
-pub fn wraps(
+pub(crate) fn wraps(
     source: &str,
     dialect: &str,
     schema: &Option<Schema>,
@@ -355,7 +359,7 @@ pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
 // ---------------------------------------------------------------------------
 
 /// Apply non-overlapping `(start, end, replacement)` edits, given in source order.
-pub fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
+pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
     let mut result = String::with_capacity(source.len());
     let mut pos = 0;
     for (start, end, replacement) in replacements {
@@ -371,7 +375,7 @@ pub fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
 pub type Suppressed = HashMap<usize, Option<Vec<String>>>;
 
 /// Whether a comment on `line` suppresses `rule`.
-pub fn suppresses(suppressed: &Suppressed, line: usize, rule: &str) -> bool {
+pub(crate) fn suppresses(suppressed: &Suppressed, line: usize, rule: &str) -> bool {
     suppressed.get(&line).is_some_and(|rules| {
         rules
             .as_ref()
@@ -380,21 +384,21 @@ pub fn suppresses(suppressed: &Suppressed, line: usize, rule: &str) -> bool {
 }
 
 /// Newline offsets of a source, so line lookups are a binary search.
-pub struct LineIndex(Vec<usize>);
+pub(crate) struct LineIndex(Vec<usize>);
 
 impl LineIndex {
-    pub fn new(source: &str) -> Self {
+    pub(crate) fn new(source: &str) -> Self {
         Self(source.match_indices('\n').map(|(i, _)| i).collect())
     }
 
     /// 1-indexed line number of a byte position.
-    pub fn line_at(&self, pos: usize) -> usize {
+    pub(crate) fn line_at(&self, pos: usize) -> usize {
         self.0.partition_point(|&newline| newline < pos) + 1
     }
 }
 
 /// Extract string content from a quoted string literal (removes quotes and a `u` prefix).
-pub fn extract_string_content(literal: &str) -> &str {
+pub(crate) fn extract_string_content(literal: &str) -> &str {
     let literal = literal.trim_start_matches(['u', 'U']);
     let quote = if literal.starts_with("\"\"\"") || literal.starts_with("'''") {
         3
@@ -409,7 +413,7 @@ const LINE_BREAKS: [&str; 4] = ["\\r\\n", "\\n", "\r\n", "\n"];
 
 /// String content after the sqlty marker: `--sql`, or `-- sql` ending its line
 /// (see [`ends_marker_line`]), a form MySQL also reads as a comment.
-pub fn after_marker(content: &str) -> Option<&str> {
+pub(crate) fn after_marker(content: &str) -> Option<&str> {
     let content = content.trim_start();
     if let Some(rest) = content.strip_prefix("--sql") {
         return Some(rest);
@@ -419,7 +423,7 @@ pub fn after_marker(content: &str) -> Option<&str> {
 }
 
 /// Whether the rest of a marker line is blank or a `--` comment, up to a line break.
-pub fn ends_marker_line(rest: &str) -> bool {
+pub(crate) fn ends_marker_line(rest: &str) -> bool {
     let Some(end) = LINE_BREAKS.iter().filter_map(|lb| rest.find(lb)).min() else {
         return false;
     };
@@ -428,17 +432,17 @@ pub fn ends_marker_line(rest: &str) -> bool {
     text.trim_end().is_empty() || (text.len() < line.len() && text.starts_with("--"))
 }
 
-pub fn starts_with_line_break(text: &str) -> bool {
+pub(crate) fn starts_with_line_break(text: &str) -> bool {
     LINE_BREAKS.iter().any(|lb| text.starts_with(lb))
 }
 
 /// `text` without one leading line break, escaped or real.
-pub fn strip_line_break(text: &str) -> Option<&str> {
+pub(crate) fn strip_line_break(text: &str) -> Option<&str> {
     LINE_BREAKS.iter().find_map(|lb| text.strip_prefix(lb))
 }
 
 /// Check if string content is sqlty-managed: the marker, then whitespace or a line break.
-pub fn is_sqlty_managed(content: &str) -> bool {
+pub(crate) fn is_sqlty_managed(content: &str) -> bool {
     let Some(rest) = after_marker(content) else {
         return false;
     };
@@ -461,7 +465,7 @@ fn is_untyped(sql_content: &str, dialect: &str) -> bool {
 /// - `--sql SELECT ...` → there is no line break, so nothing is left to parse → None.
 ///
 /// Inference errors (an unknown `SUM` column) count as uninferable.
-pub fn infer_sql_content(
+pub(crate) fn infer_sql_content(
     sql_content: &str,
     dialect: &str,
     schema: &Option<Schema>,
@@ -473,7 +477,7 @@ pub fn infer_sql_content(
 
 /// Marked string content as the analyzer reads it: the `--sql` marker, with an escaped
 /// line break after it made real. `None` when the content has no marker.
-pub fn marked_query(sql_content: &str) -> Option<String> {
+pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
     let rest = after_marker(sql_content)?;
     Some(
         match rest.strip_prefix("\\r\\n").or(rest.strip_prefix("\\n")) {
@@ -555,12 +559,12 @@ fn flush(names: &mut Vec<&str>, pairs: &mut Vec<(String, String)>) {
 }
 
 /// Check for a top-level import; indented lines (docstrings, blocks) don't count.
-pub fn has_import(source: &str, import_str: &str) -> bool {
+pub(crate) fn has_import(source: &str, import_str: &str) -> bool {
     source.lines().any(|line| line.trim_end() == import_str)
 }
 
 /// Offset where imports go: after shebang, coding cookie, docstring and `__future__`.
-pub fn header_end(source: &str) -> usize {
+pub(crate) fn header_end(source: &str) -> usize {
     header(source).0
 }
 

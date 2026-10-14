@@ -47,7 +47,7 @@ const INLINE_SQL_COMMENT: &str = concat!(
 );
 
 /// String content starting with `INLINE_SQL_COMMENT`.
-pub static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
+pub(crate) static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Lines of plain strings opening with a `--sql` marker line, which MySQL and
@@ -76,19 +76,19 @@ pub struct Diagnostic {
 }
 
 /// Rule severity configuration.
-pub struct RuleConfig {
+pub(crate) struct RuleConfig {
     overrides: HashMap<String, String>,
 }
 
 impl RuleConfig {
-    pub fn new(overrides: Option<HashMap<String, String>>) -> Self {
+    pub(crate) fn new(overrides: Option<HashMap<String, String>>) -> Self {
         RuleConfig {
             overrides: overrides.unwrap_or_default(),
         }
     }
 
     /// Get the effective severity for a rule.
-    pub fn severity(&self, rule: &str) -> &str {
+    pub(crate) fn severity(&self, rule: &str) -> &str {
         if let Some(override_val) = self.overrides.get(rule) {
             return override_val.as_str();
         }
@@ -112,7 +112,7 @@ impl RuleConfig {
     }
 
     /// Check if a rule is enabled (not "ignore").
-    pub fn is_enabled(&self, rule: &str) -> bool {
+    pub(crate) fn is_enabled(&self, rule: &str) -> bool {
         self.severity(rule) != "ignore"
     }
 }
@@ -311,7 +311,7 @@ fn skipped_message(rule: &str) -> String {
 }
 
 /// Message of `unparsed-query`, given sqlparser's error (see `analyzer::parse_error`).
-pub fn unparsed_message(error: &str) -> String {
+pub(crate) fn unparsed_message(error: &str) -> String {
     format!("query does not parse: {error}")
 }
 
@@ -401,7 +401,7 @@ pub fn wrapped_queries(
 /// or `tuple[int, list[int]]`), so it is not stale.
 ///
 /// Element types are not checked.
-pub fn refines_tuple(annotated: &str, inferred: &str) -> bool {
+pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     fn balanced(args: &str) -> bool {
         let mut depth = 0i32;
         args.bytes().all(|byte| {

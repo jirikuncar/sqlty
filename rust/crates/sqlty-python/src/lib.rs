@@ -3,4 +3,4 @@
 pub mod checker;
 pub mod fixer;
 pub mod rewriter;
-pub mod tokens;
+pub(crate) mod tokens;

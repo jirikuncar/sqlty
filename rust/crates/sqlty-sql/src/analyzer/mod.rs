@@ -164,7 +164,7 @@ type Inferred<T> = Result<T, String>;
 
 /// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SqlDialect {
+pub(crate) enum SqlDialect {
     Postgres,
     MySql,
     Sqlite,
@@ -189,7 +189,7 @@ const OTHER_DIALECTS: [&str; 12] = [
 ];
 
 impl SqlDialect {
-    pub fn from_name(name: &str) -> Self {
+    pub(crate) fn from_name(name: &str) -> Self {
         match name.to_ascii_lowercase().as_str() {
             "postgres" | "postgresql" => Self::Postgres,
             "mysql" => Self::MySql,
@@ -205,7 +205,7 @@ impl SqlDialect {
         }
     }
 
-    pub fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
+    pub(crate) fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
         match self {
             Self::Postgres => Box::new(PostgreSqlDialect {}),
             Self::MySql => Box::new(MySqlDialect {}),
@@ -594,7 +594,7 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
 }
 
 #[cfg(test)]
-pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
+pub(crate) fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
 }
 

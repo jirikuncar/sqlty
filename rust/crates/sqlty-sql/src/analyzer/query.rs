@@ -35,7 +35,7 @@ impl Column {
     }
 
     /// Whether the column can be NULL; unknown nullability counts as no.
-    pub fn nullable(&self) -> bool {
+    pub(crate) fn nullable(&self) -> bool {
         self.nullability == Nullability::Nullable
     }
 

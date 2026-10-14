@@ -60,12 +60,12 @@ struct Inner {
 
 /// A shared, append-only list of diagnostics; clones record into the same list.
 #[derive(Clone, Default)]
-pub struct Diagnostics(Rc<RefCell<Inner>>);
+pub(crate) struct Diagnostics(Rc<RefCell<Inner>>);
 
 impl Diagnostics {
     /// A sink that collects; the default one drops everything, and callers that only want
     /// types pay nothing for diagnostics.
-    pub fn collecting() -> Self {
+    pub(crate) fn collecting() -> Self {
         Diagnostics(Rc::new(RefCell::new(Inner {
             enabled: true,
             ..Inner::default()
@@ -73,12 +73,12 @@ impl Diagnostics {
     }
 
     /// Whether diagnostics are collected. Guard the building of messages with it.
-    pub fn enabled(&self) -> bool {
+    pub(crate) fn enabled(&self) -> bool {
         self.0.borrow().enabled
     }
 
     /// Record a diagnostic (once per rule and message).
-    pub fn record(&self, rule: NameRule, message: impl Into<String>) {
+    pub(crate) fn record(&self, rule: NameRule, message: impl Into<String>) {
         let mut inner = self.0.borrow_mut();
         if !inner.enabled {
             return;
@@ -95,7 +95,7 @@ impl Diagnostics {
 
     /// Account for an untyped result whose reason is reported elsewhere or is not a
     /// problem to report (an unknown table already flagged, a missing schema).
-    pub fn explain_silently(&self) {
+    pub(crate) fn explain_silently(&self) {
         let mut inner = self.0.borrow_mut();
         if inner.enabled {
             inner.explained += 1;
@@ -104,12 +104,12 @@ impl Diagnostics {
 
     /// How many untyped results are accounted for; unchanged across an expression
     /// that went untyped means nothing explains it.
-    pub fn explained(&self) -> usize {
+    pub(crate) fn explained(&self) -> usize {
         self.0.borrow().explained
     }
 
     /// Everything recorded so far, in order.
-    pub fn items(&self) -> Vec<NameDiagnostic> {
+    pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
         self.0.borrow().items.clone()
     }
 }
