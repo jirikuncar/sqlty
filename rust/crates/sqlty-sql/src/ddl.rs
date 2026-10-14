@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn test_search_path() {
         let path = |sql: &str| first(sql).search_path();
-        let list = |names: &[&str]| Some(names.iter().map(|n| n.to_string()).collect());
+        let list = |names: &[&str]| Some(names.iter().map(ToString::to_string).collect());
         assert_eq!(
             path("SET search_path TO app, \"$user\", Public"),
             list(&["app", "$user", "public"])

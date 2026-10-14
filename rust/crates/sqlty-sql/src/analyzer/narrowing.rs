@@ -67,7 +67,7 @@ impl Facts {
 /// Functions that return NULL for a NULL argument, as far as narrowing goes: a known
 /// built-in other than the ones that look through NULLs.
 fn is_strict(name: &str) -> bool {
-    !super::nullability::ALWAYS_VALUED_AGGREGATES.contains(&name)
+    !ALWAYS_VALUED_AGGREGATES.contains(&name)
         && !matches!(
             name,
             "COALESCE"

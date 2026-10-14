@@ -98,7 +98,7 @@ impl ImportStyle {
     /// How `UNTYPED` is spelled: "UNTYPED" or "sqlty.UNTYPED".
     pub(crate) fn untyped_name(&self) -> String {
         match self.wrapper_name.rsplit_once('.') {
-            Some((module, _)) => format!("{}.UNTYPED", module),
+            Some((module, _)) => format!("{module}.UNTYPED"),
             None => "UNTYPED".to_string(),
         }
     }

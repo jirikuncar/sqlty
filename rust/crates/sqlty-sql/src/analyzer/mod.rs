@@ -610,7 +610,7 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     match base {
         "ARRAY" => Some("list".to_string()),
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
-        _ => SQL_TO_PYTHON_TYPE.get(base).map(|ty| ty.to_string()),
+        _ => SQL_TO_PYTHON_TYPE.get(base).map(ToString::to_string),
     }
 }
 

@@ -218,16 +218,14 @@ pub fn check_source(
 
         let annotated = &source[call.annotation.clone()];
         if annotated == untyped_name {
-            let untyped = format!("{}[{}]", wrapper_name, untyped_name);
+            let untyped = format!("{wrapper_name}[{untyped_name}]");
             // A `*` the schema cannot resolve infers no type, so none is guessed.
             let message = match infer_from_sql_content(&sql_content, dialect, schema) {
-                Some(current) => format!(
-                    "{} can now be {}[{}]; run sqlty check --fix",
-                    untyped, wrapper_name, current
-                ),
+                Some(current) => {
+                    format!("{untyped} can now be {wrapper_name}[{current}]; run sqlty check --fix")
+                }
                 None => format!(
-                    "{} has no inferable row type; add casts (e.g. id::INTEGER) or a schema",
-                    untyped
+                    "{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
                 ),
             };
             report(Rule::UntypedQuery, message, line_num);
@@ -242,7 +240,7 @@ pub fn check_source(
                 if !refines_tuple(annotated, &current) {
                     report(
                         Rule::StaleType,
-                        format!("SQL[{}] should be SQL[{}]", annotated, current),
+                        format!("SQL[{annotated}] should be SQL[{current}]"),
                         line_num,
                     );
                 }

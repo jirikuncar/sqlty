@@ -59,7 +59,9 @@ fn cache_hit(
 }
 
 fn lock_schemas() -> MutexGuard<'static, Vec<CachedSchema>> {
-    SCHEMAS.lock().unwrap_or_else(|e| e.into_inner())
+    SCHEMAS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The parsed schema. The cache is not locked while parsing, so a slow schema does not hold
