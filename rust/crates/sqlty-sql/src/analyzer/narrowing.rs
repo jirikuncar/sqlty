@@ -6,11 +6,24 @@
 //! where `a` is false, and a `CASE` branch where its `WHEN` holds and the earlier ones do
 //! not.
 //!
-//! What a condition proves is a [`Learned`] set of columns and printed expressions. A
+//! What a condition proves is a [`Learned`] set of columns and expressions. A
 //! non-null column of a null-extended relation also proves the relation present, which
 //! [`Facts`] reads as no longer null-extended.
 
-use super::*;
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use sqlparser::ast::{
+    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Select, TableFactor, TableWithJoins,
+    UnaryOperator,
+};
+
+use super::functions::{function_name, positional_args};
+use super::hashing::{ExprKey, FxHashSet};
+use super::nullability::{Facts, Nullability};
+use super::query::Analyzer;
+use super::registry::lookup;
+use super::scope::Scope;
 
 /// Columns and expressions proven not NULL.
 #[derive(Clone, Default)]
@@ -329,6 +342,7 @@ impl<'a> Analyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::{analyze_select, load_schema};
 
     const SCHEMA: &str =
         "CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER, c TEXT, doc JSONB NOT NULL);

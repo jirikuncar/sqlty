@@ -1,6 +1,23 @@
 //! Expression typing.
 
-use super::*;
+use sqlparser::ast::{
+    AccessExpr, ArrayElemTypeDef, DataType, Expr, FunctionArguments, Ident, ObjectName, Subscript,
+    UnaryOperator, Value,
+};
+
+use crate::catalog::{fold, FunctionReturn};
+use crate::diagnostics::NameRule;
+
+use super::dialect::SqlDialect;
+use super::functions::{positional_args, Returns};
+use super::literals::{constant, strip, value_set};
+use super::memo::{first_column, Reporting};
+use super::names::table_key;
+use super::operators::{category, common_of, common_type, operand_type, type_base};
+use super::query::Analyzer;
+use super::scope::Scope;
+use super::typed::Typed;
+use super::{decimal_type, Inferred};
 
 /// `INT` from `ARRAY<INT>` or `ARRAY<INT>[3]`.
 pub(super) fn array_element(sql_type: &str) -> Option<&str> {

@@ -1,6 +1,19 @@
 //! Name resolution: table scopes, CTE and view sources, `*` expansion and column lookup.
 
-use super::*;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use sqlparser::ast::{Join, JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins};
+
+use crate::catalog::{fold, FunctionReturn};
+
+use super::dialect::SqlDialect;
+use super::memo::SubqueryMemo;
+use super::names::{object_name, table_key};
+use super::nullability::Nullability;
+use super::query::{rename_columns, Analyzer, Column};
+use super::typed::Typed;
+use super::{Inferred, SchemaColumn};
 
 /// What a name in the query can refer to: a FROM item under the name it is read by.
 #[derive(Clone, Debug, PartialEq, Eq)]

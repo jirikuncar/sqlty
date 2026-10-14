@@ -18,8 +18,9 @@ use sqlparser::ast::Query;
 
 use super::hashing::FxHasher;
 use super::nullability::Facts;
+use super::query::Analyzer;
 use super::scope::Scope;
-use super::{Analyzer, Column, Inferred};
+use super::{Column, Inferred};
 
 /// Columns of a subquery, shared between the walks that read them.
 pub(super) type SubqueryColumns = Rc<Inferred<Option<Vec<Column>>>>;

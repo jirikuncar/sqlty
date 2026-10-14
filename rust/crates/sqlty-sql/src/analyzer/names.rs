@@ -1,7 +1,12 @@
 //! Output-column names, following PostgreSQL's naming of unaliased expressions.
 
-use super::*;
 use sqlparser::ast::TrimWhereField;
+use sqlparser::ast::{AccessExpr, DataType, Expr, Ident, ObjectName, Query, SelectItem};
+
+use crate::catalog::fold;
+
+use super::dialect::SqlDialect;
+use super::query::leftmost_select;
 
 /// Lowercased unqualified name, which is how aliases and qualifiers are compared: `public.users` -> `users`.
 pub(super) fn object_name(name: &ObjectName) -> String {

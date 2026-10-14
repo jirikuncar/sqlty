@@ -6,8 +6,14 @@
 //! their values. Everything that computes a new value from its inputs ([`strip`]) goes back
 //! to the plain type, so a set is always a superset of the values an expression can take.
 
-use super::*;
+use std::rc::Rc;
+
 use crate::values::{self, Value as Lit};
+
+use super::dialect::SqlDialect;
+use super::operators::common_type;
+use super::python_type;
+use super::typed::Typed;
 
 /// A string or integer constant.
 pub(super) fn constant(value: Lit) -> Typed {

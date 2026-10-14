@@ -1,6 +1,25 @@
 //! Queries, set operations and projections: the output columns of a statement.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{
+    Expr, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
+    TableAlias, TableWithJoins, Value,
+};
+
+use crate::catalog::fold;
+use crate::diagnostics::{Diagnostics, NameRule};
+use crate::json::JsonShape;
+
+use super::dialect::SqlDialect;
+use super::dml::{dml_scope, returning};
+use super::literals::strip;
+use super::names::{alias_name, column_name, object_name};
+use super::nullability::{Facts, Nullability};
+use super::operators::{common_of, common_type};
+use super::scope::{Scope, Virtuals};
+use super::typed::Typed;
+use super::{Inferred, SchemaData};
 
 /// The SELECT whose columns a query returns: the left arm of a UNION, unparenthesized.
 pub(super) fn leftmost_select(body: &SetExpr) -> Option<&Select> {

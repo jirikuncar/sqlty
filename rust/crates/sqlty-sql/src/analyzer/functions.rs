@@ -1,6 +1,18 @@
 //! Function return types and aggregate typing.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, FunctionArguments};
+
+use super::dialect::SqlDialect;
+use super::expr::{from_sql_type, range_element};
+use super::literals::{strip, value_set};
+use super::operators::{common_of, numeric_rank, operand_type};
+use super::query::Analyzer;
+use super::registry::lookup;
+use super::scope::{resolve, Scope};
+use super::typed::Typed;
+use super::{decimal_type, InferError, Inferred};
 
 /// How a function's result type follows from its arguments (indexes count from 0).
 #[derive(Clone, Copy)]

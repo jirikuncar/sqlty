@@ -5,7 +5,19 @@
 //! ambiguous column, a source the analyzer does not read. Names are only judged when a
 //! schema is configured; without one every table and column is unknown.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{Expr, Ident, TableWithJoins};
+
+use crate::catalog::fold;
+use crate::diagnostics::NameRule;
+
+use super::dialect::SqlDialect;
+use super::nullability::Nullability;
+use super::query::{Analyzer, Column};
+use super::scope::{any_merging_join, resolve, Scope, Source, Table};
+use super::typed::Typed;
+use super::SchemaColumn;
 
 /// Where a resolved column comes from, for explaining why it is untyped.
 pub(super) enum Origin {

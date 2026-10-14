@@ -2,7 +2,23 @@
 //! `->` and friends (PostgreSQL). The column type stays `Any`; the shape is kept next to it
 //! (see [`Column::json`]) so row types can be checked against it.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{BinaryOperator, DataType, Expr, UnaryOperator, Value};
+
+use crate::json::{JsonField, JsonShape, JsonValue};
+
+use super::dialect::SqlDialect;
+use super::expr::array_element;
+use super::functions::positional_args;
+use super::memo::{first_column, Reporting};
+use super::names::object_name;
+use super::nullability::Nullability;
+use super::operators::type_base;
+use super::query::{Analyzer, Column};
+use super::scope::Scope;
+use super::typed::Typed;
+use super::{Inferred, ANY, DECIMAL};
 
 /// Deepest composite type or array nesting `to_jsonb()` follows.
 const MAX_DEPTH: usize = 8;
@@ -441,6 +457,7 @@ fn is_container(python_type: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::{analyze_select, load_schema};
 
     const SCHEMA: &str = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT);
          CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total NUMERIC NOT NULL);";

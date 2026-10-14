@@ -6,7 +6,7 @@
 //! upper-case name, and a new function is a row in the list that describes it.
 //!
 //! Dialect-specific behaviour that depends on the arguments (`MOD` by zero, `CONCAT` under
-//! MySQL, ...) stays in code, in [`Analyzer::function_nullability`].
+//! MySQL, ...) stays in code, in `Analyzer::function_nullability`.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

@@ -6,14 +6,32 @@
 //! used where nothing says what it is stays untyped.
 
 use std::collections::BTreeMap;
+use std::ops::ControlFlow;
+use std::rc::Rc;
 
+use sqlparser::ast::{
+    visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
+    FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
+    TableFactor, TableObject, TableWithJoins, Value,
+};
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Function, Insert, LimitClause, OnConflictAction, OnInsert, Query,
     UpdateTableFromKind, Visit, Visitor,
 };
 
-use super::*;
+use crate::catalog::fold;
 use crate::placeholders::{self, Styles};
+
+use super::dialect::SqlDialect;
+use super::expr::{array_element, from_sql_type};
+use super::names::{object_name, table_key};
+use super::nullability::Nullability;
+use super::preprocess::{parse, parser_input};
+use super::query::{rename_columns, Analyzer, Column};
+use super::registry::lookup;
+use super::scope::{relations, Scope, Source};
+use super::typed::Typed;
+use super::SchemaData;
 
 /// A query parameter: `$N` in the rewritten query, and what its context says about it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -639,6 +657,7 @@ impl Visitor for Walker<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::load_schema;
 
     const SCHEMA: &str = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, \
                           age INTEGER, born DATE, tags TEXT[], uid UUID NOT NULL);

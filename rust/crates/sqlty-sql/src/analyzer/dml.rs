@@ -1,6 +1,10 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
-use super::*;
+use sqlparser::ast::{FromTable, OutputClause, SelectItem, SetExpr, Statement, TableObject};
+
+use super::dialect::SqlDialect;
+use super::names::{object_name, table_key};
+use super::scope::{table_scope, Scope, Source, Table};
 
 pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
     match stmt {

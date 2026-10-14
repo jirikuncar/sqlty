@@ -1,6 +1,14 @@
 //! Operator typing: numeric promotion, arithmetic and common types.
 
-use super::*;
+use sqlparser::ast::{BinaryOperator, Expr, Value};
+
+use super::dialect::SqlDialect;
+use super::expr::{array_element, from_sql_type};
+use super::literals::{merge, python_kind};
+use super::query::Analyzer;
+use super::scope::Scope;
+use super::typed::Typed;
+use super::{Inferred, DECIMAL};
 
 impl<'a> Analyzer<'a> {
     /// Result type of `left op right`: predicates are `BOOLEAN`, text and JSON operators

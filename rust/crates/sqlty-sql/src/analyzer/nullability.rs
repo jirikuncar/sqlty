@@ -6,7 +6,21 @@
 //! expressions the analyzer does not read are [`Nullability::Unknown`], which row types treat
 //! as non-optional.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{
+    AccessExpr, BinaryOperator, Expr, FunctionArguments, Ident, JoinOperator, Query, Select,
+    SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins, Value,
+};
+
+use super::dialect::SqlDialect;
+use super::functions::{function_name, positional_args};
+use super::hashing::{ExprKey, FxHashSet};
+use super::literals::python_kind;
+use super::memo::Reporting;
+use super::query::Analyzer;
+use super::registry::{lookup, Behavior};
+use super::scope::{table_scope, Scope};
 
 /// Whether a column can be NULL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -713,6 +727,7 @@ impl<'a> Analyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::{analyze_select, load_schema};
 
     const SCHEMA: &str =
         "CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b TEXT NOT NULL, c TEXT);
