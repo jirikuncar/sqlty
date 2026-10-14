@@ -107,7 +107,11 @@ fn name_strength(expr: &Expr) -> (String, Strength) {
             .map(ident_name)
             .unwrap_or_default()),
         Expr::Extract { .. } => named("extract"),
-        Expr::Case { .. } => named("case"),
+        // The ELSE result's own name, else a weak `case` (`FigureColnameInternal`, T_CaseExpr).
+        Expr::Case { else_result, .. } => match else_result.as_deref().map(name_strength) {
+            Some((name, Strength::Named)) => (name, Strength::Named),
+            _ => ("case".to_string(), Strength::Weak),
+        },
         Expr::Exists { .. } => named("exists"),
         Expr::Array(_) => named("array"),
         Expr::Tuple(_) => named("row"),
@@ -122,10 +126,6 @@ fn name_strength(expr: &Expr) -> (String, Strength) {
         Expr::Position { .. } => named("position"),
         Expr::Overlay { .. } => named("overlay"),
         Expr::AtTimeZone { .. } => named("timezone"),
-        // `true` and `false` are casts of a string constant to `bool`.
-        Expr::Value(value) if matches!(value.value, Value::Boolean(_)) => {
-            ("bool".to_string(), Strength::Weak)
-        }
         Expr::Interval(_) => ("interval".to_string(), Strength::Weak),
         Expr::TypedString(typed) => (type_column_name(&typed.data_type), Strength::Weak),
         Expr::Subquery(query) => scalar_subquery_name(query),

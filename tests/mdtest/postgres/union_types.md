@@ -123,6 +123,13 @@ SELECT 'a'::VARCHAR(10) AS t UNION SELECT 'b'::VARCHAR(20)
 
 ```sql
 SELECT 'a'::CHAR(1) AS t UNION SELECT 'b'::TEXT
+-- columns: t: str (CHAR)
+```
+
+`text`, `varchar` and `char` cast to each other implicitly, so the first input's type wins.
+
+```sql
+SELECT 'a'::TEXT AS t UNION SELECT 'b'::CHAR(1)
 -- columns: t: str (TEXT)
 ```
 

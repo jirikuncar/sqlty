@@ -40,13 +40,13 @@ SELECT id::BIGINT, users.name, lower(email), COALESCE(email, 'x'), CASE WHEN id 
 -- columns: case: int | None (None)
 -- columns: exists: bool (BOOLEAN)
 -- columns: ?column?: str (None)
--- columns: bool: bool (None)
+-- columns: ?column?: bool (None)
 ```
 
 ## Cast targets
 
 A cast names its column after the value when the value has a name, and after the
-target type otherwise. `TRUE` is a cast of a string to `bool`, so it is named `bool`.
+target type otherwise. `TRUE` is a constant, not a cast, so it is `?column?`; `TRUE::bool` is `bool`.
 
 ```sql
 SELECT id::INT, 1::INT, 'a'::TEXT, 'a'::TEXT::INT, id::VARCHAR(5), 1::DECIMAL(5, 2), 1::DOUBLE PRECISION, 1::REAL, '1 day'::INTERVAL, now()::DATE FROM users
@@ -74,5 +74,5 @@ SELECT ROW(1, 2), TRIM(LEADING 'x' FROM name), TRIM(TRAILING 'x' FROM name), TRI
 -- columns: array: list[int] (ARRAY<INT>)
 -- columns: ?column?: int (INT)
 -- columns: ?column?: bool (BOOLEAN)
--- columns: bool: bool (None)
+-- columns: ?column?: bool (None)
 ```

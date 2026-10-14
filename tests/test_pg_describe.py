@@ -162,8 +162,7 @@ def conn() -> Iterator[Any]:
         yield conn
 
 
-@pytest.fixture(scope="module")
-def pg_types(conn: Any) -> dict[int, tuple[str, str]]:
+def load_pg_types(conn: Any) -> dict[int, tuple[str, str]]:
     """``oid -> (name, kind)``; an array's name is its element's with ``[]``."""
     rows = conn.execute(
         "SELECT oid, typname, typtype, typelem, typcategory FROM pg_type"
@@ -177,6 +176,11 @@ def pg_types(conn: Any) -> dict[int, tuple[str, str]]:
         else:
             types[oid] = (name, kind)
     return types
+
+
+@pytest.fixture(scope="module")
+def pg_types(conn: Any) -> dict[int, tuple[str, str]]:
+    return load_pg_types(conn)
 
 
 class Schemas:
@@ -245,6 +249,9 @@ def test_matches_server(
     ours = core.analyze_select(case.query, dialect="postgres", schema_sql=case.schema_sql)
     if ours is None:
         pytest.skip("sqlty does not type the query")
+    if any(oid not in pg_types for _, oid in server):
+        # Types the schema just created (enums, domains) have oids the fixture never saw.
+        pg_types.update(load_pg_types(conn))
     problems: list[str] = []
     if len(ours) != len(server):
         problems.append(f"{len(ours)} columns, server says {len(server)}")

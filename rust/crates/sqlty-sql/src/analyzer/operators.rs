@@ -230,11 +230,9 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
     let common = if let (Some(x), Some(y)) = (numeric_rank(a), numeric_rank(b)) {
         NUMERIC_RANKS[x.max(y)][0]
     } else if is_text(&left) && is_text(&right) {
-        if a == b {
-            a
-        } else {
-            "TEXT"
-        }
+        // `text`, `varchar` and `bpchar` coerce to each other implicitly, so the first wins
+        // (`select_common_type` only switches to a type the current one casts to one-way).
+        a
     } else if let (Some(x), Some(y)) = (
         TEMPORAL.iter().position(|ty| *ty == a),
         TEMPORAL.iter().position(|ty| *ty == b),

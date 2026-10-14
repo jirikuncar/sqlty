@@ -78,8 +78,8 @@ Every branch counts, not only the first.
 ```sql
 SELECT CASE WHEN i > 1 THEN 1 ELSE 2.5 END, CASE WHEN i > 1 THEN i ELSE b END, CASE i WHEN 1 THEN 'a' ELSE tx END, CASE WHEN i > 1 THEN NULL ELSE 1 END FROM t
 -- columns: case: decimal.Decimal (DECIMAL)
--- columns: case: int (BIGINT)
--- columns: case: str (TEXT)
+-- columns: b: int (BIGINT)
+-- columns: tx: str (TEXT)
 -- columns: case: int | None (None)
 ```
 
