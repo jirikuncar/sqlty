@@ -11,6 +11,7 @@ Usage:
     parsed.imports          # every Import / ImportFrom node
     parsed.classes          # every ClassDef node
     parsed.calls            # every Call node
+    parsed.calls_to(names)  # Call nodes, skipping bodies whose source never matches ``names``
     parsed.typing_aliases   # local names of typing members: {'t': 'typing', 'A': 'Any'}
     parsed.imported_names   # absolute imports, local name to dotted name: {'D': 'decimal.Decimal'}
     parsed.ignores          # {line: _Ignore} for "# sqlty: ignore" comments
@@ -22,7 +23,8 @@ Pass the object wherever a function takes ``source: str | ParsedSource``
 ``ast.parse(parsed.text)``. Nothing is parsed until a property that needs the
 tree is read: guard with the cheap ``text`` checks (``may_define_helpers``,
 ``has_ignore_comments``) first. ``imports``, ``classes`` and ``calls`` come
-from the same single visitor pass, in ``ast.walk`` order (breadth first).
+from one walk, in ``ast.walk`` order (breadth first): statements first, and the
+expressions of a body once ``calls_to`` needs them.
 Module-level statements are ``tree.body``; ``functions`` lists the module-level
 function definitions.
 
@@ -41,6 +43,7 @@ import functools
 import io
 import re
 import tokenize
+import typing
 from dataclasses import dataclass
 
 from sqlty._psycopg import PsycopgScan
@@ -72,8 +75,36 @@ def _wrapper_name(import_style: str | None) -> str | None:
     return None
 
 
-class _Scan(ast.NodeVisitor):
-    """Collects the nodes consumers need in one traversal, in ``ast.walk`` order."""
+_LEAVES = (ast.expr_context, ast.operator, ast.unaryop, ast.cmpop, ast.boolop)
+_STATEMENTS = (ast.mod, ast.stmt, ast.excepthandler, ast.match_case)
+_SCOPE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_FIELDS: dict[type, tuple[str, ...]] = {}
+
+
+def _holds_nodes(kind: object) -> bool:
+    """Whether a field annotated ``kind`` can hold a node worth visiting."""
+    if isinstance(kind, type):
+        return issubclass(kind, ast.AST) and not issubclass(kind, _LEAVES)
+    return any(_holds_nodes(arg) for arg in typing.get_args(kind))
+
+
+def _fields(cls: type) -> tuple[str, ...]:
+    """The fields of node type ``cls`` that can hold child nodes; ``ctx`` and operators never do."""
+    found = _FIELDS.get(cls)
+    if found is None:
+        types = getattr(cls, "_field_types", {})
+        found = _FIELDS[cls] = tuple(name for name, kind in types.items() if _holds_nodes(kind))
+    return found
+
+
+class _Scan:
+    """Collects the nodes consumers need in one traversal, in depth-first pre-order with depths.
+
+    Children are pushed on an explicit stack; leaf nodes that cannot hold or be one of the
+    collected nodes (names, constants, ``ctx``, operators) are never visited. ``visit`` walks
+    statements only and leaves their expressions in ``deferred`` for ``expand``, which walks
+    those of the bodies that may hold a wanted call; with ``bindings`` it walks everything.
+    """
 
     def __init__(self, bindings: bool = False) -> None:
         self.imports: list[tuple[int, ast.Import | ast.ImportFrom]] = []
@@ -85,30 +116,67 @@ class _Scan(ast.NodeVisitor):
         self.values: dict[int, ast.expr] = {}
         self.stacks: dict[int, _Stack] = {}
         self.types: dict[tuple[int | None, str], str | None] = {}
+        self.deferred: list[tuple[ast.AST, int, _Stack]] = []
+        self.visited = 0
         self._stack: _Stack = ()
-        self._depth = 0
 
-    def visit(self, node: ast.AST) -> None:
-        outer = self._stack
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if not isinstance(node, ast.ClassDef):
-                self._parameters(node)
-            self._stack = (*outer, node)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            self._typed(node)
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            self.imports.append((self._depth, node))
-        elif isinstance(node, ast.ClassDef):
-            self.classes.append((self._depth, node))
-        elif isinstance(node, ast.Call):
-            self.calls.append((self._depth, node))
-            self.stacks[id(node)] = self._stack
-        elif self.bindings:
-            self._bind(node)
-        self._depth += 1
-        self.generic_visit(node)
-        self._depth -= 1
-        self._stack = outer
+    def visit(self, tree: ast.AST) -> None:
+        self._walk([(tree, 0, ())], defer=not self.bindings)
+
+    def expand(self, wanted: typing.Callable[[_Stack], bool]) -> None:
+        """Walk the deferred expressions whose enclosing scopes are ``wanted``."""
+        roots: list[tuple[ast.AST, int, _Stack]] = []
+        rest: list[tuple[ast.AST, int, _Stack]] = []
+        known: dict[int, bool] = {}
+        for root in self.deferred:
+            stack = root[2]
+            if (found := known.get(id(stack))) is None:
+                found = known[id(stack)] = wanted(stack)
+            (roots if found else rest).append(root)
+        self.deferred = rest
+        self._walk(roots[::-1], defer=False)
+
+    def _walk(self, todo: list[tuple[ast.AST, int, _Stack]], defer: bool) -> None:
+        pop, push = todo.pop, todo.append
+        bindings = self.bindings
+        while todo:
+            node, depth, stack = pop()
+            if defer and not isinstance(node, _STATEMENTS):
+                self.deferred.append((node, depth, stack))
+                continue
+            self.visited += 1
+            self._stack = stack
+            if isinstance(node, _SCOPE_TYPES):
+                if isinstance(node, ast.ClassDef):
+                    self.classes.append((depth, node))
+                else:
+                    self._parameters(node)
+                    if bindings:
+                        self.scopes.append(node)
+                stack = (*stack, node)
+            elif isinstance(node, ast.Call):
+                self.calls.append((depth, node))
+                self.stacks[id(node)] = stack
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                self._typed(node)
+                if bindings:
+                    self._bind(node)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                self.imports.append((depth, node))
+                continue
+            elif bindings:
+                self._bind(node)
+            children: list[ast.AST] = []
+            for name in _FIELDS.get(type(node)) or _fields(type(node)):
+                value = getattr(node, name)
+                if type(value) is list:
+                    children += value
+                elif value is not None:
+                    children.append(value)
+            depth += 1
+            for child in reversed(children):
+                if child is not None and (bindings or _FIELDS.get(type(child)) != ()):
+                    push((child, depth, stack))
 
     def _note(self, key: tuple[int | None, str], type_name: str | None) -> None:
         """Remember the class a name or ``self`` attribute holds; ``None`` once it is ambiguous."""
@@ -232,10 +300,56 @@ class ParsedSource:
         """Every class definition, at any depth."""
         return _breadth_first(self._scan.classes)
 
-    @functools.cached_property
+    @property
     def calls(self) -> list[ast.Call]:
         """Every call expression."""
-        return _breadth_first(self._scan.calls)
+        return self.calls_to(None)
+
+    def calls_to(self, names: re.Pattern[str] | None) -> list[ast.Call]:
+        """Every call, except in function and class bodies whose source never matches ``names``.
+
+        Example:
+            >>> parsed = ParsedSource("def f():\\n    g(1)\\ndef h():\\n    k(2)\\nk(3)")
+            >>> [ast.unparse(c) for c in parsed.calls_to(re.compile(r"\\bg\\b"))]
+            ['k(3)', 'g(1)']
+        """
+        scan = self._scan
+        if scan.deferred:
+            scan.expand(lambda stack: names is None or self._mentions(stack, names))
+        return _breadth_first(scan.calls)
+
+    def _mentions(self, stack: _Stack, names: re.Pattern[str]) -> bool:
+        """Whether the source of the innermost scope of ``stack`` (decorators included) matches."""
+        if not stack:
+            return True
+        scope = stack[-1]
+        lines = self._lines
+        first = scope.decorator_list[0].lineno if scope.decorator_list else scope.lineno
+        end = lines[scope.end_lineno] if scope.end_lineno is not None else len(self.text)
+        return names.search(self.text, lines[first - 1], end) is not None
+
+    def segment(self, node: ast.expr) -> str | None:
+        """The source of ``node``; ``None`` unless the text is ASCII (offsets count UTF-8 bytes).
+
+        Example:
+            >>> parsed = ParsedSource("f(tuple[int,  str])")
+            >>> parsed.segment(parsed.calls[0].args[0])
+            'tuple[int,  str]'
+        """
+        if not self._ascii or node.end_lineno is None or node.end_col_offset is None:
+            return None
+        lines = self._lines
+        start = lines[node.lineno - 1] + node.col_offset
+        return self.text[start : lines[node.end_lineno - 1] + node.end_col_offset]
+
+    @functools.cached_property
+    def _ascii(self) -> bool:
+        return self.text.isascii()
+
+    @functools.cached_property
+    def _lines(self) -> list[int]:
+        """Offset of each line start, and the text length after the last line."""
+        return [0, *(m.end() for m in re.finditer(r"\r\n?|\n", self.text)), len(self.text)]
 
     @functools.cached_property
     def psycopg(self) -> PsycopgScan:

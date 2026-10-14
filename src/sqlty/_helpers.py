@@ -208,6 +208,7 @@ class HelperIndex:
         self.namespaces: dict[str, tuple[dict[str, object], dict[str, Any]]] = {}
         self.type_modules: frozenset[str] = frozenset()
         self._pattern: re.Pattern[str] | None = None
+        self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
 
     def fork(self) -> HelperIndex:
@@ -241,6 +242,7 @@ class HelperIndex:
             return False
         self.modules.setdefault(module, {}).update(found)
         self._pattern = None
+        self._names = None
         return True
 
     def register(self, import_path: str, query: str, row: str | None = None) -> None:
@@ -273,6 +275,7 @@ class HelperIndex:
                 helper = Helper(name, (), frozenset(filter(None, [query, row])), query, row)
             self.modules.setdefault(module, {})[name] = helper
         self._pattern = None
+        self._names = None
 
     def _reexports(self, module: str, parsed: ParsedSource) -> dict[str, tuple[str, str]]:
         if (exports := self._exports.get(module)) is None:
@@ -320,13 +323,19 @@ class HelperIndex:
         exports = self._reexports(module, parsed)
         return self._constant(*exports[name], _depth + 1) if name in exports else None
 
+    @property
+    def names(self) -> frozenset[str]:
+        """Unqualified names of the indexed helpers, methods included."""
+        if self._names is None:
+            self._names = frozenset(
+                name.rpartition(".")[2] for helpers in self.modules.values() for name in helpers
+            )
+        return self._names
+
     def mentions(self, source: str) -> bool:
         """Whether ``source`` contains the name of some helper, so it may call one."""
         if self._pattern is None:
-            names = {
-                name.rpartition(".")[2] for helpers in self.modules.values() for name in helpers
-            }
-            self._pattern = re.compile("|".join(map(re.escape, sorted(names))) or r"(?!)")
+            self._pattern = re.compile("|".join(map(re.escape, sorted(self.names))) or r"(?!)")
         return self._pattern.search(source) is not None
 
 
@@ -477,7 +486,12 @@ def find_helper_calls(
     calls = []
     scan = parsed.psycopg if composed else None
     pending: list[tuple[ast.Call, Helper, ast.expr]] = []
-    for node in parsed.calls:
+    names = {name.rpartition(".")[2] for name in own}
+    if helpers is not None and imported:
+        names |= helpers.names
+        names |= {local for local, (_, original) in functions.items() if original in names}
+    pattern = re.compile(rf"\b(?:{'|'.join(map(re.escape, sorted(names)))})\b")
+    for node in parsed.calls_to(pattern):
         if (helper := resolve(node)) is None:
             continue
         query = _argument(helper, node, helper.query)
