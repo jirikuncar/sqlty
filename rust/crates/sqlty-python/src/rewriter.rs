@@ -285,10 +285,8 @@ pub(crate) fn wraps(
             tokens[group[group.len() - 1]].span.end,
         );
         if group.iter().any(|&i| !tokens[i].is_plain(source))
-            || calls
-                .iter()
-                .any(|call| call.span.start <= start && end <= call.span.end)
-            || (!interpolated.is_empty() && interpolated.contains(&lines.line_at(start)))
+            || calls.enclosing(start, end).is_some()
+            || interpolated.binary_search(&lines.line_at(start)).is_ok()
             || skip(lines.line_at(start))
         {
             continue;

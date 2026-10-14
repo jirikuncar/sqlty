@@ -134,11 +134,7 @@ pub fn fix_source(
 /// This and `select-star` are the only fixes that change string content.
 fn fix_inline_sql_comments(source: &str, wrapper: &str, suppressed: &Suppressed) -> String {
     let lines = LineIndex::new(source);
-    let calls = if suppressed.is_empty() {
-        Vec::new()
-    } else {
-        wrapper_calls(source, &tokenize(source), wrapper)
-    };
+    let calls = (!suppressed.is_empty()).then(|| wrapper_calls(source, &tokenize(source), wrapper));
     let edits: Vec<(usize, usize, String)> = string_literals(source)
         .into_iter()
         .filter(|&(start, end)| {
@@ -146,8 +142,8 @@ fn fix_inline_sql_comments(source: &str, wrapper: &str, suppressed: &Suppressed)
         })
         .filter(|&(start, _)| {
             let reported = calls
-                .iter()
-                .find(|call| call.span.start <= start && start < call.span.end)
+                .as_ref()
+                .and_then(|calls| calls.enclosing(start, start + 1))
                 .map_or(start, |call| call.span.start);
             !suppresses(suppressed, lines.line_at(reported), Rule::InlineSqlComment)
         })

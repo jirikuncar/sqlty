@@ -84,6 +84,7 @@ pub fn check_source(
     untyped: bool,
     any_calls: &[usize],
 ) -> Vec<Diagnostic> {
+    let any_calls = sorted(any_calls);
     let unparsed_enabled = rule_config.is_enabled(Rule::UnparsedQuery);
     let has_schema = schema.is_some();
     let names_enabled = NameRule::ALL
@@ -129,12 +130,10 @@ pub fn check_source(
     for group in string_groups(source, &tokens) {
         let first = &tokens[group[0]];
         let line = lines.line_at(first.span.start);
-        let enclosing = calls
-            .iter()
-            .find(|call| call.span.start <= first.span.start && first.span.end <= call.span.end);
+        let enclosing = calls.enclosing(first.span.start, first.span.end);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
             if !(rule == Rule::UncheckedQuery
-                && enclosing.is_some_and(|call| call.is_any(any_calls)))
+                && enclosing.is_some_and(|call| call.is_any(&any_calls)))
             {
                 report(rule, skipped_message(rule), line);
             }
@@ -166,7 +165,7 @@ pub fn check_source(
                     .is_some_and(|prefix| prefix.contains(['f', 'F', 't', 'T']))
             });
             if !interpolated
-                && !call.is_any(any_calls)
+                && !call.is_any(&any_calls)
                 && after_marker(&content(source, &call.strings)).is_some()
             {
                 report(
@@ -303,23 +302,21 @@ pub fn query_sites(
     import_style: Option<&str>,
     any_calls: &[usize],
 ) -> Vec<(usize, SiteKind, String)> {
+    let any_calls = sorted(any_calls);
     let wrapper_name = ImportStyle::or_default(import_style).wrapper_name;
     let lines = LineIndex::new(source);
     let tokens = tokenize(source);
     let calls = wrapper_calls(source, &tokens, &wrapper_name);
     let mut sites = Vec::new();
-    let mut skipped: Vec<Range<usize>> = Vec::new();
+    let mut skipped: Vec<usize> = Vec::new();
     for group in string_groups(source, &tokens) {
         let first = &tokens[group[0]];
         let line = lines.line_at(first.span.start);
-        let enclosing = calls
-            .iter()
-            .find(|call| call.span.start <= first.span.start && first.span.end <= call.span.end);
+        let enclosing = calls.enclosing(first.span.start, first.span.end);
         if let Some(rule) = skipped_rule(source, &tokens, &group) {
-            let last = &tokens[group[group.len() - 1]];
-            skipped.push(first.span.start..last.span.end);
+            skipped.push(first.span.start);
             if !(rule == Rule::UncheckedQuery
-                && enclosing.is_some_and(|call| call.is_any(any_calls)))
+                && enclosing.is_some_and(|call| call.is_any(&any_calls)))
             {
                 sites.push((line, SiteKind::Skipped(rule), String::new()));
             }
@@ -342,8 +339,8 @@ pub fn query_sites(
                 }
             }
             None if after_marker(&content(source, &call.strings)).is_some()
-                && !call.is_any(any_calls)
-                && !skipped.iter().any(|span| call.span.contains(&span.start)) =>
+                && !call.is_any(&any_calls)
+                && !holds_start(&skipped, &call.span) =>
             {
                 sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
             }
@@ -352,6 +349,19 @@ pub fn query_sites(
     }
     sites.sort_by_key(|site| site.0);
     sites
+}
+
+/// `offsets`, ascending, for [`Call::is_any`].
+fn sorted(offsets: &[usize]) -> Vec<usize> {
+    let mut offsets = offsets.to_vec();
+    offsets.sort_unstable();
+    offsets
+}
+
+/// Whether one of `starts`, ascending, lies in `span`.
+fn holds_start(starts: &[usize], span: &Range<usize>) -> bool {
+    let first = starts.partition_point(|&start| start < span.start);
+    starts.get(first).is_some_and(|&start| start < span.end)
 }
 
 /// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
