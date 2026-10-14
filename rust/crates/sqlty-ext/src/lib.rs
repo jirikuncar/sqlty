@@ -115,6 +115,22 @@ fn analyze_select(
     }))
 }
 
+/// Why a query has untyped columns, as `(rule, message)` pairs: `unknown-table`,
+/// `unknown-column`, `ambiguous-column`, `unknown-function`, `unknown-type` and
+/// `unsupported-syntax`. Tables, columns and ambiguity are only judged with a schema.
+///
+/// Example:
+///     query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+fn query_diagnostics(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Vec<(String, String)> {
+    analyzer::analyze_with_diagnostics(sql, dialect, &schema(schema_sql, dialect))
+        .1
+        .into_iter()
+        .map(|found| (found.rule.name().to_string(), found.message))
+        .collect()
+}
+
 /// Names of the schema tables that could not be parsed, even without their
 /// constraints; their columns are unknown to inference.
 #[pyfunction]
@@ -324,6 +340,7 @@ fn query_sites(source: &str, import_style: Option<&str>) -> PyResult<Vec<(usize,
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;

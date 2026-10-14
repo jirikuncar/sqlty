@@ -1,0 +1,294 @@
+//! Column lookup, and the reasons a name stays unresolved.
+//!
+//! Every lookup that fails or yields an untyped column records why into the analyzer's
+//! [`Diagnostics`](crate::diagnostics::Diagnostics): an unknown table, an unknown or
+//! ambiguous column, a source the analyzer does not read. Names are only judged when a
+//! schema is configured; without one every table and column is unknown.
+
+use super::*;
+
+/// Sources a name can resolve to: the FROM clause, then enclosing queries (correlation).
+fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s (String, String)> {
+    scope.iter().chain(outer.iter())
+}
+
+impl<'a> Analyzer<'a> {
+    /// Whether table, column and ambiguity rules apply: a schema is configured and the
+    /// dialect's name rules (case folding, quoting) are the ones modelled.
+    pub(super) fn judges_names(&self) -> bool {
+        !self.schema.is_empty()
+            && matches!(
+                self.dialect,
+                SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
+            )
+    }
+
+    /// Whether `table` is a schema table or view, CTE or derived table.
+    fn knows_table(&self, table: &str) -> bool {
+        self.virtual_columns(table).is_some() || self.schema.get(table).is_some()
+    }
+
+    /// Records `unknown-table` when a FROM item names no schema table, view or CTE.
+    pub(super) fn check_table(&self, table: &str) {
+        if is_opaque(table) || self.knows_table(table) {
+            return;
+        }
+        if self.judges_names() {
+            self.diag.record(
+                NameRule::UnknownTable,
+                format!("table `{table}` is not defined in the schema"),
+            );
+        } else {
+            self.diag.explain_silently();
+        }
+    }
+
+    /// A column of one source: `(type, schema column)`, the latter set when a schema table
+    /// holds it (`table.column`), for type diagnostics.
+    fn lookup_column(&self, table: &str, column: &str) -> Option<(Typed, Option<String>)> {
+        if let Some(columns) = self.virtual_columns(table) {
+            return columns
+                .iter()
+                .find(|col| col.name.to_lowercase() == column)
+                .map(|col| ((col.python_type.clone(), col.sql_type.clone()), None));
+        }
+        self.schema
+            .get(table)?
+            .iter()
+            .find(|col| col.name == column)
+            .map(|col| (col.typed(self.dialect), Some(format!("{table}.{column}"))))
+    }
+
+    /// Type of a column: its qualifier's source, else the first source having it, the
+    /// FROM clause before enclosing queries.
+    pub(super) fn resolve_column(
+        &self,
+        expr: &Expr,
+        scope: &Scope,
+    ) -> Option<(Typed, Option<String>)> {
+        match expr {
+            Expr::Identifier(ident) => {
+                let column = ident.value.to_lowercase();
+                sources(scope, &self.outer)
+                    .find_map(|(_, table)| self.lookup_column(table, &column))
+            }
+            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
+                let qualifier = parts[parts.len() - 2].value.to_lowercase();
+                let column = parts[parts.len() - 1].value.to_lowercase();
+                for sources in [scope, &self.outer] {
+                    if sources.iter().any(|(reference, _)| *reference == qualifier) {
+                        return self.lookup_column(&resolve(&qualifier, sources), &column);
+                    }
+                }
+                self.lookup_column(&qualifier, &column)
+            }
+            _ => None,
+        }
+    }
+
+    /// Typed column reference, recording why when it is untyped.
+    pub(super) fn column_expr(&self, expr: &Expr, scope: &Scope) -> Typed {
+        if let Expr::Identifier(ident) = expr {
+            self.check_ambiguous(ident, scope);
+        }
+        match self.resolve_column(expr, scope) {
+            Some((typed, from_schema)) => {
+                if typed.0.is_none() {
+                    match (from_schema, &typed.1) {
+                        (Some(column), sql_type) => self.diag.record(
+                            NameRule::UnknownType,
+                            format!(
+                                "column `{column}` has type {}, which has no Python type",
+                                sql_type
+                                    .as_deref()
+                                    .map_or("unknown".to_string(), |ty| format!("`{ty}`"))
+                            ),
+                        ),
+                        // Typed in the CTE or subquery that defines it; reported there.
+                        (None, _) => self.diag.explain_silently(),
+                    }
+                }
+                typed
+            }
+            None => {
+                self.explain_unresolved(expr, scope);
+                (None, None)
+            }
+        }
+    }
+
+    /// `ambiguous-column`: an unqualified column in more than one FROM source. Columns
+    /// merged by `USING` (and every column of a `NATURAL` join) are single.
+    fn check_ambiguous(&self, ident: &Ident, scope: &Scope) {
+        if !self.judges_names() {
+            return;
+        }
+        let column = ident.value.to_lowercase();
+        if self
+            .merged
+            .iter()
+            .any(|merged| *merged == "*" || *merged == column)
+        {
+            return;
+        }
+        let mut references: Vec<&str> = scope
+            .iter()
+            .filter(|(_, table)| self.lookup_column(table, &column).is_some())
+            .map(|(reference, _)| reference.as_str())
+            .collect();
+        references.dedup();
+        if references.len() > 1 {
+            self.diag.record(
+                NameRule::AmbiguousColumn,
+                format!(
+                    "column reference `{}` is ambiguous: {} all have it",
+                    ident.value,
+                    list(&references)
+                ),
+            );
+        }
+    }
+
+    /// Records the reason a column reference found no column.
+    fn explain_unresolved(&self, expr: &Expr, scope: &Scope) {
+        let (qualifier, column) = match expr {
+            Expr::Identifier(ident) => (None, ident),
+            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => (
+                Some(parts[parts.len() - 2].value.to_lowercase()),
+                &parts[parts.len() - 1],
+            ),
+            _ => return self.diag.explain_silently(),
+        };
+        let name = column.value.to_lowercase();
+        let unqualified = qualifier.is_none();
+        let all: Vec<&(String, String)> = sources(scope, &self.outer).collect();
+        // SQLite and MySQL read an unresolved "double-quoted" name as a string literal.
+        if unqualified && column.quote_style == Some('"') && self.dialect != SqlDialect::Postgres {
+            return self.diag.explain_silently();
+        }
+        // A whole-row reference: `SELECT t FROM users t`.
+        if unqualified && all.iter().any(|(reference, _)| *reference == name) {
+            return self.diag.explain_silently();
+        }
+        let candidates: Vec<&&(String, String)> = match &qualifier {
+            Some(qualifier) => all.iter().filter(|(r, _)| r == qualifier).collect(),
+            None => all.iter().collect(),
+        };
+        // A qualifier no FROM item names may still be an alias inside an opaque source.
+        let pool: &[&(String, String)] = if candidates.is_empty() { &all } else { &[] };
+        let opaque = candidates
+            .iter()
+            .map(|source| **source)
+            .chain(pool.iter().copied())
+            .map(|(_, table)| table)
+            .find(|table| is_opaque(table));
+        if let Some(table) = opaque {
+            return self.diag.record(
+                NameRule::UnsupportedSyntax,
+                format!(
+                    "column `{}` may come from {}, which sqlty does not read the columns of",
+                    column.value,
+                    opaque_description(table)
+                ),
+            );
+        }
+        if !self.judges_names() {
+            return self.diag.explain_silently();
+        }
+        if let Some(qualifier) = &qualifier {
+            if candidates.is_empty() {
+                // `old`/`new` in RETURNING and `excluded` in ON CONFLICT are not FROM items.
+                if matches!(qualifier.as_str(), "old" | "new" | "excluded") {
+                    return self.diag.explain_silently();
+                }
+                return self.diag.record(
+                    NameRule::UnknownTable,
+                    format!("`{qualifier}` is not a table or alias in the FROM clause"),
+                );
+            }
+        }
+        // Columns of a source that is itself unknown are explained where it is declared.
+        let unreadable = candidates.iter().any(|(_, table)| {
+            !self.knows_table(table)
+                || self
+                    .virtual_columns(table)
+                    .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
+        });
+        if unreadable {
+            return self.diag.explain_silently();
+        }
+        let tables: Vec<&str> = candidates
+            .iter()
+            .map(|(reference, _)| reference.as_str())
+            .collect();
+        let message = match (&qualifier, tables.is_empty()) {
+            (Some(qualifier), _) => {
+                format!("column `{}` does not exist in `{qualifier}`", column.value)
+            }
+            (None, true) => format!(
+                "column `{}` does not exist: the query has no FROM",
+                column.value
+            ),
+            (None, false) => format!(
+                "column `{}` does not exist in {}",
+                column.value,
+                list(&tables)
+            ),
+        };
+        self.diag.record(NameRule::UnknownColumn, message);
+    }
+
+    /// Records why a `*` or `t.*` stayed unresolved.
+    pub(super) fn explain_star(
+        &self,
+        reference: Option<&str>,
+        scope: &Scope,
+        from: Option<&[TableWithJoins]>,
+    ) {
+        let reference = reference.map(str::to_lowercase);
+        let tables = Self::star_tables(reference.as_deref(), scope);
+        if let Some(table) = tables.iter().find(|table| is_opaque(table)) {
+            return self.diag.record(
+                NameRule::UnsupportedSyntax,
+                format!(
+                    "`*` reads {}, which sqlty does not read the columns of",
+                    opaque_description(table)
+                ),
+            );
+        }
+        if !self.judges_names() {
+            return self.diag.explain_silently();
+        }
+        if let Some(reference) = &reference {
+            if !scope.iter().any(|(alias, _)| alias == reference) {
+                return self.diag.record(
+                    NameRule::UnknownTable,
+                    format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
+                );
+            }
+        } else if from.is_some_and(any_merging_join) {
+            return self.diag.record(
+                NameRule::UnsupportedSyntax,
+                "`*` over a USING or NATURAL join merges columns, so it is not expanded",
+            );
+        }
+        if tables.iter().any(|table| !self.knows_table(table)) || scope.is_empty() {
+            return self.diag.explain_silently();
+        }
+        if tables.iter().any(|table| {
+            self.virtual_columns(table)
+                .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
+        }) {
+            return self.diag.explain_silently();
+        }
+        self.diag.record(
+            NameRule::UnsupportedSyntax,
+            "`*` could not be expanded into columns",
+        );
+    }
+}
+
+fn list(names: &[&str]) -> String {
+    let names: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
+    names.join(", ")
+}

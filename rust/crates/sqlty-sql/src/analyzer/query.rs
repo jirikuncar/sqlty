@@ -39,16 +39,37 @@ pub(super) struct Analyzer<'a> {
     pub(super) schema: &'a SchemaData,
     pub(super) dialect: SqlDialect,
     pub(super) virtuals: Virtuals,
+    /// Why results are untyped, shared with the analyzers of subqueries and CTEs.
+    pub(super) diag: Diagnostics,
+    /// FROM sources of the enclosing queries, for correlated subqueries and `LATERAL`.
+    pub(super) outer: Scope,
+    /// Columns the joins of this SELECT merge (`USING`, `NATURAL`), so they are not ambiguous.
+    pub(super) merged: Vec<String>,
 }
 
 impl<'a> Analyzer<'a> {
+    pub(super) fn new(schema: &'a SchemaData, dialect: SqlDialect) -> Self {
+        Analyzer {
+            schema,
+            dialect,
+            virtuals: HashMap::new(),
+            diag: Diagnostics::default(),
+            outer: Scope::new(),
+            merged: Vec::new(),
+        }
+    }
+
     pub(super) fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Column>>> {
         match stmt {
             Statement::Query(query) => self.query_columns(query),
             _ => match returning(stmt) {
-                Some(items) => self
-                    .projection(items, &dml_scope(stmt), None)
-                    .map(non_empty),
+                Some(items) => {
+                    let scope = dml_scope(stmt);
+                    for (_, table) in &scope {
+                        self.check_table(table);
+                    }
+                    self.projection(items, &scope, None).map(non_empty)
+                }
                 None => Ok(None),
             },
         }
@@ -103,7 +124,13 @@ impl<'a> Analyzer<'a> {
             branches.push(match branch {
                 SetExpr::Select(select) => Some(self.select_columns(select)?),
                 SetExpr::Query(query) => self.query_columns(query)?,
-                _ => None,
+                other => {
+                    self.diag.record(
+                        NameRule::UnsupportedSyntax,
+                        format!("{} is not typed", set_expr_kind(other)),
+                    );
+                    None
+                }
             });
         }
         let mut branches = branches.into_iter();
@@ -125,6 +152,15 @@ impl<'a> Analyzer<'a> {
             }
         }
         for (column, common) in columns.iter_mut().zip(types) {
+            if common.is_none() {
+                self.diag.record(
+                    NameRule::UnsupportedSyntax,
+                    format!(
+                        "set operation branches disagree on the type of column `{}`",
+                        column.name
+                    ),
+                );
+            }
             (column.python_type, column.sql_type) = common.unwrap_or((None, None));
         }
         Ok(Some(columns))
@@ -161,11 +197,22 @@ impl<'a> Analyzer<'a> {
                     continue;
                 }
                 SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
+                    self.diag.record(
+                        NameRule::UnsupportedSyntax,
+                        "`<expression>.*` is not expanded",
+                    );
                     columns.push(Column::unknown("*"));
                     continue;
                 }
             };
+            let explained = self.diag.explained();
             let (python_type, sql_type) = self.expr(expr, scope)?;
+            if python_type.is_none() && self.diag.explained() == explained && !is_wild(expr) {
+                self.diag.record(
+                    NameRule::UnsupportedSyntax,
+                    format!("expression `{}` is not typed", shorten(&expr.to_string())),
+                );
+            }
             columns.push(Column {
                 name,
                 python_type,
@@ -188,7 +235,10 @@ impl<'a> Analyzer<'a> {
             .flatten()
         {
             Some(columns) => columns,
-            None => vec![Column::unknown("*")],
+            None => {
+                self.explain_star(reference, scope, from);
+                vec![Column::unknown("*")]
+            }
         }
     }
 }
@@ -215,4 +265,30 @@ pub(super) fn rename_columns(columns: &mut [Column], alias: &TableAlias) {
 
 pub(super) fn non_empty(columns: Vec<Column>) -> Option<Vec<Column>> {
     (!columns.is_empty()).then_some(columns)
+}
+
+/// A NULL or placeholder: untyped by nature, not for want of analysis.
+fn is_wild(expr: &Expr) -> bool {
+    match expr {
+        Expr::Nested(inner) => is_wild(inner),
+        Expr::Value(value) => matches!(value.value, Value::Null | Value::Placeholder(_)),
+        _ => false,
+    }
+}
+
+fn set_expr_kind(body: &SetExpr) -> &'static str {
+    match body {
+        SetExpr::Values(_) => "a VALUES list",
+        SetExpr::Table(_) => "a TABLE query",
+        _ => "this query form",
+    }
+}
+
+/// `text`, cut to a length that reads well in a message.
+pub(super) fn shorten(text: &str) -> String {
+    const MAX: usize = 60;
+    match text.char_indices().nth(MAX) {
+        Some((end, _)) => format!("{}...", &text[..end]),
+        None => text.to_string(),
+    }
 }

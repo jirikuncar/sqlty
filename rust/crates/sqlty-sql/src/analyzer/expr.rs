@@ -63,10 +63,17 @@ impl<'a> Analyzer<'a> {
             Expr::Cast { data_type, .. } => {
                 let (sql_type, python_type) =
                     resolve_type(data_type, &self.schema.types, self.dialect);
-                Ok(match python_type {
+                let typed = match python_type {
                     Some(python_type) => (Some(python_type), Some(sql_type)),
                     None => from_sql_type(sql_type, self.dialect),
-                })
+                };
+                if typed.0.is_none() {
+                    self.diag.record(
+                        NameRule::UnknownType,
+                        format!("type `{data_type}` has no Python type"),
+                    );
+                }
+                Ok(typed)
             }
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => {
@@ -133,9 +140,7 @@ impl<'a> Analyzer<'a> {
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL".to_string(), self.dialect))
             }
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
-                Ok(self.column_type(expr, scope).unwrap_or((None, None)))
-            }
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => match &value.value {
                 Value::Number(number, _) if number.contains(['e', 'E']) => known("float"),
                 Value::Number(number, _) if number.contains('.') => {
@@ -176,6 +181,7 @@ impl<'a> Analyzer<'a> {
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => Ok(self
+                .correlated(scope)
                 .query_columns(query)?
                 .and_then(|columns| columns.into_iter().next())
                 .map_or((None, None), |col| (col.python_type, col.sql_type))),
@@ -202,7 +208,16 @@ impl<'a> Analyzer<'a> {
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
-                        None => Ok((None, None)),
+                        None => {
+                            self.diag.record(
+                                NameRule::UnknownFunction,
+                                format!(
+                                    "function `{}` is not known to sqlty, so its result is untyped",
+                                    func.name.to_string().to_lowercase()
+                                ),
+                            );
+                            Ok((None, None))
+                        }
                     },
                 }
             }

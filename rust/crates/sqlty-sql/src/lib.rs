@@ -2,3 +2,4 @@
 
 pub mod analyzer;
 pub mod ddl;
+pub mod diagnostics;
