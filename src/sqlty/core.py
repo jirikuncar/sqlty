@@ -665,7 +665,8 @@ def _nullability_diagnostics(
     ``declared`` is the resolved annotation. A column of unknown nullability, or an
     annotation that can't be resolved, is never reported.
     """
-    from sqlty._type_extractor import _type_repr, admits_none, is_optional
+    from sqlty._type_extractor import admits_none, is_optional
+    from sqlty._type_extractor.subtype import _type_repr
 
     if col.nullable is None or declared is None:
         return []
@@ -727,7 +728,8 @@ def _literal_diagnostics(
     column's values are known: ``str``, ``int``, ``Any`` or an enum take any value, so
     there is nothing to compare.
     """
-    from sqlty._type_extractor import _type_repr, column_literal_values, declared_literal_values
+    from sqlty._type_extractor import column_literal_values, declared_literal_values
+    from sqlty._type_extractor.subtype import _type_repr
 
     if declared is None or not col.python_type:
         return []
@@ -786,7 +788,7 @@ def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape |
     A scalar type takes one column, ``tuple[A, B]`` one column per item. Other
     row types (an unknown class, ``dict``, ``tuple[int, ...]``) are not checked.
     """
-    from sqlty._type_extractor import _ast_type
+    from sqlty._type_extractor.ast_fields import _ast_type
 
     if isinstance(row, ast.Subscript) and _ast_type(row.value, aliases) is tuple:
         items = list(row.slice.elts) if isinstance(row.slice, ast.Tuple) else [row.slice]
@@ -811,7 +813,7 @@ def _value_diagnostics(
     type_defs: Mapping[str, TypeInfo],
 ) -> list[tuple[str, str]]:
     """Compare the row type of a helper call with the query columns."""
-    from sqlty._type_extractor import _accepts
+    from sqlty._type_extractor.compat import _accepts
 
     if shape is None:
         return []
