@@ -73,6 +73,25 @@ def test_check_source_parses_once(parses):
     assert parses[source] == 1
 
 
+def test_helper_calls_bound_the_work(monkeypatch):
+    calls = "".join(
+        f'def f{i}():\n    return fetch_all("SELECT id, name FROM users", tuple[int, str])\n\n'
+        for i in range(50)
+    )
+    unrelated = "".join(
+        f"def g{i}(x):\n    return {{k: [a for a in range(k) if a % 2] for k in x}}\n\n"
+        for i in range(50)
+    )
+    parsed = ParsedSource(HELPER + calls + unrelated)
+    unparsed: list[ast.AST] = []
+    real = ast.unparse
+    monkeypatch.setattr(ast, "unparse", lambda node: unparsed.append(node) or real(node))
+
+    assert check_source(parsed, schema_sql=SCHEMA) == []
+    assert len(unparsed) <= 3
+    assert parsed._scan.visited < 10 * 50
+
+
 def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, capsys):
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text(SCHEMA)

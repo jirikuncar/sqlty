@@ -36,7 +36,6 @@ from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
-    from sqlty._helpers import HelperCall
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import TypeInfo
 
@@ -261,7 +260,18 @@ def _check_diagnostics(
                 call.line,
             )
 
-    named = [(call.line, ast.unparse(call.row), call.query) for call in calls if call.row]
+    unparsed: dict[str, str] = {}
+
+    def unparse(row: ast.expr) -> str:
+        """``ast.unparse(row)``, once per distinct source span in the file."""
+        if (key := parsed.segment(row)) is None:
+            return ast.unparse(row)
+        if key not in unparsed:
+            unparsed[key] = ast.unparse(row)
+        return unparsed[key]
+
+    rows = [unparse(call.row) if call.row else None for call in calls]
+    named = [(call.line, row, call.query) for call, row in zip(calls, rows, strict=True) if row]
     type_defs = (
         extract_type_definitions(parsed, helpers, module, type_modules) if queries or named else {}
     )
@@ -298,12 +308,15 @@ def _check_diagnostics(
         for rule, message in _structural_diagnostics(name, type_defs[name], columns, rule_config):
             report(rule, message, line)
 
-    for call in calls:
-        if call.row is None or ast.unparse(call.row) in type_defs:
+    shapes: dict[str, _RowShape | None] = {}
+    for call, row in zip(calls, rows, strict=True):
+        if call.row is None or row is None or row in type_defs:
             continue
         if (columns := _columns(call.query, dialect, schema_sql)) is None:
             continue
-        for rule, message in _value_diagnostics(call, columns):
+        if row not in shapes:
+            shapes[row] = _row_shape(call.row, row, call.typing_aliases)
+        for rule, message in _value_diagnostics(shapes[row], columns):
             report(rule, message, call.line)
     return diagnostics
 
@@ -370,55 +383,70 @@ def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[Co
         return None
 
 
-def _value_diagnostics(call: HelperCall, columns: list[ColumnInfo]) -> list[tuple[str, str]]:
-    """Compare the row type of a helper call with the query columns.
+class _RowShape(NamedTuple):
+    """The row type of helper calls, resolved once per file for every call that spells it."""
+
+    text: str
+    is_tuple: bool
+    targets: list[tuple[str, str, typing.Any]]
+    accepts: dict[tuple[int, str], bool]
+
+
+def _row_shape(row: ast.expr, text: str, aliases: dict[str, str]) -> _RowShape | None:
+    """What each column of a helper call's row type ``text`` must be; ``None`` when unchecked.
 
     A scalar type takes one column, ``tuple[A, B]`` one column per item. Other
     row types (an unknown class, ``dict``, ``tuple[int, ...]``) are not checked.
     """
-    from sqlty._type_extractor import _accepts, _ast_type
+    from sqlty._type_extractor import _ast_type
 
-    row, aliases = call.row, call.typing_aliases
-    if row is None:
-        return []
-    text = ast.unparse(row)
     if isinstance(row, ast.Subscript) and _ast_type(row.value, aliases) is tuple:
         items = list(row.slice.elts) if isinstance(row.slice, ast.Tuple) else [row.slice]
         if not items or any(isinstance(i, ast.Constant) and i.value is ... for i in items):
-            return []
-        if len(items) != len(columns):
-            return [
-                (
-                    "column-count-mismatch",
-                    f"{text} has {len(items)} items but query returns {len(columns)} columns",
-                )
-            ]
+            return None
+        annotations = [ast.unparse(item) for item in items]
         targets = [
-            (f"{text} item {i} is {ast.unparse(item)}", ast.unparse(item), _ast_type(item, aliases))
-            for i, item in enumerate(items)
+            (f"{text} item {i} is {annotation}", annotation, _ast_type(item, aliases))
+            for i, (item, annotation) in enumerate(zip(items, annotations, strict=True))
         ]
-    else:
-        resolved = _ast_type(row, aliases)
-        if resolved is None or resolved in _CONTAINERS or typing.get_args(resolved):
-            return []
-        if len(columns) != 1:
-            return [
+        return _RowShape(text, True, targets, {})
+    resolved = _ast_type(row, aliases)
+    if resolved is None or resolved in _CONTAINERS or typing.get_args(resolved):
+        return None
+    return _RowShape(text, False, [(f"{text} is expected", text, resolved)], {})
+
+
+def _value_diagnostics(shape: _RowShape | None, columns: list[ColumnInfo]) -> list[tuple[str, str]]:
+    """Compare the row type of a helper call with the query columns."""
+    from sqlty._type_extractor import _accepts
+
+    if shape is None:
+        return []
+    if len(shape.targets) != len(columns):
+        takes = f"has {len(shape.targets)} items" if shape.is_tuple else "takes 1 column"
+        return [
+            (
+                "column-count-mismatch",
+                f"{shape.text} {takes} but query returns {len(columns)} columns",
+            )
+        ]
+    found = []
+    for i, ((label, annotation, resolved), col) in enumerate(
+        zip(shape.targets, columns, strict=True)
+    ):
+        if resolved is None or not col.python_type:
+            continue
+        key = (i, col.python_type)
+        if key not in shape.accepts:
+            shape.accepts[key] = _accepts(resolved, annotation, col.python_type)
+        if not shape.accepts[key]:
+            found.append(
                 (
-                    "column-count-mismatch",
-                    f"{text} takes 1 column but query returns {len(columns)} columns",
+                    "column-type-mismatch",
+                    f"{label} but query column '{col.name}' infers {col.python_type}",
                 )
-            ]
-        targets = [(f"{text} is expected", text, resolved)]
-    return [
-        (
-            "column-type-mismatch",
-            f"{label} but query column '{col.name}' infers {col.python_type}",
-        )
-        for (label, annotation, resolved), col in zip(targets, columns, strict=True)
-        if resolved is not None
-        and col.python_type
-        and not _accepts(resolved, annotation, col.python_type)
-    ]
+            )
+    return found
 
 
 def _apply_suppressions(
