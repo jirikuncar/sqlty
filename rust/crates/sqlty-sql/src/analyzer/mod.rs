@@ -30,6 +30,7 @@ use std::sync::LazyLock;
 mod dml;
 mod expr;
 mod functions;
+mod literals;
 mod names;
 mod narrowing;
 mod nullability;
@@ -41,6 +42,7 @@ mod scope;
 use dml::*;
 use expr::*;
 use functions::*;
+use literals::*;
 use names::*;
 use nullability::*;
 use operators::*;
@@ -954,7 +956,7 @@ mod tests {
             infer_type("--sql\nSELECT 1 AS x", "mysql", None)
                 .unwrap()
                 .as_deref(),
-            Some("tuple[int]")
+            Some("tuple[typing.Literal[1]]")
         );
         // Schema DDL is not a query: a `%s` there is not a placeholder.
         assert!(load_schema("CREATE TABLE t (a INT DEFAULT %s)", "postgres").is_empty());

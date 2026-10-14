@@ -83,7 +83,7 @@ CREATE VIEW v AS SELECT id, 1 AS one FROM missing;
 
 ```sql
 SELECT one FROM v
--- inferred: tuple[int]
+-- inferred: tuple[typing.Literal[1]]
 ```
 
 ## Functions after their callers

@@ -113,7 +113,7 @@ type, skipping `NULL` and placeholders. Cast the whole expression to type it:
 unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
 typed = "--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t"
 # rewritten: unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
-# rewritten: typed = SQL[tuple[int, int, int, str]]("--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t")
+# rewritten: typed = SQL[tuple[int, typing.Literal[1], int, str]]("--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t")
 ```
 
 An unaliased column is named as PostgreSQL names it: the column (also under a

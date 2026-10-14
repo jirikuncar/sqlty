@@ -220,6 +220,40 @@ impl Statement<'_> {
         })
     }
 
+    /// The conditions of the `CHECK (...)` clauses of a `CREATE DOMAIN`, without the
+    /// `CHECK` and the parentheses around them.
+    pub(crate) fn domain_checks(&self) -> Vec<String> {
+        let spots: Vec<usize> = (0..self.0.len())
+            .filter(|&at| significant(&self.0[at]))
+            .collect();
+        let pieces: Vec<&Piece> = spots.iter().map(|&at| &self.0[at]).collect();
+        let mut checks = Vec::new();
+        let mut at = 0;
+        while at + 1 < pieces.len() {
+            if !(is_word(pieces[at], "check") && is_punct(pieces[at + 1], "(")) {
+                at += 1;
+                continue;
+            }
+            let mut depth = 0usize;
+            let mut end = None;
+            for (offset, piece) in pieces[at + 1..].iter().enumerate() {
+                if is_punct(piece, "(") {
+                    depth += 1;
+                } else if is_punct(piece, ")") {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(at + 1 + offset);
+                        break;
+                    }
+                }
+            }
+            let Some(end) = end else { break };
+            checks.push(render(&self.0[spots[at + 1] + 1..spots[end]]));
+            at = end + 1;
+        }
+        checks
+    }
+
     /// The lowercase words that open the statement, up to `n` (`create`, `or`, `replace`, ...).
     #[cfg(test)]
     pub(crate) fn lead_words(&self, n: usize) -> Vec<String> {
@@ -694,6 +728,21 @@ mod tests {
             Some(("d".to_string(), "text".to_string()))
         );
         assert_eq!(first("CREATE DOMAIN d").domain(), None);
+    }
+
+    #[test]
+    fn test_domain_checks() {
+        let first = |sql| split_statements(sql, false).remove(0);
+        assert_eq!(
+            first(
+                "CREATE DOMAIN d text CHECK (VALUE IN ('a', 'b)')) CONSTRAINT c CHECK ((VALUE)::text <> 'x')"
+            )
+            .domain_checks(),
+            vec!["VALUE IN ('a', 'b)')", "(VALUE)::text <> 'x'"]
+        );
+        assert!(first("CREATE DOMAIN d text NOT NULL")
+            .domain_checks()
+            .is_empty());
     }
 
     #[test]

@@ -37,9 +37,9 @@ SELECT id::BIGINT, users.name, lower(email), COALESCE(email, 'x'), CASE WHEN id 
 -- columns: name: str (TEXT)
 -- columns: lower: str | None (TEXT)
 -- columns: coalesce: str (VARCHAR(255))
--- columns: case: int | None (None)
+-- columns: case: typing.Literal[1] | None (None)
 -- columns: exists: bool (BOOLEAN)
--- columns: ?column?: str (None)
+-- columns: ?column?: typing.Literal['a'] (None)
 -- columns: ?column?: bool (None)
 ```
 

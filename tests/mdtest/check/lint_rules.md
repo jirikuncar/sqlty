@@ -83,12 +83,12 @@ r = u"--sql select id::INTEGER from users"
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[typing.Literal[1]]]"
 a = SQL[tuple[str]]("--sql\nSELECT 1 AS n")
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[typing.Literal[1]]]"
 b = SQL[tuple[str]]("""--sql
 SELECT 1 AS n""")
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[typing.Literal[1]]]"
 c = SQL[tuple[str]]("""--sql\nSELECT 1 AS n""")
 ```
 
@@ -115,7 +115,7 @@ from sqlty import SQL, UNTYPED
 # error: [select-star-no-schema] "SELECT * used but no schema available"
 a = SQL[tuple[str]]("""--sql
 SELECT * FROM users""")
-# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
+# error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[typing.Literal[1]]]; run sqlty check --fix"
 b = SQL[UNTYPED]("""-- sql
 SELECT 1 AS n""")
 ```

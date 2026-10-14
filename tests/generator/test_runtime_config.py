@@ -147,10 +147,17 @@ ko("c", q="SELECT 3")
         for name in ["kw", "ko"]
     )
     stub = _stub(tmp_path, pyproject, app)
-    assert "def kw(conn: object, q: Literal['SELECT 1']=...) -> SQL[tuple[int]]:" in stub
-    assert "def kw(conn: object, q: Literal['SELECT 3']) -> SQL[tuple[int]]:" in stub
-    assert "def ko(conn: object, *, q: Literal['SELECT 1']=...) -> SQL[tuple[int]]:" in stub
-    assert "def ko(conn: object, *, q: Literal['SELECT 3']) -> SQL[tuple[int]]:" in stub
+    assert (
+        "def kw(conn: object, q: Literal['SELECT 1']=...) -> SQL[tuple[typing.Literal[1]]]:" in stub
+    )
+    assert "def kw(conn: object, q: Literal['SELECT 3']) -> SQL[tuple[typing.Literal[3]]]:" in stub
+    assert (
+        "def ko(conn: object, *, q: Literal['SELECT 1']=...) -> SQL[tuple[typing.Literal[1]]]:"
+        in stub
+    )
+    assert (
+        "def ko(conn: object, *, q: Literal['SELECT 3']) -> SQL[tuple[typing.Literal[3]]]:" in stub
+    )
     assert "def kw(conn: Any, q: str='SELECT 1') -> Any:" in stub
 
 

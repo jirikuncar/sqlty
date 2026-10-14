@@ -99,7 +99,7 @@ pub(super) fn type_base(sql_type: &str) -> &str {
 
 /// The SQL type of an operand; literals know only their Python type.
 pub(super) fn operand_type(typed: &Typed) -> Option<&str> {
-    match (typed.1.as_deref(), typed.0.as_deref()) {
+    match (typed.1.as_deref(), python_kind(typed)) {
         (Some(sql_type), _) => Some(type_base(sql_type)),
         (None, Some("int")) => Some("INT"),
         (None, Some("float")) => Some("DOUBLE"),
@@ -111,7 +111,7 @@ pub(super) fn operand_type(typed: &Typed) -> Option<&str> {
 pub(super) fn is_text(typed: &Typed) -> bool {
     match &typed.1 {
         Some(sql_type) => matches!(type_base(sql_type), "TEXT" | "VARCHAR" | "CHAR"),
-        None => typed.0.as_deref() == Some("str"),
+        None => python_kind(typed) == Some("str"),
     }
 }
 
@@ -193,6 +193,9 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
     if left == (None, None) {
         return Some(right);
     }
+    if let Some(merged) = merge(&left, &right, dialect) {
+        return merged;
+    }
     let postgres = dialect == SqlDialect::Postgres;
     if postgres {
         // A string literal has the type `unknown`, which takes the other input's type.
@@ -206,7 +209,7 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
     let widens = |literal: &Typed, other: &Typed| {
         postgres
             && literal.1.is_none()
-            && literal.0.as_deref() == Some("int")
+            && python_kind(literal) == Some("int")
             && operand_type(other) == Some("SMALLINT")
     };
     if !widens(&left, &right) && !widens(&right, &left) {
@@ -246,7 +249,7 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
 
 /// A string literal: PostgreSQL types it `unknown` until the other inputs decide.
 pub(super) fn is_unknown_literal(typed: &Typed) -> bool {
-    typed.1.is_none() && typed.0.as_deref() == Some("str")
+    typed.1.is_none() && python_kind(typed) == Some("str")
 }
 
 /// The common type of the branches of a `CASE`, the arguments of `COALESCE`, `GREATEST`
@@ -264,7 +267,7 @@ pub(super) fn common_of(
 
 /// The type category of a set operation's input; literals know only their Python type.
 pub(super) fn category(typed: &Typed) -> Option<&str> {
-    match (typed.1.as_deref(), typed.0.as_deref()) {
+    match (typed.1.as_deref(), python_kind(typed)) {
         (None, Some("str")) => Some("TEXT"),
         _ => operand_type(typed),
     }

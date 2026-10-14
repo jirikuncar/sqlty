@@ -433,11 +433,12 @@ from sqlty import SQL
 a = SQL[tuple[str]]("""--sql
 SELECT 1 AS n""")
 b = SQL[tuple[str]]("""-- sql\nSELECT 1 AS n""")
+# fixed: import typing
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: a = SQL[tuple[int]]("""--sql
+# fixed: a = SQL[tuple[typing.Literal[1]]]("""--sql
 # fixed: SELECT 1 AS n""")
-# fixed: b = SQL[tuple[int]]("""-- sql\nSELECT 1 AS n""")
+# fixed: b = SQL[tuple[typing.Literal[1]]]("""-- sql\nSELECT 1 AS n""")
 ```
 
 ## Escaped CRLF marker is fixed
@@ -447,8 +448,9 @@ from sqlty import SQL
 
 a = "--sql\r\nSELECT 1 AS n"
 b = SQL[tuple[str]]("--sql\r\nSELECT 1 AS n")
+# fixed: import typing
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: a = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
-# fixed: b = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
+# fixed: a = SQL[tuple[typing.Literal[1]]]("--sql\r\nSELECT 1 AS n")
+# fixed: b = SQL[tuple[typing.Literal[1]]]("--sql\r\nSELECT 1 AS n")
 ```

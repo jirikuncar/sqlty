@@ -167,7 +167,7 @@ returns one row.
 
 ```sql
 SELECT (SELECT max(total) FROM orders), (SELECT count(*) FROM orders), (SELECT 1) FROM users
--- inferred: tuple[decimal.Decimal | None, int, int]
+-- inferred: tuple[decimal.Decimal | None, int, typing.Literal[1]]
 ```
 
 ```sql

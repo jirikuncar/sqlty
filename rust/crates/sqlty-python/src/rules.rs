@@ -20,6 +20,8 @@ pub enum Rule {
     TypeddictInheritance,
     NullableMismatch,
     RedundantOptional,
+    LiteralMismatch,
+    RedundantLiteral,
     SelectStar,
     SelectStarNoSchema,
     StaleRewrite,
@@ -38,7 +40,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 25] = [
+    pub const ALL: [Rule; 27] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -46,6 +48,8 @@ impl Rule {
         Rule::TypeddictInheritance,
         Rule::NullableMismatch,
         Rule::RedundantOptional,
+        Rule::LiteralMismatch,
+        Rule::RedundantLiteral,
         Rule::SelectStar,
         Rule::SelectStarNoSchema,
         Rule::StaleRewrite,
@@ -76,6 +80,8 @@ impl Rule {
             Rule::TypeddictInheritance => "typeddict-inheritance",
             Rule::NullableMismatch => "nullable-mismatch",
             Rule::RedundantOptional => "redundant-optional",
+            Rule::LiteralMismatch => "literal-mismatch",
+            Rule::RedundantLiteral => "redundant-literal",
             Rule::SelectStar => "select-star",
             Rule::SelectStarNoSchema => "select-star-no-schema",
             Rule::StaleRewrite => "stale-rewrite",
@@ -105,6 +111,7 @@ impl Rule {
             | Rule::TypeddictKeyMismatch
             | Rule::TypeddictInheritance
             | Rule::NullableMismatch
+            | Rule::LiteralMismatch
             | Rule::SelectStarNoSchema => Severity::Error,
             Rule::ColumnNameMismatch
             | Rule::SelectStar
@@ -116,9 +123,11 @@ impl Rule {
             | Rule::TstringSkipped
             | Rule::UncheckedQuery
             | Rule::UntypedQuery => Severity::Warn,
-            Rule::RedundantOptional | Rule::UnparsedQuery | Rule::UnusedIgnore | Rule::Name(_) => {
-                Severity::Ignore
-            }
+            Rule::RedundantOptional
+            | Rule::RedundantLiteral
+            | Rule::UnparsedQuery
+            | Rule::UnusedIgnore
+            | Rule::Name(_) => Severity::Ignore,
         }
     }
 }

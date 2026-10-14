@@ -133,6 +133,11 @@ impl<'a> Analyzer<'a> {
             Expr::Cast { data_type, .. } => {
                 let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
                 let typed = match python_type {
+                    // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
+                    // labels upper-cased, which are not the column's values.
+                    Some(_) if matches!(data_type, DataType::Enum(..)) => {
+                        from_sql_type(sql_type, self.dialect)
+                    }
                     Some(python_type) => (Some(python_type), Some(sql_type)),
                     None => from_sql_type(sql_type, self.dialect),
                 };
@@ -206,11 +211,16 @@ impl<'a> Analyzer<'a> {
             Expr::UnaryOp {
                 op: UnaryOperator::Minus | UnaryOperator::Plus,
                 expr: inner,
-            } => self.expr(inner, scope),
+            } => match crate::values::constant(expr) {
+                Some(negative) => Ok(constant(negative)),
+                None => Ok(strip(self.expr(inner, scope)?, self.dialect)),
+            },
             Expr::UnaryOp {
                 op: UnaryOperator::PGAbs | UnaryOperator::BitwiseNot,
                 expr: inner,
-            } if self.dialect == SqlDialect::Postgres => self.expr(inner, scope),
+            } if self.dialect == SqlDialect::Postgres => {
+                Ok(strip(self.expr(inner, scope)?, self.dialect))
+            }
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
                 let typed = self.expr(timestamp, scope)?;
@@ -239,9 +249,15 @@ impl<'a> Analyzer<'a> {
                 Value::Number(number, _) if number.contains('.') => {
                     known(decimal_type(self.dialect))
                 }
-                Value::Number(..) => known("int"),
+                Value::Number(number, _) => Ok(number.parse().map_or_else(
+                    |_| (Some("int".to_string()), None),
+                    |n| constant(crate::values::Value::Int(n)),
+                )),
                 Value::Boolean(_) => known("bool"),
                 Value::Null | Value::Placeholder(_) => Ok((None, None)),
+                Value::SingleQuotedString(text) => {
+                    Ok(constant(crate::values::Value::Str(text.clone())))
+                }
                 _ => known("str"),
             },
             Expr::Exists { .. }
@@ -286,27 +302,27 @@ impl<'a> Analyzer<'a> {
                 else_result,
                 ..
             } => {
+                let mut results = Vec::new();
+                for expr in conditions
+                    .iter()
+                    .map(|when| &when.result)
+                    .chain(else_result.as_deref())
+                {
+                    results.push(self.expr(expr, scope)?);
+                }
                 if self.dialect == SqlDialect::Postgres {
-                    let mut results = Vec::new();
-                    for expr in conditions
-                        .iter()
-                        .map(|when| &when.result)
-                        .chain(else_result.as_deref())
-                    {
-                        results.push(self.expr(expr, scope)?);
-                    }
-                    if let Some(common) = common_of(results, self.dialect) {
+                    if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
                         return Ok(common);
                     }
                 }
-                match conditions
-                    .first()
-                    .map(|when| &when.result)
-                    .or(else_result.as_deref())
-                {
-                    Some(branch) => self.expr(branch, scope),
-                    None => Ok((None, None)),
+                // Other dialects take the first branch's type, but a set of values
+                // covers every branch.
+                let first = results.first().cloned().unwrap_or((None, None));
+                if value_set(&first).is_some() {
+                    return Ok(common_of(results, self.dialect)
+                        .unwrap_or_else(|| strip(first, self.dialect)));
                 }
+                Ok(first)
             }
             Expr::Function(func) => {
                 let name = self.builtin_name(&func.name);

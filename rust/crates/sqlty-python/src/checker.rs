@@ -372,9 +372,28 @@ pub fn wrapped_queries(
         .collect()
 }
 
+/// Whether the annotation `a` is the `str` or `int` that an inferred `typing.Literal[...]`
+/// item `i` (optionally `| None`) is a subtype of: less precise, but not stale.
+fn covers_literal(a: &str, i: &str) -> bool {
+    let (core, optional) = match i.strip_suffix(" | None") {
+        Some(core) => (core, true),
+        None => (i, false),
+    };
+    let Some(values) = core.strip_prefix("typing.Literal[") else {
+        return false;
+    };
+    let base = if values.starts_with('\'') {
+        "str"
+    } else {
+        "int"
+    };
+    a == base || (optional && a.strip_suffix(" | None") == Some(base))
+}
+
 /// Whether `annotated` is `inferred`, narrows a `typing.Any` item to any type, or
 /// parametrises some of its generics (`tuple[int, list[str]]` for `tuple[int, list]`
-/// or `tuple[int, list[int]]`), so it is not stale.
+/// or `tuple[int, list[int]]`), or is the `str` / `int` of an inferred `Literal`, so it is
+/// not stale.
 ///
 /// Element types are not checked.
 pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
@@ -411,6 +430,7 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
             ours.iter().zip(&theirs).all(|(a, i)| {
                 let base = i.split('[').next().unwrap_or(i);
                 a == i
+                    || covers_literal(a, i)
                     || *i == "typing.Any"
                     || (["list", "dict", "set", "frozenset", "tuple"].contains(&base)
                         && a.strip_prefix(base)

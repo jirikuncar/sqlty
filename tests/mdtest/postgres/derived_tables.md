@@ -115,5 +115,5 @@ JOIN LATERAL (SELECT status FROM orders WHERE user_id = u.id LIMIT 1) o ON true
 ```sql
 WITH users AS (SELECT 1 AS other)
 SELECT other FROM users
--- inferred: tuple[int]
+-- inferred: tuple[typing.Literal[1]]
 ```
