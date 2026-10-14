@@ -139,6 +139,73 @@ orders = "--sql\nSELECT discount, status FROM orders"
 A field annotated `str` still accepts an enum column, and a `Literal[...]` field
 is not checked against the labels.
 
+## Migrations, schemas and functions
+
+In PostgreSQL the schema is a catalog that the statements build, not a list of
+`CREATE TABLE`s, so a migration history works as a schema file:
+
+- `ALTER TABLE`: add, drop and rename columns, change a column type, set or drop
+  `NOT NULL`, rename the table. A change to a table reaches the tables that
+  inherit from it or are its partitions.
+- `ALTER TYPE ... ADD VALUE` and `RENAME VALUE` change an enum's `Literal`.
+- `DROP TABLE`, `VIEW`, `TYPE`, `DOMAIN`, `FUNCTION` and `SCHEMA`.
+- `PARTITION OF`, `INHERITS` and `LIKE` give a table its parent's columns.
+- `CREATE FUNCTION ... RETURNS` types calls to the function: a scalar, a
+  `SETOF`, or the columns of `RETURNS TABLE (...)` in `FROM`. Overloads are told
+  apart by their number of arguments, and a built-in function of the same name
+  wins.
+- `pg_catalog` and `information_schema` relations (`pg_class`, `pg_namespace`,
+  `pg_attribute`, `pg_type`, `information_schema.tables` and `.columns`) are
+  always known.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, full_name TEXT, legacy TEXT);
+ALTER TABLE users DROP COLUMN legacy;
+ALTER TABLE users RENAME COLUMN full_name TO name;
+ALTER TABLE users ADD COLUMN status status NOT NULL;
+
+CREATE TYPE status AS ENUM ('active', 'banned');
+ALTER TYPE status ADD VALUE 'pending' BEFORE 'active';
+
+CREATE FUNCTION user_count() RETURNS bigint LANGUAGE sql AS 'SELECT count(*) FROM users';
+```
+
+The `ALTER TABLE` statements come before the enum they use, and that is fine:
+a statement whose dependencies are not defined yet is retried, so files load in
+any order.
+
+```python
+users = "--sql\nSELECT * FROM users"
+total = "--sql\nSELECT user_count()"
+# rewritten: users = SQL[tuple[int, str, typing.Literal['pending', 'active', 'banned']]]("--sql\nSELECT * FROM users")
+# rewritten: total = SQL[tuple[int]]("--sql\nSELECT user_count()")
+```
+
+A name written `schema.table` looks in that schema. A bare name follows the
+`search_path`: the `SET search_path` in effect at the end of the file (or
+`public`), then the one schema that defines the name. A bare name defined in
+several schemas, none on the path, is unknown rather than guessed.
+
+Nullability (`NOT NULL`, `PRIMARY KEY`) is recorded but does not change the
+inferred types yet.
+
+sqlty does not guess where it cannot follow. A table changed by a statement it
+cannot read (for instance `ALTER TABLE ... SET SCHEMA`), or built from a table
+the schema never defines (`LIKE`, `INHERITS`, `PARTITION OF`), has an unknown
+shape: its columns get no type, and `SELECT *` over it is left alone.
+`CREATE TABLE ... AS`, `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
+`ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
+tables as they are where the view is created. MySQL and SQLite read `CREATE`
+statements only.
+
 ## Where the schema comes from
 
 `sqlty rewrite` and `sqlty check` use, in order:
