@@ -1,0 +1,16 @@
+---
+source: crates/sqlty-sql/src/analyzer/functions.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT definitely_not_a_function(i) AS a FROM t
+a: ? | ? | Unknown
+[unknown-function] function `definitely_not_a_function` is not known to sqlty, so its result is untyped
+
+SELECT public.also_missing(i) AS a FROM t
+a: ? | ? | Unknown
+[unknown-function] function `public.also_missing` is not known to sqlty, so its result is untyped
+
+SELECT now() AS ok, mystery() AS bad FROM t
+ok: datetime.datetime | TIMESTAMPTZ | NonNull
+bad: ? | ? | Unknown
+[unknown-function] function `mystery` is not known to sqlty, so its result is untyped

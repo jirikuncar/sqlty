@@ -1,0 +1,15 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT id, note, total FROM orders
+id: int | INT | NonNull
+note: str | TEXT | NonNull
+total: decimal.Decimal | DECIMAL(10, 2) | Nullable
+
+SELECT o.total, u.note FROM orders o, users u
+total: decimal.Decimal | DECIMAL(10, 2) | Nullable
+note: str | TEXT | Nullable
+
+SELECT name FROM user_names
+name: str | TEXT | NonNull

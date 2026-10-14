@@ -1,6 +1,6 @@
 //! Why a name, function, type or construct could not be resolved while inferring a query.
 //!
-//! The analyzer records a [`NameDiagnostic`] into a [`Diagnostics`] sink whenever a result
+//! The analyzer records a [`NameDiagnostic`] into a `Diagnostics` sink whenever a result
 //! column ends up untyped, so every untyped column has a reason. The sink is shared by the
 //! analyzers of subqueries and CTEs; a catalog-based schema loader can record into it too.
 
@@ -10,11 +10,17 @@ use std::rc::Rc;
 /// The lint rule a diagnostic belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NameRule {
+    /// A table the schema does not define.
     UnknownTable,
+    /// A column the table does not have.
     UnknownColumn,
+    /// An unqualified column more than one table has.
     AmbiguousColumn,
+    /// A function whose result sqlty cannot type.
     UnknownFunction,
+    /// A cast or column type without a Python type.
     UnknownType,
+    /// A construct that parses but is not typed.
     UnsupportedSyntax,
 }
 
@@ -45,7 +51,9 @@ impl NameRule {
 /// One reason a table, column, function, type or construct is not typed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameDiagnostic {
+    /// The rule the diagnostic belongs to.
     pub rule: NameRule,
+    /// What could not be resolved and why, for the user.
     pub message: String,
 }
 

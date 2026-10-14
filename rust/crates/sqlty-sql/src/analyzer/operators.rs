@@ -279,3 +279,239 @@ pub(super) fn category(typed: &Typed) -> Option<&str> {
         _ => operand_type(typed),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::BinaryOperator;
+
+    use super::super::test_support::reports;
+    use super::*;
+
+    fn sql(ty: &str) -> Typed {
+        Typed::of_sql(ty, SqlDialect::Postgres)
+    }
+
+    fn literal(python: &str) -> Typed {
+        Typed::python_only(python)
+    }
+
+    fn common(left: Typed, right: Typed) -> String {
+        match common_type(left, right, SqlDialect::Postgres) {
+            Some(typed) => format!(
+                "{} | {}",
+                typed.python().unwrap_or("?"),
+                typed.sql().unwrap_or("?")
+            ),
+            None => "conflict".to_string(),
+        }
+    }
+
+    #[test]
+    fn type_base_drops_parameters() {
+        assert_eq!(type_base("DECIMAL(10, 2)"), "DECIMAL");
+        assert_eq!(type_base("ARRAY<INT>"), "ARRAY");
+        assert_eq!(type_base("TEXT"), "TEXT");
+        assert_eq!(type_base(""), "");
+    }
+
+    #[test]
+    fn operand_type_reads_the_sql_type_then_the_literal() {
+        assert_eq!(operand_type(&sql("DECIMAL(10, 2)")), Some("DECIMAL"));
+        assert_eq!(operand_type(&literal("int")), Some("INT"));
+        assert_eq!(operand_type(&literal("float")), Some("DOUBLE"));
+        assert_eq!(operand_type(&literal(DECIMAL)), Some("DECIMAL"));
+        assert_eq!(operand_type(&literal("str")), None);
+        assert_eq!(operand_type(&Typed::UNKNOWN), None);
+    }
+
+    #[test]
+    fn text_is_text_varchar_char_or_a_string_literal() {
+        assert!(is_text(&sql("TEXT")));
+        assert!(is_text(&sql("VARCHAR(20)")));
+        assert!(is_text(&sql("CHAR(2)")));
+        assert!(is_text(&literal("str")));
+        assert!(!is_text(&sql("INT")));
+        assert!(!is_text(&Typed::UNKNOWN));
+    }
+
+    #[test]
+    fn numeric_rank_orders_the_promotion_chain() {
+        let ranks: Vec<_> = ["SMALLINT", "INT", "BIGINT", "DECIMAL", "REAL", "DOUBLE"]
+            .into_iter()
+            .map(|ty| numeric_rank(ty).unwrap())
+            .collect();
+        assert_eq!(ranks, [0, 1, 2, 3, 4, 5]);
+        assert_eq!(numeric_rank("TEXT"), None);
+        assert_eq!(numeric_rank("TINYINT"), numeric_rank("SMALLINT"));
+    }
+
+    #[test]
+    fn arithmetic_promotes_numbers_and_types_date_math() {
+        let operators = [
+            ("+", BinaryOperator::Plus),
+            ("-", BinaryOperator::Minus),
+            ("*", BinaryOperator::Multiply),
+            ("/", BinaryOperator::Divide),
+        ];
+        let types = [
+            "SMALLINT",
+            "INT",
+            "BIGINT",
+            "DECIMAL",
+            "DOUBLE",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "TIMESTAMPTZ",
+            "INTERVAL",
+            "TEXT",
+        ];
+        let mut lines = Vec::new();
+        for (symbol, op) in &operators {
+            for left in types {
+                for right in types {
+                    if let Some(result) = arithmetic(op, &sql(left), &sql(right), false) {
+                        lines.push(format!("{left} {symbol} {right} = {result}"));
+                    }
+                }
+            }
+        }
+        insta::assert_snapshot!(lines.join("\n"));
+    }
+
+    #[test]
+    fn mysql_division_is_at_least_decimal() {
+        let int = sql("INT");
+        assert_eq!(
+            arithmetic(&BinaryOperator::Divide, &int, &int, true).as_deref(),
+            Some("DECIMAL")
+        );
+        assert_eq!(
+            arithmetic(&BinaryOperator::Divide, &int, &int, false).as_deref(),
+            Some("INT")
+        );
+        assert_eq!(
+            arithmetic(&BinaryOperator::Divide, &int, &sql("DOUBLE"), true).as_deref(),
+            Some("DOUBLE")
+        );
+    }
+
+    #[test]
+    fn arithmetic_with_an_unknown_operand_has_no_type() {
+        let int = sql("INT");
+        assert_eq!(
+            arithmetic(&BinaryOperator::Plus, &int, &Typed::UNKNOWN, false),
+            None
+        );
+        assert_eq!(
+            arithmetic(&BinaryOperator::Plus, &int, &literal("str"), false),
+            None
+        );
+    }
+
+    #[test]
+    fn common_type_follows_postgres_union_rules() {
+        let cases = [
+            ("INT", "INT"),
+            ("INT", "BIGINT"),
+            ("SMALLINT", "DECIMAL"),
+            ("BIGINT", "DOUBLE"),
+            ("TEXT", "VARCHAR"),
+            ("VARCHAR", "TEXT"),
+            ("DATE", "TIMESTAMP"),
+            ("TIMESTAMP", "TIMESTAMPTZ"),
+            ("INT", "TEXT"),
+            ("BOOLEAN", "INT"),
+            ("DATE", "TIME"),
+            ("ARRAY<INT>", "ARRAY<BIGINT>"),
+            ("ARRAY<INT>", "ARRAY<TEXT>"),
+            ("ARRAY<INT>", "INT"),
+        ];
+        let mut lines: Vec<String> = cases
+            .iter()
+            .map(|(left, right)| format!("{left} + {right} -> {}", common(sql(left), sql(right))))
+            .collect();
+        lines.push(format!(
+            "unknown + INT -> {}",
+            common(Typed::UNKNOWN, sql("INT"))
+        ));
+        lines.push(format!(
+            "INT + unknown -> {}",
+            common(sql("INT"), Typed::UNKNOWN)
+        ));
+        lines.push(format!(
+            "'str' + TEXT -> {}",
+            common(literal("str"), sql("TEXT"))
+        ));
+        lines.push(format!(
+            "'str' + INT -> {}",
+            common(literal("str"), sql("INT"))
+        ));
+        lines.push(format!(
+            "1 + SMALLINT -> {}",
+            common(literal("int"), sql("SMALLINT"))
+        ));
+        lines.push(format!(
+            "1 + BIGINT -> {}",
+            common(literal("int"), sql("BIGINT"))
+        ));
+        insta::assert_snapshot!(lines.join("\n"));
+    }
+
+    #[test]
+    fn common_of_folds_every_input_and_fails_on_a_conflict() {
+        let ints = [sql("INT"), literal("int"), Typed::UNKNOWN];
+        assert_eq!(
+            common_of(ints, SqlDialect::Postgres).and_then(|typed| typed.sql),
+            Some("INT".into())
+        );
+        let mixed = [sql("INT"), sql("TEXT")];
+        assert_eq!(common_of(mixed, SqlDialect::Postgres), None);
+        assert_eq!(
+            common_of([], SqlDialect::Postgres),
+            Some(Typed::UNKNOWN),
+            "no inputs give an unknown type"
+        );
+    }
+
+    #[test]
+    fn category_treats_string_literals_as_text() {
+        assert_eq!(category(&literal("str")), Some("TEXT"));
+        assert_eq!(category(&sql("BIGINT")), Some("BIGINT"));
+        assert_eq!(category(&Typed::UNKNOWN), None);
+    }
+
+    #[test]
+    fn unknown_literals_are_untyped_strings() {
+        assert!(is_unknown_literal(&literal("str")));
+        assert!(!is_unknown_literal(&sql("TEXT")));
+        assert!(!is_unknown_literal(&literal("int")));
+    }
+
+    #[test]
+    fn binary_operators_in_queries() {
+        let ddl = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT, n NUMERIC(8, 2), \
+                   d DATE, ts TIMESTAMP, tz TIMESTAMPTZ, iv INTERVAL, txt TEXT, flag BOOLEAN)";
+        let queries = [
+            "SELECT i + s AS a, i * b AS b, s - n AS c, i / i AS d, i % s AS e FROM t",
+            "SELECT i + 1.5 AS a, i + 1 AS b, n * 2 AS c FROM t",
+            "SELECT d + 1 AS a, d - d AS b, d + iv AS c, ts - ts AS d, tz - iv AS e, iv * 2 AS f FROM t",
+            "SELECT txt || 'x' AS a, txt || i AS b, 'a' || 'b' AS c FROM t",
+            "SELECT i = 1 AS a, txt LIKE 'a%' AS b, i IS NULL AS c, NOT flag AS d, i BETWEEN 1 AND 2 AS e FROM t",
+            "SELECT i IN (1, 2) AS a, i = ANY(ARRAY[1, 2]) AS b, flag AND true AS c, flag OR NULL AS d FROM t",
+            "SELECT NULL + 1 AS a, 1 + NULL AS b, NULL AS c FROM t",
+            "SELECT i + txt AS a FROM t",
+            "SELECT 2 ^ 3 AS a, 7 & 3 AS b, 1 << 2 AS c, -i AS d, +n AS e, ~i AS f FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(ddl)));
+    }
+
+    #[test]
+    fn division_differs_between_postgres_and_mysql() {
+        let ddl = "CREATE TABLE t (a INT NOT NULL, b INT NOT NULL)";
+        let query = ["SELECT a / b AS q, a DIV b AS d, a % b AS m FROM t"];
+        let postgres = reports(&query, "postgres", Some(ddl));
+        let mysql = reports(&query, "mysql", Some(ddl));
+        insta::assert_snapshot!(format!("postgres:\n{postgres}\nmysql:\n{mysql}"));
+    }
+}

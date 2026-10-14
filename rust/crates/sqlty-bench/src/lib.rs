@@ -1,4 +1,19 @@
 //! Synthetic inputs shared by the benches; deterministic, no randomness.
+//!
+//! The Criterion benchmarks live in `benches/engine.rs` (run them with `make bench-rust`).
+//! They feed the engine generated input of a chosen size:
+//!
+//! - [`schema_sql`]: a PostgreSQL schema of N tables with views, functions, an enum and a
+//!   domain, to time schema loading.
+//! - [`python_source`]: Python source with N `--sql` queries, to time rewriting and checking.
+//!
+//! ```
+//! let schema = sqlty_bench::schema_sql(2);
+//! assert!(schema.contains("CREATE TABLE app.t0001"));
+//!
+//! let source = sqlty_bench::python_source(3);
+//! assert_eq!(source.matches("--sql").count(), 3);
+//! ```
 
 use std::fmt::Write;
 

@@ -1,0 +1,14 @@
+---
+source: crates/sqlty-sql/src/analyzer/operators.rs
+expression: "format!(\"postgres:\\n{postgres}\\nmysql:\\n{mysql}\")"
+---
+postgres:
+SELECT a / b AS q, a DIV b AS d, a % b AS m FROM t
+no rows
+
+mysql:
+SELECT a / b AS q, a DIV b AS d, a % b AS m FROM t
+q: decimal.Decimal | DECIMAL | Nullable
+d: ? | ? | Nullable
+m: int | INT | Nullable
+[unsupported-syntax] expression `a DIV b` is not typed

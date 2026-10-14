@@ -1,0 +1,28 @@
+---
+source: crates/sqlty-sql/src/analyzer/expr.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT CASE WHEN i > 1 THEN 1 ELSE 2 END AS a FROM t
+a: typing.Literal[1, 2] | ? | NonNull
+
+SELECT CASE WHEN i > 1 THEN 1 END AS a FROM t
+a: typing.Literal[1] | ? | Nullable
+
+SELECT CASE WHEN i > 1 THEN i ELSE n END AS a FROM t
+a: int | INT | Nullable
+
+SELECT CASE WHEN i > 1 THEN i ELSE 2.5 END AS a FROM t
+a: decimal.Decimal | DECIMAL | NonNull
+
+SELECT CASE WHEN i > 1 THEN i ELSE txt END AS a FROM t
+a: int | INT | Nullable
+
+SELECT CASE i WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END AS a FROM t
+a: typing.Literal['one', 'two', 'many'] | ? | NonNull
+
+SELECT CASE WHEN i > 1 THEN NULL ELSE NULL END AS a FROM t
+a: ? | ? | Nullable
+[unsupported-syntax] expression `CASE WHEN i > 1 THEN NULL ELSE NULL END` is not typed
+
+SELECT CASE WHEN i > 1 THEN m ELSE 'sad' END AS a FROM t
+a: typing.Literal['sad', 'ok', 'happy'] | MOOD | NonNull

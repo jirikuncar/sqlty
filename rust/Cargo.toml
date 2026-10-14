@@ -17,6 +17,7 @@ sqlparser = { version = "0.63", features = ["visitor"] }
 regex = "1"
 rustc-hash = "2"
 thiserror = "2"
+insta = "1.49"
 sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 
@@ -43,6 +44,7 @@ uninlined_format_args = "warn"
 unnested_or_patterns = "warn"
 
 [workspace.lints.rust]
+missing_docs = "warn"
 unused_lifetimes = "warn"
 unused_qualifications = "warn"
 

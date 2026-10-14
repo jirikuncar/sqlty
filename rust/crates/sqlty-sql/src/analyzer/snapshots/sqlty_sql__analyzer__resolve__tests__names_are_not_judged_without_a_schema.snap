@@ -1,0 +1,15 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "reports(&queries, \"postgres\", None)"
+---
+SELECT name FROM users
+name: ? | ? | Unknown
+
+SELECT id FROM users, orders
+id: ? | ? | Unknown
+
+SELECT users.* FROM users
+*: ? | ? | Unknown
+
+SELECT name::TEXT FROM users
+name: str | TEXT | Unknown

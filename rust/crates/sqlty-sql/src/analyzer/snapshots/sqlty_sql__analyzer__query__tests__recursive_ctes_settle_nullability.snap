@@ -1,0 +1,17 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5) SELECT i FROM n
+i: int | INT | NonNull
+
+WITH RECURSIVE t(id, parent) AS (SELECT id, NULL::INT FROM a UNION ALL SELECT a.id, t.id FROM a JOIN t ON true) SELECT id, parent FROM t
+id: int | INT | NonNull
+parent: int | INT | Nullable
+
+WITH RECURSIVE t(x, y) AS (SELECT 1, 2 UNION ALL SELECT y, NULL FROM t) SELECT x, y FROM t
+x: int | ? | Nullable
+y: int | ? | Nullable
+
+WITH RECURSIVE t AS (SELECT id FROM a UNION ALL SELECT id FROM t) SELECT * FROM t
+id: int | INT | NonNull

@@ -38,7 +38,9 @@ static CODING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#.*?coding[:=]")
 /// `from sqlty import SQL` -> `SQL`, `from sqlty import SQL as Q` -> `Q`,
 /// `import sqlty` -> `sqlty.SQL`, `import sqlty as sy` -> `sy.SQL`.
 pub struct ImportStyle {
+    /// The import statement `rewrite` adds (and `strip` removes).
     pub import_line: String,
+    /// The name the wrapper is called by in the source, such as `SQL` or `sqlty.SQL`.
     pub wrapper_name: String,
 }
 
@@ -52,6 +54,7 @@ impl Default for ImportStyle {
 }
 
 impl ImportStyle {
+    /// Read the `import-style` setting; `None` or empty is `from sqlty import SQL`.
     pub fn parse(style: Option<&str>) -> Result<Self, ConfigError> {
         let Some(style) = style.map(str::trim).filter(|style| !style.is_empty()) else {
             return Ok(Self::default());
@@ -99,11 +102,11 @@ impl ImportStyle {
 
 /// Rewrite Python source: `"--sql\n..."` → `SQL[T]("--sql\n...")`.
 ///
-/// Adds necessary imports (SQL and the [`TYPE_MODULES`] row types use) at the top.
+/// Adds necessary imports (SQL and the `TYPE_MODULES` row types use) at the top.
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
 /// With `options.untyped`, row-returning queries of unknown row type become
 /// `SQL[UNTYPED](...)`. With `keep_lines`, imports go on existing lines (see
-/// [`insert_inline`]).
+/// `insert_inline`).
 pub fn rewrite_source_with(source: &str, options: &Options, keep_lines: bool) -> String {
     let scan = Scan::new(source, &options.style.wrapper_name);
     rewrite_scan(&scan, options, keep_lines, &|_| false).unwrap_or_else(|| source.to_string())
@@ -421,7 +424,7 @@ pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
     )
 }
 
-/// Remove sqlty and [`TYPE_MODULES`] imports that are no longer referenced.
+/// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
     let untyped_import = istyle.untyped_import();
