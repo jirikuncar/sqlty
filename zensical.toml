@@ -20,6 +20,7 @@ nav = [
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },
     { "Schema inference" = "guide/schema-inference.md" },
+    { "Name diagnostics" = "guide/name-diagnostics.md" },
     { "Untyped queries" = "guide/untyped.md" },
     { "Row types" = "guide/row-types.md" },
     { "Query helpers" = "guide/helpers.md" },

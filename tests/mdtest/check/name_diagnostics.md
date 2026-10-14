@@ -1,0 +1,372 @@
+# Lint: name diagnostics
+
+The rules `unknown-table`, `unknown-column`, `ambiguous-column`,
+`unknown-function`, `unknown-type` and `unsupported-syntax` explain why a
+result column is untyped. They are off by default (see the user guide in
+`docs/guide/name-diagnostics.md`).
+
+## With a schema
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, team_id INTEGER, "Mixed" TEXT, shape GEOMETRY);
+CREATE TABLE teams (id INTEGER PRIMARY KEY, title TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
+```
+
+### Off by default
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")
+```
+
+### Enabled rules
+
+```toml
+[tool.sqlty.rules]
+unknown-table = "error"
+unknown-column = "error"
+ambiguous-column = "error"
+unknown-function = "error"
+unknown-type = "error"
+unsupported-syntax = "error"
+select-star = "ignore"
+```
+
+#### Unknown names
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `nope` does not exist in `users`"
+a = SQL[tuple[int]]("--sql\nSELECT nope FROM users")
+# error: [unknown-column] "column `nope` does not exist in `u`"
+b = SQL[tuple[int]]("--sql\nSELECT u.nope FROM users u")
+# error: [unknown-table] "`x` is not a table or alias in the FROM clause"
+c = SQL[tuple[int]]("--sql\nSELECT x.id FROM users u")
+# error: [unknown-table] "table `missing` is not defined in the schema"
+d = SQL[tuple[int]]("--sql\nSELECT id FROM missing")
+# error: [unknown-table] "table `missing` is not defined in the schema"
+e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
+# error: [unknown-table] "table `missing` is not defined in the schema"
+f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
+```
+
+#### Ambiguous columns
+
+```python
+from sqlty import SQL
+
+# error: [ambiguous-column] "column reference `id` is ambiguous: `u`, `t` all have it"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM users u JOIN teams t ON t.id = u.team_id")
+# error: [ambiguous-column] "column reference `id` is ambiguous: `u1`, `u2` all have it"
+b = SQL[tuple[int]]("--sql\nSELECT id FROM users u1 JOIN users u2 ON u1.id = u2.id")
+```
+
+#### Functions, types and syntax
+
+```python
+from sqlty import SQL
+
+# error: [unknown-function] "function `frobnicate` is not known to sqlty"
+a = SQL[tuple[int]]("--sql\nSELECT frobnicate(id) FROM users")
+# error: [unknown-type] "type `mood` has no Python type"
+b = SQL[tuple[str]]("--sql\nSELECT name::mood FROM users")
+# error: [unknown-type] "column `users.shape` has type `GEOMETRY`"
+c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
+# error: [unsupported-syntax] "a VALUES list is not typed"
+d = SQL[tuple[int]]("--sql\nSELECT 1 UNION VALUES (2)")
+# error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
+e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
+# error: [unsupported-syntax] "expression `DATE '2020-01-01'` is not typed"
+f = SQL[tuple[object]]("--sql\nSELECT DATE '2020-01-01'")
+```
+
+#### Annotated helpers
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_value[T](query: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+
+# error: [unknown-column] "column `nope` does not exist in `users`"
+a = fetch_value("SELECT nope FROM users", int)
+# error:
+b = fetch_value("SELECT id FROM users", int)
+```
+
+#### Suppressed inline
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]]("--sql\nSELECT nope FROM users")  # sqlty: ignore[unknown-column]
+b = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")  # sqlty: ignore
+```
+
+### Only one rule enabled
+
+```toml
+[tool.sqlty.rules]
+unknown-column = "warn"
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `nope` does not exist in `users`"
+a = SQL[tuple[int]]("--sql\nSELECT nope FROM users")
+b = SQL[tuple[int]]("--sql\nSELECT id FROM missing")
+```
+
+### Names that resolve are not reported
+
+```toml
+[tool.sqlty.rules]
+unknown-table = "error"
+unknown-column = "error"
+ambiguous-column = "error"
+unknown-function = "error"
+unknown-type = "error"
+unsupported-syntax = "error"
+```
+
+#### CTEs
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, str]]("--sql\nWITH c AS (SELECT id, name FROM users) SELECT id, name FROM c")
+# error:
+b = SQL[tuple[int, str]]("--sql\nWITH c(a, b) AS (SELECT id, name FROM users) SELECT a, b FROM c")
+# error:
+c = SQL[tuple[int]]("--sql\nWITH RECURSIVE r(n) AS (SELECT 1::INTEGER UNION ALL SELECT n + 1 FROM r) SELECT n FROM r")
+# error:
+d = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT c.id FROM c")
+```
+
+#### Aliases
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, str]]("--sql\nSELECT u.id, t.title FROM users u JOIN teams t ON t.id = u.team_id")
+# error:
+b = SQL[tuple[int]]("--sql\nSELECT users.id FROM users, orders")
+# error:
+c = SQL[tuple[int]]("--sql\nSELECT o.id FROM users u JOIN orders o ON o.user_id = u.id")
+```
+
+#### Subquery and derived columns
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT d.x FROM (SELECT id AS x FROM users) d")
+# error:
+b = SQL[tuple[int]]("--sql\nSELECT x FROM (SELECT id AS x FROM users) d")
+# error:
+c = SQL[tuple[int]]("--sql\nSELECT x FROM (SELECT id FROM users) AS d(x)")
+# error:
+d = SQL[tuple[int]]("--sql\nSELECT id FROM (SELECT 1::INTEGER AS id) AS s")
+```
+
+#### Table functions
+
+A table function's columns are not read, so a column taken from one is
+reported as unsupported, never as an unknown column or table.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT g FROM generate_series(1, 3) AS g")
+# error: [unsupported-syntax] "column `n` may come from table function generate_series"
+b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
+# error:
+c = SQL[tuple[int]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
+# error: [unsupported-syntax] "column `relname` may come from system catalog pg_class"
+d = SQL[tuple[str]]("--sql\nSELECT relname FROM pg_class")
+# error: [unsupported-syntax] "column `table_name` may come from system catalog tables"
+e = SQL[tuple[str]]("--sql\nSELECT table_name FROM information_schema.tables")
+```
+
+#### LATERAL
+
+```python
+import decimal
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, int]]("--sql\nSELECT u.id, l.n FROM users u, LATERAL (SELECT count(*) AS n FROM orders o WHERE o.user_id = u.id) l")
+# error:
+b = SQL[tuple[decimal.Decimal]]("--sql\nSELECT l.total FROM users u CROSS JOIN LATERAL (SELECT o.total FROM orders o WHERE o.user_id = u.id) l")
+```
+
+#### USING and NATURAL joins
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT id FROM users JOIN teams USING (id)")
+# error:
+b = SQL[tuple[int]]("--sql\nSELECT id FROM users NATURAL JOIN teams")
+# error:
+c = SQL[tuple[int, str, str]]("--sql\nSELECT u.id, u.name, t.title FROM users u JOIN teams t USING (id)")
+```
+
+#### Correlated subqueries
+
+```python
+import decimal
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[decimal.Decimal]]("--sql\nSELECT (SELECT max(o.total) FROM orders o WHERE o.user_id = u.id) FROM users u")
+# error:
+b = SQL[tuple[str]]("--sql\nSELECT (SELECT u.name) FROM users u")
+```
+
+#### Quoted identifiers and case folding
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]('--sql\nSELECT "Mixed" FROM users')
+# error:
+b = SQL[tuple[int, str]]("--sql\nSELECT U.ID, NAME FROM Users U")
+# error:
+c = SQL[tuple[int]]('--sql\nSELECT "id" FROM "users"')
+# error:
+d = SQL[tuple[int]]("--sql\nSELECT Users.Id FROM USERS")
+```
+
+#### Whole-row references, NULL and placeholders
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[object]]("--sql\nSELECT u FROM users u")
+# error:
+b = SQL[tuple[int, int]]("--sql\nSELECT NULL, 1::INTEGER")
+# error:
+c = SQL[tuple[int]]("--sql\nSELECT id FROM users WHERE id = $1")
+```
+
+#### DML with RETURNING
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, str]]("--sql\nINSERT INTO users (id, name) VALUES (1, 'a') RETURNING id, name")
+# error:
+b = SQL[tuple[int]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING u.id")
+# error: [unsupported-syntax] "column `title` may come from tables joined to the target"
+c = SQL[tuple[str]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
+```
+
+#### Known functions and types
+
+```python
+import datetime
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users")
+```
+
+## Without a schema nothing is guessed
+
+```toml
+[tool.sqlty.rules]
+unknown-table = "error"
+unknown-column = "error"
+ambiguous-column = "error"
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")
+# error:
+b = SQL[tuple[int]]("--sql\nSELECT id FROM a JOIN b ON a.x = b.x")
+```
+
+## Other dialects
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-column = "error"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+```
+
+A double-quoted name that is not a column is a string literal in SQLite.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]('--sql\nSELECT "nope" FROM users')
+# error: [unknown-column] "column `nope` does not exist in `users`"
+b = SQL[tuple[str]]("--sql\nSELECT nope FROM users")
+```
+
+## Views
+
+A view column the view's own query leaves untyped is explained where it is read.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-table = "error"
+unknown-column = "error"
+unsupported-syntax = "error"
+select-star = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT);
+CREATE VIEW typed AS SELECT id, name FROM users;
+CREATE VIEW opaque AS SELECT id, DATE '2020-01-01' AS day FROM users;
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM typed")
+# error: [unsupported-syntax] "view column `opaque.day` is not typed"
+b = SQL[tuple[object]]("--sql\nSELECT day FROM opaque")
+# error: [unknown-column] "column `nope` does not exist in `typed`"
+c = SQL[tuple[int]]("--sql\nSELECT nope FROM typed")
+```
