@@ -1730,49 +1730,8 @@ fn read_alter_or_drop(stmt: &ddl::Statement, dialect: SqlDialect, push: &mut imp
     }
 }
 
-/// Relations PostgreSQL provides, the common columns of each.
-const BUILTIN_SQL: &str = "
-CREATE TABLE pg_catalog.pg_namespace (
-    oid INTEGER NOT NULL, nspname TEXT NOT NULL, nspowner INTEGER NOT NULL, nspacl TEXT[]);
-CREATE TABLE pg_catalog.pg_class (
-    oid INTEGER NOT NULL, relname TEXT NOT NULL, relnamespace INTEGER NOT NULL,
-    reltype INTEGER NOT NULL, reloftype INTEGER NOT NULL, relowner INTEGER NOT NULL,
-    relam INTEGER NOT NULL, relfilenode INTEGER NOT NULL, reltablespace INTEGER NOT NULL,
-    relpages INTEGER NOT NULL, reltuples REAL NOT NULL, relallvisible INTEGER NOT NULL,
-    reltoastrelid INTEGER NOT NULL, relhasindex BOOLEAN NOT NULL, relisshared BOOLEAN NOT NULL,
-    relpersistence TEXT NOT NULL, relkind TEXT NOT NULL, relnatts SMALLINT NOT NULL,
-    relchecks SMALLINT NOT NULL, relhasrules BOOLEAN NOT NULL, relhastriggers BOOLEAN NOT NULL,
-    relhassubclass BOOLEAN NOT NULL, relrowsecurity BOOLEAN NOT NULL,
-    relispopulated BOOLEAN NOT NULL, relispartition BOOLEAN NOT NULL,
-    relrewrite INTEGER NOT NULL, relacl TEXT[], reloptions TEXT[]);
-CREATE TABLE pg_catalog.pg_attribute (
-    attrelid INTEGER NOT NULL, attname TEXT NOT NULL, atttypid INTEGER NOT NULL,
-    attlen SMALLINT NOT NULL, attnum SMALLINT NOT NULL, atttypmod INTEGER NOT NULL,
-    attndims SMALLINT NOT NULL, attnotnull BOOLEAN NOT NULL, atthasdef BOOLEAN NOT NULL,
-    attidentity TEXT NOT NULL, attgenerated TEXT NOT NULL, attisdropped BOOLEAN NOT NULL,
-    attislocal BOOLEAN NOT NULL, attinhcount SMALLINT NOT NULL, attcollation INTEGER NOT NULL);
-CREATE TABLE pg_catalog.pg_type (
-    oid INTEGER NOT NULL, typname TEXT NOT NULL, typnamespace INTEGER NOT NULL,
-    typowner INTEGER NOT NULL, typlen SMALLINT NOT NULL, typbyval BOOLEAN NOT NULL,
-    typtype TEXT NOT NULL, typcategory TEXT NOT NULL, typispreferred BOOLEAN NOT NULL,
-    typisdefined BOOLEAN NOT NULL, typdelim TEXT NOT NULL, typrelid INTEGER NOT NULL,
-    typelem INTEGER NOT NULL, typarray INTEGER NOT NULL, typnotnull BOOLEAN NOT NULL,
-    typbasetype INTEGER NOT NULL, typtypmod INTEGER NOT NULL, typndims INTEGER NOT NULL,
-    typcollation INTEGER NOT NULL, typdefault TEXT);
-CREATE TABLE information_schema.tables (
-    table_catalog TEXT, table_schema TEXT, table_name TEXT, table_type TEXT,
-    self_referencing_column_name TEXT, reference_generation TEXT,
-    user_defined_type_catalog TEXT, user_defined_type_schema TEXT, user_defined_type_name TEXT,
-    is_insertable_into TEXT, is_typed TEXT, commit_action TEXT);
-CREATE TABLE information_schema.columns (
-    table_catalog TEXT, table_schema TEXT, table_name TEXT, column_name TEXT,
-    ordinal_position INTEGER, column_default TEXT, is_nullable TEXT, data_type TEXT,
-    character_maximum_length INTEGER, character_octet_length INTEGER,
-    numeric_precision INTEGER, numeric_precision_radix INTEGER, numeric_scale INTEGER,
-    datetime_precision INTEGER, interval_type TEXT, udt_catalog TEXT, udt_schema TEXT,
-    udt_name TEXT, is_identity TEXT, identity_generation TEXT, is_generated TEXT,
-    generation_expression TEXT, is_updatable TEXT);
-";
+/// Relations PostgreSQL provides, with their PostgreSQL column types.
+const BUILTIN_SQL: &str = include_str!("builtin_catalog.sql");
 
 /// Read schema DDL into a [`Catalog`], and the `(kind, name)` of the tables and views
 /// that could not be parsed. In PostgreSQL the catalog also holds the built-in
@@ -1969,8 +1928,8 @@ mod tests {
         assert!(!c.defines_function("h"));
         assert!(c.defines("pg_orders") && !c.is_unmodelled_system_relation("pg_orders"));
         assert!(!c.is_unmodelled_system_relation("pg_class"));
-        assert!(c.is_unmodelled_system_relation("pg_index"));
-        assert!(c.is_unmodelled_system_relation("information_schema.views"));
+        assert!(c.is_unmodelled_system_relation("pg_trigger"));
+        assert!(c.is_unmodelled_system_relation("information_schema.sequences"));
         assert!(!c.is_unmodelled_system_relation("users"));
     }
 
