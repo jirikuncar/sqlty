@@ -4,8 +4,8 @@ Type-safe raw SQL for Python. sqlty infers the row type of each query from
 its SQL, writes it into your source as `SQL[T]`, and checks that it stays
 correct.
 
-!!! warning "Experimental"
-    sqlty is experimental. APIs and configuration may change.
+!!! warning "Beta"
+    sqlty is in beta. APIs and configuration may change before 1.0.
 
 ## From a raw query to a typed one
 
