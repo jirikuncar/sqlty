@@ -79,8 +79,10 @@ The rules resolve the names a query defines, so these are not false positives:
   `CREATE DOMAIN`).
 - `LATERAL` subqueries and correlated subqueries, which read the outer query.
 - Columns merged by `USING` or `NATURAL` joins.
-- Case: `Users.ID` is `users.id`, as in the database. Quoted names are matched
-  the same way.
+- Case: in PostgreSQL an unquoted name folds to lower case and a quoted name keeps
+  its case, so `Users.ID` is `users.id` but `"ID"` is not `id`. A bare table name
+  resolves through the `search_path` only. MySQL and SQLite match names without
+  case.
 
 The rules read the select list of the query, so a column named only in
 `WHERE`, `ON`, `GROUP BY` or `ORDER BY` is not checked.

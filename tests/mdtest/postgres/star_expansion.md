@@ -280,7 +280,7 @@ schema = "schema.sql"
 SELECT * FROM t
 -- expanded: SELECT id::INT, "My Col"::TEXT FROM t
 -- columns: id: int | None (INT)
--- columns: my col: str | None (TEXT)
+-- columns: My Col: str | None (TEXT)
 ```
 
 ```python

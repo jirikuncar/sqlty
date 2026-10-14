@@ -33,6 +33,16 @@ impl<'a> Analyzer<'a> {
             )
     }
 
+    /// Whether a CTE, view or subquery column called `name` is the one `column` (folded)
+    /// names: PostgreSQL compares exactly, the other dialects ignore case.
+    fn same_column(&self, name: &str, column: &str) -> bool {
+        if self.dialect == SqlDialect::Postgres {
+            name == column
+        } else {
+            name.to_lowercase() == column
+        }
+    }
+
     /// Whether `table` is a schema table of known columns, a view, CTE or derived table.
     fn knows_table(&self, table: &str) -> bool {
         self.virtual_columns(table).is_some() || self.schema.table(table).is_some()
@@ -76,7 +86,7 @@ impl<'a> Analyzer<'a> {
             };
             return columns
                 .iter()
-                .find(|col| col.name.to_lowercase() == column)
+                .find(|col| self.same_column(&col.name, column))
                 .map(|col| ((col.python_type.clone(), col.sql_type.clone()), origin));
         }
         let columns = self.schema.table(table)?;
@@ -92,15 +102,16 @@ impl<'a> Analyzer<'a> {
     }
 
     /// A column every table has without declaring it: SQLite's `rowid`, PostgreSQL's
-    /// `oid`, `ctid`, `xmin`... Typed where obvious, else known but untyped.
+    /// `ctid`, `xmin`, `xmax`, `cmin`, `cmax` and `tableoid`. PostgreSQL 12 dropped `oid`.
+    /// PostgreSQL drivers load `tid`, `xid` and `cid` as text.
     fn system_column(&self, column: &str) -> Option<Typed> {
-        let int = || (Some("int".to_string()), Some("INT".to_string()));
+        let typed = |python: &str, sql: &str| (Some(python.to_string()), Some(sql.to_string()));
         match (self.dialect, column) {
-            (SqlDialect::Sqlite, "rowid" | "oid" | "_rowid_") => Some(int()),
-            (SqlDialect::Postgres, "oid" | "tableoid") => Some(int()),
-            (SqlDialect::Postgres, "ctid" | "xmin" | "xmax" | "cmin" | "cmax") => {
-                Some((None, None))
-            }
+            (SqlDialect::Sqlite, "rowid" | "oid" | "_rowid_") => Some(typed("int", "INT")),
+            (SqlDialect::Postgres, "tableoid") => Some(typed("int", "OID")),
+            (SqlDialect::Postgres, "ctid") => Some(typed("str", "TID")),
+            (SqlDialect::Postgres, "xmin" | "xmax") => Some(typed("str", "XID")),
+            (SqlDialect::Postgres, "cmin" | "cmax") => Some(typed("str", "CID")),
             _ => None,
         }
     }
@@ -114,7 +125,7 @@ impl<'a> Analyzer<'a> {
     ) -> Option<(String, String, String)> {
         match expr {
             Expr::Identifier(ident) => {
-                let column = ident.value.to_lowercase();
+                let column = fold(ident, self.dialect);
                 sources(scope, &self.outer).find_map(|(reference, table)| {
                     self.lookup_column(table, &column)?;
                     Some((reference.clone(), table.clone(), column.clone()))
@@ -122,7 +133,7 @@ impl<'a> Analyzer<'a> {
             }
             Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
                 let qualifier = parts[parts.len() - 2].value.to_lowercase();
-                let column = parts[parts.len() - 1].value.to_lowercase();
+                let column = fold(&parts[parts.len() - 1], self.dialect);
                 for sources in [scope, &self.outer] {
                     if sources.iter().any(|(reference, _)| *reference == qualifier) {
                         let table = resolve(&qualifier, sources);
@@ -143,15 +154,17 @@ impl<'a> Analyzer<'a> {
         if let Some(columns) = self.virtual_columns(table) {
             return columns
                 .iter()
-                .find(|col| col.name.to_lowercase() == column)
+                .find(|col| self.same_column(&col.name, column))
                 .map_or(Nullability::Unknown, |col| col.nullability);
         }
-        self.schema
-            .table(table)
-            .and_then(|columns| columns.iter().find(|col| col.name == column))
-            .map_or(Nullability::Unknown, |col| {
-                Nullability::declared(col.not_null)
-            })
+        let Some(columns) = self.schema.table(table) else {
+            return Nullability::Unknown;
+        };
+        match columns.iter().find(|col| col.name == column) {
+            Some(col) => Nullability::declared(col.not_null),
+            None if self.system_column(column).is_some() => Nullability::NonNull,
+            None => Nullability::Unknown,
+        }
     }
 
     /// Type of a column: its qualifier's source, else the first source having it, the
@@ -159,13 +172,13 @@ impl<'a> Analyzer<'a> {
     pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<(Typed, Origin)> {
         match expr {
             Expr::Identifier(ident) => {
-                let column = ident.value.to_lowercase();
+                let column = fold(ident, self.dialect);
                 sources(scope, &self.outer)
                     .find_map(|(_, table)| self.lookup_column(table, &column))
             }
             Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
                 let qualifier = parts[parts.len() - 2].value.to_lowercase();
-                let column = parts[parts.len() - 1].value.to_lowercase();
+                let column = fold(&parts[parts.len() - 1], self.dialect);
                 for sources in [scope, &self.outer] {
                     if sources.iter().any(|(reference, _)| *reference == qualifier) {
                         return self.lookup_column(&resolve(&qualifier, sources), &column);
@@ -218,7 +231,7 @@ impl<'a> Analyzer<'a> {
         if !self.diag.enabled() || !self.judges_names() {
             return;
         }
-        let column = ident.value.to_lowercase();
+        let column = fold(ident, self.dialect);
         if self
             .merged
             .iter()
@@ -257,7 +270,7 @@ impl<'a> Analyzer<'a> {
             ),
             _ => return self.diag.explain_silently(),
         };
-        let name = column.value.to_lowercase();
+        let name = fold(column, self.dialect);
         let unqualified = qualifier.is_none();
         let all: Vec<&(String, String)> = sources(scope, &self.outer).collect();
         // SQLite and MySQL read an unresolved "double-quoted" name as a string literal.

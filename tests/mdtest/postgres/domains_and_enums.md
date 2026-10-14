@@ -33,6 +33,7 @@ name matches the unqualified one and the other way round.
 `schema.sql`:
 
 ```sql
+SET search_path TO app, public;
 CREATE DOMAIN app.small_percent AS percent NOT NULL DEFAULT 0;
 CREATE DOMAIN app.percent AS numeric(5, 2);
 CREATE DOMAIN label AS varchar(20);
@@ -40,7 +41,7 @@ CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
     discount small_percent,
     rate app.percent,
-    note public.label
+    note app.label
 );
 ```
 
@@ -71,6 +72,7 @@ SELECT status FROM orders
 `schema.sql`:
 
 ```sql
+SET search_path TO app, public;
 CREATE TYPE app.mood AS ENUM ('it''s fine', 'bad');
 CREATE DOMAIN current_mood AS mood;
 CREATE TABLE people (id INTEGER PRIMARY KEY, mood current_mood, name TEXT);

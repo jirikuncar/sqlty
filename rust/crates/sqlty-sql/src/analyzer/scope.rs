@@ -5,7 +5,7 @@ use super::*;
 /// `(reference, table)` pairs for the tables a statement reads, in query order.
 pub(super) type Scope = Vec<(String, String)>;
 
-pub(super) fn table_scope(factor: &TableFactor) -> Scope {
+pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
     match factor {
         TableFactor::Table {
             name,
@@ -17,7 +17,7 @@ pub(super) fn table_scope(factor: &TableFactor) -> Scope {
                 .as_ref()
                 .map(|alias| alias.name.value.to_lowercase())
                 .unwrap_or_else(|| object_name(name));
-            vec![(reference, table_key(name))]
+            vec![(reference, table_key(name, dialect))]
         }
         other => vec![opaque_source(other)],
     }
@@ -145,7 +145,7 @@ pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
 
 /// Lowercased names of the columns joins merge, nested joins included; `*` for `NATURAL`.
 /// A merged column is not ambiguous, whichever side it is read from.
-pub(super) fn merged_columns(from: &[TableWithJoins]) -> Vec<String> {
+pub(super) fn merged_columns(from: &[TableWithJoins], dialect: SqlDialect) -> Vec<String> {
     let mut merged = Vec::new();
     for table in from {
         for join in &table.joins {
@@ -155,7 +155,7 @@ pub(super) fn merged_columns(from: &[TableWithJoins]) -> Vec<String> {
                     names
                         .iter()
                         .filter_map(|name| name.0.last()?.as_ident())
-                        .map(|ident| ident.value.to_lowercase()),
+                        .map(|ident| fold(ident, dialect)),
                 ),
                 _ => {}
             }
@@ -165,7 +165,10 @@ pub(super) fn merged_columns(from: &[TableWithJoins]) -> Vec<String> {
             alias: None,
         } = &table.relation
         {
-            merged.extend(merged_columns(std::slice::from_ref(table_with_joins)));
+            merged.extend(merged_columns(
+                std::slice::from_ref(table_with_joins),
+                dialect,
+            ));
         }
     }
     merged
@@ -233,24 +236,26 @@ impl<'a> Analyzer<'a> {
             sql_type,
             nullability: Nullability::Unknown,
         };
-        Some(match self.schema.function(&table_key(name), args)? {
-            FunctionReturn::Rows(columns) => columns
-                .iter()
-                .map(|col| Column {
-                    nullability: Nullability::declared(col.not_null),
-                    ..column(col.name.clone(), col.typed(self.dialect))
-                })
-                .collect(),
-            FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed) => {
-                vec![column(object_name(name), typed.clone())]
-            }
-        })
+        Some(
+            match self.schema.function(&table_key(name, self.dialect), args)? {
+                FunctionReturn::Rows(columns) => columns
+                    .iter()
+                    .map(|col| Column {
+                        nullability: Nullability::declared(col.not_null),
+                        ..column(col.name.clone(), col.typed(self.dialect))
+                    })
+                    .collect(),
+                FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed) => {
+                    vec![column(object_name(name), typed.clone())]
+                }
+            },
+        )
     }
 
     /// Whether a table reference reads a virtual source: a CTE or view by its bare
     /// name, or a view by its schema-qualified name.
     pub(super) fn is_virtual(&self, name: &ObjectName) -> bool {
-        let table = table_key(name);
+        let table = table_key(name, self.dialect);
         if name.0.len() == 1 {
             self.virtual_columns(&table).is_some()
         } else {
@@ -261,7 +266,8 @@ impl<'a> Analyzer<'a> {
     /// Whether `name` is a PostgreSQL system relation the catalog does not model: the
     /// modelled ones (`pg_class`, `information_schema.columns`, ...) are tables with columns.
     pub(super) fn is_system_catalog(&self, name: &ObjectName) -> bool {
-        self.schema.is_unmodelled_system_relation(&table_key(name))
+        self.schema
+            .is_unmodelled_system_relation(&table_key(name, self.dialect))
     }
 
     /// An analyzer for a subquery of an expression: its names may refer to `scope`.
@@ -275,7 +281,7 @@ impl<'a> Analyzer<'a> {
     /// `LATERAL` subquery is analyzed with the relations before it.
     pub(super) fn scope_of(&self, from: &[TableWithJoins]) -> Inferred<(Analyzer<'a>, Scope)> {
         let mut analyzer = self.clone();
-        analyzer.merged = merged_columns(from);
+        analyzer.merged = merged_columns(from, analyzer.dialect);
         let mut scope = Scope::new();
         for factor in relations(from) {
             let only = only_table(factor);
@@ -291,7 +297,7 @@ impl<'a> Analyzer<'a> {
                         .function_rows(name, args.args.len())
                         .unwrap_or_default();
                     if let Some(alias) = alias {
-                        rename_columns(&mut columns, alias);
+                        rename_columns(&mut columns, alias, analyzer.dialect);
                     }
                     let reference = alias.as_ref().map_or_else(
                         || object_name(name),
@@ -302,7 +308,7 @@ impl<'a> Analyzer<'a> {
                     scope.push((reference, table));
                 }
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
-                    let table = table_key(name);
+                    let table = table_key(name, self.dialect);
                     let reference = alias.as_ref().map_or_else(
                         || object_name(name),
                         |alias| alias.name.value.to_lowercase(),
@@ -320,7 +326,7 @@ impl<'a> Analyzer<'a> {
                     let mut columns = inner
                         .query_columns(subquery)?
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
-                    rename_columns(&mut columns, alias);
+                    rename_columns(&mut columns, alias, analyzer.dialect);
                     let reference = alias.name.value.to_lowercase();
                     let table = format!("({reference})");
                     analyzer.virtuals.insert(table.clone(), columns);
@@ -331,7 +337,7 @@ impl<'a> Analyzer<'a> {
                         TableFactor::Table {
                             name, args: None, ..
                         } if analyzer.is_system_catalog(name) => vec![opaque_source(other)],
-                        _ => table_scope(other),
+                        _ => table_scope(other, analyzer.dialect),
                     };
                     for (_, table) in &entries {
                         analyzer.check_table(table);
@@ -358,7 +364,7 @@ impl<'a> Analyzer<'a> {
         matched.peek().is_some()
             && matched.all(|factor| match factor {
                 TableFactor::Table { name, .. } => self
-                    .virtual_columns(&table_key(name))
+                    .virtual_columns(&table_key(name, self.dialect))
                     .is_none_or(|columns| !columns.iter().any(Column::is_unknown_star)),
                 TableFactor::Derived {
                     alias: Some(alias), ..

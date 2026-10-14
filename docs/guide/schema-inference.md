@@ -261,9 +261,26 @@ total = "--sql\nSELECT user_count()"
 ```
 
 A name written `schema.table` looks in that schema. A bare name follows the
-`search_path`: the `SET search_path` in effect at the end of the file (or
-`public`), then the one schema that defines the name. A bare name defined in
-several schemas, none on the path, is unknown rather than guessed.
+`search_path` only: `pg_catalog`, then the schemas of the `SET search_path` in
+effect at the end of the file (`public` when there is none). A table in a schema
+off the path is not found by its bare name, even when no other schema defines it:
+with `CREATE TABLE app.users (...)` and no `SET search_path`, `FROM users` is an
+`unknown-table` and `FROM app.users` works. This holds for tables, views, types
+and functions alike.
+
+Names follow PostgreSQL's case rules. An unquoted identifier folds to lower
+case; a quoted one keeps its case. With `users(id int)`, `SELECT "ID" FROM users`
+names an unknown column, and `"Users"` and `users` are different tables. A column
+declared as `"userId"` is read as `"userId"`, not `userId`. `AS Foo` names an
+output column `foo`; `AS "Foo"` names it `Foo`. Table aliases and qualifiers are
+compared without case. MySQL and SQLite compare every name without case,
+whatever the quoting, and have no `search_path`.
+
+Every table has the system columns `ctid` (`tid`), `xmin` and `xmax` (`xid`),
+`cmin` and `cmax` (`cid`) and `tableoid` (`oid`). Drivers return `tid`, `xid`
+and `cid` as `str`, and `oid` as `int`. A user table has no `oid` column since
+PostgreSQL 12 unless it declares one, so `SELECT oid FROM users` is an
+`unknown-column`. A built-in function may be written `pg_catalog.lower(x)`.
 
 As in PostgreSQL, `pg_catalog` is searched first, so a user table named like a
 system relation (`CREATE TABLE pg_class (...)`) is reached as `public.pg_class`;

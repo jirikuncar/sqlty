@@ -12,8 +12,10 @@
 //!
 //! The analyzer asks a [`Catalog`] by name: [`Catalog::table`], [`Catalog::view`],
 //! [`Catalog::user_type`], [`Catalog::composite`] and [`Catalog::function`]. A name is
-//! `table`, or `schema.table` in PostgreSQL; a bare name tries the `search_path`, then a
-//! schema that is the only one defining it. A table the schema changes in a way this
+//! `table`, or `schema.table` in PostgreSQL; a bare name tries `pg_catalog`, then each
+//! schema of the `search_path` (`public` unless the schema sets it), and no other schema.
+//! PostgreSQL names keep the case of a quoted identifier and fold an unquoted one to lower
+//! case. A table the schema changes in a way this
 //! module cannot follow (unparsable `ALTER TABLE`, an unknown `LIKE` source) has an
 //! unknown shape: it resolves to nothing, so no column of it gets a type.
 //!
@@ -39,7 +41,7 @@ use once_cell::sync::Lazy;
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterTypeOperation, ArgMode, ArrayElemTypeDef,
     ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind, CreateView,
-    DataType, Expr, FunctionReturnType, GeneratedAs, ObjectName, ObjectType, Query,
+    DataType, Expr, FunctionReturnType, GeneratedAs, Ident, ObjectName, ObjectType, Query,
     RenameTableNameKind, Statement, TableConstraint, UserDefinedTypeRepresentation, Visit, Visitor,
 };
 use sqlparser::parser::Parser;
@@ -146,12 +148,7 @@ fn lookup_key<'a, T>(map: &'a HashMap<String, T>, path: &[String], name: &str) -
             return Some(key);
         }
     }
-    let suffix = format!(".{name}");
-    let mut found = map
-        .keys()
-        .filter(|key| key.ends_with(&suffix) && !key.starts_with("information_schema."));
-    let only = found.next()?;
-    found.next().is_none().then_some(only.as_str())
+    None
 }
 
 impl Catalog {
@@ -300,11 +297,21 @@ fn type_key(dt: &DataType, dialect: SqlDialect) -> Option<String> {
     }
 }
 
-fn parts(name: &ObjectName) -> Vec<String> {
+/// An identifier as the dialect keys it. PostgreSQL folds an unquoted name to lower case and
+/// keeps a quoted one exactly; MySQL and SQLite compare names case-insensitively.
+pub(crate) fn fold(ident: &Ident, dialect: SqlDialect) -> String {
+    if dialect == SqlDialect::Postgres && ident.quote_style.is_some() {
+        ident.value.clone()
+    } else {
+        ident.value.to_lowercase()
+    }
+}
+
+fn parts(name: &ObjectName, dialect: SqlDialect) -> Vec<String> {
     name.0
         .iter()
         .filter_map(|part| part.as_ident())
-        .map(|ident| ident.value.to_lowercase())
+        .map(|ident| fold(ident, dialect))
         .collect()
 }
 
@@ -319,7 +326,7 @@ fn key_of(parts: &[String], dialect: SqlDialect) -> String {
 
 /// The name a lookup uses: `schema.name` or `name` in PostgreSQL, `name` elsewhere.
 fn name_key(name: &ObjectName, dialect: SqlDialect) -> String {
-    key_of(&parts(name), dialect)
+    key_of(&parts(name, dialect), dialect)
 }
 
 /// An empty catalog, with the built-in relations in PostgreSQL: what queries read
@@ -465,7 +472,7 @@ impl Loader {
 
     /// The key under which a statement under `path` creates `name`.
     fn new_key(&self, name: &ObjectName, path: &[String]) -> String {
-        let parts = parts(name);
+        let parts = parts(name, self.dialect);
         match parts.as_slice() {
             [] => String::new(),
             [only] => format!("{}.{only}", self.default_schema(path)),
@@ -611,9 +618,18 @@ impl Loader {
         }
         let mut table = RawTable::default();
         if self.postgres {
-            let mut sources: Vec<Vec<String>> =
-                create.inherits.iter().flatten().map(parts).collect();
-            sources.extend(create.partition_of.as_ref().map(parts));
+            let mut sources: Vec<Vec<String>> = create
+                .inherits
+                .iter()
+                .flatten()
+                .map(|name| parts(name, self.dialect))
+                .collect();
+            sources.extend(
+                create
+                    .partition_of
+                    .as_ref()
+                    .map(|name| parts(name, self.dialect)),
+            );
             for source in &sources {
                 let Some(parent) = self.table_key(source, path) else {
                     return false;
@@ -632,7 +648,7 @@ impl Loader {
                 CreateTableLikeKind::Parenthesized(like) | CreateTableLikeKind::Plain(like),
             ) = &create.like
             {
-                like_sources.push(parts(&like.name));
+                like_sources.push(parts(&like.name, self.dialect));
             }
             for source in &like_sources {
                 let Some(from) = self.table_key(source, path) else {
@@ -649,7 +665,7 @@ impl Loader {
         }
         for column in &create.columns {
             if column.data_type != DataType::Unspecified {
-                merge_column(&mut table.columns, raw_column(column));
+                merge_column(&mut table.columns, raw_column(column, self.dialect));
             }
         }
         // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
@@ -666,7 +682,7 @@ impl Loader {
                     .options
                     .iter()
                     .any(|o| matches!(o.option, ColumnOption::NotNull));
-                let name = def.name.value.to_lowercase();
+                let name = fold(&def.name, self.dialect);
                 if let Some(column) = table.columns.iter_mut().find(|c| c.name == name) {
                     if keyed && !declared && !is_rowid_type(&def.data_type) {
                         column.not_null = false;
@@ -678,13 +694,13 @@ impl Loader {
             if let TableConstraint::PrimaryKey(pk) = constraint {
                 if loose_keys
                     && !(pk.columns.len() == 1
-                        && column_named(&table.columns, &pk.columns[0].column.expr)
+                        && column_named(&table.columns, &pk.columns[0].column.expr, self.dialect)
                             .is_some_and(|c| is_rowid_type(&c.ty)))
                 {
                     continue;
                 }
                 for index_column in &pk.columns {
-                    mark_not_null(&mut table.columns, &index_column.column.expr);
+                    mark_not_null(&mut table.columns, &index_column.column.expr, self.dialect);
                 }
             }
         }
@@ -722,13 +738,14 @@ impl Loader {
             relations: Vec<ObjectName>,
             calls: Vec<ObjectName>,
             ctes: HashSet<String>,
+            dialect: SqlDialect,
         }
         impl Visitor for Sources {
             type Break = ();
             fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
                 if let Some(with) = &query.with {
                     for cte in &with.cte_tables {
-                        self.ctes.insert(cte.alias.name.value.to_lowercase());
+                        self.ctes.insert(fold(&cte.alias.name, self.dialect));
                     }
                 }
                 ControlFlow::Continue(())
@@ -748,18 +765,19 @@ impl Loader {
             relations: Vec::new(),
             calls: Vec::new(),
             ctes: HashSet::new(),
+            dialect: self.dialect,
         };
         let _ = query.visit(&mut sources);
         let relations_defined = sources.relations.iter().all(|name| {
-            let parts = parts(name);
+            let parts = parts(name, self.dialect);
             (parts.len() == 1 && sources.ctes.contains(&parts[0]))
                 || self.lookup(&self.relations, &parts, path).is_some()
                 || self.lookup(&self.functions, &parts, path).is_some()
         });
-        let undefined_calls = sources
-            .calls
-            .iter()
-            .any(|name| self.lookup(&self.functions, &parts(name), path).is_none());
+        let undefined_calls = sources.calls.iter().any(|name| {
+            self.lookup(&self.functions, &parts(name, self.dialect), path)
+                .is_none()
+        });
         (relations_defined, undefined_calls)
     }
 
@@ -767,7 +785,7 @@ impl Loader {
 
     /// Returns `false` when the table (or a column it changes) is not defined yet.
     fn alter_table(&mut self, alter: &sqlparser::ast::AlterTable, path: &[String]) -> bool {
-        let Some(key) = self.table_key(&parts(&alter.name), path) else {
+        let Some(key) = self.table_key(&parts(&alter.name, self.dialect), path) else {
             return alter.if_exists;
         };
         let Some(Rel::Table(root)) = self.relations.get(&key) else {
@@ -777,7 +795,7 @@ impl Loader {
         let mut rename = None;
         let mut failed = None;
         for op in &alter.operations {
-            if let Err(fail) = alter_op(&mut root, op, true, &mut rename) {
+            if let Err(fail) = alter_op(&mut root, op, true, &mut rename, self.dialect) {
                 failed = Some(fail);
                 break;
             }
@@ -797,7 +815,7 @@ impl Loader {
                 };
                 let mut table = table.clone();
                 for op in &alter.operations {
-                    let _ = alter_op(&mut table, op, false, &mut None);
+                    let _ = alter_op(&mut table, op, false, &mut None, self.dialect);
                 }
                 changed.push((child, table));
             }
@@ -808,7 +826,7 @@ impl Loader {
         }
         if let Some(new_name) = rename {
             let (schema, _) = key.split_once('.').unwrap_or(("public", ""));
-            let new_key = match parts(&new_name).as_slice() {
+            let new_key = match parts(&new_name, self.dialect).as_slice() {
                 [only] => format!("{schema}.{only}"),
                 other => key_of(other, self.dialect),
             };
@@ -885,7 +903,7 @@ impl Loader {
     }
 
     fn alter_type(&mut self, alter: &sqlparser::ast::AlterType, path: &[String]) -> bool {
-        let Some(key) = self.lookup(&self.types, &parts(&alter.name), path) else {
+        let Some(key) = self.lookup(&self.types, &parts(&alter.name, self.dialect), path) else {
             return false;
         };
         self.cache = None;
@@ -916,7 +934,7 @@ impl Loader {
             }
             (AlterTypeOperation::Rename(rename), Some(_)) => {
                 let schema = key.split_once('.').map_or("public", |(schema, _)| schema);
-                let new_key = format!("{schema}.{}", rename.new_name.value.to_lowercase());
+                let new_key = format!("{schema}.{}", fold(&rename.new_name, self.dialect));
                 if let Some(def) = self.types.remove(&key) {
                     for target in self.type_aliases.values_mut() {
                         if *target == key {
@@ -1002,7 +1020,7 @@ impl Loader {
                 object_type, names, ..
             } => {
                 for name in names {
-                    let name_parts = parts(name);
+                    let name_parts = parts(name, self.dialect);
                     match object_type {
                         ObjectType::Table | ObjectType::View | ObjectType::MaterializedView => {
                             if let Some(key) = self.lookup(&self.relations, &name_parts, path) {
@@ -1027,13 +1045,16 @@ impl Loader {
                 }
             }
             Statement::DropDomain(drop) => {
-                if let Some(key) = self.lookup(&self.types, &parts(&drop.name), path) {
+                if let Some(key) = self.lookup(&self.types, &parts(&drop.name, self.dialect), path)
+                {
                     self.types.remove(&key);
                 }
             }
             Statement::DropFunction(drop) => {
                 for desc in &drop.func_desc {
-                    let Some(key) = self.lookup(&self.functions, &parts(&desc.name), path) else {
+                    let Some(key) =
+                        self.lookup(&self.functions, &parts(&desc.name, self.dialect), path)
+                    else {
                         continue;
                     };
                     let wanted: Option<Vec<String>> = desc.args.as_ref().map(|args| {
@@ -1081,7 +1102,7 @@ impl Loader {
                 (
                     arg.name
                         .as_ref()
-                        .map_or(format!("column{}", i + 1), |n| n.value.to_lowercase()),
+                        .map_or(format!("column{}", i + 1), |n| fold(n, self.dialect)),
                     arg.data_type.clone(),
                 )
             })
@@ -1090,7 +1111,7 @@ impl Loader {
             Some(FunctionReturnType::DataType(DataType::Table(Some(columns)))) => RawReturn::Rows(
                 columns
                     .iter()
-                    .map(|c| (c.name.value.to_lowercase(), c.data_type.clone()))
+                    .map(|c| (fold(&c.name, self.dialect), c.data_type.clone()))
                     .collect(),
             ),
             Some(FunctionReturnType::DataType(dt)) if outs.len() < 2 => {
@@ -1371,9 +1392,9 @@ fn literal_of(labels: &[String]) -> String {
     format!("typing.Literal[{}]", labels.join(", "))
 }
 
-fn raw_column(column: &ColumnDef) -> RawColumn {
+fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
     let serial = matches!(&column.data_type, DataType::Custom(name, _)
-        if parts(name).last().is_some_and(|n| matches!(n.as_str(), "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8")));
+        if parts(name, dialect).last().is_some_and(|n| matches!(n.as_str(), "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8")));
     let not_null = serial
         || column.options.iter().any(|option| {
             matches!(
@@ -1389,7 +1410,7 @@ fn raw_column(column: &ColumnDef) -> RawColumn {
             )
         });
     RawColumn {
-        name: column.name.value.to_lowercase(),
+        name: fold(&column.name, dialect),
         ident: match column.name.quote_style {
             Some(_) => column.name.to_string(),
             None => column.name.value.to_lowercase(),
@@ -1417,17 +1438,21 @@ fn is_rowid_type(ty: &DataType) -> bool {
     matches!(ty, DataType::Integer(None))
 }
 
-fn column_named<'a>(columns: &'a [RawColumn], expr: &Expr) -> Option<&'a RawColumn> {
+fn column_named<'a>(
+    columns: &'a [RawColumn],
+    expr: &Expr,
+    dialect: SqlDialect,
+) -> Option<&'a RawColumn> {
     let Expr::Identifier(ident) = expr else {
         return None;
     };
-    let name = ident.value.to_lowercase();
+    let name = fold(ident, dialect);
     columns.iter().find(|c| c.name == name)
 }
 
-fn mark_not_null(columns: &mut [RawColumn], expr: &Expr) {
+fn mark_not_null(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
     if let Expr::Identifier(ident) = expr {
-        let name = ident.value.to_lowercase();
+        let name = fold(ident, dialect);
         if let Some(column) = columns.iter_mut().find(|c| c.name == name) {
             column.not_null = true;
         }
@@ -1441,6 +1466,7 @@ fn alter_op(
     op: &AlterTableOperation,
     strict: bool,
     rename: &mut Option<ObjectName>,
+    dialect: SqlDialect,
 ) -> Result<(), AlterFail> {
     let missing = || {
         if strict {
@@ -1449,19 +1475,17 @@ fn alter_op(
             Ok(())
         }
     };
-    let position = |table: &RawTable, name: &str| {
-        table
-            .columns
-            .iter()
-            .position(|c| c.name == name.to_lowercase())
+    let position = |table: &RawTable, name: &Ident| {
+        let name = fold(name, dialect);
+        table.columns.iter().position(|c| c.name == name)
     };
     match op {
         AlterTableOperation::AddColumn { column_def, .. } => {
             if column_def.data_type == DataType::Unspecified {
                 return Err(AlterFail::Unsupported);
             }
-            if position(table, &column_def.name.value).is_none() {
-                table.columns.push(raw_column(column_def));
+            if position(table, &column_def.name).is_none() {
+                table.columns.push(raw_column(column_def, dialect));
             }
         }
         AlterTableOperation::DropColumn {
@@ -1470,7 +1494,7 @@ fn alter_op(
             ..
         } => {
             for name in column_names {
-                match position(table, &name.value) {
+                match position(table, name) {
                     Some(at) => {
                         table.columns.remove(at);
                     }
@@ -1482,10 +1506,10 @@ fn alter_op(
         AlterTableOperation::RenameColumn {
             old_column_name,
             new_column_name,
-        } => match position(table, &old_column_name.value) {
+        } => match position(table, old_column_name) {
             Some(at) => {
                 let column = &mut table.columns[at];
-                column.name = new_column_name.value.to_lowercase();
+                column.name = fold(new_column_name, dialect);
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
                     None => column.name.clone(),
@@ -1500,7 +1524,7 @@ fn alter_op(
             }
         }
         AlterTableOperation::AlterColumn { column_name, op } => {
-            let Some(at) = position(table, &column_name.value) else {
+            let Some(at) = position(table, column_name) else {
                 return missing();
             };
             match op {
@@ -1519,7 +1543,7 @@ fn alter_op(
             ..
         } => {
             for index_column in &pk.columns {
-                mark_not_null(&mut table.columns, &index_column.column.expr);
+                mark_not_null(&mut table.columns, &index_column.column.expr, dialect);
             }
         }
         AlterTableOperation::ChangeColumn { .. }
@@ -1626,7 +1650,7 @@ fn read_statements(
                     UserDefinedTypeRepresentation::Composite { attributes } => TypeDef::Composite(
                         attributes
                             .into_iter()
-                            .map(|attr| (attr.name.value.to_lowercase(), attr.data_type))
+                            .map(|attr| (fold(&attr.name, dialect), attr.data_type))
                             .collect(),
                     ),
                     _ => continue,

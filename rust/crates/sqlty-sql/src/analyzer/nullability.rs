@@ -115,19 +115,19 @@ impl Facts {
 }
 
 /// References of the relations in `from` that outer joins null-extend, nested joins included.
-pub(super) fn null_extended(from: &[TableWithJoins]) -> Vec<String> {
+pub(super) fn null_extended(from: &[TableWithJoins], dialect: SqlDialect) -> Vec<String> {
     let mut extended = Vec::new();
     for table in from {
-        group(table, &mut extended);
+        group(table, &mut extended, dialect);
     }
     extended
 }
 
 /// References of the relations of one `a JOIN b JOIN c` chain; null-extended ones go to `extended`.
-fn group(table: &TableWithJoins, extended: &mut Vec<String>) -> Vec<String> {
-    let mut left = factor_references(&table.relation, extended);
+fn group(table: &TableWithJoins, extended: &mut Vec<String>, dialect: SqlDialect) -> Vec<String> {
+    let mut left = factor_references(&table.relation, extended, dialect);
     for join in &table.joins {
-        let right = factor_references(&join.relation, extended);
+        let right = factor_references(&join.relation, extended, dialect);
         match &join.join_operator {
             JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply => {
                 extended.extend(right.iter().cloned())
@@ -146,14 +146,18 @@ fn group(table: &TableWithJoins, extended: &mut Vec<String>) -> Vec<String> {
     left
 }
 
-fn factor_references(factor: &TableFactor, extended: &mut Vec<String>) -> Vec<String> {
+fn factor_references(
+    factor: &TableFactor,
+    extended: &mut Vec<String>,
+    dialect: SqlDialect,
+) -> Vec<String> {
     match factor {
         TableFactor::NestedJoin {
             table_with_joins,
             alias: None,
-        } => group(table_with_joins, extended),
+        } => group(table_with_joins, extended, dialect),
         // The reference the scope of the SELECT gives the relation.
-        other => table_scope(other)
+        other => table_scope(other, dialect)
             .into_iter()
             .map(|(reference, _)| reference)
             .collect(),
@@ -453,7 +457,9 @@ impl<'a> Analyzer<'a> {
     pub(super) fn select_facts(&self, select: &Select, scope: &Scope) -> Facts {
         let mut facts = self.facts.clone();
         facts.without(scope);
-        facts.null_extended.extend(null_extended(&select.from));
+        facts
+            .null_extended
+            .extend(null_extended(&select.from, self.dialect));
         facts.grouped = is_grouped(select);
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {
