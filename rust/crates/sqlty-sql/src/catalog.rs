@@ -571,6 +571,9 @@ impl Loader {
         path: &[String],
     ) -> bool {
         let key = self.new_key(&create.name, path);
+        if create.if_not_exists && self.relations.contains_key(&key) {
+            return true;
+        }
         let mut table = RawTable::default();
         if self.postgres {
             let mut sources: Vec<Vec<String>> =
@@ -630,6 +633,9 @@ impl Loader {
     // ---- CREATE VIEW ----------------------------------------------------------------
 
     fn create_view(&mut self, view: &CreateView, path: &[String], force: bool) -> bool {
+        if view.if_not_exists && self.relations.contains_key(&self.new_key(&view.name, path)) {
+            return true;
+        }
         let (relations_defined, undefined_calls) = self.view_sources(&view.query, path);
         if !force && !relations_defined {
             return false;
@@ -1898,5 +1904,17 @@ mod tests {
             .map(|(kind, name)| format!("{kind} {name}"))
             .collect();
         assert_eq!(names, ["table a", "type e", "table c"]);
+    }
+
+    #[test]
+    fn test_if_not_exists_keeps_the_existing_relation() {
+        let c = pg("CREATE TABLE t (a int);
+            CREATE TABLE IF NOT EXISTS t (a text, b text);
+            CREATE VIEW v AS SELECT a FROM t;
+            CREATE VIEW IF NOT EXISTS v AS SELECT a, a AS b FROM t;
+            CREATE TABLE IF NOT EXISTS fresh (c int);");
+        assert_eq!(cols(&c, "t"), ["a:INT"]);
+        assert_eq!(c.view("v").unwrap().len(), 1);
+        assert_eq!(cols(&c, "fresh"), ["c:INT"]);
     }
 }
