@@ -3,7 +3,7 @@
 //! A key is `schema.name` in PostgreSQL and `name` elsewhere. Nothing here reads a
 //! [`super::Catalog`] or a loader; it only turns identifiers into keys.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{DataType, Ident, ObjectName};
 
@@ -12,7 +12,7 @@ use crate::analyzer::SqlDialect;
 /// The key a bare name is tried under in each schema of `path`; PostgreSQL always
 /// searches `pg_catalog` first.
 pub(super) fn lookup_key<'a, T>(
-    map: &'a HashMap<String, T>,
+    map: &'a FxHashMap<String, T>,
     path: &[String],
     name: &str,
 ) -> Option<&'a str> {

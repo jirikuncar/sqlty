@@ -3,7 +3,7 @@
 //! `Loader::build` resolves everything; `schema_column` and `resolve_rel` resolve
 //! one relation when the loader updates the cached catalog in place.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{ArrayElemTypeDef, DataType, EnumMember};
 
@@ -33,7 +33,7 @@ impl Loader {
         BUILDS.with(|count| count.set(count.get() + 1));
         let dialect = self.dialect;
         let path = self.search_path.clone();
-        let mut user_types: HashMap<String, UserType> = HashMap::new();
+        let mut user_types: FxHashMap<String, UserType> = FxHashMap::default();
         for key in self.types.keys() {
             if let Some(user) = self.resolve_user_type(key, &path, 0) {
                 user_types.insert(key.clone(), user);
@@ -63,7 +63,7 @@ impl Loader {
                     allowed_values,
                 }
             };
-        let mut relations = HashMap::new();
+        let mut relations = FxHashMap::default();
         let mut user_relations = 0;
         for (key, rel) in &self.relations {
             if !BUILTIN_SCHEMAS
@@ -87,7 +87,7 @@ impl Loader {
                 },
             );
         }
-        let mut composites: HashMap<String, Vec<SchemaColumn>> = self
+        let mut composites: FxHashMap<String, Vec<SchemaColumn>> = self
             .types
             .iter()
             .filter_map(|(key, def)| match def {
@@ -106,7 +106,7 @@ impl Loader {
                 composites.entry(old.clone()).or_insert(fields);
             }
         }
-        let mut functions = HashMap::new();
+        let mut functions = FxHashMap::default();
         for (key, overloads) in &self.functions {
             if self.unknown_functions.contains(key) {
                 continue;

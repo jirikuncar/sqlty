@@ -4,7 +4,7 @@
 //! [`Loader::run`] applies operations until nothing changes, so statements may appear in
 //! any order. It keeps the resolved [`super::Catalog`] current between operations.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
@@ -99,18 +99,18 @@ pub(super) enum AlterFail {
 pub(super) struct Loader {
     pub(super) dialect: SqlDialect,
     pub(super) postgres: bool,
-    pub(super) relations: HashMap<String, Rel>,
-    pub(super) types: HashMap<String, TypeDef>,
-    pub(super) functions: HashMap<String, Vec<RawFunction>>,
+    pub(super) relations: FxHashMap<String, Rel>,
+    pub(super) types: FxHashMap<String, TypeDef>,
+    pub(super) functions: FxHashMap<String, Vec<RawFunction>>,
     /// Functions whose latest definition could not be read.
-    pub(super) unknown_functions: HashSet<String>,
+    pub(super) unknown_functions: FxHashSet<String>,
     pub(super) search_path: Vec<String>,
     /// The resolved catalog; a change to one relation updates it in place, any other
     /// change drops it to be built again.
     pub(super) cache: Option<Catalog>,
     /// Old name -> current name of a renamed type: columns declared with the old name
     /// have the type under its new one.
-    pub(super) type_aliases: HashMap<String, String>,
+    pub(super) type_aliases: FxHashMap<String, String>,
     /// Objects whose columns or types the loader could not follow.
     pub(super) skipped: Vec<SkippedObject>,
     /// Some function returns `SETOF table`, so its rows follow the table.
@@ -122,14 +122,14 @@ impl Loader {
         Loader {
             dialect,
             postgres: dialect == SqlDialect::Postgres,
-            relations: HashMap::new(),
-            types: HashMap::new(),
-            functions: HashMap::new(),
-            unknown_functions: HashSet::new(),
+            relations: FxHashMap::default(),
+            types: FxHashMap::default(),
+            functions: FxHashMap::default(),
+            unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
             cache: None,
             skipped: Vec::new(),
-            type_aliases: HashMap::new(),
+            type_aliases: FxHashMap::default(),
             setof_functions: false,
         }
     }
@@ -155,7 +155,7 @@ impl Loader {
 
     pub(super) fn lookup<T>(
         &self,
-        map: &HashMap<String, T>,
+        map: &FxHashMap<String, T>,
         parts: &[String],
         path: &[String],
     ) -> Option<String> {
@@ -405,7 +405,7 @@ impl Loader {
         struct Sources {
             relations: Vec<ObjectName>,
             calls: Vec<ObjectName>,
-            ctes: HashSet<String>,
+            ctes: FxHashSet<String>,
             dialect: SqlDialect,
         }
         impl Visitor for Sources {
@@ -432,7 +432,7 @@ impl Loader {
         let mut sources = Sources {
             relations: Vec::new(),
             calls: Vec::new(),
-            ctes: HashSet::new(),
+            ctes: FxHashSet::default(),
             dialect: self.dialect,
         };
         let _ = query.visit(&mut sources);

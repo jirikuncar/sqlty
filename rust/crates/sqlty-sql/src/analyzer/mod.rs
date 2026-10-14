@@ -503,6 +503,28 @@ fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
 
 /// Canonical spelling of a SQL type, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
 pub(crate) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
+    // The common column types, spelled the same in every dialect, skip the
+    // format-and-reparse below.
+    let common = match dt {
+        DataType::Integer(None) | DataType::Int(None) | DataType::Int4(None) => Some("INT"),
+        DataType::BigInt(None) => Some("BIGINT"),
+        DataType::SmallInt(None) => Some("SMALLINT"),
+        DataType::Text => Some("TEXT"),
+        DataType::Boolean | DataType::Bool => Some("BOOLEAN"),
+        DataType::Uuid => Some("UUID"),
+        DataType::Date => Some("DATE"),
+        DataType::Bytea => Some("VARBINARY"),
+        DataType::JSON => Some("JSON"),
+        DataType::JSONB => Some("JSONB"),
+        DataType::Real => Some("FLOAT"),
+        DataType::DoublePrecision => Some("DOUBLE"),
+        DataType::Varchar(None) => Some("VARCHAR"),
+        DataType::Char(None) => Some("CHAR"),
+        _ => None,
+    };
+    if let Some(common) = common {
+        return common.to_string();
+    }
     if let DataType::Array(elem) = dt {
         return match elem {
             ArrayElemTypeDef::None => "ARRAY".to_string(),

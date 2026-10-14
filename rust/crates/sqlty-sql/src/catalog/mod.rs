@@ -38,7 +38,7 @@ mod resolve;
 pub(crate) use names::fold;
 pub(crate) use read::load;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::LazyLock;
 
 use sqlparser::ast::DataType;
@@ -113,18 +113,18 @@ enum Relation {
 #[derive(Default)]
 pub struct Catalog {
     /// `schema.name` -> relation.
-    relations: HashMap<String, Relation>,
+    relations: FxHashMap<String, Relation>,
     /// `schema.name` -> domain and enum types.
-    types: HashMap<String, UserType>,
+    types: FxHashMap<String, UserType>,
     /// `schema.name` -> composite type fields in declaration order.
-    composites: HashMap<String, Vec<SchemaColumn>>,
+    composites: FxHashMap<String, Vec<SchemaColumn>>,
     /// `schema.name` -> overloads; a function of unknown shape is absent.
-    functions: HashMap<String, Vec<Function>>,
+    functions: FxHashMap<String, Vec<Function>>,
     /// `schema.name` of the functions the schema defines but whose shape is unknown.
-    unknown_functions: HashMap<String, ()>,
+    unknown_functions: FxHashMap<String, ()>,
     /// `schema.name` of every domain, enum and composite type the schema defines, those
     /// of unknown shape included.
-    type_names: HashMap<String, ()>,
+    type_names: FxHashMap<String, ()>,
     /// Schemas a bare name is looked up in, in order.
     search_path: Vec<String>,
     /// Relations the schema itself defines, built-ins not counted.
@@ -259,6 +259,9 @@ pub(crate) fn empty(dialect: SqlDialect) -> &'static Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::canonical_type;
+    use sqlparser::ast::Statement;
+    use sqlparser::parser::Parser;
 
     #[test]
     fn module_example_alter_table_adds_a_column() {
@@ -610,6 +613,58 @@ mod tests {
                 assert!(catalog.table("t0").is_some());
             }
             println!("perf {name:28} best of 15: {best:>10.2?}  build() calls: {builds}");
+        }
+    }
+
+    /// The common column types `canonical_type` answers without formatting the AST must
+    /// spell exactly what the general path does, in every dialect.
+    #[test]
+    fn canonical_type_of_common_types_is_the_same_in_every_dialect() {
+        use sqlparser::dialect::GenericDialect;
+        let cases = [
+            ("INTEGER", "INT"),
+            ("INT", "INT"),
+            ("INT4", "INT"),
+            ("BIGINT", "BIGINT"),
+            ("SMALLINT", "SMALLINT"),
+            ("TEXT", "TEXT"),
+            ("BOOLEAN", "BOOLEAN"),
+            ("BOOL", "BOOLEAN"),
+            ("UUID", "UUID"),
+            ("DATE", "DATE"),
+            ("BYTEA", "VARBINARY"),
+            ("JSON", "JSON"),
+            ("JSONB", "JSONB"),
+            ("REAL", "FLOAT"),
+            ("DOUBLE PRECISION", "DOUBLE"),
+            ("VARCHAR", "VARCHAR"),
+            ("CHAR", "CHAR"),
+            ("VARCHAR(20)", "VARCHAR(20)"),
+            ("TIMESTAMP", "TIMESTAMP"),
+            ("TEXT[]", "ARRAY<TEXT>"),
+        ];
+        let dialects = [
+            SqlDialect::Postgres,
+            SqlDialect::MySql,
+            SqlDialect::Sqlite,
+            SqlDialect::ClickHouse,
+            SqlDialect::Other("bigquery"),
+        ];
+        for (sql, expected) in cases {
+            let parsed =
+                Parser::parse_sql(&GenericDialect {}, &format!("CREATE TABLE t (a {sql})"))
+                    .unwrap();
+            let Statement::CreateTable(create) = &parsed[0] else {
+                panic!("not a table: {sql}");
+            };
+            for (n, dialect) in dialects.into_iter().enumerate() {
+                let got = canonical_type(&create.columns[0].data_type, dialect);
+                let want = match (dialect, sql) {
+                    (SqlDialect::MySql, "TIMESTAMP") => "TIMESTAMPTZ",
+                    _ => expected,
+                };
+                assert_eq!(got, want, "{sql} in dialect #{n}");
+            }
         }
     }
 }
