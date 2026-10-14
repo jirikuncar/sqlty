@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from sqlty._cli import SettingsResolver, build_parser, main
+from sqlty._config import ConfigError
 
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
@@ -96,7 +100,7 @@ def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = true\n")
     args = build_parser().parse_args(["check", str(tmp_path)])
 
-    with pytest.raises(SystemExit, match="untyped must be 'skip' or 'sentinel'"):
+    with pytest.raises(ConfigError, match="untyped must be 'skip' or 'sentinel'"):
         SettingsResolver(args).for_file(tmp_path / "q.py")
 
 
@@ -104,7 +108,7 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "from x import SQL"\n')
     args = build_parser().parse_args(["check", str(tmp_path)])
 
-    with pytest.raises(SystemExit, match="Unsupported import-style: 'from x import SQL'"):
+    with pytest.raises(ConfigError, match="Unsupported import-style: 'from x import SQL'"):
         SettingsResolver(args).for_file(tmp_path / "q.py")
 
 
@@ -220,3 +224,170 @@ def test_configured_functions_apply_to_their_own_project(tmp_path, monkeypatch, 
     out = capsys.readouterr().out
     assert "a/q.py" in out
     assert "b/q.py" not in out
+
+
+def _run(argv: list[str], capsys) -> tuple[int, str, str]:
+    """Run ``main`` and return (exit code, stdout, stderr)."""
+    code = 0
+    try:
+        main(argv)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def _project(tmp_path, config: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
+    (tmp_path / "q.py").write_text("x = 1\n")
+
+
+def test_unknown_rule_is_a_clean_error(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nselect-starr = "error"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, out, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "Traceback" not in err
+    assert "pyproject.toml: unknown rule 'select-starr'" in err
+    assert "did you mean 'select-star'?" in err
+
+
+def test_invalid_severity_is_a_clean_error(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nselect-star = "fatal"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "invalid severity 'fatal' for rule 'select-star'" in err
+
+
+def test_unknown_key_is_an_error(tmp_path, monkeypatch, capsys) -> None:
+    _project(tmp_path, "bogus = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "unknown key 'bogus' in [tool.sqlty]" in err
+
+
+def test_snake_case_key_suggests_the_kebab_case_one(tmp_path, monkeypatch, capsys) -> None:
+    _project(tmp_path, 'import_style = "import sqlty"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["rewrite", "."], capsys)
+
+    assert code == 2
+    assert "did you mean 'import-style'?" in err
+
+
+def test_missing_path_is_an_error(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    for command in ("check", "rewrite", "strip"):
+        code, _, err = _run([command, "nonexist.py"], capsys)
+        assert code == 2
+        assert "path does not exist: nonexist.py" in err
+
+
+QUERY = 'q = "--sql\\nSELECT 1::INTEGER AS n"\n'
+
+
+def test_walk_skips_default_excludes(tmp_path, monkeypatch, capsys) -> None:
+    for name in (".venv/lib", "node_modules/pkg", ".git/hooks", "src"):
+        (tmp_path / name).mkdir(parents=True)
+        (tmp_path / name / "m.py").write_text(QUERY)
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["rewrite", "--check", "."], capsys)
+
+    assert code == 1
+    assert "Would rewrite " + str(Path("src/m.py")) in out
+    assert ".venv" not in out and "node_modules" not in out and ".git" not in out
+
+
+def test_explicit_files_and_excluded_roots_are_still_checked(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "m.py").write_text(QUERY)
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["rewrite", "--check", ".venv/m.py"], capsys)[0] == 1
+    assert _run(["rewrite", "--check", ".venv"], capsys)[0] == 1
+
+
+def test_exclude_and_extend_exclude(tmp_path, monkeypatch, capsys) -> None:
+    for name in ("migrations", "gen/api", "keep", ".venv"):
+        (tmp_path / name).mkdir(parents=True)
+        (tmp_path / name / "m.py").write_text(QUERY)
+    (tmp_path / "keep" / "skip_me.py").write_text(QUERY)
+    monkeypatch.chdir(tmp_path)
+
+    def checked(config: str) -> set[str]:
+        (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
+        _, out, _ = _run(["rewrite", "--check", "."], capsys)
+        return {line.split()[-1] for line in out.splitlines() if line.startswith("Would")}
+
+    sep = os.sep
+    assert checked('extend-exclude = ["migrations", "gen/*", "skip_me.py"]\n') == {f"keep{sep}m.py"}
+    # `exclude` replaces the defaults, so .venv is walked again.
+    assert checked('exclude = ["migrations", "gen", "keep"]\n') == {f".venv{sep}m.py"}
+
+
+def test_exclude_is_relative_to_the_config_file(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pkg" / "gen").mkdir(parents=True)
+    (tmp_path / "gen").mkdir()
+    for path in ("pkg/gen/m.py", "gen/m.py"):
+        (tmp_path / path).write_text(QUERY)
+    (tmp_path / "pkg" / "pyproject.toml").write_text('[tool.sqlty]\nextend-exclude = ["gen"]\n')
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["rewrite", "--check", "."], capsys)
+
+    assert f"gen{os.sep}m.py" in out
+    assert f"pkg{os.sep}gen" not in out
+
+
+@pytest.mark.parametrize("command", ["rewrite", "strip"])
+def test_exit_codes(command, tmp_path, monkeypatch, capsys) -> None:
+    wrapped = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+    (tmp_path / "q.py").write_text(QUERY if command == "rewrite" else wrapped)
+    monkeypatch.chdir(tmp_path)
+
+    assert _run([command, "--check", "q.py"], capsys)[0] == 1
+    assert _run([command, "--diff", "q.py"], capsys)[0] == 1
+    assert (tmp_path / "q.py").read_text() == (QUERY if command == "rewrite" else wrapped)
+    assert _run([command, "q.py"], capsys)[0] == 0
+    assert _run([command, "--check", "q.py"], capsys)[0] == 0
+    assert _run([command, "--diff", "q.py"], capsys)[0] == 0
+
+
+def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    (tmp_path / "bad.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int, int]]("--sql\\nSELECT 1::INTEGER AS n")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["check", "ok.py"], capsys)[0] == 0
+    # stale-type is a warning by default: reported, exit 0.
+    assert _run(["check", "bad.py"], capsys)[0] == 0
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "error"\n')
+    assert _run(["check", "bad.py"], capsys)[0] == 1
+
+
+def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    import sqlty.core
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    (tmp_path / "q.py").write_text("x = 1\n")
+    monkeypatch.setattr(sqlty.core, "strip_source", boom)
+
+    code, _, err = _run(["strip", str(tmp_path / "q.py")], capsys)
+
+    assert code == 2
+    assert "internal error" in err

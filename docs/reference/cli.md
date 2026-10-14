@@ -12,9 +12,20 @@ sqlty strip .     # SQL[T]("--sql\n...") -> "--sql\n..."
 ```
 
 Each command takes files or directories (default: the current directory) and
-processes every `.py` file under them. Each file uses `[tool.sqlty]` from the
+processes every `.py` file under them, skipping the default and configured
+[excludes](configuration.md#exclude-and-extend-exclude) (`.venv`, `.git`,
+`node_modules`, ...) while walking a directory; a file named on the command
+line is always processed. A path that does not exist is an error. Each file uses `[tool.sqlty]` from the
 nearest `pyproject.toml` above it that has one; see
 [Configuration](configuration.md). Command-line flags override it.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Nothing to report: no `error` diagnostic from `check`, no file changed by `--check` or `--diff`, or the files were rewritten or stripped |
+| 1 | `check` found an `error`-severity diagnostic, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
+| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist) or an internal error |
 
 ## Common options
 
@@ -50,10 +61,10 @@ sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 | Option | Description |
 |--------|-------------|
 | `--check` | Do not modify files; print `Would rewrite <file>` and exit 1 if any file needs rewriting |
-| `--diff` | Print a unified diff instead of modifying files |
+| `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
 | `--untyped {skip,sentinel}` | Row-returning queries of unknown row type: leave unwrapped (`skip`, default) or wrap as `SQL[UNTYPED](...)` (`sentinel`). Overrides `untyped` in `pyproject.toml` |
 
-Exit code: 0, or 1 with `--check` when files would change.
+Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when files would change.
 
 ## `sqlty strip`
 
@@ -74,9 +85,9 @@ sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 | Option | Description |
 |--------|-------------|
 | `--check` | Do not modify files; print `Would strip <file>` and exit 1 if any file would change |
-| `--diff` | Print a unified diff instead of modifying files |
+| `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
 
-Exit code: 0, or 1 with `--check` when files would change.
+Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when files would change.
 
 ## `sqlty check`
 
@@ -115,7 +126,7 @@ counted.
 
 Rule severities come from `[tool.sqlty.rules]`; see [Rules](rules.md).
 
-Exit code: 1 if any diagnostic has severity `error`, otherwise 0.
+Exit code: 1 if any diagnostic has severity `error`; warnings alone exit 0.
 
 ## `sqlty rule`
 
