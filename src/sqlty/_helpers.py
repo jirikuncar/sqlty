@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
-from sqlty._params import ParamArg, arg_type
+from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
 
@@ -421,19 +421,7 @@ def _call_params(
 
     if helper.params is not None:
         arg = _argument(helper, call, helper.params)
-        if isinstance(arg, (ast.Tuple, ast.List)) and not any(
-            isinstance(item, ast.Starred) for item in arg.elts
-        ):
-            return tuple(typed(i, item) for i, item in enumerate(arg.elts, 1))
-        if isinstance(arg, ast.Dict) and all(
-            isinstance(key, ast.Constant) and isinstance(key.value, str) for key in arg.keys
-        ):
-            return tuple(
-                typed(str(key.value), value)
-                for key, value in zip(arg.keys, arg.values, strict=True)
-                if isinstance(key, ast.Constant)
-            )
-        return None
+        return literal_params(arg, parsed, stack)
     if helper.rest is not None:
         if any(isinstance(arg, ast.Starred) for arg in call.args):
             return None

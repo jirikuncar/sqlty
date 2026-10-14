@@ -11,6 +11,13 @@ to calls of a [marked helper](../../../docs/guide/helpers.md) whose parameters a
 out: a `params` argument holding a tuple, list or dict literal, `*args`, or
 `**params`.
 
+Driver calls are checked too: `execute` and `executemany` (each row) on a
+psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
+`fetchval` on an asyncpg connection, when the file binds the receiver to
+`psycopg.connect(...)`, `sqlite3.connect(...)`, `asyncpg.connect(...)`,
+`<connection>.cursor()` or a driver class annotation. The query is a literal,
+`SQL[T]("...")` of one, or a name assigned once to one.
+
 An argument is judged only where the source states its type: a literal, a
 variable annotated or assigned a class, a call of a known class (`date(...)`,
 `UUID(...)`). An argument of unknown type is never reported, and neither is a

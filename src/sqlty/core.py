@@ -35,6 +35,7 @@ from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import wrapped_queries as _wrapped_queries
+from sqlty._drivers import find_driver_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES
 from sqlty._params import mismatch
@@ -305,6 +306,7 @@ def _check_diagnostics(
         else []
     )
     found = find_helper_calls(parsed, helpers, module)
+    driver_calls = find_driver_calls(parsed)
     calls = [call for call in found if call.query is not None]
     queries = [
         (line, name, query)
@@ -315,7 +317,7 @@ def _check_diagnostics(
         )
         if not name.startswith("tuple[")
     ]
-    if not (queries or found):
+    if not (queries or found or driver_calls):
         return diagnostics
     rule_config = RuleConfig(overrides=rules)
 
@@ -351,7 +353,7 @@ def _check_diagnostics(
     if rule_config.is_enabled("param-type-mismatch") or rule_config.is_enabled(
         "param-count-mismatch"
     ):
-        for call in calls:
+        for call in [*calls, *driver_calls]:
             if call.params is not None:
                 for rule, message in _param_diagnostics(call, dialect, schema_sql):
                     report(rule, message, call.line)

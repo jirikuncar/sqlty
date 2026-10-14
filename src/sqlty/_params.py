@@ -143,3 +143,24 @@ def mismatch(expected: str | None, nullable: bool | None, actual: str | None) ->
     if accepted is None or actual in accepted:
         return None
     return f"expects {expected}, got {actual}"
+
+
+def literal_params(
+    arg: ast.expr | None, parsed: ParsedSource, stack: _Stack
+) -> tuple[ParamArg, ...] | None:
+    """The arguments a tuple or list literal, or a dict literal of string keys, passes; else ``None``."""
+    if isinstance(arg, (ast.Tuple, ast.List)) and not any(
+        isinstance(item, ast.Starred) for item in arg.elts
+    ):
+        return tuple(
+            ParamArg(i, arg_type(item, parsed, stack)) for i, item in enumerate(arg.elts, 1)
+        )
+    if isinstance(arg, ast.Dict) and all(
+        isinstance(key, ast.Constant) and isinstance(key.value, str) for key in arg.keys
+    ):
+        return tuple(
+            ParamArg(str(key.value), arg_type(value, parsed, stack))
+            for key, value in zip(arg.keys, arg.values, strict=True)
+            if isinstance(key, ast.Constant)
+        )
+    return None

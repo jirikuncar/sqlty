@@ -14,9 +14,17 @@ spelled out (a `params` argument holding a tuple, list or dict literal,
 - named arguments that the query does not name (`%(name)s`, `:name`), or
   names the call does not pass. A name used twice is one parameter.
 
+Driver calls are checked too: `execute` and `executemany` (each row) on a
+psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
+`fetchval` on an asyncpg connection, when the file binds the receiver to
+`psycopg.connect(...)`, `sqlite3.connect(...)`, `asyncpg.connect(...)`,
+`<connection>.cursor()` or a driver class annotation. The query is a literal,
+`SQL[T]("...")` of one, or a name assigned once to one.
+
 Positional arguments for named placeholders, or the reverse, and calls that do
 not spell their arguments out (`params` as a variable, `*rest`, `**kwargs`),
-are not compared.
+are not compared. A driver call with no parameters against a query that has
+placeholders is reported.
 
 ## Why is this bad?
 

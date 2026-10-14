@@ -120,6 +120,25 @@ execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 run("DELETE FROM users WHERE age = %(age)s", age=b"1")
 ```
 
+## Driver calls
+
+`cursor.execute(query, params)`, `executemany` (each row), and
+`connection.execute(...)` are checked on psycopg and sqlite3 receivers, and
+`execute`, `fetch`, `fetchrow`, `fetchval` on asyncpg ones. The receiver must
+be evident in the file: bound to `psycopg.connect(...)`, `sqlite3.connect(...)`,
+`asyncpg.connect(...)`, `<connection>.cursor()` (also as `with ... as name`), or
+annotated with a driver class. The query is a literal, `SQL[T]("...")` of one,
+or a name assigned once to one. A call with no parameters is a
+`param-count-mismatch` when the query has placeholders.
+
+```python
+import sqlite3
+
+conn = sqlite3.connect("app.db")
+# error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+conn.execute("SELECT id FROM users WHERE id = ?")
+```
+
 asyncpg-style `*args` numbers its placeholders `$1`, `$2`, ...:
 
 ```python
