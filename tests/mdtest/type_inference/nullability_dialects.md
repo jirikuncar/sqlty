@@ -98,3 +98,22 @@ A cast keeps the nullability of what it casts. A scalar subquery with no row is 
 SELECT (SELECT nick FROM users u WHERE u.id = users.id + 1), (SELECT count(*) FROM users) FROM users
 -- inferred: tuple[str | None, int]
 ```
+
+## MySQL WITH ROLLUP nulls the grouping columns
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE sales (id INT NOT NULL PRIMARY KEY, region VARCHAR(20) NOT NULL, amount INT NOT NULL);
+```
+
+```sql
+SELECT CAST(region AS CHAR), count(*), sum(amount) FROM sales GROUP BY region WITH ROLLUP
+-- inferred: tuple[str | None, int, int | None]
+```

@@ -46,6 +46,11 @@ pub(super) struct Facts {
     pub(super) non_null_exprs: Vec<String>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
+    /// `(reference, column)` pairs that `ROLLUP`, `CUBE`, `GROUPING SETS` or `WITH ROLLUP`
+    /// turn into NULL in their subtotal rows.
+    rolled_up: Vec<(String, String)>,
+    /// Other grouping expressions (as printed) such subtotal rows set to NULL.
+    rolled_up_exprs: Vec<String>,
 }
 
 impl Facts {
@@ -69,7 +74,15 @@ impl Facts {
         column: &str,
         declared: Nullability,
     ) -> Nullability {
-        if self.is_non_null(reference, &column.to_lowercase()) {
+        let column = column.to_lowercase();
+        // A subtotal row is made after WHERE, so a condition cannot rule its NULL out.
+        let rolled = self
+            .rolled_up
+            .iter()
+            .any(|(r, c)| r == reference && *c == column);
+        if rolled {
+            Nullability::Nullable
+        } else if self.is_non_null(reference, &column) {
             Nullability::NonNull
         } else if self.is_null_extended(reference) {
             Nullability::Nullable
@@ -84,6 +97,16 @@ impl Facts {
         self.null_extended.retain(|r| !shadowed(r));
         self.non_null.retain(|(r, _)| !shadowed(r));
         self.present.retain(|r| !shadowed(r));
+        self.rolled_up.retain(|(r, _)| !shadowed(r));
+    }
+
+    /// These facts without the grouping subtotals: what an aggregate reads is the rows of
+    /// a group, not its subtotal row.
+    fn ungrouped_rows(&self) -> Facts {
+        let mut facts = self.clone();
+        facts.rolled_up.clear();
+        facts.rolled_up_exprs.clear();
+        facts
     }
 }
 
@@ -302,6 +325,25 @@ fn function_name(func: &sqlparser::ast::Function) -> String {
         .unwrap_or_default()
 }
 
+/// Grouping expressions that a subtotal row sets to NULL: those inside `ROLLUP`, `CUBE` and
+/// `GROUPING SETS`, and all of them under MySQL's `WITH ROLLUP`.
+fn rolled_up(select: &Select) -> Vec<&Expr> {
+    let sqlparser::ast::GroupByExpr::Expressions(by, modifiers) = &select.group_by else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for expr in by {
+        match expr {
+            Expr::Rollup(sets) | Expr::Cube(sets) | Expr::GroupingSets(sets) => {
+                found.extend(sets.iter().flatten());
+            }
+            other if !modifiers.is_empty() => found.push(other),
+            _ => {}
+        }
+    }
+    found
+}
+
 /// Whether the SELECT has a plain GROUP BY, so that every group holds at least one row.
 /// `GROUP BY ()`, `ROLLUP`, `CUBE` and `GROUPING SETS` also make a group of all rows, which
 /// may be empty.
@@ -347,6 +389,12 @@ impl<'a> Analyzer<'a> {
         facts.without(scope);
         facts.null_extended.extend(null_extended(&select.from));
         facts.grouped = is_grouped(select);
+        for expr in rolled_up(select) {
+            match self.locate_column(expr, scope) {
+                Some((reference, _, column)) => facts.rolled_up.push((reference, column)),
+                None => facts.rolled_up_exprs.push(expr.to_string()),
+            }
+        }
         self.narrow_select(select, scope, facts)
     }
 
@@ -354,6 +402,9 @@ impl<'a> Analyzer<'a> {
     pub(super) fn nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
         if !facts.non_null_exprs.is_empty() && facts.non_null_exprs.contains(&expr.to_string()) {
             return Nullability::NonNull;
+        }
+        if !facts.rolled_up_exprs.is_empty() && facts.rolled_up_exprs.contains(&expr.to_string()) {
+            return Nullability::Nullable;
         }
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
@@ -613,7 +664,10 @@ impl<'a> Analyzer<'a> {
             let arg = if ALWAYS_VALUED_AGGREGATES.contains(&name.as_str()) {
                 Nullability::NonNull
             } else {
-                first()
+                let rows = facts.ungrouped_rows();
+                args.first().map_or(Nullability::Unknown, |arg| {
+                    self.nullability(arg, scope, &rows)
+                })
             };
             return if empty_possible {
                 Nullability::Nullable
