@@ -8,12 +8,11 @@ pub(super) type Scope = Vec<(String, String)>;
 pub(super) fn table_scope(factor: &TableFactor) -> Scope {
     match factor {
         TableFactor::Table { name, alias, .. } => {
-            let table = object_name(name);
             let reference = alias
                 .as_ref()
                 .map(|alias| alias.name.value.to_lowercase())
-                .unwrap_or_else(|| table.clone());
-            vec![(reference, table)]
+                .unwrap_or_else(|| object_name(name));
+            vec![(reference, table_key(name))]
         }
         _ => Vec::new(),
     }
@@ -116,19 +115,36 @@ pub(super) type Virtuals = HashMap<String, Vec<Column>>;
 impl<'a> Analyzer<'a> {
     /// Columns of a CTE, derived table or schema view; a CTE hides a view of its name.
     pub(super) fn virtual_columns(&self, table: &str) -> Option<&Vec<Column>> {
-        self.virtuals
-            .get(table)
-            .or_else(|| self.schema.views.get(table))
+        self.virtuals.get(table).or_else(|| self.schema.view(table))
+    }
+
+    /// Rows of a call to the function `name` with `args` arguments in `FROM`, when the
+    /// schema defines it.
+    pub(super) fn function_rows(&self, name: &ObjectName, args: usize) -> Option<Vec<Column>> {
+        let column = |name: String, (python_type, sql_type): Typed| Column {
+            name,
+            python_type,
+            sql_type,
+        };
+        Some(match self.schema.function(&table_key(name), args)? {
+            FunctionReturn::Rows(columns) => columns
+                .iter()
+                .map(|col| column(col.name.clone(), col.typed(self.dialect)))
+                .collect(),
+            FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed) => {
+                vec![column(object_name(name), typed.clone())]
+            }
+        })
     }
 
     /// Whether a table reference reads a virtual source: a CTE or view by its bare
     /// name, or a view by its schema-qualified name.
     pub(super) fn is_virtual(&self, name: &ObjectName) -> bool {
-        let table = object_name(name);
+        let table = table_key(name);
         if name.0.len() == 1 {
             self.virtual_columns(&table).is_some()
         } else {
-            self.schema.views.contains_key(&table)
+            self.schema.view(&table).is_some()
         }
     }
 
@@ -139,11 +155,32 @@ impl<'a> Analyzer<'a> {
         let mut scope = Scope::new();
         for factor in relations(from) {
             match factor {
+                TableFactor::Table {
+                    name,
+                    alias,
+                    args: Some(args),
+                    ..
+                } if analyzer.function_rows(name, args.args.len()).is_some() => {
+                    let mut columns = analyzer
+                        .function_rows(name, args.args.len())
+                        .unwrap_or_default();
+                    if let Some(alias) = alias {
+                        rename_columns(&mut columns, alias);
+                    }
+                    let reference = alias.as_ref().map_or_else(
+                        || object_name(name),
+                        |alias| alias.name.value.to_lowercase(),
+                    );
+                    let table = format!("({reference})");
+                    analyzer.virtuals.insert(table.clone(), columns);
+                    scope.push((reference, table));
+                }
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
-                    let table = object_name(name);
-                    let reference = alias
-                        .as_ref()
-                        .map_or_else(|| table.clone(), |alias| alias.name.value.to_lowercase());
+                    let table = table_key(name);
+                    let reference = alias.as_ref().map_or_else(
+                        || object_name(name),
+                        |alias| alias.name.value.to_lowercase(),
+                    );
                     scope.push((reference, table));
                 }
                 TableFactor::Derived {
@@ -181,7 +218,7 @@ impl<'a> Analyzer<'a> {
         matched.peek().is_some()
             && matched.all(|factor| match factor {
                 TableFactor::Table { name, .. } => self
-                    .virtual_columns(&object_name(name))
+                    .virtual_columns(&table_key(name))
                     .is_none_or(|columns| !columns.iter().any(Column::is_unknown_star)),
                 TableFactor::Derived {
                     alias: Some(alias), ..
@@ -215,7 +252,7 @@ impl<'a> Analyzer<'a> {
             .iter()
             .map(|table| {
                 self.virtual_columns(table).cloned().or_else(|| {
-                    self.schema.get(table).map(|columns| {
+                    self.schema.table(table).map(|columns| {
                         columns
                             .iter()
                             .map(|col| {
@@ -246,7 +283,7 @@ impl<'a> Analyzer<'a> {
         }
         let columns = tables
             .iter()
-            .map(|table| self.schema.get(table))
+            .map(|table| self.schema.table(table))
             .collect::<Option<Vec<_>>>()?;
         Some(columns.into_iter().flatten().cloned().collect())
     }
@@ -261,7 +298,7 @@ impl<'a> Analyzer<'a> {
                     .map(|col| (col.python_type.clone(), col.sql_type.clone()));
             }
             self.schema
-                .get(table)?
+                .table(table)?
                 .iter()
                 .find(|col| col.name == column)
                 .map(|col| col.typed(self.dialect))

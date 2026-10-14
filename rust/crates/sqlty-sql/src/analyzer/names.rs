@@ -11,6 +11,17 @@ pub(super) fn object_name(name: &ObjectName) -> String {
         .unwrap_or_default()
 }
 
+/// The key a table reference is looked up by: `schema.name` when qualified, else `name`.
+pub(super) fn table_key(name: &ObjectName) -> String {
+    let parts: Vec<String> = name
+        .0
+        .iter()
+        .filter_map(|part| part.as_ident())
+        .map(|ident| ident.value.to_lowercase())
+        .collect();
+    parts[parts.len().saturating_sub(2)..].join(".")
+}
+
 /// PostgreSQL's name for an unquoted identifier is lowercase.
 pub(super) fn ident_name(ident: &Ident) -> String {
     match ident.quote_style {

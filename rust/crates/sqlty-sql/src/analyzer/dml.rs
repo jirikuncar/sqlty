@@ -38,7 +38,7 @@ pub(super) fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
 pub(super) fn dml_scope(stmt: &Statement) -> Scope {
     match stmt {
         Statement::Insert(insert) => match &insert.table {
-            TableObject::TableName(name) => vec![(object_name(name), object_name(name))],
+            TableObject::TableName(name) => vec![(object_name(name), table_key(name))],
             _ => Vec::new(),
         },
         Statement::Update(update) => table_scope(&update.table.relation),

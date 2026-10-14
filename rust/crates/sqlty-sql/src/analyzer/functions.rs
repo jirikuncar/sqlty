@@ -514,7 +514,7 @@ impl<'a> Analyzer<'a> {
             ),
             _ => return numeric(),
         };
-        if self.schema.get(&table).is_some() && self.virtual_columns(&table).is_none() {
+        if self.schema.table(&table).is_some() && self.virtual_columns(&table).is_none() {
             return Err(format!(
                 "Column '{column}' not found in table '{table}' in schema. \
                  If you want to query columns not in the schema, use an explicit cast: \

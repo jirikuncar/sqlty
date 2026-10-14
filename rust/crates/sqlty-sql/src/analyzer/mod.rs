@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use crate::ddl;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
@@ -17,7 +16,7 @@ use sqlparser::ast::{
     FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Join, JoinConstraint, JoinOperator,
     ObjectName, OutputClause, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr,
     Statement, Subscript, TableAlias, TableFactor, TableObject, TableWithJoins, UnaryOperator,
-    UserDefinedTypeRepresentation, Value,
+    Value,
 };
 use sqlparser::dialect::{
     dialect_from_str, ClickHouseDialect, GenericDialect, MySqlDialect, PostgreSqlDialect,
@@ -39,6 +38,8 @@ use functions::*;
 use names::*;
 use operators::*;
 use query::*;
+
+pub use query::Column;
 use scope::*;
 
 const ANY: &str = "typing.Any";
@@ -112,41 +113,10 @@ static SQL_TO_PYTHON_TYPE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
 
 static STAR_ITEM: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
 
-/// What a schema defines; shared, so caching it is cheap.
-#[derive(Default)]
-pub struct SchemaData {
-    /// Table name -> columns in declaration order.
-    tables: HashMap<String, Vec<SchemaColumn>>,
-    /// View name -> output columns, as analyzed when the view was created.
-    views: HashMap<String, Vec<Column>>,
-    /// Domain and enum type names -> the types their columns have.
-    types: HashMap<String, UserType>,
-    /// Composite type names -> their fields in declaration order.
-    composites: HashMap<String, Vec<SchemaColumn>>,
-}
+use crate::catalog::FunctionReturn;
+pub use crate::catalog::{Catalog as SchemaData, SchemaColumn};
 
 pub type Schema = Arc<SchemaData>;
-
-impl SchemaData {
-    fn get(&self, table: &str) -> Option<&Vec<SchemaColumn>> {
-        self.tables.get(table)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.tables.is_empty() && self.views.is_empty()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct SchemaColumn {
-    /// Lowercased name, for lookups and result column names.
-    pub name: String,
-    /// The name as SQL spells it, quotes kept, for `SELECT *` expansion.
-    pub ident: String,
-    pub sql_type: String,
-    /// The Python type when it is not the one `sql_type` maps to (an enum's `Literal`).
-    python_type: Option<String>,
-}
 
 impl SchemaColumn {
     fn typed(&self, dialect: SqlDialect) -> Typed {
@@ -160,27 +130,12 @@ impl SchemaColumn {
 /// `(kind, name)` of a schema table or view that could not be parsed.
 pub type SkippedObject = (&'static str, String);
 
-/// A domain or enum: the SQL type its columns show (a domain's base type, an enum's
-/// own name) and the Python type when that is a `Literal` of the enum's labels.
-#[derive(Clone, Debug)]
-struct UserType {
-    sql_type: String,
-    python_type: Option<String>,
-}
-
-/// A domain or enum as written in the schema, before domains over other types resolve.
-enum TypeDef {
-    Domain(DataType),
-    Enum(Vec<String>),
-    Composite(Vec<(Ident, DataType)>),
-}
-
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
 type Inferred<T> = Result<T, String>;
 
 /// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum SqlDialect {
+pub enum SqlDialect {
     Postgres,
     MySql,
     Sqlite,
@@ -205,7 +160,7 @@ const OTHER_DIALECTS: [&str; 12] = [
 ];
 
 impl SqlDialect {
-    fn from_name(name: &str) -> Self {
+    pub fn from_name(name: &str) -> Self {
         match name.to_ascii_lowercase().as_str() {
             "postgres" | "postgresql" => Self::Postgres,
             "mysql" => Self::MySql,
@@ -221,7 +176,7 @@ impl SqlDialect {
         }
     }
 
-    fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
+    pub fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
         match self {
             Self::Postgres => Box::new(PostgreSqlDialect {}),
             Self::MySql => Box::new(MySqlDialect {}),
@@ -288,7 +243,7 @@ fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
 }
 
 /// Parse schema DDL, with the MySQL column types sqlparser rejects respelled.
-fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     if dialect != SqlDialect::MySql {
         return parse(sql, dialect);
     }
@@ -486,7 +441,7 @@ fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
 }
 
 /// Canonical spelling of a SQL type, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
-fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
+pub(crate) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
     if let DataType::Array(elem) = dt {
         return match elem {
             ArrayElemTypeDef::None => "ARRAY".to_string(),
@@ -598,229 +553,48 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     }
 }
 
-/// Load schema from CREATE TABLE, VIEW, DOMAIN and TYPE ... AS ENUM statements.
+/// Load schema from CREATE TABLE, VIEW, DOMAIN and TYPE ... AS ENUM statements; in
+/// PostgreSQL also ALTER, DROP, search_path and functions (see [`crate::catalog`]).
+/// Returns the `(kind, name)` of the tables that could not be parsed even without
+/// their constraints and of the views that could not be parsed.
+pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<SkippedObject>) {
+    let (catalog, skipped) = crate::catalog::load(schema_sql, dialect);
+    (Arc::new(catalog), skipped)
+}
+
 #[cfg(test)]
 pub fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
 }
 
-/// The labels of an enum as a `typing.Literal`.
-fn literal_of(labels: &[String]) -> String {
-    let labels: Vec<String> = labels
-        .iter()
-        .map(|label| format!("'{}'", label.replace('\\', "\\\\").replace('\'', "\\'")))
-        .collect();
-    format!("typing.Literal[{}]", labels.join(", "))
-}
-
-/// The lowercased unqualified name of a user-defined type such as `app.percent`.
-fn custom_name(dt: &DataType) -> Option<String> {
-    match dt {
-        DataType::Custom(name, modifiers) if modifiers.is_empty() => Some(object_name(name)),
-        _ => None,
-    }
-}
-
-/// The type a domain or enum named `name` gives its columns; domains over domains
-/// resolve through `defs`, up to a fixed depth.
-fn resolve_user_type(
-    name: &str,
-    defs: &HashMap<String, TypeDef>,
+/// Output columns of `view`'s query, named by its column list, as read against `catalog`.
+pub(crate) fn view_columns(
+    catalog: &SchemaData,
     dialect: SqlDialect,
-    depth: usize,
-) -> Option<UserType> {
-    match defs.get(name)? {
-        TypeDef::Enum(labels) => Some(UserType {
-            sql_type: name.to_uppercase(),
-            python_type: (!labels.is_empty()).then(|| literal_of(labels)),
-        }),
-        TypeDef::Composite(_) => Some(UserType {
-            sql_type: name.to_uppercase(),
-            python_type: None,
-        }),
-        TypeDef::Domain(base) => Some(
-            custom_name(base)
-                .filter(|_| depth < 16)
-                .and_then(|base| resolve_user_type(&base, defs, dialect, depth + 1))
-                .unwrap_or_else(|| UserType {
-                    sql_type: canonical_type(base, dialect),
-                    python_type: None,
-                }),
-        ),
-    }
-}
-
-/// The SQL type of a column, and its Python type when a domain or enum sets it.
-fn resolve_type(
-    dt: &DataType,
-    types: &HashMap<String, UserType>,
-    dialect: SqlDialect,
-) -> (String, Option<String>) {
-    if let DataType::Array(
-        ArrayElemTypeDef::AngleBracket(inner)
-        | ArrayElemTypeDef::Parenthesis(inner)
-        | ArrayElemTypeDef::Qualified(inner, _)
-        | ArrayElemTypeDef::SquareBracket(inner, _),
-    ) = dt
-    {
-        let (sql, python) = resolve_type(inner, types, dialect);
-        let size = match dt {
-            DataType::Array(
-                ArrayElemTypeDef::SquareBracket(_, Some(size))
-                | ArrayElemTypeDef::Qualified(_, Some(size)),
-            ) => format!("[{size}]"),
-            _ => String::new(),
-        };
-        let python = python.or_else(|| python_type(&sql, dialect));
-        return (
-            format!("ARRAY<{sql}>{size}"),
-            python.map(|ty| format!("list[{ty}]")),
-        );
-    }
-    match custom_name(dt).and_then(|name| types.get(&name)) {
-        Some(user) => (user.sql_type.clone(), user.python_type.clone()),
-        None => (canonical_type(dt, dialect), None),
-    }
-}
-
-fn type_defs(statements: &[ddl::Statement], dialect: SqlDialect) -> HashMap<String, TypeDef> {
-    let mut defs = HashMap::new();
-    let parser_dialect = dialect.parser_dialect();
-    let parse_with = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
-    for stmt in statements {
-        if stmt.creates("domain") {
-            let parsed = stmt.domain().and_then(|(name, base)| {
-                let name = parse_with(&name)?.parse_object_name(false).ok()?;
-                let base = parse_with(&base)?.parse_data_type().ok()?;
-                Some((object_name(&name), base))
-            });
-            if let Some((name, base)) = parsed {
-                defs.insert(name, TypeDef::Domain(base));
-            }
-        } else if stmt.creates("type") {
-            let Some(Statement::CreateType {
-                name,
-                representation: Some(representation),
-            }) = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
-            else {
-                continue;
-            };
-            let def = match representation {
-                UserDefinedTypeRepresentation::Enum { labels } => {
-                    TypeDef::Enum(labels.into_iter().map(|label| label.value).collect())
-                }
-                UserDefinedTypeRepresentation::Composite { attributes } => TypeDef::Composite(
-                    attributes
-                        .into_iter()
-                        .map(|attr| (attr.name, attr.data_type))
-                        .collect(),
-                ),
-                _ => continue,
-            };
-            defs.insert(object_name(&name), def);
-        }
-    }
-    defs
-}
-
-/// [`load_schema`], and the `(kind, name)` of the tables that could not be parsed even
-/// without their constraints and of the views that could not be parsed. Domains and enums load first, then tables, then each
-/// view in order, so a view may read the views before it.
-pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec<SkippedObject>) {
-    let dialect = SqlDialect::from_name(dialect);
-    let mut skipped = Vec::new();
-    let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
-    let defs = type_defs(&statements, dialect);
-    let types: HashMap<String, UserType> = defs
-        .keys()
-        .filter_map(|name| Some((name.clone(), resolve_user_type(name, &defs, dialect, 0)?)))
-        .collect();
-    let tables = statements
-        .iter()
-        .filter(|stmt| stmt.is_create_table())
-        .filter_map(|stmt| {
-            let parsed = parse_ddl(&stmt.sql(), dialect)
-                .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect));
-            if parsed.is_none() {
-                skipped.push(("table", stmt.table_name()));
-            }
-            parsed?.into_iter().next()
-        })
-        .filter_map(|stmt| match stmt {
-            Statement::CreateTable(create) if !create.columns.is_empty() => Some(create),
-            _ => None,
-        })
-        .map(|create| {
-            let columns = create
-                .columns
-                .iter()
-                .filter(|col| col.data_type != DataType::Unspecified)
-                .map(|col| {
-                    let (sql_type, python_type) = resolve_type(&col.data_type, &types, dialect);
-                    SchemaColumn {
-                        name: col.name.value.to_lowercase(),
-                        ident: match col.name.quote_style {
-                            Some(_) => col.name.to_string(),
-                            None => col.name.value.to_lowercase(),
-                        },
-                        sql_type,
-                        python_type,
-                    }
-                })
-                .collect();
-            (object_name(&create.name), columns)
-        })
-        .collect();
-    let composites = defs
-        .iter()
-        .filter_map(|(name, def)| match def {
-            TypeDef::Composite(fields) => Some((name.clone(), fields)),
-            _ => None,
-        })
-        .map(|(name, fields)| {
-            let fields = fields
-                .iter()
-                .map(|(field, data_type)| {
-                    let (sql_type, python_type) = resolve_type(data_type, &types, dialect);
-                    SchemaColumn {
-                        name: field.value.to_lowercase(),
-                        ident: field.value.to_lowercase(),
-                        sql_type,
-                        python_type,
-                    }
-                })
-                .collect();
-            (name, fields)
-        })
-        .collect();
-    let mut data = SchemaData {
-        tables,
-        views: HashMap::new(),
-        types,
-        composites,
+    view: &sqlparser::ast::CreateView,
+) -> Vec<Column> {
+    let analyzer = Analyzer {
+        schema: catalog,
+        dialect,
+        virtuals: HashMap::new(),
     };
-    for stmt in statements.iter().filter(|stmt| stmt.creates("view")) {
-        let Some(Statement::CreateView(view)) =
-            parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
-        else {
-            skipped.push(("view", stmt.view_name()));
-            continue;
-        };
-        let analyzer = Analyzer {
-            schema: &data,
-            dialect,
-            virtuals: HashMap::new(),
-        };
-        let mut columns = match analyzer.query_columns(&view.query) {
-            Ok(Some(columns)) => columns,
-            _ => vec![Column::unknown("*")],
-        };
-        for (column, name) in columns.iter_mut().zip(&view.columns) {
-            column.name = name.name.value.clone();
-        }
-        data.views.insert(object_name(&view.name), columns);
+    let mut columns = match analyzer.query_columns(&view.query) {
+        Ok(Some(columns)) => columns,
+        _ => vec![Column::unknown("*")],
+    };
+    for (column, name) in columns.iter_mut().zip(&view.columns) {
+        column.name = name.name.value.clone();
     }
-    (Arc::new(data), skipped)
+    columns
+}
+
+/// `(python_type, sql_type)` of a column of SQL type `sql_type`, whose Python type is
+/// `python_type` when that is not the one the SQL type maps to.
+pub(crate) fn typed(sql_type: String, python_type: Option<String>, dialect: SqlDialect) -> Typed {
+    match python_type {
+        Some(python_type) => (Some(python_type), Some(sql_type)),
+        None => from_sql_type(sql_type, dialect),
+    }
 }
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
@@ -847,13 +621,14 @@ pub fn analyze_select(
     dialect: &str,
     schema: &Option<Schema>,
 ) -> Inferred<Option<Vec<Column>>> {
-    let empty = SchemaData::default();
     let dialect = SqlDialect::from_name(dialect);
     let Some(stmt) = parse_first(sql, dialect) else {
         return Ok(None);
     };
     let analyzer = Analyzer {
-        schema: schema.as_deref().unwrap_or(&empty),
+        schema: schema
+            .as_deref()
+            .unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
         virtuals: HashMap::new(),
     };

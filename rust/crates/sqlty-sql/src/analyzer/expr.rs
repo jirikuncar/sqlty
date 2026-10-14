@@ -38,7 +38,7 @@ impl<'a> Analyzer<'a> {
         let Some(elem) = array.and_then(array_element) else {
             return (None, None);
         };
-        match self.schema.types.get(&elem.to_lowercase()) {
+        match self.schema.user_type(&elem.to_lowercase()) {
             Some(user) if user.python_type.is_some() => {
                 (user.python_type.clone(), Some(elem.to_string()))
             }
@@ -49,7 +49,7 @@ impl<'a> Analyzer<'a> {
     /// The type of `field` in the composite type `composite`, when the schema declares it.
     pub(super) fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Typed {
         composite
-            .and_then(|name| self.schema.composites.get(&name.to_lowercase()))
+            .and_then(|name| self.schema.composite(&name.to_lowercase()))
             .and_then(|fields| {
                 fields
                     .iter()
@@ -58,11 +58,22 @@ impl<'a> Analyzer<'a> {
             .map_or((None, None), |col| col.typed(self.dialect))
     }
 
+    /// The type of a call to a function the schema defines.
+    fn user_function(&self, name: &ObjectName, args: &FunctionArguments) -> Typed {
+        let count = match args {
+            FunctionArguments::List(list) => list.args.len(),
+            _ => 0,
+        };
+        match self.schema.function(&table_key(name), count) {
+            Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => typed.clone(),
+            _ => (None, None),
+        }
+    }
+
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => {
-                let (sql_type, python_type) =
-                    resolve_type(data_type, &self.schema.types, self.dialect);
+                let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
                 Ok(match python_type {
                     Some(python_type) => (Some(python_type), Some(sql_type)),
                     None => from_sql_type(sql_type, self.dialect),
@@ -202,7 +213,7 @@ impl<'a> Analyzer<'a> {
                     "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
                     _ => match self.returns(&name) {
                         Some(returns) => self.function_type(returns, &args, scope),
-                        None => Ok((None, None)),
+                        None => Ok(self.user_function(&func.name, &func.args)),
                     },
                 }
             }
