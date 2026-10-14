@@ -232,3 +232,42 @@ A strict function still narrows.
 SELECT a FROM t WHERE abs(a) IS NOT NULL
 -- inferred: tuple[int]
 ```
+
+## Recursive CTEs: non-null in the anchor and in every recursive step
+
+The recursive term reads the rows found so far, so a column it fills from a nullable column
+is nullable for the next step, too.
+
+```sql
+WITH RECURSIVE r(x, y) AS (
+    SELECT 1, 1
+    UNION ALL
+    SELECT y, NULL FROM r WHERE x < 5
+)
+SELECT x, y FROM r
+-- inferred: tuple[int | None, int | None]
+```
+
+A shift that spreads NULL over several rounds is followed to the end.
+
+```sql
+WITH RECURSIVE r(x, y, z) AS (
+    SELECT 1, 1, 1
+    UNION ALL
+    SELECT y, z, NULL FROM r WHERE x < 5
+)
+SELECT x, y, z FROM r
+-- inferred: tuple[int | None, int | None, int | None]
+```
+
+A column that stays non-null in both terms is non-null.
+
+```sql
+WITH RECURSIVE r(n, m) AS (
+    SELECT 1, 1
+    UNION ALL
+    SELECT n + 1, m FROM r WHERE n < 5
+)
+SELECT n, m FROM r
+-- inferred: tuple[int, int]
+```

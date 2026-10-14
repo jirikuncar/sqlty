@@ -94,6 +94,7 @@ impl<'a> Analyzer<'a> {
             let mut inner = self.clone();
             for cte in &with.cte_tables {
                 let name = cte.alias.name.value.to_lowercase();
+                let mut recursive = false;
                 if let (true, SetExpr::SetOperation { left, .. }) =
                     (with.recursive, cte.query.body.as_ref())
                 {
@@ -101,12 +102,40 @@ impl<'a> Analyzer<'a> {
                         let mut seed = inner.select_columns(select)?;
                         rename_columns(&mut seed, &cte.alias);
                         inner.virtuals.insert(name.clone(), seed);
+                        recursive = true;
                     }
                 }
                 let mut columns = inner
                     .query_columns(&cte.query)?
                     .unwrap_or_else(|| vec![Column::unknown("*")]);
                 rename_columns(&mut columns, &cte.alias);
+                // A column of a recursive CTE is non-null only if it is in the anchor and in
+                // the recursive term reading the rows so far: repeat until nothing changes.
+                for round in 0..=columns.len() + 1 {
+                    if !recursive {
+                        break;
+                    }
+                    let known: Vec<Nullability> = inner.virtuals[&name]
+                        .iter()
+                        .map(|col| col.nullability)
+                        .collect();
+                    let now: Vec<Nullability> = columns.iter().map(|col| col.nullability).collect();
+                    if known == now {
+                        break;
+                    }
+                    if round > columns.len() {
+                        // Not settling: no column is known to be non-null.
+                        for col in &mut columns {
+                            col.nullability = Nullability::Nullable;
+                        }
+                        break;
+                    }
+                    inner.virtuals.insert(name.clone(), columns);
+                    columns = inner
+                        .query_columns(&cte.query)?
+                        .unwrap_or_else(|| vec![Column::unknown("*")]);
+                    rename_columns(&mut columns, &cte.alias);
+                }
                 inner.virtuals.insert(name, columns);
             }
             return inner.query_body(query);
