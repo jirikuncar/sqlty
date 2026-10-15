@@ -219,9 +219,9 @@ def _check_member(
     if head is None or head in _OPEN:
         return
     info = ctx.defs.get(head) if isinstance(member, ast.Name) else None
-    typed_dict = info if info is not None and info.kind == "TypedDict" else None
+    row_type = info if info is not None and info.kind in ("TypedDict", "BaseModel") else None
     if isinstance(shape, str):
-        if head in _BUILTINS | _LISTS | _MAPPINGS or typed_dict:
+        if head in _BUILTINS | _LISTS | _MAPPINGS or row_type:
             if head not in _SCALAR_HEADS[shape]:
                 _mismatch(shape, member, path, out)
         return
@@ -230,20 +230,20 @@ def _check_member(
         if head in _LISTS:
             if isinstance(member, ast.Subscript):
                 _check(shape["array"], member.slice, f"{path}[]", ctx, out, depth + 1)
-        elif head in _BUILTINS | _MAPPINGS or typed_dict:
+        elif head in _BUILTINS | _MAPPINGS or row_type:
             _mismatch(shape, member, path, out)
     elif kind == "map":
         if head in _MAPPINGS:
             if parts := _mapping_parts(member, path, ctx, out):
                 _check(shape["map"], parts, f"{path}[key]", ctx, out, depth + 1)
-        elif head in _BUILTINS | _LISTS or typed_dict:
+        elif head in _BUILTINS | _LISTS or row_type:
             _mismatch(shape, member, path, out)
     elif head in _MAPPINGS:
         if parts := _mapping_parts(member, path, ctx, out):
             for field in shape["object"]:
                 _check(field["value"], parts, _join(path, field["name"]), ctx, out, depth + 1)
-    elif typed_dict is not None:
-        _check_typed_dict(shape["object"], typed_dict, path, ctx, out, depth)
+    elif row_type is not None:
+        _check_row_type(shape["object"], row_type, path, ctx, out, depth)
     elif head in _BUILTINS | _LISTS:
         _mismatch(shape, member, path, out)
 
@@ -262,7 +262,7 @@ def _join(path: str, name: str) -> str:
     return f"{path}.{name}" if path else name
 
 
-def _check_typed_dict(
+def _check_row_type(
     fields: list[Mapping[str, typing.Any]],
     info: TypeInfo,
     path: str,
@@ -272,21 +272,28 @@ def _check_typed_dict(
 ) -> None:
     inner = _Context(ctx.defs, info.aliases or ctx.aliases)
     built = {field["name"]: field for field in fields}
-    declared = dict(info.fields)
+    # A Pydantic model reads keys by alias; its field types are not checked here.
+    model = info.kind == "BaseModel"
+    admits_extra = info.extra_items or info.allows_extra or info.opaque
     for name, field in built.items():
         where = _join(path, name)
-        if name not in declared:
-            if not info.extra_items:
+        key = info.field_for(name)
+        if key is None:
+            if not admits_extra:
                 out.append(
                     _at(path or "the object", f"has key '{name}' that {info.name} does not declare")
                 )
             continue
-        if field["optional"] and name in info.required:
+        if field["optional"] and key in info.required:
             out.append(_at(where, f"is required by {info.name} but the query may omit it"))
-        if (annotation := info.annotations.get(name)) is not None:
+        if not model and (annotation := info.annotations.get(key)) is not None:
             _check(field["value"], annotation, where, inner, out, depth + 1)
-    out.extend(
-        _at(_join(path, name), f"is required by {info.name} but the query does not build it")
-        for name in declared
-        if name in info.required and name not in built
-    )
+    for key, _ in info.fields:
+        names = info.column_names(key)
+        if key in info.required and key not in info.opaque and not built.keys() & set(names):
+            out.append(
+                _at(
+                    _join(path, names[0]),
+                    f"is required by {info.name} but the query does not build it",
+                )
+            )
