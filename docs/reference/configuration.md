@@ -1,8 +1,9 @@
 # Configuration
 
 sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI uses, for each
-file, the nearest `pyproject.toml` above it; the magic codec searches from the
-current directory. Command-line flags override the file. An unknown key, rule or
+file, the nearest `pyproject.toml` above it, unless
+[`--config-file` or `--isolated`](cli.md#configuration-flags) picks one file or none; the magic codec
+searches from the current directory. Command-line flags override the file. An unknown key, rule or
 severity is an error (exit 2) that names the file and suggests the closest match.
 
 In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
@@ -10,7 +11,8 @@ package's packaging-only `pyproject.toml` in a monorepo does not hide the
 root config. The closest table wins; settings are not merged with tables in
 parent directories. To change one setting for a nested project, give it its
 own complete `[tool.sqlty]` table. Command-line flags (`--dialect`,
-`--schema`, `--untyped`) override the table for every path.
+`--schema`, `--untyped`, `--exclude`, `--extend-exclude`, `--error`/`--warn`/`--ignore`)
+and `-c KEY=VALUE` assignments override the table for every path.
 
 ```toml
 [tool.sqlty]
@@ -148,7 +150,8 @@ The default excludes are:
 A glob without a slash matches a file or
 directory name at any depth; one with a slash matches the path relative to
 the `pyproject.toml` that holds it, and `**` recurses. Files named on the
-command line are always processed.
+command line are always processed, unless `--force-exclude` is given. The CLI's `--exclude` and
+`--extend-exclude` take the same globs, relative to the current directory.
 
 ```toml
 [tool.sqlty]
