@@ -7,14 +7,15 @@ Default severity: **error**
 Matches query columns to the fields of a TypedDict, dataclass or Pydantic
 model by name, as `dict_row` and `class_row` do: every required field must be
 selected, and columns without a field are allowed only through
-[PEP 728](https://peps.python.org/pep-0728/) `extra_items=...` (a Pydantic
-model ignores them). `NotRequired` keys and fields with a default may be
+[PEP 728](https://peps.python.org/pep-0728/) `extra_items=...` or a Pydantic
+model's `extra="allow"`. `NotRequired` keys and fields with a default may be
 missing.
 
 ## Why is this bad?
 
 A row factory that passes columns by name fails on a missing required field
-and on a column the type does not declare.
+and on a column the type does not declare. A Pydantic model drops an undeclared column by
+default, so the query fetches data, possibly sensitive, that is never used.
 
 ## Example
 
