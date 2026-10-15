@@ -271,6 +271,9 @@ impl<'a> Analyzer<'a> {
                 return self.proven(inner, scope)
             }
             Expr::UnaryOp { expr: inner, .. } => return self.proven(inner, scope),
+            // A literal's nullability is fixed; a placeholder reads as `NULL` here, and
+            // `WHERE id = %(id)s` must not make every `NULL` in the query non-null.
+            Expr::Value(_) => return learned,
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
                 if let Some((reference, _, column)) = self.locate_column(expr, scope) {
                     learned.present.insert(reference.clone());

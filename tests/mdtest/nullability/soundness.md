@@ -38,6 +38,31 @@ SELECT CASE WHEN a IS NULL THEN 0 ELSE a END FROM t
 -- inferred: tuple[int]
 ```
 
+## CASE: ELSE NULL stays NULL under a parameter in WHERE
+
+A parameter in `WHERE` proves the column it is compared with, not the `NULL` of an
+`ELSE` branch.
+
+```sql
+SELECT CASE WHEN a > 0 THEN 5::float / a ELSE NULL END AS ratio FROM t
+-- inferred: tuple[float | None]
+```
+
+```sql
+SELECT CASE WHEN a > 0 THEN 5::float / a ELSE NULL END AS ratio FROM t WHERE id = %(id)s
+-- inferred: tuple[float | None]
+```
+
+```sql
+SELECT CASE WHEN a > 0 THEN 5::float / a ELSE NULL END AS ratio FROM t WHERE id = %s
+-- inferred: tuple[float | None]
+```
+
+```sql
+SELECT CASE WHEN a > 0 THEN a END, a FROM t WHERE a = %(a)s
+-- inferred: tuple[int | None, int]
+```
+
 The right side of an `OR` is read where the left one is false or NULL.
 
 ```sql
