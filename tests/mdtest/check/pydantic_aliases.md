@@ -55,6 +55,7 @@ class User(BaseModel):
     user_id: int = Field(alias="id")
     name: str
 
+# error: [typeddict-key-mismatch] "User has no field for query column 'user_id'"
 # error: [typeddict-key-mismatch] "User.id is required but missing from query"
 query = SQL[User]("--sql\nSELECT user_id::INTEGER, name FROM users")
 ```
@@ -157,7 +158,23 @@ class User(BaseModel):
 query = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 
-## Other extra settings ignore undeclared columns
+## extra="ignore" reports undeclared columns
+
+`ignore` is the default: the column is fetched and dropped.
+
+```python
+from pydantic import BaseModel, ConfigDict
+from sqlty import SQL
+
+class User(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: int
+
+# error: [typeddict-key-mismatch] "User has no field for query column 'name'"
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+```
+
+## extra="allow" keeps undeclared columns
 
 ```python
 from pydantic import BaseModel, ConfigDict
@@ -169,4 +186,74 @@ class User(BaseModel):
 
 # error:
 query = SQL[User]("--sql\nSELECT id, name FROM users")
+```
+
+## A config not read from source may allow undeclared columns
+
+```python
+from pydantic import BaseModel, ConfigDict
+from sqlty import SQL
+
+CONFIG = ConfigDict(extra="allow")
+
+class Shared(BaseModel):
+    model_config = CONFIG
+    id: int
+
+class Spread(BaseModel):
+    model_config = ConfigDict(**CONFIG)
+    id: int
+
+class Base(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+class Child(Base):
+    id: int
+
+# error:
+a = SQL[Shared]("--sql\nSELECT id, name FROM users")
+b = SQL[Spread]("--sql\nSELECT id, name FROM users")
+c = SQL[Child]("--sql\nSELECT id, name FROM users")
+```
+
+## Extra keys of a JSON object built into a model
+
+A model nested in a JSON column reads its keys as a row reads columns: by alias, with
+undeclared keys reported unless the model allows them.
+
+```python
+from typing import Annotated, LiteralString
+from pydantic import BaseModel, ConfigDict, Field
+from sqlty import SQL
+
+def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> T: ...
+
+class Info(BaseModel):
+    name: str
+
+class Open(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str
+
+class Aliased(BaseModel):
+    user_name: str = Field(alias="name")
+
+class Row(BaseModel):
+    info: Info
+
+class OpenRow(BaseModel):
+    info: Open
+
+class AliasedRow(BaseModel):
+    info: Aliased
+
+# error: [json-shape-mismatch] "Row.info is Info but query column 'info' builds JSON that does not fit: info has key 'password_hash' that Info does not declare"
+extra = fetch_one("SELECT jsonb_build_object('name', 'a'::TEXT, 'password_hash', 'x'::TEXT) AS info", Row)
+# error: [json-shape-mismatch] "Row.info is Info but query column 'info' builds JSON that does not fit: info has key 'nick' that Info does not declare; info.name is required by Info but the query does not build it"
+missing = fetch_one("SELECT jsonb_build_object('nick', 'a'::TEXT) AS info", Row)
+allowed = fetch_one("SELECT jsonb_build_object('name', 'a'::TEXT, 'password_hash', 'x'::TEXT) AS info", OpenRow)
+aliased = fetch_one("SELECT jsonb_build_object('name', 'a'::TEXT) AS info", AliasedRow)
+# error: [typeddict-key-mismatch] "Info has no field for query column 'id'"
+# error: [typeddict-key-mismatch] "Info has no field for query column 'password_hash'"
+user = fetch_one("SELECT 1::INTEGER AS id, 'a'::TEXT AS name, 'x'::TEXT AS password_hash", Info)
 ```
