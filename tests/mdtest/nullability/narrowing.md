@@ -221,6 +221,47 @@ SELECT users.id, orders.id, o2.id FROM users LEFT JOIN (orders JOIN orders o2 ON
 -- inferred: tuple[int, int | None, int | None]
 ```
 
+## Outer joins to one row are never null-extended
+
+An aggregate without `GROUP BY` returns exactly one row, so `LEFT JOIN ... ON TRUE` to it
+always matches.
+
+```sql
+SELECT c.n, c.total FROM users
+LEFT JOIN LATERAL (SELECT count(*) AS n, sum(orders.total) AS total FROM orders WHERE orders.user_id = users.id) c ON TRUE
+-- inferred: tuple[int, decimal.Decimal | None]
+```
+
+```sql
+SELECT c.n FROM users LEFT JOIN (SELECT count(*) AS n FROM orders) c ON TRUE
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT jsonb_build_object('n', c.n) AS doc FROM users
+LEFT JOIN LATERAL (SELECT count(*) AS n FROM orders WHERE orders.user_id = users.id) c ON TRUE
+-- json: doc: {n: integer}
+```
+
+A condition other than `TRUE` can fail, and a grouped query can return no row.
+
+```sql
+SELECT c.n FROM users LEFT JOIN (SELECT count(*) AS n FROM orders) c ON c.n > 0
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT c.n FROM users
+LEFT JOIN LATERAL (SELECT count(*) AS n FROM orders WHERE orders.user_id = users.id GROUP BY orders.user_id) c ON TRUE
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT c.n FROM users
+LEFT JOIN LATERAL (SELECT count(*) AS n FROM orders HAVING count(*) > 1) c ON TRUE
+-- inferred: tuple[int | None]
+```
+
 ## AND, OR and CASE read their right side under the left
 
 ```sql
