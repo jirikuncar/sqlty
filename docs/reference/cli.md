@@ -17,9 +17,63 @@ Each command takes files or directories (default: the current directory) and
 processes every `.py` file under them, skipping the default and configured
 [excludes](configuration.md#exclude-and-extend-exclude) (`.venv`, `.git`,
 `node_modules`, ...) while walking a directory; a file named on the command
-line is always processed. A path that does not exist is an error. Each file uses `[tool.sqlty]` from the
+line is always processed unless `--force-exclude` is given. A path that does
+not exist is an error. Each file uses `[tool.sqlty]` from the
 nearest `pyproject.toml` above it that has one; see
 [Configuration](configuration.md). Command-line flags override it.
+
+## Configuration flags
+
+To run sqlty on a project without editing its `pyproject.toml`, pass the
+settings on the command line or in a file of your own. The flags follow
+[ty](https://docs.astral.sh/ty/reference/cli/) and
+[ruff](https://docs.astral.sh/ruff/configuration/):
+
+```bash
+sqlty check --config-file ~/sqlty.toml .            # one file for every path
+sqlty check -c 'schema = "db/"' -c 'dialect = "mysql"' .  # override single keys
+sqlty check --isolated --schema db/ .               # defaults plus flags only
+sqlty check --ignore select-star --error stale-type .  # rule severities
+sqlty check --extend-exclude 'legacy/*' .           # skip more than the config does
+sqlty rewrite --exclude migrations --exclude build .  # replace the excludes
+```
+
+`--config-file PATH` reads `[tool.sqlty]` from a file named `pyproject.toml` and
+the same keys at the top level of any other file, such as `sqlty.toml`.
+
+`sqlty.toml`:
+
+```toml
+schema = "db/schema"
+extend-exclude = ["migrations"]
+
+[rules]
+select-star = "ignore"
+```
+
+It replaces the per-file lookup for every path, and its relative paths
+(`schema`, `exclude`, `extend-exclude`) start from the current directory, so
+the file can live outside the project. `SQLTY_CONFIG_FILE` sets it when
+`--config-file` is not given. `--isolated` ignores every configuration file,
+including `SQLTY_CONFIG_FILE`; it cannot be combined with `--config-file`.
+
+`-c`/`--config KEY=VALUE` is a TOML assignment applied on top of whichever
+configuration applies, `--isolated` included. Repeat it for several keys;
+the last value of a key wins, and tables merge key by key, so
+`-c 'rules.select-star = "ignore"'` keeps the other configured rules. Its
+`schema`, `exclude` and `extend-exclude` are relative to the current directory,
+like the flags of the same name, which take precedence.
+
+`--error RULE`, `--warn RULE` and `--ignore RULE` set a rule's severity over
+`[tool.sqlty.rules]` and `-c`; for a rule given several times, the last flag wins.
+
+`--exclude GLOB` replaces `exclude` from the config together with the
+default excludes; the config's `extend-exclude` still applies.
+`--extend-exclude GLOB` adds to whichever list applies. Both repeat, and
+their globs follow the rules of [`exclude`](configuration.md#exclude-and-extend-exclude),
+relative to the current directory. `--force-exclude` applies the excludes to
+files and directories named on the command line too, which is useful when a
+tool such as pre-commit passes file names.
 
 ## Exit codes
 
@@ -40,6 +94,15 @@ nearest `pyproject.toml` above it that has one; see
 | `paths ...` | Files or directories (default: .); each file uses its nearest pyproject.toml |
 | `--dialect {postgres,sqlite,mysql}` | SQL dialect (default: [tool.sqlty] dialect, else postgres) |
 | `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
+| `--config-file PATH` | Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
+| `--isolated` | Ignore every configuration file; use the defaults and command-line flags |
+| `-c`, `--config KEY=VALUE` | Override a configuration key with a TOML assignment, e.g. `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`; repeat for several. Paths are relative to the current directory |
+| `--error RULE` | Treat RULE as severity error; repeat for several, the last flag for a rule wins |
+| `--warn RULE` | Treat RULE as severity warn; repeat for several, the last flag for a rule wins |
+| `--ignore RULE` | Treat RULE as severity ignore; repeat for several, the last flag for a rule wins |
+| `--exclude GLOB` | Skip this glob while walking directories, replacing [tool.sqlty] exclude and the default excludes; repeat for several. Relative to the current directory |
+| `--extend-exclude GLOB` | Skip this glob in addition to the other excludes; repeat for several. Relative to the current directory |
+| `--force-exclude` | Apply the excludes to files and directories named on the command line too |
 | `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes |
 | `-q`, `--quiet` | Suppress non-error output |
 <!-- /generated:cli-options-common -->
@@ -59,7 +122,10 @@ never change the exit code.
 <!-- generated:cli-usage-rewrite -->
 ```
 sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}]
-              [--schema SCHEMA] [-v] [-q] [--check] [--diff]
+              [--schema SCHEMA] [--config-file PATH | --isolated]
+              [-c KEY=VALUE] [--error RULE] [--warn RULE]
+              [--ignore RULE] [--exclude GLOB] [--extend-exclude GLOB]
+              [--force-exclude] [-v] [-q] [--check] [--diff]
               [--untyped {skip,sentinel}]
               [paths ...]
 ```
@@ -88,6 +154,9 @@ which `check` still checks.
 <!-- generated:cli-usage-strip -->
 ```
 sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
+            [--config-file PATH | --isolated] [-c KEY=VALUE]
+            [--error RULE] [--warn RULE] [--ignore RULE]
+            [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [-v] [-q] [--check] [--diff]
             [paths ...]
 ```
@@ -115,7 +184,11 @@ Found 1 warning(s)
 <!-- generated:cli-usage-check -->
 ```
 sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
-            [-v] [-q] [--fix] [--statistics]
+            [--config-file PATH | --isolated] [-c KEY=VALUE]
+            [--error RULE] [--warn RULE] [--ignore RULE]
+            [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
+            [-v] [-q] [--fix] [--exit-zero] [--exit-zero-on-warning]
+            [--error-on-warning] [--statistics]
             [paths ...]
 ```
 <!-- /generated:cli-usage-check -->
@@ -124,6 +197,9 @@ sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
 | Option | Description |
 |--------|-------------|
 | `--fix` | Apply the fixable rules (see `sqlty rule`), write the files, then report what remains |
+| `--exit-zero` | Exit 0 even when an error-severity diagnostic is reported |
+| `--exit-zero-on-warning` | Exit 0 when no diagnostic has severity error (the default); cannot be combined with --error-on-warning |
+| `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
 <!-- /generated:cli-options-check -->
 
@@ -141,9 +217,12 @@ f-, t- and raw strings, and other `--sql` strings that are not plain literals,
 counted by the rule that reports them. Queries that return no rows are not
 counted.
 
-Rule severities come from `[tool.sqlty.rules]`; see [Rules](rules.md).
+Rule severities come from `[tool.sqlty.rules]`, `-c` and `--error`/`--warn`/`--ignore`; see [Rules](rules.md).
 
 Exit code: 1 if any diagnostic has severity `error`; warnings alone exit 0.
+As in ty, `--exit-zero` always exits 0, `--error-on-warning` also exits 1 on
+a `warn` diagnostic, and `--exit-zero-on-warning` keeps the default; combining
+`--error-on-warning` with either of the others is an error (exit 2).
 
 ## `sqlty rule`
 
@@ -169,4 +248,5 @@ Print `sqlty <version>` and exit. `sqlty --version` does the same.
 
 | Variable | Effect |
 |----------|--------|
+| `SQLTY_CONFIG_FILE` | Default for `--config-file`; ignored with `--isolated` |
 | `SQLTY_NO_MAGIC` | Any non-empty value (even `0`) stops `sqlty.magic` from registering the magic codec on import |

@@ -471,11 +471,12 @@ def test_verbose_names_each_changed_file(
     assert "Fixed f.py" in out
 
 
-def test_exclude_glob_outside_the_config_directory_never_matches(tmp_path: Path) -> None:
+def test_exclude_path_glob_outside_its_base_never_matches(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     outside = tmp_path / "other" / "gen.py"
-    assert not _is_excluded(outside, project.resolve(), ("gen.py", "other"))
+    assert not _is_excluded(outside, project.resolve(), ("other/gen.py", "*/gen.py"))
+    assert _is_excluded(outside, project.resolve(), ("gen.py",))
 
 
 def test_walk_compiles_exclude_globs_once_per_pattern_set(tmp_path: Path) -> None:
@@ -506,3 +507,330 @@ def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path) -> None:
         path.write_text("")
     found = {p.relative_to(tmp_path).as_posix() for p in _collect_python_files([tmp_path])}
     assert found == {"keep.py", "a/d.py"}
+
+
+def _tree(root: Path, *paths: str) -> None:
+    for rel in paths:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+
+
+@pytest.mark.parametrize("command", ["check", "rewrite", "strip"])
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        ([], {"keep.py", "legacy/old.py", "gen/x.py"}),
+        (["--extend-exclude", "legacy"], {"keep.py", "gen/x.py"}),
+        (["--extend-exclude", "legacy", "--extend-exclude", "gen/*.py"], {"keep.py"}),
+        (["--exclude", "legacy"], {"keep.py", "gen/x.py", "node_modules/m.py"}),
+        (["--exclude", "legacy", "--exclude", "keep.py"], {"gen/x.py", "node_modules/m.py"}),
+        (["--exclude", "gen", "--extend-exclude", "node_modules"], {"keep.py", "legacy/old.py"}),
+    ],
+)
+def test_exclude_flags(tmp_path: Path, monkeypatch, command, flags, expected) -> None:
+    """``--exclude`` replaces the config and default excludes; ``--extend-exclude`` adds to them."""
+    from sqlty._cli import _collect_python_files
+
+    _tree(tmp_path, "keep.py", "legacy/old.py", "gen/x.py", "node_modules/m.py", "sub/build/b.py")
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nextend-exclude = ["build"]\n')
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args([command, *flags, "."])
+
+    files = _collect_python_files(args.paths, SettingsResolver(args).source)
+
+    assert {p.as_posix() for p in files} == expected
+
+
+def test_cli_exclude_globs_are_relative_to_the_current_directory(tmp_path, monkeypatch) -> None:
+    from sqlty._cli import _collect_python_files
+
+    _tree(tmp_path, "app/gen/a.py", "app/pyproject.toml", "app/b.py")
+    (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\n")
+    monkeypatch.chdir(tmp_path)
+    for glob in ("app/gen", "./app/gen", str(tmp_path.resolve() / "app" / "gen")):
+        args = build_parser().parse_args(["check", "--extend-exclude", glob, "app"])
+
+        files = _collect_python_files(args.paths, SettingsResolver(args).source)
+
+        assert [p.as_posix() for p in files] == ["app/b.py"], glob
+
+
+def test_isolated_ignores_every_config(tmp_path, monkeypatch, capsys) -> None:
+    from sqlty._cli import _collect_python_files
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\ndialect = "mysql"\nexclude = ["gen"]\n'
+        '[tool.sqlty.rules]\nselect-star-no-schema = "ignore"\n'
+    )
+    _tree(tmp_path, ".venv/v.py", "gen/g.py")
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT * FROM t")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert "[select-star-no-schema]" not in _run(["check", "."], capsys)[1]
+    assert "[select-star-no-schema]" in _run(["check", "--isolated", "."], capsys)[1]
+    for flags, dialect, files in (
+        ([], "mysql", {".venv/v.py", "q.py"}),
+        (["--isolated"], "postgres", {"gen/g.py", "q.py"}),
+    ):
+        args = build_parser().parse_args(["check", *flags, "."])
+        resolver = SettingsResolver(args)
+        assert resolver.for_file(tmp_path / "q.py").dialect == dialect
+        assert {p.as_posix() for p in _collect_python_files(args.paths, resolver.source)} == files
+
+
+def test_isolated_skips_an_invalid_config(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nbogus = 1\n")
+    (tmp_path / "q.py").write_text("")
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["check", "."], capsys)[0] == 2
+    assert _run(["check", "--isolated", "."], capsys)[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("sqlty.toml", 'schema = "db/schema.sql"\n'),
+        ("pyproject.toml", '[tool.sqlty]\nschema = "db/schema.sql"\n'),
+    ],
+)
+def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) -> None:
+    """``--config`` applies to every path; its relative paths start at the current directory."""
+    project = tmp_path / "project"
+    _tree(project, "db/schema.sql", "pkg/q.py")
+    (project / "db" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (project / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
+    (project / "pkg" / "q.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
+    config = tmp_path / "elsewhere" / name
+    config.parent.mkdir()
+    config.write_text(content)
+    monkeypatch.chdir(project)
+
+    main(["rewrite", "--config-file", str(config), "pkg"])
+
+    assert (project / "pkg" / "q.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+    )
+    args = build_parser().parse_args(["check", "--config-file", str(config), "pkg"])
+    assert SettingsResolver(args).for_file(project / "pkg" / "q.py").dialect == "postgres"
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "message"),
+    [
+        (None, "", "config file does not exist"),
+        ("", "", "config path is not a file"),
+        ("pyproject.toml", "[project]\n", "no [tool.sqlty] table"),
+        ("sqlty.toml", "dialect = \n", "sqlty.toml: "),
+        ("sqlty.toml", "dialet = 'mysql'\n", "did you mean 'dialect'"),
+        ("sqlty.toml", "untyped = 'x'\n", "sqlty.toml: untyped must be"),
+    ],
+)
+def test_config_file_errors(tmp_path, monkeypatch, capsys, name, content, message) -> None:
+    (tmp_path / "q.py").write_text("")
+    config = tmp_path / (name if name is not None else "missing.toml")
+    if name:
+        config.write_text(content)
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["rewrite", "--config-file", str(config), "q.py"], capsys)
+
+    assert code == 2
+    assert message in err
+
+
+def test_config_and_isolated_are_exclusive(capsys) -> None:
+    code, _, err = _run(["check", "--config-file", "x.toml", "--isolated"], capsys)
+    assert code == 2
+    assert "not allowed with argument" in err
+
+
+def test_inline_config_overrides(tmp_path, monkeypatch) -> None:
+    """``-c`` applies on top of the discovered config; rule tables merge key by key."""
+    _tree(tmp_path, "db/schema.sql", "gen/g.py", "q.py")
+    (tmp_path / "db" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\ndialect = "mysql"\n[tool.sqlty.rules]\nselect-star = "error"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(
+        [
+            "check",
+            "-c",
+            'dialect = "sqlite"',
+            "--config",
+            'rules.stale-type = "ignore"',
+            "-c",
+            'schema = "db/schema.sql"',
+            "-c",
+            'extend-exclude = ["gen"]',
+            ".",
+        ]
+    )
+    resolver = SettingsResolver(args)
+    settings = resolver.for_file(tmp_path / "q.py")
+
+    assert settings.dialect == "sqlite"
+    assert settings.rules == {"select-star": "error", "stale-type": "ignore"}
+    assert settings.schema_sql is not None and "users" in settings.schema_sql
+    from sqlty._cli import _collect_python_files
+
+    assert _collect_python_files(args.paths, resolver.source) == [Path("q.py")]
+
+
+def test_inline_config_works_with_isolated(tmp_path, monkeypatch) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "import sqlty"\n')
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(["check", "--isolated", "-c", 'dialect = "mysql"', "."])
+
+    settings = SettingsResolver(args).for_file(tmp_path / "q.py")
+
+    assert (settings.dialect, settings.import_style) == ("mysql", None)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("sqlty.toml", "use --config-file for a file"),
+        ("dialect = mysql", "--config 'dialect = mysql': "),
+        ('dialet = "mysql"', "did you mean 'dialect'"),
+        ('rules.bogus = "ignore"', "unknown rule 'bogus'"),
+    ],
+)
+def test_inline_config_errors(tmp_path, monkeypatch, capsys, value, message) -> None:
+    (tmp_path / "q.py").write_text("")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "-c", value, "q.py"], capsys)
+
+    assert code == 2
+    assert message in err
+
+
+def test_rule_severity_flags(tmp_path, monkeypatch, capsys) -> None:
+    """``--error``/``--warn``/``--ignore`` override config and ``-c``; the last flag per rule wins."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\n[tool.sqlty.rules]\nselect-star-no-schema = "ignore"\n'
+    )
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT * FROM t")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["check", "q.py"], capsys)[0] == 0
+    assert _run(["check", "--error", "select-star-no-schema", "q.py"], capsys)[0] == 1
+    code, out, _ = _run(["check", "--warn", "select-star-no-schema", "q.py"], capsys)
+    assert (code, "[select-star-no-schema]" in out) == (0, True)
+    flags = ["-c", 'rules.select-star-no-schema = "error"', "--error", "select-star-no-schema"]
+    assert _run(["check", *flags, "--ignore", "select-star-no-schema", "q.py"], capsys)[0] == 0
+    code, _, err = _run(["check", "--ignore", "select-stra", "q.py"], capsys)
+    assert (code, "did you mean 'select-star'" in err) == (2, True)
+
+
+def test_exit_zero(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT * FROM t")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["check", "--isolated", "q.py"], capsys)[0] == 1
+    code, out, _ = _run(["check", "--isolated", "--exit-zero", "q.py"], capsys)
+    assert (code, "Found 1 error(s)" in out) == (0, True)
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_force_exclude_applies_to_named_paths(tmp_path, monkeypatch, force) -> None:
+    from sqlty._cli import _collect_python_files
+
+    _tree(tmp_path, "legacy/old.py", "gen_a.py", "keep.py", "sub/dist/d.py")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nextend-exclude = ["legacy", "gen_*.py"]\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    named = ["legacy/old.py", "gen_a.py", "keep.py", "legacy", "sub/dist/d.py"]
+    args = build_parser().parse_args(
+        ["check", *(["--force-exclude"] if force else []), "--extend-exclude", "keep.py", *named]
+    )
+
+    files = {p.as_posix() for p in _collect_python_files(args.paths, SettingsResolver(args).source)}
+
+    assert files == (set() if force else {"legacy/old.py", "gen_a.py", "keep.py", "sub/dist/d.py"})
+
+
+def test_config_file_from_environment(tmp_path, monkeypatch) -> None:
+    (tmp_path / "sqlty.toml").write_text('dialect = "sqlite"\n')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SQLTY_CONFIG_FILE", "sqlty.toml")
+
+    def dialect(*flags: str) -> str:
+        args = build_parser().parse_args(["check", *flags, "."])
+        return SettingsResolver(args).for_file(tmp_path / "q.py").dialect
+
+    assert dialect() == "sqlite"
+    assert dialect("--isolated") == "postgres"
+    (tmp_path / "other.toml").write_text('dialect = "mysql"\n')
+    assert dialect("--config-file", "other.toml") == "mysql"
+
+
+@pytest.mark.parametrize(
+    ("flags", "code"),
+    [
+        ([], 0),
+        (["--exit-zero-on-warning"], 0),
+        (["--error-on-warning"], 1),
+        (["--exit-zero", "--exit-zero-on-warning"], 0),
+        (["--error-on-warning", "--exit-zero"], 2),
+        (["--error-on-warning", "--exit-zero-on-warning"], 2),
+    ],
+)
+def test_warning_exit_flags(tmp_path, monkeypatch, capsys, flags, code) -> None:
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT * FROM t")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["check", "--warn", "select-star-no-schema", *flags, "q.py"], capsys)[0] == code
+
+
+def test_force_exclude_checks_parents_without_config(tmp_path, monkeypatch) -> None:
+    from sqlty._cli import _collect_python_files
+
+    _tree(tmp_path, ".venv/lib/a.py", "lib/b.py")
+    monkeypatch.chdir(tmp_path)
+    for flags in ([], ["--isolated"]):
+        args = build_parser().parse_args(
+            [
+                "check",
+                "--force-exclude",
+                *flags,
+                "--extend-exclude",
+                "lib",
+                ".venv/lib/a.py",
+                "lib/b.py",
+            ]
+        )
+        assert _collect_python_files(args.paths, SettingsResolver(args).source) == []
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ('untyped = "x"', "--config: untyped must be"),
+        ('import-style = "bogus"', "--config: "),
+        ("dialect=mysql", "quote strings"),
+        ('functions.import-path = "a"', "functions must be an array of tables"),
+    ],
+)
+def test_inline_config_error_names_its_source(tmp_path, monkeypatch, capsys, value, message):
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\n")
+    (tmp_path / "q.py").write_text("")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["rewrite", "-c", value, "q.py"], capsys)
+
+    assert code == 2
+    assert message in err
+    assert "pyproject.toml" not in err

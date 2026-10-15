@@ -152,3 +152,18 @@ def test_incomplete_function_entries_are_skipped(
         config, _ = load_config(tmp_path)
     assert config["functions"] == [{"import_path": "db.ok", "query_param": "q"}]
     assert "missing required fields" in caplog.text
+
+
+def test_load_config_file_reads_top_level_keys(tmp_path: Path) -> None:
+    from sqlty._config import load_config_file
+
+    path = tmp_path / "sqlty.toml"
+    path.write_text(
+        'schema = ["a.sql"]\nextend-exclude = ["gen"]\n[rules]\nselect-star = "ignore"\n'
+    )
+
+    assert load_config_file(path) == {
+        "schema": ["a.sql"],
+        "extend_exclude": ["gen"],
+        "rules": {"select-star": "ignore"},
+    }

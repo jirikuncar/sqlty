@@ -10,7 +10,8 @@ stale-type = "error"
 ```
 
 `error` makes `sqlty check` exit with 1, `warn` prints without failing, and
-`ignore` turns the rule off.
+`ignore` turns the rule off. For one run, `--error RULE`, `--warn RULE` and
+`--ignore RULE` override the table; see [CLI](cli.md#configuration-flags).
 
 | Rule | Group | Default | Fixable | Reports |
 |------|-------|---------|---------|---------|
