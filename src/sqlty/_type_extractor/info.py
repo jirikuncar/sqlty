@@ -131,6 +131,7 @@ PYTHON_TYPE_MAP: dict[str, type] = {
     "uuid.UUID": uuid.UUID,
     "decimal.Decimal": decimal.Decimal,
     "typing.Any": typing.Any,
+    "None": type(None),
     "ipaddress.IPv4Address": ipaddress.IPv4Address,
     "ipaddress.IPv6Address": ipaddress.IPv6Address,
     "ipaddress.IPv4Interface": ipaddress.IPv4Interface,
@@ -146,6 +147,8 @@ def _column_type(python_type: str) -> typing.Any:
     Example:
         >>> _column_type("list[decimal.Decimal]"), _column_type("int | str"), _column_type("nope")
         (<class 'list'>, int | str, None)
+        >>> _column_type("None")  # a VOID result
+        <class 'NoneType'>
     """
     if python_type.startswith("list["):
         return list
