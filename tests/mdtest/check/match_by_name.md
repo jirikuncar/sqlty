@@ -172,7 +172,9 @@ class User(BaseModel):
 query = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 
-## Pydantic ignores columns without a field
+## Pydantic reports columns without a field
+
+Pydantic drops them by default (`extra="ignore"`), so they are fetched for nothing.
 
 ```python
 from pydantic import BaseModel
@@ -182,7 +184,8 @@ class User(BaseModel):
     id: int
     name: str
 
-# error:
+# error: [typeddict-key-mismatch] "User has no field for query column 'created_at'"
+# error: [typeddict-key-mismatch] "User has no field for query column 'email'"
 query = SQL[User]("--sql\nSELECT id, name, email, created_at FROM users")
 ```
 
