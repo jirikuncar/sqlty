@@ -208,3 +208,42 @@ class Row(TypedDict):
 q = SQL[Row]("--sql\nSELECT tags::TEXT[] FROM users")
 # error:
 ```
+
+## `NewType` fields imported from another module
+
+A `NewType` imported from a helper module is resolved in a `TypedDict` and a `BaseModel`
+alike, and named by the module that defines it.
+
+`ids.py`:
+
+```python
+from typing import NewType
+
+CouponId = NewType("CouponId", int)
+```
+
+```python
+from typing import Annotated, LiteralString, TypedDict
+from pydantic import BaseModel
+from sqlty import SQL
+from ids import CouponId
+
+def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> T: ...
+
+class Typed(TypedDict):
+    coupon_id: CouponId
+
+class Model(BaseModel):
+    coupon_id: CouponId
+
+class Bad(BaseModel):
+    coupon_id: CouponId
+
+# error: [nullable-mismatch] "Typed.coupon_id is ids.CouponId but query column 'coupon_id' can be NULL"
+a = fetch_one("SELECT CASE WHEN random() > 0.5 THEN 1 END AS coupon_id", Typed)
+# error: [nullable-mismatch] "Model.coupon_id is ids.CouponId but query column 'coupon_id' can be NULL"
+b = fetch_one("SELECT CASE WHEN random() > 0.5 THEN 1 END AS coupon_id", Model)
+# error: [column-type-mismatch] "Bad.coupon_id is CouponId but query column 'coupon_id' infers str"
+c = fetch_one("SELECT 'x'::TEXT AS coupon_id", Bad)
+ok = fetch_one("SELECT 1 AS coupon_id", Model)
+```
