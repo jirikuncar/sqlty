@@ -10,21 +10,31 @@ Commands:
 
 from __future__ import annotations
 
+import fnmatch
 import functools
 import gc
+import glob
 import logging
+import os
+import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
     from collections import Counter
+    from collections.abc import Callable
 
     from sqlty._config import SchemaSpec
 
 logger = logging.getLogger(__name__)
+
+EXIT_FOUND = 1
+"""``check`` reported an error, or ``--check``/``--diff`` found files to change."""
+EXIT_ERROR = 2
+"""Bad usage or configuration, a missing path, or an internal error."""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -40,19 +50,31 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(0)
 
-    match args.command:
-        case "rewrite":
-            _cmd_rewrite(args)
-        case "strip":
-            _cmd_strip(args)
-        case "check":
-            _cmd_check(args)
-        case "rule":
-            _cmd_rule(args.name)
-        case "version":
-            _cmd_version()
-        case _:
-            parser.print_help()
+    from sqlty._config import ConfigError
+
+    try:
+        match args.command:
+            case "rewrite":
+                _cmd_rewrite(args)
+            case "strip":
+                _cmd_strip(args)
+            case "check":
+                _cmd_check(args)
+            case "rule":
+                _cmd_rule(args.name)
+            case "version":
+                _cmd_version()
+            case _:
+                parser.print_help()
+    except ConfigError as exc:
+        print(f"sqlty: error: {exc}", file=sys.stderr)
+        sys.exit(EXIT_ERROR)
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        print("sqlty: internal error; please report it with the traceback above", file=sys.stderr)
+        sys.exit(EXIT_ERROR)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,18 +98,19 @@ def build_parser() -> argparse.ArgumentParser:
     rewrite_parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit 1 if files need rewriting (don't modify files)",
+        help="Do not modify files; print `Would rewrite <file>` and exit 1 if any file needs "
+        "rewriting",
     )
     rewrite_parser.add_argument(
         "--diff",
         action="store_true",
-        help="Show diff without applying changes",
+        help="Print a unified diff instead of modifying files; exit 1 if any file would change",
     )
     rewrite_parser.add_argument(
         "--untyped",
         choices=["skip", "sentinel"],
         help="Row-returning queries of unknown row type: leave unwrapped (skip, default) "
-        "or wrap as SQL[UNTYPED](...) (sentinel). Config: untyped in [tool.sqlty]",
+        "or wrap as `SQL[UNTYPED](...)` (sentinel). Config: untyped in [tool.sqlty]",
     )
 
     # --- strip ---
@@ -99,12 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
     strip_parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit 1 if files contain SQL[T](...) wrappers",
+        help="Do not modify files; print `Would strip <file>` and exit 1 if any file would change",
     )
     strip_parser.add_argument(
         "--diff",
         action="store_true",
-        help="Show diff without applying changes",
+        help="Print a unified diff instead of modifying files; exit 1 if any file would change",
     )
 
     # --- check ---
@@ -116,13 +139,13 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--fix",
         action="store_true",
-        help="Fix what can be fixed (the rules `sqlty rule` marks fixable, e.g. stale-rewrite, "
-        "stale-type, select-star with a schema), then report the rest",
+        help="Apply the fixable rules (see `sqlty rule`), write the files, then report what remains",
     )
     check_parser.add_argument(
         "--statistics",
         action="store_true",
-        help="After the diagnostics, count queries typed, partially typed, unparsed and skipped",
+        help="After the summary, print how many queries were typed, partially typed, unparsed "
+        "and skipped",
     )
 
     # --- rule ---
@@ -157,7 +180,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Schema .sql file, directory or glob for every path; repeat for several "
         "(default: [tool.sqlty] schema per project)",
     )
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Print each file that rewrite, strip or check --fix changes",
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
 
 
@@ -175,17 +204,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     from sqlty._lint import RULES
     from sqlty.core import check_source, rewrite_source
 
-    resolver = SettingsResolver(args)
-    files = _collect_python_files(args.paths)
-
-    if not files and not args.quiet:
-        logger.warning("No Python files found")
-        return
-
-    changed = 0
-    for path in files:
-        original = path.read_text(encoding="utf-8")
-        settings = resolver.for_file(path)
+    def transform(path: Path, original: str, settings: Settings) -> str:
         rewritten = rewrite_source(
             original,
             dialect=settings.dialect,
@@ -202,34 +221,33 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
                 original, import_style=settings.import_style, rules=skipped_only
             ):
                 print(f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}", file=sys.stderr)
+        return rewritten
 
-        if rewritten == original:
-            continue
-
-        changed += 1
-        if args.check:
-            if not args.quiet:
-                print(f"Would rewrite {path}")
-        elif args.diff:
-            _print_diff(path, original, rewritten)
-        else:
-            path.write_text(rewritten, encoding="utf-8")
-            if args.verbose:
-                print(f"Rewrote {path}")
-
-    if args.check:
-        if changed > 0:
-            if not args.quiet:
-                print(f"{changed} file(s) would be rewritten")
-            sys.exit(1)
-        elif not args.quiet:
-            print("All files up to date")
+    _transform_files(args, transform, "rewrite", "Rewrote", "rewritten")
 
 
 def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
+    def transform(path: Path, original: str, settings: Settings) -> str:
+        return strip_source(original, import_style=settings.import_style)
+
+    _transform_files(args, transform, "strip", "Stripped", "stripped")
+
+
+def _transform_files(
+    args: argparse.Namespace,
+    transform: Callable[[Path, str, Settings], str],
+    verb: str,
+    done: str,
+    participle: str,
+) -> None:
+    """Apply ``transform`` to every collected file for ``rewrite`` and ``strip``.
+
+    Writes the result back. With ``--check`` or ``--diff`` it leaves the files
+    alone and exits 1 when any would change.
+    """
     resolver = SettingsResolver(args)
     files = _collect_python_files(args.paths)
 
@@ -240,28 +258,27 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     changed = 0
     for path in files:
         original = path.read_text(encoding="utf-8")
-        stripped = strip_source(original, import_style=resolver.for_file(path).import_style)
-
-        if stripped == original:
+        result = transform(path, original, resolver.for_file(path))
+        if result == original:
             continue
 
         changed += 1
         if args.check:
             if not args.quiet:
-                print(f"Would strip {path}")
+                print(f"Would {verb} {path}")
         elif args.diff:
-            _print_diff(path, original, stripped)
+            _print_diff(path, original, result)
         else:
-            path.write_text(stripped, encoding="utf-8")
+            path.write_text(result, encoding="utf-8")
             if args.verbose:
-                print(f"Stripped {path}")
+                print(f"{done} {path}")
 
-    if args.check:
+    if args.check or args.diff:
         if changed > 0:
-            if not args.quiet:
-                print(f"{changed} file(s) would be stripped")
-            sys.exit(1)
-        elif not args.quiet:
+            if args.check and not args.quiet:
+                print(f"{changed} file(s) would be {participle}")
+            sys.exit(EXIT_FOUND)
+        elif args.check and not args.quiet:
             print("All files up to date")
 
 
@@ -375,7 +392,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         print(_format_statistics(statistics))
 
     if total_errors > 0:
-        sys.exit(1)
+        sys.exit(EXIT_FOUND)
 
 
 def _format_statistics(counts: Counter[str]) -> str:
@@ -400,7 +417,7 @@ def _cmd_rule(name: str | None) -> None:
         return
     if name not in RULES:
         logger.error("Unknown rule %r; run `sqlty rule` for the list", name)
-        sys.exit(2)
+        sys.exit(EXIT_ERROR)
     print(rule_doc(name), end="")
 
 
@@ -415,14 +432,99 @@ def _cmd_version() -> None:
 
 
 def _collect_python_files(paths: list[Path]) -> list[Path]:
-    """Collect .py files from paths (files and directories)."""
+    """Collect .py files from paths (files and directories).
+
+    Files named on the command line are always collected. Walking a directory
+    skips the ``exclude`` / ``extend-exclude`` globs of the nearest config, or
+    the default excludes (``.git``, ``.venv``, ``node_modules``, ...).
+    A path that does not exist raises ``ConfigError``.
+    """
+    from sqlty._config import ConfigError
+
     files: list[Path] = []
     for path in paths:
-        if path.is_file() and path.suffix == ".py":
-            files.append(path)
+        if path.is_file():
+            if path.suffix == ".py":
+                files.append(path)
         elif path.is_dir():
-            files.extend(sorted(path.rglob("*.py")))
+            files.extend(_walk(path))
+        else:
+            raise ConfigError(f"path does not exist: {path}")
     return files
+
+
+def _exclusions(directory: Path) -> tuple[Path, tuple[str, ...]]:
+    """Base directory and exclude globs governing ``directory``."""
+    from sqlty._config import DEFAULT_EXCLUDE, load_config
+
+    config, config_dir = load_config(directory)
+    patterns = (*config.get("exclude", DEFAULT_EXCLUDE), *config.get("extend_exclude", ()))
+    return (config_dir or directory.resolve()), patterns
+
+
+@functools.cache
+def _exclude_matchers(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    """Compiled ``(name, relative path)`` matchers for exclude globs; built once per pattern set.
+
+    A glob without a slash matches a file or directory name at any depth;
+    every glob also matches the path relative to the config directory.
+    """
+    names: list[str] = []
+    paths: list[str] = []
+    for pattern in patterns:
+        pattern = pattern.strip("/")
+        if "/" not in pattern:
+            names.append(fnmatch.translate(pattern))
+        paths.append(glob.translate(pattern, recursive=True, include_hidden=True))
+    never = r"(?!)"
+    return (
+        re.compile("|".join(names) or never, re.DOTALL),
+        re.compile("|".join(paths) or never, re.DOTALL),
+    )
+
+
+def _is_excluded_entry(
+    name: str, relative_dir: PurePosixPath | None, patterns: tuple[str, ...]
+) -> bool:
+    """Whether the entry ``name`` of ``relative_dir`` matches an exclude glob.
+
+    ``relative_dir`` is the resolved parent relative to the config directory, or
+    ``None`` when it lies outside it (nothing is excluded then).
+    """
+    if relative_dir is None:
+        return False
+    by_name, by_path = _exclude_matchers(patterns)
+    return bool(by_name.match(name) or by_path.match((relative_dir / name).as_posix()))
+
+
+def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
+    """Whether ``path`` matches an exclude glob, relative to ``base`` (``_walk`` batches this per directory)."""
+    resolved = path.resolve()
+    if not resolved.is_relative_to(base):
+        return False
+    relative = PurePosixPath(resolved.relative_to(base).as_posix())
+    return _is_excluded_entry(relative.name, relative.parent, patterns)
+
+
+def _walk(root: Path) -> list[Path]:
+    """The ``.py`` files under ``root``, sorted, without excluded directories and files."""
+    found: list[Path] = []
+    for directory, dirnames, filenames in os.walk(root):
+        current = Path(directory)
+        base, patterns = _exclusions(current)
+        resolved = current.resolve()
+        relative = (
+            PurePosixPath(resolved.relative_to(base).as_posix())
+            if resolved.is_relative_to(base)
+            else None
+        )
+        dirnames[:] = sorted(d for d in dirnames if not _is_excluded_entry(d, relative, patterns))
+        found.extend(
+            current / name
+            for name in sorted(filenames)
+            if name.endswith(".py") and not _is_excluded_entry(name, relative, patterns)
+        )
+    return sorted(found)
 
 
 @functools.cache
@@ -513,7 +615,7 @@ class SettingsResolver:
         return self._by_dir[directory]
 
     def _resolve(self, directory: Path) -> Settings:
-        from sqlty._config import load_config
+        from sqlty._config import ConfigError, load_config
         from sqlty.core import strip_source
 
         config, config_dir = load_config(directory)
@@ -523,12 +625,12 @@ class SettingsResolver:
             schema_sql = _load_schema(config["schema"], config_dir)
         untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
         if untyped not in ("skip", "sentinel"):
-            raise SystemExit(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
+            raise ConfigError(f"{config_dir}/pyproject.toml: untyped must be 'skip' or 'sentinel'")
         import_style = config.get("import_style")
         try:
             strip_source("", import_style=import_style)
         except ValueError as exc:
-            raise SystemExit(
+            raise ConfigError(
                 f"{config_dir}/pyproject.toml: {exc}; use 'from sqlty import SQL [as Q]' "
                 "or 'import sqlty [as sy]'"
             ) from None

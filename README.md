@@ -120,11 +120,6 @@ query = "--sql\nSELECT id, name, email FROM users"
 - **[Untyped queries](https://jirikuncar.github.io/sqlty/guide/untyped/).**
   With `untyped = "sentinel"`, queries sqlty cannot type become
   `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
-- **[Generated stubs](https://jirikuncar.github.io/sqlty/guide/stubs/).**
-  For a helper such as `sql("SELECT ...")`, decorate it with `@sqlty`,
-  register it under `[[tool.sqlty.functions]]` in `pyproject.toml`, and run
-  your code with `SQLTY_AUTO_GENERATE=1`. sqlty writes a `.pyi` stub with one
-  overload per query.
 
 ## Use cases
 
@@ -132,7 +127,6 @@ query = "--sql\nSELECT id, name, email FROM users"
 - [Raw SQL without an ORM](https://jirikuncar.github.io/sqlty/use-cases/#raw-sql-without-an-orm)
 - [Incremental adoption](https://jirikuncar.github.io/sqlty/use-cases/#incremental-adoption)
 - [Scripts and notebooks](https://jirikuncar.github.io/sqlty/use-cases/#scripts-and-notebooks)
-- [Typed data-access helpers](https://jirikuncar.github.io/sqlty/use-cases/#typed-data-access-helpers)
 - [Guardrails for AI-generated SQL](https://jirikuncar.github.io/sqlty/use-cases/#guardrails-for-ai-generated-sql)
 
 ## Lint rules

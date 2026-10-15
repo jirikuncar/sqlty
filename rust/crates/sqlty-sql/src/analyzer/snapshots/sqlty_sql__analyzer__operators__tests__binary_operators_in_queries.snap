@@ -1,0 +1,58 @@
+---
+source: crates/sqlty-sql/src/analyzer/operators.rs
+expression: "reports(&queries, \"postgres\", Some(ddl))"
+---
+SELECT i + s AS a, i * b AS b, s - n AS c, i / i AS d, i % s AS e FROM t
+a: int | INT | Nullable
+b: int | BIGINT | Nullable
+c: decimal.Decimal | DECIMAL | Nullable
+d: int | INT | NonNull
+e: int | INT | Nullable
+
+SELECT i + 1.5 AS a, i + 1 AS b, n * 2 AS c FROM t
+a: decimal.Decimal | DECIMAL | NonNull
+b: int | INT | NonNull
+c: decimal.Decimal | DECIMAL | Nullable
+
+SELECT d + 1 AS a, d - d AS b, d + iv AS c, ts - ts AS d, tz - iv AS e, iv * 2 AS f FROM t
+a: datetime.date | DATE | Nullable
+b: int | INT | Nullable
+c: datetime.datetime | TIMESTAMP | Nullable
+d: datetime.timedelta | INTERVAL | Nullable
+e: datetime.datetime | TIMESTAMPTZ | Nullable
+f: datetime.timedelta | INTERVAL | Nullable
+
+SELECT txt || 'x' AS a, txt || i AS b, 'a' || 'b' AS c FROM t
+a: str | TEXT | Nullable
+b: str | TEXT | Nullable
+c: str | TEXT | NonNull
+
+SELECT i = 1 AS a, txt LIKE 'a%' AS b, i IS NULL AS c, NOT flag AS d, i BETWEEN 1 AND 2 AS e FROM t
+a: bool | BOOLEAN | NonNull
+b: bool | BOOLEAN | Nullable
+c: bool | BOOLEAN | NonNull
+d: bool | BOOLEAN | Nullable
+e: bool | BOOLEAN | NonNull
+
+SELECT i IN (1, 2) AS a, i = ANY(ARRAY[1, 2]) AS b, flag AND true AS c, flag OR NULL AS d FROM t
+a: bool | BOOLEAN | NonNull
+b: bool | BOOLEAN | NonNull
+c: bool | BOOLEAN | Nullable
+d: bool | BOOLEAN | Nullable
+
+SELECT NULL + 1 AS a, 1 + NULL AS b, NULL AS c FROM t
+a: int | INT | Nullable
+b: int | INT | Nullable
+c: ? | ? | Nullable
+
+SELECT i + txt AS a FROM t
+a: ? | ? | Nullable
+[unsupported-syntax] expression `i + txt` is not typed
+
+SELECT 2 ^ 3 AS a, 7 & 3 AS b, 1 << 2 AS c, -i AS d, +n AS e, ~i AS f FROM t
+a: float | DOUBLE | NonNull
+b: int | INT | NonNull
+c: int | INT | NonNull
+d: int | INT | NonNull
+e: decimal.Decimal | DECIMAL(8, 2) | Nullable
+f: int | INT | NonNull

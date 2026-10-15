@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import sqlty.core as core
+from sqlty.core import json_shapes
 
 
 class TestParser:
@@ -140,7 +141,8 @@ def _type_table() -> dict[str, str]:
         Path(__file__).resolve().parent.parent / "rust/crates/sqlty-sql/src/analyzer/mod.rs"
     ).read_text()
     constants = dict(re.findall(r'const (\w+): &str = "([\w. |]+)";', source))
-    table = source[source.index("static SQL_TO_PYTHON_TYPE") : source.index("static STAR_ITEM")]
+    start = source.index("static SQL_TO_PYTHON_TYPE")
+    table = source[start : source.index("\n});", start)]
     pairs = re.findall(r'\("(\w+)", (?:"([\w.]+)"|(\w+))\)', table)
     return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
 
@@ -201,3 +203,7 @@ def test_check_source_typeddict_inheritance_lines(imports: str):
         (5 + offset, "Middle cannot add key 'name' to closed base Base"),
         (9 + offset, "Other cannot set closed=False: base Base is closed"),
     ]
+
+
+def test_json_shapes_of_a_broken_query_is_empty() -> None:
+    assert json_shapes("SELEC (") == []

@@ -14,3 +14,7 @@ workspace = true
 [dependencies]
 sqlparser.workspace = true
 regex.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

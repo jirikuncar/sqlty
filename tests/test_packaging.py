@@ -7,6 +7,7 @@ the hook entries and what the ``.pth`` line does at interpreter startup.
 
 from __future__ import annotations
 
+import importlib.metadata
 import os
 import shlex
 import shutil
@@ -18,6 +19,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+import sqlty
 
 ROOT = Path(__file__).parent.parent
 PTH = ROOT / "src" / "sqlty_magic.pth"
@@ -175,3 +178,15 @@ def test_magic_pth_runs_coded_script(site_dir: Path, source: str, shift: int) ->
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == ["SQL", str(source.count("\n") + shift)]
+
+
+def test_version_falls_back_when_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    monkeypatch.delitem(vars(sqlty), "__version__", raising=False)
+    try:
+        assert sqlty.__version__ == "0.0.0"
+    finally:
+        vars(sqlty).pop("__version__", None)

@@ -33,10 +33,12 @@ help:
 	@echo "  bench-project     - Benchmark a synthetic 10k-file project"
 	@echo "  bench-ci          - CI performance budget check against benchmarks/baseline.json"
 	@echo "  bench-baseline    - Re-record the benchmark baseline"
+	@echo "  bench-rust        - Criterion benchmarks of the Rust engine (rust/crates/sqlty-bench)"
 	@echo ""
 	@echo "Docs:"
 	@echo "  docs              - Build the docs site, strict via zensical.toml (output: site/)"
 	@echo "  docs-serve        - Serve the docs locally with live reload"
+	@echo "  generate-docs     - Regenerate the tables in docs/reference/{configuration,cli}.md"
 	@echo ""
 	@echo "Examples:"
 	@echo "  check-examples    - Run sqlty check on all examples"
@@ -125,11 +127,19 @@ bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseli
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
 
+.PHONY: bench-rust
+bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=
+	cargo bench --manifest-path rust/Cargo.toml -p sqlty-bench -- $(ARGS)
+
 # --- Docs ---
 
 .PHONY: docs
 docs:
 	$(ZENSICAL) build --clean
+
+.PHONY: generate-docs
+generate-docs:
+	uv run python scripts/generate_docs.py
 
 .PHONY: docs-serve
 docs-serve:

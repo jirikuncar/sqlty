@@ -1,7 +1,14 @@
 //! Output-column names, following PostgreSQL's naming of unaliased expressions.
 
-use super::*;
+use std::borrow::Cow;
+
 use sqlparser::ast::TrimWhereField;
+use sqlparser::ast::{AccessExpr, DataType, Expr, Ident, ObjectName, Query, SelectItem};
+
+use crate::catalog::fold;
+
+use super::dialect::SqlDialect;
+use super::query::leftmost_select;
 
 /// Lowercased unqualified name, which is how aliases and qualifiers are compared: `public.users` -> `users`.
 pub(super) fn object_name(name: &ObjectName) -> String {
@@ -173,5 +180,168 @@ fn scalar_subquery_name(query: &Query) -> (String, Strength) {
         Some(SelectItem::UnnamedExpr(expr)) => name_strength(expr),
         Some(SelectItem::ExprWithAlias { alias, .. }) => (alias.value.clone(), Strength::Named),
         _ => (String::new(), Strength::None),
+    }
+}
+
+/// A compound access `t.col[1].field`: sqlparser reads `t.col` in it as an identifier followed
+/// by a dot access. Returns the column reference `t.col` and the accesses that follow it, or
+/// `root` and the whole chain when the access does not start that way.
+pub(super) fn split_access<'e>(
+    root: &'e Expr,
+    chain: &'e [AccessExpr],
+) -> (Cow<'e, Expr>, &'e [AccessExpr]) {
+    match (root, chain) {
+        (Expr::Identifier(table), [AccessExpr::Dot(Expr::Identifier(column)), rest @ ..]) => (
+            Cow::Owned(Expr::CompoundIdentifier(vec![
+                table.clone(),
+                column.clone(),
+            ])),
+            rest,
+        ),
+        _ => (Cow::Borrowed(root), chain),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::{DataType, Ident, ObjectName};
+
+    use super::super::test_support::expr;
+    use super::*;
+
+    fn object(name: &str) -> ObjectName {
+        match expr(&format!("{name}()")) {
+            Expr::Function(func) => func.name,
+            other => panic!("not a call: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn column_names_follow_postgres_figure_colname() {
+        let exprs = [
+            "x",
+            "t.x",
+            "\"Mixed\"",
+            "x::int",
+            "'a'::text",
+            "'a'::text::int",
+            "1::int",
+            "1::bigint",
+            "1::double precision",
+            "1::varchar(10)",
+            "1::timestamp with time zone",
+            "count(*)",
+            "pg_catalog.lower(x)",
+            "case when x then 1 end",
+            "case when x then 1 else y end",
+            "exists (select 1)",
+            "array[1, 2]",
+            "row(1, 2)",
+            "(select x from t)",
+            "(select x as y from t)",
+            "(t.col).field",
+            "extract(year from x)",
+            "trim(leading 'a' from x)",
+            "trim(x)",
+            "substring(x from 1)",
+            "interval '1 day'",
+            "x + 1",
+            "-x",
+            "1",
+            "'literal'",
+        ];
+        let rendered: Vec<String> = exprs
+            .iter()
+            .map(|sql| format!("{sql} => {}", column_name(&expr(sql))))
+            .collect();
+        insta::assert_snapshot!(rendered.join("\n"));
+    }
+
+    #[test]
+    fn figure_name_is_empty_where_column_name_falls_back() {
+        assert_eq!(figure_name(&expr("x + 1")), "");
+        assert_eq!(column_name(&expr("x + 1")), "?column?");
+        assert_eq!(figure_name(&expr("x")), "x");
+    }
+
+    #[test]
+    fn object_name_is_the_lowercased_last_part() {
+        assert_eq!(object_name(&object("Public.Users")), "users");
+        assert_eq!(object_name(&object("\"Quoted\"")), "quoted");
+        assert_eq!(object_name(&ObjectName(Vec::new())), "");
+    }
+
+    #[test]
+    fn table_key_keeps_at_most_schema_and_name() {
+        let key = |name: &str, dialect| table_key(&object(name), dialect);
+        assert_eq!(key("users", SqlDialect::Postgres), "users");
+        assert_eq!(key("public.users", SqlDialect::Postgres), "public.users");
+        assert_eq!(key("db.public.users", SqlDialect::Postgres), "public.users");
+    }
+
+    #[test]
+    fn table_key_folds_by_dialect() {
+        let key = |name: &str, dialect| table_key(&object(name), dialect);
+        assert_eq!(key("Users", SqlDialect::Postgres), "users");
+        assert_eq!(key("\"Users\"", SqlDialect::Postgres), "Users");
+        assert_eq!(key("\"Users\"", SqlDialect::MySql), "users");
+        assert_eq!(key("Users", SqlDialect::Sqlite), "users");
+    }
+
+    #[test]
+    fn identifiers_fold_in_postgres_unless_quoted() {
+        assert_eq!(ident_name(&Ident::new("Id")), "id");
+        assert_eq!(ident_name(&Ident::with_quote('"', "Id")), "Id");
+    }
+
+    #[test]
+    fn aliases_keep_their_case_outside_postgres() {
+        let alias = Ident::new("TotalCount");
+        assert_eq!(alias_name(&alias, SqlDialect::Postgres), "totalcount");
+        assert_eq!(alias_name(&alias, SqlDialect::MySql), "TotalCount");
+        let quoted = Ident::with_quote('"', "TotalCount");
+        assert_eq!(alias_name(&quoted, SqlDialect::Postgres), "TotalCount");
+    }
+
+    #[test]
+    fn cast_target_names_are_postgres_type_names() {
+        let name = |sql: &str| match expr(&format!("1::{sql}")) {
+            Expr::Cast { data_type, .. } => type_column_name(&data_type),
+            other => panic!("not a cast: {other:?}"),
+        };
+        assert_eq!(name("integer"), "int4");
+        assert_eq!(name("smallint"), "int2");
+        assert_eq!(name("boolean"), "bool");
+        assert_eq!(name("real"), "float4");
+        assert_eq!(name("float(10)"), "float4");
+        assert_eq!(name("float(40)"), "float8");
+        assert_eq!(name("decimal(10, 2)"), "numeric");
+        assert_eq!(name("char(3)"), "bpchar");
+        assert_eq!(name("timestamp"), "timestamp");
+        assert_eq!(name("timestamptz"), "timestamptz");
+        assert_eq!(name("time with time zone"), "timetz");
+        assert_eq!(name("int[]"), "int4");
+        assert_eq!(name("public.mood"), "mood");
+        assert_eq!(type_column_name(&DataType::Text), "text");
+    }
+
+    #[test]
+    fn split_access_joins_a_table_and_column_before_the_rest_of_the_chain() {
+        let Expr::CompoundFieldAccess { root, access_chain } = expr("t.col.field[1]") else {
+            panic!("expected a compound access");
+        };
+        let (column, rest) = split_access(&root, &access_chain);
+        assert_eq!(column.to_string(), "t.col");
+        assert_eq!(rest.len(), 2);
+    }
+
+    #[test]
+    fn split_access_leaves_other_roots_alone() {
+        let Expr::CompoundFieldAccess { root, access_chain } = expr("(x)[1]") else {
+            panic!("expected a compound access");
+        };
+        let (column, rest) = split_access(&root, &access_chain);
+        assert_eq!(column.to_string(), root.to_string());
+        assert_eq!(rest.len(), access_chain.len());
     }
 }

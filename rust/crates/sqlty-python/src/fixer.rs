@@ -9,13 +9,14 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use crate::checker::{refines_tuple, INLINE_SQL_COMMENT_CONTENT};
+use crate::options::Options;
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
-    is_sqlty_managed, line_ending, rewrite_source_skipping, splice, string_literals, suppresses,
-    ImportStyle, LineIndex, Suppressed, TYPE_MODULES,
+    is_sqlty_managed, line_ending, rewrite_scan, splice, suppresses, ImportStyle, LineIndex,
+    Suppressed, TYPE_MODULES,
 };
 use crate::rules::{Rule, RuleConfig};
-use crate::tokens::{tokenize, wrapper_calls};
+use crate::scan::Scan;
 use sqlty_sql::analyzer::{expand_star, SchemaData};
 
 const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
@@ -23,7 +24,9 @@ const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 /// `\bname\b`, compiled once per name: the few import styles in use repeat call after call.
 fn word_regex(name: &str) -> Regex {
     static CACHE: LazyLock<Mutex<HashMap<String, Regex>>> = LazyLock::new(Mutex::default);
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache
         .entry(name.to_string())
         .or_insert_with(|| Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap())
@@ -39,46 +42,43 @@ static SQL_PREFIX: LazyLock<Regex> =
 /// the rule reports (`suppressed`, by line of `source`) suppresses that rule.
 pub fn fix_source(
     source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    import_style: Option<&str>,
-    untyped: bool,
+    options: &Options,
     rules: &RuleConfig,
     mut suppressed: Suppressed,
 ) -> String {
     let enabled = |rule: Rule| rules.is_enabled(rule);
-    let style = ImportStyle::or_default(import_style);
-    let mut source = source.to_string();
+    let (dialect, schema) = (options.dialect.name(), options.schema);
+    let style = &options.style;
+    let wrapper = &style.wrapper_name;
+    // Each phase reads one scan; the source is scanned again only after a phase edits it.
+    let mut scan = Scan::new(source, wrapper);
     if enabled(Rule::InlineSqlComment) {
-        source = fix_inline_sql_comments(&source, &style.wrapper_name, &suppressed);
+        if let Some(fixed) = fix_inline_sql_comments(&scan, &suppressed) {
+            scan = Scan::new(fixed, wrapper);
+        }
     }
-    if dialect.eq_ignore_ascii_case("mysql") && enabled(Rule::MysqlSqlMarker) {
-        source = fix_mysql_markers(&source, &suppressed);
+    if options.dialect.is_mysql() && enabled(Rule::MysqlSqlMarker) {
+        if let Some(fixed) = fix_mysql_markers(&scan, &suppressed) {
+            scan = Scan::new(fixed, wrapper);
+        }
     }
     if enabled(Rule::StaleRewrite) {
         let skip = |line| suppresses(&suppressed, line, Rule::StaleRewrite);
-        let rewritten = rewrite_source_skipping(
-            &source,
-            dialect,
-            schema,
-            import_style,
-            untyped,
-            false,
-            &skip,
-        );
-        suppressed = shift_lines(suppressed, &source, &rewritten);
-        source = rewritten;
+        if let Some(rewritten) = rewrite_scan(&scan, options, false, &skip) {
+            suppressed = shift_lines(suppressed, scan.source(), &rewritten);
+            scan = Scan::new(rewritten, wrapper);
+        }
     }
-    let lines = LineIndex::new(&source);
+    let source = scan.source();
     let allowed = |rule: Rule, call_start: usize| {
-        enabled(rule) && !suppresses(&suppressed, lines.line_at(call_start), rule)
+        enabled(rule) && !suppresses(&suppressed, scan.lines.line_at(call_start), rule)
     };
 
     let untyped_name = style.untyped_name();
     let mut introduced = BTreeSet::new();
     let mut edits = Vec::new();
-    for call in wrapper_calls(&source, &tokenize(&source), &style.wrapper_name) {
-        let Some(mut content) = call.content(&source) else {
+    for call in &scan.calls {
+        let Some(mut content) = call.content(source) else {
             continue;
         };
         if !is_sqlty_managed(&content) {
@@ -122,34 +122,37 @@ pub fn fix_source(
         }
         edits.extend(literal_edit);
     }
-    let fixed = splice(&source, &edits);
+    let fixed = splice(source, &edits);
     if fixed == source {
-        return source;
+        return scan.into_source().into_owned();
     }
-    fix_imports(fixed, &style, &introduced)
+    fix_imports(fixed, style, &introduced)
 }
 
 /// `"--sql SELECT ..."` to `"--sql\nSELECT ..."` in plain string literals that
 /// `inline-sql-comment` reports, so prose such as `"--sql flag enables it"` is kept.
 /// This and `select-star` are the only fixes that change string content.
-fn fix_inline_sql_comments(source: &str, wrapper: &str, suppressed: &Suppressed) -> String {
-    let lines = LineIndex::new(source);
-    let calls = if suppressed.is_empty() {
-        Vec::new()
-    } else {
-        wrapper_calls(source, &tokenize(source), wrapper)
-    };
-    let edits: Vec<(usize, usize, String)> = string_literals(source)
-        .into_iter()
+/// `None` when there is nothing to fix.
+fn fix_inline_sql_comments(scan: &Scan, suppressed: &Suppressed) -> Option<String> {
+    let source = scan.source();
+    let edits: Vec<(usize, usize, String)> = scan
+        .plain_literals()
         .filter(|&(start, end)| {
             INLINE_SQL_COMMENT_CONTENT.is_match(extract_string_content(&source[start..end]))
         })
         .filter(|&(start, _)| {
-            let reported = calls
-                .iter()
-                .find(|call| call.span.start <= start && start < call.span.end)
-                .map_or(start, |call| call.span.start);
-            !suppresses(suppressed, lines.line_at(reported), Rule::InlineSqlComment)
+            let reported = if suppressed.is_empty() {
+                start
+            } else {
+                scan.calls
+                    .enclosing(start, start + 1)
+                    .map_or(start, |call| call.span.start)
+            };
+            !suppresses(
+                suppressed,
+                scan.lines.line_at(reported),
+                Rule::InlineSqlComment,
+            )
         })
         .map(|(start, end)| {
             let literal = &source[start..end];
@@ -162,19 +165,20 @@ fn fix_inline_sql_comments(source: &str, wrapper: &str, suppressed: &Suppressed)
             (at, at + 1, "\\n".to_string())
         })
         .collect();
-    splice(source, &edits)
+    (!edits.is_empty()).then(|| splice(source, &edits))
 }
 
 /// `"--sql\n..."` to `"-- sql\n..."`, the marker MySQL reads as a comment.
-fn fix_mysql_markers(source: &str, suppressed: &Suppressed) -> String {
-    let lines = LineIndex::new(source);
-    let edits: Vec<(usize, usize, String)> = string_literals(source)
-        .into_iter()
+/// `None` when there is nothing to fix.
+fn fix_mysql_markers(scan: &Scan, suppressed: &Suppressed) -> Option<String> {
+    let source = scan.source();
+    let edits: Vec<(usize, usize, String)> = scan
+        .plain_literals()
         .filter_map(|(start, end)| {
             let literal = &source[start..end];
             let content = extract_string_content(literal);
             let marked = content.trim_start();
-            if suppresses(suppressed, lines.line_at(start), Rule::MysqlSqlMarker) {
+            if suppresses(suppressed, scan.lines.line_at(start), Rule::MysqlSqlMarker) {
                 return None;
             }
             marked
@@ -186,7 +190,7 @@ fn fix_mysql_markers(source: &str, suppressed: &Suppressed) -> String {
                 })
         })
         .collect();
-    splice(source, &edits)
+    (!edits.is_empty()).then(|| splice(source, &edits))
 }
 
 /// `suppressed` moved to the line numbers of `after`, the same source with `import` lines
@@ -271,15 +275,8 @@ mod tests {
     use super::*;
 
     fn fix(source: &str) -> String {
-        fix_source(
-            source,
-            "postgres",
-            None,
-            None,
-            false,
-            &RuleConfig::default(),
-            Suppressed::new(),
-        )
+        let options = Options::new("postgres", None, None, false).unwrap();
+        fix_source(source, &options, &RuleConfig::default(), Suppressed::new())
     }
 
     #[test]
@@ -306,11 +303,11 @@ mod tests {
     fn test_inline_comment_only_in_plain_strings() {
         assert_eq!(
             fix_inline_sql_comments(
-                r#"a = "--sql SELECT 1" b = f"--sql SELECT 1""#,
-                "SQL",
+                &Scan::new(r#"a = "--sql SELECT 1" b = f"--sql SELECT 1""#, "SQL"),
                 &Suppressed::new()
-            ),
-            r#"a = "--sql\nSELECT 1" b = f"--sql SELECT 1""#
+            )
+            .as_deref(),
+            Some(r#"a = "--sql\nSELECT 1" b = f"--sql SELECT 1""#)
         );
     }
 
@@ -348,6 +345,9 @@ b = """  -- sql
 SELECT 1"""
 c = f"--sql\nSELECT 1"
 d = "--sql SELECT 1""#;
-        assert_eq!(fix_mysql_markers(source, &Suppressed::new()), fixed);
+        assert_eq!(
+            fix_mysql_markers(&Scan::new(source, "SQL"), &Suppressed::new()).as_deref(),
+            Some(fixed)
+        );
     }
 }

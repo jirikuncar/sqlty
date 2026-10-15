@@ -9,11 +9,14 @@ use std::fmt::Write;
 /// A value inside a JSON document, with whether it can be `null`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JsonValue {
+    /// The shape of the value when it is not `null`.
     pub shape: JsonShape,
+    /// Whether the value can be `null`.
     pub nullable: bool,
 }
 
 impl JsonValue {
+    /// A value of `shape` that can be `null` when `nullable`.
     pub fn new(shape: JsonShape, nullable: bool) -> Self {
         Self { shape, nullable }
     }
@@ -41,7 +44,9 @@ impl JsonValue {
 /// A member of a JSON object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JsonField {
+    /// The member's key.
     pub name: String,
+    /// The member's value.
     pub value: JsonValue,
     /// Whether the member can be missing from the object.
     pub optional: bool,
@@ -56,11 +61,15 @@ pub enum JsonShape {
     Never,
     /// The JSON `null`.
     Null,
+    /// A JSON `true` or `false`.
     Boolean,
     /// A number known to be integral.
     Integer,
+    /// Any JSON number.
     Number,
+    /// A JSON string.
     String,
+    /// An array whose elements all have one shape.
     Array(Box<JsonValue>),
     /// An object with known members.
     Object(Vec<JsonField>),

@@ -1,0 +1,20 @@
+---
+source: crates/sqlty-sql/src/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT (SELECT max(b.id) FROM b WHERE b.id = a.id) AS m FROM a
+m: int | INT | Nullable
+
+SELECT (SELECT x) AS m FROM a
+m: str | TEXT | NonNull
+
+SELECT EXISTS (SELECT 1 FROM b WHERE b.id = a.id) AS e FROM a
+e: bool | BOOLEAN | NonNull
+
+SELECT * FROM a WHERE id IN (SELECT id FROM b WHERE b.shared = a.shared)
+id: int | INT | NonNull
+x: str | TEXT | NonNull
+shared: str | TEXT | Nullable
+
+SELECT (SELECT y FROM b WHERE b.id = a.nope) AS m FROM a
+m: str | TEXT | Nullable

@@ -1,0 +1,24 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT name FROM users
+name: str | TEXT | NonNull
+
+SELECT name, total FROM users JOIN orders ON users.id = orders.user_id
+name: str | TEXT | NonNull
+total: decimal.Decimal | DECIMAL(10, 2) | Nullable
+
+SELECT users.id, orders.id AS oid FROM users, orders
+id: int | INT | NonNull
+oid: int | INT | NonNull
+
+SELECT u.name, o.note FROM users u JOIN orders o ON true
+name: str | TEXT | NonNull
+note: str | TEXT | NonNull
+
+SELECT NAME FROM users
+name: str | TEXT | NonNull
+
+SELECT users.name FROM users AS u
+name: str | TEXT | NonNull

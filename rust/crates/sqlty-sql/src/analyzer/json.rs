@@ -2,7 +2,23 @@
 //! `->` and friends (PostgreSQL). The column type stays `Any`; the shape is kept next to it
 //! (see [`Column::json`]) so row types can be checked against it.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{BinaryOperator, DataType, Expr, UnaryOperator, Value};
+
+use crate::json::{JsonField, JsonShape, JsonValue};
+
+use super::dialect::SqlDialect;
+use super::expr::array_element;
+use super::functions::positional_args;
+use super::memo::{first_column, Reporting};
+use super::names::object_name;
+use super::nullability::Nullability;
+use super::operators::type_base;
+use super::query::{Analyzer, Column};
+use super::scope::Scope;
+use super::typed::Typed;
+use super::{Inferred, ANY, DECIMAL};
 
 /// Deepest composite type or array nesting `to_jsonb()` follows.
 const MAX_DEPTH: usize = 8;
@@ -138,12 +154,13 @@ impl<'a> Analyzer<'a> {
                 ..
             } if is_json_type(data_type) => self.json_operand(inner, scope),
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_shape(expr, scope)),
-            Expr::Subquery(query) => Ok(self
-                .correlated(scope)
-                .query_columns(query)?
-                .and_then(|columns| columns.into_iter().next())
-                .and_then(|col| col.json)
-                .unwrap_or(JsonShape::Any)),
+            Expr::Subquery(query) => {
+                Ok(
+                    first_column(&self.subquery_columns(query, scope, Reporting::Record))?
+                        .and_then(|col| col.json.clone())
+                        .unwrap_or(JsonShape::Any),
+                )
+            }
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::Arrow,
@@ -188,7 +205,8 @@ impl<'a> Analyzer<'a> {
                     Some(filter) => {
                         let mut inner = self.clone();
                         inner.facts = self.facts.with(self.learn(filter, true, scope));
-                        inner.facts.present.extend(self.row_guards(filter, scope));
+                        Rc::make_mut(&mut inner.facts.present)
+                            .extend(self.row_guards(filter, scope));
                         inner.json_function(&name, &args, scope)
                     }
                     None => self.json_function(&name, &args, scope),
@@ -220,7 +238,7 @@ impl<'a> Analyzer<'a> {
                     Expr::QualifiedWildcard(name, _) => object_name(name).to_lowercase(),
                     _ => return Vec::new(),
                 };
-                if scope.iter().any(|(source, _)| *source == reference) {
+                if scope.iter().any(|source| source.reference == reference) {
                     vec![reference]
                 } else {
                     Vec::new()
@@ -329,7 +347,7 @@ impl<'a> Analyzer<'a> {
         }
         let nullable = self.nullability(expr, scope, &self.facts) == Nullability::Nullable;
         let typed = self.expr(expr, scope)?;
-        let shape = if matches!(typed.1.as_deref().map(type_base), Some("JSON" | "JSONB")) {
+        let shape = if matches!(typed.sql().map(type_base), Some("JSON" | "JSONB")) {
             self.json_shape(expr, scope)?
         } else {
             self.shape_of_type(&typed, 0)
@@ -344,7 +362,7 @@ impl<'a> Analyzer<'a> {
             return None;
         };
         let reference = ident.value.to_lowercase();
-        if !scope.iter().any(|(source, _)| *source == reference)
+        if !scope.iter().any(|source| source.reference == reference)
             || self.locate_column(expr, scope).is_some()
         {
             return None;
@@ -384,7 +402,7 @@ impl<'a> Analyzer<'a> {
         match (&col.json, col.sql_type.as_deref().map(type_base)) {
             (Some(shape), _) => shape.clone(),
             (None, Some("JSON" | "JSONB")) => JsonShape::Any,
-            _ => self.shape_of_type(&(col.python_type.clone(), col.sql_type.clone()), 0),
+            _ => self.shape_of_type(&col.typed(), 0),
         }
     }
 
@@ -393,7 +411,7 @@ impl<'a> Analyzer<'a> {
         if depth > MAX_DEPTH {
             return JsonShape::Any;
         }
-        if let Some(sql_type) = typed.1.as_deref() {
+        if let Some(sql_type) = typed.sql() {
             if array_element(sql_type).is_some() {
                 let elem = self.element_typed(Some(sql_type));
                 let value = JsonValue::new(self.shape_of_type(&elem, depth + 1), false);
@@ -415,7 +433,7 @@ impl<'a> Analyzer<'a> {
                 );
             }
         }
-        match typed.0.as_deref() {
+        match typed.python() {
             None | Some(ANY) => JsonShape::Any,
             Some("bool") => JsonShape::Boolean,
             Some("int") => JsonShape::Integer,
@@ -439,6 +457,7 @@ fn is_container(python_type: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::{analyze_select, load_schema};
 
     const SCHEMA: &str = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT);
          CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total NUMERIC NOT NULL);";

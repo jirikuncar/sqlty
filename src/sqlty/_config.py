@@ -1,61 +1,220 @@
 """Configuration loading from pyproject.toml."""
 
 import copy
+import difflib
 import glob
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict, cast
 
 SchemaSpec = str | list[str]
 
+TOOL_KEYS = ("dialect", "schema", "rules", "import-style", "untyped", "type-modules", "functions")
+"""Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
 
-class FunctionConfig(TypedDict, total=False):
-    """Configuration for a specific function to track.
+DISCOVERY_KEYS = ("exclude", "extend-exclude")
+"""``[tool.sqlty]`` keys that pick the files to process."""
 
-    Example:
-        {
-            "import_path": "db.pg_fetchvalue",
-            "query_param": "query",
-            "return_type_param": "return_tp",
-            "schema": "path/to/schema.sql",
-            "return_type_template": "list[{sqlty}]",
-            "imports": ["from typing import Any"]
-        }
+FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
 
-    Note: Class methods (e.g., "module.Class.method") are not currently supported.
-          Use module-level functions instead.
+
+class KeyDoc(NamedTuple):
+    """Reference documentation of one configuration key.
+
+    ``docs/reference/configuration.md`` renders its tables from these entries
+    (``make generate-docs``); ``tests/test_docs.py`` fails when the page drifts.
     """
 
-    import_path: (
-        str  # Full import path to the function, e.g., "module.submodule.function_name" (required)
-    )
-    query_param: str  # Name of the parameter containing the SQL query (required)
-    return_type_param: str  # Name of the parameter specifying the return type (optional)
-    schema: SchemaSpec  # Schema file, directory or glob, or a list of them (optional)
-    return_type_template: str  # Template for return type with {sqlty} placeholder (optional)
-    self_type_template: (
-        str  # TODO: Template for self parameter - currently not supported for methods (optional)
-    )
-    imports: list[str]  # List of import statements needed for the stub (optional)
+    type: str
+    default: str
+    used_by: str
+    summary: str
+    required: bool = False
 
 
-# Define required fields separately for type checking
-class _FunctionConfigRequired(TypedDict):
-    """Required fields for FunctionConfig."""
+KEY_DOCS: dict[str, KeyDoc] = {
+    "dialect": KeyDoc(
+        '`"postgres"`, `"sqlite"`, `"mysql"`',
+        '`"postgres"`',
+        "`rewrite`, `check`",
+        "SQL dialect of queries and schema",
+    ),
+    "schema": KeyDoc(
+        "string or list of strings",
+        "none",
+        "`rewrite`, `check`",
+        "Schema `.sql` files, directories or globs, relative to `pyproject.toml`",
+    ),
+    "rules": KeyDoc(
+        "table of rule = severity",
+        "per-rule defaults",
+        "`check`",
+        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`',
+    ),
+    "import-style": KeyDoc(
+        "string",
+        '`"from sqlty import SQL"`',
+        "`rewrite`, `strip`, `check`, magic codec",
+        "How rewritten code imports and spells the wrapper",
+    ),
+    "untyped": KeyDoc(
+        '`"skip"`, `"sentinel"`',
+        '`"skip"`',
+        "`rewrite`",
+        "Whether queries of unknown row type are wrapped as `SQL[UNTYPED]`",
+    ),
+    "type-modules": KeyDoc(
+        "list of strings",
+        "`[]`",
+        "`check`",
+        "Modules `check` may import to resolve row type fields",
+    ),
+    "functions": KeyDoc(
+        "array of tables",
+        "`[]`",
+        "`check`",
+        "Helper functions whose string argument is a query",
+    ),
+    "exclude": KeyDoc(
+        "list of globs",
+        "see [Default excludes](#exclude-and-extend-exclude)",
+        "`rewrite`, `strip`, `check`",
+        "Globs skipped while walking a directory; replaces the default list",
+    ),
+    "extend-exclude": KeyDoc(
+        "list of globs",
+        "`[]`",
+        "`rewrite`, `strip`, `check`",
+        "Globs skipped in addition to `exclude` or the defaults",
+    ),
+}
+"""Reference docs per key of ``[tool.sqlty]``, in documentation order."""
 
-    import_path: str
-    query_param: str
+FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
+    "import-path": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        'Module path and function name, e.g. `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. '
+        'Use `"__main__.sql"` or the file name for a script run directly',
+        required=True,
+    ),
+    "query-param": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        "Name of the parameter that holds the query",
+        required=True,
+    ),
+    "return-type-param": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        "Parameter whose argument, such as `return_tp=int`, is the row type of that call "
+        "instead of an inferred one; `check` compares it with the query columns",
+    ),
+}
+"""Reference docs per key of a ``[[tool.sqlty.functions]]`` entry."""
+
+DEFAULT_EXCLUDE = (
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+)
+"""Directories skipped when walking a directory, unless ``exclude`` replaces them."""
 
 
-class FunctionConfigComplete(_FunctionConfigRequired, total=False):
-    """Complete FunctionConfig with optional fields."""
+class ConfigError(Exception):
+    """A user error in configuration or command-line paths; the CLI prints it and exits 2."""
 
-    return_type_param: str
-    schema: SchemaSpec
-    return_type_template: str
-    self_type_template: str
-    imports: list[str]
+
+def _suggest(name: str, choices: tuple[str, ...] | list[str]) -> str:
+    close = difflib.get_close_matches(name, choices, n=1)
+    return f" (did you mean {close[0]!r}?)" if close else ""
+
+
+def validate_tool_table(table: dict[str, Any], source: str) -> None:
+    """Raise ``ConfigError`` for an unknown key, rule or severity in a ``[tool.sqlty]`` table.
+
+    ``source`` names the file in the message. Shared by the CLI and the mdtest runner.
+
+    Example:
+        >>> validate_tool_table({"dialect": "mysql"}, "pyproject.toml")
+        >>> validate_tool_table({"import_style": "x"}, "pyproject.toml")  # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        sqlty._config.ConfigError: pyproject.toml: unknown key 'import_style' in [tool.sqlty] (did you mean 'import-style'?); ...
+    """
+    from sqlty._lint import RULES, Severity
+
+    keys = (*TOOL_KEYS, *DISCOVERY_KEYS)
+    for key in table:
+        if key not in keys:
+            raise ConfigError(
+                f"{source}: unknown key {key!r} in [tool.sqlty]{_suggest(key, keys)}; "
+                f"expected one of: {', '.join(keys)}"
+            )
+    rules = table.get("rules", {})
+    if not isinstance(rules, dict):
+        raise ConfigError(f"{source}: [tool.sqlty] rules must be a table of rule = severity")
+    severities = [s.value for s in Severity]
+    for rule, severity in rules.items():
+        if rule not in RULES:
+            raise ConfigError(
+                f"{source}: unknown rule {rule!r} in [tool.sqlty.rules]"
+                f"{_suggest(rule, list(RULES))}; run `sqlty rule` for the list"
+            )
+        if severity not in severities:
+            raise ConfigError(
+                f"{source}: invalid severity {severity!r} for rule {rule!r} in "
+                f"[tool.sqlty.rules]; expected one of: {', '.join(severities)}"
+            )
+    for function in table.get("functions", []):
+        if isinstance(function, dict):
+            for key in function:
+                if key not in FUNCTION_KEYS:
+                    raise ConfigError(
+                        f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
+                        f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
+                    )
+    for key in DISCOVERY_KEYS:
+        value = table.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise ConfigError(f"{source}: [tool.sqlty] {key} must be a list of glob strings")
+
+
+class FunctionConfigComplete(TypedDict, total=False):
+    """A ``[[tool.sqlty.functions]]`` entry: a helper whose string argument is a query.
+
+    In TOML the keys are ``import-path`` and ``query-param`` (required) and
+    ``return-type-param`` (optional); here they are the snake_case fields below.
+    """
+
+    import_path: str  # Full import path, e.g. "module.function_name" (required)
+    query_param: str  # Parameter holding the SQL query (required)
+    return_type_param: str  # Parameter holding the row type (optional)
 
 
 class SQLTyConfig(TypedDict, total=False):
@@ -71,24 +230,25 @@ class SQLTyConfig(TypedDict, total=False):
         import-style = "from sqlty import SQL"
         untyped = "sentinel"
         type-modules = ["myapp.types"]
+        extend-exclude = ["migrations"]
 
         [tool.sqlty.rules]
         select-star = "ignore"
         stale-type = "error"
 
         [[tool.sqlty.functions]]
-        import_path = "db.query"
-        query_param = "sql"
+        import-path = "db.query"
+        query-param = "sql"
     """
 
     dialect: str
     schema: SchemaSpec  # Schema file, directory or glob, or a list of them
-    schemas: dict[str, SchemaSpec]  # registry_name -> schema entries
     rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
-    format_command: str  # e.g., "ruff format --stdin-filename {filename} -"
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
     type_modules: list[str]  # modules whose imports may run to resolve row types
+    exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
+    extend_exclude: list[str]  # globs excluded in addition to the above
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
 
@@ -151,6 +311,8 @@ def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
         if pyproject_path.exists():
             try:
                 config = _parse_pyproject_cached(pyproject_path, pyproject_path.stat().st_mtime_ns)
+            except ConfigError:
+                raise
             except Exception as e:
                 logging.getLogger(__name__).warning("Failed to parse %s: %s", pyproject_path, e)
                 return {}, None
@@ -191,15 +353,17 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     if tool_config is None:
         return None
 
+    validate_tool_table(tool_config, str(pyproject_path))
     config: SQLTyConfig = {}
+
+    if "exclude" in tool_config:
+        config["exclude"] = list(tool_config["exclude"])
+    if "extend-exclude" in tool_config:
+        config["extend_exclude"] = list(tool_config["extend-exclude"])
 
     # Parse each configuration option
     if "dialect" in tool_config:
         config["dialect"] = str(tool_config["dialect"])
-
-    if "schemas" in tool_config and isinstance(tool_config["schemas"], dict):
-        # Convert all values to strings
-        config["schemas"] = {k: _schema_spec(v) for k, v in tool_config["schemas"].items()}
 
     # Single schema path (top-level convenience key)
     if "schema" in tool_config:
@@ -208,10 +372,6 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     # Rule severity overrides: [tool.sqlty.rules]
     if "rules" in tool_config and isinstance(tool_config["rules"], dict):
         config["rules"] = {str(k): str(v) for k, v in tool_config["rules"].items()}
-
-    # Allow hyphenated key in pyproject: format-command
-    if "format-command" in tool_config:
-        config["format_command"] = str(tool_config["format-command"])  # expects {filename}
 
     # Allow hyphenated key in pyproject: import-style
     if "import-style" in tool_config:
@@ -234,7 +394,7 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
                 continue
 
             # Validate required fields
-            if "import_path" not in func_config or "query_param" not in func_config:
+            if "import-path" not in func_config or "query-param" not in func_config:
                 logging.getLogger(__name__).warning(
                     "Skipping function config missing required fields: %s", func_config
                 )
@@ -242,34 +402,13 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
 
             # Build function config with all fields
             function_dict: dict[str, Any] = {
-                "import_path": str(func_config["import_path"]),
-                "query_param": str(func_config["query_param"]),
+                "import_path": str(func_config["import-path"]),
+                "query_param": str(func_config["query-param"]),
             }
 
-            # Optional return_type_param field
-            if "return_type_param" in func_config:
-                function_dict["return_type_param"] = str(func_config["return_type_param"])
-
-            # Optional schema field
-            if "schema" in func_config:
-                function_dict["schema"] = _schema_spec(func_config["schema"])
-
-            # Optional return_type_template field
-            if "return_type_template" in func_config:
-                function_dict["return_type_template"] = str(func_config["return_type_template"])
-
-            # Optional self_type_template field
-            if "self_type_template" in func_config:
-                function_dict["self_type_template"] = str(func_config["self_type_template"])
-
-            # Optional imports field
-            if "imports" in func_config:
-                imports_value = func_config["imports"]
-                if isinstance(imports_value, list):
-                    function_dict["imports"] = [str(imp) for imp in imports_value]
-                elif isinstance(imports_value, str):
-                    # Support single string import
-                    function_dict["imports"] = [str(imports_value)]
+            # Optional return-type-param field
+            if "return-type-param" in func_config:
+                function_dict["return_type_param"] = str(func_config["return-type-param"])
 
             # Cast to FunctionConfigComplete after all fields are set
             function = cast(FunctionConfigComplete, function_dict)
@@ -279,32 +418,3 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
             config["functions"] = functions
 
     return config
-
-
-def merge_config(config: SQLTyConfig, cli_args: dict[str, Any]) -> SQLTyConfig:
-    """Merge configuration from pyproject.toml with CLI arguments.
-
-    CLI arguments take precedence over config file.
-
-    Args:
-        config: Configuration from pyproject.toml
-        cli_args: Configuration from CLI arguments (non-None values only)
-
-    Returns:
-        Merged configuration
-    """
-    merged: SQLTyConfig = config.copy()
-
-    # CLI arguments override config file
-    if cli_args.get("dialect") is not None:
-        merged["dialect"] = str(cli_args["dialect"])
-    if cli_args.get("format_command") is not None:
-        merged["format_command"] = str(cli_args["format_command"])  # expects {filename}
-
-    # For schemas, merge CLI schema mappings with config schemas
-    if "schemas" in cli_args and cli_args["schemas"]:
-        merged_schemas = config.get("schemas", {}).copy()
-        merged_schemas.update(cli_args["schemas"])
-        merged["schemas"] = merged_schemas
-
-    return merged

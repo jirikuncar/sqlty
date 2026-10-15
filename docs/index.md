@@ -54,8 +54,6 @@ string itself is never modified. For a file of plain `--sql` strings,
   are rewritten when imported, without a rewrite step.
 - **[Untyped queries](guide/untyped.md).** Mark queries sqlty cannot type as
   `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
-- **[Generated stubs](guide/stubs.md).** Type helper functions such as
-  `sql("SELECT ...")` with a generated `.pyi` overload per query.
 - **[Lint rules](reference/rules.md).** Thirteen rules with configurable
   severity.
 - **[Rust engine](reference/engine.md).** SQL parsing, type inference and
@@ -70,7 +68,6 @@ string itself is never modified. For a file of plain `--sql` strings,
 | [Schema inference](guide/schema-inference.md) | Projects with `CREATE TABLE` schemas |
 | [Magic codec](guide/magic-codec.md) | Scripts and prototypes |
 | [psycopg helpers](guide/psycopg.md) | psycopg 3 code that wants typed rows at runtime |
-| [Generated stubs](guide/stubs.md) | Code that sends queries through helper functions |
 
 They combine: a schema plus row types plus the psycopg helpers is the most
 complete setup. [Use cases](use-cases.md) describes the situations sqlty is

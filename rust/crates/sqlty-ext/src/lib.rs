@@ -1,4 +1,23 @@
-//! sqlty._core — the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
+//! `sqlty._core`: the SQL engine behind `sqlty.core`, compiled with PyO3 and maturin.
+//!
+//! This crate is only the Python binding. The analysis lives in `sqlty-sql` and the source
+//! handling in `sqlty-python`; each `#[pyfunction]` here converts its arguments, releases the
+//! GIL (`Python::detach`) while the engine runs, and converts the result to tuples and lists
+//! that `sqlty/core.py` wraps into dataclasses.
+//!
+//! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
+//!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
+//! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
+//!   `wrapped_queries`, `query_sites`.
+//! - Schema: `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
+//!
+//! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
+//! threads, because callers pass the same few schemas call after call. The stub
+//! `sqlty/_core.pyi` must match the signatures here.
+//!
+//! The crate is a `cdylib`, so it has no Rust API and no doc tests; the unit tests cover
+//! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
+//! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
 use sqlty_python::checker;
 use sqlty_python::fixer;
@@ -10,9 +29,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
 
 use rewriter::ImportStyle;
+use sqlty_python::options::{ConfigError, Options};
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
@@ -59,7 +78,9 @@ fn cache_hit(
 }
 
 fn lock_schemas() -> MutexGuard<'static, Vec<CachedSchema>> {
-    SCHEMAS.lock().unwrap_or_else(|e| e.into_inner())
+    SCHEMAS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The parsed schema. The cache is not locked while parsing, so a slow schema does not hold
@@ -105,15 +126,33 @@ fn schema_for(source: &str, schema_sql: Option<&str>, dialect: &str) -> Option<a
     }
 }
 
-fn check_import_style(import_style: Option<&str>) -> PyResult<()> {
-    ImportStyle::parse(import_style)
-        .map(drop)
-        .map_err(PyValueError::new_err)
+/// What an entry point can fail with, and the Python exception each becomes.
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    /// `ValueError`: an unsupported `import_style`, or an unknown rule or severity.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    /// `RuntimeError`: inference found a query it cannot judge.
+    #[error(transparent)]
+    Infer(#[from] analyzer::InferError),
 }
 
-/// Parse `rules` (rule name to `error`, `warn` or `ignore`) once, at the boundary.
-fn rule_config(rules: Option<HashMap<String, String>>) -> PyResult<RuleConfig> {
-    RuleConfig::from_overrides(rules).map_err(|e| PyValueError::new_err(e.to_string()))
+impl From<Error> for PyErr {
+    fn from(error: Error) -> Self {
+        match error {
+            Error::Config(_) => PyValueError::new_err(error.to_string()),
+            Error::Infer(_) => PyRuntimeError::new_err(error.to_string()),
+        }
+    }
+}
+
+/// Whether a column or parameter can be NULL (True), cannot (False), or is not known (None).
+fn nullable(nullability: analyzer::Nullability) -> Option<bool> {
+    match nullability {
+        analyzer::Nullability::Nullable => Some(true),
+        analyzer::Nullability::NonNull => Some(false),
+        analyzer::Nullability::Unknown => None,
+    }
 }
 
 /// Infer the Python return type for a SQL query.
@@ -130,9 +169,13 @@ fn rule_config(rules: Option<HashMap<String, String>>) -> PyResult<RuleConfig> {
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
-fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Option<String>> {
-    analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref())
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+fn infer_type(
+    py: Python<'_>,
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> Result<Option<String>, Error> {
+    Ok(py.detach(|| analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref()))?)
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -144,12 +187,14 @@ fn infer_type(sql: &str, dialect: &str, schema_sql: Option<&str>) -> PyResult<Op
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn analyze_select(
+    py: Python<'_>,
     sql: &str,
     dialect: &str,
     schema_sql: Option<&str>,
-) -> PyResult<Option<Vec<ColumnTuple>>> {
-    let columns = analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+) -> Result<Option<Vec<ColumnTuple>>, Error> {
+    let columns = py.detach(|| {
+        analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
+    })?;
     Ok(columns.map(|columns| {
         columns
             .into_iter()
@@ -170,26 +215,23 @@ fn analyze_select(
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
 fn analyze_columns(
+    py: Python<'_>,
     sql: &str,
     dialect: &str,
     schema_sql: Option<&str>,
-) -> PyResult<Option<Vec<NullableColumnTuple>>> {
-    let columns = analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+) -> Result<Option<Vec<NullableColumnTuple>>, Error> {
+    let columns = py.detach(|| {
+        analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
+    })?;
     Ok(columns.map(|columns| {
         columns
             .into_iter()
             .map(|col| {
-                let nullable = match col.nullability {
-                    analyzer::Nullability::Nullable => Some(true),
-                    analyzer::Nullability::NonNull => Some(false),
-                    analyzer::Nullability::Unknown => None,
-                };
                 (
                     col.name,
                     col.python_type,
                     col.sql_type,
-                    nullable,
+                    nullable(col.nullability),
                     col.json.map(|shape| shape.to_json()),
                 )
             })
@@ -207,23 +249,25 @@ fn analyze_columns(
 /// None when the context does not say. Returns None when the query doesn't parse.
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
-fn analyze_params(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Vec<ParamTuple>> {
-    let params = analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())?;
+fn analyze_params(
+    py: Python<'_>,
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> Option<Vec<ParamTuple>> {
+    let params = py.detach(|| {
+        analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())
+    })?;
     Some(
         params
             .into_iter()
             .map(|param| {
-                let nullable = match param.nullability {
-                    analyzer::Nullability::Nullable => Some(true),
-                    analyzer::Nullability::NonNull => Some(false),
-                    analyzer::Nullability::Unknown => None,
-                };
                 (
                     param.index,
                     param.name,
                     param.python_type,
                     param.sql_type,
-                    nullable,
+                    nullable(param.nullability),
                     param.cast,
                 )
             })
@@ -248,20 +292,27 @@ fn name_rules() -> Vec<&'static str> {
 ///     query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
-fn query_diagnostics(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Vec<(String, String)> {
-    analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
-        .1
-        .into_iter()
-        .map(|found| (found.rule.name().to_string(), found.message))
-        .collect()
+fn query_diagnostics(
+    py: Python<'_>,
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> Vec<(String, String)> {
+    py.detach(|| {
+        analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
+            .1
+            .into_iter()
+            .map(|found| (found.rule.name().to_string(), found.message))
+            .collect()
+    })
 }
 
 /// Names of the schema tables that could not be parsed, even without their
 /// constraints; their columns are unknown to inference.
 #[pyfunction]
 #[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
-fn schema_skipped_tables(schema_sql: &str, dialect: &str) -> Vec<String> {
-    skipped_objects(schema_sql, dialect, Some("table"))
+fn schema_skipped_tables(py: Python<'_>, schema_sql: &str, dialect: &str) -> Vec<String> {
+    py.detach(|| skipped_objects(schema_sql, dialect, Some("table")))
         .into_iter()
         .map(|(_, name)| name)
         .collect()
@@ -271,8 +322,12 @@ fn schema_skipped_tables(schema_sql: &str, dialect: &str) -> Vec<String> {
 /// `"table"` or `"view"`; their columns are unknown to inference.
 #[pyfunction]
 #[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
-fn schema_skipped_objects(schema_sql: &str, dialect: &str) -> Vec<(String, String)> {
-    skipped_objects(schema_sql, dialect, None)
+fn schema_skipped_objects(
+    py: Python<'_>,
+    schema_sql: &str,
+    dialect: &str,
+) -> Vec<(String, String)> {
+    py.detach(|| skipped_objects(schema_sql, dialect, None))
 }
 
 fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(String, String)> {
@@ -290,8 +345,8 @@ fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(
 ///     parse_error("SELECT id FROM", dialect="postgres")  # "Expected: ..., found: EOF ..."
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres"))]
-fn parse_error(sql: &str, dialect: &str) -> Option<String> {
-    analyzer::parse_error(sql, dialect)
+fn parse_error(py: Python<'_>, sql: &str, dialect: &str) -> Option<String> {
+    py.detach(|| analyzer::parse_error(sql, dialect))
 }
 
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -299,8 +354,8 @@ fn parse_error(sql: &str, dialect: &str) -> Option<String> {
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres"))]
-fn returns_rows(sql: &str, dialect: &str) -> bool {
-    analyzer::returns_rows(sql, dialect)
+fn returns_rows(py: Python<'_>, sql: &str, dialect: &str) -> bool {
+    py.detach(|| analyzer::returns_rows(sql, dialect))
 }
 
 /// Rewrite Python source: "--sql\n..." -> SQL[T]("--sql\n...").
@@ -315,22 +370,19 @@ fn returns_rows(sql: &str, dialect: &str) -> bool {
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false))]
 fn rewrite_source(
+    py: Python<'_>,
     source: &str,
     dialect: &str,
     schema_sql: Option<&str>,
     import_style: Option<&str>,
     untyped: bool,
     keep_lines: bool,
-) -> PyResult<String> {
-    check_import_style(import_style)?;
-    Ok(rewriter::rewrite_source_with(
-        source,
-        dialect,
-        schema_for(source, schema_sql, dialect).as_deref(),
-        import_style,
-        untyped,
-        keep_lines,
-    ))
+) -> Result<String, Error> {
+    py.detach(|| {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
+        Ok(rewriter::rewrite_source_with(source, &options, keep_lines))
+    })
 }
 
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
@@ -341,9 +393,11 @@ fn rewrite_source(
 ///     ValueError: unsupported import_style
 #[pyfunction]
 #[pyo3(signature = (source, *, import_style = None))]
-fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
-    check_import_style(import_style)?;
-    Ok(rewriter::strip_source(source, import_style))
+fn strip_source(py: Python<'_>, source: &str, import_style: Option<&str>) -> Result<String, Error> {
+    py.detach(|| {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(rewriter::strip_source(source, &style))
+    })
 }
 
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
@@ -355,7 +409,12 @@ fn strip_source(source: &str, import_style: Option<&str>) -> PyResult<String> {
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the keyword-only Python signature is the API"
+)]
 fn fix_source(
+    py: Python<'_>,
     source: &str,
     dialect: &str,
     schema_sql: Option<&str>,
@@ -363,18 +422,18 @@ fn fix_source(
     untyped: bool,
     rules: Option<HashMap<String, String>>,
     suppressed: Option<rewriter::Suppressed>,
-) -> PyResult<String> {
-    check_import_style(import_style)?;
-    let rules = rule_config(rules)?;
-    Ok(fixer::fix_source(
-        source,
-        dialect,
-        schema_for(source, schema_sql, dialect).as_deref(),
-        import_style,
-        untyped,
-        &rules,
-        suppressed.unwrap_or_default(),
-    ))
+) -> Result<String, Error> {
+    py.detach(|| {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        Ok(fixer::fix_source(
+            source,
+            &options,
+            &rules,
+            suppressed.unwrap_or_default(),
+        ))
+    })
 }
 
 /// Expand SELECT * into explicit column list.
@@ -383,8 +442,22 @@ fn fix_source(
 ///     SQL with expanded columns, or None if expansion is not possible
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
-fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<String> {
-    analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref())
+fn expand_star(
+    py: Python<'_>,
+    sql: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> Option<String> {
+    py.detach(|| analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref()))
+}
+
+/// A finding of `check_source`, which Python reads as a dict.
+#[derive(IntoPyObject)]
+struct DiagnosticOut {
+    rule: &'static str,
+    message: String,
+    severity: &'static str,
+    line: usize,
 }
 
 /// Check Python source for SQL type issues.
@@ -399,13 +472,16 @@ fn expand_star(sql: &str, dialect: &str, schema_sql: Option<&str>) -> Option<Str
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the keyword-only Python signature is the API"
+)]
 #[expect(
     clippy::needless_pass_by_value,
     reason = "PyO3 extracts a Vec, not a slice"
 )]
-fn check_source<'py>(
-    py: Python<'py>,
+fn check_source(
+    py: Python<'_>,
     source: &str,
     dialect: &str,
     schema_sql: Option<&str>,
@@ -413,28 +489,21 @@ fn check_source<'py>(
     import_style: Option<&str>,
     untyped: bool,
     any_calls: Vec<usize>,
-) -> PyResult<Bound<'py, PyList>> {
-    check_import_style(import_style)?;
-    let rules = rule_config(rules)?;
-    let diagnostics = checker::check_source(
-        source,
-        dialect,
-        schema_for(source, schema_sql, dialect).as_deref(),
-        &rules,
-        import_style,
-        untyped,
-        &any_calls,
-    );
-    let list = PyList::empty(py);
-    for diag in diagnostics {
-        let dict = PyDict::new(py);
-        dict.set_item("rule", diag.rule.name())?;
-        dict.set_item("message", &diag.message)?;
-        dict.set_item("severity", diag.severity.as_str())?;
-        dict.set_item("line", diag.line)?;
-        list.append(dict)?;
-    }
-    Ok(list)
+) -> Result<Vec<DiagnosticOut>, Error> {
+    py.detach(|| {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        Ok(checker::check_source(source, &options, &rules, &any_calls)
+            .into_iter()
+            .map(|diag| DiagnosticOut {
+                rule: diag.rule.name(),
+                message: diag.message,
+                severity: diag.severity.as_str(),
+                line: diag.line,
+            })
+            .collect())
+    })
 }
 
 /// `(line, annotation, query)` for each `SQL[T](...)` call in Python source.
@@ -447,11 +516,14 @@ fn check_source<'py>(
 #[pyfunction]
 #[pyo3(signature = (source, *, import_style = None))]
 fn wrapped_queries(
+    py: Python<'_>,
     source: &str,
     import_style: Option<&str>,
-) -> PyResult<Vec<(usize, String, Option<String>)>> {
-    check_import_style(import_style)?;
-    Ok(checker::wrapped_queries(source, import_style))
+) -> Result<Vec<(usize, String, Option<String>)>, Error> {
+    py.detach(|| {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(checker::wrapped_queries(source, &style))
+    })
 }
 
 /// Each query `check` sees, for `sqlty check --statistics`: `(line, kind, text)`.
@@ -471,18 +543,23 @@ fn wrapped_queries(
     reason = "PyO3 extracts a Vec, not a slice"
 )]
 fn query_sites(
+    py: Python<'_>,
     source: &str,
     import_style: Option<&str>,
     any_calls: Vec<usize>,
-) -> PyResult<Vec<(usize, String, String)>> {
-    check_import_style(import_style)?;
-    Ok(checker::query_sites(source, import_style, &any_calls)
-        .into_iter()
-        .map(|(line, kind, text)| (line, kind.name().to_string(), text))
-        .collect())
+) -> Result<Vec<(usize, String, String)>, Error> {
+    py.detach(|| {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(checker::query_sites(source, &style, &any_calls)
+            .into_iter()
+            .map(|(line, kind, text)| (line, kind.name().to_string(), text))
+            .collect())
+    })
 }
 
-#[pymodule]
+/// No pyclasses, and the only global state is the schema cache behind a `Mutex`, so the
+/// module runs without the GIL on free-threaded builds.
+#[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
@@ -502,4 +579,115 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(sql: &str, dialect: &str) -> CachedSchema {
+        let (schema, skipped) = analyzer::load_schema_with_skipped(sql, dialect);
+        (
+            sql.to_string(),
+            dialect.to_string(),
+            Arc::new(LoadedSchema { schema, skipped }),
+        )
+    }
+
+    #[test]
+    fn nullable_maps_the_three_states() {
+        assert_eq!(nullable(analyzer::Nullability::Nullable), Some(true));
+        assert_eq!(nullable(analyzer::Nullability::NonNull), Some(false));
+        assert_eq!(nullable(analyzer::Nullability::Unknown), None);
+    }
+
+    #[test]
+    fn cache_hit_moves_the_entry_to_the_front() {
+        let mut cache = vec![
+            entry("CREATE TABLE a (x INT)", "postgres"),
+            entry("CREATE TABLE b (x INT)", "postgres"),
+            entry("CREATE TABLE c (x INT)", "postgres"),
+        ];
+        let hit = cache_hit(&mut cache, "CREATE TABLE c (x INT)", "postgres");
+        assert!(hit.is_some());
+        let order: Vec<&str> = cache.iter().map(|(sql, _, _)| sql.as_str()).collect();
+        assert_eq!(
+            order,
+            [
+                "CREATE TABLE c (x INT)",
+                "CREATE TABLE a (x INT)",
+                "CREATE TABLE b (x INT)"
+            ]
+        );
+    }
+
+    #[test]
+    fn cache_hit_needs_the_same_sql_and_dialect() {
+        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
+        assert!(cache_hit(&mut cache, "CREATE TABLE a (x INT)", "mysql").is_none());
+        assert!(cache_hit(&mut cache, "CREATE TABLE a (y INT)", "postgres").is_none());
+        assert!(cache_hit(&mut [], "CREATE TABLE a (x INT)", "postgres").is_none());
+    }
+
+    #[test]
+    fn cache_hit_shares_the_parsed_schema() {
+        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
+        let first = cache_hit(&mut cache, "CREATE TABLE a (x INT)", "postgres").unwrap();
+        let second = cache_hit(&mut cache, "CREATE TABLE a (x INT)", "postgres").unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    /// One test, because the cache is a process-wide static: a test filling it would evict
+    /// the entries another test expects to find.
+    #[test]
+    fn cached_schema_parses_once_and_keeps_a_bounded_number() {
+        let sql = "CREATE TABLE sqlty_ext_cache_once (x INT)";
+        let first = cached_schema(sql, "postgres");
+        assert!(Arc::ptr_eq(&first, &cached_schema(sql, "postgres")));
+        assert!(!Arc::ptr_eq(&first, &cached_schema(sql, "mysql")));
+
+        for n in 0..SCHEMAS_KEPT * 2 {
+            cached_schema(
+                &format!("CREATE TABLE sqlty_ext_bound_{n} (x INT)"),
+                "postgres",
+            );
+        }
+        assert!(lock_schemas().len() <= SCHEMAS_KEPT);
+    }
+
+    #[test]
+    fn schema_is_absent_without_schema_sql() {
+        assert!(schema(None, "postgres").is_none());
+        assert!(schema(Some("CREATE TABLE sqlty_ext_present (x INT)"), "postgres").is_some());
+    }
+
+    #[test]
+    fn schema_for_skips_sources_that_cannot_hold_a_query() {
+        let ddl = Some("CREATE TABLE sqlty_ext_for (x INT)");
+        assert!(schema_for("print('hello')", ddl, "postgres").is_none());
+        assert!(schema_for("q = SQL[int]('SELECT 1')", ddl, "postgres").is_some());
+        assert!(schema_for("x = '--SQL\\nSELECT 1'", ddl, "postgres").is_some());
+        assert!(schema_for("SQL", None, "postgres").is_none());
+        assert!(schema_for("", ddl, "postgres").is_none());
+    }
+
+    #[test]
+    fn skipped_objects_lists_what_the_schema_could_not_parse() {
+        let sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;";
+        let all = skipped_objects(sql, "postgres", None);
+        assert!(
+            all.iter().all(|(_, name)| name != "sqlty_ext_ok"),
+            "a parsed table is not skipped: {all:?}"
+        );
+        let tables = skipped_objects(sql, "postgres", Some("table"));
+        let views = skipped_objects(sql, "postgres", Some("view"));
+        assert!(views.is_empty());
+        assert_eq!(tables, all);
+    }
+
+    #[test]
+    fn errors_render_the_message_of_their_source() {
+        let error = Error::from(ConfigError::ImportStyle("nope".to_string()));
+        assert_eq!(error.to_string(), "Unsupported import-style: 'nope'");
+    }
 }

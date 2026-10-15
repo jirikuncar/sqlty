@@ -1,0 +1,44 @@
+---
+source: crates/sqlty-sql/src/analyzer/functions.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT count(*) AS a, count(txt) AS b, count(DISTINCT i) AS c FROM t
+a: int | BIGINT | NonNull
+b: int | BIGINT | NonNull
+c: int | BIGINT | NonNull
+
+SELECT sum(i) AS a, sum(s) AS b, sum(b) AS c, sum(n) AS d, sum(f) AS e FROM t
+a: int | BIGINT | Nullable
+b: int | BIGINT | Nullable
+c: decimal.Decimal | DECIMAL | Nullable
+d: decimal.Decimal | DECIMAL | Nullable
+e: float | DOUBLE | Nullable
+
+SELECT min(i) AS a, max(txt) AS b, min(d) AS c, max(ts) AS d FROM t
+a: int | INT | Nullable
+b: str | TEXT | Nullable
+c: datetime.date | DATE | Nullable
+d: datetime.datetime | TIMESTAMP | Nullable
+
+SELECT avg(i) AS a, avg(f) AS b, avg(n) AS c, avg(iv) AS d FROM t
+a: decimal.Decimal | DECIMAL | Nullable
+b: float | DOUBLE | Nullable
+c: decimal.Decimal | DECIMAL | Nullable
+d: datetime.timedelta | INTERVAL | Nullable
+
+SELECT sum(i) FILTER (WHERE i > 1) AS a FROM t
+a: int | BIGINT | Nullable
+
+SELECT array_agg(i) AS a, string_agg(txt, ',') AS b, bool_and(i > 1) AS c FROM t
+a: list[int] | ARRAY<INT> | Nullable
+b: str | TEXT | Nullable
+c: bool | BOOLEAN | Nullable
+
+SELECT sum(nope) FROM t
+error: Column 'nope' not found in table 't' in schema. If you want to query columns not in the schema, use an explicit cast: SUM(nope::TYPE)
+[unknown-column] column `nope` does not exist in `t`
+
+SELECT sum(i::BIGINT) AS a, sum(unknown_fn(i)) AS b FROM t
+a: decimal.Decimal | DECIMAL | Nullable
+b: decimal.Decimal | NUMERIC | Nullable
+[unknown-function] function `unknown_fn` is not known to sqlty, so its result is untyped

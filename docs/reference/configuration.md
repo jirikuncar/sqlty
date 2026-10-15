@@ -2,8 +2,8 @@
 
 sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI uses, for each
 file, the nearest `pyproject.toml` above it; the magic codec searches from the
-current directory, and stub generation from the directory of the helper's
-module. Command-line flags override the file. Unknown keys are ignored.
+current directory. Command-line flags override the file. An unknown key, rule or
+severity is an error (exit 2) that names the file and suggests the closest match.
 
 In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
 package's packaging-only `pyproject.toml` in a monorepo does not hide the
@@ -24,21 +24,23 @@ select-star = "ignore"
 stale-type = "error"
 
 [[tool.sqlty.functions]]
-import_path = "db.sql"
-query_param = "query"
+import-path = "db.sql"
+query-param = "query"
 ```
 
-| Key | Used by |
-|-----|---------|
-| [`dialect`](#dialect) | `rewrite`, `check`, stub generation |
-| [`schema`](#schema) | `rewrite`, `check`, stub generation |
-| [`schemas`](#schemas) | Stub generation |
-| [`rules`](#rules) | `check` |
-| [`import-style`](#import-style) | `rewrite`, `strip`, `check`, magic codec |
-| [`untyped`](#untyped) | `rewrite`, stub generation |
-| [`type-modules`](#type-modules) | `check` |
-| [`format-command`](#format-command) | Stub generation |
-| [`functions`](#functions) | `check` ([helpers](../guide/helpers.md#helpers-you-cannot-annotate)), stub generation, `python -m sqlty.registries` |
+<!-- generated:config-keys -->
+| Key | Type | Default | Used by | Summary |
+|-----|------|---------|---------|---------|
+| [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
+| [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to `pyproject.toml` |
+| [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
+| [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
+| [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
+| [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
+| [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
+| [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
+| [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
+<!-- /generated:config-keys -->
 
 ## `dialect`
 
@@ -55,39 +57,11 @@ the directory of `pyproject.toml`. Each entry is a file, a directory (every
 in the order of the list; directory and glob matches are sorted by path, and a
 file named twice is read once. CLI: `--schema`, repeatable (relative to the
 current directory). See [Schema inference](../guide/schema-inference.md).
-Stub generation uses it for helpers that have no more specific schema; see
-[Generated stubs](../guide/stubs.md#schemas).
 
 ```toml
 [tool.sqlty]
 schema = ["extensions.sql", "tables/"]
 ```
-
-## `schemas`
-
-Schema files for [stub generation](../guide/stubs.md#schemas), keyed by the
-module that defines the helper (`"db"`) or by module and function
-(`"db.sql"`). Paths are relative to the directory of `pyproject.toml`.
-
-```toml
-[tool.sqlty.schemas]
-db = "db/schema.sql"                       # every helper in db.py
-"analytics.query" = "db/analytics.sql"    # only analytics.query
-```
-
-Keys use the module name the helper has at runtime, so a helper in a script
-run directly is under `__main__`. `rewrite` and `check` do not read this
-table.
-
-A stub uses the first schema found, from most to least specific:
-
-| Order | Source |
-|-------|--------|
-| 1 | `schema` in the helper's [`[[tool.sqlty.functions]]`](#functions) entry |
-| 2 | `schemas["module.function"]` |
-| 3 | `@sqlty(schema=...)` |
-| 4 | `schemas["module"]` |
-| 5 | top-level [`schema`](#schema) |
 
 ## `rules`
 
@@ -135,49 +109,48 @@ type-modules = ["myapp.types"]
 ## `untyped`
 
 `"skip"` (default) leaves row-returning queries of unknown type as plain
-strings. `"sentinel"` wraps them as `SQL[UNTYPED](...)`, and makes the
-catch-all overload of generated stubs return `SQL[UNTYPED]` instead of `str`
-(or `Any` for a helper with more parameters than the query). CLI:
+strings. `"sentinel"` wraps them as `SQL[UNTYPED](...)`. CLI:
 `sqlty rewrite --untyped`. See [Untyped queries](../guide/untyped.md).
-
-## `format-command`
-
-A formatter command with a `{filename}` placeholder, reading the source on
-stdin:
-
-```toml
-[tool.sqlty]
-format-command = "ruff format --stdin-filename {filename} -"
-```
-
-Stub generation pipes each `.pyi` file it writes through the command,
-with `{filename}` replaced by the shell-quoted stub path (do not quote it in
-the command). If the command fails, the
-unformatted stub is written and a warning is logged. `sqlty rewrite` does not
-run the formatter; run yours after it.
 
 ## `functions`
 
-An array of tables registering helper functions for
-[stub generation](../guide/stubs.md) and for `sqlty check`, which checks their
+An array of tables registering helper functions. `sqlty check` checks their
 calls like those of an [annotated helper](../guide/helpers.md#helpers-you-cannot-annotate)
 without editing the signature (a method is `"pkg.db.Db.fetch_all"`):
 
 ```toml
 [[tool.sqlty.functions]]
-import_path = "db.fetch_all"
-query_param = "query"
-return_type_template = "list[{sqlty}]"
+import-path = "db.fetch_all"
+query-param = "query"
 ```
 
+<!-- generated:config-function-keys -->
 | Key | Required | Description |
 |-----|----------|-------------|
-| `import_path` | yes | Module path and function name, e.g. `"app.db.sql"`. Use `"__main__.sql"` or the file name for a script run directly |
-| `query_param` | yes | Name of the parameter that holds the query |
-| `return_type_template` | no | Return type of each overload, with `{sqlty}` for the inferred row type. Default: `"SQL[{sqlty}]"` |
-| `imports` | no | Import lines added to the stub (a string or a list), for names used in `return_type_template` |
-| `schema` | no | Schema path for this helper, relative to the directory of `pyproject.toml`. Overrides every other [schema source](../guide/stubs.md#schemas) |
-| `return_type_param` | no | Parameter whose argument, such as `return_tp=int`, is used as the row type of that call instead of inferring it. `check` compares it with the query columns |
-| `self_type_template` | no | Reserved for methods, which are not supported |
+| `import-path` | yes | Module path and function name, e.g. `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. Use `"__main__.sql"` or the file name for a script run directly |
+| `query-param` | yes | Name of the parameter that holds the query |
+| `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is the row type of that call instead of an inferred one; `check` compares it with the query columns |
+<!-- /generated:config-function-keys -->
 
-Entries without `import_path` or `query_param` are skipped with a warning.
+Entries without `import-path` or `query-param` are skipped with a warning.
+
+## `exclude` and `extend-exclude`
+
+Directories the CLI walks skip these globs. `exclude` replaces the default
+list; `extend-exclude` adds to whichever list applies.
+
+The default excludes are:
+
+<!-- generated:config-default-excludes -->
+`.bzr`, `.direnv`, `.eggs`, `.git`, `.git-rewrite`, `.hg`, `.ipynb_checkpoints`, `.mypy_cache`, `.nox`, `.pants.d`, `.pyenv`, `.pytest_cache`, `.pytype`, `.ruff_cache`, `.svn`, `.tox`, `.venv`, `.vscode`, `__pypackages__`, `_build`, `buck-out`, `dist`, `node_modules`, `site-packages`, `venv`
+<!-- /generated:config-default-excludes -->
+
+A glob without a slash matches a file or
+directory name at any depth; one with a slash matches the path relative to
+the `pyproject.toml` that holds it, and `**` recurses. Files named on the
+command line are always processed.
+
+```toml
+[tool.sqlty]
+extend-exclude = ["migrations", "gen/*.py"]
+```

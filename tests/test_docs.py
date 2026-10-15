@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import doctest
 import importlib
+import importlib.util
 import pkgutil
 import re
 from pathlib import Path
@@ -40,6 +41,25 @@ def test_rules_table() -> None:
     assert sorted(rows) == sorted(
         (r.name, r.default_severity.value, "yes" if r.fixable else "no") for r in RULES.values()
     )
+
+
+def test_generated_reference_is_current() -> None:
+    """The tables in ``configuration.md`` and ``cli.md`` match the code (``make generate-docs``)."""
+    spec = importlib.util.spec_from_file_location(
+        "generate_docs", ROOT / "scripts" / "generate_docs.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    stale = [p.name for p in module.generate(check=True)]
+    assert not stale, f"run `make generate-docs`: {stale} out of date"
+
+
+def test_config_key_docs_cover_every_key() -> None:
+    from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEY_DOCS, FUNCTION_KEYS, KEY_DOCS, TOOL_KEYS
+
+    assert list(KEY_DOCS) == [*TOOL_KEYS, *DISCOVERY_KEYS]
+    assert list(FUNCTION_KEY_DOCS) == list(FUNCTION_KEYS)
 
 
 def test_python_api_doctest() -> None:

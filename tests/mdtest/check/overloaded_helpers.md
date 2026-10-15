@@ -18,19 +18,19 @@ schema = "schema.sql"
 
 ```toml
 [[tool.sqlty.functions]]
-import_path = "pkg.db.fetch_all"
-query_param = "query"
-return_type_param = "form"
+import-path = "pkg.db.fetch_all"
+query-param = "query"
+return-type-param = "form"
 
 [[tool.sqlty.functions]]
-import_path = "pkg.db.fetch_conn"
-query_param = "query"
-return_type_param = "form"
+import-path = "pkg.db.fetch_conn"
+query-param = "query"
+return-type-param = "form"
 
 [[tool.sqlty.functions]]
-import_path = "pkg.db.Db.fetch_all"
-query_param = "query"
-return_type_param = "form"
+import-path = "pkg.db.Db.fetch_all"
+query-param = "query"
+return-type-param = "form"
 ```
 
 `pkg/db.py`:

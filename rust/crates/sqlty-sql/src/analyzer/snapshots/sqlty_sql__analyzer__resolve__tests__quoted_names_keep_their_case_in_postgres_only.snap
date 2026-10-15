@@ -1,0 +1,29 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "format!(\"postgres:\\n{postgres}\\nmysql:\\n{mysql}\")"
+---
+postgres:
+SELECT "Mixed" FROM "Case"
+Mixed: int | INT | NonNull
+
+SELECT Mixed FROM "Case"
+mixed: ? | ? | Unknown
+[unknown-column] column `Mixed` does not exist in `case`
+
+SELECT PLAIN FROM "Case"
+plain: int | INT | Nullable
+
+SELECT "PLAIN" FROM "Case"
+PLAIN: ? | ? | Unknown
+[unknown-column] column `PLAIN` does not exist in `case`
+
+mysql:
+SELECT mixed FROM `Case`
+mixed: int | INT | NonNull
+
+SELECT PLAIN FROM case_
+plain: ? | ? | Unknown
+[unknown-table] table `case_` is not defined in the schema
+
+SELECT `MIXED` FROM `case`
+MIXED: int | INT | NonNull

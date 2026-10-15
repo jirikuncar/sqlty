@@ -1,0 +1,74 @@
+---
+source: crates/sqlty-sql/src/analyzer/functions.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT abs(i) AS a, abs(n) AS b, abs(f) AS c, abs(s) AS d FROM t
+a: int | INT | NonNull
+b: decimal.Decimal | DECIMAL(10, 2) | NonNull
+c: float | DOUBLE | Nullable
+d: int | SMALLINT | Nullable
+
+SELECT round(n) AS a, round(n, 1) AS b, round(f) AS c, round(i) AS d FROM t
+a: decimal.Decimal | DECIMAL | NonNull
+b: decimal.Decimal | DECIMAL | NonNull
+c: float | DOUBLE | Nullable
+d: float | DOUBLE | NonNull
+
+SELECT sqrt(i) AS a, sqrt(n) AS b, ceil(f) AS c, sign(n) AS d FROM t
+a: float | DOUBLE | NonNull
+b: decimal.Decimal | DECIMAL | NonNull
+c: float | DOUBLE | Nullable
+d: decimal.Decimal | DECIMAL | NonNull
+
+SELECT length(txt) AS a, lower(txt) AS b, concat(txt, i) AS c, substr(txt, 1) AS d FROM t
+a: int | INT | Nullable
+b: str | TEXT | Nullable
+c: str | TEXT | NonNull
+d: str | TEXT | Nullable
+
+SELECT coalesce(s, 1) AS a, coalesce(i, 1.5) AS b, coalesce(txt, 'x') AS c, coalesce(NULL, NULL) AS d FROM t
+a: int | INT | NonNull
+b: decimal.Decimal | DECIMAL | NonNull
+c: str | TEXT | NonNull
+d: ? | ? | Nullable
+[unsupported-syntax] expression `coalesce(NULL, NULL)` is not typed
+
+SELECT greatest(i, b) AS a, least(i, 1) AS b, nullif(i, 0) AS c FROM t
+a: int | BIGINT | NonNull
+b: int | INT | NonNull
+c: int | INT | Nullable
+
+SELECT now() AS a, current_date AS b, date_trunc('day', tz) AS c, date_trunc('day', d) AS d FROM t
+a: datetime.datetime | TIMESTAMPTZ | NonNull
+b: datetime.date | DATE | NonNull
+c: datetime.datetime | TIMESTAMPTZ | Nullable
+d: datetime.datetime | TIMESTAMPTZ | Nullable
+
+SELECT extract(year FROM ts) AS a, age(ts) AS b, date_part('day', ts) AS c FROM t
+a: decimal.Decimal | DECIMAL | NonNull
+b: datetime.timedelta | INTERVAL | NonNull
+c: float | DOUBLE | NonNull
+
+SELECT lag(i) OVER () AS a, lag(i, 1, 0) OVER () AS b, row_number() OVER () AS c FROM t
+a: int | INT | Nullable
+b: int | INT | NonNull
+c: int | BIGINT | NonNull
+
+SELECT lower(r) AS a, upper(r) AS b, array_length(arr, 1) AS c, unnest(arr) AS d FROM t
+a: int | INT | Nullable
+b: int | INT | Nullable
+c: int | INT | Nullable
+d: int | INT | Nullable
+[unknown-type] column `t.r` has type `INT4RANGE`, which has no Python type
+
+SELECT arr[1] AS a, tags[1] AS b, array_append(arr, 1) AS c, array_agg(txt) AS d FROM t GROUP BY txt
+a: int | INT | Nullable
+b: str | TEXT | Nullable
+c: list[int] | ARRAY<INT> | NonNull
+d: list[str] | ARRAY<TEXT> | NonNull
+
+SELECT gen_random_uuid() AS a, md5(txt) AS b, random() AS c, pg_sleep(1) AS d FROM t
+a: uuid.UUID | UUID | NonNull
+b: str | TEXT | Nullable
+c: float | DOUBLE | NonNull
+d: None | VOID | NonNull

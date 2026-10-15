@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
 
 import pytest
 
 from sqlty import _config
-from sqlty._config import load_config
+from sqlty._config import ConfigError, load_config, validate_tool_table
 
 
 def test_parses_each_pyproject_once(tmp_path, monkeypatch):
@@ -80,3 +82,73 @@ def test_nearest_sqlty_table_wins(tmp_path, packaging_only):
         (pkg / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "sqlite"\n')
         config, config_dir = load_config(pkg)
         assert (config["dialect"], config_dir) == ("sqlite", pkg.resolve())
+
+
+def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
+    _config._parse_pyproject_cached.cache_clear()
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\nbogus = 1\n')
+
+    with pytest.raises(_config.ConfigError, match=r"pyproject\.toml: unknown key 'bogus'"):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("toml", "message"),
+    [
+        ("[tool.sqlty.rules]\nnope = 'warn'\n", "unknown rule 'nope'"),
+        ("[tool.sqlty.rules]\nstale-typ = 'warn'\n", "did you mean 'stale-type'?"),
+        ("[tool.sqlty.rules]\nstale-type = 'loud'\n", "invalid severity 'loud'"),
+        ("[[tool.sqlty.functions]]\nimport-path = 'a.b'\nquery = 'q'\n", "unknown key 'query'"),
+        (
+            "[[tool.sqlty.functions]]\nimport_path = 'a.b'\nquery-param = 'q'\n",
+            "did you mean 'import-path'?",
+        ),
+        ("[tool.sqlty]\nexclude = 'build'\n", "exclude must be a list of glob strings"),
+    ],
+)
+def test_invalid_settings(tmp_path, toml, message):
+    _config._parse_pyproject_cached.cache_clear()
+    (tmp_path / "pyproject.toml").write_text(toml)
+
+    with pytest.raises(_config.ConfigError, match=message):
+        load_config(tmp_path)
+
+
+def test_exclude_settings_are_loaded(tmp_path):
+    _config._parse_pyproject_cached.cache_clear()
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nexclude = ["a"]\nextend-exclude = ["b"]\n'
+    )
+
+    config, _ = load_config(tmp_path)
+
+    assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
+
+
+def test_rules_must_be_a_table() -> None:
+    with pytest.raises(ConfigError, match="rules must be a table"):
+        validate_tool_table({"rules": ["select-star"]}, "pyproject.toml")
+
+
+def test_unreadable_pyproject_is_skipped_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
+    with caplog.at_level(logging.WARNING):
+        config, root = load_config(tmp_path)
+    assert (config, root) == ({}, None)
+    assert "Failed to parse" in caplog.text
+
+
+def test_incomplete_function_entries_are_skipped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nfunctions = ["junk", {import-path = "db.run"},'
+        ' {import-path = "db.ok", query-param = "q"}]\n'
+    )
+    with caplog.at_level(logging.WARNING):
+        config, _ = load_config(tmp_path)
+    assert config["functions"] == [{"import_path": "db.ok", "query_param": "q"}]
+    assert "missing required fields" in caplog.text

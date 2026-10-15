@@ -9,6 +9,7 @@ uv sync --all-groups               # install
 uv run pytest                      # all tests
 make test-mdtest                   # mdtest only
 make update-mdtest                 # update mdtest assertions
+make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
 make typecheck                     # mypy + ty on src and examples
 uv run pre-commit run --all-files  # all hooks (run before every commit)
 ```
@@ -44,6 +45,21 @@ make test-e2e        # e2e only
 make update-mdtest   # auto-update assertion comments in .md files
 make typecheck       # mypy + ty on src and examples
 ```
+
+## Benchmarks
+
+Two layers, both in the Makefile:
+
+- `make bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
+  is end-to-end: CLI wall time and RSS on a synthetic project, gated by
+  `benchmarks/baseline.json`. Needs a release build (`maturin develop --release`). Published wheels use
+  the slower `dist` profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so `release` numbers can
+  differ slightly from a shipped wheel.
+- `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
+  load (270 tables with functions), analyzer per query kind, and
+  `check_source`/`rewrite_source` on 1k/4k queries. Use it to find where time
+  goes and to compare a branch (`ARGS="--save-baseline main"`, then
+  `ARGS="--baseline main"`).
 
 ## Git safety
 
@@ -120,6 +136,7 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 |-------------|-----------|-------------|
 | Type inference | `tests/mdtest/type_inference/` | `basic_types.md` |
 | SQL dialects | `tests/mdtest/postgres/`, `mysql/`, `sqlite/` | `select.md` |
+| Nullability | `tests/mdtest/nullability/` | `inference.md` |
 | Rewriting | `tests/mdtest/rewrite/` | `basic_rewrite.md` |
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
@@ -232,6 +249,9 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 - README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
+- `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
+  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
+  parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
   matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
@@ -286,7 +306,7 @@ src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
 ├── core.py              # Public API over the Rust engine, plus row type checks
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _type_extractor.py   # Row types (TypedDict, dataclass, ...) for structural checks
+├── _type_extractor/     # Row types (TypedDict, dataclass, ...) for structural checks
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, version

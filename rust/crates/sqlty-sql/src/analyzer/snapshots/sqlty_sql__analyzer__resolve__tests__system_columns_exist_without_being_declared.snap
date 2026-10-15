@@ -1,0 +1,29 @@
+---
+source: crates/sqlty-sql/src/analyzer/resolve.rs
+expression: "format!(\"postgres:\\n{postgres}\\nsqlite:\\n{sqlite}\")"
+---
+postgres:
+SELECT ctid, xmin, xmax, cmin, cmax, tableoid FROM users
+ctid: str | TID | NonNull
+xmin: str | XID | NonNull
+xmax: str | XID | NonNull
+cmin: str | CID | NonNull
+cmax: str | CID | NonNull
+tableoid: int | OID | NonNull
+
+SELECT users.ctid FROM users
+ctid: str | TID | NonNull
+
+SELECT oid FROM users
+oid: ? | ? | Unknown
+[unknown-column] column `oid` does not exist in `users`
+
+sqlite:
+SELECT rowid, _rowid_, oid FROM users
+rowid: int | INT | NonNull
+_rowid_: int | INT | NonNull
+oid: int | INT | NonNull
+
+SELECT ctid FROM users
+ctid: ? | ? | Unknown
+[unknown-column] column `ctid` does not exist in `users`

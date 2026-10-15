@@ -1,6 +1,23 @@
 //! Expression typing.
 
-use super::*;
+use sqlparser::ast::{
+    AccessExpr, ArrayElemTypeDef, CaseWhen, DataType, Expr, Function, FunctionArguments, Ident,
+    ObjectName, Subscript, UnaryOperator, Value,
+};
+
+use crate::catalog::{fold, FunctionReturn};
+use crate::diagnostics::NameRule;
+
+use super::dialect::SqlDialect;
+use super::functions::{positional_args, Returns};
+use super::literals::{constant, strip, value_set};
+use super::memo::{first_column, Reporting};
+use super::names::{split_access, table_key};
+use super::operators::{category, common_of, common_type, operand_type, type_base};
+use super::query::{Analyzer, Column};
+use super::scope::Scope;
+use super::typed::Typed;
+use super::{decimal_type, Inferred};
 
 /// `INT` from `ARRAY<INT>` or `ARRAY<INT>[3]`.
 pub(super) fn array_element(sql_type: &str) -> Option<&str> {
@@ -21,28 +38,25 @@ pub(super) fn range_element(sql_type: &str) -> Option<&'static str> {
     })
 }
 
-/// `(python_type, sql_type)` of an expression.
-pub(super) type Typed = (Option<String>, Option<String>);
-
 pub(super) fn known(python_type: &str) -> Inferred<Typed> {
-    Ok((Some(python_type.to_string()), None))
+    Ok(Typed::python_only(python_type))
 }
 
-pub(super) fn from_sql_type(sql_type: String, dialect: SqlDialect) -> Typed {
-    (python_type(&sql_type, dialect), Some(sql_type))
+pub(super) fn from_sql_type(sql_type: &str, dialect: SqlDialect) -> Typed {
+    Typed::of_sql(sql_type, dialect)
 }
 
 impl<'a> Analyzer<'a> {
     /// The element type of an array type; an enum element keeps its `Literal`.
     pub(super) fn element_typed(&self, array: Option<&str>) -> Typed {
         let Some(elem) = array.and_then(array_element) else {
-            return (None, None);
+            return Typed::UNKNOWN;
         };
         match self.schema.user_type(&elem.to_lowercase()) {
             Some(user) if user.python_type.is_some() => {
-                (user.python_type.clone(), Some(elem.to_string()))
+                Typed::new(user.python_type.clone(), Some(elem.to_string()))
             }
-            _ => from_sql_type(elem.to_string(), self.dialect),
+            _ => from_sql_type(elem, self.dialect),
         }
     }
 
@@ -55,7 +69,7 @@ impl<'a> Analyzer<'a> {
                     .iter()
                     .find(|col| col.name == fold(field, self.dialect))
             })
-            .map_or((None, None), |col| col.typed(self.dialect))
+            .map_or(Typed::UNKNOWN, |col| col.typed(self.dialect))
     }
 
     /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
@@ -123,90 +137,20 @@ impl<'a> Analyzer<'a> {
             _ => 0,
         };
         match self.schema.function(&table_key(name, self.dialect), count) {
-            Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => typed.clone(),
-            _ => (None, None),
+            Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => {
+                typed.clone().into()
+            }
+            _ => Typed::UNKNOWN,
         }
     }
 
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
-            Expr::Cast { data_type, .. } => {
-                let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
-                let typed = match python_type {
-                    // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
-                    // labels upper-cased, which are not the column's values.
-                    Some(_) if matches!(data_type, DataType::Enum(..)) => {
-                        from_sql_type(sql_type, self.dialect)
-                    }
-                    Some(python_type) => (Some(python_type), Some(sql_type)),
-                    None => from_sql_type(sql_type, self.dialect),
-                };
-                if typed.0.is_none() && self.diag.enabled() {
-                    if self.schema.is_empty() || self.defines_type(data_type) {
-                        self.diag.explain_silently();
-                    } else {
-                        self.diag.record(
-                            NameRule::UnknownType,
-                            format!("type `{data_type}` has no Python type"),
-                        );
-                    }
-                }
-                Ok(typed)
-            }
+            Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
             Expr::Nested(inner) => self.expr(inner, scope),
-            Expr::Array(array) => {
-                let mut common: Option<Typed> = None;
-                for elem in &array.elem {
-                    if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
-                        continue;
-                    }
-                    let mut typed = self.expr(elem, scope)?;
-                    if let Some(inner) = typed.1.as_deref().and_then(array_element) {
-                        typed = from_sql_type(inner.to_string(), self.dialect);
-                    }
-                    common = match common {
-                        _ if typed == (None, None) => None,
-                        Some(common) => common_type(common, typed, self.dialect),
-                        None => Some(typed),
-                    };
-                    if common.is_none() {
-                        return Ok((None, None));
-                    }
-                }
-                let elem = common.and_then(|typed| {
-                    typed
-                        .1
-                        .clone()
-                        .or_else(|| category(&typed).map(String::from))
-                });
-                Ok(elem.map_or((None, None), |elem| {
-                    from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
-                }))
-            }
+            Expr::Array(array) => self.array_typed(&array.elem, scope),
             Expr::CompoundFieldAccess { root, access_chain } => {
-                let (mut typed, chain) = match (root.as_ref(), access_chain.as_slice()) {
-                    (
-                        Expr::Identifier(table),
-                        [AccessExpr::Dot(Expr::Identifier(column)), rest @ ..],
-                    ) => {
-                        let column = Expr::CompoundIdentifier(vec![table.clone(), column.clone()]);
-                        (self.expr(&column, scope)?, rest)
-                    }
-                    _ => (self.expr(root, scope)?, access_chain.as_slice()),
-                };
-                for access in chain {
-                    typed = match access {
-                        AccessExpr::Subscript(Subscript::Index { .. }) => {
-                            self.element_typed(typed.1.as_deref())
-                        }
-                        AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
-                        AccessExpr::Dot(Expr::Identifier(field)) => {
-                            self.field_typed(typed.1.as_deref(), field)
-                        }
-                        AccessExpr::Dot(_) => typed,
-                    };
-                }
-                Ok(typed)
+                self.access_typed(root, access_chain, scope)
             }
             Expr::UnaryOp {
                 op: UnaryOperator::Minus | UnaryOperator::Plus,
@@ -225,41 +169,19 @@ impl<'a> Analyzer<'a> {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
                 let typed = self.expr(timestamp, scope)?;
                 Ok(match operand_type(&typed) {
-                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ".to_string(), self.dialect),
-                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP".to_string(), self.dialect),
-                    _ => (None, None),
+                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
+                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    _ => Typed::UNKNOWN,
                 })
             }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
                 self.function_type(Returns::Real, &[inner], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("DECIMAL".to_string(), self.dialect))
+                Ok(from_sql_type("DECIMAL", self.dialect))
             }
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
-            Expr::Value(value) => match &value.value {
-                // PostgreSQL reads `1e3` as a `numeric`.
-                Value::Number(number, _) if number.contains(['e', 'E']) => {
-                    known(if self.dialect == SqlDialect::Postgres {
-                        decimal_type(self.dialect)
-                    } else {
-                        "float"
-                    })
-                }
-                Value::Number(number, _) if number.contains('.') => {
-                    known(decimal_type(self.dialect))
-                }
-                Value::Number(number, _) => Ok(number.parse().map_or_else(
-                    |_| (Some("int".to_string()), None),
-                    |n| constant(crate::values::Value::Int(n)),
-                )),
-                Value::Boolean(_) => known("bool"),
-                Value::Null | Value::Placeholder(_) => Ok((None, None)),
-                Value::SingleQuotedString(text) => {
-                    Ok(constant(crate::values::Value::Str(text.clone())))
-                }
-                _ => known("str"),
-            },
+            Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
             | Expr::InSubquery { .. }
             | Expr::InList { .. }
@@ -284,80 +206,359 @@ impl<'a> Analyzer<'a> {
             | Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 ..
-            } => Ok(from_sql_type("BOOLEAN".to_string(), self.dialect)),
-            Expr::Interval(_) => Ok(from_sql_type("INTERVAL".to_string(), self.dialect)),
+            } => Ok(from_sql_type("BOOLEAN", self.dialect)),
+            Expr::Interval(_) => Ok(from_sql_type("INTERVAL", self.dialect)),
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
             Expr::Trim { .. } | Expr::Substring { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("TEXT".to_string(), self.dialect))
+                Ok(from_sql_type("TEXT", self.dialect))
             }
             Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
             Expr::Position { .. } => known("int"),
-            Expr::Subquery(query) => Ok(self
-                .correlated(scope)
-                .query_columns(query)?
-                .and_then(|columns| columns.into_iter().next())
-                .map_or((None, None), |col| (col.python_type, col.sql_type))),
+            Expr::Subquery(query) => {
+                Ok(
+                    first_column(&self.subquery_columns(query, scope, Reporting::Record))?
+                        .map_or(Typed::UNKNOWN, Column::typed),
+                )
+            }
             Expr::Case {
                 conditions,
                 else_result,
                 ..
-            } => {
-                let mut results = Vec::new();
-                for expr in conditions
-                    .iter()
-                    .map(|when| &when.result)
-                    .chain(else_result.as_deref())
-                {
-                    results.push(self.expr(expr, scope)?);
-                }
-                if self.dialect == SqlDialect::Postgres {
-                    if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
-                        return Ok(common);
-                    }
-                }
-                // Other dialects take the first branch's type, but a set of values
-                // covers every branch.
-                let first = results.first().cloned().unwrap_or((None, None));
-                if value_set(&first).is_some() {
-                    return Ok(common_of(results, self.dialect)
-                        .unwrap_or_else(|| strip(first, self.dialect)));
-                }
-                Ok(first)
-            }
-            Expr::Function(func) => {
-                let name = self.builtin_name(&func.name);
-                let args = positional_args(&func.args);
-                let arg = args.first().copied();
-                match name.as_str() {
-                    "COUNT" => Ok(from_sql_type("BIGINT".to_string(), self.dialect)),
-                    "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
-                    _ => match self.returns(&name) {
-                        Some(returns) => self.function_type(returns, &args, scope),
-                        None => {
-                            let typed = self.user_function(&func.name, &func.args);
-                            if typed.0.is_none() && self.diag.enabled() {
-                                if self.schema.is_empty()
-                                    || self
-                                        .schema
-                                        .defines_function(&table_key(&func.name, self.dialect))
-                                {
-                                    self.diag.explain_silently();
-                                } else {
-                                    self.diag.record(
-                                        NameRule::UnknownFunction,
-                                        format!(
-                                            "function `{}` is not known to sqlty, so its result is untyped",
-                                            self.display_name(&func.name)
-                                        ),
-                                    );
-                                }
-                            }
-                            Ok(typed)
-                        }
-                    },
-                }
-            }
-            _ => Ok((None, None)),
+            } => self.case_typed(conditions, else_result.as_deref(), scope),
+            Expr::Function(func) => self.call_typed(func, scope),
+            _ => Ok(Typed::UNKNOWN),
         }
+    }
+
+    /// `CAST(x AS type)`: the type as the schema resolves it, with the reason when it has no
+    /// Python type.
+    fn cast_typed(&self, data_type: &DataType) -> Typed {
+        let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
+        let typed = match python_type {
+            // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
+            // labels upper-cased, which are not the column's values.
+            Some(_) if matches!(data_type, DataType::Enum(..)) => {
+                from_sql_type(&sql_type, self.dialect)
+            }
+            Some(python_type) => Typed::new(Some(python_type), Some(sql_type)),
+            None => from_sql_type(&sql_type, self.dialect),
+        };
+        if !typed.is_known() && self.diag.enabled() {
+            if self.schema.is_empty() || self.defines_type(data_type) {
+                self.diag.explain_silently();
+            } else {
+                self.diag.record(
+                    NameRule::UnknownType,
+                    format!("type `{data_type}` has no Python type"),
+                );
+            }
+        }
+        typed
+    }
+
+    /// `ARRAY[a, b, ...]`: an array of the common type of its elements.
+    fn array_typed(&self, elems: &[Expr], scope: &Scope) -> Inferred<Typed> {
+        let mut common: Option<Typed> = None;
+        for elem in elems {
+            if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
+                continue;
+            }
+            let mut typed = self.expr(elem, scope)?;
+            if let Some(inner) = typed.sql().and_then(array_element) {
+                typed = from_sql_type(inner, self.dialect);
+            }
+            common = match common {
+                _ if typed == Typed::UNKNOWN => None,
+                Some(common) => common_type(common, typed, self.dialect),
+                None => Some(typed),
+            };
+            if common.is_none() {
+                return Ok(Typed::UNKNOWN);
+            }
+        }
+        let elem =
+            common.and_then(|typed| typed.sql().or_else(|| category(&typed)).map(String::from));
+        Ok(elem.map_or(Typed::UNKNOWN, |elem| {
+            from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
+        }))
+    }
+
+    /// `col[1].field`: element and field types of the root's type, as the schema declares them.
+    fn access_typed(
+        &self,
+        root: &Expr,
+        access_chain: &[AccessExpr],
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        let (root, chain) = split_access(root, access_chain);
+        let mut typed = self.expr(&root, scope)?;
+        for access in chain {
+            typed = match access {
+                AccessExpr::Subscript(Subscript::Index { .. }) => self.element_typed(typed.sql()),
+                AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
+                AccessExpr::Dot(Expr::Identifier(field)) => self.field_typed(typed.sql(), field),
+                AccessExpr::Dot(_) => typed,
+            };
+        }
+        Ok(typed)
+    }
+
+    /// A literal: numbers by their spelling, strings as constants.
+    fn value_typed(&self, value: &Value) -> Inferred<Typed> {
+        match value {
+            // PostgreSQL reads `1e3` as a `numeric`.
+            Value::Number(number, _) if number.contains(['e', 'E']) => {
+                known(if self.dialect == SqlDialect::Postgres {
+                    decimal_type(self.dialect)
+                } else {
+                    "float"
+                })
+            }
+            Value::Number(number, _) if number.contains('.') => known(decimal_type(self.dialect)),
+            Value::Number(number, _) => Ok(number.parse().map_or_else(
+                |_| Typed::python_only("int"),
+                |n| constant(crate::values::Value::Int(n)),
+            )),
+            Value::Boolean(_) => known("bool"),
+            Value::Null | Value::Placeholder(_) => Ok(Typed::UNKNOWN),
+            Value::SingleQuotedString(text) => {
+                Ok(constant(crate::values::Value::Str(text.clone())))
+            }
+            _ => known("str"),
+        }
+    }
+
+    /// `CASE`: the common type of its results.
+    fn case_typed(
+        &self,
+        conditions: &[CaseWhen],
+        else_result: Option<&Expr>,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        let mut results = Vec::new();
+        for expr in conditions
+            .iter()
+            .map(|when| &when.result)
+            .chain(else_result)
+        {
+            results.push(self.expr(expr, scope)?);
+        }
+        if self.dialect == SqlDialect::Postgres {
+            if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
+                return Ok(common);
+            }
+        }
+        // Other dialects take the first branch's type, but a set of values
+        // covers every branch.
+        let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
+        if value_set(&first).is_some() {
+            return Ok(
+                common_of(results, self.dialect).unwrap_or_else(|| strip(first, self.dialect))
+            );
+        }
+        Ok(first)
+    }
+
+    /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
+    fn call_typed(&self, func: &Function, scope: &Scope) -> Inferred<Typed> {
+        let name = self.builtin_name(&func.name);
+        let args = positional_args(&func.args);
+        let arg = args.first().copied();
+        match name.as_str() {
+            "COUNT" => Ok(from_sql_type("BIGINT", self.dialect)),
+            "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
+            _ => match self.returns(&name) {
+                Some(returns) => self.function_type(returns, &args, scope),
+                None => Ok(self.user_call_typed(func)),
+            },
+        }
+    }
+
+    /// A call to a function sqlty has no rule for: the schema's, with the reason when the
+    /// result stays untyped.
+    fn user_call_typed(&self, func: &Function) -> Typed {
+        let typed = self.user_function(&func.name, &func.args);
+        if typed.python.is_none() && self.diag.enabled() {
+            if self.schema.is_empty()
+                || self
+                    .schema
+                    .defines_function(&table_key(&func.name, self.dialect))
+            {
+                self.diag.explain_silently();
+            } else {
+                self.diag.record(
+                    NameRule::UnknownFunction,
+                    format!(
+                        "function `{}` is not known to sqlty, so its result is untyped",
+                        self.display_name(&func.name)
+                    ),
+                );
+            }
+        }
+        typed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support::reports;
+    use super::*;
+
+    const DDL: &str = "CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy'); \
+                       CREATE TYPE pair AS (x INT, y TEXT); \
+                       CREATE DOMAIN positive AS INT CHECK (VALUE > 0); \
+                       CREATE TABLE t (i INT NOT NULL, n INT, txt TEXT, m mood NOT NULL, \
+                       p pair, pos positive NOT NULL, arr INT[] NOT NULL, \
+                       grid INT[][], ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ, j JSONB)";
+
+    #[test]
+    fn array_element_reads_the_inner_type() {
+        assert_eq!(array_element("ARRAY<INT>"), Some("INT"));
+        assert_eq!(array_element("ARRAY<INT>[3]"), Some("INT"));
+        assert_eq!(array_element("ARRAY<ARRAY<TEXT>>"), Some("ARRAY<TEXT>"));
+        assert_eq!(array_element("INT"), None);
+        assert_eq!(array_element("ARRAY<INT"), None);
+    }
+
+    #[test]
+    fn range_element_names_the_bound_type() {
+        assert_eq!(range_element("INT4RANGE"), Some("INT"));
+        assert_eq!(range_element("INT8RANGE"), Some("BIGINT"));
+        assert_eq!(range_element("NUMRANGE"), Some("DECIMAL"));
+        assert_eq!(range_element("TSRANGE"), Some("TIMESTAMP"));
+        assert_eq!(range_element("TSTZRANGE"), Some("TIMESTAMPTZ"));
+        assert_eq!(range_element("DATERANGE"), Some("DATE"));
+        assert_eq!(range_element("INT"), None);
+    }
+
+    #[test]
+    fn known_is_a_python_only_type() {
+        let typed = known("int").unwrap();
+        assert_eq!(typed.python(), Some("int"));
+        assert_eq!(typed.sql(), None);
+    }
+
+    #[test]
+    fn from_sql_type_maps_the_python_type() {
+        let typed = from_sql_type("BIGINT", SqlDialect::Postgres);
+        assert_eq!(typed.python(), Some("int"));
+        assert_eq!(typed.sql(), Some("BIGINT"));
+        assert_eq!(from_sql_type("NOPE", SqlDialect::Postgres).python(), None);
+    }
+
+    #[test]
+    fn casts() {
+        let queries = [
+            "SELECT i::BIGINT AS a, i::TEXT AS b, txt::INT AS c, n::NUMERIC(10, 2) AS d",
+            "SELECT CAST(i AS DOUBLE PRECISION) AS a, CAST(txt AS VARCHAR(20)) AS b FROM t",
+            "SELECT '1'::INT AS a, NULL::TEXT AS b, 1::BOOLEAN AS c",
+            "SELECT i::INT[] AS a, txt::TEXT[] AS b, '{}'::INT[][] AS c",
+            "SELECT m::TEXT AS a, txt::mood AS b, i::positive AS c",
+            "SELECT i::pair AS a",
+            "SELECT i::no_such_type AS a",
+            "SELECT i::JSONB AS a, i::UUID AS b, i::BYTEA AS c, i::DATE AS d",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn casts_without_a_schema_do_not_complain() {
+        let queries = ["SELECT 1::no_such_type AS a", "SELECT x::INT AS a"];
+        insta::assert_snapshot!(reports(&queries, "postgres", None));
+    }
+
+    #[test]
+    fn literals_and_unary_operators() {
+        let queries = [
+            "SELECT 1 AS a, -1 AS b, +1 AS c, 1.5 AS d, 'x' AS e, true AS f, NULL AS g",
+            "SELECT -i AS a, @ i AS b, ~i AS c, NOT true AS d FROM t",
+            "SELECT 1e3 AS a, 0x1F AS b, X'ff' AS c, E'a\\nb' AS d, $$dollar$$ AS e",
+            "SELECT $1 AS a, $1::INT AS b",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn case_expressions() {
+        let queries = [
+            "SELECT CASE WHEN i > 1 THEN 1 ELSE 2 END AS a FROM t",
+            "SELECT CASE WHEN i > 1 THEN 1 END AS a FROM t",
+            "SELECT CASE WHEN i > 1 THEN i ELSE n END AS a FROM t",
+            "SELECT CASE WHEN i > 1 THEN i ELSE 2.5 END AS a FROM t",
+            "SELECT CASE WHEN i > 1 THEN i ELSE txt END AS a FROM t",
+            "SELECT CASE i WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END AS a FROM t",
+            "SELECT CASE WHEN i > 1 THEN NULL ELSE NULL END AS a FROM t",
+            "SELECT CASE WHEN i > 1 THEN m ELSE 'sad' END AS a FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn arrays_and_subscripts() {
+        let queries = [
+            "SELECT ARRAY[1, 2, 3] AS a, ARRAY[1, 2.5] AS b, ARRAY['a', 'b'] AS c",
+            "SELECT ARRAY[i, n] AS a, ARRAY[]::INT[] AS b, ARRAY[ARRAY[1], ARRAY[2]] AS c FROM t",
+            "SELECT ARRAY[1, 'a'] AS a",
+            "SELECT arr[1] AS a, grid[1][2] AS b, arr[1:2] AS c, (arr)[1] AS d FROM t",
+            "SELECT txt[1] AS a, i[1] AS b FROM t",
+            "SELECT ARRAY(SELECT i FROM t) AS a",
+            "SELECT i = ANY(arr) AS a, arr @> ARRAY[1] AS b, arr || 4 AS c FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn composite_fields_and_json_access() {
+        let queries = [
+            "SELECT (p).x AS a, (p).y AS b, (t.p).x AS c FROM t",
+            "SELECT (p).nope AS a FROM t",
+            "SELECT j -> 'a' AS a, j ->> 'a' AS b, j #> '{a,b}' AS c, j #>> '{a,b}' AS d FROM t",
+            "SELECT j['a'] AS a, j @> '{}' AS b, j ? 'a' AS c FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    #[ignore = "bug: typed string literals (DATE '...', TIMESTAMP '...') are not typed; expr() has no Expr::TypedString arm"]
+    fn typed_string_literals_are_typed() {
+        let report = super::super::test_support::report(
+            "SELECT DATE '2020-01-01' AS d, TIMESTAMP '2020-01-01 00:00:00' AS ts",
+            "postgres",
+            None,
+        );
+        assert!(report.contains("d: datetime.date"), "{report}");
+        assert!(report.contains("ts: datetime.datetime"), "{report}");
+    }
+
+    #[test]
+    fn misc_expressions() {
+        let queries = [
+            "SELECT EXTRACT(YEAR FROM ts) AS a, POSITION('a' IN txt) AS b, TRIM(txt) AS c FROM t",
+            "SELECT SUBSTRING(txt FROM 1 FOR 2) AS a, CEIL(1.5) AS b, FLOOR(i) AS c FROM t",
+            "SELECT ts AT TIME ZONE 'UTC' AS a, tz AT TIME ZONE 'UTC' AS b, i AT TIME ZONE 'UTC' AS c FROM t",
+            "SELECT EXISTS (SELECT 1) AS a, i IN (SELECT i FROM t) AS b, i BETWEEN 1 AND 3 AS c FROM t",
+            "SELECT (SELECT max(i) FROM t) AS a, (SELECT i, n FROM t) AS b",
+            "SELECT txt ILIKE 'a%' AS a, txt SIMILAR TO 'a' AS b, txt ~ 'a' AS c FROM t",
+            "SELECT i IS DISTINCT FROM n AS a, n IS NOT NULL AS b, (i > 1) IS TRUE AS c FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn mysql_and_sqlite_expressions() {
+        let ddl_mysql =
+            "CREATE TABLE t (i INT NOT NULL, txt VARCHAR(10), e ENUM('a', 'b') NOT NULL)";
+        let queries = [
+            "SELECT CAST(i AS CHAR) AS a, CAST(i AS SIGNED) AS b, CAST(txt AS UNSIGNED) AS c FROM t",
+            "SELECT TRIM(txt) AS a, SUBSTRING(txt, 1, 2) AS b, POSITION('a' IN txt) AS c FROM t",
+            "SELECT e AS a, CAST(e AS CHAR) AS b, i DIV 2 AS c FROM t",
+        ];
+        let mysql = reports(&queries, "mysql", Some(ddl_mysql));
+        let sqlite_queries = [
+            "SELECT CAST(x AS INTEGER) AS a, CAST(x AS TEXT) AS b, CAST(x AS REAL) AS c FROM t",
+            "SELECT 1 AS a, 'x' AS b, x'ff' AS c FROM t",
+        ];
+        let sqlite = reports(&sqlite_queries, "sqlite", Some("CREATE TABLE t (x)"));
+        insta::assert_snapshot!(format!("mysql:\n{mysql}\nsqlite:\n{sqlite}"));
     }
 }

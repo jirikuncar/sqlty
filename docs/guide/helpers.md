@@ -110,17 +110,16 @@ one = Db.fetch_one("SELECT name FROM users", int)
 ## Helpers you cannot annotate
 
 A helper whose signature you cannot edit (a library, generated code) is
-registered in `pyproject.toml` instead, with the entry that
-[stub generation](stubs.md) also reads:
+registered in `pyproject.toml` instead:
 
 ```toml
 [[tool.sqlty.functions]]
-import_path = "pkg.db.fetch_all"   # or "pkg.db.Db.fetch_all" for a method
-query_param = "query"
-return_type_param = "form"
+import-path = "pkg.db.fetch_all"   # or "pkg.db.Db.fetch_all" for a method
+query-param = "query"
+return-type-param = "form"
 ```
 
-`query_param` names the parameter that holds the query and `return_type_param`
+`query-param` names the parameter that holds the query and `return-type-param`
 the one holding the row type. When `pkg.db` is among the checked paths, both are
 looked up in the definition, so calls may pass them by position; otherwise
 they are checked only when passed by keyword (`fetch_all(query="...", form=int)`).

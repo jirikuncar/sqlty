@@ -1,0 +1,21 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+CREATE TABLE z (a INT)
+no rows
+
+DROP TABLE a
+no rows
+
+BEGIN
+no rows
+
+UPDATE a SET label = 'x'
+no rows
+
+SELECT FROM
+no rows
+
+
+no rows

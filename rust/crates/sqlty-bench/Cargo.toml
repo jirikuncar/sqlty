@@ -1,0 +1,23 @@
+[package]
+name = "sqlty-bench"
+version.workspace = true
+edition.workspace = true
+description = "Criterion benchmarks of the sqlty engine (run with `make bench-rust`)"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sqlty-sql.workspace = true
+sqlty-python.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "engine"
+harness = false

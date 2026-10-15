@@ -1,0 +1,33 @@
+---
+source: crates/sqlty-sql/src/analyzer/query.rs
+expression: "rendered.join(\"\\n\")"
+---
+postgres:
+SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
+id: int | INT | NonNull
+total: int | BIGINT | NonNull
+?column?: int | INT | NonNull
+
+mysql:
+SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
+id: int | INT | NonNull
+Total: int | BIGINT | NonNull
+?column?: int | INT | NonNull
+
+sqlite:
+SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
+id: int | INT | NonNull
+Total: int | BIGINT | NonNull
+?column?: int | INT | NonNull
+
+clickhouse:
+SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
+id: int | INT | NonNull
+Total: int | BIGINT | NonNull
+?column?: int | INT | NonNull
+
+bigquery:
+SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
+id: int | INT | NonNull
+Total: int | BIGINT | NonNull
+?column?: int | INT | NonNull

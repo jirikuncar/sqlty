@@ -1,6 +1,18 @@
 //! Function return types and aggregate typing.
 
-use super::*;
+use std::rc::Rc;
+
+use sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, FunctionArguments};
+
+use super::dialect::SqlDialect;
+use super::expr::{from_sql_type, range_element};
+use super::literals::{strip, value_set};
+use super::operators::{common_of, numeric_rank, operand_type};
+use super::query::Analyzer;
+use super::registry::lookup;
+use super::scope::{resolve, Scope};
+use super::typed::Typed;
+use super::{decimal_type, InferError, Inferred};
 
 /// How a function's result type follows from its arguments (indexes count from 0).
 #[derive(Clone, Copy)]
@@ -378,19 +390,15 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     (&["DATE_TRUNC"], Returns::Trunc(1)),
 ];
 
-pub(super) fn function_table(
-    entries: &'static [(&[&'static str], Returns)],
-) -> HashMap<&'static str, Returns> {
-    entries
-        .iter()
-        .flat_map(|(names, returns)| names.iter().map(move |name| (*name, *returns)))
-        .collect()
+/// The upper-case name of a function, without its schema.
+pub(super) fn function_name(func: &sqlparser::ast::Function) -> String {
+    func.name
+        .0
+        .last()
+        .and_then(|part| part.as_ident())
+        .map(|ident| ident.value.to_uppercase())
+        .unwrap_or_default()
 }
-
-pub(super) static FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
-    LazyLock::new(|| function_table(COMMON_FUNCTIONS));
-pub(super) static POSTGRES_FUNCTION_TYPES: LazyLock<HashMap<&'static str, Returns>> =
-    LazyLock::new(|| function_table(POSTGRES_FUNCTIONS));
 
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
 pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
@@ -408,11 +416,9 @@ pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
 }
 
 impl<'a> Analyzer<'a> {
+    /// How the result type of the built-in function `name` (upper case) follows from its arguments.
     pub(super) fn returns(&self, name: &str) -> Option<Returns> {
-        let postgres = (self.dialect == SqlDialect::Postgres)
-            .then(|| POSTGRES_FUNCTION_TYPES.get(name))
-            .flatten();
-        postgres.or_else(|| FUNCTION_TYPES.get(name)).copied()
+        lookup(name)?.returns(self.dialect)
     }
 
     /// Result type of a call to a function that [`Returns`] describes, given its arguments.
@@ -424,13 +430,16 @@ impl<'a> Analyzer<'a> {
     ) -> Inferred<Typed> {
         let arg = |i: usize| match args.get(i) {
             Some(arg) => self.expr(arg, scope),
-            None => Ok((None, None)),
+            None => Ok(Typed::UNKNOWN),
         };
-        let sql = |name: &str| Ok(from_sql_type(name.to_string(), self.dialect));
+        let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
         match returns {
-            Returns::Sql(name) => sql(name),
-            Returns::Void => Ok((Some("None".to_string()), Some("VOID".to_string()))),
-            Returns::Arg(i) => Ok(strip(arg(i)?, self.dialect)),
+            Sql(name) => sql(name),
+            Returns::Void => Ok(Typed {
+                python: Some(Rc::from("None")),
+                sql: Some(Rc::from("VOID")),
+            }),
+            Arg(i) => Ok(strip(arg(i)?, self.dialect)),
             // `LAG(x, 1, 'default')` can also return the default.
             Returns::Same(i) if args.len() >= 3 => Ok(strip(arg(i)?, self.dialect)),
             Returns::Same(i) => arg(i),
@@ -446,9 +455,9 @@ impl<'a> Analyzer<'a> {
                 }
                 let first = typed_args
                     .iter()
-                    .find(|typed| typed.0.is_some())
+                    .find(|typed| typed.is_known())
                     .cloned()
-                    .unwrap_or((None, None));
+                    .unwrap_or(Typed::UNKNOWN);
                 // `COALESCE(checked_column, 'other')` takes any of the arguments' values.
                 if value_set(&first).is_some() {
                     return Ok(common_of(typed_args, self.dialect)
@@ -456,23 +465,23 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(first)
             }
-            Returns::Elem(i) => Ok(self.element_typed(arg(i)?.1.as_deref())),
+            Elem(i) => Ok(self.element_typed(arg(i)?.sql())),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
                 let elem = typed
-                    .1
-                    .clone()
-                    .or_else(|| operand_type(&typed).map(String::from));
-                Ok(elem.map_or((None, None), |elem| {
-                    from_sql_type(format!("ARRAY<{elem}>"), self.dialect)
+                    .sql()
+                    .or_else(|| operand_type(&typed))
+                    .map(String::from);
+                Ok(elem.map_or(Typed::UNKNOWN, |elem| {
+                    from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
                 }))
             }
             Returns::Bound => {
                 let typed = arg(0)?;
-                match typed.1.as_deref().and_then(range_element) {
+                match typed.sql().and_then(range_element) {
                     Some(elem) => sql(elem),
-                    None if typed.0.is_some() => sql("TEXT"),
-                    None => Ok((None, None)),
+                    None if typed.python.is_some() => sql("TEXT"),
+                    None => Ok(Typed::UNKNOWN),
                 }
             }
             Returns::Mean => {
@@ -481,7 +490,7 @@ impl<'a> Analyzer<'a> {
                     Some("DOUBLE" | "FLOAT") => sql("DOUBLE"),
                     Some("INTERVAL") => sql("INTERVAL"),
                     Some(_) => sql("DECIMAL"),
-                    None => Ok((None, None)),
+                    None => Ok(Typed::UNKNOWN),
                 }
             }
             Returns::Real | Returns::Scaled => {
@@ -491,7 +500,7 @@ impl<'a> Analyzer<'a> {
                     Some("DOUBLE" | "FLOAT") => sql("DOUBLE"),
                     Some(ty) if numeric_rank(ty).is_some_and(|rank| rank <= 2) => sql("DOUBLE"),
                     Some("DECIMAL" | "NUMERIC") => sql("DECIMAL"),
-                    _ => Ok((None, None)),
+                    _ => Ok(Typed::UNKNOWN),
                 }
             }
             Returns::Trunc(i) => {
@@ -499,7 +508,7 @@ impl<'a> Analyzer<'a> {
                 match operand_type(&typed) {
                     Some("DATE") => sql("TIMESTAMPTZ"),
                     Some("TIMESTAMP" | "TIMESTAMPTZ" | "INTERVAL") => Ok(typed),
-                    _ => Ok((None, None)),
+                    _ => Ok(Typed::UNKNOWN),
                 }
             }
         }
@@ -512,17 +521,17 @@ impl<'a> Analyzer<'a> {
         arg: Option<&Expr>,
         scope: &Scope,
     ) -> Inferred<Typed> {
-        let mut typed = arg.map_or(Ok((None, None)), |arg| self.expr(arg, scope))?;
+        let mut typed = arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope))?;
         if name == "SUM" {
             typed = strip(typed, self.dialect);
         }
         let numeric = || {
-            Ok((
-                Some(decimal_type(self.dialect).to_string()),
-                Some("NUMERIC".to_string()),
-            ))
+            Ok(Typed {
+                python: Some(Rc::from(decimal_type(self.dialect))),
+                sql: Some(Rc::from("NUMERIC")),
+            })
         };
-        if typed.0.is_some() || name != "SUM" {
+        if typed.python.is_some() || name != "SUM" {
             return Ok(if name == "SUM" && self.dialect == SqlDialect::Postgres {
                 sum_type(typed, self.dialect)
             } else {
@@ -533,12 +542,15 @@ impl<'a> Analyzer<'a> {
             return numeric();
         }
         let (table, column) = match arg {
-            Some(Expr::Identifier(ident)) => (scope[0].1.clone(), &ident.value),
+            Some(Expr::Identifier(ident)) => (scope[0].table.clone(), &ident.value),
             Some(Expr::CompoundIdentifier(parts)) if parts.len() >= 2 => (
                 resolve(&parts[parts.len() - 2].value, scope),
                 &parts[parts.len() - 1].value,
             ),
             _ => return numeric(),
+        };
+        let Some(table) = table.named().map(str::to_string) else {
+            return numeric();
         };
         if self.schema.table(&table).is_some() && self.virtual_columns(&table).is_none() {
             return Err(InferError::SumColumnNotInSchema {
@@ -559,5 +571,166 @@ pub(super) fn sum_type(typed: Typed, dialect: SqlDialect) -> Typed {
         Some("DOUBLE") => "DOUBLE",
         _ => return typed,
     };
-    from_sql_type(widened.to_string(), dialect)
+    from_sql_type(widened, dialect)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use sqlparser::ast::Function;
+
+    use super::super::test_support::{expr, reports};
+    use super::*;
+
+    fn call(sql: &str) -> Function {
+        match expr(sql) {
+            Expr::Function(func) => func,
+            other => panic!("not a call: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_names_are_upper_case_without_the_schema() {
+        assert_eq!(function_name(&call("lower(x)")), "LOWER");
+        assert_eq!(function_name(&call("pg_catalog.Lower(x)")), "LOWER");
+        assert_eq!(function_name(&call("\"MyFn\"(x)")), "MYFN");
+    }
+
+    #[test]
+    fn positional_args_stop_at_the_first_star_or_named_argument() {
+        let args = |sql: &str| {
+            positional_args(&call(sql).args)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(args("f(a, b + 1)"), ["a", "b + 1"]);
+        assert!(args("count(*)").is_empty());
+        assert_eq!(args("f(a, b => 1, c)"), ["a"]);
+        assert!(args("now()").is_empty());
+    }
+
+    #[test]
+    fn positional_args_of_a_function_without_a_list_are_empty() {
+        let Expr::Function(func) = expr("current_timestamp") else {
+            panic!("expected a function");
+        };
+        assert!(positional_args(&func.args).is_empty());
+    }
+
+    #[test]
+    fn function_tables_have_upper_case_names() {
+        for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
+            for name in table.iter().flat_map(|(names, _)| names.iter()) {
+                assert_eq!(*name, name.to_uppercase(), "{name} is not upper case");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "bug: GREATEST and LEAST are listed in two POSTGRES_FUNCTIONS entries (Same(0) and FirstKnown)"]
+    fn function_tables_list_a_name_once() {
+        for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
+            let mut seen = HashSet::new();
+            for name in table.iter().flat_map(|(names, _)| names.iter()) {
+                assert!(seen.insert(*name), "{name} is listed twice");
+            }
+        }
+    }
+
+    #[test]
+    fn sum_widens_in_postgres() {
+        let widen = |sql: &str| {
+            let typed = Typed::of_sql(sql, SqlDialect::Postgres);
+            sum_type(typed, SqlDialect::Postgres)
+                .sql()
+                .map(str::to_string)
+        };
+        assert_eq!(widen("SMALLINT").as_deref(), Some("BIGINT"));
+        assert_eq!(widen("INT").as_deref(), Some("BIGINT"));
+        assert_eq!(widen("BIGINT").as_deref(), Some("DECIMAL"));
+        assert_eq!(widen("DECIMAL(10, 2)").as_deref(), Some("DECIMAL"));
+        assert_eq!(widen("FLOAT").as_deref(), Some("FLOAT"));
+        assert_eq!(widen("DOUBLE").as_deref(), Some("DOUBLE"));
+        assert_eq!(widen("INTERVAL").as_deref(), Some("INTERVAL"));
+        assert_eq!(widen("TEXT").as_deref(), Some("TEXT"));
+    }
+
+    const DDL: &str = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT NOT NULL, \
+                       n NUMERIC(10, 2) NOT NULL, f DOUBLE PRECISION, txt TEXT, \
+                       d DATE, ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ, iv INTERVAL, \
+                       arr INT[] NOT NULL, tags TEXT[], r INT4RANGE, j JSONB)";
+
+    #[test]
+    fn aggregates_in_postgres() {
+        let queries = [
+            "SELECT count(*) AS a, count(txt) AS b, count(DISTINCT i) AS c FROM t",
+            "SELECT sum(i) AS a, sum(s) AS b, sum(b) AS c, sum(n) AS d, sum(f) AS e FROM t",
+            "SELECT min(i) AS a, max(txt) AS b, min(d) AS c, max(ts) AS d FROM t",
+            "SELECT avg(i) AS a, avg(f) AS b, avg(n) AS c, avg(iv) AS d FROM t",
+            "SELECT sum(i) FILTER (WHERE i > 1) AS a FROM t",
+            "SELECT array_agg(i) AS a, string_agg(txt, ',') AS b, bool_and(i > 1) AS c FROM t",
+            "SELECT sum(nope) FROM t",
+            "SELECT sum(i::BIGINT) AS a, sum(unknown_fn(i)) AS b FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn return_types_follow_the_argument() {
+        let queries = [
+            "SELECT abs(i) AS a, abs(n) AS b, abs(f) AS c, abs(s) AS d FROM t",
+            "SELECT round(n) AS a, round(n, 1) AS b, round(f) AS c, round(i) AS d FROM t",
+            "SELECT sqrt(i) AS a, sqrt(n) AS b, ceil(f) AS c, sign(n) AS d FROM t",
+            "SELECT length(txt) AS a, lower(txt) AS b, concat(txt, i) AS c, substr(txt, 1) AS d FROM t",
+            "SELECT coalesce(s, 1) AS a, coalesce(i, 1.5) AS b, coalesce(txt, 'x') AS c, coalesce(NULL, NULL) AS d FROM t",
+            "SELECT greatest(i, b) AS a, least(i, 1) AS b, nullif(i, 0) AS c FROM t",
+            "SELECT now() AS a, current_date AS b, date_trunc('day', tz) AS c, date_trunc('day', d) AS d FROM t",
+            "SELECT extract(year FROM ts) AS a, age(ts) AS b, date_part('day', ts) AS c FROM t",
+            "SELECT lag(i) OVER () AS a, lag(i, 1, 0) OVER () AS b, row_number() OVER () AS c FROM t",
+            "SELECT lower(r) AS a, upper(r) AS b, array_length(arr, 1) AS c, unnest(arr) AS d FROM t",
+            "SELECT arr[1] AS a, tags[1] AS b, array_append(arr, 1) AS c, array_agg(txt) AS d FROM t GROUP BY txt",
+            "SELECT gen_random_uuid() AS a, md5(txt) AS b, random() AS c, pg_sleep(1) AS d FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    #[ignore = "bug: MySQL SUM of an integer column is DECIMAL (MySQL reference manual, aggregate functions), but sum_type widens only in PostgreSQL"]
+    fn mysql_sum_of_an_integer_is_decimal() {
+        let report = super::super::test_support::report(
+            "SELECT sum(i) AS total FROM t",
+            "mysql",
+            Some("CREATE TABLE t (i INT NOT NULL)"),
+        );
+        assert!(
+            report.starts_with("total: decimal.Decimal | DECIMAL"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn unknown_functions_are_untyped_and_explained() {
+        let queries = [
+            "SELECT definitely_not_a_function(i) AS a FROM t",
+            "SELECT public.also_missing(i) AS a FROM t",
+            "SELECT now() AS ok, mystery() AS bad FROM t",
+        ];
+        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn function_availability_differs_by_dialect() {
+        let queries = [
+            "SELECT ifnull(i, 0) AS a, concat_ws(',', txt, txt) AS b, if(i > 1, 1, 0) AS c FROM t",
+            "SELECT date_format(ts, '%Y') AS a, curdate() AS b, group_concat(txt) AS c FROM t",
+            "SELECT avg(i) AS a, sum(i) AS b, round(n, 1) AS c, stddev(i) AS d FROM t",
+        ];
+        let ddl = "CREATE TABLE t (i INT NOT NULL, txt VARCHAR(10), ts DATETIME, \
+                   n DECIMAL(10, 2) NOT NULL)";
+        let mysql = reports(&queries, "mysql", Some(ddl));
+        let postgres = reports(&queries, "postgres", None);
+        insta::assert_snapshot!(format!("mysql:\n{mysql}\npostgres:\n{postgres}"));
+    }
 }

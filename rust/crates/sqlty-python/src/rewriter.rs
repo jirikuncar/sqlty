@@ -14,11 +14,11 @@ use std::collections::HashMap;
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::options::{ConfigError, Options};
 use crate::rules::Rule;
-pub(crate) use crate::tokens::string_literals;
-use crate::tokens::{content, string_at, string_groups, tokenize, wrapper_calls, Kind, Token};
+use crate::scan::Scan;
+use crate::tokens::{string_at, Kind, Token};
 use sqlty_sql::analyzer::{infer_type, returns_rows, SchemaData};
-use std::ops::Range;
 
 /// Standard-library modules inferred row types are spelled with.
 pub(crate) const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipaddress", "typing"];
@@ -29,23 +29,6 @@ pub(crate) const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipad
 
 static CODING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
 
-/// Why rewrite leaves a string group alone although it holds a `--sql` string:
-/// `fstring-skipped`, `tstring-skipped`, or `unchecked-query` for a raw or bytes part.
-pub(crate) fn skipped_rule(source: &str, tokens: &[Token], group: &[usize]) -> Option<Rule> {
-    let prefixes: String = group.iter().map(|&i| tokens[i].prefix(source)).collect();
-    let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
-    if prefixes.trim_matches('u').is_empty() || after_marker(&content(source, &spans)).is_none() {
-        return None;
-    }
-    Some(if prefixes.contains('t') {
-        Rule::TstringSkipped
-    } else if prefixes.contains('f') {
-        Rule::FstringSkipped
-    } else {
-        Rule::UncheckedQuery
-    })
-}
-
 // ---------------------------------------------------------------------------
 // Import style parsing
 // ---------------------------------------------------------------------------
@@ -55,7 +38,9 @@ pub(crate) fn skipped_rule(source: &str, tokens: &[Token], group: &[usize]) -> O
 /// `from sqlty import SQL` -> `SQL`, `from sqlty import SQL as Q` -> `Q`,
 /// `import sqlty` -> `sqlty.SQL`, `import sqlty as sy` -> `sy.SQL`.
 pub struct ImportStyle {
+    /// The import statement `rewrite` adds (and `strip` removes).
     pub import_line: String,
+    /// The name the wrapper is called by in the source, such as `SQL` or `sqlty.SQL`.
     pub wrapper_name: String,
 }
 
@@ -69,7 +54,8 @@ impl Default for ImportStyle {
 }
 
 impl ImportStyle {
-    pub fn parse(style: Option<&str>) -> Result<Self, String> {
+    /// Read the `import-style` setting; `None` or empty is `from sqlty import SQL`.
+    pub fn parse(style: Option<&str>) -> Result<Self, ConfigError> {
         let Some(style) = style.map(str::trim).filter(|style| !style.is_empty()) else {
             return Ok(Self::default());
         };
@@ -82,7 +68,7 @@ impl ImportStyle {
         } else if let Some(alias) = style.strip_prefix("import sqlty as ") {
             format!("{}.SQL", alias.trim())
         } else {
-            return Err(format!("Unsupported import-style: '{style}'"));
+            return Err(ConfigError::ImportStyle(style.to_string()));
         };
         Ok(ImportStyle {
             import_line: style.to_string(),
@@ -91,6 +77,7 @@ impl ImportStyle {
     }
 
     /// [`ImportStyle::parse`], with the default for an unsupported style.
+    #[cfg(test)]
     pub(crate) fn or_default(style: Option<&str>) -> Self {
         Self::parse(style).unwrap_or_default()
     }
@@ -98,7 +85,7 @@ impl ImportStyle {
     /// How `UNTYPED` is spelled: "UNTYPED" or "sqlty.UNTYPED".
     pub(crate) fn untyped_name(&self) -> String {
         match self.wrapper_name.rsplit_once('.') {
-            Some((module, _)) => format!("{}.UNTYPED", module),
+            Some((module, _)) => format!("{module}.UNTYPED"),
             None => "UNTYPED".to_string(),
         }
     }
@@ -115,52 +102,27 @@ impl ImportStyle {
 
 /// Rewrite Python source: `"--sql\n..."` → `SQL[T]("--sql\n...")`.
 ///
-/// Adds necessary imports (SQL and the [`TYPE_MODULES`] row types use) at the top.
+/// Adds necessary imports (SQL and the `TYPE_MODULES` row types use) at the top.
 /// Never modifies string content — only adds the `SQL[T]()` wrapper.
-/// With `untyped`, row-returning queries of unknown row type become `SQL[UNTYPED](...)`.
-#[cfg(test)]
-pub(crate) fn rewrite_source(
-    source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    import_style: Option<&str>,
-    untyped: bool,
-) -> String {
-    rewrite_source_with(source, dialect, schema, import_style, untyped, false)
+/// With `options.untyped`, row-returning queries of unknown row type become
+/// `SQL[UNTYPED](...)`. With `keep_lines`, imports go on existing lines (see
+/// `insert_inline`).
+pub fn rewrite_source_with(source: &str, options: &Options, keep_lines: bool) -> String {
+    let scan = Scan::new(source, &options.style.wrapper_name);
+    rewrite_scan(&scan, options, keep_lines, &|_| false).unwrap_or_else(|| source.to_string())
 }
 
-/// [`rewrite_source`]; with `keep_lines`, imports go on existing lines (see [`insert_inline`]).
-pub fn rewrite_source_with(
-    source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    import_style: Option<&str>,
-    untyped: bool,
-    keep_lines: bool,
-) -> String {
-    rewrite_source_skipping(
-        source,
-        dialect,
-        schema,
-        import_style,
-        untyped,
-        keep_lines,
-        &|_| false,
-    )
-}
-
-/// [`rewrite_source_with`], leaving alone the strings that start on a line `skip` accepts.
-pub(crate) fn rewrite_source_skipping(
-    source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    import_style: Option<&str>,
-    untyped: bool,
+/// [`rewrite_source_with`] on a scanned source, leaving alone the strings that start on a
+/// line `skip` accepts: `None` when nothing is wrapped.
+pub(crate) fn rewrite_scan(
+    scan: &Scan,
+    options: &Options,
     keep_lines: bool,
     skip: &dyn Fn(usize) -> bool,
-) -> String {
-    let istyle = ImportStyle::or_default(import_style);
-    let replacements = wraps(source, dialect, schema, &istyle, untyped, skip);
+) -> Option<String> {
+    let istyle = &options.style;
+    let source = scan.source();
+    let replacements = wraps(scan, options, skip);
     let needs_untyped_import = replacements.iter().any(|(_, _, r)| {
         r.starts_with(&format!(
             "{}[{}](",
@@ -170,7 +132,7 @@ pub(crate) fn rewrite_source_skipping(
     });
 
     if replacements.is_empty() {
-        return source.to_string();
+        return None;
     }
     let needs = |marker: &str| replacements.iter().any(|(_, _, r)| r.contains(marker));
     let mut imports = Vec::new();
@@ -180,7 +142,7 @@ pub(crate) fn rewrite_source_skipping(
         }
     }
     let module_style = istyle.wrapper_name.contains('.');
-    let bound = sqlty_imports(source);
+    let bound = sqlty_imports(scan);
     let binds = |name: &str, binding: &str| {
         bound
             .iter()
@@ -199,10 +161,10 @@ pub(crate) fn rewrite_source_skipping(
 
     let result = splice(source, &replacements);
     if imports.is_empty() {
-        return result;
+        return Some(result);
     }
     if keep_lines {
-        return insert_inline(&result, &imports.join("; "));
+        return Some(insert_inline(&result, &imports.join("; ")));
     }
     let at = header_end(&result);
     let eol = line_ending(&result, at);
@@ -211,14 +173,14 @@ pub(crate) fn rewrite_source_skipping(
     } else {
         ""
     };
-    format!(
+    Some(format!(
         "{}{}{}{}{}",
         &result[..at],
         sep,
         imports.join(eol),
         eol,
         &result[at..]
-    )
+    ))
 }
 
 /// Line ending of the line at `at`, else of the line before it.
@@ -234,67 +196,45 @@ pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
     }
 }
 
-/// `(start, end, wrapped)` for each string group `rewrite` wraps, in source order.
-///
-/// Whether the string at token `first` opens the argument of a call named `SQL`
-/// or ending in it (`sql.SQL(`, `PgSQL(`): a psycopg query, not for a wrapper.
-fn in_composed_sql(source: &str, tokens: &[Token], first: usize) -> bool {
-    let call =
-        |i: usize| tokens[i].kind == Kind::Name && source[tokens[i].span.clone()].ends_with("SQL");
-    first >= 2
-        && tokens[first - 1].kind == Kind::Op
-        && &source[tokens[first - 1].span.clone()] == "("
-        && call(first - 2)
-}
-
 /// A group is a string or implicitly concatenated strings. Rewrite skips groups in
 /// a wrapper call (`mod.SQL[...]` included), the argument of a psycopg `SQL(...)`,
 /// groups with a prefixed string, and
 /// every group on a line that holds an f- or t-string `--sql` group.
 pub(crate) fn wraps(
-    source: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-    istyle: &ImportStyle,
-    untyped: bool,
+    scan: &Scan,
+    options: &Options,
     skip: &dyn Fn(usize) -> bool,
 ) -> Vec<(usize, usize, String)> {
-    let tokens = tokenize(source);
-    let calls = wrapper_calls(source, &tokens, &istyle.wrapper_name);
-    let groups = string_groups(source, &tokens);
-    let lines = LineIndex::new(source);
-    let interpolated: Vec<usize> = groups
+    let source = scan.source();
+    let (dialect, schema) = (options.dialect.name(), options.schema);
+    let (istyle, untyped) = (&options.style, options.untyped);
+    let interpolated: Vec<usize> = scan
+        .groups()
         .iter()
         .filter(|group| {
             matches!(
-                skipped_rule(source, &tokens, group),
+                group.skipped,
                 Some(Rule::FstringSkipped | Rule::TstringSkipped)
             )
         })
-        .map(|group| lines.line_at(tokens[group[0]].span.start))
+        .map(|group| group.line)
         .collect();
 
     let psycopg = source.contains("psycopg");
     let mut replacements = Vec::new();
-    for group in groups {
-        if psycopg && in_composed_sql(source, &tokens, group[0]) {
+    for group in scan.groups() {
+        if psycopg && scan.in_composed_sql(group.tokens[0]) {
             continue;
         }
-        let (start, end) = (
-            tokens[group[0]].span.start,
-            tokens[group[group.len() - 1]].span.end,
-        );
-        if group.iter().any(|&i| !tokens[i].is_plain(source))
-            || calls
-                .iter()
-                .any(|call| call.span.start <= start && end <= call.span.end)
-            || (!interpolated.is_empty() && interpolated.contains(&lines.line_at(start)))
-            || skip(lines.line_at(start))
+        let (start, end) = (group.start, group.end);
+        if !scan.is_plain(group)
+            || scan.calls.enclosing(start, end).is_some()
+            || interpolated.binary_search(&group.line).is_ok()
+            || skip(group.line)
         {
             continue;
         }
-        let spans: Vec<Range<usize>> = group.iter().map(|&i| tokens[i].span.clone()).collect();
-        let content = content(source, &spans);
+        let content = scan.content(group);
         let content = content.trim();
         if after_marker(content).is_none() {
             continue;
@@ -324,10 +264,10 @@ pub(crate) fn wraps(
 /// allow), only `SQL[T]` and the trailing comma go: `SQL[T]("a"  # c\n)` becomes
 /// `("a"  # c\n)`. Other arguments are left alone. Removes unused imports added by
 /// rewrite.
-pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
-    let istyle = ImportStyle::or_default(import_style);
+pub fn strip_source(source: &str, istyle: &ImportStyle) -> String {
+    let scan = Scan::new(source, &istyle.wrapper_name);
     let mut replacements: Vec<(usize, usize, String)> = Vec::new();
-    for call in wrapper_calls(source, &tokenize(source), &istyle.wrapper_name) {
+    for call in &scan.calls {
         if !call.exact || !call.content(source).is_some_and(|c| is_sqlty_managed(&c)) {
             continue;
         }
@@ -340,7 +280,7 @@ pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
             continue;
         }
         replacements.push((call.span.start, call.open, String::new()));
-        if let Some(comma) = call.comma {
+        if let Some(comma) = &call.comma {
             replacements.push((comma.start, comma.end, String::new()));
         }
     }
@@ -348,7 +288,7 @@ pub fn strip_source(source: &str, import_style: Option<&str>) -> String {
     if replacements.is_empty() {
         return source.to_string();
     }
-    remove_unused_imports(&splice(source, &replacements), &istyle)
+    remove_unused_imports(&splice(source, &replacements), istyle)
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +424,7 @@ pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
     )
 }
 
-/// Remove sqlty and [`TYPE_MODULES`] imports that are no longer referenced.
+/// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
     let untyped_import = istyle.untyped_import();
@@ -507,8 +447,8 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
 
 /// `(name, binding)` pairs of top-level `from sqlty import ...` statements, read from
 /// tokens so strings and comments don't count; `*` imports every name.
-fn sqlty_imports(source: &str) -> Vec<(String, String)> {
-    let tokens = tokenize(source);
+fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
+    let (source, tokens) = (scan.source(), &scan.tokens);
     let text = |i: usize| {
         tokens
             .get(i)
@@ -709,6 +649,27 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::options::Dialect;
+
+    fn rewrite_source(
+        source: &str,
+        dialect: &str,
+        schema: Option<&SchemaData>,
+        style: Option<&str>,
+        untyped: bool,
+    ) -> String {
+        let options = Options {
+            dialect: Dialect::new(dialect),
+            schema,
+            style: ImportStyle::or_default(style),
+            untyped,
+        };
+        rewrite_source_with(source, &options, false)
+    }
+
+    fn strip_source(source: &str, style: Option<&str>) -> String {
+        super::strip_source(source, &ImportStyle::or_default(style))
+    }
 
     #[test]
     fn test_rewrite_basic() {
@@ -826,7 +787,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             .into_iter()
             .map(|(n, b)| (n.to_string(), b.to_string()))
             .collect();
-        assert_eq!(sqlty_imports(source), expected);
+        assert_eq!(sqlty_imports(&Scan::new(source, "SQL")), expected);
     }
 
     #[test]
@@ -1102,7 +1063,8 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
     }
 
     fn keep_lines(source: &str) -> String {
-        rewrite_source_with(source, "postgres", None, None, false, true)
+        let options = Options::new("postgres", None, None, false).unwrap();
+        rewrite_source_with(source, &options, true)
     }
 
     const Q: &str = "q = \"--sql\\nSELECT 1::INTEGER AS x\"\n";

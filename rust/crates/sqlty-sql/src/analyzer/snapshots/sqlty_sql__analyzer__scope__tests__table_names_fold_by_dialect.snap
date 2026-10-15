@@ -1,0 +1,28 @@
+---
+source: crates/sqlty-sql/src/analyzer/scope.rs
+expression: "format!(\"postgres:\\n{postgres}\\nmysql:\\n{mysql}\")"
+---
+postgres:
+SELECT id FROM "Mixed"
+id: int | INT | NonNull
+
+SELECT id FROM Mixed
+id: ? | ? | Unknown
+[unknown-table] table `mixed` is not defined in the schema
+
+SELECT id FROM LOWER
+id: int | INT | Nullable
+
+SELECT id FROM public.lower
+id: int | INT | Nullable
+
+SELECT id FROM other.lower
+id: ? | ? | Unknown
+[unknown-table] table `other.lower` is not defined in the schema
+
+mysql:
+SELECT id FROM "Mixed"
+id: int | INT | NonNull
+
+SELECT id FROM Mixed
+id: int | INT | NonNull

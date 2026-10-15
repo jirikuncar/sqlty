@@ -6,11 +6,25 @@
 //! where `a` is false, and a `CASE` branch where its `WHEN` holds and the earlier ones do
 //! not.
 //!
-//! What a condition proves is a [`Learned`] set of columns and printed expressions. A
+//! What a condition proves is a [`Learned`] set of columns and expressions. A
 //! non-null column of a null-extended relation also proves the relation present, which
 //! [`Facts`] reads as no longer null-extended.
 
-use super::*;
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use sqlparser::ast::{
+    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Select, TableFactor, TableWithJoins,
+    UnaryOperator,
+};
+
+use super::functions::{function_name, positional_args};
+use super::hashing::ExprKey;
+use super::nullability::{Facts, Nullability};
+use super::query::Analyzer;
+use super::registry::lookup;
+use super::scope::Scope;
+use rustc_hash::FxHashSet;
 
 /// Columns and expressions proven not NULL.
 #[derive(Clone, Default)]
@@ -19,8 +33,8 @@ pub(super) struct Learned {
     columns: HashSet<(String, String)>,
     /// References whose relation has a row, because a column of it is not NULL.
     present: HashSet<String>,
-    /// Expressions as printed, such as `doc -> 'k'`.
-    exprs: HashSet<String>,
+    /// Expressions such as `doc -> 'k'`.
+    exprs: FxHashSet<ExprKey>,
 }
 
 impl Learned {
@@ -57,52 +71,17 @@ impl Facts {
     /// These facts and what a condition proved.
     pub(super) fn with(&self, learned: Learned) -> Facts {
         let mut facts = self.clone();
-        facts.non_null.extend(learned.columns);
-        facts.present.extend(learned.present);
-        facts.non_null_exprs.extend(learned.exprs);
+        if !learned.columns.is_empty() {
+            Rc::make_mut(&mut facts.non_null).extend(learned.columns);
+        }
+        if !learned.present.is_empty() {
+            Rc::make_mut(&mut facts.present).extend(learned.present);
+        }
+        if !learned.exprs.is_empty() {
+            Rc::make_mut(&mut facts.non_null_exprs).extend(learned.exprs);
+        }
         facts
     }
-}
-
-/// Functions that return NULL for a NULL argument, as far as narrowing goes: a known
-/// built-in other than the ones that look through NULLs.
-fn is_strict(name: &str) -> bool {
-    !super::nullability::ALWAYS_VALUED_AGGREGATES.contains(&name)
-        && !matches!(
-            name,
-            "COALESCE"
-                | "IFNULL"
-                | "NVL"
-                | "CONCAT"
-                | "CONCAT_WS"
-                | "GREATEST"
-                | "LEAST"
-                | "IF"
-                | "IIF"
-                | "COUNT"
-                | "REGR_COUNT"
-                | "NULLIF"
-                | "NVL2"
-                | "ISNULL"
-                | "TYPEOF"
-                | "FIELD"
-                | "QUOTE"
-                | "QUOTE_NULLABLE"
-                | "FORMAT"
-                | "NUM_NULLS"
-                | "NUM_NONNULLS"
-                | "JSON_BUILD_OBJECT"
-                | "JSONB_BUILD_OBJECT"
-                | "JSON_BUILD_ARRAY"
-                | "JSONB_BUILD_ARRAY"
-                | "JSON_OBJECT"
-                | "JSON_ARRAY"
-                | "ROW"
-                | "ARRAY_APPEND"
-                | "ARRAY_PREPEND"
-                | "ARRAY_CAT"
-                | "ARRAY_TO_STRING"
-        )
 }
 
 /// The conditions every row of a SELECT satisfies: WHERE, HAVING, and the ON of inner
@@ -302,7 +281,7 @@ impl<'a> Analyzer<'a> {
             Expr::BinaryOp { left, op, right } => match op {
                 And | Or | Xor | Spaceship => return learned,
                 _ => {
-                    learned.exprs.insert(expr.to_string());
+                    learned.exprs.insert(ExprKey::of(expr));
                     return self
                         .proven(left, scope)
                         .union(self.proven(right, scope))
@@ -344,15 +323,10 @@ impl<'a> Analyzer<'a> {
                 ..
             } => return self.proven(inner, scope).union(self.proven(pattern, scope)),
             Expr::Function(func) => {
-                let name = func
-                    .name
-                    .0
-                    .last()
-                    .and_then(|part| part.as_ident())
-                    .map(|ident| ident.value.to_uppercase())
-                    .unwrap_or_default();
-                learned.exprs.insert(expr.to_string());
-                if func.over.is_none() && self.returns(&name).is_some() && is_strict(&name) {
+                learned.exprs.insert(ExprKey::of(expr));
+                if func.over.is_none()
+                    && lookup(&function_name(func)).is_some_and(|info| info.is_strict(self.dialect))
+                {
                     for arg in positional_args(&func.args) {
                         learned = learned.union(self.proven(arg, scope));
                     }
@@ -361,7 +335,7 @@ impl<'a> Analyzer<'a> {
             }
             _ => {}
         }
-        learned.exprs.insert(expr.to_string());
+        learned.exprs.insert(ExprKey::of(expr));
         learned
     }
 }
@@ -369,6 +343,7 @@ impl<'a> Analyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::{analyze_select, load_schema};
 
     const SCHEMA: &str =
         "CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER, c TEXT, doc JSONB NOT NULL);

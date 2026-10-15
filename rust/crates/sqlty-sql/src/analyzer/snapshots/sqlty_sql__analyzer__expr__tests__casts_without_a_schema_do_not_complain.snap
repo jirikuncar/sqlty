@@ -1,0 +1,9 @@
+---
+source: crates/sqlty-sql/src/analyzer/expr.rs
+expression: "reports(&queries, \"postgres\", None)"
+---
+SELECT 1::no_such_type AS a
+a: ? | NO_SUCH_TYPE | NonNull
+
+SELECT x::INT AS a
+a: int | INT | Unknown

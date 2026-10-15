@@ -49,32 +49,6 @@ Plain strings, `SQL("...")`, annotation-only `q: SQL[T] = "..."` and
 stripped sources carry no runtime type: `row_form` raises `TypeError` for
 them unless `default` is given.
 
-### `@sqlty`
-
-```python
-@sqlty
-def sql(query: str) -> SQL[Any]: ...
-
-@sqlty(schema="schema.sql")
-def sql(query: str) -> SQL[Any]: ...
-```
-
-Marks a helper function for [stub generation](../guide/stubs.md). `schema`
-is a path relative to the module and is used to infer types for the stub,
-unless the helper's `[[tool.sqlty.functions]]` entry or a
-`[tool.sqlty.schemas]` `"module.function"` key sets one (see
-[Schemas](../guide/stubs.md#schemas)).
-Decorating a function twice raises `TypeError`.
-
-Without `SQLTY_AUTO_GENERATE`, the decorator returns the function unchanged.
-With it, a function registered in `[[tool.sqlty.functions]]` is wrapped to
-record each query it receives (its `query_param` argument, defaults applied, and the
-`return_type_param` argument if configured) and passes all arguments through;
-an unregistered one triggers a warning.
-
-`async def` helpers are supported and get `async def` overloads. The query is
-recorded when the helper is called, before the coroutine is awaited.
-
 ## `sqlty.drivers.psycopg`
 
 Requires `sqlty[psycopg]`. See [psycopg](../guide/psycopg.md).
@@ -179,4 +153,4 @@ column, so `None` is not a valid argument:
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |
 | `strip_source(source, *, import_style=None)` | Stripped source |
 | `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None)` | Source with `sqlty check --fix` applied |
-| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: dicts with `rule`, `message`, `severity`, `line` |
+| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line` |

@@ -1,0 +1,37 @@
+---
+source: crates/sqlty-sql/src/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT * FROM (SELECT id, x FROM a) AS d
+id: int | INT | NonNull
+x: str | TEXT | NonNull
+
+SELECT d.n FROM (SELECT id AS n FROM a) AS d
+n: int | INT | NonNull
+
+SELECT * FROM (SELECT id, x FROM a) AS d(k, v)
+k: int | INT | NonNull
+v: str | TEXT | NonNull
+
+WITH w AS (SELECT id FROM a) SELECT * FROM w
+id: int | INT | NonNull
+
+WITH w(k) AS (SELECT id FROM a) SELECT k FROM w
+k: int | INT | NonNull
+
+WITH a AS (SELECT 1 AS only_here) SELECT * FROM a
+only_here: int | ? | NonNull
+
+SELECT * FROM v
+id: int | INT | NonNull
+x: str | TEXT | NonNull
+
+WITH v AS (SELECT 'shadow'::TEXT AS s) SELECT * FROM v
+s: str | TEXT | NonNull
+
+SELECT * FROM (SELECT 1)
+*: ? | ? | Unknown
+[unsupported-syntax] `*` reads subquery without an alias, which sqlty does not read the columns of
+
+SELECT s.* FROM (SELECT 1 AS one) AS s
+one: int | ? | NonNull
