@@ -452,8 +452,9 @@ Fix: list the columns, or configure a
 
 ### select-star
 
-Default: warn. `SELECT *` with a schema. The row type follows the table,
-so any change to the table changes it.
+Default: warn. `*` or `t.*` with a schema, in the `SELECT` list, in
+`RETURNING`, or in a CTE the query reads. The row type follows the table, so
+any change to the table changes it.
 
 `schema.sql`:
 
@@ -475,8 +476,9 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 
 Fix: `sqlty check --fix` replaces `*` with the cast column list from the
 schema, unless the string holds escapes or quotes, the query is split over
-several concatenated strings, or it reads from more than one table (`JOIN` or
-`FROM a, b`), because the expansion drops table qualifiers. A `*` the schema
+several concatenated strings, or a bare `*` reads from more than one table
+(`JOIN` or `FROM a, b`). A qualified `u.*` keeps its qualifier
+(`u.id::INT, ...`), so it is expanded in a join too. A `*` the schema
 cannot resolve (a `USING` or `NATURAL` join) gets no inferred type, so its
 annotation is kept. A `*` over a subquery or CTE is typed from that query's
 columns but not expanded by `--fix`.

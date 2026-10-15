@@ -385,9 +385,11 @@ t = SQL[tuple[int, int, str]]("--sql\nSELECT id, * FROM users")
 # fixed: t = SQL[tuple[int | None, int | None, str | None]]("--sql\nSELECT id, id::INT, name::TEXT FROM users")
 ```
 
-## Star with a join is not expanded
+## Qualified star with a join is expanded
 
-Expansion drops table qualifiers, which would make joined columns ambiguous.
+`u.*` expands to `u.`-qualified columns, so it stays unambiguous next to the
+joined table. A bare `*` over a join is left alone: its columns would be
+written without a qualifier.
 
 ```toml
 [tool.sqlty]
@@ -407,7 +409,7 @@ from sqlty import SQL
 q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str | None, int | None]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+# fixed: q = SQL[tuple[int, str | None, int | None]]("--sql\nSELECT u.id::INT, u.name::TEXT, o.id FROM users u JOIN orders o ON o.user_id = u.id")
 ```
 
 ## Plain string after an f-string is wrapped

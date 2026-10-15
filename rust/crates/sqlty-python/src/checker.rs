@@ -23,7 +23,7 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
-use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error};
+use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, result_stars};
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
@@ -249,24 +249,17 @@ impl Checker<'_> {
         }
     }
 
+    /// `select-star` and `select-star-no-schema`: a `*` or `t.*` that shapes the result.
     fn select_star(&mut self, sql_content: &str, line: usize) {
-        let upper = sql_content.to_uppercase();
-        if !(upper.contains("SELECT *") || upper.contains("SELECT\n*")) {
+        let Some(query) = marked_query(sql_content) else {
             return;
-        }
-        if self.options.schema.is_some() {
-            self.report(
-                Rule::SelectStar,
-                "SELECT * used — expand to explicit column list (joins need a manual edit)"
-                    .to_string(),
-                line,
-            );
-        } else {
-            self.report(
-                Rule::SelectStarNoSchema,
-                "SELECT * used but no schema available".to_string(),
-                line,
-            );
+        };
+        if let Some((rule, message)) = select_star_finding(
+            &query,
+            self.options.dialect.name(),
+            self.options.schema.is_some(),
+        ) {
+            self.report(rule, message, line);
         }
     }
 
@@ -364,6 +357,51 @@ impl SiteKind {
             SiteKind::Skipped(rule) => rule.name(),
         }
     }
+}
+
+/// `select-star` (with a schema) or `select-star-no-schema` for a query with a `*` or
+/// `t.*` that shapes its result, naming the clauses; `None` without one.
+///
+/// Example:
+/// ```
+/// use sqlty_python::checker::select_star_finding;
+/// use sqlty_python::rules::Rule;
+///
+/// let (rule, message) = select_star_finding("SELECT u.* FROM users u", "postgres", true).unwrap();
+/// assert_eq!(rule, Rule::SelectStar);
+/// assert_eq!(message, "SELECT u.* used — expand to explicit column list");
+/// assert!(select_star_finding("SELECT count(*) FROM users", "postgres", true).is_none());
+/// ```
+pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Option<(Rule, String)> {
+    let stars = result_stars(query, dialect).unwrap_or_else(|| {
+        // A query that doesn't parse falls back to the text.
+        let upper = query.to_uppercase();
+        if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
+            vec!["SELECT *".to_string()]
+        } else {
+            vec![]
+        }
+    });
+    if stars.is_empty() {
+        return None;
+    }
+    let stars = stars.join(" and ");
+    Some(if has_schema {
+        let hint = if stars == "SELECT *" {
+            " (joins need a manual edit)"
+        } else {
+            ""
+        };
+        (
+            Rule::SelectStar,
+            format!("{stars} used — expand to explicit column list{hint}"),
+        )
+    } else {
+        (
+            Rule::SelectStarNoSchema,
+            format!("{stars} used but no schema available"),
+        )
+    })
 }
 
 /// Each query `sqlty check` sees, as `(line, kind, text)` for `--statistics`.

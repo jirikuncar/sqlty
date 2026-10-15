@@ -34,6 +34,7 @@ from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
+from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._drivers import find_driver_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
@@ -400,18 +401,12 @@ def _check_typeddict_inheritance(ctx: _Check) -> None:
 
 def _check_select_star(ctx: _Check) -> None:
     for call in ctx.calls:
-        upper = (call.query or "").upper()
-        if "SELECT *" in upper or "SELECT\n*" in upper:
-            if ctx.schema_sql is not None:
-                ctx.report(
-                    "select-star",
-                    "SELECT * used \u2014 expand to explicit column list (joins need a manual edit)",
-                    call.line,
-                )
-            else:
-                ctx.report(
-                    "select-star-no-schema", "SELECT * used but no schema available", call.line
-                )
+        if call.query and (
+            found := _select_star_finding(
+                call.query, dialect=ctx.dialect, has_schema=ctx.schema_sql is not None
+            )
+        ):
+            ctx.report(*found, call.line)
 
 
 def _check_unparsed(ctx: _Check) -> None:

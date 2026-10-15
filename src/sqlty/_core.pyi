@@ -59,6 +59,9 @@ def expand_star(
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> str | None: ...
+def select_star_finding(
+    sql: str, *, dialect: str = "postgres", has_schema: bool = False
+) -> tuple[str, str] | None: ...
 def check_source(
     source: str,
     *,
