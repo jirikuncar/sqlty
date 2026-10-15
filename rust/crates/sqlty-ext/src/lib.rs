@@ -451,6 +451,24 @@ fn expand_star(
     py.detach(|| analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref()))
 }
 
+/// `(rule, message)` of `select-star` or `select-star-no-schema` for a query whose
+/// result has a `*` or `t.*`, or None.
+///
+/// Example:
+///     select_star_finding("SELECT u.* FROM users u", has_schema=True)
+///     # ("select-star", "SELECT u.* used — expand to explicit column list")
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = "postgres", has_schema = false))]
+fn select_star_finding(
+    py: Python<'_>,
+    sql: &str,
+    dialect: &str,
+    has_schema: bool,
+) -> Option<(&'static str, String)> {
+    py.detach(|| checker::select_star_finding(sql, dialect, has_schema))
+        .map(|(rule, message)| (rule.name(), message))
+}
+
 /// A finding of `check_source`, which Python reads as a dict.
 #[derive(IntoPyObject)]
 struct DiagnosticOut {
@@ -575,6 +593,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
+    m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;

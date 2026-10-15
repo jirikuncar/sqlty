@@ -150,6 +150,25 @@ run("SELECT id, name FROM users")
 run("SELECT * FROM users")
 ```
 
+## Qualified and RETURNING stars in helper calls
+
+`select-star` finds the same stars in a helper's query as in `SQL[T]`.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def run(query: Annotated[LiteralString, SQL], /) -> None: ...
+
+# error: [select-star] "SELECT u.* used — expand to explicit column list"
+run("SELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+# error: [select-star] "RETURNING * used — expand to explicit column list"
+run("DELETE FROM orders WHERE id = 1 RETURNING *")
+# error: [select-star] "WITH u AS (SELECT *) used — expand to explicit column list"
+run("WITH u AS (SELECT * FROM users) SELECT id FROM u")
+run("SELECT id FROM users WHERE EXISTS (SELECT * FROM orders)")
+```
+
 ## Calls that are not checked
 
 ```python

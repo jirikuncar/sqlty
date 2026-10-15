@@ -113,6 +113,10 @@ d = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders 
 e = SQL[tuple[int, str, int, int]]("--sql\nSELECT u.*, o.* FROM users u JOIN orders o ON o.user_id = u.id")
 # error: [select-star] "SELECT u.* used — expand to explicit column list"
 f = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users UNION SELECT u.* FROM users u")
+# error: [select-star] "SELECT d.* used — expand to explicit column list"
+g = SQL[tuple[int, str]]("--sql\nSELECT d.* FROM (SELECT id, name FROM users) d")
+# error: [select-star] "SELECT public.users.* used — expand to explicit column list"
+h = SQL[tuple[int, str]]("--sql\nSELECT public.users.* FROM public.users")
 ```
 
 ## Star in RETURNING is reported
