@@ -9,8 +9,9 @@
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    AccessExpr, BinaryOperator, CastKind, Expr, FunctionArguments, Ident, JoinOperator, Query,
-    Select, SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins, Value,
+    AccessExpr, BinaryOperator, CastKind, Expr, FunctionArguments, Ident, Join, JoinConstraint,
+    JoinOperator, Query, Select, SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins,
+    Value,
 };
 
 use super::dialect::SqlDialect;
@@ -156,7 +157,9 @@ fn group(table: &TableWithJoins, extended: &mut Vec<String>, dialect: SqlDialect
     for join in &table.joins {
         let right = factor_references(&join.relation, extended, dialect);
         match &join.join_operator {
-            JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply => {
+            JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply
+                if !always_matches(join) =>
+            {
                 extended.extend(right.iter().cloned());
             }
             JoinOperator::Right(_) | JoinOperator::RightOuter(_) => {
@@ -171,6 +174,28 @@ fn group(table: &TableWithJoins, extended: &mut Vec<String>, dialect: SqlDialect
         left.extend(right);
     }
     left
+}
+
+/// Whether an outer join always finds its one row, so it never null-extends it: a derived
+/// table that returns exactly one row (an ungrouped aggregate), joined `ON TRUE` or applied.
+fn always_matches(join: &Join) -> bool {
+    let unconditional = match &join.join_operator {
+        JoinOperator::Left(constraint) | JoinOperator::LeftOuter(constraint) => {
+            matches!(constraint, JoinConstraint::On(on) if is_true(on))
+        }
+        JoinOperator::OuterApply => true,
+        _ => false,
+    };
+    unconditional
+        && matches!(&join.relation, TableFactor::Derived { subquery, .. } if returns_one_row(subquery))
+}
+
+fn is_true(expr: &Expr) -> bool {
+    match expr {
+        Expr::Nested(inner) => is_true(inner),
+        Expr::Value(value) => matches!(value.value, Value::Boolean(true)),
+        _ => false,
+    }
 }
 
 fn factor_references(

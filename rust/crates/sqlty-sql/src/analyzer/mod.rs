@@ -51,7 +51,7 @@ pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
 pub(crate) use preprocess::parse_ddl;
 pub use query::Column;
-pub use star_expand::expand_star;
+pub use star_expand::{expand_star, result_stars};
 use typed::Typed;
 
 const ANY: &str = "typing.Any";

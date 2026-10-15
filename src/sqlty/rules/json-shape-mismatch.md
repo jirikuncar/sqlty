@@ -10,7 +10,9 @@ query, with `jsonb_build_object()`, `jsonb_agg()`, `to_jsonb()` and the like (Po
 so that sqlty knows its shape; the annotation is followed through nested `TypedDict`s,
 `list[...]` and `dict[str, ...]`. A scalar of the wrong type, a member that can be `null`
 while the annotation is not optional, a required key the query may omit or never builds,
-and a key the `TypedDict` does not declare are all reported, each with its path.
+and a key the `TypedDict` does not declare are all reported, each with its path. A nested
+Pydantic model is checked for its keys only (by alias, extra keys allowed by
+`extra="allow"`), not for the types of its fields.
 
 ```toml
 [tool.sqlty]

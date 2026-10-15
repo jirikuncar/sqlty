@@ -13,11 +13,15 @@ schema = "schema.sql"
 
 ```sql
 CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);
+CREATE TABLE teams (id INTEGER NOT NULL, owner_id INTEGER NOT NULL);
 ```
 
 ## What it does
 
-Flags `SELECT *` in queries whose columns come from a schema.
+Flags a `*` or qualified `t.*` that shapes the result of a query whose
+columns come from a schema: in the `SELECT` list, in `RETURNING`, or in a
+CTE the query reads. Stars that don't shape the result, such as
+`EXISTS (SELECT * ...)` or `count(*)`, are not reported.
 
 ## Why is this bad?
 
@@ -31,6 +35,12 @@ from sqlty import SQL
 
 # error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
+# error: [select-star] "SELECT u.* used — expand to explicit column list"
+r = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
+# error: [select-star] "RETURNING * used — expand to explicit column list"
+s = SQL[tuple[int, str]]("--sql\nDELETE FROM users WHERE id = 1 RETURNING *")
+# error: [select-star] "WITH u AS (SELECT *) used — expand to explicit column list"
+t = SQL[tuple[int]]("--sql\nWITH u AS (SELECT * FROM users) SELECT id FROM u")
 ```
 
 ## Fix
@@ -46,7 +56,19 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
+A qualified star keeps its qualifier, so it is expanded in a join too:
+
+```python
+from sqlty import SQL
+
+r = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: r = SQL[tuple[int, str, int]]("--sql\nSELECT u.id::INT, u.name::TEXT, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
+```
+
 Queries with escapes or quotes inside the string, queries split over several
-concatenated strings, and queries that read from more than one table (`JOIN`
-or `FROM a, b`; the expansion drops table qualifiers), are left for you to
-edit. `select-star` is still reported for them.
+concatenated strings, and a bare `*` in a query that reads from more than one
+table (`JOIN` or `FROM a, b`; its columns would have no qualifier), are left
+for you to edit, as are stars in `RETURNING` and in CTEs. `select-star` is
+still reported for them.

@@ -147,6 +147,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
+            Expr::TypedString(typed) => Ok(self.cast_typed(&typed.data_type)),
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => self.array_typed(&array.elem, scope),
             Expr::CompoundFieldAccess { root, access_chain } => {
@@ -519,7 +520,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "bug: typed string literals (DATE '...', TIMESTAMP '...') are not typed; expr() has no Expr::TypedString arm"]
     fn typed_string_literals_are_typed() {
         let report = super::super::test_support::report(
             "SELECT DATE '2020-01-01' AS d, TIMESTAMP '2020-01-01 00:00:00' AS ts",

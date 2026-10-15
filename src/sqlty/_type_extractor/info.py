@@ -28,8 +28,8 @@ class TypeInfo:
     ``errors`` lists its PEP 728 inheritance violations. For Pydantic models,
     ``columns`` maps each accepted column name (field name or validation alias)
     to its field, ``opaque`` names the fields whose validation names are not
-    statically known (``AliasChoices``, ``alias_generator``) and ``forbid``
-    is ``extra="forbid"``. ``lax`` names the fields of a Pydantic model or
+    statically known (``AliasChoices``, ``alias_generator``) and ``allows_extra``
+    whether it keeps undeclared columns (``extra="allow"``, or a config not read from source). ``lax`` names the fields of a Pydantic model or
     dataclass that accept lax-mode conversions (not strict). ``annotations`` holds
     each field's annotation from source, qualifiers stripped and ``| None`` kept, and
     ``aliases`` the typing names of the source it was read from (see
@@ -55,7 +55,7 @@ class TypeInfo:
         "errors",
         "columns",
         "opaque",
-        "forbid",
+        "allows_extra",
         "lax",
         "annotations",
         "aliases",
@@ -91,7 +91,7 @@ class TypeInfo:
         self.errors: list[str] = []
         self.columns: dict[str, str] = {}
         self.opaque: frozenset[str] = frozenset()
-        self.forbid = False
+        self.allows_extra = False
         self.lax: frozenset[str] = frozenset()
         self.annotations: dict[str, ast.expr] = {}
         self.aliases: dict[str, str] = {}
@@ -131,6 +131,7 @@ PYTHON_TYPE_MAP: dict[str, type] = {
     "uuid.UUID": uuid.UUID,
     "decimal.Decimal": decimal.Decimal,
     "typing.Any": typing.Any,
+    "None": type(None),
     "ipaddress.IPv4Address": ipaddress.IPv4Address,
     "ipaddress.IPv6Address": ipaddress.IPv6Address,
     "ipaddress.IPv4Interface": ipaddress.IPv4Interface,
@@ -146,6 +147,8 @@ def _column_type(python_type: str) -> typing.Any:
     Example:
         >>> _column_type("list[decimal.Decimal]"), _column_type("int | str"), _column_type("nope")
         (<class 'list'>, int | str, None)
+        >>> _column_type("None")  # a VOID result
+        <class 'NoneType'>
     """
     if python_type.startswith("list["):
         return list

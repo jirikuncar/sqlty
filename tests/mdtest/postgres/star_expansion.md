@@ -40,7 +40,7 @@ schema = "schema.sql"
 
 ```sql
 SELECT users.* FROM users
--- expanded: SELECT id::INT, name::TEXT FROM users
+-- expanded: SELECT users.id::INT, users.name::TEXT FROM users
 ```
 
 ## No schema — returns None
@@ -89,13 +89,14 @@ schema = "schema.sql"
 
 ```sql
 SELECT u.* FROM users u
--- expanded: SELECT id::INT, name::TEXT FROM users u
+-- expanded: SELECT u.id::INT, u.name::TEXT FROM users u
 ```
 
 ## Multi-table star is not expanded
 
-Expansion drops table qualifiers, so a query reading from more than one
-table (`JOIN` or `FROM a, b`) is left alone.
+A bare `*` expands to unqualified columns, so a query reading from more than
+one table (`JOIN` or `FROM a, b`) is left alone. A qualified `t.*` keeps its
+qualifier and is expanded.
 
 `schema.sql`:
 ```sql
@@ -243,7 +244,7 @@ CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CREATE TABLE ord
 
 ```sql
 SELECT o.*, 1 AS one FROM orders o
--- expanded: SELECT oid::INT, user_id::INT, placed::TIMESTAMPTZ, 1 AS one FROM orders o
+-- expanded: SELECT o.oid::INT, o.user_id::INT, o.placed::TIMESTAMPTZ, 1 AS one FROM orders o
 ```
 
 ### `CREATE TABLE users (id INTEGER, name TEXT, score NUMERIC(10,2));CRE...` (3)

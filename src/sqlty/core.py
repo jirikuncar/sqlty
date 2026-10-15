@@ -34,6 +34,7 @@ from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
+from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._drivers import find_driver_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
@@ -400,18 +401,12 @@ def _check_typeddict_inheritance(ctx: _Check) -> None:
 
 def _check_select_star(ctx: _Check) -> None:
     for call in ctx.calls:
-        upper = (call.query or "").upper()
-        if "SELECT *" in upper or "SELECT\n*" in upper:
-            if ctx.schema_sql is not None:
-                ctx.report(
-                    "select-star",
-                    "SELECT * used \u2014 expand to explicit column list (joins need a manual edit)",
-                    call.line,
-                )
-            else:
-                ctx.report(
-                    "select-star-no-schema", "SELECT * used but no schema available", call.line
-                )
+        if call.query and (
+            found := _select_star_finding(
+                call.query, dialect=ctx.dialect, has_schema=ctx.schema_sql is not None
+            )
+        ):
+            ctx.report(*found, call.line)
 
 
 def _check_unparsed(ctx: _Check) -> None:
@@ -919,8 +914,8 @@ def _structural_diagnostics(
     TypedDicts, dataclasses and Pydantic models match columns to fields by
     name, as ``dict_row`` and ``class_row`` pass them: fields with a default
     (``NotRequired`` keys) may be absent, and a column without a field is a
-    violation, except that Pydantic models ignore it and only ``extra_items``
-    admits it (type-checked against it). Key-set violations are
+    violation, unless a Pydantic model allows it (``extra="allow"``) or
+    ``extra_items`` admits it (type-checked against it). Key-set violations are
     ``typeddict-key-mismatch``. NamedTuples match by position.
     A reported count mismatch suppresses the per-column checks. A column that builds JSON
     of a known shape is also checked against the field's annotation, nested types looked up
@@ -931,13 +926,13 @@ def _structural_diagnostics(
     fields = info.fields
     declared = dict(fields)
     by_name = info.kind != "NamedTuple"
-    ignores_extra = info.kind == "BaseModel"
+    by_alias = info.kind == "BaseModel"
     unit = "keys" if info.kind == "TypedDict" else "fields"
     lo = len(info.required - info.opaque) if by_name else len(fields)
-    hi = len(columns) if info.extra_items or ignores_extra else len(fields)
+    hi = len(columns) if info.extra_items or by_alias else len(fields)
     if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
         expected = f"{len(fields)} fields"
-        if info.extra_items or ignores_extra:
+        if info.extra_items or by_alias:
             expected = f"{lo} required {unit}"
         elif lo < hi:
             expected = f"{lo} required and {hi} total {unit}"
@@ -972,7 +967,7 @@ def _structural_diagnostics(
             if field != col.name
         ]
 
-    admits_extra = info.extra_items or (ignores_extra and not info.forbid) or info.opaque
+    admits_extra = info.extra_items or info.allows_extra or info.opaque
     owners = [(col, info.field_for(col.name)) for col in columns]
     known = [(col, field or col.name) for col, field in owners if field or info.extra_items]
     unknown = [col for col, field in owners if field is None and not admits_extra]

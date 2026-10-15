@@ -191,7 +191,10 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                 f"{source}: invalid severity {severity!r} for rule {rule!r} in "
                 f"[tool.sqlty.rules]; expected one of: {', '.join(severities)}"
             )
-    for function in table.get("functions", []):
+    functions = table.get("functions", [])
+    if not isinstance(functions, list):
+        raise ConfigError(f"{source}: [tool.sqlty] functions must be an array of tables")
+    for function in functions:
         if isinstance(function, dict):
             for key in function:
                 if key not in FUNCTION_KEYS:
@@ -352,8 +355,100 @@ def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
     tool_config: dict[str, Any] | None = data.get("tool", {}).get("sqlty")
     if tool_config is None:
         return None
+    return _parse_table(tool_config, str(pyproject_path))
 
-    validate_tool_table(tool_config, str(pyproject_path))
+
+def load_config_file(path: Path) -> SQLTyConfig:
+    """Load the configuration of a file named by ``--config``.
+
+    A file named ``pyproject.toml`` must have a ``[tool.sqlty]`` table; any other
+    file, such as ``sqlty.toml``, holds the same keys at the top level. Raises
+    ``ConfigError`` when the file is missing, is not TOML, is a ``pyproject.toml``
+    without ``[tool.sqlty]`` or has an invalid key.
+
+    Example:
+        >>> load_config_file(Path("missing.toml"))  # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        sqlty._config.ConfigError: config file does not exist: missing.toml
+    """
+    import tomllib
+
+    if not path.exists():
+        raise ConfigError(f"config file does not exist: {path}")
+    if not path.is_file():
+        raise ConfigError(f"config path is not a file: {path}")
+    try:
+        with open(path, "rb") as f:
+            data: dict[str, Any] = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{path}: {exc}") from None
+    if path.name == "pyproject.toml":
+        table = data.get("tool", {}).get("sqlty")
+        if table is None:
+            raise ConfigError(f"{path}: no [tool.sqlty] table")
+        data = table
+    return _parse_table(data, str(path))
+
+
+def parse_overrides(assignments: list[str]) -> SQLTyConfig:
+    """Parse ``-c/--config`` TOML assignments into one configuration; later ones win.
+
+    Tables merge key by key, so ``rules.a = "ignore"`` and ``rules.b = "warn"``
+    both apply. Raises ``ConfigError`` for a value that is not a TOML assignment
+    or names an unknown key.
+
+    Example:
+        >>> parse_overrides(['dialect = "mysql"', 'rules.select-star = "ignore"'])
+        {'dialect': 'mysql', 'rules': {'select-star': 'ignore'}}
+    """
+    import tomllib
+
+    merged: dict[str, Any] = {}
+    for assignment in assignments:
+        if "=" not in assignment:
+            raise ConfigError(
+                f"--config expects a TOML assignment such as 'dialect = \"mysql\"', got "
+                f"{assignment!r}; use --config-file for a file"
+            )
+        try:
+            _merge(merged, tomllib.loads(assignment))
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(
+                f"--config {assignment!r}: {exc}; quote strings, as in -c 'dialect = \"mysql\"', "
+                "or use --config-file for a file"
+            ) from None
+    return _parse_table(merged, "--config")
+
+
+def _merge(target: dict[str, Any], update: dict[str, Any]) -> None:
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _merge(target[key], value)
+        else:
+            target[key] = value
+
+
+def validate_rule_severity(pairs: list[tuple[str, str]]) -> dict[str, str]:
+    """Rule severities from ``--error``/``--warn``/``--ignore RULE``, the last flag per rule winning.
+
+    Example:
+        >>> validate_rule_severity([("select-star", "error"), ("select-star", "ignore")])
+        {'select-star': 'ignore'}
+    """
+    from sqlty._lint import RULES
+
+    for rule, severity in pairs:
+        if rule not in RULES:
+            raise ConfigError(
+                f"--{severity}: unknown rule {rule!r}{_suggest(rule, list(RULES))}; "
+                "run `sqlty rule` for the list"
+            )
+    return dict(pairs)
+
+
+def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
+    """Validate a ``[tool.sqlty]`` table and convert it to ``SQLTyConfig``."""
+    validate_tool_table(tool_config, source)
     config: SQLTyConfig = {}
 
     if "exclude" in tool_config:
