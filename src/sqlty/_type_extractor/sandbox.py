@@ -269,7 +269,12 @@ def _module_namespace(
     """
     if module in index.namespaces:
         return index.namespaces[module]
-    namespace: dict[str, object] = {"__builtins__": __builtins__, _UNKNOWN_NAME: _Unknown()}
+    # ``__name__`` makes a NewType defined there name ``module``, not ``__main__``.
+    namespace: dict[str, object] = {
+        "__builtins__": __builtins__,
+        "__name__": module,
+        _UNKNOWN_NAME: _Unknown(),
+    }
     pending: dict[str, _Import] = {}
     index.namespaces[module] = namespace, pending
     if (tree := index.sources[module].tree) is None:

@@ -30,6 +30,8 @@ from sqlty._type_extractor.ast_fields import (
 )
 from sqlty._type_extractor.info import TypeInfo
 from sqlty._type_extractor.sandbox import (
+    _Import,
+    _import_value,
     _namespace_statements,
     _own_extra_type,
     _resolve_class,
@@ -77,7 +79,7 @@ def extract_type_definitions(
 
     aliases = parsed.typing_aliases
     imports = parsed.imported_names
-    newtypes = _newtype_assignments(tree, aliases)
+    newtypes: dict[str, ast.Assign | typing.Any] = dict(_newtype_assignments(tree, aliases))
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
     # are recognized when their base is a TypedDict defined earlier
@@ -99,6 +101,14 @@ def extract_type_definitions(
         helpers.type_modules = extra
         helpers.namespaces.clear()
     import_stmts = _namespace_statements(tree, set(newtypes), helpers, module, extra)
+    if helpers is not None:
+        # A NewType imported from a checked module, read from its source, for the AST
+        # fallback (a BaseModel without pydantic installed).
+        used = {n.id for node, _ in recognized for n in ast.walk(node) if isinstance(n, ast.Name)}
+        for stmt in import_stmts:
+            if isinstance(stmt, _Import) and stmt.module and stmt.name and stmt.local in used:
+                if isinstance(tp := _import_value(helpers, stmt), typing.NewType):
+                    newtypes.setdefault(stmt.local, tp)
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}

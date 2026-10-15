@@ -282,7 +282,7 @@ _IMPORTED_TYPES: dict[str, typing.Any] = {
 def _ast_type(
     node: ast.expr,
     aliases: dict[str, str],
-    newtypes: dict[str, ast.Assign] | None = None,
+    newtypes: dict[str, ast.Assign | typing.Any] | None = None,
     imports: dict[str, str] | None = None,
 ) -> typing.Any:
     """Builtin scalars and generics, ``Any``, ``Never``, NewTypes and their unions from source; None if unknown.
@@ -293,7 +293,8 @@ def _ast_type(
     ``typing`` generic aliases (``List``, ``Dict``, ``Set``, ``FrozenSet``,
     ``Tuple``) resolve to their builtins only when imported from ``typing``
     or ``typing_extensions``.
-    ``newtypes`` maps names to their ``NewType`` assignments (see `_newtype_assignments`).
+    ``newtypes`` maps names to their ``NewType`` assignments (see `_newtype_assignments`), or to
+    a ``NewType`` already resolved, such as one imported from a checked module.
     With ``imports`` (see ``ParsedSource.imported_names``), the ``decimal``,
     ``datetime`` and ``uuid`` types and Pydantic's ``Strict*`` aliases resolve too.
     """
@@ -302,6 +303,8 @@ def _ast_type(
         return type(None)
     if imports and (tp := _IMPORTED_TYPES.get(_qualname(node, imports) or "")):
         return tp
+    if isinstance(node, ast.Name) and isinstance(resolved := newtypes.get(node.id), typing.NewType):
+        return resolved
     if isinstance(node, ast.Name) and (assign := newtypes.get(node.id)):
         others = {k: v for k, v in newtypes.items() if k != node.id}
         supertype = _ast_type(typing.cast(ast.Call, assign.value).args[1], aliases, others, imports)
@@ -359,7 +362,7 @@ def _annotation_type(annotation: str) -> typing.Any:
 def _ast_key_types(
     nodes: list[ast.ClassDef],
     aliases: dict[str, str],
-    newtypes: dict[str, ast.Assign],
+    newtypes: dict[str, ast.Assign | typing.Any],
     imports: dict[str, str] | None = None,
 ) -> dict[str, typing.Any]:
     """Key types of a TypedDict lineage (bases first) from source, as by ``_ast_type``."""
