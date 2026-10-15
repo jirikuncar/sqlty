@@ -30,3 +30,6 @@ src/sqlty/_core.*.pyd
 # Docs build output
 site/
 bench-result.json
+
+# Claude Code local settings
+.claude/
