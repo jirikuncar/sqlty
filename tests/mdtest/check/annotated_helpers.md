@@ -113,6 +113,30 @@ rows = fetch_all("SELECT id, name, email FROM users", tuple[int, str])
 bad = fetch_all("SELECT id, name FROM users", tuple[int, int])
 ```
 
+## A void result
+
+A function that returns `void`, such as `pg_advisory_xact_lock`, gives `None`.
+
+```python
+from typing import Annotated, LiteralString, TypedDict
+from sqlty import SQL
+
+def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> T: ...
+
+class Locked(TypedDict):
+    locked: bool
+
+class Done(TypedDict):
+    done: None
+
+# error: [column-type-mismatch] "bool is expected but query column 'pg_advisory_xact_lock' infers None"
+locked = fetch_one("SELECT pg_advisory_xact_lock(42)", bool)
+# error: [column-type-mismatch] "Locked.locked is bool but query column 'locked' infers None"
+row = fetch_one("SELECT pg_advisory_xact_lock(42) AS locked", Locked)
+done = fetch_one("SELECT pg_advisory_xact_lock(42) AS done", Done)
+maybe = fetch_one("SELECT pg_advisory_xact_lock(42)", bool | None)
+```
+
 ## Row types defined in the file
 
 ```python
