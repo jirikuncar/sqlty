@@ -23,7 +23,7 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
-use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error};
+use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, result_stars};
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
@@ -249,22 +249,40 @@ impl Checker<'_> {
         }
     }
 
+    /// `select-star` and `select-star-no-schema`: a `*` or `t.*` that shapes the result.
     fn select_star(&mut self, sql_content: &str, line: usize) {
-        let upper = sql_content.to_uppercase();
-        if !(upper.contains("SELECT *") || upper.contains("SELECT\n*")) {
+        let parsed = marked_query(sql_content)
+            .and_then(|query| result_stars(&query, self.options.dialect.name()));
+        let stars = match parsed {
+            Some(stars) => stars,
+            None => {
+                let upper = sql_content.to_uppercase();
+                if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
+                    vec!["SELECT *".to_string()]
+                } else {
+                    vec![]
+                }
+            }
+        };
+        if stars.is_empty() {
             return;
         }
+        let stars = stars.join(" and ");
         if self.options.schema.is_some() {
+            let hint = if stars == "SELECT *" {
+                " (joins need a manual edit)"
+            } else {
+                ""
+            };
             self.report(
                 Rule::SelectStar,
-                "SELECT * used — expand to explicit column list (joins need a manual edit)"
-                    .to_string(),
+                format!("{stars} used — expand to explicit column list{hint}"),
                 line,
             );
         } else {
             self.report(
                 Rule::SelectStarNoSchema,
-                "SELECT * used but no schema available".to_string(),
+                format!("{stars} used but no schema available"),
                 line,
             );
         }

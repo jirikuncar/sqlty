@@ -3,13 +3,13 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use sqlparser::ast::{Statement, TableFactor};
+use sqlparser::ast::{Query, SelectItem, SetExpr, Statement, TableFactor};
 
 use super::dialect::SqlDialect;
 use super::names::object_name;
 use super::preprocess::parse_first;
 use super::query::{leftmost_select, Analyzer};
-use super::scope::{relations, table_scope};
+use super::scope::{relation_name, relations, table_scope, Scope};
 use super::SchemaData;
 
 pub(super) static STAR_ITEM: LazyLock<Regex> =
@@ -25,22 +25,17 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
         return None;
     };
     let select = leftmost_select(&query.body)?;
-    // Expansion drops table qualifiers, so with more than one source it could
-    // write ambiguous columns.
-    let [TableFactor::Table { name, .. }] = relations(&select.from).collect::<Vec<_>>()[..] else {
-        return None;
-    };
-    if query.with.as_ref().is_some_and(|with| {
-        with.cte_tables.iter().any(|cte| {
-            cte.alias
-                .name
-                .value
-                .eq_ignore_ascii_case(&object_name(name))
-        })
-    }) {
-        return None;
-    }
-    let scope = table_scope(&select.from[0].relation, dialect);
+    let sources: Vec<&TableFactor> = relations(&select.from).collect();
+    let ctes: Vec<&str> = query
+        .with
+        .iter()
+        .flat_map(|with| &with.cte_tables)
+        .map(|cte| cte.alias.name.value.as_str())
+        .collect();
+    let scope: Scope = sources
+        .iter()
+        .flat_map(|factor| table_scope(factor, dialect))
+        .collect();
 
     let upper = sql.to_ascii_uppercase();
     let select_idx = top_level(&upper, "SELECT", 0)?;
@@ -54,14 +49,30 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
             continue;
         };
         let reference = star.get(1).map(|m| m.as_str());
-        if !analyzer.star_resolvable(&select.from, reference) {
+        // Expansion writes `t.col` for `t.*` but a bare `col` for `*`, which would be
+        // ambiguous with more than one source.
+        if reference.is_none() && sources.len() != 1 {
+            return None;
+        }
+        let shadowed_by_cte = sources.iter().any(|factor| {
+            let TableFactor::Table { name, .. } = factor else {
+                return false;
+            };
+            reference.is_none_or(|reference| {
+                relation_name(factor).is_some_and(|read| read.eq_ignore_ascii_case(reference))
+            }) && ctes
+                .iter()
+                .any(|cte| cte.eq_ignore_ascii_case(&object_name(name)))
+        });
+        if shadowed_by_cte || !analyzer.star_resolvable(&select.from, reference) {
             return None;
         }
         let columns = analyzer.schema_star_columns(reference, &scope)?;
+        let qualifier = reference.map_or_else(String::new, |reference| format!("{reference}."));
         items.extend(
             columns
                 .iter()
-                .map(|col| format!("{}::{}", col.ident, col.sql_type)),
+                .map(|col| format!("{qualifier}{}::{}", col.ident, col.sql_type)),
         );
         has_star = true;
     }
@@ -73,6 +84,86 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
             &sql[from_idx..]
         )
     })
+}
+
+/// The stars that shape a statement's result, each named by its clause: `SELECT *`,
+/// `SELECT u.*`, `RETURNING *`, and `WITH c AS (SELECT *)` for a CTE. `None` if the
+/// statement does not parse. A star that doesn't shape the result, such as
+/// `EXISTS (SELECT * ...)` or `count(*)`, is not listed.
+///
+/// Example:
+/// ```
+/// use sqlty_sql::analyzer::result_stars;
+///
+/// let stars = result_stars("SELECT u.*, o.id FROM users u JOIN orgs o ON o.id = u.org", "postgres");
+/// assert_eq!(stars, Some(vec!["SELECT u.*".to_string()]));
+/// let stars = result_stars("WITH c AS (SELECT * FROM t) DELETE FROM t RETURNING *", "postgres");
+/// assert_eq!(stars, Some(vec!["WITH c AS (SELECT *)".to_string(), "RETURNING *".to_string()]));
+/// assert_eq!(result_stars("SELECT 1 WHERE EXISTS (SELECT * FROM t)", "postgres"), Some(vec![]));
+/// ```
+pub fn result_stars(sql: &str, dialect: &str) -> Option<Vec<String>> {
+    let stmt = parse_first(sql, SqlDialect::from_name(dialect))?;
+    let mut stars = Vec::new();
+    statement_stars(&stmt, &mut stars);
+    Some(stars)
+}
+
+/// `clause` followed by the stars among `items` (`SELECT u.*, o.*`), if there are any.
+fn wildcards(items: &[SelectItem], clause: &str) -> Option<String> {
+    let found: Vec<String> = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(..)
+            )
+        })
+        .map(ToString::to_string)
+        .collect();
+    (!found.is_empty()).then(|| format!("{clause} {}", found.join(", ")))
+}
+
+fn statement_stars(stmt: &Statement, stars: &mut Vec<String>) {
+    let returning = match stmt {
+        Statement::Query(query) => return query_stars(query, stars),
+        Statement::Insert(insert) => &insert.returning,
+        Statement::Update(update) => &update.returning,
+        Statement::Delete(delete) => &delete.returning,
+        _ => return,
+    };
+    stars.extend(
+        returning
+            .as_deref()
+            .and_then(|items| wildcards(items, "RETURNING")),
+    );
+}
+
+fn query_stars(query: &Query, stars: &mut Vec<String>) {
+    for cte in query.with.iter().flat_map(|with| &with.cte_tables) {
+        let mut inner = Vec::new();
+        query_stars(&cte.query, &mut inner);
+        stars.extend(
+            inner
+                .into_iter()
+                .map(|star| format!("WITH {} AS ({star})", cte.alias.name)),
+        );
+    }
+    body_stars(&query.body, stars);
+}
+
+fn body_stars(body: &SetExpr, stars: &mut Vec<String>) {
+    match body {
+        SetExpr::Select(select) => stars.extend(wildcards(&select.projection, "SELECT")),
+        SetExpr::Query(query) => query_stars(query, stars),
+        SetExpr::SetOperation { left, right, .. } => {
+            body_stars(left, stars);
+            body_stars(right, stars);
+        }
+        SetExpr::Insert(stmt) | SetExpr::Update(stmt) | SetExpr::Delete(stmt) => {
+            statement_stars(stmt, stars);
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn is_word(byte: u8) -> bool {
