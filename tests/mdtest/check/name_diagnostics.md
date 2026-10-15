@@ -87,8 +87,8 @@ c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
 d = SQL[tuple[int]]("--sql\nSELECT 1 UNION TABLE users")
 # error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
 e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
-# error: [unsupported-syntax] "expression `DATE '2020-01-01'` is not typed"
-f = SQL[tuple[object]]("--sql\nSELECT DATE '2020-01-01'")
+# error: [unsupported-syntax] "expression `(1, 2)` is not typed"
+f = SQL[tuple[object]]("--sql\nSELECT (1, 2)")
 ```
 
 #### Annotated helpers
@@ -381,7 +381,7 @@ select-star = "ignore"
 ```sql
 CREATE TABLE users (id INTEGER, name TEXT);
 CREATE VIEW typed AS SELECT id, name FROM users;
-CREATE VIEW opaque AS SELECT id, DATE '2020-01-01' AS day FROM users;
+CREATE VIEW opaque AS SELECT id, (1, 2) AS day FROM users;
 ```
 
 ```python
@@ -479,7 +479,7 @@ select-star = "ignore"
 
 ```sql
 CREATE TABLE a (id INTEGER, g GEOMETRY);
-CREATE VIEW opaque AS SELECT id, DATE '2020-01-01' AS day FROM a;
+CREATE VIEW opaque AS SELECT id, (1, 2) AS day FROM a;
 ```
 
 ```python
