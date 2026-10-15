@@ -73,7 +73,7 @@ dev = [
     "ruff>=0.16.10",
     "ty>=0.0.85",
 ]
-cli = ["rich>=13.0.0"]
+cli = ["rich>=15.0.0"]
 psycopg = ["psycopg>=3.2.12"]
 
 [tool.pytest.ini_options]
