@@ -252,6 +252,59 @@ SELECT CASE WHEN age IS NULL THEN 0 WHEN nick IS NULL THEN 1 ELSE age + length(n
 -- inferred: tuple[int]
 ```
 
+## A CASE branch narrows the JSON it builds
+
+A JSON object built only when the joined row exists has its `NOT NULL` columns non-null;
+`ELSE NULL` makes the column nullable, not its keys.
+
+```sql
+SELECT CASE WHEN orders.id IS NOT NULL THEN json_build_object('id', orders.id, 'user_id', orders.user_id, 'total', orders.total) ELSE NULL END AS doc
+FROM users LEFT JOIN orders ON orders.user_id = users.id
+-- json: doc: {id: integer, user_id: integer, total: number | null}
+```
+
+A guard on a nullable column of the joined row narrows that column and proves the row
+present.
+
+```sql
+SELECT CASE WHEN orders.total IS NOT NULL THEN json_build_object('id', orders.id, 'total', orders.total, 'note', orders.note) END AS doc
+FROM users LEFT JOIN orders ON orders.user_id = users.id
+-- json: doc: {id: integer, total: number, note: string | null}
+```
+
+A guard on another relation does not narrow the joined row.
+
+```sql
+SELECT CASE WHEN users.age IS NOT NULL THEN json_build_object('id', orders.id, 'user_id', orders.user_id) END AS doc
+FROM users LEFT JOIN orders ON orders.user_id = users.id
+-- json: doc: {id: integer | null, user_id: integer | null}
+```
+
+Later branches see the earlier conditions fail.
+
+```sql
+SELECT CASE WHEN orders.id IS NULL THEN NULL ELSE json_build_object('id', orders.id) END AS doc
+FROM users LEFT JOIN orders ON orders.user_id = users.id
+-- json: doc: {id: integer}
+```
+
+```python
+from typing import Annotated, LiteralString, TypedDict
+from sqlty import SQL
+
+def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> T: ...
+
+class Order(TypedDict):
+    id: int
+    user_id: int
+
+class Row(TypedDict):
+    doc: Order | None
+
+row = fetch_one("SELECT CASE WHEN orders.id IS NOT NULL THEN json_build_object('id', orders.id, 'user_id', orders.user_id) ELSE NULL END AS doc FROM users LEFT JOIN orders ON orders.user_id = users.id", Row)
+# error:
+```
+
 ## Narrowing stays in its query
 
 A derived table or CTE is narrowed by its own conditions, not by the outer query.

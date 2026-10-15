@@ -182,18 +182,37 @@ impl<'a> Analyzer<'a> {
                 Ok(path_keys(right).map_or(JsonShape::Any, |keys| follow(&base, &keys)))
             }
             Expr::Case {
+                operand,
                 conditions,
                 else_result,
                 ..
             } => {
+                // A branch is read where its WHEN holds and the earlier ones do not.
+                let mut skipped = self.facts.clone();
                 let mut shapes = Vec::new();
-                for result in conditions
-                    .iter()
-                    .map(|when| &when.result)
-                    .chain(else_result.as_deref())
-                    .filter(|result| !is_null_literal(result))
-                {
-                    shapes.push(self.json_operand(result, scope)?);
+                for when in conditions {
+                    let condition = match operand.as_deref() {
+                        Some(operand) => Expr::BinaryOp {
+                            left: Box::new(operand.clone()),
+                            op: BinaryOperator::Eq,
+                            right: Box::new(when.condition.clone()),
+                        },
+                        None => when.condition.clone(),
+                    };
+                    if !is_null_literal(&when.result) {
+                        let mut inner = self.clone();
+                        inner.facts = skipped.with(self.learn(&condition, true, scope));
+                        Rc::make_mut(&mut inner.facts.present)
+                            .extend(self.row_guards(&condition, scope));
+                        shapes.push(inner.json_operand(&when.result, scope)?);
+                    }
+                    let unmatched = self.learn_not_true(&condition, scope, &skipped);
+                    skipped = skipped.with(unmatched);
+                }
+                if let Some(result) = else_result.as_deref().filter(|e| !is_null_literal(e)) {
+                    let mut inner = self.clone();
+                    inner.facts = skipped;
+                    shapes.push(inner.json_operand(result, scope)?);
                 }
                 Ok(unify_all(shapes))
             }
