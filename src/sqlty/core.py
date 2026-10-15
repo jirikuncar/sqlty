@@ -914,8 +914,8 @@ def _structural_diagnostics(
     TypedDicts, dataclasses and Pydantic models match columns to fields by
     name, as ``dict_row`` and ``class_row`` pass them: fields with a default
     (``NotRequired`` keys) may be absent, and a column without a field is a
-    violation, except that Pydantic models ignore it and only ``extra_items``
-    admits it (type-checked against it). Key-set violations are
+    violation, unless a Pydantic model allows it (``extra="allow"``) or
+    ``extra_items`` admits it (type-checked against it). Key-set violations are
     ``typeddict-key-mismatch``. NamedTuples match by position.
     A reported count mismatch suppresses the per-column checks. A column that builds JSON
     of a known shape is also checked against the field's annotation, nested types looked up
@@ -926,13 +926,13 @@ def _structural_diagnostics(
     fields = info.fields
     declared = dict(fields)
     by_name = info.kind != "NamedTuple"
-    ignores_extra = info.kind == "BaseModel"
+    by_alias = info.kind == "BaseModel"
     unit = "keys" if info.kind == "TypedDict" else "fields"
     lo = len(info.required - info.opaque) if by_name else len(fields)
-    hi = len(columns) if info.extra_items or ignores_extra else len(fields)
+    hi = len(columns) if info.extra_items or by_alias else len(fields)
     if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
         expected = f"{len(fields)} fields"
-        if info.extra_items or ignores_extra:
+        if info.extra_items or by_alias:
             expected = f"{lo} required {unit}"
         elif lo < hi:
             expected = f"{lo} required and {hi} total {unit}"
@@ -967,7 +967,7 @@ def _structural_diagnostics(
             if field != col.name
         ]
 
-    admits_extra = info.extra_items or (ignores_extra and not info.forbid) or info.opaque
+    admits_extra = info.extra_items or info.allows_extra or info.opaque
     owners = [(col, info.field_for(col.name)) for col in columns]
     known = [(col, field or col.name) for col, field in owners if field or info.extra_items]
     unknown = [col for col, field in owners if field is None and not admits_extra]

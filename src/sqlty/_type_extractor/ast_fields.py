@@ -613,8 +613,60 @@ def _lax_fields(
     return frozenset(lax)
 
 
+def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
+    """Whether a Pydantic model keeps undeclared columns: ``extra="allow"``, or a config not read.
+
+    ``extra="ignore"`` (the default) drops them and ``extra="forbid"`` rejects them. A config
+    sqlty cannot read from source (a ``model_config`` that is not a literal, ``**`` options, a
+    base other than ``BaseModel`` and ``Generic``) may allow them.
+
+    Example:
+        >>> cls = lambda src: ast.parse(src).body[0]
+        >>> _allows_extra(cls("class A(BaseModel): x: int"), {})
+        False
+        >>> _allows_extra(cls("class A(BaseModel): model_config = CONFIG"), {})
+        True
+    """
+    if (extra := options.get("extra")) is not None:
+        value = (
+            extra.value
+            if isinstance(extra, ast.Constant)
+            else extra.attr
+            if isinstance(extra, ast.Attribute)
+            else None
+        )
+        return value not in ("ignore", "forbid")
+    if any(k.arg is None for k in node.keywords):
+        return True
+    for base in node.bases:
+        root = base.value if isinstance(base, ast.Subscript) else base
+        if _get_name(root) not in ("BaseModel", "Generic"):
+            return True
+    names = ("model_config", "__pydantic_config__")
+    for item in node.body:
+        targets = (
+            item.targets
+            if isinstance(item, ast.Assign)
+            else [item.target]
+            if isinstance(item, ast.AnnAssign)
+            else []
+        )
+        if not any(isinstance(t, ast.Name) and t.id in names for t in targets):
+            continue
+        config = typing.cast(ast.Assign | ast.AnnAssign, item).value
+        if isinstance(config, ast.Call):
+            if any(k.arg is None for k in config.keywords) or config.args:
+                return True
+        elif isinstance(config, ast.Dict):
+            if None in config.keys:
+                return True
+        else:
+            return True
+    return False
+
+
 def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
-    """Read validation aliases and ``extra="forbid"`` from the class source.
+    """Read validation aliases and the ``extra`` setting from the class source.
 
     A field is matched by its ``alias`` / ``validation_alias`` string (either
     that or its name with ``populate_by_name=True``). ``AliasChoices``,
@@ -622,10 +674,7 @@ def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
     field's names unknown (``opaque``).
     """
     options = _config_options(node)
-    extra = options.get("extra")
-    info.forbid = (isinstance(extra, ast.Constant) and extra.value == "forbid") or (
-        isinstance(extra, ast.Attribute) and extra.attr == "forbid"
-    )
+    info.allows_extra = _allows_extra(node, options)
     by_name = _is_true(options.get("populate_by_name")) or _is_true(options.get("validate_by_name"))
     generated = "alias_generator" in options and not (
         isinstance(options["alias_generator"], ast.Constant)

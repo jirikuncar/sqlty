@@ -63,8 +63,9 @@ them, so the order of fields and columns does not matter:
    error).
 
 A field with a default, and a `NotRequired` key, may be missing from the
-query. A column without a field is an error for a TypedDict and a dataclass;
-a Pydantic model ignores it, as `extra="ignore"` is its default.
+query. A column without a field is an error: a TypedDict and a dataclass
+reject it, and a Pydantic model drops it by default (`extra="ignore"`), so it is
+fetched for nothing. Only a model with `extra="allow"` keeps it.
 
 ```python
 from dataclasses import dataclass
@@ -95,7 +96,8 @@ class Typed(TypedDict):
 
 reordered = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 optional = SQL[Account]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-ignored = SQL[Profile]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [typeddict-key-mismatch] "Profile has no field for query column 'name'"
+dropped = SQL[Profile]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-count-mismatch] "Short has 1 fields but query returns 2 columns"
 c = SQL[Short]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # error: [column-type-mismatch] "Typed.id is str but query column 'id' infers int"
@@ -207,10 +209,12 @@ module=...)`.
 A Pydantic model validates a row by alias, so a column is matched to a field by
 its `Field(alias="id")` or `Field(validation_alias="id")` string (also inside
 `Annotated`). With `populate_by_name=True` either the alias or the field name
-fills the field. `ConfigDict(extra="forbid")` (or `class Config: extra =
-"forbid"`) makes a column without a field an error, like a TypedDict. Aliases
+fills the field. A column without a field is an error unless the model sets
+`ConfigDict(extra="allow")` (or `class Config: extra = "allow"`). Aliases
 and the config are read from the class source, so Pydantic need not be
-installed.
+installed; a config that cannot be read there, such as `model_config = SHARED`,
+may allow extra columns and leaves them unreported. A model nested in a JSON column
+reads the object's keys the same way.
 
 ```python
 from pydantic import BaseModel, ConfigDict, Field
@@ -226,8 +230,8 @@ bad = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 `AliasChoices`, `AliasPath`, a non-literal alias and `alias_generator` make a
-field's names unknown: it is not reported as missing, and `extra="forbid"` no
-longer reports columns without a field.
+field's names unknown: it is not reported as missing, and columns without a field
+are no longer reported.
 
 ## Pydantic lax mode
 
