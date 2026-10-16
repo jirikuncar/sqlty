@@ -9,6 +9,7 @@
 //! The rewriter never modifies string content — it only adds/removes
 //! the `SQL[T]()` wrapper.  This guarantees `strip(rewrite(x)) == x`.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use regex::Regex;
@@ -412,16 +413,86 @@ pub(crate) fn infer_sql_content(
         .flatten()
 }
 
-/// Marked string content as the analyzer reads it: the `--sql` marker, with an escaped
-/// line break after it made real. `None` when the content has no marker.
+/// Marked string content as the analyzer reads it: the string's value, escape sequences
+/// decoded, from the `--sql` marker on. `None` when the content has no marker.
 pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
-    let rest = after_marker(sql_content)?;
-    Some(
-        match rest.strip_prefix("\\r\\n").or(rest.strip_prefix("\\n")) {
-            Some(query) => format!("--sql\n{query}"),
-            None => format!("--sql{rest}"),
-        },
-    )
+    let decoded = decode_escapes(sql_content);
+    Some(format!("--sql{}", after_marker(&decoded)?))
+}
+
+/// The value of the source text of plain (not raw) string literals: `\n`, `\"`, `\\`,
+/// `\x41`, `\u00e9`, ... decoded, a backslash-newline (LF, CRLF or CR) dropped. Unknown escapes, and
+/// `\N{...}`, stay as written.
+pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
+    if !text.contains('\\') {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('\\') {
+        out.push_str(&rest[..at]);
+        let escape = &rest[at + 1..];
+        let Some(next) = escape.chars().next() else {
+            out.push('\\');
+            rest = "";
+            break;
+        };
+        if next == '\r' {
+            rest = escape[1..].strip_prefix('\n').unwrap_or(&escape[1..]);
+            continue;
+        }
+        let simple = match next {
+            '\n' => Some(""),
+            '\\' => Some("\\"),
+            '\'' => Some("'"),
+            '"' => Some("\""),
+            'a' => Some("\u{7}"),
+            'b' => Some("\u{8}"),
+            'f' => Some("\u{c}"),
+            'n' => Some("\n"),
+            'r' => Some("\r"),
+            't' => Some("\t"),
+            'v' => Some("\u{b}"),
+            _ => None,
+        };
+        if let Some(value) = simple {
+            out.push_str(value);
+            rest = &escape[next.len_utf8()..];
+            continue;
+        }
+        let (digits, radix) = match next {
+            'x' => (2, 16),
+            'u' => (4, 16),
+            'U' => (8, 16),
+            '0'..='7' => (
+                escape
+                    .bytes()
+                    .take(3)
+                    .take_while(|b| (b'0'..=b'7').contains(b))
+                    .count(),
+                8,
+            ),
+            _ => (0, 0),
+        };
+        let skip = usize::from(radix == 16);
+        let code = escape
+            .get(skip..skip + digits)
+            .filter(|_| digits > 0)
+            .and_then(|code| u32::from_str_radix(code, radix).ok())
+            .and_then(char::from_u32);
+        match code {
+            Some(ch) => {
+                out.push(ch);
+                rest = &escape[skip + digits..];
+            }
+            None => {
+                out.push('\\');
+                rest = escape;
+            }
+        }
+    }
+    out.push_str(rest);
+    Cow::Owned(out)
 }
 
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
@@ -693,6 +764,37 @@ mod tests {
         );
         assert!(result.contains("SQL[tuple[int]]"));
         assert!(result.contains("from sqlty import SQL"));
+    }
+
+    #[test]
+    fn decode_escapes_reads_python_string_escapes() {
+        let cases = [
+            (r"plain", "plain"),
+            (r#"a\"b\'c\\d"#, "a\"b'c\\d"),
+            (r"\n\r\t\a\b\f\v", "\n\r\t\u{7}\u{8}\u{c}\u{b}"),
+            (r"\x41\u00e9\U0001F600", "A\u{e9}\u{1F600}"),
+            (r"\101\0\08", "A\0\08"),
+            ("a\\\nb", "ab"),
+            ("a\\\r\nb\\\rc", "abc"),
+            (r"\d\N{BULLET}\x4", r"\d\N{BULLET}\x4"),
+            ("end\\", "end\\"),
+        ];
+        for (source, value) in cases {
+            assert_eq!(decode_escapes(source), value, "{source}");
+        }
+    }
+
+    #[test]
+    fn marked_query_decodes_the_string() {
+        assert_eq!(
+            marked_query(r#"--sql\nSELECT name FROM \"users\""#).as_deref(),
+            Some("--sql\nSELECT name FROM \"users\"")
+        );
+        assert_eq!(
+            marked_query("--sql\r\nSELECT 1").as_deref(),
+            Some("--sql\r\nSELECT 1")
+        );
+        assert_eq!(marked_query(r"SELECT 1"), None);
     }
 
     #[test]

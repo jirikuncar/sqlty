@@ -103,7 +103,8 @@ pub(crate) struct Function {
 
 #[derive(Clone, Debug)]
 enum Relation {
-    Table(Vec<SchemaColumn>),
+    /// Columns, and the groups of them a `CHECK` keeps at least one of non-null.
+    Table(Vec<SchemaColumn>, Vec<Vec<String>>),
     View(Vec<Column>),
     /// Defined, but its shape is not known.
     Unknown,
@@ -154,8 +155,17 @@ impl Catalog {
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
-            Relation::Table(columns) => Some(columns),
+            Relation::Table(columns, _) => Some(columns),
             _ => None,
+        }
+    }
+
+    /// Groups of columns of the table `name` that a `CHECK` keeps at least one of
+    /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
+    pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
+        match self.find(name) {
+            Some(Relation::Table(_, groups)) => groups,
+            _ => &[],
         }
     }
 

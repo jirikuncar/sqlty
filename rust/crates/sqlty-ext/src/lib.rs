@@ -275,6 +275,12 @@ fn analyze_params(
     )
 }
 
+/// Every Python type an inferred column can have, one union member at a time.
+#[pyfunction]
+fn python_types() -> Vec<&'static str> {
+    analyzer::python_types().into_iter().collect()
+}
+
 /// The rules `query_diagnostics` reports, which are off by default.
 #[pyfunction]
 fn name_rules() -> Vec<&'static str> {
@@ -585,6 +591,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
+    m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
