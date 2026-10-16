@@ -249,6 +249,7 @@ def check_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
+    row_usage: RowUsage | None = None,
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -281,6 +282,11 @@ def check_source(
     most once for all of these checks, and not at all when it holds no query.
     Build one per file when checking many (see ``sqlty._source``).
 
+    ``redundant-optional`` reports a row type field only when no query that loads the
+    type can return NULL for it. Within ``source`` that is settled here; to settle it
+    across files, pass one ``RowUsage`` to every call and drop what its ``filter`` drops
+    once all files are checked.
+
     Example:
         >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
         []
@@ -302,8 +308,27 @@ def check_source(
         helpers=helpers,
         module=module or parsed.module,
         type_modules=type_modules,
+        row_usage=row_usage or (usage := RowUsage()),
     )
-    return _apply_suppressions(parsed, diagnostics, rules)
+    diagnostics = _apply_suppressions(parsed, diagnostics, rules)
+    return diagnostics if row_usage else usage.filter(diagnostics)
+
+
+class RowUsage:
+    """Which fields of the row types a run checks some query needs ``| None`` for.
+
+    ``redundant-optional`` is a question about a row type, not a query: a field is
+    redundant only when no query that loads the type can return NULL for it.
+    """
+
+    def __init__(self) -> None:
+        self.needed: set[tuple[str | None, str, str]] = set()
+        self.redundant: list[tuple[tuple[str | None, str, str], Diagnostic]] = []
+
+    def filter(self, diagnostics: list[Diagnostic]) -> list[Diagnostic]:
+        """``diagnostics`` without the ``redundant-optional`` reports another query refutes."""
+        refuted = {id(diag) for key, diag in self.redundant if key in self.needed}
+        return [diag for diag in diagnostics if id(diag) not in refuted]
 
 
 class _Check:
@@ -348,6 +373,7 @@ class _Check:
         )
         # The row types of the module an imported row type comes from, by local name.
         self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
+        self.row_usage = RowUsage()
         if helpers is not None:
             extra = frozenset(type_modules or ())
             for name in {q[1] for q in [*queries, *named]} - self.type_defs.keys():
@@ -363,16 +389,17 @@ class _Check:
             self._unparsed[key] = ast.unparse(row)
         return self._unparsed[key]
 
-    def report(self, rule: str, message: str, line: int) -> None:
-        if self.rule_config.is_enabled(rule):
-            self.diagnostics.append(
-                {
-                    "rule": rule,
-                    "message": message,
-                    "severity": self.rule_config.severity(rule).value,
-                    "line": line,
-                }
-            )
+    def report(self, rule: str, message: str, line: int) -> Diagnostic | None:
+        if not self.rule_config.is_enabled(rule):
+            return None
+        diagnostic: Diagnostic = {
+            "rule": rule,
+            "message": message,
+            "severity": self.rule_config.severity(rule).value,
+            "line": line,
+        }
+        self.diagnostics.append(diagnostic)
+        return diagnostic
 
 
 def _check_unchecked_queries(ctx: _Check) -> None:
@@ -445,11 +472,22 @@ def _check_structural(ctx: _Check) -> None:
     for line, name, query in ctx.user_queries:
         if (columns := _columns(query, ctx.dialect, ctx.schema_sql)) is None:
             continue
+        info = ctx.type_defs[name]
         defs = ctx.imported_defs.get(name, ctx.type_defs)
-        for rule, message in _structural_diagnostics(
-            name, ctx.type_defs[name], columns, ctx.rule_config, defs
-        ):
-            ctx.report(rule, message, line)
+        # A field this query can fill with NULL needs `| None`, whatever other queries do.
+        pairs = (
+            zip((field for field, _ in info.fields), columns, strict=False)
+            if info.kind == "NamedTuple"
+            else ((info.field_for(col.name), col) for col in columns)
+        )
+        for field, col in pairs:
+            if field is not None and col.nullable is not False:
+                ctx.row_usage.needed.add((info.module, info.name, field))
+        for rule, message in _structural_diagnostics(name, info, columns, ctx.rule_config, defs):
+            diagnostic = ctx.report(rule, message, line)
+            if diagnostic is not None and rule == "redundant-optional":
+                field = message.split(" is ", 1)[0].removeprefix(f"{name}.")
+                ctx.row_usage.redundant.append(((info.module, info.name, field), diagnostic))
 
 
 def _check_values(ctx: _Check) -> None:
@@ -491,6 +529,7 @@ def _check_diagnostics(
     helpers: HelperIndex | None,
     module: str | None,
     type_modules: Iterable[str] | None = None,
+    row_usage: RowUsage | None = None,
 ) -> list[Diagnostic]:
     """Every diagnostic before inline suppression: the Rust pass, then the Python passes."""
     from sqlty._lint import RuleConfig
@@ -535,6 +574,7 @@ def _check_diagnostics(
         helpers=helpers,
         module=module,
     )
+    ctx.row_usage = row_usage or RowUsage()
     for check_pass in _CHECK_PASSES:
         check_pass(ctx)
     return diagnostics
@@ -1005,6 +1045,7 @@ def _structural_diagnostics(
 __all__ = [
     "ColumnInfo",
     "HelperIndex",
+    "RowUsage",
     "analyze_select",
     "check_source",
     "expand_star",

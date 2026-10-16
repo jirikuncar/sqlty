@@ -101,6 +101,7 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("TSVECTOR", "str"),
         ("TSQUERY", "str"),
         ("MACADDR", "str"),
+        ("MACADDR8", "str"),
         ("PG_NODE_TREE", "str"),
         ("ACLITEM", "str"),
         ("\"CHAR\"", "str"),
@@ -340,6 +341,8 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     match base {
         "ARRAY" => Some("list".to_string()),
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
+        // A MySQL `TIME` is a duration, up to 838 hours either way.
+        "TIME" if dialect == SqlDialect::MySql => Some("datetime.timedelta".to_string()),
         _ => SQL_TO_PYTHON_TYPE
             .get(base)
             .map(ToString::to_string)
