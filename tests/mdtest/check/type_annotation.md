@@ -57,6 +57,35 @@ class User(TypedDict):
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
+## Binary columns are bytes
+
+`BYTEA` and `BLOB` columns are `bytes`, checked like any other type.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import NamedTuple, TypedDict
+from sqlty import SQL
+
+class File(TypedDict):
+    data: int
+
+class Blob(NamedTuple):
+    data: str
+
+class Raw(TypedDict):
+    data: bytes
+
+# error: [column-type-mismatch] "File.data is int but query column 'data' infers bytes"
+a = SQL[File]("--sql\nSELECT 'x'::BYTEA AS data")
+# error: [column-type-mismatch] "Blob.data is str but query column 'data' infers bytes"
+b = SQL[Blob]("--sql\nSELECT 'x'::BYTEA AS data")
+c = SQL[Raw]("--sql\nSELECT 'x'::BYTEA AS data")
+```
+
 ## Column name mismatch
 
 ```toml
