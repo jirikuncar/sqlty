@@ -89,7 +89,9 @@ What makes a column nullable or not:
 
 - **Schema.** `NOT NULL` and `PRIMARY KEY` columns are non-null; others are nullable. In
   SQLite a `PRIMARY KEY` column is non-null only if it is `INTEGER`, `NOT NULL`, or in a
-  `WITHOUT ROWID` or `STRICT` table.
+  `WITHOUT ROWID` or `STRICT` table. A `CHECK (x IS NOT NULL)` makes `x` non-null too, and
+  `CHECK (num_nonnulls(a, b) = 1)` or `CHECK (a IS NOT NULL OR b IS NOT NULL)` makes
+  `COALESCE(a, b)` non-null.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
   is nullable.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
@@ -381,8 +383,12 @@ triggers, partitions, tablespaces) never do this. `sqlty check` warns about each
 table or type it had to leave unknown.
 `CREATE TABLE ... AS`, `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
-tables as they are where the view is created. MySQL and SQLite read `CREATE`
-statements only.
+tables as they are where the view is created.
+
+MySQL and SQLite follow `ALTER TABLE` (`ADD`, `DROP` and `RENAME COLUMN`,
+`RENAME TO`, MySQL's `MODIFY` and `CHANGE` with `FIRST` / `AFTER`) and `DROP`
+too; other dialects read `CREATE` statements only. A MySQL `MODIFY` or `CHANGE`
+replaces the whole column definition, `NOT NULL` and `ENUM` labels included.
 
 ## Where the schema comes from
 
@@ -433,9 +439,32 @@ stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
 # rewritten: stats = SQL[tuple[int, float | None, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
-SQLite accepts free-form type names such as `UNSIGNED BIG INT`; sqlty does
-not, and skips a table that uses one (see
-[Engine](../reference/engine.md#known-gaps)).
+#### Free-form type names
+
+SQLite accepts any type name, `UNSIGNED BIG INT` or `VARYING CHARACTER(255)`
+included, and derives the column's
+[type affinity](https://www.sqlite.org/datatype3.html#determination_of_column_affinity)
+from it. sqlty does the same for a name it has no mapping for: one containing
+`INT` is `int`; `CHAR`, `CLOB` or `TEXT` is `str`; `BLOB` is `bytes`; `REAL`,
+`FLOA` or `DOUB` is `float`; any other is `NUMERIC` (`float`). A column with no
+type, or `ANY`, can hold any value and is not typed.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE legacy (id UNSIGNED BIG INT NOT NULL, code VARYING CHARACTER(10), price MONEYISH, raw);
+```
+
+```python
+legacy = "--sql\nSELECT id, code, price FROM legacy"
+# rewritten: legacy = SQL[tuple[int, str | None, float | None]]("--sql\nSELECT id, code, price FROM legacy")
+```
 
 ### MySQL
 

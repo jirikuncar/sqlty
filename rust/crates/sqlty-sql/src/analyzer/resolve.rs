@@ -234,8 +234,24 @@ impl<'a> Analyzer<'a> {
 
     /// Whether the source says `column` of `table` can be NULL (see [`ColumnRef`]).
     pub(super) fn declared_nullability(&self, table: &str, column: &str) -> Nullability {
-        self.find_column(table, column)
-            .map_or(Nullability::Unknown, |found| found.nullability())
+        match self.find_column(table, column) {
+            // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.
+            Some(ColumnRef::Schema(_)) if self.checked_non_null(table, &[column]) => {
+                Nullability::NonNull
+            }
+            found => found.map_or(Nullability::Unknown, |found| found.nullability()),
+        }
+    }
+
+    /// Whether `columns` of the schema table `table` include a group a `CHECK` keeps at
+    /// least one of non-null.
+    pub(super) fn checked_non_null(&self, table: &str, columns: &[&str]) -> bool {
+        self.virtual_columns(table).is_none()
+            && self
+                .schema
+                .nonnull_groups(table)
+                .iter()
+                .any(|group| group.iter().all(|name| columns.contains(&name.as_str())))
     }
 
     /// Type of a column: its qualifier's source, else the first source having it, the
@@ -258,12 +274,7 @@ impl<'a> Analyzer<'a> {
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
                             NameRule::UnknownType,
-                            format!(
-                                "column `{column}` has type {}, which has no Python type",
-                                sql_type
-                                    .as_deref()
-                                    .map_or("unknown".to_string(), |ty| format!("`{ty}`"))
-                            ),
+                            untyped_column_message(&column, sql_type.as_deref().unwrap_or("")),
                         ),
                         (Origin::View(column), _) => self.diag.record(
                             NameRule::UnsupportedSyntax,
@@ -475,10 +486,7 @@ impl<'a> Analyzer<'a> {
                     if col.typed(self.dialect).python.is_none() {
                         self.diag.record(
                             NameRule::UnknownType,
-                            format!(
-                                "column `{table}.{}` has type `{}`, which has no Python type",
-                                col.name, col.sql_type
-                            ),
+                            untyped_column_message(&format!("{table}.{}", col.name), &col.sql_type),
                         );
                     }
                 }
@@ -570,6 +578,15 @@ impl<'a> Analyzer<'a> {
 fn list(names: &[&str]) -> String {
     let names: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
     names.join(", ")
+}
+
+/// Why the schema column `column` of type `sql_type` has no Python type.
+fn untyped_column_message(column: &str, sql_type: &str) -> String {
+    if sql_type.is_empty() {
+        format!("column `{column}` has no declared type, so it has no Python type")
+    } else {
+        format!("column `{column}` has type `{sql_type}`, which has no Python type")
+    }
 }
 
 #[cfg(test)]

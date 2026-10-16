@@ -1,0 +1,69 @@
+# CHECK constraints that rule out NULL
+
+A `CHECK` can require some of a table's columns to be set. sqlty reads three
+forms, alone or joined by `AND`:
+
+- `num_nonnulls(a, b) = 1`, `>= 1` or `> 0`: at least one of the columns is
+  set, so `COALESCE` over all of them is never NULL.
+- `a IS NOT NULL OR b IS NOT NULL`: the same.
+- `num_nulls(a, b) = 0` and `a IS NOT NULL`: each column is set, like
+  `NOT NULL`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE items (
+    id INTEGER PRIMARY KEY,
+    a_id INTEGER,
+    b_id INTEGER,
+    note TEXT,
+    x INTEGER,
+    y INTEGER,
+    z INTEGER CHECK (z IS NOT NULL),
+    CHECK (num_nonnulls(a_id, b_id) = 1),
+    CHECK (x IS NOT NULL OR y IS NOT NULL)
+);
+CREATE TABLE owners (id INTEGER PRIMARY KEY, item_id INTEGER);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+## COALESCE over a checked group
+
+```sql
+SELECT COALESCE(a_id, b_id) AS ref, COALESCE(b_id, a_id, 0) AS ref2, COALESCE(x, y) AS xy, z FROM items
+-- inferred: tuple[int, int, int, int]
+```
+
+## Columns outside a group stay nullable
+
+```sql
+SELECT COALESCE(a_id, x) AS r, a_id, COALESCE(note, 'none') AS n FROM items
+-- inferred: tuple[int | None, int | None, str]
+```
+
+## A null-extended row has every column NULL
+
+```sql
+SELECT COALESCE(i.a_id, i.b_id) AS ref FROM owners o LEFT JOIN items i ON i.id = o.item_id
+-- inferred: tuple[int | None]
+```
+
+## Dropping a constraint forgets it
+
+Constraints are not tracked by name, so dropping any of them drops them all.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE items (id INTEGER PRIMARY KEY, a_id INTEGER, b_id INTEGER, CHECK (num_nonnulls(a_id, b_id) >= 1));
+ALTER TABLE items DROP CONSTRAINT items_check;
+```
+
+```sql
+SELECT COALESCE(a_id, b_id) AS ref FROM items
+-- inferred: tuple[int | None]
+```
