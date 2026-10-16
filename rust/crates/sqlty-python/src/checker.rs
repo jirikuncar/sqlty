@@ -14,6 +14,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
@@ -23,7 +24,9 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
-use sqlty_sql::analyzer::{analyze_with_diagnostics, parse_error, result_stars};
+use sqlty_sql::analyzer::{
+    analyze_with_diagnostics, expand_star, parse_error, result_stars, SchemaData,
+};
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
@@ -51,23 +54,41 @@ const INLINE_SQL_COMMENT: &str = concat!(
 pub(crate) static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
-/// Lines of plain strings opening with a `--sql` marker line, which MySQL and
-/// MariaDB reject: they read `--` as a comment only before whitespace.
-fn mysql_marker_lines(scan: &Scan) -> Vec<usize> {
+/// Plain strings opening with a `--sql` marker line, which MySQL and MariaDB reject:
+/// they read `--` as a comment only before whitespace. Each with its line and the edit
+/// to `-- sql`.
+fn mysql_markers(scan: &Scan) -> Vec<(usize, Edit)> {
     let source = scan.source();
-    let mut lines: Vec<usize> = scan
-        .plain_literals()
-        .filter(|&(start, end)| {
-            extract_string_content(&source[start..end])
-                .trim_start()
+    scan.plain_literals()
+        .filter_map(|(start, end)| {
+            let literal = &source[start..end];
+            let marked = extract_string_content(literal).trim_start();
+            marked
                 .strip_prefix("--sql")
                 .is_some_and(ends_marker_line)
+                .then(|| {
+                    let at = start + literal.find(marked).unwrap_or_default();
+                    let edit = Edit::new(at..at + "--sql".len(), "-- sql");
+                    (scan.lines.line_at(start), edit)
+                })
         })
-        .map(|(start, _)| scan.lines.line_at(start))
-        .collect();
-    lines.dedup();
-    lines
+        .collect()
 }
+
+/// `"--sql SELECT ..."` to `"--sql\nSELECT ..."`: the escape replaces the space after the
+/// marker of the string literal at `span`.
+fn inline_comment_edit(source: &str, span: &Range<usize>) -> Edit {
+    let literal = &source[span.clone()];
+    let quoted = literal.trim_start_matches(['u', 'U']);
+    let quote = QUOTES
+        .into_iter()
+        .find(|q| quoted.starts_with(q))
+        .unwrap_or("\"");
+    let at = span.end - quoted.len() + quote.len() + "--sql".len();
+    Edit::new(at..at + 1, "\\n")
+}
+
+pub(crate) const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
 /// A diagnostic result from checking source code.
 pub struct Diagnostic {
@@ -79,6 +100,8 @@ pub struct Diagnostic {
     pub severity: Severity,
     /// 1-based line of the source the diagnostic points at.
     pub line: usize,
+    /// The edits `sqlty check --fix` makes for it; empty when it has no fix.
+    pub fix: Vec<Edit>,
 }
 
 /// Check Python source code for SQL type issues.
@@ -123,23 +146,29 @@ struct Checker<'a> {
 
 impl Checker<'_> {
     fn report(&mut self, rule: Rule, message: String, line: usize) {
+        self.report_fix(rule, message, line, Vec::new());
+    }
+
+    fn report_fix(&mut self, rule: Rule, message: String, line: usize, fix: Vec<Edit>) {
         if self.rules.is_enabled(rule) {
             self.diagnostics.push(Diagnostic {
                 rule,
                 message,
                 severity: self.rules.severity(rule),
                 line,
+                fix,
             });
         }
     }
 
     /// Plain strings whose marker line MySQL reads as an expression.
     fn mysql_markers(&mut self) {
-        for line in mysql_marker_lines(self.scan) {
-            self.report(
+        for (line, edit) in mysql_markers(self.scan) {
+            self.report_fix(
                 Rule::MysqlSqlMarker,
                 r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#.to_string(),
                 line,
+                vec![edit],
             );
         }
     }
@@ -147,11 +176,12 @@ impl Checker<'_> {
     /// `--sql` strings that `rewrite` would wrap.
     fn stale_rewrites(&mut self) {
         let scan = self.scan;
-        for (start, _, _) in wraps(scan, self.options, &|_| false) {
-            self.report(
+        for edit in wraps(scan, self.options, &|_| false) {
+            self.report_fix(
                 Rule::StaleRewrite,
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
-                scan.lines.line_at(start),
+                scan.lines.line_at(edit.range.start),
+                vec![edit],
             );
         }
     }
@@ -172,7 +202,8 @@ impl Checker<'_> {
             if enclosing.is_some() {
                 continue;
             }
-            self.marker_and_syntax(&scan.content(group), group.line);
+            let first = scan.tokens[group.tokens[0]].span.clone();
+            self.marker_and_syntax(&scan.content(group), group.line, &first);
         }
     }
 
@@ -193,16 +224,30 @@ impl Checker<'_> {
         if after_marker(&sql_content).is_none() {
             return;
         }
-        self.marker_and_syntax(&sql_content, line);
+        self.marker_and_syntax(&sql_content, line, &call.strings[0]);
         self.name_diagnostics(&sql_content, line);
-        self.select_star(&sql_content, line);
+        self.select_star(call, &sql_content, line);
         self.annotation(call, &sql_content, line);
     }
 
-    /// `inline-sql-comment` and `unparsed-query` of marked string content.
-    fn marker_and_syntax(&mut self, sql_content: &str, line: usize) {
+    /// `inline-sql-comment` and `unparsed-query` of marked string content, which starts in
+    /// the literal at `first`.
+    fn marker_and_syntax(&mut self, sql_content: &str, line: usize, first: &Range<usize>) {
         if INLINE_SQL_COMMENT_CONTENT.is_match(sql_content) {
-            self.report(Rule::InlineSqlComment, INLINE_MESSAGE.to_string(), line);
+            let source = self.scan.source();
+            let literal = &source[first.clone()];
+            let plain = literal
+                .trim_start_matches(['u', 'U'])
+                .starts_with(['"', '\'']);
+            let fix = (plain
+                && INLINE_SQL_COMMENT_CONTENT.is_match(extract_string_content(literal)))
+            .then(|| inline_comment_edit(source, first));
+            self.report_fix(
+                Rule::InlineSqlComment,
+                INLINE_MESSAGE.to_string(),
+                line,
+                fix.into_iter().collect(),
+            );
         }
         if self.rules.is_enabled(Rule::UnparsedQuery) {
             if let Some(error) = marked_query(sql_content)
@@ -253,17 +298,29 @@ impl Checker<'_> {
     }
 
     /// `select-star` and `select-star-no-schema`: a `*` or `t.*` that shapes the result.
-    fn select_star(&mut self, sql_content: &str, line: usize) {
+    /// With a schema, a query in one literal is fixed by expanding the star.
+    fn select_star(&mut self, call: &Call, sql_content: &str, line: usize) {
         let Some(query) = marked_query(sql_content) else {
             return;
         };
-        if let Some((rule, message)) = select_star_finding(
+        let Some((rule, message)) = select_star_finding(
             &query,
             self.options.dialect.name(),
             self.options.schema.is_some(),
-        ) {
-            self.report(rule, message, line);
-        }
+        ) else {
+            return;
+        };
+        let fix = match (rule, call.strings.as_slice(), self.options.schema) {
+            (Rule::SelectStar, [span], Some(schema)) => expanded_literal(
+                self.scan.source(),
+                span,
+                sql_content,
+                self.options.dialect.name(),
+                schema,
+            ),
+            _ => None,
+        };
+        self.report_fix(rule, message, line, fix.into_iter().collect());
     }
 
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
@@ -278,13 +335,13 @@ impl Checker<'_> {
         if annotated == untyped_name {
             let untyped = format!("{wrapper}[{untyped_name}]");
             // A `*` the schema cannot resolve infers no type, so none is guessed.
-            let message = match infer_from_sql_content(
+            let current = infer_from_sql_content(
                 sql_content,
                 self.options.dialect.name(),
                 self.options.schema,
             )
-            .map(|current| self.spelling.respell(current))
-            {
+            .map(|current| self.spelling.respell(current));
+            let message = match &current {
                 Some(current) => {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
                 }
@@ -292,7 +349,8 @@ impl Checker<'_> {
                     "{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
                 ),
             };
-            self.report(Rule::UntypedQuery, message, line);
+            let fix = current.map(|current| Edit::new(call.annotation.clone(), current));
+            self.report_fix(Rule::UntypedQuery, message, line, fix.into_iter().collect());
             return;
         }
 
@@ -311,7 +369,7 @@ impl Checker<'_> {
         .map(|current| self.spelling.respell(current))
         {
             if !refines_tuple(annotated, &current) {
-                self.report(
+                self.report_fix(
                     Rule::StaleType,
                     format!(
                         "{}[{annotated}] should be {}[{current}]",
@@ -319,6 +377,7 @@ impl Checker<'_> {
                         if call.template { "SQLTemplate" } else { "SQL" }
                     ),
                     line,
+                    vec![Edit::new(call.annotation.clone(), current.clone())],
                 );
             }
             for (rule, message) in literal_findings(annotated, &current) {
@@ -329,11 +388,57 @@ impl Checker<'_> {
 
     fn finish(mut self) -> Vec<Diagnostic> {
         self.diagnostics.sort_by_key(|d| d.line);
-        self.diagnostics
-            .dedup_by(|a, b| a.line == b.line && a.rule == b.rule && a.message == b.message);
+        // One report per line, rule and message, with the fixes of all of them.
+        self.diagnostics.dedup_by(|later, kept| {
+            let same =
+                later.line == kept.line && later.rule == kept.rule && later.message == kept.message;
+            if same {
+                kept.fix.append(&mut later.fix);
+            }
+            same
+        });
         self.diagnostics
     }
 }
+
+/// The string literal at `span`, holding all of `content`, with its `*` expanded; `None`
+/// when the expansion cannot be written back in the same quotes.
+fn expanded_literal(
+    source: &str,
+    span: &Range<usize>,
+    content: &str,
+    dialect: &str,
+    schema: &SchemaData,
+) -> Option<Edit> {
+    let literal = &source[span.clone()];
+    let quoted = literal.trim_start_matches(['u', 'U']);
+    let prefix = &literal[..literal.len() - quoted.len()];
+    let quote = QUOTES
+        .into_iter()
+        .find(|q| quoted.starts_with(q))
+        .unwrap_or("\"");
+    let caps = SQL_PREFIX.captures(content)?;
+    let (marker, query) = (&caps[1], &caps[2]);
+    let quote_char = &quote[..1];
+    if !query.contains('*') || query.contains('\\') || query.contains(quote_char) {
+        return None;
+    }
+    let expanded = expand_star(query, dialect, Some(schema))?;
+    if expanded.contains('\\')
+        || expanded.contains(quote_char)
+        || (quote.len() == 1 && expanded.contains('\n'))
+    {
+        return None;
+    }
+    Some(Edit::new(
+        span.clone(),
+        format!("{prefix}{quote}{marker}{expanded}{quote}"),
+    ))
+}
+
+/// A `--sql` marker line at the start of string content.
+static SQL_PREFIX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
 
 const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#;
 

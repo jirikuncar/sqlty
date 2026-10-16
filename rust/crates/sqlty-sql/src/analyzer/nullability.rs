@@ -77,6 +77,8 @@ pub(super) struct Facts {
     rolled_up_exprs: Rc<FxHashSet<ExprKey>>,
     /// The values the conditions in force leave a column (`WHERE status = 'paid'`).
     pub(super) values: Rc<Vec<super::narrowing::ColumnValues>>,
+    /// `(reference, column)` pairs the conditions in force prove NULL (`col IS NULL`).
+    pub(super) null: Rc<Vec<(String, String)>>,
 }
 
 impl Facts {
@@ -551,15 +553,37 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// A column reference: what its source declares, narrowed by `facts`.
+    /// A column reference: what its source declares, narrowed by `facts`. A column is
+    /// also non-null where the others of a group a `CHECK` keeps one of are proven NULL
+    /// (`CASE WHEN a IS NOT NULL THEN a ELSE b END`).
     fn column_nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
-        match self.locate_column(expr, scope) {
-            Some((reference, table, column)) => facts.column(
-                &reference,
-                &column,
-                self.declared_nullability(&table, &column),
-            ),
-            None => Nullability::Unknown,
+        let Some((reference, table, column)) = self.locate_column(expr, scope) else {
+            return Nullability::Unknown;
+        };
+        let nullability = facts.column(
+            &reference,
+            &column,
+            self.declared_nullability(&table, &column),
+        );
+        if nullability == Nullability::NonNull
+            || facts.column(&reference, &column, Nullability::NonNull) != Nullability::NonNull
+        {
+            return nullability;
+        }
+        let mut columns: Vec<&str> = facts
+            .null
+            .iter()
+            .filter(|(r, _)| *r == reference)
+            .map(|(_, c)| c.as_str())
+            .collect();
+        if columns.is_empty() {
+            return nullability;
+        }
+        columns.push(&column);
+        if self.checked_non_null(&table, &columns) {
+            Nullability::NonNull
+        } else {
+            nullability
         }
     }
 
@@ -755,6 +779,12 @@ impl<'a> Analyzer<'a> {
         if name == "COUNT"
             || name == "REGR_COUNT"
             || (name == "ARRAY" && matches!(func.args, FunctionArguments::Subquery(_)))
+        {
+            return Nullability::NonNull;
+        }
+        // Over no rows MySQL's BIT_AND has every bit set, BIT_OR and BIT_XOR none.
+        if self.dialect == SqlDialect::MySql
+            && matches!(name.as_str(), "BIT_AND" | "BIT_OR" | "BIT_XOR")
         {
             return Nullability::NonNull;
         }

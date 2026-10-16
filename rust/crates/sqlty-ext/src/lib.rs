@@ -503,7 +503,7 @@ fn fix_source(
             source,
             &options,
             &rules,
-            suppressed.unwrap_or_default(),
+            &suppressed.unwrap_or_default(),
         ))
     })
 }

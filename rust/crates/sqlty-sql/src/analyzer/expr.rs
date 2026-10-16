@@ -53,9 +53,11 @@ impl<'a> Analyzer<'a> {
             return Typed::UNKNOWN;
         };
         match self.schema.user_type(&elem.to_lowercase()) {
-            Some(user) if user.python_type.is_some() => {
-                Typed::new(user.python_type.clone(), Some(elem.to_string()))
-            }
+            Some(user) if user.python_type.is_some() => Typed::with_values(
+                user.python_type.clone(),
+                Some(elem.to_string()),
+                user.values.clone(),
+            ),
             _ => from_sql_type(elem, self.dialect),
         }
     }
@@ -180,7 +182,11 @@ impl<'a> Analyzer<'a> {
                 })
             }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
-                self.function_type(Returns::Real, &[inner], scope)
+                let returns = match self.dialect {
+                    SqlDialect::MySql => Returns::Integral,
+                    _ => Returns::Real,
+                };
+                self.function_type(returns, &[inner], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL", self.dialect))
@@ -244,14 +250,14 @@ impl<'a> Analyzer<'a> {
     /// `CAST(x AS type)`: the type as the schema resolves it, with the reason when it has no
     /// Python type.
     fn cast_typed(&self, data_type: &DataType) -> Typed {
-        let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
+        let (sql_type, python_type, values) = self.schema.resolve_type(data_type, self.dialect);
         let typed = match python_type {
             // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
             // labels upper-cased, which are not the column's values.
             Some(_) if matches!(data_type, DataType::Enum(..)) => {
                 from_sql_type(&sql_type, self.dialect)
             }
-            Some(python_type) => Typed::new(Some(python_type), Some(sql_type)),
+            Some(python_type) => Typed::with_values(Some(python_type), Some(sql_type), values),
             None => from_sql_type(&sql_type, self.dialect),
         };
         if !typed.is_known() && self.diag.enabled() {
