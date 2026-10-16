@@ -6,6 +6,7 @@ use super::functions::Returns::{self, Arg, Branches, FirstKnown, Sql, StrToDate}
 /// <https://dev.mysql.com/doc/refman/8.4/en/built-in-function-reference.html>
 pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
     (&["IF"], Branches(1)),
+    (&["GROUPING"], Sql("INT")),
     (&["IFNULL", "GREATEST", "LEAST"], FirstKnown),
     (
         &["DATE_ADD", "DATE_SUB", "ADDDATE", "SUBDATE"],

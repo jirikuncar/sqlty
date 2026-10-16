@@ -5,13 +5,21 @@ use sqlparser::dialect::{
     SQLiteDialect,
 };
 
-/// A dialect name, matched case-insensitively; names sqlparser doesn't know read as generic SQL.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SqlDialect {
+/// A SQL dialect: PostgreSQL, MySQL and SQLite are specified, the others follow sqlparser.
+///
+/// Parse a user's name with [`str::parse`], which rejects names it does not know
+/// ([`UnknownDialect`]); [`SqlDialect::name`] is the canonical spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SqlDialect {
+    /// PostgreSQL.
     Postgres,
+    /// MySQL and MariaDB.
     MySql,
+    /// SQLite.
     Sqlite,
+    /// ClickHouse.
     ClickHouse,
+    /// Another sqlparser dialect, by its name (`generic` when sqlparser has none).
     Other(&'static str),
 }
 
@@ -31,7 +39,64 @@ pub(super) const OTHER_DIALECTS: [&str; 12] = [
     "teradata",
 ];
 
+/// A dialect name sqlty does not know.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unknown dialect {name:?}; expected one of: {}", SqlDialect::NAMES.join(", "))]
+pub struct UnknownDialect {
+    /// The name as given.
+    pub name: String,
+}
+
+impl std::str::FromStr for SqlDialect {
+    type Err = UnknownDialect;
+
+    /// A dialect from its name, case-insensitively (`postgresql` and `tsql` are aliases).
+    fn from_str(name: &str) -> Result<Self, UnknownDialect> {
+        let lower = name.to_ascii_lowercase();
+        if Self::NAMES.contains(&lower.as_str()) || matches!(lower.as_str(), "postgresql" | "tsql")
+        {
+            Ok(Self::from_name(&lower))
+        } else {
+            Err(UnknownDialect {
+                name: name.to_string(),
+            })
+        }
+    }
+}
+
 impl SqlDialect {
+    /// Every dialect name [`str::parse`] accepts, besides the aliases `postgresql` and `tsql`.
+    pub const NAMES: [&'static str; 17] = [
+        "postgres",
+        "mysql",
+        "sqlite",
+        "clickhouse",
+        "generic",
+        "ansi",
+        "bigquery",
+        "databricks",
+        "duckdb",
+        "hive",
+        "mssql",
+        "oracle",
+        "redshift",
+        "snowflake",
+        "spark",
+        "sparksql",
+        "teradata",
+    ];
+
+    /// The canonical name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres",
+            Self::MySql => "mysql",
+            Self::Sqlite => "sqlite",
+            Self::ClickHouse => "clickhouse",
+            Self::Other(name) => name,
+        }
+    }
+
     pub(crate) fn from_name(name: &str) -> Self {
         match name.to_ascii_lowercase().as_str() {
             "postgres" | "postgresql" => Self::Postgres,
@@ -74,5 +139,33 @@ impl SqlDialect {
             Self::ClickHouse => Box::new(ClickHouseDialect {}),
             Self::Other(name) => dialect_from_str(name).unwrap_or_else(|| Box::new(GenericDialect)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SqlDialect;
+
+    #[test]
+    fn every_name_round_trips() {
+        for name in SqlDialect::NAMES {
+            let dialect: SqlDialect = name.parse().unwrap();
+            assert_eq!(dialect.name(), name);
+        }
+    }
+
+    #[test]
+    fn names_are_case_insensitive_with_aliases() {
+        assert_eq!("PostgreSQL".parse(), Ok(SqlDialect::Postgres));
+        assert_eq!("TSQL".parse(), Ok(SqlDialect::Other("mssql")));
+    }
+
+    #[test]
+    fn an_unknown_name_lists_the_known_ones() {
+        let error = "postgress".parse::<SqlDialect>().unwrap_err();
+        assert_eq!(error.name, "postgress");
+        assert!(error
+            .to_string()
+            .starts_with("unknown dialect \"postgress\"; expected one of: postgres, mysql,"));
     }
 }

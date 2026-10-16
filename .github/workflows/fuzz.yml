@@ -1,0 +1,61 @@
+name: Fuzz
+
+# On demand: random schemas and queries through the analyzer, compared with PostgreSQL.
+on:
+  workflow_dispatch:
+    inputs:
+      examples:
+        description: Examples per property
+        default: "2000"
+      seed:
+        description: Hypothesis seed (empty for a random one)
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz the analyzer
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      SQLTY_FUZZ: "1"
+      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the project (with Rust extension)
+        run: uv sync --all-groups
+
+      - name: Build Rust extension
+        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Fuzz
+        run: >-
+          uv run pytest tests/test_fuzz.py -p no:randomly -q
+          ${{ inputs.seed && format('--hypothesis-seed={0}', inputs.seed) || '' }}

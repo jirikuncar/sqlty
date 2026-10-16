@@ -59,6 +59,7 @@ class TypeInfo:
         "lax",
         "annotations",
         "aliases",
+        "module",
     )
 
     def __init__(
@@ -75,7 +76,7 @@ class TypeInfo:
     ) -> None:
         self.name = name
         self.fields = fields  # [(field_name, field_type_str), ...] — AST fallback
-        self.kind = kind  # "TypedDict", "NamedTuple", "dataclass", "BaseModel"
+        self.kind = kind  # "TypedDict", "NamedTuple", "dataclass", "BaseModel", "Protocol"
         self.resolved_hints = resolved_hints  # {field_name: type_object} — runtime
         self.required = frozenset(n for n, _ in fields) if required is None else required
         self.closed = closed
@@ -95,6 +96,7 @@ class TypeInfo:
         self.lax: frozenset[str] = frozenset()
         self.annotations: dict[str, ast.expr] = {}
         self.aliases: dict[str, str] = {}
+        self.module: str | None = None  # the module that defines it, when known
 
     def field_for(self, column: str) -> str | None:
         """The field a query column fills, by name (a Pydantic alias counts); None if none does."""

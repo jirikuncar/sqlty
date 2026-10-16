@@ -2,7 +2,7 @@
 
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Any, LiteralString, cast, get_origin, is_typeddict, overload
+from typing import Any, LiteralString, cast, get_origin, is_protocol, is_typeddict, overload
 
 if sys.version_info >= (3, 15):
     from typing import TypeForm
@@ -11,9 +11,9 @@ else:
 
 from psycopg import Connection, Cursor
 from psycopg.abc import Params
-from psycopg.rows import BaseRowFactory, class_row, dict_row, tuple_row
+from psycopg.rows import BaseRowFactory, class_row, dict_row, namedtuple_row, tuple_row
 
-from sqlty import SQL, row_form
+from sqlty import SQL, SQLTemplate, row_form
 
 __all__ = ["execute", "row_factory", "scalar"]
 
@@ -23,6 +23,7 @@ def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
 
     - ``tuple[...]`` -> ``tuple_row``
     - ``TypedDict``, ``dict[...]`` -> ``dict_row``
+    - ``Protocol`` -> ``namedtuple_row``: rows with every column as an attribute
     - other classes (dataclass, NamedTuple, Pydantic model, ...) -> ``class_row``
 
     Example:
@@ -34,33 +35,45 @@ def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
         return cast(BaseRowFactory[T], tuple_row)
     if origin is dict or is_typeddict(form):
         return cast(BaseRowFactory[T], dict_row)
+    if isinstance(form, type) and is_protocol(form):
+        return cast(BaseRowFactory[T], namedtuple_row)
     if isinstance(form, type):
         return class_row(form)
     raise TypeError(f"no psycopg row factory for {form!r}")
 
 
-def execute[T](conn: Connection[Any], query: SQL[T], params: Params | None = None) -> Cursor[T]:
+def execute[T](
+    conn: Connection[Any], query: SQL[T] | SQLTemplate[T], params: Params | None = None
+) -> Cursor[T]:
     """Execute ``query`` on a cursor whose rows are typed as ``T``.
 
-    Queries without a runtime row type (see ``sqlty.row_form``) yield tuples.
+    Queries without a runtime row type (see ``sqlty.row_form``) yield tuples. A
+    ``SQLTemplate`` runs its t-string, whose values are its parameters (psycopg >= 3.3).
 
     Example:
         >>> rows: list[User] = execute(conn, SQL[User]("--sql\\n...")).fetchall()  # doctest: +SKIP
+        >>> rows = execute(conn, SQLTemplate[User](t"--sql\\n... WHERE id = {user_id}")).fetchall()  # doctest: +SKIP
     """
     form = row_form(query, cast(TypeForm[T], tuple))
-    return conn.cursor(row_factory=row_factory(form)).execute(cast(LiteralString, query), params)
+    cursor = conn.cursor(row_factory=row_factory(form))
+    if isinstance(query, SQLTemplate):
+        return cursor.execute(cast(Any, query.template))
+    return cursor.execute(cast(LiteralString, query), params)
 
 
 @overload
 def scalar[T](
-    conn: Connection[Any], query: SQL[tuple[T]], /, params: Params | None = None
+    conn: Connection[Any],
+    query: SQL[tuple[T]] | SQLTemplate[tuple[T]],
+    /,
+    params: Params | None = None,
 ) -> T: ...
 
 
 @overload
 def scalar[T](
     conn: Connection[Any],
-    query: LiteralString | SQL[Any],
+    query: LiteralString | SQL[Any] | SQLTemplate[Any],
     form: TypeForm[T],
     /,
     params: Params | None = None,
@@ -82,6 +95,8 @@ def scalar(conn: Connection[Any], query: Any, /, *args: Any, **kwargs: Any) -> A
     params = kwargs.get("params")
     if args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str):
         params = args[-1]
+    if isinstance(query, SQLTemplate):
+        query, params = query.template, None
     row = conn.cursor(row_factory=tuple_row).execute(query, params).fetchone()
     if row is None:
         raise LookupError("query returned no rows")

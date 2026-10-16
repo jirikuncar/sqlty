@@ -167,3 +167,9 @@ def test_load_config_file_reads_top_level_keys(tmp_path: Path) -> None:
         "extend_exclude": ["gen"],
         "rules": {"select-star": "ignore"},
     }
+
+
+def test_unknown_dialect_is_an_error_with_a_suggestion() -> None:
+    with pytest.raises(ConfigError, match=r"unknown dialect 'postgress'.*did you mean 'postgres'"):
+        validate_tool_table({"dialect": "postgress"}, "pyproject.toml")
+    validate_tool_table({"dialect": "PostgreSQL"}, "pyproject.toml")
