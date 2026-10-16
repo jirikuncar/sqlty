@@ -191,6 +191,72 @@ SELECT lpad(name, %s, %s), coalesce(age, %s) FROM users WHERE lower(name) = lowe
 -- params: 4: str (TEXT)
 ```
 
+## Operators type the other operand
+
+An arithmetic, array, `jsonb` or network operator types a parameter the way
+PostgreSQL resolves it: a number like the other number, an interval next to a
+timestamp, an array like the other array, a `jsonb` key as text.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (
+    id INTEGER PRIMARY KEY,
+    n INTEGER NOT NULL,
+    total NUMERIC(10, 2) NOT NULL,
+    at TIMESTAMP NOT NULL,
+    span INTERVAL NOT NULL,
+    note TEXT NOT NULL,
+    ids INTEGER[] NOT NULL,
+    doc JSONB NOT NULL,
+    ip INET NOT NULL
+);
+```
+
+```sql
+SELECT id FROM events WHERE n + %s > 10 AND total * %s > 1 AND at + %s < now() AND span * %s > span
+-- params: 1: int (INT)
+-- params: 2: decimal.Decimal (DECIMAL(10, 2))
+-- params: 3: datetime.timedelta (INTERVAL)
+-- params: 4: float (DOUBLE)
+```
+
+```sql
+SELECT id FROM events WHERE ids @> %s AND doc @> %s AND doc ? %s AND doc ->> %s = %s AND ip << %s AND note = %s || 'x'
+-- params: 1: list[int] (ARRAY<INT>)
+-- params: 2: typing.Any (JSONB)
+-- params: 3: str (TEXT)
+-- params: 4: str (TEXT)
+-- params: 5: str (TEXT)
+-- params: 6: ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface (INET)
+-- params: 7: str (TEXT)
+```
+
+### Rows, CASE and AT TIME ZONE
+
+```sql
+SELECT CASE WHEN n > %s THEN %s ELSE note END, at AT TIME ZONE %s FROM events WHERE (id, note) = (%s, %s)
+-- params: 1: int (INT)
+-- params: 2: str (TEXT)
+-- params: 3: str (TEXT)
+-- params: 4: int (INT)
+-- params: 5: str (TEXT)
+```
+
+### INSERT ... SELECT and functions in FROM
+
+```sql
+INSERT INTO events (id, n, note) SELECT %s, %s, %s
+-- params: 1: int (INT) NOT NULL
+-- params: 2: int (INT) NOT NULL
+-- params: 3: str (TEXT) NOT NULL
+```
+
+```sql
+SELECT g FROM generate_series(1, %s) AS g
+-- params: 1: int (None)
+```
+
 ## Unknown context stays untyped
 
 ```sql

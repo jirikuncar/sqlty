@@ -15,8 +15,8 @@ use sqlparser::ast::{
     TableFactor, TableObject, TableWithJoins, Value,
 };
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, Function, Insert, LimitClause, OnConflictAction, OnInsert, Query,
-    UpdateTableFromKind, Visit, Visitor,
+    Assignment, AssignmentTarget, Function, Insert, LimitClause, ObjectName, OnConflictAction,
+    OnInsert, Query, UpdateTableFromKind, Visit, Visitor,
 };
 
 use crate::catalog::fold;
@@ -24,8 +24,10 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
+use super::literals::strip;
 use super::names::{object_name, table_key};
 use super::nullability::Nullability;
+use super::operators::{is_text, numeric_rank, operand_type};
 use super::preprocess::{parse, parser_input};
 use super::query::{rename_columns, Analyzer, Column};
 use super::registry::lookup;
@@ -295,8 +297,22 @@ impl<'a> Analyzer<'a> {
     fn params_select(&self, select: &Select, out: &mut Hints) {
         let (analyzer, scope) = self.scope_or_empty(&select.from);
         for factor in relations(&select.from) {
-            if let TableFactor::Derived { subquery, .. } = factor {
-                analyzer.params_query(subquery, out);
+            match factor {
+                TableFactor::Derived { subquery, .. } => analyzer.params_query(subquery, out),
+                // A function in FROM: `generate_series(1, $1)`.
+                TableFactor::Table {
+                    name,
+                    args: Some(args),
+                    ..
+                } => {
+                    for arg in &args.args {
+                        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg {
+                            analyzer.walk_params(expr, &scope, out);
+                        }
+                    }
+                    analyzer.call_params(name, &args.args, &scope, out);
+                }
+                _ => {}
             }
         }
         for join in select.from.iter().flat_map(|table| &table.joins) {
@@ -352,7 +368,24 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            Some(query) => self.params_query(query, out),
+            Some(query) => {
+                // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
+                if let SetExpr::Select(select) = query.body.as_ref() {
+                    for (position, item) in select.projection.iter().enumerate() {
+                        let (SelectItem::UnnamedExpr(expr)
+                        | SelectItem::ExprWithAlias { expr, .. }) = item
+                        else {
+                            continue;
+                        };
+                        if let (Some(column), Some(index)) =
+                            (targets.get(position), placeholder_index(expr))
+                        {
+                            self.hint_column(&table, column, index, out);
+                        }
+                    }
+                }
+                self.params_query(query, out);
+            }
             None => {}
         }
         self.params_assignments(&insert.assignments, Some(&table), &scope, out);
@@ -464,10 +497,65 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Parameter `placeholder` is the operand of `op` next to `other` (on its right when
+    /// `left` is false): the type PostgreSQL gives it.
+    fn hint_operand(
+        &self,
+        placeholder: &Expr,
+        op: &BinaryOperator,
+        other: &Expr,
+        left: bool,
+        scope: &Scope,
+        out: &mut Hints,
+    ) {
+        use BinaryOperator::*;
+        let (Some(index), None) = (placeholder_index(placeholder), placeholder_index(other)) else {
+            return;
+        };
+        let Ok(typed) = self.expr(other, scope) else {
+            return;
+        };
+        let other_type = operand_type(&typed);
+        let array = typed.sql().is_some_and(|sql| array_element(sql).is_some());
+        let sql_type = match (op, other_type) {
+            (Plus | Minus | Multiply | Divide | Modulo, Some(ty)) if numeric_rank(ty).is_some() => {
+                return out.add(index, strip(typed, self.dialect), Nullability::Unknown);
+            }
+            (Plus, Some("TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ" | "INTERVAL"))
+            | (Minus, Some("INTERVAL")) => "INTERVAL",
+            (Multiply | Divide, Some("INTERVAL")) if *op == Multiply || !left => "DOUBLE",
+            (StringConcat, _) if is_text(&typed) => "TEXT",
+            (StringConcat, _) if array => {
+                return out.add(index, typed, Nullability::Unknown);
+            }
+            (AtArrow | ArrowAt | PGOverlap, Some("JSONB")) => "JSONB",
+            (AtArrow | ArrowAt | PGOverlap, _) if array => {
+                return out.add(index, typed, Nullability::Unknown);
+            }
+            (Question, Some("JSONB")) if !left => "TEXT",
+            (QuestionPipe | QuestionAnd, Some("JSONB")) if !left => "ARRAY<TEXT>",
+            (Arrow | LongArrow, Some("JSON" | "JSONB")) if !left => "TEXT",
+            (HashArrow | HashLongArrow | HashMinus, Some("JSON" | "JSONB")) if !left => {
+                "ARRAY<TEXT>"
+            }
+            (PGBitwiseShiftLeft | PGBitwiseShiftRight | PGOverlap, Some("INET" | "CIDR")) => "INET",
+            (Custom(name), Some("INET" | "CIDR")) if matches!(name.as_str(), "<<=" | ">>=") => {
+                "INET"
+            }
+            _ => return,
+        };
+        out.add(index, self.param_typed(sql_type), Nullability::Unknown);
+    }
+
     fn expr_params(&self, expr: &Expr, scope: &Scope, out: &mut Hints) {
         match expr {
             Expr::BinaryOp { left, op, right } if is_comparison(op) => {
-                if let (Some(array), true) = (any_argument(right), is_array_search(op)) {
+                if let (Expr::Tuple(lefts), Expr::Tuple(rights)) = (&**left, &**right) {
+                    for (l, r) in lefts.iter().zip(rights) {
+                        self.hint_pair(l, r, scope, out);
+                        self.hint_pair(r, l, scope, out);
+                    }
+                } else if let (Some(array), true) = (any_argument(right), is_array_search(op)) {
                     self.hint_array(array, left, scope, out);
                 } else if let (Some(array), true) = (any_argument(left), is_array_search(op)) {
                     self.hint_array(array, right, scope, out);
@@ -487,6 +575,38 @@ impl<'a> Analyzer<'a> {
                                 Nullability::Unknown,
                             );
                         }
+                    }
+                }
+            }
+            Expr::BinaryOp { left, op, right } if self.dialect == SqlDialect::Postgres => {
+                self.hint_operand(left, op, right, true, scope, out);
+                self.hint_operand(right, op, left, false, scope, out);
+            }
+            Expr::AtTimeZone { time_zone, .. } => {
+                if let Some(index) = placeholder_index(time_zone) {
+                    out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
+                }
+            }
+            Expr::Case {
+                operand,
+                conditions,
+                else_result,
+                ..
+            } => {
+                let results: Vec<&Expr> = conditions
+                    .iter()
+                    .map(|when| &when.result)
+                    .chain(else_result.as_deref())
+                    .collect();
+                for result in &results {
+                    for other in &results {
+                        self.hint_pair(result, other, scope, out);
+                    }
+                }
+                if let Some(operand) = operand {
+                    for when in conditions {
+                        self.hint_pair(&when.condition, operand, scope, out);
+                        self.hint_pair(operand, &when.condition, scope, out);
                     }
                 }
             }
@@ -544,20 +664,44 @@ impl<'a> Analyzer<'a> {
     }
 
     fn function_params(&self, function: &Function, scope: &Scope, out: &mut Hints) {
-        let FunctionArguments::List(list) = &function.args else {
-            return;
-        };
-        let args: Vec<Option<&Expr>> = list
-            .args
+        if let FunctionArguments::List(list) = &function.args {
+            self.call_params(&function.name, &list.args, scope, out);
+        }
+    }
+
+    fn call_params(&self, name: &ObjectName, args: &[FunctionArg], scope: &Scope, out: &mut Hints) {
+        let args: Vec<Option<&Expr>> = args
             .iter()
             .map(|arg| match arg {
                 FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Some(expr),
                 _ => None,
             })
             .collect();
-        let name = object_name(&function.name).to_uppercase();
+        let name = object_name(name).to_uppercase();
         let info = lookup(&name);
-        if info.is_some_and(|info| info.same_type) {
+        if name == "GENERATE_SERIES" {
+            // The bounds share a type; the step of a time series is an interval.
+            if let [Some(start), Some(stop), step @ ..] = args.as_slice() {
+                self.hint_pair(start, stop, scope, out);
+                self.hint_pair(stop, start, scope, out);
+                if let [Some(step)] = step {
+                    let temporal = [start, stop].into_iter().any(|bound| {
+                        self.expr(bound, scope).is_ok_and(|typed| {
+                            matches!(
+                                operand_type(&typed),
+                                Some("TIMESTAMP" | "TIMESTAMPTZ" | "DATE")
+                            )
+                        })
+                    });
+                    match placeholder_index(step) {
+                        Some(index) if temporal => {
+                            out.add(index, self.param_typed("INTERVAL"), Nullability::Unknown);
+                        }
+                        _ => self.hint_pair(step, start, scope, out),
+                    }
+                }
+            }
+        } else if info.is_some_and(|info| info.same_type) {
             for placeholder in args.iter().flatten() {
                 for other in args.iter().flatten() {
                     self.hint_pair(placeholder, other, scope, out);
@@ -789,7 +933,7 @@ mod tests {
         );
         assert_eq!(
             pg("INSERT INTO users (id, name) SELECT id, %s FROM users WHERE age = %s"),
-            ["-", "int"]
+            ["str!", "int"]
         );
     }
 
