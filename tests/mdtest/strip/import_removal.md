@@ -43,3 +43,22 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 # stripped: """
 # stripped: q = "--sql\nSELECT 1::INTEGER"
 ```
+
+## Import lines in strings are text
+
+An unused import line is removed only where it is a statement: a docstring that
+shows one keeps it.
+
+```python
+"""Example:
+from sqlty import UNTYPED
+import datetime
+"""
+from sqlty import SQL
+q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# stripped: """Example:
+# stripped: from sqlty import UNTYPED
+# stripped: import datetime
+# stripped: """
+# stripped: q = "--sql\nSELECT 1::INTEGER AS n"
+```
