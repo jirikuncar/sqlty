@@ -125,7 +125,9 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
 
 
 F_SKIPPED = "q.py:2: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
-T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+T_SKIPPED = (
+    "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (the field {x:i} changes the SQL)"
+)
 
 
 @pytest.mark.parametrize(
