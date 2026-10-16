@@ -85,14 +85,18 @@ impl<'a> Analyzer<'a> {
             }
             Plus | Minus | Multiply | Divide | Modulo => {
                 let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-                let mysql_division = self.dialect == SqlDialect::MySql && *op == Divide;
+                if self.dialect == SqlDialect::MySql {
+                    if let Some(typed) = mysql_date_add(op, (left, &l), (right, &r)) {
+                        return Ok(from_sql_type(typed, self.dialect));
+                    }
+                }
                 let wild = |expr: &Expr| matches!(expr, Expr::Value(v) if matches!(v.value, Value::Null | Value::Placeholder(_)));
                 let (l, r) = match (wild(left), wild(right)) {
                     (true, false) => (r.clone(), r),
                     (false, true) => (l.clone(), l),
                     _ => (l, r),
                 };
-                Ok(arithmetic(op, &l, &r, mysql_division)
+                Ok(arithmetic(op, &l, &r, self.dialect)
                     .map_or(Typed::UNKNOWN, |ty| from_sql_type(&ty, self.dialect)))
             }
             _ => Ok(Typed::UNKNOWN),
@@ -138,23 +142,61 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
         .position(|names| names.contains(&sql_type))
 }
 
-/// Result type of `left op right` for numbers (promoted to the wider type), and for dates,
-/// timestamps and intervals; a placeholder or `NULL` operand takes the other's type.
+/// MySQL `date ± INTERVAL n unit` (or `INTERVAL n unit + date`): a `DATE` stays a date for
+/// day units and coarser, anything else is a `DATETIME`.
+fn mysql_date_add(
+    op: &BinaryOperator,
+    (left, left_typed): (&Expr, &Typed),
+    (right, right_typed): (&Expr, &Typed),
+) -> Option<&'static str> {
+    use sqlparser::ast::DateTimeField::{
+        Day, Days, Month, Months, Quarter, Week, Weeks, Year, Years,
+    };
+    let (date, interval) = match (left, right) {
+        (_, Expr::Interval(interval)) => (left_typed, interval),
+        (Expr::Interval(interval), _) if *op == BinaryOperator::Plus => (right_typed, interval),
+        _ => return None,
+    };
+    if !matches!(op, BinaryOperator::Plus | BinaryOperator::Minus) {
+        return None;
+    }
+    let whole_days = interval.last_field.is_none()
+        && matches!(
+            interval.leading_field,
+            Some(Year | Years | Quarter | Month | Months | Week(_) | Weeks | Day | Days)
+        );
+    match operand_type(date)? {
+        "DATE" if whole_days => Some("DATE"),
+        "DATE" | "DATETIME" | "TIMESTAMP" => Some("DATETIME"),
+        _ => None,
+    }
+}
+
+/// Result type of `left op right` for numbers (promoted to the wider type), and in
+/// PostgreSQL for dates, times, timestamps and intervals; a placeholder or `NULL` operand
+/// takes the other's type.
 pub(super) fn arithmetic(
     op: &BinaryOperator,
     left: &Typed,
     right: &Typed,
-    mysql_division: bool,
+    dialect: SqlDialect,
 ) -> Option<String> {
     use BinaryOperator::*;
     let (l, r) = (operand_type(left), operand_type(right));
+    if let (Some(a), Some(b)) = (l, r) {
+        if let (Some(a), Some(b)) = (numeric_rank(a), numeric_rank(b)) {
+            let rank = a.max(b);
+            let mysql_division = dialect == SqlDialect::MySql && *op == Divide;
+            let rank = if mysql_division { rank.max(3) } else { rank };
+            return Some(NUMERIC_RANKS[rank][0].to_string());
+        }
+    }
+    // MySQL reads a date as a number in arithmetic, and SQLite stores it as text.
+    if dialect != SqlDialect::Postgres {
+        return None;
+    }
     let temporal = |ty: Option<&str>| matches!(ty, Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ"));
     match (l, r) {
-        (Some(a), Some(b)) if numeric_rank(a).is_some() && numeric_rank(b).is_some() => {
-            let rank = numeric_rank(a)?.max(numeric_rank(b)?);
-            let rank = if mysql_division { rank.max(3) } else { rank };
-            Some(NUMERIC_RANKS[rank][0].to_string())
-        }
         (Some(a), Some("INTERVAL")) if temporal(Some(a)) && matches!(op, Plus | Minus) => {
             Some(if a == "DATE" { "TIMESTAMP" } else { a }.to_string())
         }
@@ -165,8 +207,18 @@ pub(super) fn arithmetic(
             Some("DATE".to_string())
         }
         (Some("INT" | "SMALLINT"), Some("DATE")) if *op == Plus => Some("DATE".to_string()),
-        (Some("DATE"), Some("TIME")) if *op == Plus => Some("TIMESTAMP".to_string()),
-        (Some("TIME"), Some("INTERVAL")) if matches!(op, Plus | Minus) => Some("TIME".to_string()),
+        (Some("DATE"), Some("TIME")) | (Some("TIME"), Some("DATE")) if *op == Plus => {
+            Some("TIMESTAMP".to_string())
+        }
+        (Some("DATE"), Some("TIMETZ")) | (Some("TIMETZ"), Some("DATE")) if *op == Plus => {
+            Some("TIMESTAMPTZ".to_string())
+        }
+        (Some(time @ ("TIME" | "TIMETZ")), Some("INTERVAL")) if matches!(op, Plus | Minus) => {
+            Some(time.to_string())
+        }
+        (Some("INTERVAL"), Some(time @ ("TIME" | "TIMETZ"))) if *op == Plus => {
+            Some(time.to_string())
+        }
         (Some("TIME"), Some("TIME")) if *op == Minus => Some("INTERVAL".to_string()),
         (Some("INTERVAL"), Some(n)) if *op == Divide && numeric_rank(n).is_some() => {
             Some("INTERVAL".to_string())
@@ -370,7 +422,9 @@ mod tests {
         for (symbol, op) in &operators {
             for left in types {
                 for right in types {
-                    if let Some(result) = arithmetic(op, &sql(left), &sql(right), false) {
+                    if let Some(result) =
+                        arithmetic(op, &sql(left), &sql(right), SqlDialect::Postgres)
+                    {
                         lines.push(format!("{left} {symbol} {right} = {result}"));
                     }
                 }
@@ -383,15 +437,21 @@ mod tests {
     fn mysql_division_is_at_least_decimal() {
         let int = sql("INT");
         assert_eq!(
-            arithmetic(&BinaryOperator::Divide, &int, &int, true).as_deref(),
+            arithmetic(&BinaryOperator::Divide, &int, &int, SqlDialect::MySql).as_deref(),
             Some("DECIMAL")
         );
         assert_eq!(
-            arithmetic(&BinaryOperator::Divide, &int, &int, false).as_deref(),
+            arithmetic(&BinaryOperator::Divide, &int, &int, SqlDialect::Postgres).as_deref(),
             Some("INT")
         );
         assert_eq!(
-            arithmetic(&BinaryOperator::Divide, &int, &sql("DOUBLE"), true).as_deref(),
+            arithmetic(
+                &BinaryOperator::Divide,
+                &int,
+                &sql("DOUBLE"),
+                SqlDialect::MySql
+            )
+            .as_deref(),
             Some("DOUBLE")
         );
     }
@@ -400,11 +460,21 @@ mod tests {
     fn arithmetic_with_an_unknown_operand_has_no_type() {
         let int = sql("INT");
         assert_eq!(
-            arithmetic(&BinaryOperator::Plus, &int, &Typed::UNKNOWN, false),
+            arithmetic(
+                &BinaryOperator::Plus,
+                &int,
+                &Typed::UNKNOWN,
+                SqlDialect::Postgres
+            ),
             None
         );
         assert_eq!(
-            arithmetic(&BinaryOperator::Plus, &int, &literal("str"), false),
+            arithmetic(
+                &BinaryOperator::Plus,
+                &int,
+                &literal("str"),
+                SqlDialect::Postgres
+            ),
             None
         );
     }
