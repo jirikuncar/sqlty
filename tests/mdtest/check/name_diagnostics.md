@@ -61,6 +61,15 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+A subquery over the same table as the outer query names the table once.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `nope` does not exist in `users`"
+g = SQL[tuple[int]]("--sql\nSELECT (SELECT nope FROM users) FROM users")
+```
+
 #### Ambiguous columns
 
 ```python
