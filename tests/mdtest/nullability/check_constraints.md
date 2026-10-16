@@ -38,6 +38,26 @@ SELECT COALESCE(a_id, b_id) AS ref, COALESCE(b_id, a_id, 0) AS ref2, COALESCE(x,
 -- inferred: tuple[int, int, int, int]
 ```
 
+## The other column of a group where one is NULL
+
+Where a condition proves the other columns of a group NULL, the one left is
+set: in a `CASE` branch, or after `WHERE ... IS NULL`.
+
+```sql
+SELECT CASE WHEN a_id IS NOT NULL THEN a_id ELSE b_id END AS ref, CASE WHEN x IS NULL THEN y ELSE x END AS xy FROM items
+-- inferred: tuple[int, int]
+```
+
+```sql
+SELECT b_id FROM items WHERE a_id IS NULL
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT CASE WHEN a_id IS NOT NULL THEN a_id ELSE x END AS r, b_id FROM items WHERE x IS NULL
+-- inferred: tuple[int | None, int | None]
+```
+
 ## Columns outside a group stay nullable
 
 ```sql

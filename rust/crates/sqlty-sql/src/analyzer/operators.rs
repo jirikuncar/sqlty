@@ -74,6 +74,13 @@ impl<'a> Analyzer<'a> {
             {
                 // Integer operands: the wider type; a shift keeps its left operand's type.
                 let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+                if is_address(&l) || is_address(&r) {
+                    // `<<` and `>>` test containment; `&` and `|` mask an address.
+                    return sql(match op {
+                        PGBitwiseShiftLeft | PGBitwiseShiftRight => "BOOLEAN",
+                        _ => "INET",
+                    });
+                }
                 let integer = |t: &Typed| {
                     operand_type(t)
                         .and_then(numeric_rank)
@@ -87,6 +94,12 @@ impl<'a> Analyzer<'a> {
                     }
                     _ => Typed::UNKNOWN,
                 })
+            }
+            Custom(name)
+                if self.dialect == SqlDialect::Postgres
+                    && matches!(name.as_str(), "<<=" | ">>=") =>
+            {
+                sql("BOOLEAN")
             }
             Plus | Minus | Multiply | Divide | Modulo => {
                 let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
@@ -124,6 +137,11 @@ pub(super) fn operand_type(typed: &Typed) -> Option<&str> {
     }
 }
 
+/// An `inet` or `cidr` value.
+fn is_address(typed: &Typed) -> bool {
+    matches!(operand_type(typed), Some("INET" | "CIDR"))
+}
+
 pub(super) fn is_text(typed: &Typed) -> bool {
     match &typed.sql {
         Some(sql_type) => matches!(type_base(sql_type), "TEXT" | "VARCHAR" | "CHAR"),
@@ -152,7 +170,7 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
 
 /// MySQL `date ± INTERVAL n unit` (or `INTERVAL n unit + date`): a `DATE` stays a date for
 /// day units and coarser, anything else is a `DATETIME`.
-fn mysql_date_add(
+pub(super) fn mysql_date_add(
     op: &BinaryOperator,
     (left, left_typed): (&Expr, &Typed),
     (right, right_typed): (&Expr, &Typed),
@@ -209,7 +227,17 @@ pub(super) fn arithmetic(
         return None;
     }
     let temporal = |ty: Option<&str>| matches!(ty, Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ"));
+    let integer = |ty: &str| numeric_rank(ty).is_some_and(|rank| rank <= 2);
     match (l, r) {
+        // `jsonb - key`, `jsonb - index` and `jsonb - keys`.
+        (Some("JSONB"), _) if *op == Minus => Some("JSONB".to_string()),
+        (Some("INET" | "CIDR"), Some("INET" | "CIDR")) if *op == Minus => {
+            Some("BIGINT".to_string())
+        }
+        (Some("INET" | "CIDR"), Some(n)) if matches!(op, Plus | Minus) && integer(n) => {
+            Some("INET".to_string())
+        }
+        (Some(n), Some("INET" | "CIDR")) if *op == Plus && integer(n) => Some("INET".to_string()),
         (Some(a), Some("INTERVAL")) if temporal(Some(a)) && matches!(op, Plus | Minus) => {
             Some(if a == "DATE" { "TIMESTAMP" } else { a }.to_string())
         }

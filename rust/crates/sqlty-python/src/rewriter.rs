@@ -16,6 +16,7 @@ use std::ops::Range;
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::edit::{apply_edits, Edit};
 use crate::options::{ConfigError, Options};
 use crate::rules::Rule;
 use crate::scan::Scan;
@@ -132,21 +133,40 @@ pub(crate) fn rewrite_scan(
     keep_lines: bool,
     skip: &dyn Fn(usize) -> bool,
 ) -> Option<String> {
-    let istyle = &options.style;
-    let source = scan.source();
     let replacements = wraps(scan, options, skip);
-    let needs_untyped_import = replacements.iter().any(|(_, _, r)| {
-        r.starts_with(&format!(
-            "{}[{}](",
-            istyle.wrapper_name,
-            istyle.untyped_name()
-        ))
-    });
-
     if replacements.is_empty() {
         return None;
     }
-    let needs = |marker: &str| replacements.iter().any(|(_, _, r)| r.contains(marker));
+    let (result, applied) = apply_edits(scan.source(), replacements);
+    let wrapped: Vec<&str> = applied
+        .iter()
+        .map(|edit| edit.replacement.as_str())
+        .collect();
+    Some(with_wrapper_imports(
+        result,
+        scan,
+        &wrapped,
+        &options.style,
+        keep_lines,
+    ))
+}
+
+/// `result` with the imports the `wrapped` calls need: the wrapper, `UNTYPED` and the
+/// [`TYPE_MODULES`] their row types name. `scan` is of a source with the same imports.
+pub(crate) fn with_wrapper_imports(
+    result: String,
+    scan: &Scan,
+    wrapped: &[&str],
+    istyle: &ImportStyle,
+    keep_lines: bool,
+) -> String {
+    if wrapped.is_empty() {
+        return result;
+    }
+    let source = scan.source();
+    let untyped_call = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
+    let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
+    let needs = |marker: &str| wrapped.iter().any(|r| r.contains(marker));
     let mut imports = Vec::new();
     for module in TYPE_MODULES {
         if needs(&format!("{module}.")) && !has_import(source, &format!("import {module}")) {
@@ -160,11 +180,7 @@ pub(crate) fn rewrite_scan(
             .iter()
             .any(|(n, b)| (n == name && b == binding) || (n == "*" && name == binding))
     };
-    let wraps_with = |name: &str| {
-        replacements
-            .iter()
-            .any(|(_, _, r)| r.starts_with(&format!("{name}[")))
-    };
+    let wraps_with = |name: &str| wrapped.iter().any(|r| r.starts_with(&format!("{name}[")));
     let needs_wrapper =
         wraps_with(&istyle.wrapper_name) || (module_style && wraps_with(&istyle.template_name()));
     if needs_wrapper
@@ -184,12 +200,11 @@ pub(crate) fn rewrite_scan(
         }
     }
 
-    let result = splice(source, &replacements);
     if imports.is_empty() {
-        return Some(result);
+        return result;
     }
     if keep_lines {
-        return Some(insert_inline(&result, &imports.join("; ")));
+        return insert_inline(&result, &imports.join("; "));
     }
     let at = header_end(&result);
     let eol = line_ending(&result, at);
@@ -198,14 +213,14 @@ pub(crate) fn rewrite_scan(
     } else {
         ""
     };
-    Some(format!(
+    format!(
         "{}{}{}{}{}",
         &result[..at],
         sep,
         imports.join(eol),
         eol,
         &result[at..]
-    ))
+    )
 }
 
 /// Line ending of the line at `at`, else of the line before it.
@@ -225,11 +240,7 @@ pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
 /// a wrapper call (`mod.SQL[...]` included), the argument of a psycopg `SQL(...)`,
 /// groups with a prefixed string, and
 /// every group on a line that holds an f- or t-string `--sql` group.
-pub(crate) fn wraps(
-    scan: &Scan,
-    options: &Options,
-    skip: &dyn Fn(usize) -> bool,
-) -> Vec<(usize, usize, String)> {
+pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool) -> Vec<Edit> {
     let source = scan.source();
     let (dialect, schema) = (options.dialect.name(), options.schema);
     let (istyle, untyped) = (&options.style, options.untyped);
@@ -248,7 +259,9 @@ pub(crate) fn wraps(
     let psycopg = source.contains("psycopg");
     let mut replacements = Vec::new();
     for group in scan.groups() {
-        if psycopg && scan.in_composed_sql(group.tokens[0]) {
+        if (psycopg && scan.in_composed_sql(group.tokens[0]))
+            || scan.in_case_pattern(group.tokens[0])
+        {
             continue;
         }
         let (start, end) = (group.start, group.end);
@@ -277,7 +290,7 @@ pub(crate) fn wraps(
             istyle.wrapper_name.clone()
         };
         let wrapped = format!("{wrapper}[{type_str}]({})", &source[start..end]);
-        replacements.push((start, end, wrapped));
+        replacements.push(Edit::new(start..end, wrapped));
     }
     replacements
 }
@@ -292,47 +305,30 @@ pub(crate) fn wraps(
 /// rewrite.
 pub fn strip_source(source: &str, istyle: &ImportStyle) -> String {
     let scan = Scan::new(source, &istyle.wrapper_name);
-    let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+    let mut replacements = Vec::new();
     for call in &scan.calls {
         if !call.exact || !call.content(source).is_some_and(|c| is_sqlty_managed(&c)) {
             continue;
         }
         if call.bare {
-            replacements.push((
-                call.span.start,
-                call.span.end,
-                call.argument(source).to_string(),
-            ));
+            replacements.push(Edit::new(call.span.clone(), call.argument(source)));
             continue;
         }
-        replacements.push((call.span.start, call.open, String::new()));
+        replacements.push(Edit::new(call.span.start..call.open, ""));
         if let Some(comma) = &call.comma {
-            replacements.push((comma.start, comma.end, String::new()));
+            replacements.push(Edit::new(comma.clone(), ""));
         }
     }
 
     if replacements.is_empty() {
         return source.to_string();
     }
-    remove_unused_imports(&splice(source, &replacements), istyle)
+    remove_unused_imports(&apply_edits(source, replacements).0, istyle)
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Apply non-overlapping `(start, end, replacement)` edits, given in source order.
-pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
-    let mut result = String::with_capacity(source.len());
-    let mut pos = 0;
-    for (start, end, replacement) in replacements {
-        result.push_str(&source[pos..*start]);
-        result.push_str(replacement);
-        pos = *end;
-    }
-    result.push_str(&source[pos..]);
-    result
-}
 
 /// Rules suppressed by `# sqlty: ignore` comments, by line: `None` suppresses every rule.
 pub type Suppressed = HashMap<usize, Option<Vec<String>>>;
