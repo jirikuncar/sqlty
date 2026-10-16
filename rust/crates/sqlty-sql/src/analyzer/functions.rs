@@ -342,8 +342,6 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         &[
             "ABS",
             "MOD",
-            "GREATEST",
-            "LEAST",
             "ARRAY_APPEND",
             "ARRAY_CAT",
             "ARRAY_REMOVE",
@@ -629,7 +627,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "bug: GREATEST and LEAST are listed in two POSTGRES_FUNCTIONS entries (Same(0) and FirstKnown)"]
     fn function_tables_list_a_name_once() {
         for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
             let mut seen = HashSet::new();
