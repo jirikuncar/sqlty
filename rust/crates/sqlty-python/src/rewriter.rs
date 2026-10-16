@@ -199,6 +199,7 @@ pub(crate) fn with_wrapper_imports(
             imports.push(line.to_string());
         }
     }
+    imports.extend(Spelling::of(scan).imports_for(wrapped));
 
     if imports.is_empty() {
         return result;
@@ -257,6 +258,7 @@ pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool
         .collect();
 
     let psycopg = source.contains("psycopg");
+    let spelling = Spelling::of(scan);
     let mut replacements = Vec::new();
     for group in scan.groups() {
         if (psycopg && scan.in_composed_sql(group.tokens[0]))
@@ -279,7 +281,7 @@ pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool
             continue;
         }
         let type_str = match infer_sql_content(content, dialect, schema) {
-            Some(inferred) => inferred,
+            Some(inferred) => spelling.respell(inferred),
             None if untyped && is_untyped(content, dialect) => istyle.untyped_name(),
             // Don't wrap when inference fails — SQL[Any] is never useful.
             None => continue,
@@ -538,10 +540,27 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
                     || TYPE_MODULES.iter().any(|module| {
                         line == format!("import {module}")
                             && !source.contains(&format!("{module}."))
-                    }))
+                    })
+                    || unused_datetime_import(source, line))
         })
         .map(|(line, _)| line)
         .collect()
+}
+
+/// Whether `line` is a `from datetime import X` that [`Spelling`] adds, and nothing else
+/// in `source` names what it binds.
+fn unused_datetime_import(source: &str, line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("from datetime import ") else {
+        return false;
+    };
+    let (class, binding) = rest.split_once(" as ").unwrap_or((rest, rest));
+    if !DATETIME_CLASSES.contains(&class)
+        || !(binding == class || binding == format!("datetime_{class}"))
+    {
+        return false;
+    }
+    let word = Regex::new(&format!(r"\b{}\b", regex::escape(binding))).unwrap();
+    word.find_iter(source).count() == 1
 }
 
 /// Each line of `source` with its line ending, and whether it starts inside a string
@@ -564,13 +583,28 @@ fn lines_in_strings(source: &str) -> impl Iterator<Item = (&str, bool)> {
 /// `(name, binding)` pairs of top-level `from sqlty import ...` statements, read from
 /// tokens so strings and comments don't count; `*` imports every name.
 fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
+    from_imports(scan, "sqlty")
+}
+
+/// `(name, binding)` pairs of the top-level `from module import ...` statements.
+fn from_imports(scan: &Scan, module: &str) -> Vec<(String, String)> {
+    top_level_imports(scan)
+        .into_iter()
+        .filter(|(from, _, _)| from.as_deref() == Some(module))
+        .map(|(_, name, binding)| (name, binding))
+        .collect()
+}
+
+/// `(from, name, binding)` of every top-level import, `from` being the module of a
+/// `from ... import`: `import os.path` binds `os`, `from a import b as c` binds `c`.
+fn top_level_imports(scan: &Scan) -> Vec<(Option<String>, String, String)> {
     let (source, tokens) = (scan.source(), &scan.tokens);
     let text = |i: usize| {
         tokens
             .get(i)
             .map_or("", |t: &Token| &source[t.span.clone()])
     };
-    let mut pairs = Vec::new();
+    let mut found = Vec::new();
     for i in 0..tokens.len() {
         let start = tokens[i].span.start;
         // The logical line up to the token: a compound header may span physical lines.
@@ -590,16 +624,17 @@ fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
             ";" => !is_compound(line),
             _ => false,
         };
-        if !(statement
-            && !line.starts_with([' ', '\t'])
-            && text(i) == "from"
-            && text(i + 1) == "sqlty"
-            && text(i + 2) == "import")
-        {
+        if !statement || line.starts_with([' ', '\t']) {
             continue;
         }
+        let (from, names_at) = match text(i) {
+            "from" if text(i + 2) == "import" => (Some(text(i + 1).to_string()), i + 3),
+            "import" => (None, i + 1),
+            _ => continue,
+        };
+        let mut pairs = Vec::new();
         let mut names = Vec::new();
-        for token in &tokens[i + 3..] {
+        for token in &tokens[names_at..] {
             match (token.kind, &source[token.span.clone()]) {
                 (Kind::Name, name) => names.push(name),
                 (Kind::Op, "*") => names.push("*"),
@@ -608,11 +643,108 @@ fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
             }
         }
         flush(&mut names, &mut pairs);
+        for (name, binding) in pairs {
+            let binding = match (&from, name == binding) {
+                // `import os.path` binds `os`.
+                (None, true) => binding.split('.').next().unwrap_or_default().to_string(),
+                _ => binding,
+            };
+            found.push((from.clone(), name, binding));
+        }
     }
-    pairs
+    found
 }
 
-/// Add `name` or `name as alias` from `names` to `pairs`.
+/// How row types spell the `datetime` classes in a module that binds the name `datetime`
+/// to something else, as `from datetime import datetime` does: by the names it imports
+/// them under, importing the missing ones (under an alias when their name is taken).
+#[derive(Default)]
+pub(crate) struct Spelling {
+    /// `(type, spelling)`, such as `("datetime.date", "date")`.
+    names: Vec<(String, String)>,
+    /// `(spelling, import line)` for the classes the module does not import yet.
+    imports: Vec<(String, String)>,
+}
+
+/// The `datetime` classes row types name.
+const DATETIME_CLASSES: [&str; 5] = ["datetime", "date", "time", "timedelta", "timezone"];
+
+impl Spelling {
+    pub(crate) fn of(scan: &Scan) -> Self {
+        if !scan.source().contains("datetime") {
+            return Self::default();
+        }
+        let imports = top_level_imports(scan);
+        if !imports
+            .iter()
+            .any(|(from, _, binding)| from.is_some() && binding == "datetime")
+        {
+            return Self::default();
+        }
+        let bound = |name: &str| imports.iter().any(|(_, _, binding)| binding == name);
+        let mut spelling = Self::default();
+        for class in DATETIME_CLASSES {
+            let imported = imports
+                .iter()
+                .find(|(from, name, _)| from.as_deref() == Some("datetime") && name == class);
+            let spelled = match imported {
+                Some((_, _, binding)) => binding.clone(),
+                None => {
+                    let spelled = if bound(class) {
+                        format!("datetime_{class}")
+                    } else {
+                        class.to_string()
+                    };
+                    let line = if spelled == class {
+                        format!("from datetime import {class}")
+                    } else {
+                        format!("from datetime import {class} as {spelled}")
+                    };
+                    spelling.imports.push((spelled.clone(), line));
+                    spelled
+                }
+            };
+            spelling.names.push((format!("datetime.{class}"), spelled));
+        }
+        spelling
+    }
+
+    /// `row_type` spelled as the module can evaluate it.
+    pub(crate) fn respell(&self, row_type: String) -> String {
+        if self.names.is_empty() || !row_type.contains("datetime.") {
+            return row_type;
+        }
+        DATETIME_TYPE
+            .replace_all(&row_type, |caps: &regex::Captures| {
+                let canonical = &caps[0];
+                self.names
+                    .iter()
+                    .find(|(name, _)| name == canonical)
+                    .map_or_else(|| canonical.to_string(), |(_, spelled)| spelled.clone())
+            })
+            .into_owned()
+    }
+
+    /// The import lines the respelled `wrapped` calls need.
+    pub(crate) fn imports_for(&self, wrapped: &[&str]) -> Vec<String> {
+        self.imports
+            .iter()
+            .filter(|(spelled, _)| {
+                let word = Regex::new(&format!(r"\b{}\b", regex::escape(spelled))).unwrap();
+                wrapped.iter().any(|text| {
+                    text.split_once('(')
+                        .is_some_and(|(head, _)| word.is_match(head))
+                })
+            })
+            .map(|(_, line)| line.clone())
+            .collect()
+    }
+}
+
+static DATETIME_TYPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bdatetime\.(?:datetime|date|timedelta|timezone|time)\b").unwrap()
+});
+
 fn flush(names: &mut Vec<&str>, pairs: &mut Vec<(String, String)>) {
     match names[..] {
         [name] => pairs.push((name.to_string(), name.to_string())),

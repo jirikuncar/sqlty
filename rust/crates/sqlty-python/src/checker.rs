@@ -19,7 +19,7 @@ use crate::options::{Dialect, Options};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
-    strip_line_break, wraps, ImportStyle,
+    strip_line_break, wraps, ImportStyle, Spelling,
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
@@ -118,6 +118,7 @@ pub fn check_source(
         rules,
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
+        spelling: Spelling::of(&scan),
     };
     if options.dialect == Dialect::MySql {
         checker.mysql_markers();
@@ -139,6 +140,8 @@ struct Checker<'a> {
     /// Offsets of the calls whose `T` is `typing.Any`, ascending.
     any_calls: Vec<usize>,
     diagnostics: Vec<Diagnostic>,
+    /// How the module can spell the row types it names.
+    spelling: Spelling,
 }
 
 impl Checker<'_> {
@@ -336,7 +339,8 @@ impl Checker<'_> {
                 sql_content,
                 self.options.dialect.name(),
                 self.options.schema,
-            );
+            )
+            .map(|current| self.spelling.respell(current));
             let message = match &current {
                 Some(current) => {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
@@ -361,7 +365,9 @@ impl Checker<'_> {
             sql_content,
             self.options.dialect.name(),
             self.options.schema,
-        ) {
+        )
+        .map(|current| self.spelling.respell(current))
+        {
             if !refines_tuple(annotated, &current) {
                 self.report_fix(
                     Rule::StaleType,

@@ -480,6 +480,36 @@ class ParsedSource:
         return aliases
 
     @functools.cached_property
+    def type_aliases(self) -> dict[str, ast.expr]:
+        """Module-level aliases of row types: ``type Row = ...``, ``Row: TypeAlias = ...``, and
+        ``Row = tuple[...]`` or ``Row = OtherRow``; a generic alias is left out.
+
+        Example:
+            >>> aliases = ParsedSource("type A = tuple[int]\\nB = A\\nC = 1").type_aliases
+            >>> {name: ast.unparse(value) for name, value in aliases.items()}
+            {'A': 'tuple[int]', 'B': 'A'}
+        """
+        if self.tree is None:
+            return {}
+        aliases: dict[str, ast.expr] = {}
+        for node in self.tree.body:
+            match node:
+                case ast.TypeAlias(name=ast.Name(id=name), type_params=[], value=value):
+                    aliases[name] = value
+                case ast.AnnAssign(target=ast.Name(id=name), annotation=hint, value=value) if (
+                    value is not None and _typing_name(hint, self.typing_aliases) == "TypeAlias"
+                ):
+                    aliases[name] = value
+                case ast.Assign(targets=[ast.Name(id=name)], value=value) if isinstance(
+                    value, ast.Subscript | ast.Name | ast.Attribute
+                ) and (
+                    not isinstance(value, ast.Subscript)
+                    or ast.unparse(value.value) in ("tuple", "typing.Tuple", "Tuple")
+                ):
+                    aliases[name] = value
+        return aliases
+
+    @functools.cached_property
     def imported_names(self) -> dict[str, str]:
         """Local names bound by absolute imports, to the dotted names they stand for; the outermost binding wins.
 
