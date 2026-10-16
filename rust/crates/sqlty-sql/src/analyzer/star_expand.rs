@@ -72,7 +72,7 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
         // Without `::` (MySQL, SQLite, ...) the schema alone types the columns.
         let casts = dialect.has_cast_operator();
         items.extend(columns.iter().map(|col| {
-            if casts {
+            if casts && !col.sql_type.is_empty() {
                 format!("{qualifier}{}::{}", col.ident, col.sql_type)
             } else {
                 format!("{qualifier}{}", col.ident)

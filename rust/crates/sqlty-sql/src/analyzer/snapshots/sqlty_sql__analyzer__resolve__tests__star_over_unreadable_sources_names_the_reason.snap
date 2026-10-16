@@ -13,8 +13,14 @@ note: str | TEXT | Nullable
 [unknown-table] table `missing` is not defined in the schema
 
 SELECT * FROM users, generate_series(1, 2) AS g
+id: int | INT | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+g: int | INT | NonNull
+
+SELECT * FROM users, pg_get_keywords() AS k
 *: ? | ? | Unknown
-[unsupported-syntax] `*` reads table function generate_series, which sqlty does not read the columns of
+[unsupported-syntax] `*` reads table function pg_get_keywords, which sqlty does not read the columns of
 
 SELECT nope.* FROM users
 *: ? | ? | Unknown
