@@ -142,6 +142,32 @@ impl<'s> Scan<'s> {
         })
     }
 
+    /// Whether the string at token `first` is in the pattern of a `case` clause, which
+    /// takes literals and no calls (its `if` guard is an expression).
+    pub(crate) fn in_case_pattern(&self, first: usize) -> bool {
+        let text = |i: usize| &self.text[self.tokens[i].span.clone()];
+        let start = (0..first)
+            .rev()
+            .find(|&i| self.tokens[i].kind == Kind::Newline && self.tokens[i].depth == 0)
+            .map_or(0, |i| i + 1);
+        if start >= first
+            || self.tokens[start].kind != Kind::Name
+            || text(start) != "case"
+            // `case = ...`, `case: int = ...`: a name, not the soft keyword.
+            || (self.tokens[start + 1].kind == Kind::Op
+                && !matches!(text(start + 1), "(" | "[" | "{" | "-"))
+        {
+            return false;
+        }
+        !(start + 1..first).any(|i| {
+            self.tokens[i].depth == 0
+                && matches!(
+                    (&self.tokens[i].kind, text(i)),
+                    (Kind::Op, ":") | (Kind::Name, "if")
+                )
+        })
+    }
+
     /// Whether the string at token `first` opens the argument of a call named `SQL`
     /// or ending in it (`sql.SQL(`, `PgSQL(`): a psycopg query, not for a wrapper.
     pub(crate) fn in_composed_sql(&self, first: usize) -> bool {
