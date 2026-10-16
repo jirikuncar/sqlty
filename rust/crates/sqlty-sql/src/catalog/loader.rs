@@ -331,8 +331,10 @@ impl Loader {
                 }
             }
         }
+        // A PostgreSQL `PARTITION OF` column without a type only adds constraints; a SQLite
+        // column may have no type at all.
         for column in &create.columns {
-            if column.data_type != DataType::Unspecified {
+            if column.data_type != DataType::Unspecified || self.dialect == SqlDialect::Sqlite {
                 merge_column(&mut table.columns, raw_column(column, self.dialect));
             }
         }

@@ -201,6 +201,15 @@ Run Rust unit tests independently:
 cargo test --workspace --manifest-path rust/Cargo.toml
 ```
 
+CI runs them with [cargo-nextest](https://nexte.st/), which runs test binaries in
+parallel and reports each failure on its own, then runs the doctests that
+nextest skips:
+
+```bash
+cargo nextest run --workspace --manifest-path rust/Cargo.toml
+cargo test --doc --workspace --manifest-path rust/Cargo.toml
+```
+
 ### Magic codec internals
 
 User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).
