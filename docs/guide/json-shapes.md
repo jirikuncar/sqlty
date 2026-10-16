@@ -154,5 +154,8 @@ else sqlty cannot read has no shape, and every annotation fits it. So does an an
 of `Any`, `object` or a class sqlty cannot see into, such as an imported one or a Pydantic
 model. A `dict[str, Any]` fits any object or map, but not an array.
 
-Shapes are inferred for PostgreSQL; other dialects have none yet. `sqlty rewrite` still
+Shapes are inferred for PostgreSQL and for MySQL's `JSON_OBJECT`, `JSON_ARRAY`,
+`JSON_ARRAYAGG` and `JSON_OBJECTAGG`. MySQL has no boolean type, so a `BOOLEAN`
+column is a JSON number there; only `TRUE` and `FALSE` are JSON booleans. SQLite's
+JSON functions return text and have no shape. `sqlty rewrite` still
 writes `Any` for JSON columns: generating nested `TypedDict`s is not done.
