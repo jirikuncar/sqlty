@@ -434,7 +434,7 @@ fn expanded_literal(
 static SQL_PREFIX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
 
-const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#;
+const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"#;
 
 fn skipped_message(rule: Rule) -> String {
     match rule {
