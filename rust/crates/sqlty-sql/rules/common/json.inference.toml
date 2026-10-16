@@ -1,0 +1,17 @@
+# JSON accessors that give text, in every dialect that has them.
+
+[[rule]]
+id = "common.json.long-arrow"
+operator = "LongArrow"
+type = "TEXT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json ->> text, json ->> integer); MySQL 8.4 Reference Manual, 14.17.3 Functions That Search JSON Values (->>)"
+reasoning = "`->>` extracts a member or element as text; a missing member or a JSON null gives NULL."
+
+[[rule]]
+id = "common.json.hash-long-arrow"
+operator = "HashLongArrow"
+type = "TEXT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json #>> text[])"
+reasoning = "`#>>` extracts the value at a path as text; a missing path or a JSON null gives NULL."

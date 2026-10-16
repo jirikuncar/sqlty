@@ -314,6 +314,7 @@ src/sqlty/
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
+│   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core
 ```
