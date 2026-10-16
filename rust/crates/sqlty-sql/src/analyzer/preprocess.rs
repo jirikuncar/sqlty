@@ -38,6 +38,15 @@ pub(super) static POSTGRES_LOCK_FIXES: LazyLock<[(Regex, &str); 3]> = LazyLock::
     ]
 });
 
+/// PostgreSQL `type 'string'` literals sqlparser only reads for its built-in types, in
+/// groups 1 and 2; literals, quoted names and comments are matched to be skipped.
+pub(super) static POSTGRES_TYPED_STRING: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:\b(bpchar|cidr|citext|daterange|hstore|inet|int4range|int8range|jsonpath|macaddr8?|money|name|numrange|oid|pg_lsn|tsrange|tstzrange|txid_snapshot))\s+('(?:[^']|'')*')"#,
+    )
+    .unwrap()
+});
+
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
 pub(super) static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
@@ -68,8 +77,12 @@ pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
 }
 
-/// Parse schema DDL, with the MySQL column types sqlparser rejects respelled.
+/// Parse schema DDL, with the MySQL column types sqlparser rejects respelled, and in
+/// SQLite multi-word type names (`UNSIGNED BIG INT`) joined into one word.
 pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    if dialect == SqlDialect::Sqlite {
+        return parse(sql, dialect).or_else(|| parse(&sqlite_type_names(sql)?, dialect));
+    }
     if dialect != SqlDialect::MySql {
         return parse(sql, dialect);
     }
@@ -79,6 +92,65 @@ pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>
             pattern.replace_all(&sql, *replacement).into_owned()
         });
     parse(&sql, dialect)
+}
+
+/// Words that end a column's type name in SQLite: the constraints that may follow it.
+const SQLITE_CONSTRAINTS: [&str; 12] = [
+    "AS",
+    "CHECK",
+    "COLLATE",
+    "CONSTRAINT",
+    "DEFAULT",
+    "GENERATED",
+    "NOT",
+    "NULL",
+    "PRIMARY",
+    "REFERENCES",
+    "UNIQUE",
+    "AUTOINCREMENT",
+];
+
+/// A `CREATE TABLE` whose multi-word column type names, which SQLite accepts and sqlparser
+/// does not, are joined with `_` (`UNSIGNED BIG INT` -> `UNSIGNED_BIG_INT`); `None` when
+/// nothing changes.
+pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
+    static COLUMN: LazyLock<Regex> = LazyLock::new(|| {
+        let name = r#"(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|\w+)"#;
+        Regex::new(&format!(
+            r"(?i)([(,]\s*{name}\s+)([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)+)"
+        ))
+        .unwrap()
+    });
+    let open = sql.find('(')?;
+    let mut changed = false;
+    let columns = COLUMN.replace_all(&sql[open..], |caps: &Captures| {
+        let words: Vec<&str> = caps[2].split_whitespace().collect();
+        let end = words
+            .iter()
+            .position(|word| SQLITE_CONSTRAINTS.contains(&word.to_ascii_uppercase().as_str()))
+            .unwrap_or(words.len());
+        let head = &caps[1];
+        let column = head
+            .trim_start_matches([',', '('])
+            .trim()
+            .to_ascii_uppercase();
+        if end < 2
+            || matches!(
+                column.as_str(),
+                "CONSTRAINT" | "FOREIGN" | "PRIMARY" | "UNIQUE"
+            )
+        {
+            return caps[0].to_string();
+        }
+        changed = true;
+        let rest = words[end..].join(" ");
+        format!(
+            "{head}{}{}{rest}",
+            words[..end].join("_"),
+            if rest.is_empty() { "" } else { " " }
+        )
+    });
+    changed.then(|| format!("{}{columns}", &sql[..open]))
 }
 
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
@@ -94,7 +166,7 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
 }
 
 /// `sql` as sqlparser should read it, in every dialect: the `--sql` marker line is
-/// dropped (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
+/// dropped, PostgreSQL's `cidr '...'` and similar literals become casts (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
 /// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
 /// literals and comments are not skipped; any query this mangles fails to parse
 /// and stays uninferred rather than mistyped.
@@ -102,11 +174,17 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = SQL_MARKER.replace(sql, "");
     let sql = if dialect == SqlDialect::Postgres {
         let sql = drop_conflict_predicate(&sql);
-        POSTGRES_LOCK_FIXES
+        let sql = POSTGRES_LOCK_FIXES
             .iter()
             .fold(sql, |sql, (pattern, replacement)| {
                 pattern.replace_all(&sql, *replacement).into_owned()
+            });
+        POSTGRES_TYPED_STRING
+            .replace_all(&sql, |caps: &Captures| match (caps.get(1), caps.get(2)) {
+                (Some(ty), Some(value)) => format!("CAST({} AS {})", value.as_str(), ty.as_str()),
+                _ => caps[0].to_string(),
             })
+            .into_owned()
     } else {
         sql.into_owned()
     };
