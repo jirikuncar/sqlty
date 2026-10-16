@@ -29,6 +29,42 @@ spelled the PostgreSQL way, so `INT64` expands to `BIGINT` and `NUMBER` to
 others work on a best-effort basis. The `--dialect` CLI flag accepts the
 first three; set others with `dialect` in `pyproject.toml`.
 
+## PostgreSQL type resolution
+
+PostgreSQL gives `CASE`, `COALESCE`, `GREATEST`/`LEAST`, `VALUES`, `ARRAY[...]`
+and `UNION`/`INTERSECT`/`EXCEPT` one type for all their inputs, and picks an
+operator by its operand types, by the rules of
+[UNION, CASE and related constructs](https://www.postgresql.org/docs/17/typeconv-union-case.html)
+and [operators](https://www.postgresql.org/docs/17/typeconv-oper.html). sqlty
+follows them, and `tests/fixtures/pg_common_types.toml` checks it: each query
+there has the type PostgreSQL 17 describes for its column, and
+`tests/test_pg_common_types.py` compares sqlty's type with it, with no server
+needed.
+
+To add a query, put it in the fixture with any type, then fill in the types
+from a disposable server:
+
+```bash
+SQLTY_PG_DSN=postgresql://postgres:postgres@localhost:5432/postgres \
+    uv run --group psycopg python scripts/refresh_pg_types.py
+```
+
+With `SQLTY_PG_DSN` set, the test also checks the fixture against the server.
+
+!!! note "Unknown, never a guess"
+    A column sqlty can't resolve statically stays untyped. These stay untyped
+    today: a bare `NULL` (`text` in PostgreSQL), arithmetic on an untyped string
+    literal (`'1' + 1` is `integer`), a date minus a string literal, and the
+    `|/` operator.
+
+### Known gaps
+
+These differ from PostgreSQL; the test lists them in `KNOWN_GAPS`:
+
+| Query | sqlty | PostgreSQL |
+|-------|-------|------------|
+| `SELECT 2.5 ^ 2` | `double precision` | `numeric`: `^` has a `numeric` form |
+
 ## Functions
 
 A call to a built-in function is typed by the function's rules in the query's
