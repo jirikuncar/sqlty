@@ -14,6 +14,7 @@ use sqlparser::ast::{ArrayElemTypeDef, DataType};
 
 mod api;
 mod dialect;
+mod dialect_functions;
 mod dml;
 mod expr;
 mod functions;
