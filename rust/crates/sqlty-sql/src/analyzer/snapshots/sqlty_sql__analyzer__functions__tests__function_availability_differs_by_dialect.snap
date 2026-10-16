@@ -15,7 +15,7 @@ c: str | TEXT | Nullable
 
 SELECT avg(i) AS a, sum(i) AS b, round(n, 1) AS c, stddev(i) AS d FROM t
 a: decimal.Decimal | DECIMAL | Nullable
-b: int | INT | Nullable
+b: decimal.Decimal | DECIMAL | Nullable
 c: decimal.Decimal | DECIMAL(10, 2) | NonNull
 d: float | DOUBLE | Nullable
 

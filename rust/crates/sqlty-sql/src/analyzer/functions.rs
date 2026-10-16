@@ -547,7 +547,7 @@ impl<'a> Analyzer<'a> {
             })
         };
         if typed.python.is_some() || name != "SUM" {
-            return Ok(if name == "SUM" && self.dialect == SqlDialect::Postgres {
+            return Ok(if name == "SUM" {
                 sum_type(typed, self.dialect)
             } else {
                 typed
@@ -596,13 +596,25 @@ fn str_to_date_type(format: &str) -> &'static str {
     }
 }
 
-/// PostgreSQL's `SUM` widens: `BIGINT` for `SMALLINT`/`INT`, `NUMERIC` for `BIGINT`/`NUMERIC`.
+/// `SUM` widens. PostgreSQL: `BIGINT` for `SMALLINT`/`INT`, `NUMERIC` for `BIGINT`/`NUMERIC`.
+/// MySQL: `DECIMAL` for exact values, `DOUBLE` for approximate ones, signed or `UNSIGNED`.
+/// SQLite keeps the type.
 pub(super) fn sum_type(typed: Typed, dialect: SqlDialect) -> Typed {
-    let widened = match operand_type(&typed) {
-        Some("SMALLINT" | "INT") => "BIGINT",
-        Some("BIGINT" | "DECIMAL" | "NUMERIC") => "DECIMAL",
-        Some("FLOAT") => "FLOAT",
-        Some("DOUBLE") => "DOUBLE",
+    let signed = operand_type(&typed).map(|ty| {
+        ty.strip_prefix('U')
+            .filter(|ty| numeric_rank(ty).is_some())
+            .unwrap_or(ty)
+    });
+    let widened = match (dialect, signed) {
+        (SqlDialect::Postgres, Some("SMALLINT" | "INT")) => "BIGINT",
+        (SqlDialect::Postgres, Some("BIGINT" | "DECIMAL" | "NUMERIC")) => "DECIMAL",
+        (SqlDialect::Postgres, Some("FLOAT")) => "FLOAT",
+        (SqlDialect::Postgres, Some("DOUBLE")) => "DOUBLE",
+        (
+            SqlDialect::MySql,
+            Some("TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "BIGINT" | "DECIMAL" | "NUMERIC"),
+        ) => "DECIMAL",
+        (SqlDialect::MySql, Some("FLOAT" | "REAL" | "DOUBLE")) => "DOUBLE",
         _ => return typed,
     };
     from_sql_type(widened, dialect)
@@ -730,7 +742,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "bug: MySQL SUM of an integer column is DECIMAL (MySQL reference manual, aggregate functions), but sum_type widens only in PostgreSQL"]
     fn mysql_sum_of_an_integer_is_decimal() {
         let report = super::super::test_support::report(
             "SELECT sum(i) AS total FROM t",
