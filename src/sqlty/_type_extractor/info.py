@@ -75,7 +75,7 @@ class TypeInfo:
     ) -> None:
         self.name = name
         self.fields = fields  # [(field_name, field_type_str), ...] — AST fallback
-        self.kind = kind  # "TypedDict", "NamedTuple", "dataclass", "BaseModel"
+        self.kind = kind  # "TypedDict", "NamedTuple", "dataclass", "BaseModel", "Protocol"
         self.resolved_hints = resolved_hints  # {field_name: type_object} — runtime
         self.required = frozenset(n for n, _ in fields) if required is None else required
         self.closed = closed

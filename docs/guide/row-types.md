@@ -2,8 +2,8 @@
 
 `sqlty rewrite` writes `SQL[tuple[...]]`. You can replace the tuple with a
 named row type, and `sqlty check` validates it against the query columns.
-Supported forms are `TypedDict`, `NamedTuple`, `@dataclass` and Pydantic
-`BaseModel`. `TypedDict` and `NamedTuple` work in their functional forms too:
+Supported forms are `TypedDict`, `NamedTuple`, `@dataclass`, Pydantic
+`BaseModel` and `Protocol`. `TypedDict` and `NamedTuple` work in their functional forms too:
 `TypedDict("User", {"id": int})` and `NamedTuple("User", [("id", int)])`.
 
 ## Named rows
@@ -204,6 +204,30 @@ side effects is not triggered by `sqlty check`. From Python, pass a
 `HelperIndex` filled with the modules (`index.add("pkg.ids", source)`) and the
 `module` name of the checked source as `check_source(..., helpers=index,
 module=...)`.
+
+## Protocols
+
+A `Protocol` row type says which attributes a row has, not how it is built.
+Use it with a row factory that gives every column as an attribute, such as
+psycopg's `namedtuple_row`; psycopg's `class_row` cannot build a Protocol.
+Each attribute is matched to the column of its name, and the query may return
+more columns than the protocol lists.
+
+```python
+from typing import Protocol
+
+from sqlty import SQL
+
+class Named(Protocol):
+    id: int
+    name: str
+
+ok = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name, now() AS created")
+# error: [typeddict-key-mismatch] "Named.name is required but missing from query"
+bad = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS title")
+```
+
+Only annotated attributes count; methods and properties are not read.
 
 ## Pydantic aliases and extra columns
 

@@ -60,7 +60,7 @@ def _classify_class(
     aliases: dict[str, str] | None = None,
     typeddicts: typing.Container[str] = (),
 ) -> str | None:
-    """Classify a class as TypedDict, NamedTuple, dataclass, or BaseModel.
+    """Classify a class as TypedDict, NamedTuple, dataclass, BaseModel or Protocol.
 
     Subclasses of the names in ``typeddicts`` are TypedDicts too.
     """
@@ -74,6 +74,8 @@ def _classify_class(
             return "NamedTuple"
         if base_name == "BaseModel":
             return "BaseModel"
+        if base_name == "Protocol":
+            return "Protocol"
 
     for decorator in node.decorator_list:
         dec_name = _get_name(decorator)
