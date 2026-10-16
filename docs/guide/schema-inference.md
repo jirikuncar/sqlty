@@ -107,6 +107,11 @@ What makes a column nullable or not:
 - **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
   `EXCEPT` follows its left side.
 - **DML.** `RETURNING` reads the schema like a `SELECT`.
+- **Parameters.** A placeholder echoed into a column (`SELECT %(key)s::text`) can be NULL,
+  since a caller may bind `None`. In a call to a [marked helper](helpers.md) whose argument
+  for it has a known type other than `None` (a literal, an annotated variable), it is not:
+  the column, or the JSON member it fills, follows the argument. Where the argument is
+  `None`, optional or of unknown type, and in `SQL[T]` strings, it stays nullable.
 
 [`nullable-mismatch`](../reference/rules.md#nullable-mismatch) reports a row type field
 that is not optional for a nullable column;

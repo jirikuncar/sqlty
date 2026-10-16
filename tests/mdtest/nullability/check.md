@@ -299,3 +299,44 @@ def fetch[T](query: Annotated[LiteralString, SQL], row: type[T]) -> list[T]:
 rows = fetch("SELECT id, name FROM users", tuple[int, str])
 rows = fetch("SELECT id, name FROM users", tuple[int, str | None])
 ```
+
+## Parameters follow the argument at the call site
+
+A placeholder echoed into the result can be NULL, since a caller may bind `None`.
+A helper call that passes a value whose type excludes `None` makes it non-null
+for that call; `None`, an optional or an unknown argument keeps it nullable.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+from typing import Annotated, LiteralString, TypedDict
+from sqlty import SQL
+
+def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /, **params: object) -> T: ...
+
+class Doc(TypedDict):
+    id: int
+    key: str
+
+class Row(TypedDict):
+    key: str
+    doc: Doc
+
+def lookup(maybe: str | None) -> None:
+    ok = fetch_one("SELECT %(key)s::TEXT AS key, jsonb_build_object('id', u.id, 'key', %(key)s::TEXT) AS doc FROM users u", Row, key="x")
+    # error: [json-shape-mismatch] "Row.doc is Doc but query column 'doc' builds JSON that does not fit: doc.key can be null but is declared str"
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    none = fetch_one("SELECT %(key)s::TEXT AS key, jsonb_build_object('id', u.id, 'key', %(key)s::TEXT) AS doc FROM users u", Row, key=None)
+    # error: [json-shape-mismatch] "Row.doc is Doc but query column 'doc' builds JSON that does not fit: doc.key can be null but is declared str"
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    optional = fetch_one("SELECT %(key)s::TEXT AS key, jsonb_build_object('id', u.id, 'key', %(key)s::TEXT) AS doc FROM users u", Row, key=maybe)
+```
