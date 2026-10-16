@@ -320,6 +320,14 @@ impl<'a> Analyzer<'a> {
         from: Option<&[TableWithJoins]>,
     ) -> Inferred<Vec<Column>> {
         let mut columns = Vec::new();
+        let mut lockstep_facts;
+        let facts = if self.dialect == SqlDialect::Postgres && self.set_returning_items(items) > 1 {
+            lockstep_facts = self.facts.clone();
+            lockstep_facts.lockstep = true;
+            &lockstep_facts
+        } else {
+            &self.facts
+        };
         for item in items {
             let (expr, name) = match item {
                 SelectItem::UnnamedExpr(expr) => (expr, column_name(expr)),
@@ -372,7 +380,7 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
-            let nullability = self.nullability(expr, scope, &self.facts);
+            let nullability = self.nullability(expr, scope, facts);
             let json = self.column_json(expr, sql_type.as_deref(), scope)?;
             columns.push(Column {
                 name,
