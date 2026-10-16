@@ -49,6 +49,43 @@ SELECT total, status FROM orders
 -- columns: status: typing.Literal['new', 'paid', 'shipped'] | None (ENUM('NEW', 'PAID', 'SHIPPED'))
 ```
 
+## MODIFY keeps a primary key NOT NULL
+
+A primary key column stays `NOT NULL` whatever its new definition says, until
+`DROP PRIMARY KEY`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (id INT, code INT, note TEXT, PRIMARY KEY (id, code));
+ALTER TABLE events MODIFY id BIGINT;
+ALTER TABLE events CHANGE code event_code BIGINT;
+CREATE TABLE tags (name VARCHAR(10) PRIMARY KEY);
+ALTER TABLE tags MODIFY name VARCHAR(20);
+```
+
+```sql
+SELECT id, event_code, name FROM events, tags
+-- columns: id: int (BIGINT)
+-- columns: event_code: int (BIGINT)
+-- columns: name: str (VARCHAR(20))
+```
+
+## DROP PRIMARY KEY
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (id INT PRIMARY KEY);
+ALTER TABLE events DROP PRIMARY KEY;
+ALTER TABLE events MODIFY id BIGINT;
+```
+
+```sql
+SELECT id FROM events
+-- columns: id: int | None (BIGINT)
+```
+
 ## CHANGE
 
 `CHANGE` renames the column too, and `FIRST` / `AFTER` move it.
