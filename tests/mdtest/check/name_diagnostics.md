@@ -61,6 +61,15 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+A subquery over the same table as the outer query names the table once.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `nope` does not exist in `users`"
+g = SQL[tuple[int]]("--sql\nSELECT (SELECT nope FROM users) FROM users")
+```
+
 #### Ambiguous columns
 
 ```python
@@ -543,4 +552,35 @@ f = SQL[tuple[object]]("--sql\nSELECT opaque()")
 g = SQL[tuple[int]]("--sql\nSELECT frobnicate(id) FROM users")
 # error: [unknown-type] "type `shape` has no Python type"
 h = SQL[tuple[int]]("--sql\nSELECT id::shape FROM users")
+```
+
+## Composite fields
+
+A composite column has no Python type, so selecting it reports
+`unknown-type`. A field read from it, `(p).x`, has the field's type and is
+not reported.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unknown-type = "error"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TYPE point2 AS (x INTEGER, y INTEGER);
+CREATE TABLE shapes (id INTEGER PRIMARY KEY, p point2);
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int | None]]("--sql\nSELECT (p).x AS x FROM shapes")
+b = SQL[tuple[int | None]]("--sql\nSELECT (shapes.p).y AS y FROM shapes")
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
+c = SQL[tuple[object]]("--sql\nSELECT p FROM shapes")
 ```
