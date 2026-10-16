@@ -39,7 +39,7 @@ stale-type = "error"
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
-| [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` cannot be rewritten |
+| [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` and a field that changes the SQL |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
@@ -640,12 +640,14 @@ Fix: use query parameters instead of interpolation.
 
 ### tstring-skipped
 
-Default: warn. Same as `fstring-skipped`, for t-strings
-([PEP 750](https://peps.python.org/pep-0750/)).
+Default: warn. A t-string ([PEP 750](https://peps.python.org/pep-0750/)) with
+`--sql` and a field that changes the SQL itself: a format spec, such as
+psycopg's `{name:i}` identifier, or a conversion. A t-string of plain value
+fields is rewritten as `SQLTemplate[T](t"...")` instead.
 
 ```python
-# error: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
-q = t"--sql\nSELECT {column}::INTEGER FROM users"
+# error: [tstring-skipped] "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+q = t"--sql\nSELECT {column:i}::INTEGER FROM users"
 ```
 
 A concatenation that holds an f- or t-string anywhere is reported the same way.
