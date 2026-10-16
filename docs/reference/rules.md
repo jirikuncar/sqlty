@@ -471,7 +471,7 @@ schema = "schema.sql"
 ```python
 from sqlty import SQL
 
-# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
+# error: [select-star] "SELECT * used — expand to explicit column list"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 ```
 

@@ -73,6 +73,25 @@ impl Column {
     }
 }
 
+/// Fields of the composite type `name` the schema defines (`CREATE TYPE point AS (x int,
+/// y int)`), in declaration order, typed as columns; `None` when it is not one.
+pub fn composite_columns(name: &str, dialect: &str, schema: &SchemaData) -> Option<Vec<Column>> {
+    let dialect = SqlDialect::from_name(dialect);
+    let fields = schema.composite(&name.to_lowercase())?;
+    Some(
+        fields
+            .iter()
+            .map(|field| {
+                Column::from_typed(
+                    field.name.clone(),
+                    field.typed(dialect),
+                    super::nullability::Nullability::declared(field.not_null),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
 pub fn infer_type(
     sql: &str,

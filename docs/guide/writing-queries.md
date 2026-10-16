@@ -200,7 +200,7 @@ the SQL. Such a template is left alone and reported as
 | `DECIMAL`, `NUMERIC`, `UDECIMAL` (MySQL `... UNSIGNED`) | `decimal.Decimal`, `float` in `sqlite` and `oracle` |
 | `DATE` | `datetime.date` |
 | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` |
-| `TIME`, `TIMETZ` | `datetime.time` |
+| `TIME`, `TIMETZ` | `datetime.time`; MySQL `TIME` is `datetime.timedelta` (a duration, up to 838 hours) |
 | `INTERVAL` | `datetime.timedelta` |
 | `JSON`, `JSONB` | `typing.Any`: any JSON value can be stored |
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` |
@@ -208,7 +208,7 @@ the SQL. Such a template is left alone and reported as
 | `UUID` | `uuid.UUID` |
 | `BYTEA`, `BLOB`, `BINARY`, `VARBINARY` | `bytes` |
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
-| `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `TSVECTOR`, `TSQUERY` | `str` |
+| `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
 | Anything else (`SET`, `POINT`, custom types, ...) | unknown: the row type is unknown |
 

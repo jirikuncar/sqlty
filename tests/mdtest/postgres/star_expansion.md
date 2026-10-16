@@ -92,11 +92,11 @@ SELECT u.* FROM users u
 -- expanded: SELECT u.id::INT, u.name::TEXT FROM users u
 ```
 
-## Multi-table star is not expanded
+## Multi-table stars keep their qualifiers
 
-A bare `*` expands to unqualified columns, so a query reading from more than
-one table (`JOIN` or `FROM a, b`) is left alone. A qualified `t.*` keeps its
-qualifier and is expanded.
+A bare `*` over several tables lists each table's columns qualified by its alias
+(or name), in `FROM` order, so no column is ambiguous; a `t.*` keeps its
+qualifier. The expanded query has the same row type.
 
 `schema.sql`:
 ```sql
@@ -107,6 +107,7 @@ CREATE TABLE users (
 
 CREATE TABLE orders (
     order_id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
     amount NUMERIC NOT NULL
 );
 ```
@@ -119,6 +120,44 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM users, orders
+-- expanded: SELECT users.id::INT, users.name::TEXT, orders.order_id::INT, orders.user_id::INT, orders.amount::DECIMAL FROM users, orders
+-- inferred: tuple[int, str, int, int, decimal.Decimal]
+```
+
+```sql
+SELECT * FROM users u JOIN orders o ON o.user_id = u.id
+-- expanded: SELECT u.id::INT, u.name::TEXT, o.order_id::INT, o.user_id::INT, o.amount::DECIMAL FROM users u JOIN orders o ON o.user_id = u.id
+-- inferred: tuple[int, str, int, int, decimal.Decimal]
+```
+
+```sql
+SELECT * FROM users u LEFT JOIN orders o ON o.user_id = u.id
+-- expanded: SELECT u.id::INT, u.name::TEXT, o.order_id::INT, o.user_id::INT, o.amount::DECIMAL FROM users u LEFT JOIN orders o ON o.user_id = u.id
+-- inferred: tuple[int, str, int | None, int | None, decimal.Decimal | None]
+```
+
+```sql
+SELECT u.*, o.amount FROM users u JOIN orders o ON o.user_id = u.id
+-- expanded: SELECT u.id::INT, u.name::TEXT, o.amount FROM users u JOIN orders o ON o.user_id = u.id
+```
+
+### What stays a star
+
+`USING` and `NATURAL` joins merge the joined columns, a subquery's columns are
+not in the schema, and a quoted alias would need quoting: those are left alone.
+
+```sql
+SELECT * FROM users JOIN orders USING (id)
+-- expanded: None
+```
+
+```sql
+SELECT * FROM users u JOIN (SELECT 1 AS n) s ON true
+-- expanded: None
+```
+
+```sql
+SELECT * FROM users "U" JOIN orders o ON true
 -- expanded: None
 ```
 

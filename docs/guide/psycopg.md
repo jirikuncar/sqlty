@@ -48,6 +48,7 @@ The row factory is chosen from the query's runtime row type
 |-----|-------------|
 | `tuple[...]` | `tuple_row` |
 | `TypedDict`, `dict[...]` | `dict_row` |
+| `Protocol` | `namedtuple_row` |
 | any other class (dataclass, `NamedTuple`, Pydantic model) | `class_row(T)` |
 
 A query without a runtime row type, such as a plain string, yields tuples.
