@@ -59,15 +59,20 @@ SELECT ltrim(name) AS a, hex(name) AS b, printf('%d', id) AS c, instr(name, 'a')
 
 ## Numbers
 
+`mod` is one of the math functions, which return a real; `%` keeps integers.
+`total` is `0.0` over no rows, where `sum` is `NULL`.
+
 ```sql
-SELECT abs(id) AS a, round(ratio) AS b, round(id) AS c, random() AS d, sqrt(id) AS e, floor(ratio) AS f, total(ratio) AS g FROM events
+SELECT abs(id) AS a, round(ratio) AS b, round(id) AS c, random() AS d, sqrt(id) AS e, floor(ratio) AS f, total(ratio) AS g, mod(id, 2) AS h, id % 2 AS i FROM events
 -- columns: a: int (INT)
 -- columns: b: float (DOUBLE)
 -- columns: c: float (DOUBLE)
 -- columns: d: int (BIGINT)
 -- columns: e: float (DOUBLE)
 -- columns: f: float (DOUBLE)
--- columns: g: float | None (DOUBLE)
+-- columns: g: float (DOUBLE)
+-- columns: h: float (DOUBLE)
+-- columns: i: int (INT)
 ```
 
 ## JSON
@@ -80,6 +85,15 @@ SELECT json_object('id', id) AS a, json_array(id, name) AS b, json_array_length(
 -- columns: b: str (TEXT)
 -- columns: c: int (BIGINT)
 -- columns: d: int (BIGINT)
+```
+
+`->` gives the element as JSON text. `->>` gives its SQL value, an integer, a
+real or text, so its type is not known.
+
+```sql
+SELECT note -> '$.a' AS a, note ->> '$.a' AS b FROM events
+-- columns: a: str | None (TEXT)
+-- columns: b: typing.Any (None)
 ```
 
 ```sql
