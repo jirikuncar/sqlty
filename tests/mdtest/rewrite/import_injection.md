@@ -227,6 +227,33 @@ q = "--sql\nSELECT 1::INTEGER AS n"
 # stripped: q = "--sql\nSELECT 1::INTEGER AS n"
 ```
 
+### The header spans lines
+
+The same holds when the compound statement's header continues over several
+lines, in brackets or after a backslash.
+
+```python
+from typing import TYPE_CHECKING
+if (
+    TYPE_CHECKING
+): pass; from sqlty import SQL
+def f(
+): pass; from sqlty import SQL
+if TYPE_CHECKING \
+    : pass; from sqlty import SQL
+q = "--sql\nSELECT 1::INTEGER AS n"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: from typing import TYPE_CHECKING
+# rewritten-file: if (
+# rewritten-file:     TYPE_CHECKING
+# rewritten-file: ): pass; from sqlty import SQL
+# rewritten-file: def f(
+# rewritten-file: ): pass; from sqlty import SQL
+# rewritten-file: if TYPE_CHECKING \
+# rewritten-file:     : pass; from sqlty import SQL
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+```
+
 ## Added imports use the file's line ending
 
 In a file with CRLF line endings, `rewrite` and `check --fix` end added

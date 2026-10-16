@@ -83,6 +83,66 @@ def _classify_class(
     return None
 
 
+def _functional_classes(tree: ast.Module, aliases: dict[str, str]) -> list[ast.ClassDef]:
+    """``R = TypedDict("R", {...})`` and ``N = NamedTuple("N", [(...), ...])`` at module level, as classes.
+
+    Each class keeps the position of its assignment, whose source builds it at runtime.
+
+    Example:
+        >>> tree = ast.parse('R = TypedDict("R", {"a": int}, total=False)')
+        >>> [ast.unparse(c) for c in _functional_classes(tree, {"TypedDict": "TypedDict"})]
+        ['class R(TypedDict, total=False):\\n    a: int']
+    """
+    classes: list[ast.ClassDef] = []
+    for stmt in tree.body:
+        if not (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(target := stmt.targets[0], ast.Name)
+            and isinstance(call := stmt.value, ast.Call)
+            and len(call.args) == 2
+        ):
+            continue
+        name = _get_name(call.func) or ""
+        kind, spec = aliases.get(name, name), call.args[1]
+        if kind == "TypedDict" and isinstance(spec, ast.Dict):
+            pairs = list(zip(spec.keys, spec.values, strict=True))
+        elif kind == "NamedTuple" and isinstance(spec, (ast.List, ast.Tuple)):
+            pairs = [
+                (item.elts[0], item.elts[1])
+                for item in spec.elts
+                if isinstance(item, ast.Tuple) and len(item.elts) == 2
+            ]
+            if len(pairs) != len(spec.elts):
+                continue
+        else:
+            continue
+        fields = [
+            (key.value, value)
+            for key, value in pairs
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        ]
+        if len(fields) != len(pairs):
+            continue
+        body: list[ast.stmt] = [
+            ast.copy_location(
+                ast.AnnAssign(target=ast.Name(field, ast.Store()), annotation=value, simple=1),
+                value,
+            )
+            for field, value in fields
+        ]
+        node = ast.ClassDef(
+            name=target.id,
+            bases=[call.func],
+            keywords=call.keywords,
+            body=body or [ast.Pass()],
+            decorator_list=[],
+            type_params=[],
+        )
+        classes.append(ast.copy_location(node, stmt))
+    return classes
+
+
 def _base_names(node: ast.ClassDef) -> list[str]:
     """Names of bases spelled as bare names."""
     return [base.id for base in node.bases if isinstance(base, ast.Name)]

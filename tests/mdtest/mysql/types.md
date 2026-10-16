@@ -184,6 +184,40 @@ SELECT * FROM items
 -- expanded: SELECT a::UMEDIUMINT, b::UMEDIUMINT(8), c::UINT(5), d::UBIGINT FROM items
 ```
 
+## SUM of exact and approximate values
+
+`SUM` of an integer or `DECIMAL` column returns `DECIMAL`, and of a `FLOAT` or
+`DOUBLE` column returns `DOUBLE`, as in the
+[MySQL reference](https://dev.mysql.com/doc/refman/8.4/en/aggregate-functions.html#function_sum).
+
+`schema.sql`:
+```sql
+CREATE TABLE items (
+    a TINYINT NOT NULL,
+    b INT NOT NULL,
+    c BIGINT UNSIGNED NOT NULL,
+    d DECIMAL(10,2) NOT NULL,
+    e FLOAT NOT NULL,
+    f DOUBLE NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT SUM(a) AS a, SUM(b) AS b, SUM(c) AS c, SUM(d) AS d, SUM(e) AS e, SUM(f) AS f FROM items
+-- columns: a: decimal.Decimal | None (DECIMAL)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: decimal.Decimal | None (DECIMAL)
+-- columns: d: decimal.Decimal | None (DECIMAL)
+-- columns: e: float | None (DOUBLE)
+-- columns: f: float | None (DOUBLE)
+```
+
 ## Date arithmetic
 
 `date ± INTERVAL n unit` is a `DATE` for day units and coarser, and a
