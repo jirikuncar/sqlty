@@ -5,12 +5,13 @@
 
 use sqlparser::ast::{
     AlterColumnOperation, AlterTable, AlterTableOperation, AlterType, AlterTypeAddValuePosition,
-    AlterTypeOperation, DataType, Ident, ObjectName, RenameTableNameKind, TableConstraint,
+    AlterTypeOperation, ColumnDef, ColumnOptionDef, DataType, Ident, MySQLColumnPosition,
+    ObjectName, RenameTableNameKind, TableConstraint,
 };
 
 use crate::analyzer::SqlDialect;
 
-use super::columns::{apply_check, mark_not_null, raw_column};
+use super::columns::{apply_check, mark_not_null, nonnull_groups, raw_column};
 use super::loader::{AlterFail, Loader, RawTable, Rel, TypeDef};
 use super::names::{fold, key_of, parts};
 
@@ -164,18 +165,72 @@ pub(super) fn alter_op(
         let name = fold(name, dialect);
         table.columns.iter().position(|c| c.name == name)
     };
+    // MySQL's `FIRST` / `AFTER col`: where a column added or changed goes.
+    let place = |table: &mut RawTable, column, at: Option<&MySQLColumnPosition>| {
+        let index = match at {
+            None => table.columns.len(),
+            Some(MySQLColumnPosition::First) => 0,
+            Some(MySQLColumnPosition::After(after)) => match position(table, after) {
+                Some(index) => index + 1,
+                None => return missing(),
+            },
+        };
+        table.columns.insert(index, column);
+        Ok(())
+    };
     match op {
         AlterTableOperation::AddColumn {
             column_def,
             column_position,
             ..
         } => {
-            // `FIRST` / `AFTER` put the column somewhere in the middle.
-            if column_def.data_type == DataType::Unspecified || column_position.is_some() {
+            if column_def.data_type == DataType::Unspecified && dialect != SqlDialect::Sqlite {
                 return Err(AlterFail::Unsupported);
             }
             if position(table, &column_def.name).is_none() {
-                table.columns.push(raw_column(column_def, dialect));
+                place(
+                    table,
+                    raw_column(column_def, dialect),
+                    column_position.as_ref(),
+                )?;
+            }
+        }
+        AlterTableOperation::ModifyColumn {
+            col_name: old_name,
+            data_type,
+            options,
+            column_position,
+        }
+        | AlterTableOperation::ChangeColumn {
+            old_name,
+            data_type,
+            options,
+            column_position,
+            ..
+        } => {
+            let Some(at) = position(table, old_name) else {
+                return missing();
+            };
+            let name = match op {
+                AlterTableOperation::ChangeColumn { new_name, .. } => new_name,
+                _ => old_name,
+            };
+            let def = ColumnDef {
+                name: name.clone(),
+                data_type: data_type.clone(),
+                options: options
+                    .iter()
+                    .map(|option| ColumnOptionDef {
+                        name: None,
+                        option: option.clone(),
+                    })
+                    .collect(),
+            };
+            table.columns.remove(at);
+            let column = raw_column(&def, dialect);
+            match column_position {
+                None => table.columns.insert(at, column),
+                Some(_) => place(table, column, column_position.as_ref())?,
             }
         }
         AlterTableOperation::DropColumn {
@@ -241,16 +296,20 @@ pub(super) fn alter_op(
         AlterTableOperation::AddConstraint {
             constraint: TableConstraint::Check(check),
             not_valid: false,
-        } => apply_check(&mut table.columns, &check.expr, dialect),
+        } => {
+            apply_check(&mut table.columns, &check.expr, dialect);
+            table
+                .nonnull_groups
+                .extend(nonnull_groups(&check.expr, dialect));
+        }
         // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
         AlterTableOperation::DropConstraint { .. } => {
             for column in &mut table.columns {
                 column.values = None;
             }
+            table.nonnull_groups.clear();
         }
-        AlterTableOperation::ChangeColumn { .. }
-        | AlterTableOperation::ModifyColumn { .. }
-        | AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
+        AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
         // Storage, options, tablespace, triggers, RLS, partitions, comments and the like
         // never change a column.
         _ => {}

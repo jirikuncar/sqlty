@@ -30,7 +30,10 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["typing-extensions>=4.15.0; python_version < '3.15'"]
+dependencies = [
+    "pathspec>=0.12.1",
+    "typing-extensions>=4.15.0; python_version < '3.15'",
+]
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"
