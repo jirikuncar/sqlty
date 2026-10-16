@@ -66,7 +66,7 @@ SELECT id::INT, 1::INT, 'a'::TEXT, 'a'::TEXT::INT, id::VARCHAR(5), 1::DECIMAL(5,
 
 ```sql
 SELECT ROW(1, 2), TRIM(LEADING 'x' FROM name), TRIM(TRAILING 'x' FROM name), TRIM(name), EXTRACT(YEAR FROM created_at), ARRAY[1], -id, id IS NULL, FALSE FROM users
--- columns: row: None (None)
+-- columns: row: tuple[typing.Any, ...] (RECORD)
 -- columns: ltrim: str (TEXT)
 -- columns: rtrim: str (TEXT)
 -- columns: btrim: str (TEXT)

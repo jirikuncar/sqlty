@@ -332,6 +332,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("TSQUERY"),
     ),
+    (&["ROW"], Sql("RECORD")),
     (&["INT4RANGE"], Sql("INT4RANGE")),
     (&["INT8RANGE"], Sql("INT8RANGE")),
     (&["NUMRANGE"], Sql("NUMRANGE")),
