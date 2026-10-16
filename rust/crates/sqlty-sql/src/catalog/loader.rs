@@ -18,7 +18,7 @@ use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject
 use crate::values::{self, Value};
 
 use super::columns::{
-    apply_check, column_named, is_rowid_type, mark_not_null, merge_column, nonnull_groups,
+    apply_check, column_named, is_rowid_type, mark_primary_key, merge_column, nonnull_groups,
     raw_column, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
@@ -388,7 +388,7 @@ impl Loader {
                     continue;
                 }
                 for index_column in &pk.columns {
-                    mark_not_null(&mut table.columns, &index_column.column.expr, self.dialect);
+                    mark_primary_key(&mut table.columns, &index_column.column.expr, self.dialect);
                 }
             }
         }

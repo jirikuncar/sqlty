@@ -15,7 +15,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use crate::edit::Edit;
-use crate::options::Options;
+use crate::options::{Dialect, Options};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
@@ -119,7 +119,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
     };
-    if options.dialect.is_mysql() {
+    if options.dialect == Dialect::MySql {
         checker.mysql_markers();
     }
     if rules.is_enabled(Rule::StaleRewrite) {
@@ -323,7 +323,11 @@ impl Checker<'_> {
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
         let annotated = &self.scan.source()[call.annotation.clone()];
-        let wrapper = &self.options.style.wrapper_name;
+        let wrapper = if call.template {
+            self.options.style.template_name()
+        } else {
+            self.options.style.wrapper_name.clone()
+        };
         let untyped_name = self.options.style.untyped_name();
         if annotated == untyped_name {
             let untyped = format!("{wrapper}[{untyped_name}]");
@@ -361,7 +365,11 @@ impl Checker<'_> {
             if !refines_tuple(annotated, &current) {
                 self.report_fix(
                     Rule::StaleType,
-                    format!("SQL[{annotated}] should be SQL[{current}]"),
+                    format!(
+                        "{}[{annotated}] should be {}[{current}]",
+                        if call.template { "SQLTemplate" } else { "SQL" },
+                        if call.template { "SQLTemplate" } else { "SQL" }
+                    ),
                     line,
                     vec![Edit::new(call.annotation.clone(), current.clone())],
                 );
@@ -431,7 +439,7 @@ const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL com
 fn skipped_message(rule: Rule) -> String {
     match rule {
         Rule::TstringSkipped => {
-            "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+            "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
         }
         Rule::FstringSkipped => {
             "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
@@ -493,14 +501,9 @@ pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Opti
     }
     let stars = stars.join(" and ");
     Some(if has_schema {
-        let hint = if stars == "SELECT *" {
-            " (joins need a manual edit)"
-        } else {
-            ""
-        };
         (
             Rule::SelectStar,
-            format!("{stars} used — expand to explicit column list{hint}"),
+            format!("{stars} used — expand to explicit column list"),
         )
     } else {
         (
@@ -849,7 +852,6 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::Dialect;
     use sqlty_sql::analyzer::SchemaData;
     use std::collections::HashMap;
 
@@ -863,7 +865,7 @@ mod tests {
         any_calls: &[usize],
     ) -> Vec<Diagnostic> {
         let options = Options {
-            dialect: Dialect::new(dialect),
+            dialect: dialect.parse().unwrap(),
             schema,
             style: ImportStyle::or_default(style),
             untyped,

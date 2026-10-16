@@ -129,7 +129,11 @@ class Run:
     @cached_property
     def _imports(self) -> set[str]:
         style = (self.import_style or "from sqlty import SQL").strip()
-        extra = {"from sqlty import UNTYPED"} if style.startswith("from ") else set()
+        extra = (
+            {"from sqlty import UNTYPED", "from sqlty import SQLTemplate"}
+            if style.startswith("from ")
+            else set()
+        )
         return {"import datetime", "import typing", "import uuid", style, *extra}
 
     @cached_property

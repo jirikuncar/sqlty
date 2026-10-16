@@ -124,7 +124,7 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
 
 
 F_SKIPPED = "q.py:2: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
-T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
+T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
 
 
 @pytest.mark.parametrize(
@@ -138,7 +138,9 @@ T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (t-str
 )
 def test_rewrite_reports_skipped_strings(tmp_path, monkeypatch, capsys, config, flags, expected):
     (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
-    (tmp_path / "q.py").write_text('x = 1\na = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x}"\n')
+    (tmp_path / "q.py").write_text(
+        'x = 1\na = f"--sql\\nSELECT {x}"\nb = t"--sql\\nSELECT {x:i}"\n'
+    )
     monkeypatch.chdir(tmp_path)
 
     main(["rewrite", *flags, "q.py"])
@@ -1096,3 +1098,31 @@ def test_format_command_must_be_a_list(tmp_path, monkeypatch, capsys) -> None:
 
     assert code == 2
     assert "format-command must be a list of strings" in err
+
+
+def test_redundant_optional_reads_every_query_of_a_shared_row_type(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
+    )
+    (tmp_path / "s.sql").write_text(
+        "CREATE TABLE coupons (id INTEGER PRIMARY KEY, owner_id INTEGER);"
+    )
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "models.py").write_text(
+        "from typing import TypedDict\nclass Coupon(TypedDict):\n    id: int\n    owner_id: int | None\n"
+    )
+    query = 'from sqlty import SQL\nfrom pkg.models import Coupon\nq = SQL[Coupon]("--sql\\nSELECT id, owner_id FROM coupons{}")\n'
+    (tmp_path / "pkg" / "a.py").write_text(query.format(" WHERE owner_id = 1"))
+    (tmp_path / "pkg" / "b.py").write_text(query.format(""))
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "."], capsys)
+    assert (code, out) == (0, "")
+
+    (tmp_path / "pkg" / "b.py").unlink()
+    code, out, _ = _run(["check", "."], capsys)
+    assert code == 1
+    assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")

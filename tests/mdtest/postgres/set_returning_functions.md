@@ -116,3 +116,23 @@ SELECT * FROM jsonb_object_keys('{"a": 1}')
 SELECT * FROM regexp_split_to_table('a b c', ' ') AS word
 -- columns: word: str (TEXT)
 ```
+
+## Several in a select list
+
+PostgreSQL runs the set-returning functions of one select list in lockstep and
+pads the shorter ones with NULL, so each of them can be NULL. One alone cannot.
+
+```sql
+SELECT generate_series(1, 2) AS a, unnest(tags) AS tag, unnest(tags) || '!' AS loud, COALESCE(generate_series(1, 3), 0) AS c, id FROM posts
+-- columns: a: int | None (None)
+-- columns: tag: str | None (TEXT)
+-- columns: loud: str | None (TEXT)
+-- columns: c: int (None)
+-- columns: id: int (INT)
+```
+
+```sql
+SELECT generate_series(1, id) AS n, id FROM posts
+-- columns: n: int (None)
+-- columns: id: int (INT)
+```
