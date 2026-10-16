@@ -15,7 +15,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from psycopg.rows import dict_row, tuple_row  # noqa: E402
 
-from sqlty import SQL, row_form  # noqa: E402
+from sqlty import SQL, SQLTemplate, row_form  # noqa: E402
 from sqlty.drivers.psycopg import execute, row_factory, scalar  # noqa: E402
 
 
@@ -143,3 +143,21 @@ def test_scalar_no_rows(conn: Any) -> None:
 def test_scalar_many_columns(conn: Any) -> None:
     with pytest.raises(ValueError, match="too many values"):
         scalar(conn, QUERY, tuple[int, str])
+
+
+def test_row_form_template() -> None:
+    user_id = 1
+    query = SQLTemplate[UserTD](
+        t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
+    )
+    assert row_form(query) is UserTD
+    assert query.template.values == (1,)
+
+
+def test_execute_template(conn: Any) -> None:
+    if tuple(int(part) for part in psycopg.__version__.split(".")[:2]) < (3, 3):
+        pytest.skip("psycopg runs t-strings from 3.3")
+    n = 41
+    query = SQLTemplate[UserTD](t"--sql\nSELECT {n}::INTEGER + 1 AS id, 'ada'::TEXT AS name")
+    assert execute(conn, query).fetchone() == {"id": 42, "name": "ada"}
+    assert scalar(conn, SQLTemplate[tuple[int]](t"--sql\nSELECT {n}::INTEGER")) == 41

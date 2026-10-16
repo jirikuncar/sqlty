@@ -13,7 +13,7 @@ from psycopg import Connection, Cursor
 from psycopg.abc import Params
 from psycopg.rows import BaseRowFactory, class_row, dict_row, tuple_row
 
-from sqlty import SQL, row_form
+from sqlty import SQL, SQLTemplate, row_form
 
 __all__ = ["execute", "row_factory", "scalar"]
 
@@ -39,28 +39,38 @@ def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
     raise TypeError(f"no psycopg row factory for {form!r}")
 
 
-def execute[T](conn: Connection[Any], query: SQL[T], params: Params | None = None) -> Cursor[T]:
+def execute[T](
+    conn: Connection[Any], query: SQL[T] | SQLTemplate[T], params: Params | None = None
+) -> Cursor[T]:
     """Execute ``query`` on a cursor whose rows are typed as ``T``.
 
-    Queries without a runtime row type (see ``sqlty.row_form``) yield tuples.
+    Queries without a runtime row type (see ``sqlty.row_form``) yield tuples. A
+    ``SQLTemplate`` runs its t-string, whose values are its parameters (psycopg >= 3.3).
 
     Example:
         >>> rows: list[User] = execute(conn, SQL[User]("--sql\\n...")).fetchall()  # doctest: +SKIP
+        >>> rows = execute(conn, SQLTemplate[User](t"--sql\\n... WHERE id = {user_id}")).fetchall()  # doctest: +SKIP
     """
     form = row_form(query, cast(TypeForm[T], tuple))
-    return conn.cursor(row_factory=row_factory(form)).execute(cast(LiteralString, query), params)
+    cursor = conn.cursor(row_factory=row_factory(form))
+    if isinstance(query, SQLTemplate):
+        return cursor.execute(cast(Any, query.template))
+    return cursor.execute(cast(LiteralString, query), params)
 
 
 @overload
 def scalar[T](
-    conn: Connection[Any], query: SQL[tuple[T]], /, params: Params | None = None
+    conn: Connection[Any],
+    query: SQL[tuple[T]] | SQLTemplate[tuple[T]],
+    /,
+    params: Params | None = None,
 ) -> T: ...
 
 
 @overload
 def scalar[T](
     conn: Connection[Any],
-    query: LiteralString | SQL[Any],
+    query: LiteralString | SQL[Any] | SQLTemplate[Any],
     form: TypeForm[T],
     /,
     params: Params | None = None,
@@ -82,6 +92,8 @@ def scalar(conn: Connection[Any], query: Any, /, *args: Any, **kwargs: Any) -> A
     params = kwargs.get("params")
     if args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str):
         params = args[-1]
+    if isinstance(query, SQLTemplate):
+        query, params = query.template, None
     row = conn.cursor(row_factory=tuple_row).execute(query, params).fetchone()
     if row is None:
         raise LookupError("query returned no rows")
