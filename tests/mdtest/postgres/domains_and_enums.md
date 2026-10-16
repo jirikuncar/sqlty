@@ -96,7 +96,7 @@ CREATE VIEW open_orders AS SELECT status, discount FROM orders WHERE status = 'p
 
 ```sql
 SELECT status, discount FROM open_orders
--- inferred: tuple[typing.Literal['pending', 'paid'], int | None]
+-- inferred: tuple[typing.Literal['pending'], int | None]
 ```
 
 ## Arrays of enums and domains

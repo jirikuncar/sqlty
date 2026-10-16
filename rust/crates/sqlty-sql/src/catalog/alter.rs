@@ -11,7 +11,7 @@ use sqlparser::ast::{
 
 use crate::analyzer::SqlDialect;
 
-use super::columns::{apply_check, mark_not_null, nonnull_groups, raw_column};
+use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column};
 use super::loader::{AlterFail, Loader, RawTable, Rel, TypeDef};
 use super::names::{fold, key_of, parts};
 
@@ -226,8 +226,10 @@ pub(super) fn alter_op(
                     })
                     .collect(),
             };
-            table.columns.remove(at);
-            let column = raw_column(&def, dialect);
+            let old = table.columns.remove(at);
+            let mut column = raw_column(&def, dialect);
+            column.primary_key |= old.primary_key;
+            column.not_null |= old.primary_key;
             match column_position {
                 None => table.columns.insert(at, column),
                 Some(_) => place(table, column, column_position.as_ref())?,
@@ -284,12 +286,17 @@ pub(super) fn alter_op(
                 | AlterColumnOperation::AddGenerated { .. } => {}
             }
         }
+        AlterTableOperation::DropPrimaryKey { .. } => {
+            for column in &mut table.columns {
+                column.primary_key = false;
+            }
+        }
         AlterTableOperation::AddConstraint {
             constraint: TableConstraint::PrimaryKey(pk),
             ..
         } => {
             for index_column in &pk.columns {
-                mark_not_null(&mut table.columns, &index_column.column.expr, dialect);
+                mark_primary_key(&mut table.columns, &index_column.column.expr, dialect);
             }
         }
         // A `CHECK` added `NOT VALID` does not hold for the rows already there.
