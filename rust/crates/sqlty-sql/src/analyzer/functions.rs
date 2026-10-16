@@ -500,6 +500,7 @@ impl<'a> Analyzer<'a> {
             Returns::Void => Ok(Typed {
                 python: Some(Rc::from("None")),
                 sql: Some(Rc::from("VOID")),
+                values: None,
             }),
             Arg(i) => Ok(strip(arg(i)?, self.dialect)),
             // `LAG(x, 1, 'default')` can also return the default.
@@ -638,6 +639,7 @@ impl<'a> Analyzer<'a> {
             Ok(Typed {
                 python: Some(Rc::from(decimal_type(self.dialect))),
                 sql: Some(Rc::from("NUMERIC")),
+                values: None,
             })
         };
         // PostgreSQL has no `min`/`max` for `varchar`: they read it as `text`.

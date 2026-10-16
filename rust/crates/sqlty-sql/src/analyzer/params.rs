@@ -453,6 +453,7 @@ impl<'a> Analyzer<'a> {
         if let Ok(Typed {
             python: Some(python),
             sql,
+            ..
         }) = self.expr(element, scope)
         {
             let typed = Typed::new(
