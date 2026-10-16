@@ -163,6 +163,18 @@ SELECT a || a, a || 1, 1 || a, a || ARRAY[2] FROM t
 -- columns: ?column?: list[int] (ARRAY<INT>)
 ```
 
+A `real` (`r`) stays `real` only with another `real`; with any other number
+PostgreSQL computes in `double precision`.
+
+```sql
+SELECT r + r, r + 1, r * i, r + n, r - b FROM t
+-- columns: ?column?: float (FLOAT)
+-- columns: ?column?: float (DOUBLE)
+-- columns: ?column?: float (DOUBLE)
+-- columns: ?column?: float (DOUBLE)
+-- columns: ?column?: float (DOUBLE)
+```
+
 Dates, times and intervals.
 
 ```sql
