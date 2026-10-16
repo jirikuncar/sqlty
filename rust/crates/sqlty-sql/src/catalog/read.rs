@@ -133,19 +133,11 @@ pub(super) fn read_statements(
                     stmt.name_parts_after("function"),
                 )),
             }
-        } else if postgres {
+        } else if matches!(
+            dialect,
+            SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
+        ) {
             read_alter_or_drop(stmt, dialect, &mut push);
-        } else if let Some((kind, name, action)) = stmt.target_and_action("alter") {
-            // Other dialects do not follow `ALTER TABLE`, but a `MODIFY` or `CHANGE` retypes
-            // a column, and a stale type or `ENUM` would be wrong: the table is unknown.
-            if kind == "table"
-                && matches!(
-                    action.first().map(String::as_str),
-                    Some("modify" | "change")
-                )
-            {
-                push(OpKind::Taint(Taint::Relation, name));
-            }
         }
     }
     ops
@@ -209,8 +201,8 @@ pub(super) const BUILTIN_SQL: &str = include_str!("builtin_catalog.sql");
 
 /// Read schema DDL into a [`Catalog`], and the `(kind, name)` of the tables and views
 /// that could not be parsed. In PostgreSQL the catalog also holds the built-in
-/// relations and follows `ALTER`, `DROP`, `search_path` and functions; other dialects
-/// read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
+/// relations, `search_path` and functions; it, MySQL and SQLite follow `ALTER` and `DROP`.
+/// Other dialects read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
 pub(crate) fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
     let dialect = SqlDialect::from_name(dialect);
     let mut loader = Loader::new(dialect);
