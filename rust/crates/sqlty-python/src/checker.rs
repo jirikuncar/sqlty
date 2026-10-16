@@ -14,7 +14,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::options::Options;
+use crate::options::{Dialect, Options};
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
@@ -96,7 +96,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
     };
-    if options.dialect.is_mysql() {
+    if options.dialect == Dialect::MySql {
         checker.mysql_markers();
     }
     if rules.is_enabled(Rule::StaleRewrite) {
@@ -743,7 +743,6 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::Dialect;
     use sqlty_sql::analyzer::SchemaData;
     use std::collections::HashMap;
 
@@ -757,7 +756,7 @@ mod tests {
         any_calls: &[usize],
     ) -> Vec<Diagnostic> {
         let options = Options {
-            dialect: Dialect::new(dialect),
+            dialect: dialect.parse().unwrap(),
             schema,
             style: ImportStyle::or_default(style),
             untyped,

@@ -731,7 +731,6 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::Dialect;
 
     fn rewrite_source(
         source: &str,
@@ -741,7 +740,7 @@ mod tests {
         untyped: bool,
     ) -> String {
         let options = Options {
-            dialect: Dialect::new(dialect),
+            dialect: dialect.parse().unwrap(),
             schema,
             style: ImportStyle::or_default(style),
             untyped,

@@ -142,6 +142,18 @@ column, so `None` is not a valid argument:
 [ParamInfo(number=1, name='ids', python_type='list[int]', sql_type='ARRAY<INT>', nullable=None, cast=False)]
 ```
 
+`dialect` takes `postgres` (the default), `mysql`, `sqlite` or another
+sqlparser dialect, in any case. An unknown name raises `ValueError` rather than
+reading the query as generic SQL:
+
+```pycon
+>>> infer_type("SELECT 1::INTEGER", dialect="PostgreSQL")
+'tuple[int]'
+>>> infer_type("SELECT 1", dialect="postgress")  # doctest: +ELLIPSIS
+Traceback (most recent call last):
+ValueError: unknown dialect "postgress"; expected one of: postgres, mysql, sqlite, ...
+```
+
 | Function | Returns |
 |----------|---------|
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
