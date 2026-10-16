@@ -180,7 +180,11 @@ impl<'a> Analyzer<'a> {
                 })
             }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
-                self.function_type(Returns::Real, &[inner], scope)
+                let returns = match self.dialect {
+                    SqlDialect::MySql => Returns::Integral,
+                    _ => Returns::Real,
+                };
+                self.function_type(returns, &[inner], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL", self.dialect))

@@ -758,6 +758,12 @@ impl<'a> Analyzer<'a> {
         {
             return Nullability::NonNull;
         }
+        // Over no rows MySQL's BIT_AND has every bit set, BIT_OR and BIT_XOR none.
+        if self.dialect == SqlDialect::MySql
+            && matches!(name.as_str(), "BIT_AND" | "BIT_OR" | "BIT_XOR")
+        {
+            return Nullability::NonNull;
+        }
         // SQLite's `total` is 0.0 over no rows.
         if name == "TOTAL" && self.dialect == SqlDialect::Sqlite {
             return Nullability::NonNull;

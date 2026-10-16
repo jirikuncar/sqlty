@@ -79,6 +79,20 @@ SELECT STR_TO_DATE(name, '%Y-%m-%d') AS a, STR_TO_DATE(name, '%H:%i') AS b, STR_
 -- columns: d: None (None)
 ```
 
+## Date arithmetic functions
+
+`DATE_ADD` and its kin type like `+ INTERVAL`: a date stays a date for day
+units and coarser. A number of days is a day interval.
+
+```sql
+SELECT DATE_ADD(day, INTERVAL 1 DAY) AS a, DATE_SUB(day, INTERVAL 1 HOUR) AS b, ADDDATE(day, 3) AS c, SUBDATE(happened, INTERVAL 1 MONTH) AS d, ADDTIME(happened, '01:00:00') AS e FROM events
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.datetime | None (DATETIME)
+-- columns: c: datetime.date | None (DATE)
+-- columns: d: datetime.datetime | None (DATETIME)
+-- columns: e: datetime.datetime | None (DATETIME)
+```
+
 ## Strings
 
 ```sql
@@ -100,7 +114,7 @@ SELECT ABS(price) AS a, ROUND(ratio) AS b, TRUNCATE(price, 1) AS c, FLOOR(id) AS
 -- columns: a: decimal.Decimal (DECIMAL(10, 2))
 -- columns: b: float (DOUBLE)
 -- columns: c: decimal.Decimal (DECIMAL(10, 2))
--- columns: d: float (DOUBLE)
+-- columns: d: int (BIGINT)
 -- columns: e: int (INT)
 -- columns: f: float (DOUBLE)
 -- columns: g: float (DOUBLE)
@@ -124,6 +138,45 @@ SELECT JSON_OBJECT('id', id) AS a, JSON_ARRAY(id, name) AS b, JSON_EXTRACT(doc, 
 SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: a: typing.Any (JSON)
 -- columns: b: typing.Any (JSON)
+```
+
+## Rounding to an integer
+
+`CEIL` and `FLOOR` of an exact number are integers when the integer part fits
+a `BIGINT`, and of an approximate one a `DOUBLE`.
+
+```sql
+SELECT CEIL(price) AS a, FLOOR(price) AS b, CEILING(ratio) AS c, FLOOR(id) AS d FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: float (DOUBLE)
+-- columns: d: int (BIGINT)
+```
+
+## Session and conversion functions
+
+```sql
+SELECT GREATEST(id, 2) AS a, LEAST(name, note) AS b, LAST_INSERT_ID() AS c, DATABASE() AS d, VERSION() AS e, INET_ATON(name) AS f, INET_NTOA(id) AS g, UUID_TO_BIN(UUID()) AS h, BIN(id) AS i, UNIX_TIMESTAMP() AS j FROM events
+-- columns: a: int (INT)
+-- columns: b: str | None (VARCHAR(50))
+-- columns: c: int (BIGINT)
+-- columns: d: str | None (TEXT)
+-- columns: e: str (TEXT)
+-- columns: f: int | None (BIGINT)
+-- columns: g: str | None (TEXT)
+-- columns: h: bytes (VARBINARY)
+-- columns: i: str (TEXT)
+-- columns: j: int (BIGINT)
+```
+
+`BIT_AND`, `BIT_OR` and `BIT_XOR` are never NULL: over no rows `BIT_AND` has
+every bit set and the others none.
+
+```sql
+SELECT BIT_AND(id) AS a, BIT_OR(id) AS b, STD(price) AS c FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: float | None (DOUBLE)
 ```
 
 `->` is `JSON_EXTRACT` and `->>` is `JSON_UNQUOTE(JSON_EXTRACT(...))`.
