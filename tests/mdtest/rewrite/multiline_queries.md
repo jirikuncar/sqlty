@@ -69,7 +69,7 @@ user_id = 1
 column = "id"
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
-# error: [tstring-skipped] "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+# error: [tstring-skipped] "t-string with --sql prefix skipped (the field {column:i} changes the SQL)"
 r = t"--sql\nSELECT {column:i}::INTEGER FROM users"
 # rewritten: user_id = 1
 # rewritten: column = "id"

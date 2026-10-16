@@ -195,7 +195,13 @@ impl Checker<'_> {
                 if !(rule == Rule::UncheckedQuery
                     && enclosing.is_some_and(|call| call.is_any(&self.any_calls)))
                 {
-                    self.report(rule, skipped_message(rule), group.line);
+                    let message = match scan.template_blocker(&group.tokens) {
+                        Some(field) if rule == Rule::TstringSkipped => {
+                            format!("t-string with --sql prefix skipped (the field {field} changes the SQL)")
+                        }
+                        _ => skipped_message(rule),
+                    };
+                    self.report(rule, message, group.line);
                 }
                 continue;
             }
@@ -445,7 +451,7 @@ const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL com
 fn skipped_message(rule: Rule) -> String {
     match rule {
         Rule::TstringSkipped => {
-            "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+            "t-string with --sql prefix skipped (raw t-strings are not read as queries)"
         }
         Rule::FstringSkipped => {
             "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
