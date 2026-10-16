@@ -22,7 +22,9 @@ An argument is judged only where the source states its type: a literal, a
 variable annotated or assigned a class, a call of a known class (`date(...)`,
 `UUID(...)`). An argument of unknown type is never reported, and neither is a
 `str`, which the server coerces to any type. `int`, `float` and `Decimal` are
-interchangeable, and a parameter with an explicit cast (`%s::text`) takes
+interchangeable. On PostgreSQL a `bool` is not a number and an `int` is not a
+`boolean`, since the server has no implicit cast between them; MySQL takes
+either. A parameter with an explicit cast (`%s::text`) takes
 anything. `None` is reported only for a parameter stored in a `NOT NULL`
 column. SQLite is dynamically typed: with `dialect = "sqlite"` only `None` is
 checked.
