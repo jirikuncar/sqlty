@@ -6,7 +6,6 @@ SELECT (p).x AS a, (p).y AS b, (t.p).x AS c FROM t
 a: int | INT | Nullable
 b: str | TEXT | Nullable
 c: int | INT | Nullable
-[unknown-type] column `t.p` has type `PAIR`, which has no Python type
 
 SELECT (p).nope AS a FROM t
 a: ? | ? | Nullable

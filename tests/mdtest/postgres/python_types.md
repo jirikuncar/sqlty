@@ -72,11 +72,31 @@ SELECT '1.2.3.4'::inet, '1.2.3.0/24'::cidr
 -- inferred: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface, ipaddress.IPv4Network | ipaddress.IPv6Network]
 ```
 
+A literal prefixed with its type name, like `INET '1.2.3.4'`, types like the
+cast and is named after the type.
+
+```sql
+SELECT INET '10.0.0.1', CIDR '10.0.0.0/8', MACADDR '08:00:2b:01:02:03'
+-- columns: inet: ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface (INET)
+-- columns: cidr: ipaddress.IPv4Network | ipaddress.IPv6Network (CIDR)
+-- columns: macaddr: str (MACADDR)
+```
+
 ## Text-like types are str
 
 ```sql
 SELECT 'a'::citext, 'a'::name, 'a'::xml, 'a'::tsvector, 'a'::money, 'a'::macaddr
 -- inferred: tuple[str, str, str, str, str, str]
+```
+
+The same types as prefixed literals:
+
+```sql
+SELECT citext 'a', name 'a', money '1', bpchar 'a'
+-- columns: citext: str (CITEXT)
+-- columns: name: str (NAME)
+-- columns: money: str (MONEY)
+-- columns: bpchar: str (BPCHAR)
 ```
 
 ## Checks
