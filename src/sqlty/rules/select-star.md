@@ -45,7 +45,9 @@ t = SQL[tuple[int]]("--sql\nWITH u AS (SELECT * FROM users) SELECT id FROM u")
 
 ## Fix
 
-`sqlty check --fix .` lists the columns from the schema:
+`sqlty check --fix .` lists the columns from the schema, each cast to its
+type with `::`. MySQL and SQLite have no `::`, so there the columns are listed
+bare (`SELECT id, name FROM users`); the schema still types them.
 
 ```python
 from sqlty import SQL

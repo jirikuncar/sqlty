@@ -256,12 +256,7 @@ impl<'a> Analyzer<'a> {
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
                             NameRule::UnknownType,
-                            format!(
-                                "column `{column}` has type {}, which has no Python type",
-                                sql_type
-                                    .as_deref()
-                                    .map_or("unknown".to_string(), |ty| format!("`{ty}`"))
-                            ),
+                            untyped_column_message(&column, sql_type.as_deref().unwrap_or("")),
                         ),
                         (Origin::View(column), _) => self.diag.record(
                             NameRule::UnsupportedSyntax,
@@ -446,10 +441,7 @@ impl<'a> Analyzer<'a> {
                     if col.typed(self.dialect).python.is_none() {
                         self.diag.record(
                             NameRule::UnknownType,
-                            format!(
-                                "column `{table}.{}` has type `{}`, which has no Python type",
-                                col.name, col.sql_type
-                            ),
+                            untyped_column_message(&format!("{table}.{}", col.name), &col.sql_type),
                         );
                     }
                 }
@@ -541,6 +533,15 @@ impl<'a> Analyzer<'a> {
 fn list(names: &[&str]) -> String {
     let names: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
     names.join(", ")
+}
+
+/// Why the schema column `column` of type `sql_type` has no Python type.
+fn untyped_column_message(column: &str, sql_type: &str) -> String {
+    if sql_type.is_empty() {
+        format!("column `{column}` has no declared type, so it has no Python type")
+    } else {
+        format!("column `{column}` has type `{sql_type}`, which has no Python type")
+    }
 }
 
 #[cfg(test)]
