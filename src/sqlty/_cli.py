@@ -351,6 +351,8 @@ def _transform_files(
             _print_diff(path, original, result)
         else:
             path.write_text(result, encoding="utf-8")
+            if verb == "rewrite":
+                _format(path, resolver.for_file(path).format_command)
             if args.verbose:
                 print(f"{done} {path}")
 
@@ -361,6 +363,25 @@ def _transform_files(
             sys.exit(EXIT_FOUND)
         elif args.check and not args.quiet:
             print("All files up to date")
+
+
+def _format(path: Path, command: tuple[str, ...]) -> bool:
+    """Run the configured formatter on ``path``; whether it ran and succeeded."""
+    import subprocess
+
+    if not command:
+        return False
+    try:
+        result = subprocess.run([*command, str(path)], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        logger.warning("format-command %s failed on %s: %s", command[0], path, exc)
+        return False
+    if result.returncode != 0:
+        logger.warning(
+            "format-command %s failed on %s: %s", command[0], path, result.stderr.strip()
+        )
+        return False
+    return True
 
 
 def _cmd_check(args: argparse.Namespace) -> None:
@@ -383,7 +404,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
-    modules = {path: _module_names(path, args.paths) for path in files}
+    modules = {path: _module_names(resolver.resolve(path), args.paths) for path in files}
     sources = {
         path: ParsedSource(
             path.read_text(encoding="utf-8"),
@@ -427,6 +448,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             )
             if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")
+                if _format(path, settings.format_command):
+                    fixed = path.read_text(encoding="utf-8")
                 parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
@@ -814,7 +837,7 @@ def _resolved_root(root: Path) -> Path | None:
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
-    """Dotted names ``path`` can be imported by, the likeliest first.
+    """Dotted names the resolved ``path`` can be imported by, the likeliest first.
 
     The package path (up through the ``__init__.py`` directories) comes first,
     then the path from each checked directory, with and without its own name.
@@ -824,7 +847,6 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    path = path.resolve()
     parts = [*_package_path(path.parent), *([] if path.stem == "__init__" else [path.stem])]
     names = [".".join(parts)]
     for root in map(_resolved_root, roots):
@@ -847,6 +869,7 @@ class Settings:
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
+    format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
     config_dir: Path | None = None
 
@@ -867,6 +890,7 @@ class SettingsResolver:
         schema = args.schema or self.source.schema
         self._schema_sql = _load_schema(schema, Path.cwd()) if schema else None
         self._by_dir: dict[Path, Settings] = {}
+        self._resolved: dict[Path, Path] = {}
         self._warned: set[tuple[str, str]] = set()
 
     def _warn_skipped_objects(self, schema_sql: str | None, dialect: str) -> None:
@@ -878,8 +902,19 @@ class SettingsResolver:
         for kind, name in schema_skipped_objects(schema_sql, dialect=dialect):
             logger.warning("Schema %s %s could not be parsed; its columns are unknown", kind, name)
 
+    def resolve(self, path: Path) -> Path:
+        """``path`` resolved; each directory is resolved once, as its files share it."""
+        if path.is_symlink():
+            return path.resolve()
+        return self._directory(path.parent) / path.name
+
+    def _directory(self, directory: Path) -> Path:
+        if (resolved := self._resolved.get(directory)) is None:
+            resolved = self._resolved[directory] = directory.resolve()
+        return resolved
+
     def for_file(self, path: Path) -> Settings:
-        directory = path.parent.resolve()
+        directory = self._directory(path.parent)
         if directory not in self._by_dir:
             self._by_dir[directory] = self._resolve(directory)
         settings = self._by_dir[directory]
@@ -929,6 +964,7 @@ class SettingsResolver:
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])
             ),
+            format_command=tuple(config.get("format_command", ())),
             overrides=tuple(config.get("overrides", ())),
             config_dir=config_dir,
         )

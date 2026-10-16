@@ -33,6 +33,7 @@ mod registry;
 mod resolve;
 mod scope;
 mod star_expand;
+mod table_functions;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -339,6 +340,34 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     match base {
         "ARRAY" => Some("list".to_string()),
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
-        _ => SQL_TO_PYTHON_TYPE.get(base).map(ToString::to_string),
+        _ => SQL_TO_PYTHON_TYPE
+            .get(base)
+            .map(ToString::to_string)
+            .or_else(|| (dialect == SqlDialect::Sqlite).then(|| sqlite_affinity(base))?),
     }
+}
+
+/// The Python type of SQLite's type affinity for a type name it has no mapping for, by the
+/// rules of <https://www.sqlite.org/datatype3.html#determination_of_column_affinity>; no
+/// type and `ANY` can hold anything.
+fn sqlite_affinity(name: &str) -> Option<String> {
+    let name = name.to_ascii_uppercase();
+    let has = |part: &str| name.contains(part);
+    Some(
+        // `ANY` holds any value in a STRICT table.
+        if name.is_empty() || name == "ANY" {
+            return None;
+        } else if has("INT") {
+            "int"
+        } else if has("CHAR") || has("CLOB") || has("TEXT") {
+            "str"
+        } else if has("BLOB") {
+            "bytes"
+        } else if has("REAL") || has("FLOA") || has("DOUB") {
+            "float"
+        } else {
+            decimal_type(SqlDialect::Sqlite)
+        }
+        .to_string(),
+    )
 }

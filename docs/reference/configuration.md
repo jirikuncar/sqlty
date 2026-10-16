@@ -41,6 +41,7 @@ query-param = "query"
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
+| [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
 | [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
@@ -177,6 +178,24 @@ query-param = "query"
 <!-- /generated:config-function-keys -->
 
 Entries without `import-path` or `query-param` are skipped with a warning.
+
+## `format-command`
+
+A formatter `rewrite` and `check --fix` run on each file they change, with the
+file's path appended to the command. A long `SQL[tuple[...]]` wrapper then
+leaves the file formatted, instead of failing your formatter's check until it
+runs again.
+
+```toml
+[tool.sqlty]
+format-command = ["ruff", "format", "--quiet"]
+```
+
+Files that are not changed are never formatted, and `--check` and `--diff`
+write nothing, so they run no formatter. A formatter that fails is reported as
+a warning and the file keeps sqlty's changes. `rewrite` stays idempotent with a
+formatter: a wrapper the formatter split over several lines is recognised as
+already written.
 
 ## `exclude` and `extend-exclude`
 
