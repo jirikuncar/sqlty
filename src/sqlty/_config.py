@@ -193,6 +193,26 @@ def _suggest(name: str, choices: tuple[str, ...] | list[str]) -> str:
     return f" (did you mean {close[0]!r}?)" if close else ""
 
 
+def dialect_problem(dialect: object) -> str | None:
+    """Why ``dialect`` is not a dialect name, or ``None`` when it is one (in any case).
+
+    Example:
+        >>> dialect_problem("PostgreSQL") is None
+        True
+        >>> dialect_problem("postgress")  # doctest: +ELLIPSIS
+        "unknown dialect 'postgress' (did you mean 'postgres'?); expected one of: postgres, ..."
+    """
+    from sqlty._core import dialect_names
+
+    names = dialect_names()
+    if isinstance(dialect, str) and dialect.lower() in (*names, "postgresql", "tsql"):
+        return None
+    return (
+        f"unknown dialect {dialect!r}{_suggest(str(dialect), names)}; "
+        f"expected one of: {', '.join(names)}"
+    )
+
+
 def validate_tool_table(table: dict[str, Any], source: str) -> None:
     """Raise ``ConfigError`` for an unknown key, rule or severity in a ``[tool.sqlty]`` table.
 
@@ -230,16 +250,8 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                     f"{where}; expected one of: {', '.join(severities)}"
                 )
 
-    if "dialect" in table:
-        from sqlty._core import dialect_names
-
-        dialect = table["dialect"]
-        names = dialect_names()
-        if not isinstance(dialect, str) or dialect.lower() not in (*names, "postgresql", "tsql"):
-            raise ConfigError(
-                f"{source}: unknown dialect {dialect!r} in [tool.sqlty]"
-                f"{_suggest(str(dialect), names)}; expected one of: {', '.join(names)}"
-            )
+    if "dialect" in table and (problem := dialect_problem(table["dialect"])):
+        raise ConfigError(f"{source}: [tool.sqlty] {problem}")
     check_rules(table.get("rules", {}), "[tool.sqlty] rules", "[tool.sqlty.rules]")
     overrides = table.get("overrides", [])
     if not isinstance(overrides, list) or not all(isinstance(o, dict) for o in overrides):

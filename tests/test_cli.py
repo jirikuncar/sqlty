@@ -1151,3 +1151,14 @@ def test_rewrite_generates_typeddicts_for_json_columns(tmp_path, monkeypatch, ca
     assert "class Doc(typing.TypedDict):\n    n: int\n" in path.read_text()
     assert _run(["strip", "."], capsys)[0] == 0
     assert path.read_text() == "q = \"--sql\\nSELECT jsonb_build_object('n', 1) AS doc\"\n"
+
+
+def test_dialect_option_takes_every_dialect(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1::INTEGER AS n"\n')
+    monkeypatch.chdir(tmp_path)
+    code, out, _ = _run(["rewrite", "--diff", "--dialect", "DuckDB", "."], capsys)
+    assert code == 1
+    assert 'SQL[tuple[int]]("--sql' in out
+    code, _, err = _run(["check", "--dialect", "postgress", "."], capsys)
+    assert code == 2
+    assert "unknown dialect 'postgress' (did you mean 'postgres'?)" in err
