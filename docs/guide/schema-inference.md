@@ -430,6 +430,8 @@ stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
 # rewritten: stats = SQL[tuple[int, float | None, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
+#### Free-form type names
+
 SQLite accepts any type name, `UNSIGNED BIG INT` or `VARYING CHARACTER(255)`
 included, and derives the column's
 [type affinity](https://www.sqlite.org/datatype3.html#determination_of_column_affinity)
