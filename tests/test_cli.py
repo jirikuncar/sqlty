@@ -844,6 +844,98 @@ def test_inline_config_error_names_its_source(tmp_path, monkeypatch, capsys, val
     assert "pyproject.toml" not in err
 
 
+_OVERRIDES = """[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "error"
+
+[[tool.sqlty.overrides]]
+include = ["tests/**", "conftest.py"]
+
+[tool.sqlty.overrides.rules]
+stale-type = "ignore"
+
+[[tool.sqlty.overrides]]
+include = ["tests/legacy"]
+exclude = ["test_skip.py"]
+
+[tool.sqlty.overrides.rules]
+stale-type = "warn"
+"""
+
+
+def _overrides_project(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(_OVERRIDES)
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    stale = 'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT id FROM users")\n'
+    names = ["app/q.py", "tests/test_q.py", "tests/legacy/test_old.py", "tests/legacy/test_skip.py"]
+    for name in [*names, "pkg/conftest.py"]:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(stale)
+
+
+def test_overrides_set_rule_severities_per_path(tmp_path, monkeypatch, capsys) -> None:
+    _overrides_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "."], capsys)
+
+    sep = os.sep
+    assert code == 1
+    assert out.splitlines()[:2] == [
+        f"app{sep}q.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+        f"tests{sep}legacy{sep}test_old.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+    ]
+    assert "Found 1 error(s), 1 warning(s)" in out
+
+
+def test_overrides_apply_to_check_fix(tmp_path, monkeypatch, capsys) -> None:
+    _overrides_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    _run(["check", "--fix", "."], capsys)
+
+    fixed = {
+        p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.py") if "int" in p.read_text()
+    }
+    assert fixed == {"app/q.py", "tests/legacy/test_old.py"}
+
+
+def test_rule_flags_win_over_overrides(tmp_path, monkeypatch, capsys) -> None:
+    _overrides_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "--warn", "stale-type", "."], capsys)
+
+    assert "Found 5 warning(s)" in out
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ("include = 'tests'\n", "include must be a list of glob strings"),
+        ('exclude = "tests"\n', "exclude must be a list of glob strings"),
+        (
+            'include = ["tests"]\nignore = ["x"]\n',
+            "unknown key 'ignore' in [[tool.sqlty.overrides]]",
+        ),
+        (
+            'include = ["tests"]\nrules = { select-starr = "ignore" }\n',
+            "unknown rule 'select-starr' in [tool.sqlty.overrides.rules]",
+        ),
+    ],
+)
+def test_invalid_overrides_are_errors(tmp_path, monkeypatch, capsys, override, message) -> None:
+    (tmp_path / "pyproject.toml").write_text(f"[[tool.sqlty.overrides]]\n{override}")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert message in err
+
+
 def _gitignore_project(tmp_path: Path, config: str = "") -> set[str]:
     """A git work tree with ignored files; returns the files `check` reads."""
     (tmp_path / ".git" / "info").mkdir(parents=True)
