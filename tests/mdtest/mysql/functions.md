@@ -36,13 +36,23 @@ SELECT IF(id > 1, name, note) AS a, IF(id > 1, 'big', 'small') AS b, IFNULL(note
 -- columns: c: str (VARCHAR(50))
 ```
 
+## Grouping
+
+`GROUPING` tells a `WITH ROLLUP` super-aggregate row by a non-null `int`.
+
+```sql
+SELECT note, GROUPING(note) AS g FROM events GROUP BY note WITH ROLLUP
+-- columns: note: str | None (VARCHAR(50))
+-- columns: g: int (INT)
+```
+
 ## Dates and times
 
 ```sql
 SELECT NOW() AS a, CURDATE() AS b, CURTIME() AS c, DATE(happened) AS d, TIMESTAMP(day) AS e, FROM_UNIXTIME(id) AS f, LAST_DAY(day) AS g FROM events
 -- columns: a: datetime.datetime (DATETIME)
 -- columns: b: datetime.date (DATE)
--- columns: c: datetime.time (TIME)
+-- columns: c: datetime.timedelta (TIME)
 -- columns: d: datetime.date | None (DATE)
 -- columns: e: datetime.datetime | None (DATETIME)
 -- columns: f: datetime.datetime | None (DATETIME)
@@ -64,7 +74,7 @@ reads, and `NULL` when the string does not match.
 ```sql
 SELECT STR_TO_DATE(name, '%Y-%m-%d') AS a, STR_TO_DATE(name, '%H:%i') AS b, STR_TO_DATE(name, '%Y-%m-%d %H:%i:%s') AS c, STR_TO_DATE(name, note) AS d FROM events
 -- columns: a: datetime.date | None (DATE)
--- columns: b: datetime.time | None (TIME)
+-- columns: b: datetime.timedelta | None (TIME)
 -- columns: c: datetime.datetime | None (DATETIME)
 -- columns: d: None (None)
 ```

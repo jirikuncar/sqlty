@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, TypedDict
+from typing import Any, Literal, NamedTuple, Protocol, TypedDict
 
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from psycopg.rows import dict_row, tuple_row  # noqa: E402
+from psycopg.rows import dict_row, namedtuple_row, tuple_row  # noqa: E402
 
-from sqlty import SQL, row_form  # noqa: E402
+from sqlty import SQL, SQLTemplate, row_form  # noqa: E402
 from sqlty.drivers.psycopg import execute, row_factory, scalar  # noqa: E402
 
 
@@ -31,6 +31,11 @@ class UserNT(NamedTuple):
 
 
 class UserTD(TypedDict):
+    id: int
+    name: str
+
+
+class Named(Protocol):
     id: int
     name: str
 
@@ -67,6 +72,10 @@ def test_row_factory_builtin(form: Any, factory: Any) -> None:
 @pytest.mark.parametrize("form", [UserDC, UserNT])
 def test_row_factory_class(form: Any) -> None:
     assert row_factory(form).__qualname__.startswith("class_row")
+
+
+def test_row_factory_protocol() -> None:
+    assert row_factory(Named) is namedtuple_row
 
 
 @pytest.mark.parametrize("form", [int | str, list[int]])
@@ -107,6 +116,12 @@ def test_execute_pydantic(conn: Any) -> None:
     assert execute(conn, SQL[User](QUERY)).fetchone() == User(id=1, name="ada")
 
 
+def test_execute_protocol(conn: Any) -> None:
+    row: Named | None = execute(conn, SQL[Named](QUERY)).fetchone()
+    assert row is not None
+    assert (row.id, row.name) == (1, "ada")
+
+
 def test_execute_params(conn: Any) -> None:
     query = SQL[tuple[int]]("--sql\nSELECT %(n)s::INTEGER + 1")
     assert execute(conn, query, {"n": 41}).fetchone() == (42,)
@@ -143,3 +158,21 @@ def test_scalar_no_rows(conn: Any) -> None:
 def test_scalar_many_columns(conn: Any) -> None:
     with pytest.raises(ValueError, match="too many values"):
         scalar(conn, QUERY, tuple[int, str])
+
+
+def test_row_form_template() -> None:
+    user_id = 1
+    query = SQLTemplate[UserTD](
+        t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
+    )
+    assert row_form(query) is UserTD
+    assert query.template.values == (1,)
+
+
+def test_execute_template(conn: Any) -> None:
+    if tuple(int(part) for part in psycopg.__version__.split(".")[:2]) < (3, 3):
+        pytest.skip("psycopg runs t-strings from 3.3")
+    n = 41
+    query = SQLTemplate[UserTD](t"--sql\nSELECT {n}::INTEGER + 1 AS id, 'ada'::TEXT AS name")
+    assert execute(conn, query).fetchone() == {"id": 42, "name": "ada"}
+    assert scalar(conn, SQLTemplate[tuple[int]](t"--sql\nSELECT {n}::INTEGER")) == 41

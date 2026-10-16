@@ -158,11 +158,11 @@ SELECT * FROM t
 -- columns: d: datetime.date | None (DATE)
 ```
 
-### Unknown dialect
+### Generic SQL
 
 ```toml
 [tool.sqlty]
-dialect = "nosuch"
+dialect = "generic"
 ```
 
 ```sql
