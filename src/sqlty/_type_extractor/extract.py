@@ -136,6 +136,7 @@ def extract_type_definitions(
         required -= defaulted
         info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
         info.lineno = node.lineno
+        info.module = module
         if kind == "BaseModel":
             _set_pydantic_names(info, node)
         if (config := _pydantic_config(node, kind, imports)) is not None:
