@@ -160,7 +160,7 @@ from sqlty import SQL
 
 # error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
 q = SQL[Any](f"--sql\nSELECT {column} FROM users")
-# error: [tstring-skipped] "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+# error: [tstring-skipped] "t-string with --sql prefix skipped (the field {column:i} changes the SQL)"
 r = SQL[Any](t"--sql\nSELECT {column:i} FROM users")
 ```
 

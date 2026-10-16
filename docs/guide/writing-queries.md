@@ -182,10 +182,49 @@ template in `.template`: pass that to psycopg, or pass the query to the
 `sqlty check` checks it like `SQL[T]`: `stale-type`, and the row type checks of
 a named row type.
 
-A field with a format spec or a conversion, such as psycopg's `{name:i}`
-identifier, `{value:l}` literal or `{part:q}` nested query, changes the text of
-the SQL. Such a template is left alone and reported as
-[`tstring-skipped`](../reference/rules.md#tstring-skipped).
+### Format specs
+
+psycopg's `:s`, `:b` and `:t` specs only pick the wire format of a value, so
+those fields are placeholders too:
+
+```python
+user_id = 1
+query = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id:b}"
+# rewritten: user_id = 1
+# rewritten: query = SQLTemplate[tuple[int]](t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id:b}")
+```
+
+In a module that imports `psycopg` or `sqlty.drivers.psycopg`, sqlty also reads
+the specs that psycopg merges on the client:
+
+| Field | Read as | Why |
+|-------|---------|-----|
+| `{value:l}` | a placeholder | A literal is a value; where a placeholder can't go, such as `NOTIFY`'s payload, a string literal |
+| `{name:i}` | an identifier | Only in a query that returns no rows: elsewhere it could name a result column or the table they come from |
+| `{part:q}` | the template `part` | Inlined when `part` is assigned a t-string once, at module level |
+
+```python
+import psycopg
+
+user_id = 1
+table = "users"
+by_id = t"id = {user_id}"
+query = t"--sql\nSELECT id::INTEGER FROM users WHERE {by_id:q}"
+insert = t"--sql\nINSERT INTO {table:i} (name) VALUES ({user_id:l})"
+# rewritten: import psycopg
+# rewritten:
+# rewritten: user_id = 1
+# rewritten: table = "users"
+# rewritten: by_id = t"id = {user_id}"
+# rewritten: query = SQLTemplate[tuple[int]](t"--sql\nSELECT id::INTEGER FROM users WHERE {by_id:q}")
+# rewritten: insert = t"--sql\nINSERT INTO {table:i} (name) VALUES ({user_id:l})"
+```
+
+Any other field, such as a conversion (`{value!r}`), an identifier the result
+columns may depend on, or a snippet sqlty can't find, changes the text of the
+SQL in a way sqlty can't follow. Such a template is left alone and reported as
+[`tstring-skipped`](../reference/rules.md#tstring-skipped), which names the
+field.
 
 ## Type mapping
 

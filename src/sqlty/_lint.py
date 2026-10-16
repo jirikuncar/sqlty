@@ -182,7 +182,7 @@ RULES: dict[str, LintRule] = {
         name="tstring-skipped",
         default_severity=Severity.WARN,
         fixable=False,
-        description="t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)",
+        description="t-string with --sql prefix skipped (a field changes the SQL in a way sqlty cannot follow)",
     ),
     "unchecked-query": LintRule(
         name="unchecked-query",
