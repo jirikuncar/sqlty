@@ -157,5 +157,46 @@ model. A `dict[str, Any]` fits any object or map, but not an array.
 Shapes are inferred for PostgreSQL and for MySQL's `JSON_OBJECT`, `JSON_ARRAY`,
 `JSON_ARRAYAGG` and `JSON_OBJECTAGG`. MySQL has no boolean type, so a `BOOLEAN`
 column is a JSON number there; only `TRUE` and `FALSE` are JSON booleans. SQLite's
-JSON functions return text and have no shape. `sqlty rewrite` still
-writes `Any` for JSON columns: generating nested `TypedDict`s is not done.
+JSON functions return text and have no shape.
+
+## Generated TypedDicts
+
+`sqlty rewrite` types a JSON column `typing.Any`. With `json-types = "typeddict"`, a
+column of known shape gets a type of its own instead: a `TypedDict` per object, `list[...]`
+for arrays, `dict[str, ...]` for maps and `| None` where a value can be NULL.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+json-types = "typeddict"
+```
+
+```python
+q = "--sql\nSELECT o.id, (SELECT jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', l.qty, 'note', l.note)) FROM lines l WHERE l.order_id = o.id) AS lines FROM orders o"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class LinesItem(typing.TypedDict):
+# rewritten-file:     sku: str
+# rewritten-file:     qty: int
+# rewritten-file:     note: str | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[int, list[LinesItem] | None]]("--sql\nSELECT o.id, (SELECT jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', l.qty, 'note', l.note)) FROM lines l WHERE l.order_id = o.id) AS lines FROM orders o")
+```
+
+Each class is written after the imports, under a `# sqlty: generated` line, and named after
+the column: `lines` gives `Lines`, an item of its array `LinesItem`, a nested object the
+member's name after its parent's. A name another definition of the module uses gets a
+number; a generated class of the same name and fields is reused. `sqlty strip` removes the
+generated classes with the wrappers.
+
+The classes are yours once written: `rewrite` adds them for the strings it wraps, and
+`check --fix` for the queries it wraps or retypes, but neither rewrites a class that is
+there. `json-shape-mismatch` checks a row type that names them, so a query that changes is
+reported until you update or delete the class and run `rewrite` again.
+
+Why opt in: a generated class is new code in your module, and a field typed `typing.Any`
+needs nothing. Turn it on where the JSON reaches typed code, such as an API response model.

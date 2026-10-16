@@ -293,6 +293,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             schema_sql=settings.schema_sql,
             import_style=settings.import_style,
             untyped=settings.untyped,
+            json_types=settings.json_types,
         )
         if not args.quiet:
             skipped_only = dict.fromkeys(RULES, "ignore") | {
@@ -449,6 +450,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 rules=settings.rules,
+                json_types=settings.json_types,
             )
             if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")
@@ -871,6 +873,7 @@ class Settings:
     schema_sql: str | None = None
     import_style: str | None = None
     untyped: bool = False
+    json_types: str = "any"
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
@@ -948,6 +951,11 @@ class SettingsResolver:
             raise ConfigError(
                 f"{self.source.origin('untyped', label)}: untyped must be 'skip' or 'sentinel'"
             )
+        json_types = config.get("json_types", "any")
+        if json_types not in ("any", "typeddict"):
+            raise ConfigError(
+                f"{self.source.origin('json_types', label)}: json-types must be 'any' or 'typeddict'"
+            )
         import_style = config.get("import_style")
         try:
             strip_source("", import_style=import_style)
@@ -963,6 +971,7 @@ class SettingsResolver:
             schema_sql=schema_sql,
             import_style=import_style,
             untyped=untyped == "sentinel",
+            json_types=json_types,
             rules=config.get("rules"),
             type_modules=tuple(config.get("type_modules", ())),
             functions=tuple(

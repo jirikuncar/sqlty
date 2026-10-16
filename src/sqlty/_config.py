@@ -17,6 +17,7 @@ TOOL_KEYS = (
     "overrides",
     "import-style",
     "untyped",
+    "json-types",
     "type-modules",
     "functions",
     "format-command",
@@ -81,6 +82,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         '`"skip"`',
         "`rewrite`",
         "Whether queries of unknown row type are wrapped as `SQL[UNTYPED]`",
+    ),
+    "json-types": KeyDoc(
+        '`"any"`, `"typeddict"`',
+        '`"any"`',
+        "`rewrite`, `check --fix`",
+        "How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict`",
     ),
     "type-modules": KeyDoc(
         "list of strings",
@@ -335,6 +342,7 @@ class SQLTyConfig(TypedDict, total=False):
     overrides: list[RuleOverride]  # rule severities for files matching globs
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
+    json_types: str  # "any" (default) or "typeddict": generated TypedDicts for JSON columns
     type_modules: list[str]  # modules whose imports may run to resolve row types
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above
@@ -575,6 +583,9 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
 
     if "untyped" in tool_config:
         config["untyped"] = str(tool_config["untyped"])
+
+    if "json-types" in tool_config:
+        config["json_types"] = str(tool_config["json-types"])
 
     if "type-modules" in tool_config:
         modules = tool_config["type-modules"]

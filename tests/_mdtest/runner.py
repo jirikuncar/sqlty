@@ -31,6 +31,7 @@ class Run:
         self.schema_sql: str | None = section.schema_sql
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
+        self.json_types: str = settings.get("json-types", "any")
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
 
@@ -115,6 +116,7 @@ class Run:
             import_style=self.import_style,
             untyped=self.untyped,
             rules=self.rules,
+            json_types=self.json_types,
         )
 
     def _rewrite(self, text: str) -> str:
@@ -124,6 +126,7 @@ class Run:
             schema_sql=self.schema_sql,
             import_style=self.import_style,
             untyped=self.untyped,
+            json_types=self.json_types,
         )
 
     @cached_property
@@ -238,6 +241,18 @@ def string_constants(source: str) -> list[str]:
     )
 
 
+_GENERATED = re.compile(
+    r"# sqlty: generated\r?\n(?:class [^\r\n]*:\r?\n(?:    [^\r\n]*\r?\n)+"
+    r"|\w+ = typing\.TypedDict\([^\r\n]*\)\r?\n)"
+)
+
+
+def without_generated(source: str) -> str:
+    """``source`` without the classes ``json-types = "typeddict"`` generates, which are
+    new code with comments and strings of their own."""
+    return _GENERATED.sub("", source)
+
+
 def comments(source: str) -> list[str]:
     """Every comment in ``source``, sorted."""
     return sorted(
@@ -261,9 +276,11 @@ def _parses(source: str, output: str, *, same_strings: bool = False) -> str:
         ast.parse(output)
     except SyntaxError as error:
         raise AssertionError(f"output is not valid Python ({error}):\n{output}") from error
-    if comments(output) != comments(source):
+    # Classes rewrite generates for JSON columns are new code, with comments and strings.
+    written, original = without_generated(output), without_generated(source)
+    if comments(written) != comments(original):
         raise AssertionError(f"output changes the comments of the source:\n{output}")
-    if same_strings and string_constants(output) != string_constants(source):
+    if same_strings and string_constants(written) != string_constants(original):
         raise AssertionError(f"output changes the strings of the source:\n{output}")
     return output
 
