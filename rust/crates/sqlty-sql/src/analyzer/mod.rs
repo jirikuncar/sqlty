@@ -32,6 +32,7 @@ mod registry;
 mod resolve;
 mod scope;
 mod star_expand;
+mod table_functions;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
