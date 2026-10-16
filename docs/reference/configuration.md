@@ -42,6 +42,7 @@ query-param = "query"
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
+| [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
 <!-- /generated:config-keys -->
 
 ## `dialect`
@@ -157,3 +158,20 @@ command line are always processed, unless `--force-exclude` is given. The CLI's 
 [tool.sqlty]
 extend-exclude = ["migrations", "gen/*.py"]
 ```
+
+## `respect-gitignore`
+
+Directories the CLI walks also skip what git ignores: every `.gitignore` from
+the repository root down, and `.git/info/exclude`, with negations (`!keep.py`)
+and nested files read as git reads them. Build output and generated code are
+usually listed there already, so they need no `exclude` entry. Outside a git
+repository nothing is skipped this way; the global `core.excludesFile` is not
+read.
+
+```toml
+[tool.sqlty]
+respect-gitignore = false
+```
+
+Files named on the command line are always processed. The CLI's
+`--respect-gitignore` and `--no-respect-gitignore` override the setting.

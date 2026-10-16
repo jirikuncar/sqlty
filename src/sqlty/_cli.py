@@ -183,6 +183,8 @@ def _rule_severity(severity: str, rule: str) -> tuple[str, str]:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared across rewrite/strip/check."""
+    import argparse
+
     parser.add_argument(
         "paths",
         nargs="*",
@@ -251,6 +253,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--force-exclude",
         action="store_true",
         help="Apply the excludes to files and directories named on the command line too",
+    )
+    parser.add_argument(
+        "--respect-gitignore",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Skip the files .gitignore ignores while walking directories (default: "
+        "[tool.sqlty] respect-gitignore, else true)",
     )
     parser.add_argument(
         "-v",
@@ -565,8 +574,10 @@ class ConfigSource:
         exclude: list[str] | None = None,
         extend_exclude: list[str] | None = None,
         force_exclude: bool = False,
+        respect_gitignore: bool | None = None,
     ) -> None:
         from sqlty._config import load_config_file, parse_overrides, validate_rule_severity
+        from sqlty._gitignore import GitIgnore
 
         self._isolated = isolated
         self._fixed = None if config_file is None else load_config_file(config_file)
@@ -583,6 +594,8 @@ class ConfigSource:
         self._exclude = None if exclude is None else self._relative_globs(exclude)
         self._extend_exclude = self._relative_globs(extend_exclude)
         self.force_exclude = force_exclude
+        self._respect_gitignore = inline.pop("respect_gitignore", respect_gitignore)
+        self.gitignore = GitIgnore()
 
     def _relative_globs(self, patterns: list[str] | tuple[str, ...]) -> tuple[str, ...]:
         """Command-line globs relative to the current directory: ``./gen`` and ``$PWD/gen`` are ``gen``."""
@@ -606,6 +619,7 @@ class ConfigSource:
             exclude=getattr(args, "exclude", None),
             extend_exclude=getattr(args, "extend_exclude", None),
             force_exclude=getattr(args, "force_exclude", False),
+            respect_gitignore=getattr(args, "respect_gitignore", None),
         )
 
     def load(self, directory: Path) -> tuple[SQLTyConfig, Path | None, str]:
@@ -653,6 +667,18 @@ class ConfigSource:
             rules = [(self._cwd, self._exclude), (base, tuple(config.get("extend_exclude", ())))]
         rules.append((self._cwd, self._extend_exclude))
         return [(b, patterns) for b, patterns in rules if patterns]
+
+    def respects_gitignore(self, directory: Path) -> bool:
+        """Whether walking ``directory`` skips what ``.gitignore`` ignores."""
+        from sqlty._config import load_config
+
+        if self._respect_gitignore is not None:
+            return bool(self._respect_gitignore)
+        if self._fixed is not None:
+            config = self._fixed
+        else:
+            config = {} if self._isolated else load_config(directory)[0]
+        return config.get("respect_gitignore", True)
 
     def is_excluded(self, path: Path) -> bool:
         """Whether ``path`` or one of its parents up to a glob's base directory is excluded."""
@@ -734,11 +760,18 @@ def _walk(root: Path, source: ConfigSource) -> list[Path]:
             )
             for base, patterns in source.exclusions(current)
         ]
-        dirnames[:] = sorted(d for d in dirnames if not _excluded(d, rules))
+        ignore = source.gitignore if source.respects_gitignore(current) else None
+        dirnames[:] = sorted(
+            d
+            for d in dirnames
+            if not _excluded(d, rules) and not (ignore and ignore.ignored(resolved, d, is_dir=True))
+        )
         found.extend(
             current / name
             for name in sorted(filenames)
-            if name.endswith(".py") and not _excluded(name, rules)
+            if name.endswith(".py")
+            and not _excluded(name, rules)
+            and not (ignore and ignore.ignored(resolved, name, is_dir=False))
         )
     return sorted(found)
 
