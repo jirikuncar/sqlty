@@ -20,6 +20,8 @@ pub(super) struct RawColumn {
     pub(super) ident: String,
     pub(super) ty: DataType,
     pub(super) not_null: bool,
+    /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
+    pub(super) primary_key: bool,
     /// The values a `CHECK` constraint limits the column to, when it lists them.
     pub(super) values: Option<Vec<Value>>,
     /// Compared with a collation that may equate different strings (`NOCASE`, `_ci`):
@@ -89,6 +91,10 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
                 }
             )
         });
+    let primary_key = column
+        .options
+        .iter()
+        .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)));
     let name = fold(&column.name, dialect);
     // MySQL before 8.0.16 parses `CHECK` and ignores it.
     let collated = column.options.iter().any(
@@ -113,6 +119,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         },
         ty: column.data_type.clone(),
         not_null,
+        primary_key,
         values,
         collated,
     }
@@ -310,11 +317,12 @@ pub(super) fn column_named<'a>(
     columns.iter().find(|c| c.name == name)
 }
 
-pub(super) fn mark_not_null(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
+pub(super) fn mark_primary_key(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
     if let Expr::Identifier(ident) = expr {
         let name = fold(ident, dialect);
         if let Some(column) = columns.iter_mut().find(|c| c.name == name) {
             column.not_null = true;
+            column.primary_key = true;
         }
     }
 }

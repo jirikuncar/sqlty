@@ -9,7 +9,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use crate::checker::{refines_tuple, INLINE_SQL_COMMENT_CONTENT};
-use crate::options::Options;
+use crate::options::{Dialect, Options};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, line_ending, rewrite_scan, splice, suppresses, ImportStyle, LineIndex,
@@ -57,7 +57,7 @@ pub fn fix_source(
             scan = Scan::new(fixed, wrapper);
         }
     }
-    if options.dialect.is_mysql() && enabled(Rule::MysqlSqlMarker) {
+    if options.dialect == Dialect::MySql && enabled(Rule::MysqlSqlMarker) {
         if let Some(fixed) = fix_mysql_markers(&scan, &suppressed) {
             scan = Scan::new(fixed, wrapper);
         }

@@ -385,11 +385,11 @@ t = SQL[tuple[int, int, str]]("--sql\nSELECT id, * FROM users")
 # fixed: t = SQL[tuple[int | None, int | None, str | None]]("--sql\nSELECT id, id::INT, name::TEXT FROM users")
 ```
 
-## Qualified star with a join is expanded
+## Stars over joins keep their qualifiers
 
 `u.*` expands to `u.`-qualified columns, so it stays unambiguous next to the
-joined table. A bare `*` over a join is left alone: its columns would be
-written without a qualifier.
+joined table. A bare `*` over a join lists every table's columns, each
+qualified by its alias or name.
 
 ```toml
 [tool.sqlty]
@@ -410,6 +410,17 @@ q = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders 
 # fixed: from sqlty import SQL
 # fixed:
 # fixed: q = SQL[tuple[int, str | None, int | None]]("--sql\nSELECT u.id::INT, u.name::TEXT, o.id FROM users u JOIN orders o ON o.user_id = u.id")
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str, int, int]]("--sql\nSELECT * FROM users u JOIN orders o ON o.user_id = u.id")
+r = SQL[tuple[int, str, int, int]]("--sql\nSELECT * FROM users, orders")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str | None, int | None, int]]("--sql\nSELECT u.id::INT, u.name::TEXT, o.id::INT, o.user_id::INT FROM users u JOIN orders o ON o.user_id = u.id")
+# fixed: r = SQL[tuple[int | None, str | None, int | None, int | None]]("--sql\nSELECT users.id::INT, users.name::TEXT, orders.id::INT, orders.user_id::INT FROM users, orders")
 ```
 
 ## Plain string after an f-string is wrapped

@@ -13,6 +13,7 @@ use crate::catalog::fold;
 use crate::diagnostics::NameRule;
 
 use super::dialect::SqlDialect;
+use super::literals::value_set;
 use super::nullability::Nullability;
 use super::query::{Analyzer, Column};
 use super::scope::{any_merging_join, resolve, Scope, Source, Table};
@@ -268,6 +269,7 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_column(expr, scope) {
             Some((typed, origin)) => {
+                let typed = self.narrowed_values(expr, scope, typed);
                 if typed.python.is_none() && self.diag.enabled() {
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
@@ -288,6 +290,33 @@ impl<'a> Analyzer<'a> {
                 self.explain_unresolved(expr, scope);
                 Typed::UNKNOWN
             }
+        }
+    }
+
+    /// `typed` limited to the values the conditions in force leave the column `expr`
+    /// (`WHERE status = 'paid'`), when it has a value set.
+    fn narrowed_values(&self, expr: &Expr, scope: &Scope, typed: Typed) -> Typed {
+        if self.facts.values.is_empty() {
+            return typed;
+        }
+        let Some(known) = value_set(&typed) else {
+            return typed;
+        };
+        let Some((reference, _, column)) = self.locate_column(expr, scope) else {
+            return typed;
+        };
+        let Some((_, _, allowed)) = self
+            .facts
+            .values
+            .iter()
+            .find(|(r, c, _)| *r == reference && *c == column)
+        else {
+            return typed;
+        };
+        // No value left means no row: keep the declared set rather than an empty one.
+        match crate::values::render(&crate::values::intersect(known, allowed)) {
+            Some(python) => Typed::new(Some(python), typed.sql().map(String::from)),
+            None => typed,
         }
     }
 

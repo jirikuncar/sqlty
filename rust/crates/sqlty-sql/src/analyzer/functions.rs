@@ -183,6 +183,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "PG_BACKEND_PID",
             "NUM_NONNULLS",
             "NUM_NULLS",
+            "GROUPING",
         ],
         Sql("INT"),
     ),

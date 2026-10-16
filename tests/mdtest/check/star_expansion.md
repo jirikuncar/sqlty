@@ -45,7 +45,7 @@ schema = "schema.sql"
 
 ```python
 from sqlty import SQL
-# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
+# error: [select-star] "SELECT * used — expand to explicit column list"
 q = SQL[tuple[int, str, str]]("--sql\nSELECT * FROM users")
 ```
 
@@ -103,9 +103,9 @@ from sqlty import SQL
 
 # error: [select-star] "SELECT u.* used — expand to explicit column list"
 a = SQL[tuple[int, str]]("--sql\nSELECT u.* FROM users u")
-# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
+# error: [select-star] "SELECT * used — expand to explicit column list"
 b = SQL[tuple[int, int, str]]("--sql\nSELECT id, * FROM users")
-# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
+# error: [select-star] "SELECT * used — expand to explicit column list"
 c = SQL[tuple[int, str]]("--sql\nselect  * from users")
 # error: [select-star] "SELECT u.* used — expand to explicit column list"
 d = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, o.id FROM users u JOIN orders o ON o.user_id = u.id")

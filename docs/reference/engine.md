@@ -21,7 +21,9 @@ Wheels include the compiled extension; building from source needs a
 `dialect` picks the sqlparser-rs dialect that reads queries and schemas:
 `postgres` (default), `mysql`, `sqlite`, and any other name sqlparser-rs
 knows (`bigquery`, `snowflake`, `duckdb`, `clickhouse`, `mssql` or `tsql`,
-`redshift`, `oracle`, ...). Unknown names read as generic SQL. Type names are
+`redshift`, `oracle`, ..., and `generic` for generic SQL). An unknown name is an
+error that lists the valid ones: a typo such as `postgress` would otherwise read
+queries as generic SQL. Type names are
 spelled the PostgreSQL way, so `INT64` expands to `BIGINT` and `NUMBER` to
 `DECIMAL`. PostgreSQL, MySQL and SQLite are specified by the test suite; the
 others work on a best-effort basis. The `--dialect` CLI flag accepts the
