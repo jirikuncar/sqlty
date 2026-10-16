@@ -1,6 +1,7 @@
 //! Queries, set operations and projections: the output columns of a statement.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use sqlparser::ast::{
     Expr, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
@@ -10,6 +11,7 @@ use sqlparser::ast::{
 use crate::catalog::fold;
 use crate::diagnostics::{Diagnostics, NameRule};
 use crate::json::JsonShape;
+use crate::values;
 
 use super::dialect::SqlDialect;
 use super::dml::{dml_scope, returning};
@@ -47,6 +49,8 @@ pub struct Column {
     pub nullability: Nullability,
     /// The shape of the JSON value the column holds, when the query spells it out.
     pub json: Option<JsonShape>,
+    /// The values of a `Literal` `python_type`, as data.
+    pub(crate) values: Option<Arc<[values::Value]>>,
 }
 
 impl Column {
@@ -57,6 +61,7 @@ impl Column {
             sql_type: None,
             nullability: Nullability::Unknown,
             json: None,
+            values: None,
         }
     }
 
@@ -67,6 +72,7 @@ impl Column {
 
     /// A column of the given type, with no JSON shape.
     pub(super) fn from_typed(name: String, typed: Typed, nullability: Nullability) -> Self {
+        let values = typed.values.clone();
         let (python_type, sql_type) = typed.into_strings();
         Column {
             name,
@@ -74,12 +80,17 @@ impl Column {
             sql_type,
             nullability,
             json: None,
+            values,
         }
     }
 
     /// The column's type as the analyzer passes it around.
     pub(super) fn typed(&self) -> Typed {
-        Typed::new(self.python_type.clone(), self.sql_type.clone())
+        Typed::with_values(
+            self.python_type.clone(),
+            self.sql_type.clone(),
+            self.values.clone(),
+        )
     }
 
     pub(super) fn is_unknown_star(&self) -> bool {
@@ -297,16 +308,11 @@ impl<'a> Analyzer<'a> {
                     _ => Nullability::Unknown,
                 };
             }
-            let (python_type, sql_type) = common_of(types, self.dialect)
-                .unwrap_or(Typed::UNKNOWN)
-                .into_strings();
-            columns.push(Column {
-                name: format!("column{}", index + 1),
-                python_type,
-                sql_type,
+            columns.push(Column::from_typed(
+                format!("column{}", index + 1),
+                common_of(types, self.dialect).unwrap_or(Typed::UNKNOWN),
                 nullability,
-                json: None,
-            });
+            ));
         }
         Ok(columns)
     }
@@ -320,6 +326,14 @@ impl<'a> Analyzer<'a> {
         from: Option<&[TableWithJoins]>,
     ) -> Inferred<Vec<Column>> {
         let mut columns = Vec::new();
+        let mut lockstep_facts;
+        let facts = if self.dialect == SqlDialect::Postgres && self.set_returning_items(items) > 1 {
+            lockstep_facts = self.facts.clone();
+            lockstep_facts.lockstep = true;
+            &lockstep_facts
+        } else {
+            &self.facts
+        };
         for item in items {
             let (expr, name) = match item {
                 SelectItem::UnnamedExpr(expr) => (expr, column_name(expr)),
@@ -356,14 +370,12 @@ impl<'a> Analyzer<'a> {
             let mut typed = self.expr(expr, scope)?;
             // A bare integer column (`SELECT 1`) stays `int`; only strings are spelled as
             // a `Literal` there. Integer sets still come from `CASE`, `CHECK` and the like.
-            if matches!(
-                crate::values::constant(expr),
-                Some(crate::values::Value::Int(_))
-            ) {
+            if matches!(values::constant(expr), Some(values::Value::Int(_))) {
                 typed = strip(typed, self.dialect);
             }
             let sql_type = typed.sql.clone();
             let known = typed.is_known();
+            let values = typed.values.clone();
             let (python_type, _) = typed.into_strings();
             if !known && self.diag.enabled() && self.diag.explained() == explained && !is_wild(expr)
             {
@@ -372,7 +384,7 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
-            let nullability = self.nullability(expr, scope, &self.facts);
+            let nullability = self.nullability(expr, scope, facts);
             let json = self.column_json(expr, sql_type.as_deref(), scope)?;
             columns.push(Column {
                 name,
@@ -380,6 +392,7 @@ impl<'a> Analyzer<'a> {
                 sql_type: sql_type.map(|ty| ty.to_string()),
                 nullability,
                 json,
+                values,
             });
         }
         Ok(columns)
@@ -528,6 +541,7 @@ mod tests {
             sql_type: None,
             nullability,
             json: None,
+            values: None,
         }
     }
 

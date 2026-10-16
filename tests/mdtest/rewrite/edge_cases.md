@@ -179,3 +179,27 @@ untyped = "sentinel"
 q = "--sql\nSELECT * FROM users"
 # rewritten: q = SQL[UNTYPED]("--sql\nSELECT * FROM users")
 ```
+
+## Strings in a `case` pattern stay unwrapped
+
+A pattern takes literals, not calls, so a query string there is left alone. Its
+`if` guard and its body are expressions, and are wrapped.
+
+```python
+def kind(query: str, n: int) -> str:
+    match query:
+        case "--sql\nSELECT 1::INTEGER AS n" | ("--sql\nSELECT 2::INTEGER AS n"):
+            return "one or two"
+        case [x, "--sql\nSELECT 1::INTEGER AS n"] if x == "--sql\nSELECT 3::INTEGER AS n":
+            return "pair"
+        case _: return "--sql\nSELECT 4::INTEGER AS n"
+case = "--sql\nSELECT 5::INTEGER AS n"
+# rewritten: def kind(query: str, n: int) -> str:
+# rewritten:     match query:
+# rewritten:         case "--sql\nSELECT 1::INTEGER AS n" | ("--sql\nSELECT 2::INTEGER AS n"):
+# rewritten:             return "one or two"
+# rewritten:         case [x, "--sql\nSELECT 1::INTEGER AS n"] if x == SQL[tuple[int]]("--sql\nSELECT 3::INTEGER AS n"):
+# rewritten:             return "pair"
+# rewritten:         case _: return SQL[tuple[int]]("--sql\nSELECT 4::INTEGER AS n")
+# rewritten: case = SQL[tuple[int]]("--sql\nSELECT 5::INTEGER AS n")
+```

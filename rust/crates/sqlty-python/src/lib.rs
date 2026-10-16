@@ -8,7 +8,9 @@
 //! - [`rewriter`]: [`rewriter::rewrite_source_with`] wraps strings in `SQL[T](...)` and
 //!   [`rewriter::strip_source`] takes the wrappers off again.
 //! - [`checker`]: [`checker::check_source`] lints the source into [`checker::Diagnostic`]s.
-//! - [`fixer`]: [`fixer::fix_source`] applies the fixes of the fixable rules.
+//! - [`fixer`]: [`fixer::fix_source`] applies the fixes the checker's diagnostics carry.
+//! - [`edit`]: the [`edit::Edit`]s that rewriting, stripping and fixing make, applied in
+//!   one pass by [`edit::apply_edits`].
 //! - [`rules`]: the lint [`rules::Rule`]s, their severities and the user's overrides.
 //! - [`options`]: the settings every entry point shares.
 //!
@@ -29,6 +31,7 @@
 //! ```
 
 pub mod checker;
+pub mod edit;
 pub mod fixer;
 pub mod options;
 pub mod rewriter;
