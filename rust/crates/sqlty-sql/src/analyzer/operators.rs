@@ -28,7 +28,12 @@ impl<'a> Analyzer<'a> {
             | PGRegexNotIMatch | PGLikeMatch | PGILikeMatch | PGNotLikeMatch | PGNotILikeMatch
             | PGStartsWith | AtAt | AtArrow | ArrowAt | AtQuestion | Question | QuestionAnd
             | QuestionPipe | Overlaps => sql("BOOLEAN"),
+            // SQLite's `->>` gives the element's SQL value: an integer, a real or text.
+            LongArrow if self.dialect == SqlDialect::Sqlite => Ok(Typed::python_only("typing.Any")),
             LongArrow | HashLongArrow => sql("TEXT"),
+            // The element as JSON: text in SQLite, a `JSON` value in MySQL.
+            Arrow if self.dialect == SqlDialect::Sqlite => sql("TEXT"),
+            Arrow if self.dialect == SqlDialect::MySql => sql("JSON"),
             Arrow | HashArrow | HashMinus if self.dialect == SqlDialect::Postgres => {
                 let json = self.expr(left, scope)?.sql() == Some("JSON");
                 sql(if json && *op != HashMinus {
