@@ -641,13 +641,16 @@ Fix: use query parameters instead of interpolation.
 ### tstring-skipped
 
 Default: warn. A t-string ([PEP 750](https://peps.python.org/pep-0750/)) with
-`--sql` and a field that changes the SQL itself: a format spec, such as
-psycopg's `{name:i}` identifier, or a conversion. A t-string of plain value
-fields is rewritten as `SQLTemplate[T](t"...")` instead.
+`--sql` and a field that changes the SQL in a way sqlty can't follow: a
+conversion, a format spec other than psycopg's, or, in a module that uses
+psycopg, a `{name:i}` identifier in a query that returns rows. A t-string whose
+fields sqlty can read is rewritten as `SQLTemplate[T](t"...")` instead; see
+[t-strings](../guide/writing-queries.md#t-strings).
 
 ```python
-# error: [tstring-skipped] "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
-q = t"--sql\nSELECT {column:i}::INTEGER FROM users"
+user_id = 1
+# error: [tstring-skipped] "t-string with --sql prefix skipped (the field {user_id!r} changes the SQL)"
+q = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id!r}"
 ```
 
 A concatenation that holds an f- or t-string anywhere is reported the same way.
