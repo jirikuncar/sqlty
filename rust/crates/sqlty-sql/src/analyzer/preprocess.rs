@@ -38,6 +38,15 @@ pub(super) static POSTGRES_LOCK_FIXES: LazyLock<[(Regex, &str); 3]> = LazyLock::
     ]
 });
 
+/// PostgreSQL `type 'string'` literals sqlparser only reads for its built-in types, in
+/// groups 1 and 2; literals, quoted names and comments are matched to be skipped.
+pub(super) static POSTGRES_TYPED_STRING: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:\b(bpchar|cidr|citext|daterange|hstore|inet|int4range|int8range|jsonpath|macaddr8?|money|name|numrange|oid|pg_lsn|tsrange|tstzrange|txid_snapshot))\s+('(?:[^']|'')*')"#,
+    )
+    .unwrap()
+});
+
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
 pub(super) static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
@@ -94,7 +103,7 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
 }
 
 /// `sql` as sqlparser should read it, in every dialect: the `--sql` marker line is
-/// dropped (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
+/// dropped, PostgreSQL's `cidr '...'` and similar literals become casts (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
 /// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
 /// literals and comments are not skipped; any query this mangles fails to parse
 /// and stays uninferred rather than mistyped.
@@ -102,11 +111,17 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = SQL_MARKER.replace(sql, "");
     let sql = if dialect == SqlDialect::Postgres {
         let sql = drop_conflict_predicate(&sql);
-        POSTGRES_LOCK_FIXES
+        let sql = POSTGRES_LOCK_FIXES
             .iter()
             .fold(sql, |sql, (pattern, replacement)| {
                 pattern.replace_all(&sql, *replacement).into_owned()
+            });
+        POSTGRES_TYPED_STRING
+            .replace_all(&sql, |caps: &Captures| match (caps.get(1), caps.get(2)) {
+                (Some(ty), Some(value)) => format!("CAST({} AS {})", value.as_str(), ty.as_str()),
+                _ => caps[0].to_string(),
             })
+            .into_owned()
     } else {
         sql.into_owned()
     };

@@ -3,7 +3,8 @@
 `sqlty rewrite` writes `SQL[tuple[...]]`. You can replace the tuple with a
 named row type, and `sqlty check` validates it against the query columns.
 Supported forms are `TypedDict`, `NamedTuple`, `@dataclass` and Pydantic
-`BaseModel`.
+`BaseModel`. `TypedDict` and `NamedTuple` work in their functional forms too:
+`TypedDict("User", {"id": int})` and `NamedTuple("User", [("id", int)])`.
 
 ## Named rows
 

@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # sqlty needs its compiled extension, so every supported platform gets a wheel;
 # other platforms build from the sdist with a Rust toolchain.
 jobs:

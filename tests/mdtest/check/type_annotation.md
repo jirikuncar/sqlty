@@ -57,6 +57,35 @@ class User(TypedDict):
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
+## Binary columns are bytes
+
+`BYTEA` and `BLOB` columns are `bytes`, checked like any other type.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import NamedTuple, TypedDict
+from sqlty import SQL
+
+class File(TypedDict):
+    data: int
+
+class Blob(NamedTuple):
+    data: str
+
+class Raw(TypedDict):
+    data: bytes
+
+# error: [column-type-mismatch] "File.data is int but query column 'data' infers bytes"
+a = SQL[File]("--sql\nSELECT 'x'::BYTEA AS data")
+# error: [column-type-mismatch] "Blob.data is str but query column 'data' infers bytes"
+b = SQL[Blob]("--sql\nSELECT 'x'::BYTEA AS data")
+c = SQL[Raw]("--sql\nSELECT 'x'::BYTEA AS data")
+```
+
 ## Column name mismatch
 
 ```toml
@@ -158,4 +187,38 @@ class Row(TypedDict):
 
 # error: [column-count-mismatch] "Row has 1 fields but query returns 2 columns"
 q = SQL[Row]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+## Functional TypedDict and NamedTuple
+
+The functional forms are checked like the class forms.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+import typing
+from typing import NamedTuple, TypedDict
+from sqlty import SQL
+
+R = TypedDict("R", {"a": str})
+N = NamedTuple("N", [("a", str)])
+P = typing.NamedTuple("P", (("a", int), ("b", str)))
+Partial = TypedDict("Partial", {"a": int, "b": str}, total=False)
+
+class Child(R):
+    b: int
+
+# error: [column-type-mismatch] "R.a is str but query column 'a' infers int"
+q1 = SQL[R]("--sql\nSELECT a::INTEGER AS a")
+# error: [column-type-mismatch] "N.a is str but query column 'a' infers int"
+q2 = SQL[N]("--sql\nSELECT a::INTEGER AS a")
+# error: [column-count-mismatch] "P has 2 fields but query returns 1 columns"
+q3 = SQL[P]("--sql\nSELECT a::INTEGER AS a")
+q4 = SQL[P]("--sql\nSELECT 1::INTEGER AS a, 'x'::TEXT AS b")
+q5 = SQL[Partial]("--sql\nSELECT 1::INTEGER AS a")
+# error: [column-type-mismatch] "Child.b is int but query column 'b' infers str"
+q6 = SQL[Child]("--sql\nSELECT 'x'::TEXT AS a, 'y'::TEXT AS b")
 ```
