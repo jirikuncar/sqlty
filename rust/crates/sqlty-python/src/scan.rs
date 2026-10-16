@@ -55,10 +55,6 @@ impl<'s> Scan<'s> {
         &self.text
     }
 
-    pub(crate) fn into_source(self) -> Cow<'s, str> {
-        self.text
-    }
-
     /// The call `group` sits in, if any.
     pub(crate) fn enclosing_call(&self, group: &Group) -> Option<&Call> {
         group.enclosing.map(|i| &self.calls[i])
