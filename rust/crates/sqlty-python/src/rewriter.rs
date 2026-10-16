@@ -530,25 +530,10 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let untyped_used = source
         .lines()
         .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
-    // A line that starts inside a string (a docstring's example) is text, not an import.
-    let strings: Vec<Range<usize>> = tokenize(source)
-        .into_iter()
-        .filter(|token| token.kind == Kind::Str)
-        .map(|token| token.span)
-        .collect();
-    let in_string = |at: usize| {
-        let before = strings.partition_point(|span| span.start < at);
-        before > 0 && strings[before - 1].end > at
-    };
-    let mut at = 0;
-
-    source
-        .split_inclusive('\n')
-        .filter(|line| {
-            let start = at;
-            at += line.len();
+    lines_in_strings(source)
+        .filter(|&(line, quoted)| {
             let line = line.trim_end();
-            in_string(start)
+            quoted
                 || !((Some(line) == untyped_import && !untyped_used)
                     || (Some(line) == template_import && !source.contains(&template_marker))
                     || (line == istyle.import_line
@@ -559,7 +544,25 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
                             && !source.contains(&format!("{module}."))
                     }))
         })
+        .map(|(line, _)| line)
         .collect()
+}
+
+/// Each line of `source` with its line ending, and whether it starts inside a string
+/// literal (the lines of a docstring after its first): text, not code.
+fn lines_in_strings(source: &str) -> impl Iterator<Item = (&str, bool)> {
+    let strings: Vec<Range<usize>> = tokenize(source)
+        .into_iter()
+        .filter(|token| token.kind == Kind::Str)
+        .map(|token| token.span)
+        .collect();
+    let mut at = 0;
+    source.split_inclusive('\n').map(move |line| {
+        let start = at;
+        at += line.len();
+        let before = strings.partition_point(|span| span.start < start);
+        (line, before > 0 && strings[before - 1].end > start)
+    })
 }
 
 /// `(name, binding)` pairs of top-level `from sqlty import ...` statements, read from
@@ -623,9 +626,9 @@ fn flush(names: &mut Vec<&str>, pairs: &mut Vec<(String, String)>) {
     names.clear();
 }
 
-/// Check for a top-level import; indented lines (docstrings, blocks) don't count.
+/// Check for a top-level import; indented lines (blocks) and lines in strings don't count.
 pub(crate) fn has_import(source: &str, import_str: &str) -> bool {
-    source.lines().any(|line| line.trim_end() == import_str)
+    lines_in_strings(source).any(|(line, quoted)| !quoted && line.trim_end() == import_str)
 }
 
 /// Offset where imports go: after shebang, coding cookie, docstring and `__future__`.

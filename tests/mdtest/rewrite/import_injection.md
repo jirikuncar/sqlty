@@ -269,3 +269,18 @@ q = SQL[tuple[str]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
 # fixed: from sqlty import SQL
 # fixed: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
 ```
+
+## An import in a docstring is no import
+
+```python
+"""Example:
+import datetime
+"""
+q = "--sql\nSELECT now() AS t"
+# rewritten-file: """Example:
+# rewritten-file: import datetime
+# rewritten-file: """
+# rewritten-file: import datetime
+# rewritten-file: from sqlty import SQL
+# rewritten-file: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT now() AS t")
+```
