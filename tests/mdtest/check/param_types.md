@@ -68,6 +68,44 @@ ok_limit = fetch_all("SELECT id FROM users LIMIT %s", (2.0,), int)
 # error:
 ```
 
+### Booleans are not numbers in PostgreSQL
+
+PostgreSQL has no implicit cast between `boolean` and the number types, and the
+drivers send `True` as a `boolean`, so `age = %s` with `True` fails on the
+server.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], params: tuple[object, ...], form: type[T], /) -> list[T]: ...
+
+# error: [param-type-mismatch] "parameter 1 expects int, got bool"
+age = fetch_all("SELECT id FROM users WHERE age = %s", (True,), int)
+# error: [param-type-mismatch] "parameter 1 expects bool, got int"
+flag = fetch_all("SELECT id FROM users WHERE (age > 1) = %s", (1,), int)
+ok = fetch_all("SELECT id FROM users WHERE (age > 1) = %s", (False,), int)
+```
+
+#### MySQL and SQLite take either
+
+They read `TRUE` as `1`.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], params: tuple[object, ...], form: type[T], /) -> list[T]: ...
+
+# error:
+age = fetch_all("SELECT id FROM users WHERE age = %s", (True,), int)
+```
+
 ### An explicit cast takes any argument
 
 The server converts the value, so only `None` for a `NOT NULL` target is reported.
@@ -93,6 +131,7 @@ from sqlty import SQL
 
 def fetch_all[T](query: Annotated[LiteralString, SQL], params: tuple[object, ...], form: type[T], /) -> list[T]: ...
 
+# error: [param-type-mismatch] "parameter 1 expects int, got bool"
 ok = fetch_all("SELECT id FROM users WHERE id = %s AND born = %s", (True, datetime.now()), int)
 # error: [param-type-mismatch] "parameter 2 expects datetime.date, got decimal.Decimal"
 bad = fetch_all("SELECT id FROM users WHERE id = %s AND born = %s", (1, Decimal("1")), int)
