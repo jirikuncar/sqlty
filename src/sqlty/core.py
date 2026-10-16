@@ -363,7 +363,7 @@ class _Check:
         self._unparsed: dict[str, str] = {}
         self.rows = [self._unparse(call.row) if call.row else None for call in self.calls]
         named = [
-            (call.line, row, call.query)
+            (call.line, row, _bound(call, dialect))
             for call, row in zip(self.calls, self.rows, strict=True)
             if row
         ]
@@ -498,6 +498,40 @@ def _check_structural(ctx: _Check) -> None:
                 ctx.row_usage.redundant.append(((info.module, info.name, field), diagnostic))
 
 
+_PSYCOPG_PLACEHOLDER = re.compile(r"%%|%\((?P<name>[^)]+)\)s|%s")
+
+
+def _bound(call: HelperCall, dialect: str) -> str | None:
+    """The query of ``call`` with the placeholders it binds to non-``None`` values marked so.
+
+    A bare placeholder reads as a value that may be NULL, since a caller may bind ``None``.
+    Where the call passes an argument whose type excludes ``None`` (a literal, an
+    annotated variable), the placeholder is respelled as one whose nullability is not
+    judged, so the column or JSON member it fills is not reported as nullable.
+    """
+    if call.query is None or not call.params:
+        return call.query
+    non_null = {arg.key for arg in call.params if arg.type not in (None, "None")}
+    if not non_null:
+        return call.query
+    marker = "$0" if dialect.lower() in ("postgres", "postgresql") else "?"
+    position = 0
+
+    def respell(match: re.Match[str]) -> str:
+        nonlocal position
+        if match[0] == "%%":
+            return match[0]
+        key: int | str
+        if match["name"] is not None:
+            key = match["name"]
+        else:
+            position += 1
+            key = position
+        return marker if key in non_null else match[0]
+
+    return _PSYCOPG_PLACEHOLDER.sub(respell, call.query)
+
+
 def _row_type_of(annotation: ast.expr | None, type_defs: Mapping[str, TypeInfo]) -> TypeInfo | None:
     """The row type in ``type_defs`` an annotation names, through ``X | None`` and ``Optional[X]``."""
     match annotation:
@@ -518,7 +552,7 @@ def _check_values(ctx: _Check) -> None:
     for call, row in zip(ctx.calls, ctx.rows, strict=True):
         if call.row is None or row is None or row in ctx.type_defs:
             continue
-        if (columns := _columns(call.query, ctx.dialect, ctx.schema_sql)) is None:
+        if (columns := _columns(_bound(call, ctx.dialect), ctx.dialect, ctx.schema_sql)) is None:
             continue
         if row not in shapes:
             shapes[row] = _row_shape(call.row, row, call.typing_aliases)
