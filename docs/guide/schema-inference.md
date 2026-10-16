@@ -380,8 +380,12 @@ triggers, partitions, tablespaces) never do this. `sqlty check` warns about each
 table or type it had to leave unknown.
 `CREATE TABLE ... AS`, `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
-tables as they are where the view is created. MySQL and SQLite read `CREATE`
-statements only.
+tables as they are where the view is created.
+
+MySQL and SQLite follow `ALTER TABLE` (`ADD`, `DROP` and `RENAME COLUMN`,
+`RENAME TO`, MySQL's `MODIFY` and `CHANGE` with `FIRST` / `AFTER`) and `DROP`
+too; other dialects read `CREATE` statements only. A MySQL `MODIFY` or `CHANGE`
+replaces the whole column definition, `NOT NULL` and `ENUM` labels included.
 
 ## Where the schema comes from
 

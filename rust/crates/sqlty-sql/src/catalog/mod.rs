@@ -482,10 +482,27 @@ mod tests {
     fn test_other_dialects_ignore_postgres_statements() {
         let (c, _) = load(
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
-            "mysql",
+            "duckdb",
         );
         assert_eq!(c.table("t").map(<[SchemaColumn]>::len), Some(1));
         assert!(c.table("pg_class").is_none());
+    }
+
+    #[test]
+    fn test_mysql_and_sqlite_follow_alter_and_drop() {
+        for dialect in ["mysql", "sqlite"] {
+            let (c, _) = load(
+                "CREATE TABLE t (a INT); ALTER TABLE t ADD COLUMN b INT; \
+                 CREATE TABLE u (a INT); DROP TABLE u;",
+                dialect,
+            );
+            assert_eq!(
+                c.table("t").map(<[SchemaColumn]>::len),
+                Some(2),
+                "{dialect}"
+            );
+            assert!(c.table("u").is_none(), "{dialect}");
+        }
     }
 
     fn assert_fast(sql: &str) -> Catalog {
