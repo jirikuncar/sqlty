@@ -774,7 +774,7 @@ impl<'a> Analyzer<'a> {
         if name == "CURRENT_SETTING" && args.len() == 2 {
             return Nullability::Nullable;
         }
-        if info.is_some_and(|info| info.always_nullable) {
+        if info.is_some_and(|info| info.always_nullable(self.dialect)) {
             return Nullability::Nullable;
         }
         match name.as_str() {

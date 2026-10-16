@@ -432,9 +432,32 @@ stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
 # rewritten: stats = SQL[tuple[int, float | None, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
-SQLite accepts free-form type names such as `UNSIGNED BIG INT`; sqlty does
-not, and skips a table that uses one (see
-[Engine](../reference/engine.md#known-gaps)).
+#### Free-form type names
+
+SQLite accepts any type name, `UNSIGNED BIG INT` or `VARYING CHARACTER(255)`
+included, and derives the column's
+[type affinity](https://www.sqlite.org/datatype3.html#determination_of_column_affinity)
+from it. sqlty does the same for a name it has no mapping for: one containing
+`INT` is `int`; `CHAR`, `CLOB` or `TEXT` is `str`; `BLOB` is `bytes`; `REAL`,
+`FLOA` or `DOUB` is `float`; any other is `NUMERIC` (`float`). A column with no
+type, or `ANY`, can hold any value and is not typed.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE legacy (id UNSIGNED BIG INT NOT NULL, code VARYING CHARACTER(10), price MONEYISH, raw);
+```
+
+```python
+legacy = "--sql\nSELECT id, code, price FROM legacy"
+# rewritten: legacy = SQL[tuple[int, str | None, float | None]]("--sql\nSELECT id, code, price FROM legacy")
+```
 
 ### MySQL
 

@@ -27,6 +27,27 @@ spelled the PostgreSQL way, so `INT64` expands to `BIGINT` and `NUMBER` to
 others work on a best-effort basis. The `--dialect` CLI flag accepts the
 first three; set others with `dialect` in `pyproject.toml`.
 
+## Functions
+
+A call to a built-in function is typed by the function's rules in the query's
+dialect; an unknown function leaves its column untyped (see
+[`unknown-function`](rules.md#unknown-function)). PostgreSQL follows its
+"Functions and Operators" chapter. MySQL and SQLite type these:
+
+| Group | MySQL | SQLite |
+|---|---|---|
+| Control flow | `IF`, `IFNULL` | `IIF`, `IFNULL` |
+| Dates and times | `NOW`, `SYSDATE`, `UTC_TIMESTAMP`, `CURDATE`, `CURTIME`, `DATE`, `TIME`, `TIMESTAMP`, `STR_TO_DATE`, `FROM_UNIXTIME`, `CONVERT_TZ`, `LAST_DAY`, `MAKEDATE`, `MAKETIME`, `SEC_TO_TIME`, `TIMEDIFF`, `DATE_FORMAT`, `TIME_FORMAT`, `DAYNAME`, `MONTHNAME`, `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND`, `WEEK`, `QUARTER`, `DATEDIFF`, `TIMESTAMPDIFF`, `TO_DAYS`, `TIME_TO_SEC`, ... | `date`, `time`, `datetime`, `strftime`, `timediff` (text), `julianday`, `unixepoch` |
+| Strings | `CONCAT_WS`, `LPAD`, `RPAD`, `LEFT`, `RIGHT`, `REPEAT`, `REVERSE`, `LTRIM`, `RTRIM`, `UCASE`, `LCASE`, `HEX`, `MD5`, `SHA1`, `SHA2`, `FORMAT`, `QUOTE`, `SUBSTRING_INDEX`, `INSERT`, `ELT`, `UUID`, `LOCATE`, `INSTR`, `ASCII`, `FIELD`, `FIND_IN_SET`, ... | `ltrim`, `rtrim`, `hex`, `quote`, `printf`, `format`, `char`, `typeof`, `concat_ws`, `instr`, `unicode` |
+| Numbers | `ABS`, `ROUND`, `TRUNCATE`, `CEIL`, `FLOOR`, `MOD`, `SIGN`, `SQRT`, `EXP`, `LN`, `LOG`, `POW`, trigonometry, `PI`, `RAND` | `abs`, `round`, `ceil`, `floor`, `trunc`, `mod`, `sign`, `random`, `total`, the math functions |
+| JSON | `JSON_OBJECT`, `JSON_ARRAY`, `JSON_ARRAYAGG`, `JSON_OBJECTAGG`, `JSON_EXTRACT`, `JSON_SET`, ... (`JSON`), `JSON_UNQUOTE`, `JSON_TYPE`, `JSON_LENGTH`, `JSON_VALID`, `JSON_CONTAINS` | `json`, `json_object`, `json_array`, `json_group_array`, `json_set`, ... (text), `json_array_length`, `json_valid` |
+
+The functions common to every dialect (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
+`COALESCE`, `LENGTH`, `UPPER`, `LOWER`, `SUBSTR`, `REPLACE`, ...) are typed
+everywhere. The full lists are in `rust/crates/sqlty-sql/src/analyzer/dialect_functions.rs`;
+`tests/mdtest/mysql/functions.md` and `tests/mdtest/sqlite/functions.md` show
+each group.
+
 ## Placeholders
 
 A placeholder is a value of unknown type, so it does not stop inference.
@@ -48,12 +69,7 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
     MariaDB read `--` as a comment only before whitespace. Use `-- sql`
     instead; see [`mysql-sql-marker`](rules.md#mysql-sql-marker).
 
-## Known gaps
-
-- **SQLite free-form type names.** SQLite accepts any type name and derives an
-  affinity (sqlite.org/datatype3.html section 3.1), but `UNSIGNED BIG INT`,
-  `VARYING CHARACTER(255)` or `NATIVE CHARACTER(70)` make sqlty skip the
-  table.
+## Changes from the sqlglot backend
 
 Earlier versions also shipped a pure-Python backend built on
 [sqlglot](https://sqlglot.com). Removing it changed:

@@ -14,6 +14,7 @@ use sqlparser::ast::{ArrayElemTypeDef, DataType};
 
 mod api;
 mod dialect;
+mod dialect_functions;
 mod dml;
 mod expr;
 mod functions;
@@ -137,6 +138,8 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("INTERVAL", "datetime.timedelta"),
         ("JSON", ANY),
         ("JSONB", ANY),
+        // psycopg loads an anonymous record as a tuple (of strings, in text format).
+        ("RECORD", "tuple[typing.Any, ...]"),
         ("UUID", "uuid.UUID"),
         ("BYTEA", "bytes"),
         ("BLOB", "bytes"),
@@ -305,6 +308,16 @@ pub(crate) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
 
 /// What the dialect's usual drivers load exact decimals as: SQLite and Oracle drivers
 /// return floats, the others `decimal.Decimal`.
+/// Every Python type a SQL type maps to, one union member at a time (`int`,
+/// `ipaddress.IPv4Address`, ...): what the row-type checks must know.
+pub fn python_types() -> std::collections::BTreeSet<&'static str> {
+    SQL_TO_PYTHON_TYPE
+        .values()
+        .flat_map(|python| python.split(" | "))
+        .chain([DECIMAL, "float"])
+        .collect()
+}
+
 fn decimal_type(dialect: SqlDialect) -> &'static str {
     match dialect {
         SqlDialect::Sqlite | SqlDialect::Other("oracle") => "float",
@@ -326,6 +339,34 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     match base {
         "ARRAY" => Some("list".to_string()),
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
-        _ => SQL_TO_PYTHON_TYPE.get(base).map(ToString::to_string),
+        _ => SQL_TO_PYTHON_TYPE
+            .get(base)
+            .map(ToString::to_string)
+            .or_else(|| (dialect == SqlDialect::Sqlite).then(|| sqlite_affinity(base))?),
     }
+}
+
+/// The Python type of SQLite's type affinity for a type name it has no mapping for, by the
+/// rules of <https://www.sqlite.org/datatype3.html#determination_of_column_affinity>; no
+/// type and `ANY` can hold anything.
+fn sqlite_affinity(name: &str) -> Option<String> {
+    let name = name.to_ascii_uppercase();
+    let has = |part: &str| name.contains(part);
+    Some(
+        // `ANY` holds any value in a STRICT table.
+        if name.is_empty() || name == "ANY" {
+            return None;
+        } else if has("INT") {
+            "int"
+        } else if has("CHAR") || has("CLOB") || has("TEXT") {
+            "str"
+        } else if has("BLOB") {
+            "bytes"
+        } else if has("REAL") || has("FLOA") || has("DOUB") {
+            "float"
+        } else {
+            decimal_type(SqlDialect::Sqlite)
+        }
+        .to_string(),
+    )
 }
