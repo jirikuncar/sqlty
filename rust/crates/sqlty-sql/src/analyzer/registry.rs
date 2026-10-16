@@ -249,6 +249,13 @@ const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
 /// Functions that can return NULL for non-null arguments.
 const ALWAYS_NULLABLE: &[&str] = &[
     "NULLIF",
+    "ARRAY_DIMS",
+    "ARRAY_LOWER",
+    "ARRAY_UPPER",
+    "INET_CLIENT_ADDR",
+    "INET_CLIENT_PORT",
+    "INET_SERVER_ADDR",
+    "INET_SERVER_PORT",
     "REGEXP_MATCH",
     "REGEXP_SUBSTR",
     "REGEXP_INSTR",

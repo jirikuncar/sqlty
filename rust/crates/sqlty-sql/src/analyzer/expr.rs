@@ -419,6 +419,25 @@ impl<'a> Analyzer<'a> {
         let arg = args.first().copied();
         match name.as_str() {
             "COUNT" => Ok(from_sql_type("BIGINT", self.dialect)),
+            // Ordered-set aggregates: the type of the `WITHIN GROUP (ORDER BY x)` value.
+            "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE"
+                if self.dialect == SqlDialect::Postgres && !func.within_group.is_empty() =>
+            {
+                let ordered = self.expr(&func.within_group[0].expr, scope)?;
+                let typed = match name.as_str() {
+                    "PERCENTILE_CONT" if operand_type(&ordered) == Some("INTERVAL") => ordered,
+                    "PERCENTILE_CONT" => from_sql_type("DOUBLE", self.dialect),
+                    _ => strip(ordered, self.dialect),
+                };
+                // An array of fractions gives an array of percentiles.
+                Ok(match (arg, typed.sql()) {
+                    (Some(Expr::Array(_)), Some(sql)) if name != "MODE" => {
+                        from_sql_type(&format!("ARRAY<{sql}>"), self.dialect)
+                    }
+                    (Some(Expr::Array(_)), _) if name != "MODE" => Typed::UNKNOWN,
+                    _ => typed,
+                })
+            }
             "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
             _ => match self.returns(&name) {
                 Some(returns) => self.function_type(returns, &args, scope),

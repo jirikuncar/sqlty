@@ -178,3 +178,11 @@ SELECT BIT_AND(id) AS a, BIT_OR(id) AS b, STD(price) AS c FROM events
 -- columns: b: int (BIGINT)
 -- columns: c: float | None (DOUBLE)
 ```
+
+`->` is `JSON_EXTRACT` and `->>` is `JSON_UNQUOTE(JSON_EXTRACT(...))`.
+
+```sql
+SELECT doc -> '$.a' AS a, doc ->> '$.a' AS b FROM events
+-- columns: a: typing.Any (JSON)
+-- columns: b: str | None (TEXT)
+```

@@ -764,6 +764,10 @@ impl<'a> Analyzer<'a> {
         {
             return Nullability::NonNull;
         }
+        // SQLite's `total` is 0.0 over no rows.
+        if name == "TOTAL" && self.dialect == SqlDialect::Sqlite {
+            return Nullability::NonNull;
+        }
         // SQLite's two-argument MIN and MAX are scalar functions.
         if matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2 {
             return any_nullable(args.iter().map(|arg| of(arg)));

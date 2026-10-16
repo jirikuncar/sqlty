@@ -302,10 +302,11 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
             "DEGREES",
             "RADIANS",
             "PI",
+            "MOD",
         ],
         Sql("DOUBLE"),
     ),
-    (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC", "MOD"], Arg(0)),
+    (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC"], Arg(0)),
 ];
 
 /// SQLite date functions give NULL for a value that is not a date.
