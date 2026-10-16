@@ -270,6 +270,44 @@ q = SQL[tuple[str]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
 # fixed: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
 ```
 
+## `from datetime import datetime` shadows the module
+
+The module's name is the class here, so row types use the names the module
+imports, and the classes it does not import are imported by name (under an
+alias when the name is taken).
+
+```python
+import time
+from datetime import datetime
+
+q = "--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d"
+print(time.time(), datetime.now())
+# rewritten-file: from sqlty import SQL
+# rewritten-file: from datetime import date
+# rewritten-file: from datetime import time as datetime_time
+# rewritten-file: import time
+# rewritten-file: from datetime import datetime
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[datetime, datetime_time, date]]("--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d")
+# rewritten-file: print(time.time(), datetime.now())
+```
+
+### Stripped back
+
+```python
+from sqlty import SQL
+from datetime import date
+from datetime import time as datetime_time
+import time
+from datetime import datetime
+
+q = SQL[tuple[datetime, datetime_time, date]]("--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d")
+# stripped: import time
+# stripped: from datetime import datetime
+# stripped:
+# stripped: q = "--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d"
+```
+
 ## An import in a docstring is no import
 
 ```python
