@@ -39,7 +39,7 @@ query-param = "query"
 | [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
-| [`json-types`](#json-types) | `"any"`, `"typeddict"` | `"any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
+| [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
@@ -160,7 +160,7 @@ strings. `"sentinel"` wraps them as `SQL[UNTYPED](...)`. CLI:
 
 ## `json-types`
 
-`"any"` (default) types a JSON column `typing.Any`. `"typeddict"` makes
+`"typing.Any"` (default) types a JSON column `typing.Any`. `"typing.TypedDict"` makes
 `rewrite` and `check --fix` type a JSON column whose shape the query spells out
 with generated `TypedDict`s, written after the imports under a
 `# sqlty: generated` line. `strip` removes them. See
@@ -168,7 +168,7 @@ with generated `TypedDict`s, written after the imports under a
 
 ```toml
 [tool.sqlty]
-json-types = "typeddict"
+json-types = "typing.TypedDict"
 ```
 
 ## `functions`

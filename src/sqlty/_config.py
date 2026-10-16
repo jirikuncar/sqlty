@@ -84,8 +84,8 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "Whether queries of unknown row type are wrapped as `SQL[UNTYPED]`",
     ),
     "json-types": KeyDoc(
-        '`"any"`, `"typeddict"`',
-        '`"any"`',
+        '`"typing.Any"`, `"typing.TypedDict"`',
+        '`"typing.Any"`',
         "`rewrite`, `check --fix`",
         "How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict`",
     ),
@@ -354,7 +354,9 @@ class SQLTyConfig(TypedDict, total=False):
     overrides: list[RuleOverride]  # rule severities for files matching globs
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
-    json_types: str  # "any" (default) or "typeddict": generated TypedDicts for JSON columns
+    json_types: (
+        str  # "typing.Any" (default) or "typing.TypedDict": generated TypedDicts for JSON columns
+    )
     type_modules: list[str]  # modules whose imports may run to resolve row types
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above

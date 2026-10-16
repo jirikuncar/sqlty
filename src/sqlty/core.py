@@ -213,11 +213,11 @@ def rewrite_source(
     import_style: str | None = None,
     untyped: bool = False,
     keep_lines: bool = False,
-    json_types: str = "any",
+    json_types: str = "typing.Any",
 ) -> str:
     r"""Wrap each ``--sql`` string in ``SQL[T](...)``, ``T`` the row type it infers.
 
-    With ``json_types="typeddict"``, a JSON column of known shape gets a generated
+    With ``json_types="typing.TypedDict"``, a JSON column of known shape gets a generated
     ``TypedDict`` instead of ``typing.Any``.
 
     Example:
@@ -236,7 +236,7 @@ def rewrite_source(
         untyped=untyped,
         keep_lines=keep_lines,
     )
-    if json_types == "typeddict" and rewritten != source:
+    if json_types == "typing.TypedDict" and rewritten != source:
         from sqlty._json_types import add_json_types
 
         rewritten = add_json_types(
@@ -268,7 +268,7 @@ def fix_source(
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
-    json_types: str = "any",
+    json_types: str = "typing.Any",
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
@@ -297,7 +297,7 @@ def fix_source(
         }
         or None,
     )
-    if json_types == "typeddict" and fixed != parsed.text:
+    if json_types == "typing.TypedDict" and fixed != parsed.text:
         from sqlty._json_types import add_json_types
 
         fixed = add_json_types(

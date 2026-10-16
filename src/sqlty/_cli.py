@@ -887,7 +887,7 @@ class Settings:
     schema: Schema | None = None
     import_style: str | None = None
     untyped: bool = False
-    json_types: str = "any"
+    json_types: str = "typing.Any"
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
@@ -968,10 +968,10 @@ class SettingsResolver:
             raise ConfigError(
                 f"{self.source.origin('untyped', label)}: untyped must be 'skip' or 'sentinel'"
             )
-        json_types = config.get("json_types", "any")
-        if json_types not in ("any", "typeddict"):
+        json_types = config.get("json_types", "typing.Any")
+        if json_types not in ("typing.Any", "typing.TypedDict"):
             raise ConfigError(
-                f"{self.source.origin('json_types', label)}: json-types must be 'any' or 'typeddict'"
+                f"{self.source.origin('json_types', label)}: json-types must be 'typing.Any' or 'typing.TypedDict'"
             )
         import_style = config.get("import_style")
         try:

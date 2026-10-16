@@ -31,7 +31,7 @@ class Run:
         self.schema_sql: str | None = section.schema_sql
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
-        self.json_types: str = settings.get("json-types", "any")
+        self.json_types: str = settings.get("json-types", "typing.Any")
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
 
@@ -248,7 +248,7 @@ _GENERATED = re.compile(
 
 
 def without_generated(source: str) -> str:
-    """``source`` without the classes ``json-types = "typeddict"`` generates, which are
+    """``source`` without the classes ``json-types = "typing.TypedDict"`` generates, which are
     new code with comments and strings of their own."""
     return _GENERATED.sub("", source)
 

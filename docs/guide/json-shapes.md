@@ -161,14 +161,14 @@ JSON functions return text and have no shape.
 
 ## Generated TypedDicts
 
-`sqlty rewrite` types a JSON column `typing.Any`. With `json-types = "typeddict"`, a
+`sqlty rewrite` types a JSON column `typing.Any`. With `json-types = "typing.TypedDict"`, a
 column of known shape gets a type of its own instead: a `TypedDict` per object, `list[...]`
 for arrays, `dict[str, ...]` for maps and `| None` where a value can be NULL.
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-json-types = "typeddict"
+json-types = "typing.TypedDict"
 ```
 
 ```python

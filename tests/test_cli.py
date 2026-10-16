@@ -1133,17 +1133,17 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
 
 
-def test_json_types_must_be_any_or_typeddict(tmp_path, monkeypatch, capsys) -> None:
+def test_json_types_must_name_a_type(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\njson-types = "pydantic"\n')
     (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1::INTEGER AS n"\n')
     monkeypatch.chdir(tmp_path)
     code, _, err = _run(["rewrite", "."], capsys)
     assert code == 2
-    assert "json-types must be 'any' or 'typeddict'" in err
+    assert "json-types must be 'typing.Any' or 'typing.TypedDict'" in err
 
 
 def test_rewrite_generates_typeddicts_for_json_columns(tmp_path, monkeypatch, capsys) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\njson-types = "typeddict"\n')
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\njson-types = "typing.TypedDict"\n')
     path = tmp_path / "q.py"
     path.write_text("q = \"--sql\\nSELECT jsonb_build_object('n', 1) AS doc\"\n")
     monkeypatch.chdir(tmp_path)

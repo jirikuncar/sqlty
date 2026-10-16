@@ -1,11 +1,11 @@
 # Generated TypedDicts for JSON columns
 
-With `json-types = "typeddict"`, `rewrite` types a JSON column of known shape with
+With `json-types = "typing.TypedDict"`, `rewrite` types a JSON column of known shape with
 generated classes instead of `typing.Any`.
 
 ```toml
 [tool.sqlty]
-json-types = "typeddict"
+json-types = "typing.TypedDict"
 schema = "schema.sql"
 ```
 

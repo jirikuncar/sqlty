@@ -1,4 +1,4 @@
-"""TypedDicts for JSON columns: what ``json-types = "typeddict"`` writes into a module.
+"""TypedDicts for JSON columns: what ``json-types = "typing.TypedDict"`` writes into a module.
 
 ``rewrite`` types a JSON column ``typing.Any``. Where the engine knows the shape of the
 JSON a query builds (``jsonb_build_object()``, ``jsonb_agg()``, ``to_jsonb()``), the
