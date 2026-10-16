@@ -17,6 +17,7 @@ from sqlty._type_extractor.ast_fields import (
     _base_names,
     _classify_class,
     _extract_fields_from_ast,
+    _functional_classes,
     _header_errors,
     _key_errors,
     _lax_fields,
@@ -85,7 +86,10 @@ def extract_type_definitions(
     # are recognized when their base is a TypedDict defined earlier
     recognized: list[tuple[ast.ClassDef, str]] = []  # (node, kind)
     typeddict_nodes: dict[str, ast.ClassDef] = {}
-    for node in parsed.classes:
+    classes = parsed.classes
+    if functional := _functional_classes(tree, aliases):
+        classes = sorted([*classes, *functional], key=lambda node: node.lineno)
+    for node in classes:
         kind = _classify_class(node, aliases, typeddict_nodes)
         if kind == "TypedDict":
             typeddict_nodes[node.name] = node
