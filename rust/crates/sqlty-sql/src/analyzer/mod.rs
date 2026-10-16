@@ -19,6 +19,7 @@ mod dml;
 mod expr;
 mod functions;
 mod hashing;
+mod inference;
 mod json;
 mod literals;
 mod memo;
