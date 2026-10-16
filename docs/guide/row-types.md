@@ -208,10 +208,32 @@ module=...)`.
 ## Protocols
 
 A `Protocol` row type says which attributes a row has, not how it is built.
-Use it with a row factory that gives every column as an attribute, such as
-psycopg's `namedtuple_row`; psycopg's `class_row` cannot build a Protocol.
 Each attribute is matched to the column of its name, and the query may return
-more columns than the protocol lists.
+more columns than the protocol lists. At runtime the
+[psycopg helpers](psycopg.md) build such rows with `namedtuple_row`, which
+gives every column as an attribute; `class_row` cannot build a Protocol.
+
+```python
+from typing import Protocol
+
+import psycopg
+from sqlty import SQL
+from sqlty.drivers.psycopg import execute
+
+class Named(Protocol):
+    id: int
+    name: str
+
+query = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'ada'::TEXT AS name, now() AS seen")
+
+with psycopg.connect("dbname=app") as conn:
+    row = execute(conn, query).fetchone()  # Named | None
+    if row is not None:
+        print(row.id, row.name)  # 1 ada
+# error:
+```
+
+`sqlty check` reports a missing attribute and a type mismatch:
 
 ```python
 from typing import Protocol
@@ -222,9 +244,10 @@ class Named(Protocol):
     id: int
     name: str
 
-ok = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name, now() AS created")
 # error: [typeddict-key-mismatch] "Named.name is required but missing from query"
 bad = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS title")
+# error: [column-type-mismatch] "Named.id is int but query column 'id' infers str"
+wrong = SQL[Named]("--sql\nSELECT 'x'::TEXT AS id, 'ada'::TEXT AS name")
 ```
 
 Only annotated attributes count; methods and properties are not read.
