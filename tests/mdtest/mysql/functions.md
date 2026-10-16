@@ -115,3 +115,16 @@ SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: a: typing.Any (JSON)
 -- columns: b: typing.Any (JSON)
 ```
+
+## Window functions and NULLIF
+
+```sql
+SELECT LAG(id) OVER (ORDER BY id) AS a, LEAD(name, 1, 'x') OVER (ORDER BY id) AS b, FIRST_VALUE(price) OVER (ORDER BY id) AS c, NTH_VALUE(name, 2) OVER (ORDER BY id) AS d, PERCENT_RANK() OVER (ORDER BY id) AS e, CUME_DIST() OVER (ORDER BY id) AS f, NULLIF(name, 'x') AS g FROM events
+-- columns: a: int | None (INT)
+-- columns: b: str (VARCHAR(50))
+-- columns: c: decimal.Decimal (DECIMAL(10, 2))
+-- columns: d: str | None (VARCHAR(50))
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+-- columns: g: str | None (VARCHAR(50))
+```
