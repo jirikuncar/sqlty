@@ -11,6 +11,9 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use super::dialect_functions::{
+    MYSQL_ALWAYS_NULLABLE, MYSQL_FUNCTIONS, SQLITE_ALWAYS_NULLABLE, SQLITE_FUNCTIONS,
+};
 use super::functions::{Returns, COMMON_FUNCTIONS, POSTGRES_FUNCTIONS};
 use super::SqlDialect;
 
@@ -34,9 +37,17 @@ pub(super) struct FunctionInfo {
     returns: Option<Returns>,
     /// PostgreSQL's own definition, which takes precedence over `returns` there.
     postgres_returns: Option<Returns>,
+    /// MySQL's, likewise.
+    mysql_returns: Option<Returns>,
+    /// SQLite's, likewise.
+    sqlite_returns: Option<Returns>,
     pub(super) behavior: Behavior,
     /// Can be NULL for non-null arguments.
-    pub(super) always_nullable: bool,
+    always_nullable: bool,
+    /// Can be NULL for non-null arguments in MySQL.
+    mysql_nullable: bool,
+    /// Can be NULL for non-null arguments in SQLite.
+    sqlite_nullable: bool,
     /// Never NULL.
     pub(super) never_null: bool,
     /// Looks through NULL arguments (see [`LOOKS_THROUGH_NULLS`]).
@@ -50,11 +61,19 @@ pub(super) struct FunctionInfo {
 impl FunctionInfo {
     /// The result type rule in `dialect`, when the analyzer has one.
     pub(super) fn returns(&self, dialect: SqlDialect) -> Option<Returns> {
-        if dialect == SqlDialect::Postgres {
-            self.postgres_returns.or(self.returns)
-        } else {
-            self.returns
+        match dialect {
+            SqlDialect::Postgres => self.postgres_returns.or(self.returns),
+            SqlDialect::MySql => self.mysql_returns.or(self.returns),
+            SqlDialect::Sqlite => self.sqlite_returns.or(self.returns),
+            _ => self.returns,
         }
+    }
+
+    /// Whether the result can be NULL for non-null arguments in `dialect`.
+    pub(super) fn always_nullable(&self, dialect: SqlDialect) -> bool {
+        self.always_nullable
+            || (dialect == SqlDialect::MySql && self.mysql_nullable)
+            || (dialect == SqlDialect::Sqlite && self.sqlite_nullable)
     }
 
     /// Whether the result is NULL for a NULL argument, as far as narrowing goes: a function
@@ -93,6 +112,22 @@ static REGISTRY: LazyLock<HashMap<&'static str, FunctionInfo>> = LazyLock::new(|
         for name in *names {
             entry(&mut registry, name).postgres_returns = Some(*returns);
         }
+    }
+    for (names, returns) in MYSQL_FUNCTIONS {
+        for name in *names {
+            entry(&mut registry, name).mysql_returns = Some(*returns);
+        }
+    }
+    for (names, returns) in SQLITE_FUNCTIONS {
+        for name in *names {
+            entry(&mut registry, name).sqlite_returns = Some(*returns);
+        }
+    }
+    for name in MYSQL_ALWAYS_NULLABLE {
+        entry(&mut registry, name).mysql_nullable = true;
+    }
+    for name in SQLITE_ALWAYS_NULLABLE {
+        entry(&mut registry, name).sqlite_nullable = true;
     }
     for name in AGGREGATES {
         entry(&mut registry, name).behavior = Behavior::Aggregate;
@@ -168,6 +203,8 @@ const AGGREGATES: &[&str] = &[
     "REGR_SXY",
     "REGR_SYY",
     "TOTAL",
+    "JSON_GROUP_ARRAY",
+    "JSON_GROUP_OBJECT",
 ];
 
 /// Aggregates that give NULL for a group of rows too: too few non-null rows for a sample
@@ -204,6 +241,8 @@ const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
     "JSON_OBJECTAGG",
     "XMLAGG",
     "TOTAL",
+    "JSON_GROUP_ARRAY",
+    "JSON_GROUP_OBJECT",
 ];
 
 /// Functions that can return NULL for non-null arguments.
@@ -294,6 +333,10 @@ const NEVER_NULL: &[&str] = &[
     "JSON_OBJECT",
     "JSON_ARRAY",
     "ROW",
+    // `typeof(NULL)` is `'null'`, `quote(NULL)` is `'NULL'`, `FIELD(NULL, ...)` is 0.
+    "TYPEOF",
+    "QUOTE",
+    "FIELD",
 ];
 
 /// Positions of text and integer arguments of functions with a known signature.
