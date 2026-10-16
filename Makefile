@@ -14,8 +14,8 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  install           - Install/sync dependencies with uv"
-	@echo "  pre-commit-install- Install pre-commit hooks"
-	@echo "  pre-commit        - Run pre-commit on all files"
+	@echo "  hooks-install     - Install the prek git hook"
+	@echo "  hooks             - Run every prek hook on all files"
 	@echo "  lint              - Run ruff linter with auto-fix"
 	@echo "  format            - Run ruff formatter"
 	@echo "  typecheck         - Run mypy and ty type checks on src and examples"
@@ -51,13 +51,13 @@ help:
 install:
 	uv sync --all-groups
 
-.PHONY: pre-commit-install
-pre-commit-install:
-	uv run pre-commit install
+.PHONY: hooks-install
+hooks-install:
+	uv run prek install
 
-.PHONY: pre-commit
-pre-commit:
-	uv run pre-commit run --all-files
+.PHONY: hooks
+hooks:
+	uv run prek run --all-files
 
 .PHONY: lint
 lint:

@@ -11,7 +11,7 @@ make test-mdtest                   # mdtest only
 make update-mdtest                 # update mdtest assertions
 make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
 make typecheck                     # mypy + ty on src and examples
-uv run pre-commit run --all-files  # all hooks (run before every commit)
+uv run prek run --all-files        # all hooks (run before every commit)
 ```
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
@@ -67,27 +67,29 @@ Two layers, both in the Makefile:
 or any other force-push variant. If a push is rejected, investigate and resolve
 the conflict without rewriting remote history. No exceptions.
 
-## Pre-commit checks
+## Hooks
 
-**Always run pre-commit before every commit:**
+**Always run the hooks before every commit:**
 
 ```bash
-uv run pre-commit run --all-files
+uv run prek run --all-files
 ```
 
-Hooks defined in `.pre-commit-config.yaml`:
+[prek](https://prek.j178.dev) runs the hooks of `prek.toml`; `uv run prek install`
+runs them on every commit. Each runs when the files it depends on change:
 
-- mypy and ty on `src/`
-- `sqlty check` on `examples/`; `sqlty rewrite` in place on `examples/`
-  (except `magic_codec/`)
-- `cargo fmt --check` on `rust/` (requires `cargo`)
-- `cargo test` on `rust/` when files under `rust/` change (requires `cargo`)
-- ruff (lint + format) and uv-lock
-- standard file checks (trailing whitespace, YAML/TOML/JSON syntax, etc.)
+| Hook | Runs when these change |
+|------|------------------------|
+| mypy and ty on `src/` | `src/`, `pyproject.toml` |
+| `sqlty rewrite` (in place), `sqlty check`, mypy and ty on `examples/` (except `magic_codec/`) | `examples/`, `src/sqlty/`, `rust/crates/` |
+| `cargo fmt --check` | Rust files |
+| `cargo clippy -D warnings`, `cargo test` | `rust/` |
+| ruff (lint + format), uv-lock | Python files, `pyproject.toml` |
+| file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
 
-CI's Lint job additionally runs `make typecheck-examples` and `cargo clippy`,
-so a clean local pre-commit does not guarantee a green Lint job. Fix all
-errors before creating a commit.
+Hooks that edit files run one at a time; the read-only checks run in
+parallel. CI's Lint job runs the same hooks on all files. Fix all errors before
+creating a commit.
 
 ## The `--sql\n` convention
 
@@ -267,7 +269,7 @@ and ty by `tests/test_typecheckers.py`.
 
 ```bash
 make typecheck                 # mypy + ty on src and examples
-make typecheck-src             # mypy + ty on src/sqlty (also a pre-commit hook)
+make typecheck-src             # mypy + ty on src/sqlty (also a prek hook)
 make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
 uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
 ```
