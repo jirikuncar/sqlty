@@ -258,7 +258,9 @@ pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool
     let psycopg = source.contains("psycopg");
     let mut replacements = Vec::new();
     for group in scan.groups() {
-        if psycopg && scan.in_composed_sql(group.tokens[0]) {
+        if (psycopg && scan.in_composed_sql(group.tokens[0]))
+            || scan.in_case_pattern(group.tokens[0])
+        {
             continue;
         }
         let (start, end) = (group.start, group.end);
