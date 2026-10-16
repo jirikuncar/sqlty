@@ -457,7 +457,18 @@ fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     for i in 0..tokens.len() {
         let start = tokens[i].span.start;
-        let line = source[..start].rsplit('\n').next().unwrap_or_default();
+        // The logical line up to the token: a compound header may span physical lines.
+        let first = tokens[..i]
+            .iter()
+            .rposition(|t| t.kind == Kind::Newline)
+            .map_or(0, |n| n + 1);
+        let first = (first..i)
+            .find(|&j| tokens[j].kind != Kind::Comment)
+            .unwrap_or(i);
+        let line_start = source[..tokens[first].span.start]
+            .rfind('\n')
+            .map_or(0, |n| n + 1);
+        let line = &source[line_start..start];
         let statement = match text(i.wrapping_sub(1)) {
             "" | "\n" | "\r\n" => true,
             ";" => !is_compound(line),
