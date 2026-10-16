@@ -854,7 +854,10 @@ class SettingsResolver:
             return settings
         rules = dict(settings.rules or {})
         for override in settings.overrides:
-            if _is_included(path, settings.config_dir, tuple(override["include"])):
+            include, exclude = tuple(override["include"]), tuple(override["exclude"])
+            if (not include or _is_included(path, settings.config_dir, include)) and not (
+                exclude and _is_included(path, settings.config_dir, exclude)
+            ):
                 rules |= override["rules"]
         return replace(settings, rules=rules | self.source.cli_rules)
 

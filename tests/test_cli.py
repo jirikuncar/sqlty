@@ -850,6 +850,7 @@ stale-type = "ignore"
 
 [[tool.sqlty.overrides]]
 include = ["tests/legacy"]
+exclude = ["test_skip.py"]
 
 [tool.sqlty.overrides.rules]
 stale-type = "warn"
@@ -860,7 +861,8 @@ def _overrides_project(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(_OVERRIDES)
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
     stale = 'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT id FROM users")\n'
-    for name in ["app/q.py", "tests/test_q.py", "tests/legacy/test_old.py", "pkg/conftest.py"]:
+    names = ["app/q.py", "tests/test_q.py", "tests/legacy/test_old.py", "tests/legacy/test_skip.py"]
+    for name in [*names, "pkg/conftest.py"]:
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(stale)
 
@@ -898,13 +900,14 @@ def test_rule_flags_win_over_overrides(tmp_path, monkeypatch, capsys) -> None:
 
     _, out, _ = _run(["check", "--warn", "stale-type", "."], capsys)
 
-    assert "Found 4 warning(s)" in out
+    assert "Found 5 warning(s)" in out
 
 
 @pytest.mark.parametrize(
     ("override", "message"),
     [
         ("include = 'tests'\n", "include must be a list of glob strings"),
+        ('exclude = "tests"\n', "exclude must be a list of glob strings"),
         (
             'include = ["tests"]\nignore = ["x"]\n',
             "unknown key 'ignore' in [[tool.sqlty.overrides]]",

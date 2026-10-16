@@ -27,7 +27,7 @@ DISCOVERY_KEYS = ("exclude", "extend-exclude")
 
 FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
 
-OVERRIDE_KEYS = ("include", "rules")
+OVERRIDE_KEYS = ("include", "exclude", "rules")
 
 
 class KeyDoc(NamedTuple):
@@ -67,7 +67,7 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "array of tables",
         "`[]`",
         "`check`",
-        "Rule severities for the files an `include` glob matches, on top of `rules`",
+        "Rule severities for the files `include` matches and `exclude` does not, on top of `rules`",
     ),
     "import-style": KeyDoc(
         "string",
@@ -221,11 +221,12 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                     f"{source}: unknown key {key!r} in [[tool.sqlty.overrides]]"
                     f"{_suggest(key, OVERRIDE_KEYS)}; expected one of: {', '.join(OVERRIDE_KEYS)}"
                 )
-        include = override.get("include")
-        if not isinstance(include, list) or not all(isinstance(g, str) for g in include):
-            raise ConfigError(
-                f"{source}: [[tool.sqlty.overrides]] include must be a list of glob strings"
-            )
+        for key in ("include", "exclude"):
+            globs = override.get(key, [])
+            if not isinstance(globs, list) or not all(isinstance(g, str) for g in globs):
+                raise ConfigError(
+                    f"{source}: [[tool.sqlty.overrides]] {key} must be a list of glob strings"
+                )
         check_rules(
             override.get("rules", {}),
             "[[tool.sqlty.overrides]] rules",
@@ -249,13 +250,15 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
 
 
 class RuleOverride(TypedDict):
-    """A ``[[tool.sqlty.overrides]]`` entry: rule severities for the files ``include`` matches.
+    """A ``[[tool.sqlty.overrides]]`` entry, as ty spells them: rule severities for the files
+    ``include`` matches (every file when it is empty) and ``exclude`` does not.
 
     Globs are relative to the ``pyproject.toml`` directory; a glob without a slash
     matches a file or directory name at any depth, as in ``exclude``.
     """
 
     include: list[str]
+    exclude: list[str]
     rules: dict[str, str]
 
 
@@ -521,7 +524,11 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
         config["rules"] = {str(k): str(v) for k, v in tool_config["rules"].items()}
     if "overrides" in tool_config:
         config["overrides"] = [
-            {"include": list(o["include"]), "rules": dict(o.get("rules", {}))}
+            {
+                "include": list(o.get("include", [])),
+                "exclude": list(o.get("exclude", [])),
+                "rules": dict(o.get("rules", {})),
+            }
             for o in tool_config["overrides"]
         ]
 

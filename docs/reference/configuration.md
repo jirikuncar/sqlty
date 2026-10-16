@@ -36,7 +36,7 @@ query-param = "query"
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to `pyproject.toml` |
 | [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
-| [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files an `include` glob matches, on top of `rules` |
+| [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
@@ -92,7 +92,22 @@ include = ["tests/**", "conftest.py"]
 select-star = "ignore"
 ```
 
-`include` globs are relative to the `pyproject.toml` directory and match like
+The table follows ty's
+[`[[tool.ty.overrides]]`](https://docs.astral.sh/ty/reference/configuration/#overrides):
+`include` and `exclude` are lists of globs, and `rules` takes the same
+severities as [`rules`](#rules). An entry applies to the files `include`
+matches (every file when it is left out) and `exclude` does not:
+
+```toml
+[[tool.sqlty.overrides]]
+include = ["generated/**"]
+exclude = ["generated/important.py"]
+
+[tool.sqlty.overrides.rules]
+select-star = "ignore"
+```
+
+Globs are relative to the `pyproject.toml` directory and match like
 [`exclude`](#exclude-and-extend-exclude): a glob without a slash matches a file
 or directory name at any depth, and a matching directory covers every file in
 it. Every entry that matches a file is merged over `rules`, later entries
