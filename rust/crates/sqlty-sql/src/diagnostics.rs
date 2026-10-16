@@ -124,6 +124,20 @@ impl Diagnostics {
         self.0.borrow().explained
     }
 
+    /// Where the list stands, to [`Diagnostics::rewind`] to.
+    pub(crate) fn mark(&self) -> (usize, usize) {
+        let inner = self.0.borrow();
+        (inner.items.len(), inner.explained)
+    }
+
+    /// Drop what was recorded after `mark`: an untyped part of an expression whose
+    /// whole turned out typed needs no explanation.
+    pub(crate) fn rewind(&self, (items, explained): (usize, usize)) {
+        let mut inner = self.0.borrow_mut();
+        inner.items.truncate(items);
+        inner.explained = explained;
+    }
+
     /// Everything recorded so far, in order.
     pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
         self.0.borrow().items.clone()
@@ -185,6 +199,18 @@ mod tests {
         diag.explain_silently();
         assert!(diag.items().is_empty());
         assert_eq!(diag.explained(), 0);
+    }
+
+    #[test]
+    fn rewind_drops_what_was_recorded_after_the_mark() {
+        let diag = Diagnostics::collecting();
+        diag.record(NameRule::UnknownType, "kept");
+        let mark = diag.mark();
+        diag.record(NameRule::UnknownType, "dropped");
+        diag.explain_silently();
+        diag.rewind(mark);
+        assert_eq!(diag.items(), [found(NameRule::UnknownType, "kept")]);
+        assert_eq!(diag.explained(), 1);
     }
 
     #[test]
