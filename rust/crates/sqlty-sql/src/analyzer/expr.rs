@@ -60,16 +60,20 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The type of `field` in the composite type `composite`, when the schema declares it.
-    pub(super) fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Typed {
-        composite
-            .and_then(|name| self.schema.composite(&name.to_lowercase()))
-            .and_then(|fields| {
-                fields
-                    .iter()
-                    .find(|col| col.name == fold(field, self.dialect))
-            })
-            .map_or(Typed::UNKNOWN, |col| col.typed(self.dialect))
+    /// The type of `field` in the composite type `composite`, when the schema declares it;
+    /// the composite's name when it declares no such field.
+    fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Result<Typed, String> {
+        let Some((name, fields)) = composite
+            .map(str::to_lowercase)
+            .and_then(|name| Some((name.clone(), self.schema.composite(&name)?)))
+        else {
+            return Ok(Typed::UNKNOWN);
+        };
+        let field = fold(field, self.dialect);
+        match fields.iter().find(|col| col.name == field) {
+            Some(col) => Ok(col.typed(self.dialect)),
+            None => Err(format!("type `{name}` has no field `{field}`")),
+        }
     }
 
     /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
@@ -213,10 +217,13 @@ impl<'a> Analyzer<'a> {
                 Ok(from_sql_type("RECORD", self.dialect))
             }
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
-            Expr::Trim { .. } | Expr::Substring { .. } if self.dialect == SqlDialect::Postgres => {
+            Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. }
+                if self.dialect == SqlDialect::Postgres =>
+            {
                 Ok(from_sql_type("TEXT", self.dialect))
             }
-            Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
+            Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. } => known("str"),
+            Expr::Collate { expr: inner, .. } => self.expr(inner, scope),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => {
                 Ok(
@@ -301,7 +308,16 @@ impl<'a> Analyzer<'a> {
             typed = match access {
                 AccessExpr::Subscript(Subscript::Index { .. }) => self.element_typed(typed.sql()),
                 AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
-                AccessExpr::Dot(Expr::Identifier(field)) => self.field_typed(typed.sql(), field),
+                AccessExpr::Dot(Expr::Identifier(field)) => {
+                    match self.field_typed(typed.sql(), field) {
+                        Ok(typed) => typed,
+                        Err(message) => {
+                            self.diag.rewind(mark);
+                            self.diag.record(NameRule::UnknownColumn, message);
+                            return Ok(Typed::UNKNOWN);
+                        }
+                    }
+                }
                 AccessExpr::Dot(_) => typed,
             };
         }
@@ -351,11 +367,18 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         let mut results = Vec::new();
-        for expr in conditions
-            .iter()
-            .map(|when| &when.result)
-            .chain(else_result)
-        {
+        for when in conditions {
+            // A branch reads its column where its `WHEN` holds: `WHEN s = 'a' THEN s` is 'a'.
+            let learned = self.learn(&when.condition, true, scope);
+            if learned.limits_values() {
+                let mut inner = self.clone();
+                inner.facts = self.facts.with(learned);
+                results.push(inner.expr(&when.result, scope)?);
+            } else {
+                results.push(self.expr(&when.result, scope)?);
+            }
+        }
+        if let Some(expr) = else_result {
             results.push(self.expr(expr, scope)?);
         }
         if self.dialect == SqlDialect::Postgres {
@@ -377,6 +400,17 @@ impl<'a> Analyzer<'a> {
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
     fn call_typed(&self, func: &Function, scope: &Scope) -> Inferred<Typed> {
         let name = self.builtin_name(&func.name);
+        if let (FunctionArguments::Subquery(query), "ARRAY", SqlDialect::Postgres) =
+            (&func.args, name.as_str(), self.dialect)
+        {
+            let columns = self.subquery_columns(query, scope, Reporting::Record);
+            let elem = first_column(&columns)?
+                .map(Column::typed)
+                .and_then(|typed| typed.sql().or_else(|| category(&typed)).map(String::from));
+            return Ok(elem.map_or(Typed::UNKNOWN, |elem| {
+                from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
+            }));
+        }
         let args = positional_args(&func.args);
         let arg = args.first().copied();
         match name.as_str() {

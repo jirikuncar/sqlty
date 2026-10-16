@@ -1,10 +1,16 @@
 //! Built-in set-returning functions read as row sources in `FROM`: `generate_series`,
 //! `unnest`, the JSON `*_each` and `*_array_elements` families, SQLite's `json_each`.
 
-use sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, TableAlias};
+use sqlparser::ast::{
+    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, SelectItem, TableAlias,
+};
+
+use crate::catalog::FunctionReturn;
 
 use super::dialect::SqlDialect;
 use super::expr::from_sql_type;
+use super::functions::{function_name, positional_args};
+use super::names::table_key;
 use super::nullability::Nullability;
 use super::operators::{common_of, operand_type};
 use super::query::{rename_columns, Analyzer, Column};
@@ -45,7 +51,79 @@ impl FunctionRows {
     }
 }
 
+/// PostgreSQL's built-in set-returning functions.
+const SET_RETURNING: &[&str] = &[
+    "GENERATE_SERIES",
+    "GENERATE_SUBSCRIPTS",
+    "UNNEST",
+    "REGEXP_MATCHES",
+    "REGEXP_SPLIT_TO_TABLE",
+    "STRING_TO_TABLE",
+    "JSON_ARRAY_ELEMENTS",
+    "JSON_ARRAY_ELEMENTS_TEXT",
+    "JSONB_ARRAY_ELEMENTS",
+    "JSONB_ARRAY_ELEMENTS_TEXT",
+    "JSON_EACH",
+    "JSON_EACH_TEXT",
+    "JSONB_EACH",
+    "JSONB_EACH_TEXT",
+    "JSON_OBJECT_KEYS",
+    "JSONB_OBJECT_KEYS",
+    "JSONB_PATH_QUERY",
+];
+
 impl Analyzer<'_> {
+    /// Whether a call returns a set of rows: a built-in set-returning function, or a
+    /// function the schema declares `SETOF` or `TABLE`.
+    pub(super) fn is_set_returning(&self, func: &Function) -> bool {
+        let count = match &func.args {
+            FunctionArguments::List(list) => list.args.len(),
+            _ => 0,
+        };
+        match self
+            .schema
+            .function(&table_key(&func.name, self.dialect), count)
+        {
+            Some(FunctionReturn::Scalar(_)) => false,
+            Some(_) => true,
+            None => SET_RETURNING.contains(&function_name(func).as_str()),
+        }
+    }
+
+    /// How many of the select list's expressions call a set-returning function, outside
+    /// subqueries.
+    pub(super) fn set_returning_items(&self, items: &[SelectItem]) -> usize {
+        items
+            .iter()
+            .filter(|item| match item {
+                SelectItem::UnnamedExpr(expr)
+                | SelectItem::ExprWithAlias { expr, .. }
+                | SelectItem::ExprWithAliases { expr, .. } => self.calls_set_returning(expr),
+                _ => false,
+            })
+            .count()
+    }
+
+    fn calls_set_returning(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Function(func) => {
+                self.is_set_returning(func)
+                    || positional_args(&func.args)
+                        .into_iter()
+                        .any(|arg| self.calls_set_returning(arg))
+            }
+            Expr::Nested(inner)
+            | Expr::Cast { expr: inner, .. }
+            | Expr::UnaryOp { expr: inner, .. }
+            | Expr::Collate { expr: inner, .. } => self.calls_set_returning(inner),
+            Expr::BinaryOp { left, right, .. } => {
+                self.calls_set_returning(left) || self.calls_set_returning(right)
+            }
+            Expr::CompoundFieldAccess { root, .. } => self.calls_set_returning(root),
+            _ => false,
+        }
+    }
+
     /// Rows of the built-in function `name` (lower case) called with `args` in `FROM`;
     /// `None` when it is not one the analyzer knows in this dialect.
     pub(super) fn builtin_rows(

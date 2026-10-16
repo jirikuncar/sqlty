@@ -314,6 +314,7 @@ const LOOKS_THROUGH_NULLS: &[&str] = &[
 
 /// Window and other functions that never return NULL.
 const NEVER_NULL: &[&str] = &[
+    "GROUPING",
     "ROW_NUMBER",
     "RANK",
     "DENSE_RANK",

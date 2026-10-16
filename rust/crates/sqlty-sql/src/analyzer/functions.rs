@@ -198,6 +198,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "FAMILY",
             "INET_CLIENT_PORT",
             "INET_SERVER_PORT",
+            "GROUPING",
         ],
         Sql("INT"),
     ),
@@ -604,6 +605,13 @@ impl<'a> Analyzer<'a> {
                 sql: Some(Rc::from("NUMERIC")),
             })
         };
+        // PostgreSQL has no `min`/`max` for `varchar`: they read it as `text`.
+        if self.dialect == SqlDialect::Postgres
+            && name != "SUM"
+            && typed.sql().map(super::operators::type_base) == Some("VARCHAR")
+        {
+            typed = Typed::new(typed.python().map(String::from), Some("TEXT".to_string()));
+        }
         if typed.python.is_some() || name != "SUM" {
             return Ok(if name == "SUM" {
                 sum_type(typed, self.dialect)

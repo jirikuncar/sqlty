@@ -154,6 +154,9 @@ pub(super) const NUMERIC_RANKS: [&[&str]; 6] = [
     &["DOUBLE"],
 ];
 
+/// The rank of `FLOAT` (`real`) in [`NUMERIC_RANKS`].
+const FLOAT_RANK: usize = 4;
+
 pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
     NUMERIC_RANKS
         .iter()
@@ -203,7 +206,12 @@ pub(super) fn arithmetic(
     let (l, r) = (operand_type(left), operand_type(right));
     if let (Some(a), Some(b)) = (l, r) {
         if let (Some(a), Some(b)) = (numeric_rank(a), numeric_rank(b)) {
-            let rank = a.max(b);
+            let mut rank = a.max(b);
+            // PostgreSQL has `real` operators for two `real`s only: anything else with a
+            // `real` resolves to `double precision`.
+            if dialect == SqlDialect::Postgres && rank == FLOAT_RANK && a != b {
+                rank = FLOAT_RANK + 1;
+            }
             let mysql_division = dialect == SqlDialect::MySql && *op == Divide;
             let rank = if mysql_division { rank.max(3) } else { rank };
             return Some(NUMERIC_RANKS[rank][0].to_string());
