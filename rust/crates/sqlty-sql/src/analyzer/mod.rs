@@ -161,6 +161,7 @@ impl SchemaColumn {
             Some(python_type) => Typed {
                 python: Some(Rc::from(python_type.as_str())),
                 sql: Some(Rc::from(self.sql_type.as_str())),
+                values: self.values.clone(),
             },
             None => from_sql_type(&self.sql_type, dialect),
         }

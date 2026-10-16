@@ -39,6 +39,8 @@ pub(super) struct Learned {
     exprs: FxHashSet<ExprKey>,
     /// `(reference, column, values)`: the values `col = 'x'` or `col IN (...)` leaves.
     values: Vec<ColumnValues>,
+    /// `(reference, column)` pairs proven NULL, by `col IS NULL`.
+    null: HashSet<(String, String)>,
 }
 
 /// The values a column of a relation is limited to.
@@ -70,6 +72,7 @@ impl Learned {
         self.columns.extend(other.columns);
         self.present.extend(other.present);
         self.exprs.extend(other.exprs);
+        self.null.extend(other.null);
         restrict(&mut self.values, other.values);
         self
     }
@@ -109,6 +112,11 @@ impl Learned {
                 .into_iter()
                 .filter(|expr| other.exprs.contains(expr))
                 .collect(),
+            null: self
+                .null
+                .into_iter()
+                .filter(|pair| other.null.contains(pair))
+                .collect(),
         }
     }
 }
@@ -128,6 +136,9 @@ impl Facts {
         }
         if !learned.values.is_empty() {
             restrict(Rc::make_mut(&mut facts.values), learned.values);
+        }
+        if !learned.null.is_empty() {
+            Rc::make_mut(&mut facts.null).extend(learned.null);
         }
         facts
     }
@@ -246,6 +257,15 @@ impl<'a> Analyzer<'a> {
             }
             Expr::IsNull(inner) if !truth => self.proven(inner, scope),
             Expr::IsNotNull(inner) if truth => self.proven(inner, scope),
+            Expr::IsNull(inner) | Expr::IsNotNull(inner)
+                if matches!(**inner, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) =>
+            {
+                let mut learned = Learned::default();
+                if let Some((reference, _, column)) = self.locate_column(inner, scope) {
+                    learned.null.insert((reference, column));
+                }
+                learned
+            }
             Expr::IsTrue(inner) if truth => self.learn(inner, true, scope),
             Expr::IsFalse(inner) if truth => self.learn(inner, false, scope),
             Expr::IsNotTrue(inner) if !truth => self.learn(inner, true, scope),

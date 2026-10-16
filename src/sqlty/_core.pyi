@@ -1,40 +1,48 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
+from typing import final
+
+@final
+class Schema:
+    @property
+    def dialect(self) -> str: ...
+
+def load_schema(schema_sql: str, *, dialect: str = "postgres") -> Schema: ...
 def infer_type(
     sql: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> str | None: ...
 def analyze_select(
     sql: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> list[tuple[str, str | None, str | None]] | None: ...
 def analyze_columns(
     sql: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> list[tuple[str, str | None, str | None, bool | None, str | None]] | None: ...
 def analyze_params(
     sql: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool]] | None: ...
 def composite_fields(
     type_name: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> list[tuple[str, str | None, str | None, bool | None]] | None: ...
 def query_diagnostics(
     sql: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> list[tuple[str, str]]: ...
 def name_rules() -> list[str]: ...
 def dialect_names() -> list[str]: ...
@@ -45,7 +53,7 @@ def rewrite_source(
     source: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
     untyped: bool = False,
     keep_lines: bool = False,
@@ -55,7 +63,7 @@ def fix_source(
     source: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
@@ -65,7 +73,7 @@ def expand_star(
     sql: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
 ) -> str | None: ...
 def select_star_finding(
     sql: str, *, dialect: str = "postgres", has_schema: bool = False
@@ -74,7 +82,7 @@ def check_source(
     source: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
     untyped: bool = False,
@@ -86,7 +94,7 @@ def wrapped_queries(
 def query_sites(
     source: str, *, import_style: str | None = None, any_calls: list[int] = ...
 ) -> list[tuple[int, str, str]]: ...
-def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list[str]: ...
+def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]: ...
 def schema_skipped_objects(
-    schema_sql: str, *, dialect: str = "postgres"
+    schema_sql: str | Schema, *, dialect: str = "postgres"
 ) -> list[tuple[str, str]]: ...

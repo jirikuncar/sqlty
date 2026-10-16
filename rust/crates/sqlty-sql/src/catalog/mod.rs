@@ -67,6 +67,8 @@ pub struct SchemaColumn {
     pub not_null: bool,
     /// The labels of the enum the column has, `None` for other types.
     pub allowed_values: Option<Arc<[String]>>,
+    /// The values of a `Literal` `python_type`, as data.
+    pub(crate) values: Option<Arc<[crate::values::Value]>>,
 }
 
 /// A domain, enum or composite type as its columns see it: the SQL type they show (a
@@ -78,6 +80,8 @@ pub(crate) struct UserType {
     pub python_type: Option<String>,
     /// An enum's labels.
     pub allowed_values: Option<Arc<[String]>>,
+    /// The values of a `Literal` `python_type`, as data.
+    pub values: Option<Arc<[crate::values::Value]>>,
 }
 
 /// What a function returns.
@@ -251,9 +255,9 @@ impl Catalog {
         &self,
         dt: &DataType,
         dialect: SqlDialect,
-    ) -> (String, Option<String>) {
+    ) -> (String, Option<String>, Option<Arc<[crate::values::Value]>>) {
         let resolved = self.resolver(dialect).resolve(dt);
-        (resolved.sql_type, resolved.python_type)
+        (resolved.sql_type, resolved.python_type, resolved.values)
     }
 }
 
