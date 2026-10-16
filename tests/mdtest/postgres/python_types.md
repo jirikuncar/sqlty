@@ -72,6 +72,18 @@ SELECT '1.2.3.4'::inet, '1.2.3.0/24'::cidr
 -- inferred: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface, ipaddress.IPv4Network | ipaddress.IPv6Network]
 ```
 
+## Records are tuples
+
+A row constructor, `ROW(...)` or `(a, b)`, is an anonymous `record`. psycopg
+loads it as a tuple, of strings in the default text format, so its fields
+are `Any`.
+
+```sql
+SELECT ROW(1, 'a'), (1, 'a') AS pair
+-- columns: row: tuple[typing.Any, ...] (RECORD)
+-- columns: pair: tuple[typing.Any, ...] (RECORD)
+```
+
 ## Text-like types are str
 
 ```sql

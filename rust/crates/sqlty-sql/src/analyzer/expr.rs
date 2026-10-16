@@ -209,6 +209,9 @@ impl<'a> Analyzer<'a> {
                 ..
             } => Ok(from_sql_type("BOOLEAN", self.dialect)),
             Expr::Interval(_) => Ok(from_sql_type("INTERVAL", self.dialect)),
+            Expr::Tuple(_) if self.dialect == SqlDialect::Postgres => {
+                Ok(from_sql_type("RECORD", self.dialect))
+            }
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
             Expr::Trim { .. } | Expr::Substring { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("TEXT", self.dialect))
