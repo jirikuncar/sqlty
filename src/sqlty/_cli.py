@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
+    from sqlty._core import Schema
     from sqlty._lint import Diagnostic
 
 logger = logging.getLogger(__name__)
@@ -290,7 +291,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
         rewritten = rewrite_source(
             original,
             dialect=settings.dialect,
-            schema_sql=settings.schema_sql,
+            schema_sql=settings.schema,
             import_style=settings.import_style,
             untyped=settings.untyped,
             json_types=settings.json_types,
@@ -446,7 +447,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             fixed = fix_source(
                 parsed,
                 dialect=settings.dialect,
-                schema_sql=settings.schema_sql,
+                schema_sql=settings.schema,
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 rules=settings.rules,
@@ -463,7 +464,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         diagnostics = check_source(
             parsed,
             dialect=settings.dialect,
-            schema_sql=settings.schema_sql,
+            schema_sql=settings.schema,
             rules=settings.rules,
             import_style=settings.import_style,
             untyped=settings.untyped,
@@ -475,7 +476,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             statistics += query_statistics(
                 parsed,
                 dialect=settings.dialect,
-                schema_sql=settings.schema_sql,
+                schema_sql=settings.schema,
                 import_style=settings.import_style,
                 helpers=file_helpers,
             )
@@ -870,7 +871,7 @@ class Settings:
     """``[tool.sqlty]`` of the nearest ``pyproject.toml``, with CLI flags on top."""
 
     dialect: str = "postgres"
-    schema_sql: str | None = None
+    schema: Schema | None = None
     import_style: str | None = None
     untyped: bool = False
     json_types: str = "any"
@@ -899,16 +900,19 @@ class SettingsResolver:
         self._schema_sql = _load_schema(schema, Path.cwd()) if schema else None
         self._by_dir: dict[Path, Settings] = {}
         self._resolved: dict[Path, Path] = {}
-        self._warned: set[tuple[str, str]] = set()
+        self._schemas: dict[tuple[str, str], Schema] = {}
 
-    def _warn_skipped_objects(self, schema_sql: str | None, dialect: str) -> None:
-        from sqlty.core import schema_skipped_objects
+    def _schema(self, schema_sql: str, dialect: str) -> Schema:
+        """``schema_sql`` parsed once per run, warning about the objects it could not parse."""
+        from sqlty.core import load_schema, schema_skipped_objects
 
-        if schema_sql is None or (schema_sql, dialect) in self._warned:
-            return
-        self._warned.add((schema_sql, dialect))
-        for kind, name in schema_skipped_objects(schema_sql, dialect=dialect):
-            logger.warning("Schema %s %s could not be parsed; its columns are unknown", kind, name)
+        if (schema := self._schemas.get((schema_sql, dialect))) is None:
+            schema = self._schemas[schema_sql, dialect] = load_schema(schema_sql, dialect=dialect)
+            for kind, name in schema_skipped_objects(schema, dialect=dialect):
+                logger.warning(
+                    "Schema %s %s could not be parsed; its columns are unknown", kind, name
+                )
+        return schema
 
     def resolve(self, path: Path) -> Path:
         """``path`` resolved; each directory is resolved once, as its files share it."""
@@ -965,10 +969,9 @@ class SettingsResolver:
                 "use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
             ) from None
         dialect = args.dialect or config.get("dialect", "postgres")
-        self._warn_skipped_objects(schema_sql, dialect)
         return Settings(
             dialect=dialect,
-            schema_sql=schema_sql,
+            schema=None if schema_sql is None else self._schema(schema_sql, dialect),
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,

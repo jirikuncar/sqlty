@@ -17,12 +17,12 @@ use super::typed::Typed;
 
 /// A string or integer constant.
 pub(super) fn constant(value: Lit) -> Typed {
-    Typed::new(values::render(&[value]), None)
+    Typed::of_values(vec![value], None).unwrap_or(Typed::UNKNOWN)
 }
 
 /// The values `typed` is limited to, when it is a `Literal`.
 pub(super) fn value_set(typed: &Typed) -> Option<Vec<Lit>> {
-    typed.python().and_then(values::parse)
+    typed.values.as_deref().map(<[Lit]>::to_vec)
 }
 
 /// The Python type with a `Literal` collapsed to `str` or `int`, for code that tells
@@ -43,6 +43,7 @@ pub(super) fn strip(typed: Typed, dialect: SqlDialect) -> Typed {
         Some(sql_type) => Typed {
             python: python_type(&sql_type, dialect).map(Rc::from),
             sql: Some(sql_type),
+            values: None,
         },
     }
 }
@@ -68,11 +69,8 @@ pub(super) fn merge(left: &Typed, right: &Typed, dialect: SqlDialect) -> Option<
         // An enum keeps every label it has; other sets widen past the cap.
         let enum_type = plain.python.is_none() && plain.sql.is_some();
         if enum_type || all.len() <= values::MAX_VALUES {
-            if let Some(literal) = values::render(&all) {
-                return Some(Some(Typed {
-                    python: Some(Rc::from(literal)),
-                    sql: plain.sql,
-                }));
+            if let Some(typed) = Typed::of_values(all, plain.sql.clone()) {
+                return Some(Some(typed));
             }
         }
     }
@@ -93,7 +91,7 @@ mod tests {
     }
 
     fn constants(values: &[Lit]) -> Typed {
-        Typed::new(values::render(values), None)
+        Typed::of_values(values.to_vec(), None).unwrap()
     }
 
     fn show(typed: Option<Option<Typed>>) -> String {
@@ -212,19 +210,18 @@ mod tests {
     #[test]
     fn merge_keeps_every_label_of_an_enum() {
         let labels = |from: usize| {
-            Typed::new(
-                values::render(
-                    &(from..from + values::MAX_VALUES)
-                        .map(|n| text(&format!("v{n}")))
-                        .collect::<Vec<_>>(),
-                ),
-                Some("big_enum".to_string()),
+            Typed::of_values(
+                (from..from + values::MAX_VALUES)
+                    .map(|n| text(&format!("v{n}")))
+                    .collect(),
+                Some(Rc::from("big_enum")),
             )
+            .unwrap()
         };
         let merged = merge(&labels(0), &labels(1), SqlDialect::Postgres)
             .flatten()
             .expect("an enum unites its labels");
-        assert_eq!(values::parse(merged.python().unwrap()).unwrap().len(), 33);
+        assert_eq!(merged.values.as_deref().map(<[Lit]>::len), Some(33));
         assert_eq!(merged.sql(), Some("big_enum"));
     }
 

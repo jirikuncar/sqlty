@@ -18,6 +18,9 @@ import typing
 from sqlty._core import analyze_columns
 from sqlty._source import _wrapper_name
 
+if typing.TYPE_CHECKING:
+    from sqlty._core import Schema
+
 MARKER = "# sqlty: generated"
 _BLOCK = (
     rf"{MARKER}\r?\n(?:class [^\r\n]*:\r?\n(?:    [^\r\n]*\r?\n)+"
@@ -39,7 +42,7 @@ def add_json_types(
     source: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
 ) -> str:
     """``source`` with the ``typing.Any`` row items of JSON columns of known shape typed.

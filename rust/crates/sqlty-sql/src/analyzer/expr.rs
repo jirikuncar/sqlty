@@ -53,9 +53,11 @@ impl<'a> Analyzer<'a> {
             return Typed::UNKNOWN;
         };
         match self.schema.user_type(&elem.to_lowercase()) {
-            Some(user) if user.python_type.is_some() => {
-                Typed::new(user.python_type.clone(), Some(elem.to_string()))
-            }
+            Some(user) if user.python_type.is_some() => Typed::with_values(
+                user.python_type.clone(),
+                Some(elem.to_string()),
+                user.values.clone(),
+            ),
             _ => from_sql_type(elem, self.dialect),
         }
     }
@@ -180,7 +182,11 @@ impl<'a> Analyzer<'a> {
                 })
             }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
-                self.function_type(Returns::Real, &[inner], scope)
+                let returns = match self.dialect {
+                    SqlDialect::MySql => Returns::Integral,
+                    _ => Returns::Real,
+                };
+                self.function_type(returns, &[inner], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL", self.dialect))
@@ -244,14 +250,14 @@ impl<'a> Analyzer<'a> {
     /// `CAST(x AS type)`: the type as the schema resolves it, with the reason when it has no
     /// Python type.
     fn cast_typed(&self, data_type: &DataType) -> Typed {
-        let (sql_type, python_type) = self.schema.resolve_type(data_type, self.dialect);
+        let (sql_type, python_type, values) = self.schema.resolve_type(data_type, self.dialect);
         let typed = match python_type {
             // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
             // labels upper-cased, which are not the column's values.
             Some(_) if matches!(data_type, DataType::Enum(..)) => {
                 from_sql_type(&sql_type, self.dialect)
             }
-            Some(python_type) => Typed::new(Some(python_type), Some(sql_type)),
+            Some(python_type) => Typed::with_values(Some(python_type), Some(sql_type), values),
             None => from_sql_type(&sql_type, self.dialect),
         };
         if !typed.is_known() && self.diag.enabled() {
@@ -415,6 +421,25 @@ impl<'a> Analyzer<'a> {
         let arg = args.first().copied();
         match name.as_str() {
             "COUNT" => Ok(from_sql_type("BIGINT", self.dialect)),
+            // Ordered-set aggregates: the type of the `WITHIN GROUP (ORDER BY x)` value.
+            "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE"
+                if self.dialect == SqlDialect::Postgres && !func.within_group.is_empty() =>
+            {
+                let ordered = self.expr(&func.within_group[0].expr, scope)?;
+                let typed = match name.as_str() {
+                    "PERCENTILE_CONT" if operand_type(&ordered) == Some("INTERVAL") => ordered,
+                    "PERCENTILE_CONT" => from_sql_type("DOUBLE", self.dialect),
+                    _ => strip(ordered, self.dialect),
+                };
+                // An array of fractions gives an array of percentiles.
+                Ok(match (arg, typed.sql()) {
+                    (Some(Expr::Array(_)), Some(sql)) if name != "MODE" => {
+                        from_sql_type(&format!("ARRAY<{sql}>"), self.dialect)
+                    }
+                    (Some(Expr::Array(_)), _) if name != "MODE" => Typed::UNKNOWN,
+                    _ => typed,
+                })
+            }
             "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
             _ => match self.returns(&name) {
                 Some(returns) => self.function_type(returns, &args, scope),

@@ -17,12 +17,18 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+from sqlty._core import (
+    Schema,
+    expand_star,
+    infer_type,
+    load_schema,
+    returns_rows,
+)
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
-from sqlty._core import expand_star, infer_type, returns_rows
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
@@ -70,7 +76,7 @@ class _RowColumn(NamedTuple):
 
 
 def analyze_select(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
 ) -> list[ColumnInfo] | None:
     """Result columns of a query, or ``None`` when it returns no rows or doesn't parse.
 
@@ -91,7 +97,7 @@ def analyze_select(
 
 
 def json_shapes(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
 ) -> list[tuple[str, str]]:
     """The shape of the JSON each column builds, as ``(column, shape)`` pairs.
 
@@ -132,7 +138,7 @@ class ParamInfo(NamedTuple):
 
 
 def analyze_params(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
 ) -> list[ParamInfo] | None:
     """Parameters of a query with the type each takes from its context, or ``None`` when it doesn't parse.
 
@@ -156,7 +162,7 @@ def analyze_params(
 
 
 def query_diagnostics(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | None = None
+    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
 ) -> list[tuple[str, str]]:
     """Why a query has untyped columns, as ``(rule, message)`` pairs.
 
@@ -171,7 +177,7 @@ def query_diagnostics(
     return _query_diagnostics(sql, dialect=dialect, schema_sql=schema_sql)
 
 
-def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list[str]:
+def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]:
     """Names of schema tables that can't be parsed, so their columns are unknown.
 
     A table is retried without its constraints and ``CHECK`` / ``REFERENCES``
@@ -184,7 +190,9 @@ def schema_skipped_tables(schema_sql: str, *, dialect: str = "postgres") -> list
     return _schema_skipped_tables(schema_sql, dialect=dialect)
 
 
-def schema_skipped_objects(schema_sql: str, *, dialect: str = "postgres") -> list[tuple[str, str]]:
+def schema_skipped_objects(
+    schema_sql: str | Schema, *, dialect: str = "postgres"
+) -> list[tuple[str, str]]:
     """``(kind, name)`` of schema tables and views that can't be parsed, so their columns are unknown.
 
     ``kind`` is ``"table"`` or ``"view"``. Unparseable tables are retried without
@@ -201,7 +209,7 @@ def rewrite_source(
     source: str,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
     untyped: bool = False,
     keep_lines: bool = False,
@@ -256,7 +264,7 @@ def fix_source(
     source: str | ParsedSource,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
@@ -302,7 +310,7 @@ def check_source(
     source: str | ParsedSource,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     rules: dict[str, str] | None = None,
     import_style: str | None = None,
     untyped: bool = False,
@@ -400,7 +408,7 @@ class _Check:
         diagnostics: list[Diagnostic],
         *,
         dialect: str,
-        schema_sql: str | None,
+        schema_sql: str | Schema | None,
         rule_config: RuleConfig,
         found: list[HelperCall],
         driver_calls: list[HelperCall],
@@ -637,7 +645,7 @@ def _check_diagnostics(
     parsed: ParsedSource,
     *,
     dialect: str,
-    schema_sql: str | None,
+    schema_sql: str | Schema | None,
     rules: dict[str, str] | None,
     import_style: str | None,
     untyped: bool,
@@ -699,7 +707,7 @@ def query_statistics(
     source: str | ParsedSource,
     *,
     dialect: str = "postgres",
-    schema_sql: str | None = None,
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
     helpers: HelperIndex | None = None,
     module: str | None = None,
@@ -740,7 +748,7 @@ def _is_any(call: HelperCall) -> bool:
     return call.row is not None and is_any(call.row, call.typing_aliases)
 
 
-def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
+def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
     """``typed``, ``partially typed`` or ``unparsed``; ``None`` when ``query`` returns no rows."""
     if _parse_error(query, dialect=dialect) is not None:
         return "unparsed"
@@ -756,7 +764,7 @@ def _outcome(query: str, dialect: str, schema_sql: str | None) -> str | None:
 
 
 def _param_diagnostics(
-    call: HelperCall, dialect: str, schema_sql: str | None
+    call: HelperCall, dialect: str, schema_sql: str | Schema | None
 ) -> list[tuple[str, str]]:
     """``(rule, message)`` for the arguments a call passes for its query's placeholders."""
     assert call.query is not None and call.params is not None
@@ -801,7 +809,9 @@ def _param_diagnostics(
     return found
 
 
-def _columns(query: str | None, dialect: str, schema_sql: str | None) -> list[_RowColumn] | None:
+def _columns(
+    query: str | None, dialect: str, schema_sql: str | Schema | None
+) -> list[_RowColumn] | None:
     """Columns of a query and whether each can be NULL; ``None`` when it has none or cannot be analysed."""
     if query is None:
         return None
@@ -1193,6 +1203,7 @@ def _structural_diagnostics(
 __all__ = [
     "ColumnInfo",
     "HelperIndex",
+    "Schema",
     "RowUsage",
     "analyze_select",
     "check_source",
@@ -1200,6 +1211,7 @@ __all__ = [
     "fix_source",
     "infer_type",
     "json_shapes",
+    "load_schema",
     "query_diagnostics",
     "returns_rows",
     "rewrite_source",

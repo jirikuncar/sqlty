@@ -54,3 +54,26 @@ def test_sources_skipped_for_lack_of_sql_have_no_schema_diagnostics() -> None:
             assert core.check_source(source, schema_sql=_schema(0), **kwargs) == (
                 core.check_source(source, **kwargs)
             )
+
+
+def test_a_loaded_schema_stands_in_for_its_text() -> None:
+    sql = "CREATE TABLE t (a INT3 ZEROFILL NOT NULL); CREATE TABLE bad (x INT,;"
+    loaded = core.load_schema(sql, dialect="mysql")
+    assert loaded.dialect == "mysql"
+    query = "SELECT a FROM t"
+    assert core.analyze_select(query, dialect="mysql", schema_sql=loaded) == (
+        core.analyze_select(query, dialect="mysql", schema_sql=sql)
+    )
+    assert core.schema_skipped_objects(loaded, dialect="mysql") == [("table", "bad")]
+    source = 'q = "--sql\\nSELECT a FROM t"\n'
+    assert core.rewrite_source(source, dialect="mysql", schema_sql=loaded) == (
+        core.rewrite_source(source, dialect="mysql", schema_sql=sql)
+    )
+
+
+def test_a_loaded_schema_is_parsed_again_for_another_dialect() -> None:
+    sql = "CREATE TABLE t (a INT3 ZEROFILL);"
+    loaded = core.load_schema(sql, dialect="mysql")
+    assert core.analyze_select("SELECT a FROM t", dialect="postgres", schema_sql=loaded) == (
+        core.analyze_select("SELECT a FROM t", dialect="postgres", schema_sql=sql)
+    )
