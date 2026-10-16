@@ -18,7 +18,7 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Callable
 
-    from sqlty._config import SchemaSpec, SQLTyConfig
+    from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -630,6 +630,11 @@ class ConfigSource:
                 config["rules"] = rules
         return config, config_dir, label
 
+    @property
+    def cli_rules(self) -> dict[str, str]:
+        """Rule severities from ``-c rules.X`` and ``--error/--warn/--ignore``, which win over every file."""
+        return {**self._overrides.get("rules", {}), **dict(self._rule_severity)}
+
     def origin(self, key: str, label: str) -> str:
         """Where ``key`` of the config ``load`` returned with ``label`` came from, for error messages."""
         return "--config" if key in self._overrides else label
@@ -715,6 +720,18 @@ def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
     return _is_excluded_entry(relative.name, relative.parent, patterns)
 
 
+def _is_included(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
+    """Whether ``path`` or a directory holding it matches a glob relative to ``base``, as excludes do."""
+    resolved = path.resolve()
+    if not resolved.is_relative_to(base):
+        return False
+    relative = PurePosixPath(resolved.relative_to(base).as_posix())
+    return any(
+        _is_excluded_entry(entry.name, entry.parent, patterns)
+        for entry in [relative, *relative.parents[:-1]]
+    )
+
+
 def _excluded(name: str, rules: list[tuple[PurePosixPath | None, tuple[str, ...]]]) -> bool:
     return any(_is_excluded_entry(name, relative, patterns) for relative, patterns in rules)
 
@@ -797,6 +814,8 @@ class Settings:
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
+    overrides: tuple[RuleOverride, ...] = ()
+    config_dir: Path | None = None
 
 
 class SettingsResolver:
@@ -830,7 +849,17 @@ class SettingsResolver:
         directory = path.parent.resolve()
         if directory not in self._by_dir:
             self._by_dir[directory] = self._resolve(directory)
-        return self._by_dir[directory]
+        settings = self._by_dir[directory]
+        if not settings.overrides or settings.config_dir is None:
+            return settings
+        rules = dict(settings.rules or {})
+        for override in settings.overrides:
+            include, exclude = tuple(override["include"]), tuple(override["exclude"])
+            if (not include or _is_included(path, settings.config_dir, include)) and not (
+                exclude and _is_included(path, settings.config_dir, exclude)
+            ):
+                rules |= override["rules"]
+        return replace(settings, rules=rules | self.source.cli_rules)
 
     def _resolve(self, directory: Path) -> Settings:
         from sqlty._config import ConfigError
@@ -867,6 +896,8 @@ class SettingsResolver:
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])
             ),
+            overrides=tuple(config.get("overrides", ())),
+            config_dir=config_dir,
         )
 
 

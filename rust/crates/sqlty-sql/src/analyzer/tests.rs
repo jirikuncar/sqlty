@@ -103,6 +103,17 @@ fn test_parser_input() {
         "SELECT 1 ON CONFLICT (a) WHERE b"
     );
     assert_eq!(
+        parser_input(
+            "SELECT CIDR '10.0.0.0/8', inet 'it''s', \"name\" 'x', 'oid ''1''' -- money '1'",
+            SqlDialect::Postgres
+        ),
+        "SELECT CAST('10.0.0.0/8' AS CIDR), CAST('it''s' AS inet), \"name\" 'x', 'oid ''1''' -- money '1'"
+    );
+    assert_eq!(
+        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql),
+        "SELECT inet '1.2.3.4'"
+    );
+    assert_eq!(
         infer_type("--sql\nSELECT 1 AS x", "mysql", None)
             .unwrap()
             .as_deref(),
