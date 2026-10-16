@@ -24,6 +24,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
     WINDOW_FUNCTIONS[0],
     WINDOW_FUNCTIONS[1],
     (&["IF"], Branches(1)),
+    (&["GROUPING"], Sql("INT")),
     (&["IFNULL"], FirstKnown),
     (
         &[
@@ -275,10 +276,11 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
             "DEGREES",
             "RADIANS",
             "PI",
+            "MOD",
         ],
         Sql("DOUBLE"),
     ),
-    (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC", "MOD"], Arg(0)),
+    (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC"], Arg(0)),
 ];
 
 /// SQLite functions that give NULL for a value they cannot read: the date functions for

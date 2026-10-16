@@ -108,3 +108,46 @@ LEFT JOIN user_stats s ON u.id = s.user_id
 ORDER BY s.total_spent DESC NULLS LAST
 -- inferred: tuple[int, str, str, datetime.datetime, int, float, datetime.datetime | None, bool]
 ```
+
+## ARRAY of a subquery, GROUPING, COLLATE and OVERLAY
+
+`ARRAY(SELECT ...)` is an array of the subquery's column, empty rather than
+NULL over no rows. `GROUPING` is a non-null `int`, `COLLATE` keeps its
+operand's type, and `OVERLAY` is text.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, nick TEXT, tags TEXT[]);
+```
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ARRAY(SELECT id FROM users) AS ids, ARRAY(SELECT 'x') AS xs
+-- columns: ids: list[int] (ARRAY<INT>)
+-- columns: xs: list[str] (ARRAY<TEXT>)
+```
+
+```sql
+SELECT nick, GROUPING(nick) AS g, count(*) AS n FROM users GROUP BY ROLLUP(nick)
+-- columns: nick: str | None (TEXT)
+-- columns: g: int (INT)
+-- columns: n: int (BIGINT)
+```
+
+```sql
+SELECT name COLLATE "C", nick COLLATE "C" AS n FROM users
+-- columns: name: str (TEXT)
+-- columns: n: str | None (TEXT)
+```
+
+```sql
+SELECT OVERLAY(name PLACING 'x' FROM 1 FOR 2) AS a, OVERLAY(name PLACING nick FROM 1) AS b FROM users
+-- columns: a: str (TEXT)
+-- columns: b: str | None (TEXT)
+```

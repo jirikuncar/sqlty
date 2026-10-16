@@ -91,6 +91,16 @@ impl ImportStyle {
         }
     }
 
+    /// How `SQLTemplate` is spelled: "SQLTemplate" or "sqlty.SQLTemplate".
+    pub(crate) fn template_name(&self) -> String {
+        crate::tokens::template_wrapper(&self.wrapper_name)
+    }
+
+    /// Import line `SQLTemplate` needs, or `None` when the module is imported.
+    pub(crate) fn template_import(&self) -> Option<&'static str> {
+        (!self.wrapper_name.contains('.')).then_some("from sqlty import SQLTemplate")
+    }
+
     /// Import line `UNTYPED` needs, or `None` when the module is imported.
     pub(crate) fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
@@ -149,10 +159,23 @@ pub(crate) fn rewrite_scan(
             .iter()
             .any(|(n, b)| (n == name && b == binding) || (n == "*" && name == binding))
     };
-    if (module_style && !has_import(source, &istyle.import_line))
-        || (!module_style && !binds("SQL", &istyle.wrapper_name))
+    let wraps_with = |name: &str| {
+        replacements
+            .iter()
+            .any(|(_, _, r)| r.starts_with(&format!("{name}[")))
+    };
+    let needs_wrapper =
+        wraps_with(&istyle.wrapper_name) || (module_style && wraps_with(&istyle.template_name()));
+    if needs_wrapper
+        && ((module_style && !has_import(source, &istyle.import_line))
+            || (!module_style && !binds("SQL", &istyle.wrapper_name)))
     {
         imports.push(istyle.import_line.clone());
+    }
+    if let Some(line) = istyle.template_import() {
+        if wraps_with(&istyle.template_name()) && !binds("SQLTemplate", "SQLTemplate") {
+            imports.push(line.to_string());
+        }
     }
     if let Some(line) = istyle.untyped_import() {
         if needs_untyped_import && !binds("UNTYPED", "UNTYPED") {
@@ -228,7 +251,8 @@ pub(crate) fn wraps(
             continue;
         }
         let (start, end) = (group.start, group.end);
-        if !scan.is_plain(group)
+        let template = scan.is_template(&group.tokens);
+        if !(scan.is_plain(group) || template)
             || scan.calls.enclosing(start, end).is_some()
             || interpolated.binary_search(&group.line).is_ok()
             || skip(group.line)
@@ -246,12 +270,12 @@ pub(crate) fn wraps(
             // Don't wrap when inference fails — SQL[Any] is never useful.
             None => continue,
         };
-        let wrapped = format!(
-            "{}[{}]({})",
-            istyle.wrapper_name,
-            type_str,
-            &source[start..end]
-        );
+        let wrapper = if template {
+            istyle.template_name()
+        } else {
+            istyle.wrapper_name.clone()
+        };
+        let wrapped = format!("{wrapper}[{type_str}]({})", &source[start..end]);
         replacements.push((start, end, wrapped));
     }
     replacements
@@ -498,6 +522,9 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
+    let template_marker = format!("{}[", istyle.template_name());
+    let module_style = istyle.wrapper_name.contains('.');
+    let template_import = istyle.template_import();
     let untyped_import = istyle.untyped_import();
     let untyped_used = source
         .lines()
@@ -508,7 +535,10 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
         .filter(|line| {
             let line = line.trim_end();
             !((Some(line) == untyped_import && !untyped_used)
-                || (line == istyle.import_line && !source.contains(&wrapper_marker))
+                || (Some(line) == template_import && !source.contains(&template_marker))
+                || (line == istyle.import_line
+                    && !source.contains(&wrapper_marker)
+                    && !(module_style && source.contains(&template_marker)))
                 || TYPE_MODULES.iter().any(|module| {
                     line == format!("import {module}") && !source.contains(&format!("{module}."))
                 }))
@@ -731,7 +761,6 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::Dialect;
 
     fn rewrite_source(
         source: &str,
@@ -741,7 +770,7 @@ mod tests {
         untyped: bool,
     ) -> String {
         let options = Options {
-            dialect: Dialect::new(dialect),
+            dialect: dialect.parse().unwrap(),
             schema,
             style: ImportStyle::or_default(style),
             untyped,
