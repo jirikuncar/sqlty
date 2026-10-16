@@ -1,0 +1,113 @@
+# PostgreSQL arithmetic: reals, division, bitwise and network operators.
+
+[[rule]]
+id = "postgres.arithmetic.reals"
+operators = ["Plus", "Minus", "Multiply", "Divide", "Modulo"]
+dialects = ["postgres"]
+left = ["REAL", "FLOAT"]
+right = ["REAL", "FLOAT"]
+type = "@promote"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type + numeric_type → numeric_type)"
+reasoning = "Two reals give a real."
+
+[[rule]]
+id = "postgres.arithmetic.real-and-other"
+operators = ["Plus", "Minus", "Multiply", "Divide", "Modulo"]
+dialects = ["postgres"]
+left = ["REAL", "FLOAT"]
+right = ["@numeric"]
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 10.2 Operators, Example 10.1 (operators are resolved among the candidates a type converts to; real has operators only with real)"
+reasoning = "PostgreSQL has real operators for two reals only, so a real with another number resolves to double precision."
+
+[[rule]]
+id = "postgres.arithmetic.other-and-real"
+operators = ["Plus", "Minus", "Multiply", "Divide", "Modulo"]
+dialects = ["postgres"]
+left = ["@numeric"]
+right = ["REAL", "FLOAT"]
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 10.2 Operators, Example 10.1 (operators are resolved among the candidates a type converts to; real has operators only with real)"
+reasoning = "PostgreSQL has real operators for two reals only, so a real with another number resolves to double precision."
+
+[[rule]]
+id = "postgres.arithmetic.division"
+operators = ["Divide", "Modulo"]
+dialects = ["postgres"]
+left = ["@numeric"]
+right = ["@numeric"]
+type = "@promote"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type / numeric_type → numeric_type)"
+reasoning = "Division gives the wider type; a zero divisor raises an error rather than giving NULL."
+
+[[rule]]
+id = "postgres.arithmetic.division-other"
+operators = ["Divide", "Modulo"]
+dialects = ["postgres"]
+type = "@code"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval / double precision → interval)"
+reasoning = "A zero divisor raises an error, so the result is NULL only when an operand is; intervals are typed in code."
+
+[[rule]]
+id = "postgres.bitwise.address-shift"
+operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["postgres"]
+left = ["@address"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet << inet → boolean, inet >> inet → boolean)"
+reasoning = "On addresses, `<<` and `>>` test whether one network contains the other."
+
+[[rule]]
+id = "postgres.bitwise.address-shift-right-operand"
+operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["postgres"]
+right = ["@address"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet << inet → boolean, inet >> inet → boolean)"
+reasoning = "On addresses, `<<` and `>>` test whether one network contains the other."
+
+[[rule]]
+id = "postgres.bitwise.address-mask"
+operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
+dialects = ["postgres"]
+left = ["@address"]
+type = "INET"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet & inet → inet, inet | inet → inet)"
+reasoning = "On addresses, `&` and `|` mask one address with another."
+
+[[rule]]
+id = "postgres.bitwise.address-mask-right-operand"
+operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
+dialects = ["postgres"]
+right = ["@address"]
+type = "INET"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet & inet → inet, inet | inet → inet)"
+reasoning = "On addresses, `&` and `|` mask one address with another."
+
+[[rule]]
+id = "postgres.bitwise.integers"
+operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
+dialects = ["postgres"]
+left = ["@integer"]
+right = ["@integer"]
+type = "@promote"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (integral_type & integral_type → integral_type)"
+reasoning = "Bitwise operators on integers give the wider integer type."
+
+[[rule]]
+id = "postgres.bitwise.shift"
+operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["postgres"]
+left = ["@integer"]
+right = ["@integer"]
+type = "@promote-left"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (integral_type << integer → integral_type)"
+reasoning = "A shift keeps the type of the number it shifts."
+
+[[rule]]
+id = "postgres.network.contained-or-equal"
+operators = ["Custom:<<=", "Custom:>>="]
+dialects = ["postgres"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet <<= inet → boolean, inet >>= inet → boolean)"
+reasoning = "`<<=` and `>>=` test whether one network contains or equals the other."

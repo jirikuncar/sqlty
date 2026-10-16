@@ -1,0 +1,30 @@
+# MySQL division.
+
+[[rule]]
+id = "mysql.arithmetic.division"
+operator = "Divide"
+dialects = ["mysql"]
+left = ["@numeric"]
+right = ["@numeric"]
+type = "@promote-decimal"
+nullability = "nonzero-divisor"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (/ Division; Division by zero produces a NULL result)"
+reasoning = "`/` on integers gives an exact decimal, and NULL for a zero divisor."
+
+[[rule]]
+id = "mysql.arithmetic.division-other"
+operator = "Divide"
+dialects = ["mysql"]
+type = "@code"
+nullability = "nonzero-divisor"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result)"
+reasoning = "A division by zero gives NULL whatever the operand types."
+
+[[rule]]
+id = "mysql.arithmetic.integer-division"
+operator = "MyIntegerDivide"
+dialects = ["mysql"]
+type = "@unknown"
+nullability = "nonzero-divisor"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (DIV; Division by zero produces a NULL result)"
+reasoning = "`DIV` gives NULL for a zero divisor; its type is not inferred yet."

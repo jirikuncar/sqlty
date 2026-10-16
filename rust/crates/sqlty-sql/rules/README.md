@@ -23,18 +23,41 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | Key | Required | Meaning |
 |-----|----------|---------|
 | `id` | yes | Unique name, `<directory>.<topic>.<name>` |
-| `operator` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), or `Custom:<<=` for an operator sqlparser keeps as text |
+| `operator` or `operators` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), or `Custom:<<=` for an operator sqlparser keeps as text; `operators` lists several that share the rule |
 | `dialects` | in a dialect directory | `postgres`, `mysql`, `sqlite`, `clickhouse`; a rule in `common/` has none and applies to every dialect |
 | `left`, `right` | no | SQL types the operand may have; absent means any operand |
-| `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...), `@any` (any value, `typing.Any`) or `@left` (the left operand's type) |
-| `nullability` | no | `operands` (default: NULL when an operand is), `nullable`, `non-null` |
+| `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...) or one of the results below |
+| `nullability` | no | One of the nullabilities below; `operands` by default |
+| `shadows` | no | Ids of later rules of the same tier this one takes precedence over where both match |
 | `reference` | yes | The documentation the rule follows: product, version, section |
 | `reasoning` | yes | Why, in one sentence |
 
 Operand types are the canonical names the analyzer gives (`INT`, `BIGINT`,
 `DECIMAL`, `TEXT`, `JSONB`, `TIMESTAMPTZ`, ...; see `SQL_TYPES` in
-`rules/compile.rs`) or a class: `@integer`, `@numeric`, `@text`, `@json`,
-`@address` (`INET`, `CIDR`). A literal has no SQL type and matches no list.
+`compile.rs`), `ARRAY` for any array, or a class: `@integer`, `@numeric`,
+`@text`, `@json`, `@address` (`INET`, `CIDR`), `@array`. A string literal is
+`TEXT`, a number literal `INT`, `DECIMAL` or `DOUBLE`. In arithmetic, a
+placeholder or `NULL` operand takes the other operand's type.
+
+| `type` | Result |
+|--------|--------|
+| a SQL type | That type |
+| `@any` | Any value, `typing.Any` |
+| `@unknown` | Untyped |
+| `@code` | Typed by the analyzer's code; the rule gives the nullability only |
+| `@left`, `@right` | The type of that operand |
+| `@common` | The common type of both operands, as `CASE` and `UNION` unify them |
+| `@promote` | The wider number: `SMALLINT` < `INT` < `BIGINT` < `DECIMAL` < `REAL` < `DOUBLE` |
+| `@promote-decimal` | `@promote`, and at least `DECIMAL` |
+| `@promote-left` | The canonical type of the left number's rank |
+
+| `nullability` | NULL when |
+|---------------|-----------|
+| `operands` | an operand is |
+| `nullable` | always possible, such as a missing JSON member |
+| `non-null` | never |
+| `short-circuit` | an operand is, the right side read under what the left proves (`AND`, `OR`) |
+| `nonzero-divisor` | the divisor is zero, unless it is a number other than zero; else as `operands` |
 
 ## How a rule is chosen
 
@@ -56,13 +79,23 @@ The operands are typed only when a rule of the operator lists operand types.
 - an operator that is not a variant name (`rustc` then checks the variant
   exists: the generated `match` names it as `BinaryOperator::<name> { .. }`);
 - a rule in `common/` with `dialects`, or a dialect rule without them;
-- an overlap: a rule that matches some operands an earlier rule of the same
-  tier and operator matches too, unless the earlier rule is strictly narrower
-  (a specific case before the general one). An earlier rule that covers a later
-  one would make it unreachable, and a partial overlap would make file order
+- a rule an earlier rule of the same tier and operator covers entirely: it
+  would never apply;
+- a partial overlap with a different result or nullability: operands two rules
+  of the same tier match, unless an even earlier rule decides them, the earlier
+  rule is strictly narrower (a specific case before the general one), or the
+  earlier rule lists the later one in `shadows`. Otherwise file order would
   decide silently.
 
 `tests/inference_compiler.rs` covers each case.
+
+## What stays in code
+
+`analyzer/operators.rs` keeps what rules cannot express, each documented where
+it lives: MySQL `date ± INTERVAL n unit` (the unit decides between `DATE` and
+`DATETIME`), and until their ports the JSON accessors (`->`, `#>`, `#-`) and
+date, time and interval arithmetic. Rules with `type = "@code"` give those
+operators their nullability.
 
 ## Adding a rule
 
