@@ -1,10 +1,28 @@
 //! MySQL and SQLite built-ins, from their reference manuals; in their dialect they take
 //! precedence over [`COMMON_FUNCTIONS`](super::functions::COMMON_FUNCTIONS).
 
-use super::functions::Returns::{self, Arg, Branches, FirstKnown, Sql, StrToDate};
+use super::functions::Returns::{self, Arg, Branches, FirstKnown, Same, Sql, StrToDate};
+
+/// Window functions and `NULLIF`, as both MySQL and SQLite have them.
+const WINDOW_FUNCTIONS: [(&[&str], Returns); 2] = [
+    (
+        &[
+            "NULLIF",
+            "FIRST_VALUE",
+            "LAST_VALUE",
+            "NTH_VALUE",
+            "LAG",
+            "LEAD",
+        ],
+        Same(0),
+    ),
+    (&["PERCENT_RANK", "CUME_DIST"], Sql("DOUBLE")),
+];
 
 /// <https://dev.mysql.com/doc/refman/8.4/en/built-in-function-reference.html>
 pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
+    WINDOW_FUNCTIONS[0],
+    WINDOW_FUNCTIONS[1],
     (&["IF"], Branches(1)),
     (&["GROUPING"], Sql("INT")),
     (&["IFNULL", "GREATEST", "LEAST"], FirstKnown),
@@ -230,7 +248,12 @@ pub(super) const MYSQL_ALWAYS_NULLABLE: &[&str] = &[
 /// <https://www.sqlite.org/lang_corefunc.html>, `lang_datefunc.html`, `lang_mathfunc.html`
 /// and `json1.html`. Dates are text; the JSON functions return text too.
 pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
+    WINDOW_FUNCTIONS[0],
+    WINDOW_FUNCTIONS[1],
     (&["IIF"], Branches(1)),
+    (&["ZEROBLOB", "RANDOMBLOB", "UNHEX"], Sql("BLOB")),
+    (&["LIKELIHOOD", "LIKELY", "UNLIKELY"], Same(0)),
+    (&["GLOB", "LIKE"], Sql("BIGINT")),
     (&["IFNULL"], FirstKnown),
     (
         &[
@@ -261,6 +284,8 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_PATCH",
             "JSON_QUOTE",
             "JSON_TYPE",
+            "SQLITE_VERSION",
+            "SQLITE_SOURCE_ID",
         ],
         Sql("TEXT"),
     ),
@@ -309,8 +334,10 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
     (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC"], Arg(0)),
 ];
 
-/// SQLite date functions give NULL for a value that is not a date.
+/// SQLite functions that give NULL for a value they cannot read: the date functions for
+/// one that is not a date, `unhex` for one that is not hexadecimal.
 pub(super) const SQLITE_ALWAYS_NULLABLE: &[&str] = &[
+    "UNHEX",
     "DATE",
     "TIME",
     "DATETIME",

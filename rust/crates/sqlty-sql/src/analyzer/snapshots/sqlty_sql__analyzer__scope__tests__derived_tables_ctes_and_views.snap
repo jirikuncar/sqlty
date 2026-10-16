@@ -30,8 +30,7 @@ WITH v AS (SELECT 'shadow'::TEXT AS s) SELECT * FROM v
 s: str | TEXT | NonNull
 
 SELECT * FROM (SELECT 1)
-*: ? | ? | Unknown
-[unsupported-syntax] `*` reads subquery without an alias, which sqlty does not read the columns of
+?column?: int | ? | NonNull
 
 SELECT s.* FROM (SELECT 1 AS one) AS s
 one: int | ? | NonNull
