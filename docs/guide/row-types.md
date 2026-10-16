@@ -170,6 +170,26 @@ q = SQL[Event]("--sql\nSELECT id::INTEGER, created_at::TIMESTAMP, token::UUID FR
 # error:
 ```
 
+### Row types from other modules
+
+Row types usually live in a models module. `SQL[User](...)` with `User`
+imported from another module of the checked paths is checked like a local
+one: `from pkg.models import User [as U]`, `import pkg.models as m`
+(`SQL[m.User]`), relative imports and `__init__.py` re-exports all resolve.
+The module is read from its source, never imported.
+
+```text
+# pkg/models.py
+class User(TypedDict):
+    id: str
+
+# app.py
+from pkg.models import User
+q = SQL[User]("--sql\nSELECT 1::INTEGER AS id")  # column-type-mismatch
+```
+
+Run `sqlty check` on a path that holds both files, such as the project root.
+
 ### Types from other modules
 
 `sqlty check` also resolves a field annotated with a name imported from
@@ -429,8 +449,8 @@ alias often serves several queries that each return some of its values.
 
 ## Limitations
 
-- The row type must be defined in the same file as the `SQL[T](...)` call.
-  Imported row types are skipped silently.
+- A row type imported from a module outside the checked paths is skipped
+  silently.
 - A column with neither a cast nor a schema type has an unknown type: the
   query is not wrapped by `rewrite` (`SQL[UNTYPED]` with
   [`untyped = "sentinel"`](untyped.md)), and `check` does not compare the

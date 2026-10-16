@@ -346,6 +346,13 @@ class _Check:
             if queries or named
             else {}
         )
+        # The row types of the module an imported row type comes from, by local name.
+        self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
+        if helpers is not None:
+            extra = frozenset(type_modules or ())
+            for name in {q[1] for q in [*queries, *named]} - self.type_defs.keys():
+                if (found := helpers.row_type(parsed, name, extra)) is not None:
+                    self.type_defs[name], self.imported_defs[name] = found
         self.user_queries = [q for q in [*queries, *named] if q[1] in self.type_defs]
 
     def _unparse(self, row: ast.expr) -> str:
@@ -393,7 +400,7 @@ def _check_params(ctx: _Check) -> None:
 def _check_typeddict_inheritance(ctx: _Check) -> None:
     if not ctx.rule_config.is_enabled("typeddict-inheritance"):
         return
-    names = [name for _, name, _ in ctx.user_queries]
+    names = [name for _, name, _ in ctx.user_queries if name not in ctx.imported_defs]
     for info in _typeddict_lineage(names, ctx.type_defs):
         for message in info.errors:
             ctx.report("typeddict-inheritance", message, info.lineno)
@@ -438,8 +445,9 @@ def _check_structural(ctx: _Check) -> None:
     for line, name, query in ctx.user_queries:
         if (columns := _columns(query, ctx.dialect, ctx.schema_sql)) is None:
             continue
+        defs = ctx.imported_defs.get(name, ctx.type_defs)
         for rule, message in _structural_diagnostics(
-            name, ctx.type_defs[name], columns, ctx.rule_config, ctx.type_defs
+            name, ctx.type_defs[name], columns, ctx.rule_config, defs
         ):
             ctx.report(rule, message, line)
 
