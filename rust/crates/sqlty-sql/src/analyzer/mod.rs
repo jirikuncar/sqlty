@@ -14,6 +14,7 @@ use sqlparser::ast::{ArrayElemTypeDef, DataType};
 
 mod api;
 mod dialect;
+mod dialect_functions;
 mod dml;
 mod expr;
 mod functions;
@@ -137,6 +138,8 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("INTERVAL", "datetime.timedelta"),
         ("JSON", ANY),
         ("JSONB", ANY),
+        // psycopg loads an anonymous record as a tuple (of strings, in text format).
+        ("RECORD", "tuple[typing.Any, ...]"),
         ("UUID", "uuid.UUID"),
         ("BYTEA", "bytes"),
         ("BLOB", "bytes"),
@@ -305,6 +308,16 @@ pub(crate) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
 
 /// What the dialect's usual drivers load exact decimals as: SQLite and Oracle drivers
 /// return floats, the others `decimal.Decimal`.
+/// Every Python type a SQL type maps to, one union member at a time (`int`,
+/// `ipaddress.IPv4Address`, ...): what the row-type checks must know.
+pub fn python_types() -> std::collections::BTreeSet<&'static str> {
+    SQL_TO_PYTHON_TYPE
+        .values()
+        .flat_map(|python| python.split(" | "))
+        .chain([DECIMAL, "float"])
+        .collect()
+}
+
 fn decimal_type(dialect: SqlDialect) -> &'static str {
     match dialect {
         SqlDialect::Sqlite | SqlDialect::Other("oracle") => "float",

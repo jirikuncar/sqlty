@@ -36,12 +36,14 @@ query-param = "query"
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to `pyproject.toml` |
 | [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
+| [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
+| [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
 <!-- /generated:config-keys -->
 
 ## `dialect`
@@ -68,13 +70,53 @@ schema = ["extensions.sql", "tables/"]
 ## `rules`
 
 Severity per [lint rule](rules.md): `"error"`, `"warn"` or `"ignore"`.
-Unknown rule names and invalid severities are ignored.
+An unknown rule name or severity is an error.
 
 ```toml
 [tool.sqlty.rules]
 select-star = "ignore"
 column-name-mismatch = "error"
 ```
+
+## `overrides`
+
+Rule severities for some paths only, such as tests or migrations:
+
+```toml
+[tool.sqlty.rules]
+select-star = "error"
+
+[[tool.sqlty.overrides]]
+include = ["tests/**", "conftest.py"]
+
+[tool.sqlty.overrides.rules]
+select-star = "ignore"
+```
+
+The table follows ty's
+[`[[tool.ty.overrides]]`](https://docs.astral.sh/ty/reference/configuration/#overrides):
+`include` and `exclude` are lists of globs, and `rules` takes the same
+severities as [`rules`](#rules). An entry applies to the files `include`
+matches (every file when it is left out) and `exclude` does not:
+
+```toml
+[[tool.sqlty.overrides]]
+include = ["generated/**"]
+exclude = ["generated/important.py"]
+
+[tool.sqlty.overrides.rules]
+select-star = "ignore"
+```
+
+Globs are relative to the `pyproject.toml` directory and match like
+[`exclude`](#exclude-and-extend-exclude): a glob without a slash matches a file
+or directory name at any depth, and a matching directory covers every file in
+it. Every entry that matches a file is merged over `rules`, later entries
+winning. `--error`, `--warn`, `--ignore` and `-c rules.X=...` still win over
+both.
+
+An override changes severities only; `dialect`, `schema` and the other keys
+apply to the whole project. `check` and `check --fix` read it.
 
 ## `import-style`
 
@@ -157,3 +199,20 @@ command line are always processed, unless `--force-exclude` is given. The CLI's 
 [tool.sqlty]
 extend-exclude = ["migrations", "gen/*.py"]
 ```
+
+## `respect-gitignore`
+
+Directories the CLI walks also skip what git ignores: every `.gitignore` from
+the repository root down, and `.git/info/exclude`, with negations (`!keep.py`)
+and nested files read as git reads them. Build output and generated code are
+usually listed there already, so they need no `exclude` entry. Outside a git
+repository nothing is skipped this way; the global `core.excludesFile` is not
+read.
+
+```toml
+[tool.sqlty]
+respect-gitignore = false
+```
+
+Files named on the command line are always processed. The CLI's
+`--respect-gitignore` and `--no-respect-gitignore` override the setting.

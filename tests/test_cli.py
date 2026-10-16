@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 
 import pytest
 
-from sqlty._cli import SettingsResolver, _is_excluded, build_parser, main
+from sqlty._cli import (
+    ConfigSource,
+    SettingsResolver,
+    _collect_python_files,
+    _is_excluded,
+    build_parser,
+    main,
+)
 from sqlty._config import ConfigError
 from sqlty._lint import RULES
 
@@ -834,3 +842,175 @@ def test_inline_config_error_names_its_source(tmp_path, monkeypatch, capsys, val
     assert code == 2
     assert message in err
     assert "pyproject.toml" not in err
+
+
+_OVERRIDES = """[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "error"
+
+[[tool.sqlty.overrides]]
+include = ["tests/**", "conftest.py"]
+
+[tool.sqlty.overrides.rules]
+stale-type = "ignore"
+
+[[tool.sqlty.overrides]]
+include = ["tests/legacy"]
+exclude = ["test_skip.py"]
+
+[tool.sqlty.overrides.rules]
+stale-type = "warn"
+"""
+
+
+def _overrides_project(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(_OVERRIDES)
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    stale = 'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT id FROM users")\n'
+    names = ["app/q.py", "tests/test_q.py", "tests/legacy/test_old.py", "tests/legacy/test_skip.py"]
+    for name in [*names, "pkg/conftest.py"]:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(stale)
+
+
+def test_overrides_set_rule_severities_per_path(tmp_path, monkeypatch, capsys) -> None:
+    _overrides_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "."], capsys)
+
+    sep = os.sep
+    assert code == 1
+    assert out.splitlines()[:2] == [
+        f"app{sep}q.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+        f"tests{sep}legacy{sep}test_old.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+    ]
+    assert "Found 1 error(s), 1 warning(s)" in out
+
+
+def test_overrides_apply_to_check_fix(tmp_path, monkeypatch, capsys) -> None:
+    _overrides_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    _run(["check", "--fix", "."], capsys)
+
+    fixed = {
+        p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.py") if "int" in p.read_text()
+    }
+    assert fixed == {"app/q.py", "tests/legacy/test_old.py"}
+
+
+def test_rule_flags_win_over_overrides(tmp_path, monkeypatch, capsys) -> None:
+    _overrides_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "--warn", "stale-type", "."], capsys)
+
+    assert "Found 5 warning(s)" in out
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ("include = 'tests'\n", "include must be a list of glob strings"),
+        ('exclude = "tests"\n', "exclude must be a list of glob strings"),
+        (
+            'include = ["tests"]\nignore = ["x"]\n',
+            "unknown key 'ignore' in [[tool.sqlty.overrides]]",
+        ),
+        (
+            'include = ["tests"]\nrules = { select-starr = "ignore" }\n',
+            "unknown rule 'select-starr' in [tool.sqlty.overrides.rules]",
+        ),
+    ],
+)
+def test_invalid_overrides_are_errors(tmp_path, monkeypatch, capsys, override, message) -> None:
+    (tmp_path / "pyproject.toml").write_text(f"[[tool.sqlty.overrides]]\n{override}")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert message in err
+
+
+def _gitignore_project(tmp_path: Path, config: str = "") -> set[str]:
+    """A git work tree with ignored files; returns the files `check` reads."""
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    (tmp_path / ".git" / "info" / "exclude").write_text("local.py\n")
+    (tmp_path / ".gitignore").write_text("generated/\n*_pb2.py\n!keep_pb2.py\n")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / ".gitignore").write_text("build/\n")
+    (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
+    names = [
+        "generated/a.py",
+        "app/b.py",
+        "app/c_pb2.py",
+        "app/keep_pb2.py",
+        "app/build/d.py",
+        "local.py",
+    ]
+    for name in names:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("x = 1\n")
+    return set(names)
+
+
+def _walked(tmp_path: Path, *flags: str, root: str = ".") -> set[str]:
+    args = build_parser().parse_args(["check", *flags, root])
+    source = ConfigSource.from_args(args)
+    return {
+        p.resolve().relative_to(tmp_path).as_posix()
+        for p in _collect_python_files(args.paths, source)
+    }
+
+
+def test_walk_skips_what_git_ignores(tmp_path, monkeypatch) -> None:
+    _gitignore_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path) == {"app/b.py", "app/keep_pb2.py"}
+    assert _walked(tmp_path, root="app") == {"app/b.py", "app/keep_pb2.py"}
+
+
+@pytest.mark.parametrize(
+    ("config", "flags"),
+    [
+        ("respect-gitignore = false\n", []),
+        ("", ["--no-respect-gitignore"]),
+        ("respect-gitignore = true\n", ["--no-respect-gitignore"]),
+        ("", ["-c", "respect-gitignore = false"]),
+    ],
+)
+def test_respect_gitignore_can_be_turned_off(tmp_path, monkeypatch, config, flags) -> None:
+    every = _gitignore_project(tmp_path, config)
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path, *flags) == every
+
+
+def test_gitignore_needs_a_git_work_tree(tmp_path, monkeypatch) -> None:
+    every = _gitignore_project(tmp_path)
+    shutil.rmtree(tmp_path / ".git")
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path) == every
+
+
+def test_ignored_files_named_on_the_command_line_are_checked(tmp_path, monkeypatch) -> None:
+    _gitignore_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path, root="generated/a.py") == {"generated/a.py"}
+
+
+def test_respect_gitignore_must_be_a_boolean(tmp_path, monkeypatch, capsys) -> None:
+    _project(tmp_path, 'respect-gitignore = "no"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "respect-gitignore must be true or false" in err

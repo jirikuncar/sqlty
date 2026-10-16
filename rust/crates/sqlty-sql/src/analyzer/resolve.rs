@@ -386,10 +386,12 @@ impl<'a> Analyzer<'a> {
         if unreadable {
             return self.diag.explain_silently();
         }
-        let tables: Vec<&str> = candidates
-            .iter()
-            .map(|source| source.reference.as_str())
-            .collect();
+        let mut tables: Vec<&str> = Vec::new();
+        for source in &candidates {
+            if !tables.contains(&source.reference.as_str()) {
+                tables.push(&source.reference);
+            }
+        }
         let message = match (&qualifier, tables.is_empty()) {
             (Some(qualifier), _) => {
                 format!("column `{}` does not exist in `{qualifier}`", column.value)
@@ -595,6 +597,7 @@ mod tests {
             "SELECT nope FROM missing",
             "SELECT missing.col FROM missing",
             "SELECT nope FROM users JOIN orders ON true",
+            "SELECT (SELECT nope FROM users) FROM users",
             "SELECT name, nope FROM user_names",
             "SELECT nope",
             "SELECT users.* , nope.* FROM users",

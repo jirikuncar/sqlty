@@ -18,7 +18,7 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Callable
 
-    from sqlty._config import SchemaSpec, SQLTyConfig
+    from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,8 @@ def _rule_severity(severity: str, rule: str) -> tuple[str, str]:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared across rewrite/strip/check."""
+    import argparse
+
     parser.add_argument(
         "paths",
         nargs="*",
@@ -251,6 +253,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--force-exclude",
         action="store_true",
         help="Apply the excludes to files and directories named on the command line too",
+    )
+    parser.add_argument(
+        "--respect-gitignore",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Skip the files .gitignore ignores while walking directories (default: "
+        "[tool.sqlty] respect-gitignore, else true)",
     )
     parser.add_argument(
         "-v",
@@ -565,8 +574,10 @@ class ConfigSource:
         exclude: list[str] | None = None,
         extend_exclude: list[str] | None = None,
         force_exclude: bool = False,
+        respect_gitignore: bool | None = None,
     ) -> None:
         from sqlty._config import load_config_file, parse_overrides, validate_rule_severity
+        from sqlty._gitignore import GitIgnore
 
         self._isolated = isolated
         self._fixed = None if config_file is None else load_config_file(config_file)
@@ -583,6 +594,8 @@ class ConfigSource:
         self._exclude = None if exclude is None else self._relative_globs(exclude)
         self._extend_exclude = self._relative_globs(extend_exclude)
         self.force_exclude = force_exclude
+        self._respect_gitignore = inline.pop("respect_gitignore", respect_gitignore)
+        self.gitignore = GitIgnore()
 
     def _relative_globs(self, patterns: list[str] | tuple[str, ...]) -> tuple[str, ...]:
         """Command-line globs relative to the current directory: ``./gen`` and ``$PWD/gen`` are ``gen``."""
@@ -606,6 +619,7 @@ class ConfigSource:
             exclude=getattr(args, "exclude", None),
             extend_exclude=getattr(args, "extend_exclude", None),
             force_exclude=getattr(args, "force_exclude", False),
+            respect_gitignore=getattr(args, "respect_gitignore", None),
         )
 
     def load(self, directory: Path) -> tuple[SQLTyConfig, Path | None, str]:
@@ -630,6 +644,11 @@ class ConfigSource:
                 config["rules"] = rules
         return config, config_dir, label
 
+    @property
+    def cli_rules(self) -> dict[str, str]:
+        """Rule severities from ``-c rules.X`` and ``--error/--warn/--ignore``, which win over every file."""
+        return {**self._overrides.get("rules", {}), **dict(self._rule_severity)}
+
     def origin(self, key: str, label: str) -> str:
         """Where ``key`` of the config ``load`` returned with ``label`` came from, for error messages."""
         return "--config" if key in self._overrides else label
@@ -653,6 +672,18 @@ class ConfigSource:
             rules = [(self._cwd, self._exclude), (base, tuple(config.get("extend_exclude", ())))]
         rules.append((self._cwd, self._extend_exclude))
         return [(b, patterns) for b, patterns in rules if patterns]
+
+    def respects_gitignore(self, directory: Path) -> bool:
+        """Whether walking ``directory`` skips what ``.gitignore`` ignores."""
+        from sqlty._config import load_config
+
+        if self._respect_gitignore is not None:
+            return bool(self._respect_gitignore)
+        if self._fixed is not None:
+            config = self._fixed
+        else:
+            config = {} if self._isolated else load_config(directory)[0]
+        return config.get("respect_gitignore", True)
 
     def is_excluded(self, path: Path) -> bool:
         """Whether ``path`` or one of its parents up to a glob's base directory is excluded."""
@@ -715,6 +746,18 @@ def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
     return _is_excluded_entry(relative.name, relative.parent, patterns)
 
 
+def _is_included(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
+    """Whether ``path`` or a directory holding it matches a glob relative to ``base``, as excludes do."""
+    resolved = path.resolve()
+    if not resolved.is_relative_to(base):
+        return False
+    relative = PurePosixPath(resolved.relative_to(base).as_posix())
+    return any(
+        _is_excluded_entry(entry.name, entry.parent, patterns)
+        for entry in [relative, *relative.parents[:-1]]
+    )
+
+
 def _excluded(name: str, rules: list[tuple[PurePosixPath | None, tuple[str, ...]]]) -> bool:
     return any(_is_excluded_entry(name, relative, patterns) for relative, patterns in rules)
 
@@ -734,11 +777,18 @@ def _walk(root: Path, source: ConfigSource) -> list[Path]:
             )
             for base, patterns in source.exclusions(current)
         ]
-        dirnames[:] = sorted(d for d in dirnames if not _excluded(d, rules))
+        ignore = source.gitignore if source.respects_gitignore(current) else None
+        dirnames[:] = sorted(
+            d
+            for d in dirnames
+            if not _excluded(d, rules) and not (ignore and ignore.ignored(resolved, d, is_dir=True))
+        )
         found.extend(
             current / name
             for name in sorted(filenames)
-            if name.endswith(".py") and not _excluded(name, rules)
+            if name.endswith(".py")
+            and not _excluded(name, rules)
+            and not (ignore and ignore.ignored(resolved, name, is_dir=False))
         )
     return sorted(found)
 
@@ -797,6 +847,8 @@ class Settings:
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
+    overrides: tuple[RuleOverride, ...] = ()
+    config_dir: Path | None = None
 
 
 class SettingsResolver:
@@ -830,7 +882,17 @@ class SettingsResolver:
         directory = path.parent.resolve()
         if directory not in self._by_dir:
             self._by_dir[directory] = self._resolve(directory)
-        return self._by_dir[directory]
+        settings = self._by_dir[directory]
+        if not settings.overrides or settings.config_dir is None:
+            return settings
+        rules = dict(settings.rules or {})
+        for override in settings.overrides:
+            include, exclude = tuple(override["include"]), tuple(override["exclude"])
+            if (not include or _is_included(path, settings.config_dir, include)) and not (
+                exclude and _is_included(path, settings.config_dir, exclude)
+            ):
+                rules |= override["rules"]
+        return replace(settings, rules=rules | self.source.cli_rules)
 
     def _resolve(self, directory: Path) -> Settings:
         from sqlty._config import ConfigError
@@ -867,6 +929,8 @@ class SettingsResolver:
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])
             ),
+            overrides=tuple(config.get("overrides", ())),
+            config_dir=config_dir,
         )
 
 
