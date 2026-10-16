@@ -43,11 +43,11 @@ mod typed;
 #[cfg(test)]
 pub(crate) use api::load_schema;
 pub use api::{
-    analyze_select, analyze_with_diagnostics, infer_type, load_schema_with_skipped, parse_error,
-    returns_rows,
+    analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
+    load_schema_with_skipped, parse_error, returns_rows,
 };
 pub(crate) use api::{typed, view_columns};
-pub(crate) use dialect::SqlDialect;
+pub use dialect::{SqlDialect, UnknownDialect};
 use expr::from_sql_type;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
@@ -101,6 +101,7 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("TSVECTOR", "str"),
         ("TSQUERY", "str"),
         ("MACADDR", "str"),
+        ("MACADDR8", "str"),
         ("PG_NODE_TREE", "str"),
         ("ACLITEM", "str"),
         ("\"CHAR\"", "str"),
@@ -341,6 +342,8 @@ fn python_type(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     match base {
         "ARRAY" => Some("list".to_string()),
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" => Some(decimal_type(dialect).to_string()),
+        // A MySQL `TIME` is a duration, up to 838 hours either way.
+        "TIME" if dialect == SqlDialect::MySql => Some("datetime.timedelta".to_string()),
         _ => SQL_TO_PYTHON_TYPE
             .get(base)
             .map(ToString::to_string)

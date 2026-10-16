@@ -6,6 +6,7 @@ use super::functions::Returns::{self, Arg, Branches, FirstKnown, Sql, StrToDate}
 /// <https://dev.mysql.com/doc/refman/8.4/en/built-in-function-reference.html>
 pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
     (&["IF"], Branches(1)),
+    (&["GROUPING"], Sql("INT")),
     (&["IFNULL"], FirstKnown),
     (
         &[
@@ -250,10 +251,11 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
             "DEGREES",
             "RADIANS",
             "PI",
+            "MOD",
         ],
         Sql("DOUBLE"),
     ),
-    (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC", "MOD"], Arg(0)),
+    (&["ABS", "CEIL", "CEILING", "FLOOR", "TRUNC"], Arg(0)),
 ];
 
 /// SQLite date functions give NULL for a value that is not a date.

@@ -152,6 +152,8 @@ def _type_table() -> dict[str, str]:
 @pytest.mark.parametrize(("sql_type", "python_type"), sorted(_type_table().items()))
 def test_type_names(sql_type: str, python_type: str, dialect: str):
     """A mapped type name, cast or in a schema, is its Python type."""
+    if (sql_type, dialect) == ("TIME", "mysql"):
+        python_type = "datetime.timedelta"
     schema = f"CREATE TABLE t (c {sql_type} NOT NULL);"
     cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)

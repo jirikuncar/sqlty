@@ -617,6 +617,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "sqlparser",
+ "thiserror",
 ]
 
 [[package]]

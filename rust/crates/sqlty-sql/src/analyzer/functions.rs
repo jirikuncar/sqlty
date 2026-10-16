@@ -48,6 +48,9 @@ pub(super) enum Returns {
     Scaled,
     /// `date_trunc`: a timestamp argument's type, `TIMESTAMPTZ` for a date.
     Trunc(usize),
+    /// `timezone(zone, ts)`, like `ts AT TIME ZONE zone`: a `TIMESTAMP` becomes a
+    /// `TIMESTAMPTZ` and back, a time becomes a `TIMETZ`.
+    AtZone(usize),
 }
 
 use Returns::{Arg, Elem, Sql};
@@ -166,6 +169,10 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "TS_HEADLINE",
             "JSONB_ARRAY_ELEMENTS_TEXT",
             "JSON_ARRAY_ELEMENTS_TEXT",
+            "ARRAY_DIMS",
+            "HOST",
+            "ABBREV",
+            "TEXT",
         ],
         Sql("TEXT"),
     ),
@@ -183,12 +190,22 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "PG_BACKEND_PID",
             "NUM_NONNULLS",
             "NUM_NULLS",
+            "ARRAY_LOWER",
+            "ARRAY_UPPER",
+            "GET_BYTE",
+            "GET_BIT",
+            "MASKLEN",
+            "FAMILY",
+            "INET_CLIENT_PORT",
+            "INET_SERVER_PORT",
+            "GROUPING",
         ],
         Sql("INT"),
     ),
     (
         &[
             "NEXTVAL",
+            "REGR_COUNT",
             "CURRVAL",
             "LASTVAL",
             "SETVAL",
@@ -215,6 +232,19 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "ACOS",
             "ATAN",
             "ATAN2",
+            "PERCENT_RANK",
+            "CUME_DIST",
+            "CORR",
+            "COVAR_POP",
+            "COVAR_SAMP",
+            "REGR_SLOPE",
+            "REGR_INTERCEPT",
+            "REGR_R2",
+            "REGR_AVGX",
+            "REGR_AVGY",
+            "REGR_SXX",
+            "REGR_SYY",
+            "REGR_SXY",
         ],
         Sql("DOUBLE"),
     ),
@@ -299,9 +329,31 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         Sql("VARBINARY"),
     ),
     (
-        &["STRING_TO_ARRAY", "REGEXP_SPLIT_TO_ARRAY"],
+        &[
+            "STRING_TO_ARRAY",
+            "REGEXP_SPLIT_TO_ARRAY",
+            "REGEXP_MATCH",
+            "REGEXP_MATCHES",
+        ],
         Sql("ARRAY<TEXT>"),
     ),
+    (&["ARRAY_POSITIONS"], Sql("ARRAY<INT>")),
+    (&["NETWORK", "INET_MERGE"], Sql("CIDR")),
+    (
+        &[
+            "BROADCAST",
+            "HOSTMASK",
+            "NETMASK",
+            "INET_CLIENT_ADDR",
+            "INET_SERVER_ADDR",
+        ],
+        Sql("INET"),
+    ),
+    (&["SET_MASKLEN"], Arg(0)),
+    (&["DATE_BIN"], Arg(1)),
+    (&["TIMEZONE"], Returns::AtZone(1)),
+    (&["ARRAY_FILL"], Returns::ArrayOf(0)),
+    (&["BIT_AND", "BIT_OR", "BIT_XOR"], Arg(0)),
     (
         &[
             "ROW_TO_JSON",
@@ -520,6 +572,12 @@ impl<'a> Analyzer<'a> {
                     _ => Ok(Typed::UNKNOWN),
                 }
             }
+            Returns::AtZone(i) => Ok(match operand_type(&arg(i)?) {
+                Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
+                Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
+                _ => Typed::UNKNOWN,
+            }),
             Returns::Trunc(i) => {
                 let typed = arg(i)?;
                 match operand_type(&typed) {
@@ -549,6 +607,13 @@ impl<'a> Analyzer<'a> {
                 values: None,
             })
         };
+        // PostgreSQL has no `min`/`max` for `varchar`: they read it as `text`.
+        if self.dialect == SqlDialect::Postgres
+            && name != "SUM"
+            && typed.sql().map(super::operators::type_base) == Some("VARCHAR")
+        {
+            typed = Typed::new(typed.python().map(String::from), Some("TEXT".to_string()));
+        }
         if typed.python.is_some() || name != "SUM" {
             return Ok(if name == "SUM" {
                 sum_type(typed, self.dialect)
