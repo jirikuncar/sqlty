@@ -168,6 +168,7 @@ const AGGREGATES: &[&str] = &[
     "STDDEV",
     "STDDEV_POP",
     "STDDEV_SAMP",
+    "STD",
     "VARIANCE",
     "VAR_POP",
     "VAR_SAMP",

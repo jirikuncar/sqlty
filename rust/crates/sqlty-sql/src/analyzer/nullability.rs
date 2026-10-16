@@ -735,6 +735,12 @@ impl<'a> Analyzer<'a> {
         if name == "COUNT" || name == "REGR_COUNT" {
             return Nullability::NonNull;
         }
+        // Over no rows MySQL's BIT_AND has every bit set, BIT_OR and BIT_XOR none.
+        if self.dialect == SqlDialect::MySql
+            && matches!(name.as_str(), "BIT_AND" | "BIT_OR" | "BIT_XOR")
+        {
+            return Nullability::NonNull;
+        }
         // SQLite's two-argument MIN and MAX are scalar functions.
         if matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2 {
             return any_nullable(args.iter().map(|arg| of(arg)));

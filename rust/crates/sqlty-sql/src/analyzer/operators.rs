@@ -144,7 +144,7 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
 
 /// MySQL `date ± INTERVAL n unit` (or `INTERVAL n unit + date`): a `DATE` stays a date for
 /// day units and coarser, anything else is a `DATETIME`.
-fn mysql_date_add(
+pub(super) fn mysql_date_add(
     op: &BinaryOperator,
     (left, left_typed): (&Expr, &Typed),
     (right, right_typed): (&Expr, &Typed),

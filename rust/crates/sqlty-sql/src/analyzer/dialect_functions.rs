@@ -6,7 +6,50 @@ use super::functions::Returns::{self, Arg, Branches, FirstKnown, Sql, StrToDate}
 /// <https://dev.mysql.com/doc/refman/8.4/en/built-in-function-reference.html>
 pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
     (&["IF"], Branches(1)),
-    (&["IFNULL"], FirstKnown),
+    (&["IFNULL", "GREATEST", "LEAST"], FirstKnown),
+    (
+        &["DATE_ADD", "DATE_SUB", "ADDDATE", "SUBDATE"],
+        Returns::DateAdd,
+    ),
+    (&["ADDTIME", "SUBTIME"], Arg(0)),
+    (&["CEIL", "CEILING", "FLOOR"], Returns::Integral),
+    (&["STD"], Sql("DOUBLE")),
+    (
+        &[
+            "BIT_AND",
+            "BIT_OR",
+            "BIT_XOR",
+            "ISNULL",
+            "UNIX_TIMESTAMP",
+            "LAST_INSERT_ID",
+            "ROW_COUNT",
+            "FOUND_ROWS",
+            "CONNECTION_ID",
+            "SLEEP",
+            "BENCHMARK",
+            "INET_ATON",
+        ],
+        Sql("BIGINT"),
+    ),
+    (
+        &[
+            "DATABASE",
+            "SCHEMA",
+            "USER",
+            "CURRENT_USER",
+            "SESSION_USER",
+            "SYSTEM_USER",
+            "VERSION",
+            "INET_NTOA",
+            "INET6_NTOA",
+            "BIN_TO_UUID",
+            "BIN",
+            "OCT",
+            "CONV",
+        ],
+        Sql("TEXT"),
+    ),
+    (&["UUID_TO_BIN", "INET6_ATON"], Sql("VARBINARY")),
     (
         &[
             "NOW",
@@ -126,12 +169,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("TEXT"),
     ),
-    (
-        &[
-            "ABS", "ROUND", "TRUNCATE", "CEIL", "CEILING", "FLOOR", "MOD",
-        ],
-        Arg(0),
-    ),
+    (&["ABS", "ROUND", "TRUNCATE", "MOD"], Arg(0)),
     (
         &[
             "SQRT", "EXP", "LN", "LOG", "LOG2", "LOG10", "POW", "POWER", "SIN", "COS", "TAN",
@@ -173,6 +211,19 @@ pub(super) const MYSQL_ALWAYS_NULLABLE: &[&str] = &[
     "MAKETIME",
     "LAST_DAY",
     "ELT",
+    "DATE_ADD",
+    "DATE_SUB",
+    "ADDDATE",
+    "SUBDATE",
+    "ADDTIME",
+    "SUBTIME",
+    "DATABASE",
+    "SCHEMA",
+    "INET_ATON",
+    "INET_NTOA",
+    "INET6_ATON",
+    "INET6_NTOA",
+    "CONV",
 ];
 
 /// <https://www.sqlite.org/lang_corefunc.html>, `lang_datefunc.html`, `lang_mathfunc.html`
