@@ -115,3 +115,11 @@ SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: a: typing.Any (JSON)
 -- columns: b: typing.Any (JSON)
 ```
+
+`->` is `JSON_EXTRACT` and `->>` is `JSON_UNQUOTE(JSON_EXTRACT(...))`.
+
+```sql
+SELECT doc -> '$.a' AS a, doc ->> '$.a' AS b FROM events
+-- columns: a: typing.Any (JSON)
+-- columns: b: str | None (TEXT)
+```
