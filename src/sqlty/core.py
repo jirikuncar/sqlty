@@ -1045,12 +1045,13 @@ def _structural_diagnostics(
     )
     by_name = info.kind != "NamedTuple"
     by_alias = info.kind == "BaseModel"
-    unit = "keys" if info.kind == "TypedDict" else "fields"
+    unit = {"TypedDict": "keys", "Protocol": "attributes"}.get(info.kind, "fields")
+    open_ended = bool(info.extra_items) or by_alias or info.allows_extra
     lo = len(info.required - info.opaque) if by_name else len(fields)
-    hi = len(columns) if info.extra_items or by_alias else len(fields)
+    hi = len(columns) if open_ended else len(fields)
     if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
         expected = f"{len(fields)} fields"
-        if info.extra_items or by_alias:
+        if open_ended:
             expected = f"{lo} required {unit}"
         elif lo < hi:
             expected = f"{lo} required and {hi} total {unit}"
@@ -1113,7 +1114,7 @@ def _structural_diagnostics(
         and key not in info.opaque
         and not names.intersection(info.column_names(key))
     ]
-    noun = "key" if info.kind == "TypedDict" else "field"
+    noun = {"TypedDict": "key", "Protocol": "attribute"}.get(info.kind, "field")
     return (
         [d for col, field in known for d in type_mismatch(field, col)]
         + [
