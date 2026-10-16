@@ -16,7 +16,7 @@ statement.
 ## Example
 
 ```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 

@@ -92,7 +92,7 @@ tool such as pre-commit passes file names.
 |--------|-------------|
 | `-h`, `--help` | show this help message and exit |
 | `paths ...` | Files or directories (default: .); each file uses its nearest pyproject.toml |
-| `--dialect {postgres,sqlite,mysql}` | SQL dialect (default: [tool.sqlty] dialect, else postgres) |
+| `--dialect DIALECT` | SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb (default: [tool.sqlty] dialect, else postgres) |
 | `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
 | `--config-file PATH` | Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
 | `--isolated` | Ignore every configuration file; use the defaults and command-line flags |
@@ -122,10 +122,10 @@ never change the exit code.
 
 <!-- generated:cli-usage-rewrite -->
 ```
-sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}]
-              [--schema SCHEMA] [--config-file PATH | --isolated]
-              [-c KEY=VALUE] [--error RULE] [--warn RULE]
-              [--ignore RULE] [--exclude GLOB] [--extend-exclude GLOB]
+sqlty rewrite [-h] [--dialect DIALECT] [--schema SCHEMA]
+              [--config-file PATH | --isolated] [-c KEY=VALUE]
+              [--error RULE] [--warn RULE] [--ignore RULE]
+              [--exclude GLOB] [--extend-exclude GLOB]
               [--force-exclude]
               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
               [--check] [--diff] [--untyped {skip,sentinel}]
@@ -155,7 +155,7 @@ which `check` still checks.
 
 <!-- generated:cli-usage-strip -->
 ```
-sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
+sqlty strip [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--config-file PATH | --isolated] [-c KEY=VALUE]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
@@ -186,7 +186,7 @@ Found 1 warning(s)
 
 <!-- generated:cli-usage-check -->
 ```
-sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
+sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--config-file PATH | --isolated] [-c KEY=VALUE]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]

@@ -20,6 +20,7 @@ from sqlty._cli import (
 )
 from sqlty._config import ConfigError
 from sqlty._lint import RULES
+from sqlty.core import infer_type
 
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
@@ -686,7 +687,11 @@ def test_inline_config_overrides(tmp_path, monkeypatch) -> None:
 
     assert settings.dialect == "sqlite"
     assert settings.rules == {"select-star": "error", "stale-type": "ignore"}
-    assert settings.schema_sql is not None and "users" in settings.schema_sql
+    assert settings.schema is not None and settings.schema.dialect == "sqlite"
+    assert (
+        infer_type("SELECT * FROM users", dialect="sqlite", schema_sql=settings.schema)
+        == "tuple[int]"
+    )
     from sqlty._cli import _collect_python_files
 
     assert _collect_python_files(args.paths, resolver.source) == [Path("q.py")]
@@ -1126,3 +1131,14 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     code, out, _ = _run(["check", "."], capsys)
     assert code == 1
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
+
+
+def test_dialect_option_takes_every_dialect(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1::INTEGER AS n"\n')
+    monkeypatch.chdir(tmp_path)
+    code, out, _ = _run(["rewrite", "--diff", "--dialect", "DuckDB", "."], capsys)
+    assert code == 1
+    assert 'SQL[tuple[int]]("--sql' in out
+    code, _, err = _run(["check", "--dialect", "postgress", "."], capsys)
+    assert code == 2
+    assert "unknown dialect 'postgress' (did you mean 'postgres'?)" in err
