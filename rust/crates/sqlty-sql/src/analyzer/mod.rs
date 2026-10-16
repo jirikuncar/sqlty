@@ -307,6 +307,16 @@ pub(crate) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
 
 /// What the dialect's usual drivers load exact decimals as: SQLite and Oracle drivers
 /// return floats, the others `decimal.Decimal`.
+/// Every Python type a SQL type maps to, one union member at a time (`int`,
+/// `ipaddress.IPv4Address`, ...): what the row-type checks must know.
+pub fn python_types() -> std::collections::BTreeSet<&'static str> {
+    SQL_TO_PYTHON_TYPE
+        .values()
+        .flat_map(|python| python.split(" | "))
+        .chain([DECIMAL, "float"])
+        .collect()
+}
+
 fn decimal_type(dialect: SqlDialect) -> &'static str {
     match dialect {
         SqlDialect::Sqlite | SqlDialect::Other("oracle") => "float",

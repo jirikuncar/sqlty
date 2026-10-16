@@ -808,3 +808,12 @@ def test_type_modules_allow_imports(marker_module) -> None:
     diagnostics = check_source(MARKER_SOURCE, type_modules=["marker_app_ids"])
     assert marker_module.exists()
     assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]
+
+
+def test_every_inferred_python_type_is_checked():
+    """A Python type the Rust engine infers but the row-type checks don't know is never checked."""
+    from sqlty._core import python_types
+    from sqlty._type_extractor.info import PYTHON_TYPE_MAP
+
+    scalars = {name for name in python_types() if "[" not in name}
+    assert scalars - PYTHON_TYPE_MAP.keys() == set()
