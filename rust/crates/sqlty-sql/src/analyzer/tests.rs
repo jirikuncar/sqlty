@@ -1,6 +1,6 @@
 //! Analyzer unit tests that cross module boundaries.
 
-use super::preprocess::{numbered_placeholders, parse_first, parser_input};
+use super::preprocess::{numbered_placeholders, parse_first, parser_input, sqlite_type_names};
 use super::query::Analyzer;
 use super::*;
 
@@ -103,6 +103,17 @@ fn test_parser_input() {
         "SELECT 1 ON CONFLICT (a) WHERE b"
     );
     assert_eq!(
+        parser_input(
+            "SELECT CIDR '10.0.0.0/8', inet 'it''s', \"name\" 'x', 'oid ''1''' -- money '1'",
+            SqlDialect::Postgres
+        ),
+        "SELECT CAST('10.0.0.0/8' AS CIDR), CAST('it''s' AS inet), \"name\" 'x', 'oid ''1''' -- money '1'"
+    );
+    assert_eq!(
+        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql),
+        "SELECT inet '1.2.3.4'"
+    );
+    assert_eq!(
         infer_type("--sql\nSELECT 1 AS x", "mysql", None)
             .unwrap()
             .as_deref(),
@@ -131,9 +142,17 @@ fn test_mysql_column_types() {
          c INT SIGNED ZEROFILL, d MIDDLEINT(8) UNSIGNED)",
         "mysql",
     ));
+    let types: Vec<_> = analyze_select("SELECT * FROM t", "mysql", schema.as_deref())
+        .unwrap()
+        .unwrap()
+        .into_iter()
+        .map(|col| col.sql_type.unwrap())
+        .collect();
+    assert_eq!(types, ["UMEDIUMINT", "UINT", "UINT", "UMEDIUMINT(8)"]);
     assert_eq!(
         expand_star("SELECT * FROM t", "mysql", schema.as_deref()).as_deref(),
-        Some("SELECT a::UMEDIUMINT, b::UINT, c::UINT, d::UMEDIUMINT(8) FROM t")
+        Some("SELECT a, b, c, d FROM t"),
+        "MySQL has no `::`"
     );
     assert_eq!(
         names_in("SELECT 1 zerofill", "mysql"),
@@ -176,26 +195,47 @@ fn test_question_mark_placeholders() {
 
 #[test]
 fn test_dialect_type_aliases() {
-    let expand = |columns: &str, dialect: &str| {
+    let types = |columns: &str, dialect: &str| -> Vec<String> {
         let schema = Some(load_schema(&format!("CREATE TABLE t ({columns})"), dialect));
-        expand_star("SELECT * FROM t", dialect, schema.as_deref())
+        analyze_select("SELECT * FROM t", dialect, schema.as_deref())
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|col| col.sql_type.unwrap())
+            .collect()
     };
     assert_eq!(
-        expand("a INT64, b FLOAT64", "bigquery").as_deref(),
-        Some("SELECT a::BIGINT, b::DOUBLE FROM t")
+        types("a INT64, b FLOAT64", "bigquery"),
+        ["BIGINT", "DOUBLE"]
     );
     assert_eq!(
-        expand("a Int8, b INT8", "clickhouse").as_deref(),
-        Some("SELECT a::TINYINT, b::TINYINT FROM t")
+        types("a Int8, b INT8", "clickhouse"),
+        ["TINYINT", "TINYINT"]
     );
-    assert_eq!(
-        expand("a INT8", "postgres").as_deref(),
-        Some("SELECT a::BIGINT FROM t")
-    );
-    assert_eq!(
-        expand("a UNIQUEIDENTIFIER", "tsql").as_deref(),
-        Some("SELECT a::UUID FROM t")
-    );
+    assert_eq!(types("a INT8", "postgres"), ["BIGINT"]);
+    assert_eq!(types("a UNIQUEIDENTIFIER", "tsql"), ["UUID"]);
+}
+
+#[test]
+fn star_expansion_casts_only_where_the_dialect_has_a_cast_operator() {
+    let expand = |dialect: &str| {
+        let schema = Some(load_schema("CREATE TABLE t (a INTEGER, b TEXT)", dialect));
+        expand_star("SELECT * FROM t", dialect, schema.as_deref())
+    };
+    for dialect in ["postgres", "duckdb", "snowflake"] {
+        assert_eq!(
+            expand(dialect).as_deref(),
+            Some("SELECT a::INT, b::TEXT FROM t"),
+            "{dialect}"
+        );
+    }
+    for dialect in ["mysql", "sqlite", "bigquery", "tsql"] {
+        assert_eq!(
+            expand(dialect).as_deref(),
+            Some("SELECT a, b FROM t"),
+            "{dialect}"
+        );
+    }
 }
 
 #[test]
@@ -353,7 +393,7 @@ fn test_name_diagnostics_stay_quiet() {
     }
     // A table function's columns are not read, which is reported, not guessed.
     assert_eq!(
-        rules("SELECT x FROM generate_series(1, 3) AS g(x)"),
+        rules("SELECT word FROM pg_get_keywords() AS k"),
         ["unsupported-syntax"]
     );
 }
@@ -362,4 +402,20 @@ fn test_name_diagnostics_stay_quiet() {
 fn test_name_rules_need_a_schema() {
     let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", None).1;
     assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn sqlite_multi_word_type_names_are_joined() {
+    assert_eq!(
+        sqlite_type_names(
+            "CREATE TABLE t (a UNSIGNED BIG INT NOT NULL, \"b c\" VARYING CHARACTER(9), \
+             d INTEGER PRIMARY KEY, CONSTRAINT k PRIMARY KEY (d), e)"
+        )
+        .as_deref(),
+        Some(
+            "CREATE TABLE t (a UNSIGNED_BIG_INT NOT NULL, \"b c\" VARYING_CHARACTER(9), \
+             d INTEGER PRIMARY KEY, CONSTRAINT k PRIMARY KEY (d), e)"
+        )
+    );
+    assert_eq!(sqlite_type_names("CREATE TABLE t (a INT NOT NULL)"), None);
 }

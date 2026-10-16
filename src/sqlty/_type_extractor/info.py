@@ -122,6 +122,7 @@ PYTHON_TYPE_MAP: dict[str, type] = {
     "str": str,
     "float": float,
     "bool": bool,
+    "bytes": bytes,
     "list": list,
     "dict": dict,
     "datetime.date": datetime.date,
