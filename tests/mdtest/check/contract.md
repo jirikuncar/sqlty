@@ -5,7 +5,7 @@
 ### Detects stale rewrite space
 
 ```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
 q = "--sql SELECT 1::INTEGER"
 ```
 
@@ -46,7 +46,7 @@ stale-rewrite = "ignore"
 ```
 
 ```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
 q = "--sql SELECT 1::INTEGER"
 ```
 
@@ -68,7 +68,7 @@ y = 2
 ### Detects --sql<space> even inside SQL[T](...)
 
 ```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
 q = SQL[tuple[int]]("--sql SELECT 1::INTEGER")
 ```
 
@@ -400,7 +400,7 @@ q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ## Check_source detects unwrapped --sql strings
 
 ```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 
@@ -428,7 +428,7 @@ stale-rewrite = "ignore"
 ```
 
 ```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"
+# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
 q = "--sql SELECT id::INTEGER FROM users"
 ```
 

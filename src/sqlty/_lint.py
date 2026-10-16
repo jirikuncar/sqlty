@@ -170,7 +170,7 @@ RULES: dict[str, LintRule] = {
         name="inline-sql-comment",
         default_severity=Severity.WARN,
         fixable=True,
-        description='--sql followed by space makes entire query a SQL comment; use "--sql\\nSELECT ..." or run sqlty rewrite',
+        description='--sql followed by space makes entire query a SQL comment; use "--sql\\nSELECT ..." or run sqlty check --fix',
     ),
     "fstring-skipped": LintRule(
         name="fstring-skipped",

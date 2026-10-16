@@ -320,7 +320,7 @@ impl Checker<'_> {
     }
 }
 
-const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty rewrite"#;
+const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"#;
 
 fn skipped_message(rule: Rule) -> String {
     match rule {
