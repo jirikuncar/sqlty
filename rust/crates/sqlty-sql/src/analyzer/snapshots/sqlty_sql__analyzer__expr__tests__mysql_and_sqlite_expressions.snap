@@ -21,9 +21,9 @@ c: ? | ? | NonNull
 
 sqlite:
 SELECT CAST(x AS INTEGER) AS a, CAST(x AS TEXT) AS b, CAST(x AS REAL) AS c FROM t
-a: int | INT | Unknown
-b: str | TEXT | Unknown
-c: float | FLOAT | Unknown
+a: int | INT | Nullable
+b: str | TEXT | Nullable
+c: float | FLOAT | Nullable
 
 SELECT 1 AS a, 'x' AS b, x'ff' AS c FROM t
 a: int | ? | NonNull

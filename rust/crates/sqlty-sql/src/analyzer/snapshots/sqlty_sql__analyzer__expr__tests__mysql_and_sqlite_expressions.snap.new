@@ -1,0 +1,32 @@
+---
+source: crates/sqlty-sql/src/analyzer/expr.rs
+assertion_line: 573
+expression: "format!(\"mysql:\\n{mysql}\\nsqlite:\\n{sqlite}\")"
+---
+mysql:
+SELECT CAST(i AS CHAR) AS a, CAST(i AS SIGNED) AS b, CAST(txt AS UNSIGNED) AS c FROM t
+a: str | CHAR | NonNull
+b: int | BIGINT | NonNull
+c: int | UBIGINT | Nullable
+
+SELECT TRIM(txt) AS a, SUBSTRING(txt, 1, 2) AS b, POSITION('a' IN txt) AS c FROM t
+a: str | ? | Nullable
+b: str | ? | Nullable
+c: int | ? | Nullable
+
+SELECT e AS a, CAST(e AS CHAR) AS b, i DIV 2 AS c FROM t
+a: typing.Literal['a', 'b'] | ENUM('A', 'B') | NonNull
+b: str | CHAR | NonNull
+c: ? | ? | NonNull
+[unsupported-syntax] expression `i DIV 2` is not typed
+
+sqlite:
+SELECT CAST(x AS INTEGER) AS a, CAST(x AS TEXT) AS b, CAST(x AS REAL) AS c FROM t
+a: int | INT | Nullable
+b: str | TEXT | Nullable
+c: float | FLOAT | Nullable
+
+SELECT 1 AS a, 'x' AS b, x'ff' AS c FROM t
+a: int | ? | NonNull
+b: typing.Literal['x'] | ? | NonNull
+c: str | ? | NonNull

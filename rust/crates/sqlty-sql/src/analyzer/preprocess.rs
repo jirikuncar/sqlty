@@ -68,8 +68,12 @@ pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     (!reject_unsupported(&stmts, dialect)).then_some(stmts)
 }
 
-/// Parse schema DDL, with the MySQL column types sqlparser rejects respelled.
+/// Parse schema DDL, with the MySQL column types sqlparser rejects respelled, and in
+/// SQLite multi-word type names (`UNSIGNED BIG INT`) joined into one word.
 pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    if dialect == SqlDialect::Sqlite {
+        return parse(sql, dialect).or_else(|| parse(&sqlite_type_names(sql)?, dialect));
+    }
     if dialect != SqlDialect::MySql {
         return parse(sql, dialect);
     }
@@ -79,6 +83,65 @@ pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>
             pattern.replace_all(&sql, *replacement).into_owned()
         });
     parse(&sql, dialect)
+}
+
+/// Words that end a column's type name in SQLite: the constraints that may follow it.
+const SQLITE_CONSTRAINTS: [&str; 12] = [
+    "AS",
+    "CHECK",
+    "COLLATE",
+    "CONSTRAINT",
+    "DEFAULT",
+    "GENERATED",
+    "NOT",
+    "NULL",
+    "PRIMARY",
+    "REFERENCES",
+    "UNIQUE",
+    "AUTOINCREMENT",
+];
+
+/// A `CREATE TABLE` whose multi-word column type names, which SQLite accepts and sqlparser
+/// does not, are joined with `_` (`UNSIGNED BIG INT` -> `UNSIGNED_BIG_INT`); `None` when
+/// nothing changes.
+pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
+    static COLUMN: LazyLock<Regex> = LazyLock::new(|| {
+        let name = r#"(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|\w+)"#;
+        Regex::new(&format!(
+            r"(?i)([(,]\s*{name}\s+)([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)+)"
+        ))
+        .unwrap()
+    });
+    let open = sql.find('(')?;
+    let mut changed = false;
+    let columns = COLUMN.replace_all(&sql[open..], |caps: &Captures| {
+        let words: Vec<&str> = caps[2].split_whitespace().collect();
+        let end = words
+            .iter()
+            .position(|word| SQLITE_CONSTRAINTS.contains(&word.to_ascii_uppercase().as_str()))
+            .unwrap_or(words.len());
+        let head = &caps[1];
+        let column = head
+            .trim_start_matches([',', '('])
+            .trim()
+            .to_ascii_uppercase();
+        if end < 2
+            || matches!(
+                column.as_str(),
+                "CONSTRAINT" | "FOREIGN" | "PRIMARY" | "UNIQUE"
+            )
+        {
+            return caps[0].to_string();
+        }
+        changed = true;
+        let rest = words[end..].join(" ");
+        format!(
+            "{head}{}{}{rest}",
+            words[..end].join("_"),
+            if rest.is_empty() { "" } else { " " }
+        )
+    });
+    changed.then(|| format!("{}{columns}", &sql[..open]))
 }
 
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where

@@ -1,6 +1,6 @@
 //! Analyzer unit tests that cross module boundaries.
 
-use super::preprocess::{numbered_placeholders, parse_first, parser_input};
+use super::preprocess::{numbered_placeholders, parse_first, parser_input, sqlite_type_names};
 use super::query::Analyzer;
 use super::*;
 
@@ -362,4 +362,20 @@ fn test_name_diagnostics_stay_quiet() {
 fn test_name_rules_need_a_schema() {
     let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", None).1;
     assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn sqlite_multi_word_type_names_are_joined() {
+    assert_eq!(
+        sqlite_type_names(
+            "CREATE TABLE t (a UNSIGNED BIG INT NOT NULL, \"b c\" VARYING CHARACTER(9), \
+             d INTEGER PRIMARY KEY, CONSTRAINT k PRIMARY KEY (d), e)"
+        )
+        .as_deref(),
+        Some(
+            "CREATE TABLE t (a UNSIGNED_BIG_INT NOT NULL, \"b c\" VARYING_CHARACTER(9), \
+             d INTEGER PRIMARY KEY, CONSTRAINT k PRIMARY KEY (d), e)"
+        )
+    );
+    assert_eq!(sqlite_type_names("CREATE TABLE t (a INT NOT NULL)"), None);
 }
