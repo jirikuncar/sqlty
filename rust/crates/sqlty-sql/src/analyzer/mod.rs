@@ -47,7 +47,7 @@ pub use api::{
     load_schema_with_skipped, parse_error, returns_rows,
 };
 pub(crate) use api::{typed, view_columns};
-pub(crate) use dialect::SqlDialect;
+pub use dialect::{SqlDialect, UnknownDialect};
 use expr::from_sql_type;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
