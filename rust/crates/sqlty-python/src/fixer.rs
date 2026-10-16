@@ -13,7 +13,7 @@ use crate::options::{Dialect, Options};
 use crate::rewriter::{
     ends_marker_line, extract_string_content, has_import, header_end, infer_sql_content,
     is_sqlty_managed, line_ending, rewrite_scan, splice, suppresses, ImportStyle, LineIndex,
-    Suppressed, TYPE_MODULES,
+    Spelling, Suppressed, TYPE_MODULES,
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
@@ -75,6 +75,7 @@ pub fn fix_source(
     };
 
     let untyped_name = style.untyped_name();
+    let spelling = Spelling::of(&scan);
     let mut introduced = BTreeSet::new();
     let mut edits = Vec::new();
     for call in &scan.calls {
@@ -115,6 +116,7 @@ pub fn fix_source(
         if let Some(row_type) = refresh
             .then(|| infer_sql_content(&content, dialect, schema))
             .flatten()
+            .map(|inferred| spelling.respell(inferred))
             .filter(|inferred| inferred != annotated && !refines_tuple(annotated, inferred))
         {
             edits.push((call.annotation.start, call.annotation.end, row_type.clone()));
@@ -234,7 +236,7 @@ fn expand_star_in(content: &str, quote: &str, dialect: &str, schema: &SchemaData
 
 /// Add the [`TYPE_MODULES`] imports new row types need; drop an `UNTYPED` import no longer used.
 fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<String>) -> String {
-    let missing: Vec<String> = TYPE_MODULES
+    let mut missing: Vec<String> = TYPE_MODULES
         .into_iter()
         .filter(|module| {
             introduced
@@ -244,6 +246,11 @@ fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<St
         .map(|module| format!("import {module}"))
         .filter(|line| !has_import(&source, line))
         .collect();
+    let wrapped: Vec<String> = introduced.iter().map(|ty| format!("[{ty}](")).collect();
+    let wrapped: Vec<&str> = wrapped.iter().map(String::as_str).collect();
+    missing.extend(
+        Spelling::of(&Scan::new(source.as_str(), &style.wrapper_name)).imports_for(&wrapped),
+    );
     if let Some(untyped) = style
         .untyped_import()
         .filter(|line| has_import(&source, line))
