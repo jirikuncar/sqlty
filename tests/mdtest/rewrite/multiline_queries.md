@@ -58,14 +58,23 @@ q = f"--sql\nSELECT {column}::INTEGER FROM users"
 # rewritten: q = f"--sql\nSELECT {column}::INTEGER FROM users"
 ```
 
-## T-strings (PEP 750) are not rewritten
+## T-strings (PEP 750)
 
-Template strings (Python 3.14+) also use interpolation and are skipped:
+A t-string whose fields are values is wrapped as `SQLTemplate[T]`: each `{field}`
+is a parameter. A field with a format spec or a conversion, such as psycopg's
+`{name:i}` identifier, changes the SQL itself, so that template is skipped:
 
 ```python
-# error: [tstring-skipped] "t-string with --sql prefix skipped (t-strings cannot be statically rewritten)"
-q = t"--sql\nSELECT {column}::INTEGER FROM users"
-# rewritten: q = t"--sql\nSELECT {column}::INTEGER FROM users"
+user_id = 1
+column = "id"
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
+# error: [tstring-skipped] "t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+r = t"--sql\nSELECT {column:i}::INTEGER FROM users"
+# rewritten: user_id = 1
+# rewritten: column = "id"
+# rewritten: q = SQLTemplate[tuple[int, str]](t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}")
+# rewritten: r = t"--sql\nSELECT {column:i}::INTEGER FROM users"
 ```
 
 ## Silencing skipped f-strings

@@ -210,6 +210,25 @@ cargo nextest run --workspace --manifest-path rust/Cargo.toml
 cargo test --doc --workspace --manifest-path rust/Cargo.toml
 ```
 
+### Fuzzing the analyzer
+
+`tests/test_fuzz.py` generates random schemas and queries with
+[Hypothesis](https://hypothesis.readthedocs.io/) (joins, aggregates, casts,
+`COALESCE`, `CASE`, `UNION ALL`, `WHERE ... IS NOT NULL`) and checks that every
+query analyzes with one column per select item and survives `rewrite` and
+`strip`. With a PostgreSQL server it also prepares each query and compares
+column names and types, and runs it over rows full of NULLs to catch a column
+typed as non-null that is not. It is skipped unless `SQLTY_FUZZ` is set:
+
+```bash
+SQLTY_FUZZ=1 SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch uv run pytest tests/test_fuzz.py -p no:randomly
+```
+
+The server's tables are dropped and recreated, so point it at a scratch
+database. In CI, run the `Fuzz` workflow by hand (Actions, Fuzz, Run workflow);
+a failure prints the smallest schema and query Hypothesis shrank it to, which
+belongs in an mdtest next to the fix.
+
 ### Magic codec internals
 
 User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).

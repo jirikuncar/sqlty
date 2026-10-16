@@ -55,10 +55,6 @@ impl<'s> Scan<'s> {
         &self.text
     }
 
-    pub(crate) fn into_source(self) -> Cow<'s, str> {
-        self.text
-    }
-
     /// The call `group` sits in, if any.
     pub(crate) fn enclosing_call(&self, group: &Group) -> Option<&Call> {
         group.enclosing.map(|i| &self.calls[i])
@@ -112,6 +108,14 @@ impl<'s> Scan<'s> {
             .all(|&i| self.tokens[i].is_plain(&self.text))
     }
 
+    /// Whether every literal of `group` is a t-string of plain value fields, which is
+    /// checked and rewritten as a `SQLTemplate[T]` (see `tokens::template_content`).
+    pub(crate) fn is_template(&self, group: &[usize]) -> bool {
+        group
+            .iter()
+            .all(|&i| self.tokens[i].is_template(&self.text))
+    }
+
     /// Spans of plain string literals (no prefix but `u`), outside comments.
     pub(crate) fn plain_literals(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.tokens
@@ -121,7 +125,8 @@ impl<'s> Scan<'s> {
     }
 
     /// Why rewrite leaves a string group alone although it holds a `--sql` string:
-    /// `fstring-skipped`, `tstring-skipped`, or `unchecked-query` for a raw or bytes part.
+    /// `fstring-skipped`, `tstring-skipped` (a t-string a field of which changes the SQL),
+    /// or `unchecked-query` for a raw or bytes part.
     fn skipped_rule(&self, group: &[usize]) -> Option<Rule> {
         let prefixes: String = group
             .iter()
@@ -129,6 +134,7 @@ impl<'s> Scan<'s> {
             .collect();
         let spans: Vec<Range<usize>> = group.iter().map(|&i| self.tokens[i].span.clone()).collect();
         if prefixes.trim_matches('u').is_empty()
+            || self.is_template(group)
             || after_marker(&content(&self.text, &spans)).is_none()
         {
             return None;

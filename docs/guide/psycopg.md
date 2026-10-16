@@ -48,9 +48,32 @@ The row factory is chosen from the query's runtime row type
 |-----|-------------|
 | `tuple[...]` | `tuple_row` |
 | `TypedDict`, `dict[...]` | `dict_row` |
+| `Protocol` | `namedtuple_row` |
 | any other class (dataclass, `NamedTuple`, Pydantic model) | `class_row(T)` |
 
 A query without a runtime row type, such as a plain string, yields tuples.
+
+A [t-string query](writing-queries.md#t-strings), `SQLTemplate[T](t"...")`, runs
+as a template, its values sent as parameters (psycopg 3.3 or later):
+
+```python
+from typing import TypedDict
+
+import psycopg
+from sqlty import SQLTemplate
+from sqlty.drivers.psycopg import execute
+
+class User(TypedDict):
+    id: int
+    name: str
+
+user_id = 1
+query = SQLTemplate[User](t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}")
+
+with psycopg.connect("dbname=app") as conn:
+    user = execute(conn, query).fetchone()  # User | None
+# error:
+```
 
 ## `row_factory`
 

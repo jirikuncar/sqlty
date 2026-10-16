@@ -265,6 +265,23 @@ impl RuleConfig {
     pub fn is_enabled(&self, rule: Rule) -> bool {
         self.severity(rule) != Severity::Ignore
     }
+
+    /// This configuration with every rule but `rules` ignored.
+    pub(crate) fn only(&self, rules: &[Rule]) -> RuleConfig {
+        RuleConfig {
+            overrides: Rule::ALL
+                .into_iter()
+                .map(|rule| {
+                    let severity = if rules.contains(&rule) {
+                        self.severity(rule)
+                    } else {
+                        Severity::Ignore
+                    };
+                    (rule, severity)
+                })
+                .collect(),
+        }
+    }
 }
 
 #[cfg(test)]

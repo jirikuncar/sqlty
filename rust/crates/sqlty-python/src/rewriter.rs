@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::edit::{apply_edits, Edit};
 use crate::options::{ConfigError, Options};
 use crate::rules::Rule;
 use crate::scan::Scan;
@@ -91,6 +92,16 @@ impl ImportStyle {
         }
     }
 
+    /// How `SQLTemplate` is spelled: "SQLTemplate" or "sqlty.SQLTemplate".
+    pub(crate) fn template_name(&self) -> String {
+        crate::tokens::template_wrapper(&self.wrapper_name)
+    }
+
+    /// Import line `SQLTemplate` needs, or `None` when the module is imported.
+    pub(crate) fn template_import(&self) -> Option<&'static str> {
+        (!self.wrapper_name.contains('.')).then_some("from sqlty import SQLTemplate")
+    }
+
     /// Import line `UNTYPED` needs, or `None` when the module is imported.
     pub(crate) fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
@@ -121,21 +132,40 @@ pub(crate) fn rewrite_scan(
     keep_lines: bool,
     skip: &dyn Fn(usize) -> bool,
 ) -> Option<String> {
-    let istyle = &options.style;
-    let source = scan.source();
     let replacements = wraps(scan, options, skip);
-    let needs_untyped_import = replacements.iter().any(|(_, _, r)| {
-        r.starts_with(&format!(
-            "{}[{}](",
-            istyle.wrapper_name,
-            istyle.untyped_name()
-        ))
-    });
-
     if replacements.is_empty() {
         return None;
     }
-    let needs = |marker: &str| replacements.iter().any(|(_, _, r)| r.contains(marker));
+    let (result, applied) = apply_edits(scan.source(), replacements);
+    let wrapped: Vec<&str> = applied
+        .iter()
+        .map(|edit| edit.replacement.as_str())
+        .collect();
+    Some(with_wrapper_imports(
+        result,
+        scan,
+        &wrapped,
+        &options.style,
+        keep_lines,
+    ))
+}
+
+/// `result` with the imports the `wrapped` calls need: the wrapper, `UNTYPED` and the
+/// [`TYPE_MODULES`] their row types name. `scan` is of a source with the same imports.
+pub(crate) fn with_wrapper_imports(
+    result: String,
+    scan: &Scan,
+    wrapped: &[&str],
+    istyle: &ImportStyle,
+    keep_lines: bool,
+) -> String {
+    if wrapped.is_empty() {
+        return result;
+    }
+    let source = scan.source();
+    let untyped_call = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
+    let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
+    let needs = |marker: &str| wrapped.iter().any(|r| r.contains(marker));
     let mut imports = Vec::new();
     for module in TYPE_MODULES {
         if needs(&format!("{module}.")) && !has_import(source, &format!("import {module}")) {
@@ -149,10 +179,19 @@ pub(crate) fn rewrite_scan(
             .iter()
             .any(|(n, b)| (n == name && b == binding) || (n == "*" && name == binding))
     };
-    if (module_style && !has_import(source, &istyle.import_line))
-        || (!module_style && !binds("SQL", &istyle.wrapper_name))
+    let wraps_with = |name: &str| wrapped.iter().any(|r| r.starts_with(&format!("{name}[")));
+    let needs_wrapper =
+        wraps_with(&istyle.wrapper_name) || (module_style && wraps_with(&istyle.template_name()));
+    if needs_wrapper
+        && ((module_style && !has_import(source, &istyle.import_line))
+            || (!module_style && !binds("SQL", &istyle.wrapper_name)))
     {
         imports.push(istyle.import_line.clone());
+    }
+    if let Some(line) = istyle.template_import() {
+        if wraps_with(&istyle.template_name()) && !binds("SQLTemplate", "SQLTemplate") {
+            imports.push(line.to_string());
+        }
     }
     if let Some(line) = istyle.untyped_import() {
         if needs_untyped_import && !binds("UNTYPED", "UNTYPED") {
@@ -160,12 +199,11 @@ pub(crate) fn rewrite_scan(
         }
     }
 
-    let result = splice(source, &replacements);
     if imports.is_empty() {
-        return Some(result);
+        return result;
     }
     if keep_lines {
-        return Some(insert_inline(&result, &imports.join("; ")));
+        return insert_inline(&result, &imports.join("; "));
     }
     let at = header_end(&result);
     let eol = line_ending(&result, at);
@@ -174,14 +212,14 @@ pub(crate) fn rewrite_scan(
     } else {
         ""
     };
-    Some(format!(
+    format!(
         "{}{}{}{}{}",
         &result[..at],
         sep,
         imports.join(eol),
         eol,
         &result[at..]
-    ))
+    )
 }
 
 /// Line ending of the line at `at`, else of the line before it.
@@ -201,11 +239,7 @@ pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
 /// a wrapper call (`mod.SQL[...]` included), the argument of a psycopg `SQL(...)`,
 /// groups with a prefixed string, and
 /// every group on a line that holds an f- or t-string `--sql` group.
-pub(crate) fn wraps(
-    scan: &Scan,
-    options: &Options,
-    skip: &dyn Fn(usize) -> bool,
-) -> Vec<(usize, usize, String)> {
+pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool) -> Vec<Edit> {
     let source = scan.source();
     let (dialect, schema) = (options.dialect.name(), options.schema);
     let (istyle, untyped) = (&options.style, options.untyped);
@@ -230,7 +264,8 @@ pub(crate) fn wraps(
             continue;
         }
         let (start, end) = (group.start, group.end);
-        if !scan.is_plain(group)
+        let template = scan.is_template(&group.tokens);
+        if !(scan.is_plain(group) || template)
             || scan.calls.enclosing(start, end).is_some()
             || interpolated.binary_search(&group.line).is_ok()
             || skip(group.line)
@@ -248,13 +283,13 @@ pub(crate) fn wraps(
             // Don't wrap when inference fails — SQL[Any] is never useful.
             None => continue,
         };
-        let wrapped = format!(
-            "{}[{}]({})",
-            istyle.wrapper_name,
-            type_str,
-            &source[start..end]
-        );
-        replacements.push((start, end, wrapped));
+        let wrapper = if template {
+            istyle.template_name()
+        } else {
+            istyle.wrapper_name.clone()
+        };
+        let wrapped = format!("{wrapper}[{type_str}]({})", &source[start..end]);
+        replacements.push(Edit::new(start..end, wrapped));
     }
     replacements
 }
@@ -269,47 +304,30 @@ pub(crate) fn wraps(
 /// rewrite.
 pub fn strip_source(source: &str, istyle: &ImportStyle) -> String {
     let scan = Scan::new(source, &istyle.wrapper_name);
-    let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+    let mut replacements = Vec::new();
     for call in &scan.calls {
         if !call.exact || !call.content(source).is_some_and(|c| is_sqlty_managed(&c)) {
             continue;
         }
         if call.bare {
-            replacements.push((
-                call.span.start,
-                call.span.end,
-                call.argument(source).to_string(),
-            ));
+            replacements.push(Edit::new(call.span.clone(), call.argument(source)));
             continue;
         }
-        replacements.push((call.span.start, call.open, String::new()));
+        replacements.push(Edit::new(call.span.start..call.open, ""));
         if let Some(comma) = &call.comma {
-            replacements.push((comma.start, comma.end, String::new()));
+            replacements.push(Edit::new(comma.clone(), ""));
         }
     }
 
     if replacements.is_empty() {
         return source.to_string();
     }
-    remove_unused_imports(&splice(source, &replacements), istyle)
+    remove_unused_imports(&apply_edits(source, replacements).0, istyle)
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Apply non-overlapping `(start, end, replacement)` edits, given in source order.
-pub(crate) fn splice(source: &str, replacements: &[(usize, usize, String)]) -> String {
-    let mut result = String::with_capacity(source.len());
-    let mut pos = 0;
-    for (start, end, replacement) in replacements {
-        result.push_str(&source[pos..*start]);
-        result.push_str(replacement);
-        pos = *end;
-    }
-    result.push_str(&source[pos..]);
-    result
-}
 
 /// Rules suppressed by `# sqlty: ignore` comments, by line: `None` suppresses every rule.
 pub type Suppressed = HashMap<usize, Option<Vec<String>>>;
@@ -500,6 +518,9 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
+    let template_marker = format!("{}[", istyle.template_name());
+    let module_style = istyle.wrapper_name.contains('.');
+    let template_import = istyle.template_import();
     let untyped_import = istyle.untyped_import();
     let untyped_used = source
         .lines()
@@ -510,7 +531,10 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
         .filter(|line| {
             let line = line.trim_end();
             !((Some(line) == untyped_import && !untyped_used)
-                || (line == istyle.import_line && !source.contains(&wrapper_marker))
+                || (Some(line) == template_import && !source.contains(&template_marker))
+                || (line == istyle.import_line
+                    && !source.contains(&wrapper_marker)
+                    && !(module_style && source.contains(&template_marker)))
                 || TYPE_MODULES.iter().any(|module| {
                     line == format!("import {module}") && !source.contains(&format!("{module}."))
                 }))
@@ -733,7 +757,6 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::options::Dialect;
 
     fn rewrite_source(
         source: &str,
@@ -743,7 +766,7 @@ mod tests {
         untyped: bool,
     ) -> String {
         let options = Options {
-            dialect: Dialect::new(dialect),
+            dialect: dialect.parse().unwrap(),
             schema,
             style: ImportStyle::or_default(style),
             untyped,

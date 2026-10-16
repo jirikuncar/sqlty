@@ -33,7 +33,7 @@ table silently changes what the query returns at runtime.
 ```python
 from sqlty import SQL
 
-# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
+# error: [select-star] "SELECT * used — expand to explicit column list"
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # error: [select-star] "SELECT u.* used — expand to explicit column list"
 r = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
@@ -58,7 +58,8 @@ q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
-A qualified star keeps its qualifier, so it is expanded in a join too:
+A qualified star keeps its qualifier, and a bare `*` over several tables lists each
+table's columns qualified by its alias or name, so joins are expanded too:
 
 ```python
 from sqlty import SQL
@@ -70,7 +71,7 @@ r = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, t.id FROM users u JOIN teams t
 ```
 
 Queries with escapes or quotes inside the string, queries split over several
-concatenated strings, and a bare `*` in a query that reads from more than one
-table (`JOIN` or `FROM a, b`; its columns would have no qualifier), are left
-for you to edit, as are stars in `RETURNING` and in CTEs. `select-star` is
+concatenated strings, and a bare `*` over a `USING` or `NATURAL` join (which
+merges columns), a subquery or a quoted alias, are left for you to edit, as are
+stars in `RETURNING` and in CTEs. `select-star` is
 still reported for them.

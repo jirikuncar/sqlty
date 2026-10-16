@@ -14,13 +14,14 @@ import ast
 import re
 import typing
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import check_source as _check_source
+from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import (
     expand_star,
     infer_type,
@@ -362,7 +363,7 @@ class _Check:
         self._unparsed: dict[str, str] = {}
         self.rows = [self._unparse(call.row) if call.row else None for call in self.calls]
         named = [
-            (call.line, row, call.query)
+            (call.line, row, _bound(call, dialect))
             for call, row in zip(self.calls, self.rows, strict=True)
             if row
         ]
@@ -380,6 +381,11 @@ class _Check:
                 if (imported := helpers.row_type(parsed, name, extra)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         self.user_queries = [q for q in [*queries, *named] if q[1] in self.type_defs]
+
+    def composite(self, sql_type: str) -> list[_RowColumn] | None:
+        """The fields of the composite type ``sql_type`` as columns; None when it is not one."""
+        fields = _composite_fields(sql_type, dialect=self.dialect, schema_sql=self.schema_sql)
+        return None if fields is None else [_RowColumn(*field) for field in fields]
 
     def _unparse(self, row: ast.expr) -> str:
         """``ast.unparse(row)``, once per distinct source span in the file."""
@@ -483,11 +489,61 @@ def _check_structural(ctx: _Check) -> None:
         for field, col in pairs:
             if field is not None and col.nullable is not False:
                 ctx.row_usage.needed.add((info.module, info.name, field))
-        for rule, message in _structural_diagnostics(name, info, columns, ctx.rule_config, defs):
+        for rule, message in _structural_diagnostics(
+            name, info, columns, ctx.rule_config, defs, ctx.composite
+        ):
             diagnostic = ctx.report(rule, message, line)
             if diagnostic is not None and rule == "redundant-optional":
                 field = message.split(" is ", 1)[0].removeprefix(f"{name}.")
                 ctx.row_usage.redundant.append(((info.module, info.name, field), diagnostic))
+
+
+_PSYCOPG_PLACEHOLDER = re.compile(r"%%|%\((?P<name>[^)]+)\)s|%s")
+
+
+def _bound(call: HelperCall, dialect: str) -> str | None:
+    """The query of ``call`` with the placeholders it binds to non-``None`` values marked so.
+
+    A bare placeholder reads as a value that may be NULL, since a caller may bind ``None``.
+    Where the call passes an argument whose type excludes ``None`` (a literal, an
+    annotated variable), the placeholder is respelled as one whose nullability is not
+    judged, so the column or JSON member it fills is not reported as nullable.
+    """
+    if call.query is None or not call.params:
+        return call.query
+    non_null = {arg.key for arg in call.params if arg.type not in (None, "None")}
+    if not non_null:
+        return call.query
+    marker = "$0" if dialect.lower() in ("postgres", "postgresql") else "?"
+    position = 0
+
+    def respell(match: re.Match[str]) -> str:
+        nonlocal position
+        if match[0] == "%%":
+            return match[0]
+        key: int | str
+        if match["name"] is not None:
+            key = match["name"]
+        else:
+            position += 1
+            key = position
+        return marker if key in non_null else match[0]
+
+    return _PSYCOPG_PLACEHOLDER.sub(respell, call.query)
+
+
+def _row_type_of(annotation: ast.expr | None, type_defs: Mapping[str, TypeInfo]) -> TypeInfo | None:
+    """The row type in ``type_defs`` an annotation names, through ``X | None`` and ``Optional[X]``."""
+    match annotation:
+        case ast.BinOp(op=ast.BitOr(), left=left, right=ast.Constant(value=None)):
+            return _row_type_of(left, type_defs)
+        case ast.BinOp(op=ast.BitOr(), left=ast.Constant(value=None), right=right):
+            return _row_type_of(right, type_defs)
+        case ast.Subscript(value=value, slice=inner) if ast.unparse(value).endswith("Optional"):
+            return _row_type_of(inner, type_defs)
+        case ast.Name() | ast.Attribute():
+            return type_defs.get(ast.unparse(annotation))
+    return None
 
 
 def _check_values(ctx: _Check) -> None:
@@ -496,7 +552,7 @@ def _check_values(ctx: _Check) -> None:
     for call, row in zip(ctx.calls, ctx.rows, strict=True):
         if call.row is None or row is None or row in ctx.type_defs:
             continue
-        if (columns := _columns(call.query, ctx.dialect, ctx.schema_sql)) is None:
+        if (columns := _columns(_bound(call, ctx.dialect), ctx.dialect, ctx.schema_sql)) is None:
             continue
         if row not in shapes:
             shapes[row] = _row_shape(call.row, row, call.typing_aliases)
@@ -702,6 +758,7 @@ def _nullability_diagnostics(
     declared: typing.Any,
     col: _RowColumn,
     rules: RuleConfig,
+    item: str = "query column",
 ) -> list[tuple[str, str]]:
     """``nullable-mismatch`` and ``redundant-optional`` for one field and its column.
 
@@ -718,14 +775,14 @@ def _nullability_diagnostics(
         return [
             (
                 "nullable-mismatch",
-                f"{label} is {_type_repr(declared)} but query column '{col.name}' can be NULL",
+                f"{label} is {_type_repr(declared)} but {item} '{col.name}' can be NULL",
             )
         ]
     if not col.nullable and rules.is_enabled("redundant-optional") and is_optional(declared):
         return [
             (
                 "redundant-optional",
-                f"{label} is {_type_repr(declared)} but query column '{col.name}' is never NULL",
+                f"{label} is {_type_repr(declared)} but {item} '{col.name}' is never NULL",
             )
         ]
     return []
@@ -765,6 +822,7 @@ def _literal_diagnostics(
     declared: typing.Any,
     col: _RowColumn,
     rules: RuleConfig,
+    item: str = "query column",
 ) -> list[tuple[str, str]]:
     """``literal-mismatch`` and ``redundant-literal`` for one field and its column.
 
@@ -788,7 +846,7 @@ def _literal_diagnostics(
         return [
             (
                 "literal-mismatch",
-                f"{label} is {_type_repr(declared)} but query column '{col.name}' "
+                f"{label} is {_type_repr(declared)} but {item} '{col.name}' "
                 f"can be {', '.join(map(repr, missing))}",
             )
         ]
@@ -797,7 +855,7 @@ def _literal_diagnostics(
         return [
             (
                 "redundant-literal",
-                f"{label} is {_type_repr(declared)} but query column '{col.name}' "
+                f"{label} is {_type_repr(declared)} but {item} '{col.name}' "
                 f"is never {', '.join(map(repr, extra))}",
             )
         ]
@@ -809,10 +867,11 @@ def _field_diagnostics(
     declared: typing.Any,
     col: _RowColumn,
     rules: RuleConfig,
+    item: str = "query column",
 ) -> list[tuple[str, str]]:
-    """Nullability and value-set diagnostics for one field and its column."""
-    return _nullability_diagnostics(label, declared, col, rules) + _literal_diagnostics(
-        label, declared, col, rules
+    """Nullability and value-set diagnostics for one field and its column (or composite field)."""
+    return _nullability_diagnostics(label, declared, col, rules, item) + _literal_diagnostics(
+        label, declared, col, rules, item
     )
 
 
@@ -957,6 +1016,8 @@ def _structural_diagnostics(
     columns: list[_RowColumn],
     rules: RuleConfig,
     type_defs: Mapping[str, TypeInfo],
+    composite: Callable[[str], list[_RowColumn] | None] | None = None,
+    source: str = "query",
 ) -> list[tuple[str, str]]:
     """Compare a user type with query columns, returning ``(rule, message)`` pairs.
 
@@ -968,27 +1029,36 @@ def _structural_diagnostics(
     ``typeddict-key-mismatch``. NamedTuples match by position.
     A reported count mismatch suppresses the per-column checks. A column that builds JSON
     of a known shape is also checked against the field's annotation, nested types looked up
-    in ``type_defs`` (``json-shape-mismatch``).
+    in ``type_defs`` (``json-shape-mismatch``). A column of a composite type whose field is
+    annotated with a row type in ``type_defs`` is compared with the fields ``composite``
+    gives for its SQL type, the same way.
     """
     from sqlty._type_extractor import check_type_compatibility, field_type
 
     fields = info.fields
     declared = dict(fields)
+    item = "column" if source == "query" else "field"
+    counted = (
+        f"{source} returns {len(columns)} columns"
+        if source == "query"
+        else f"{source} has {len(columns)} fields"
+    )
     by_name = info.kind != "NamedTuple"
     by_alias = info.kind == "BaseModel"
-    unit = "keys" if info.kind == "TypedDict" else "fields"
+    unit = {"TypedDict": "keys", "Protocol": "attributes"}.get(info.kind, "fields")
+    open_ended = bool(info.extra_items) or by_alias or info.allows_extra
     lo = len(info.required - info.opaque) if by_name else len(fields)
-    hi = len(columns) if info.extra_items or by_alias else len(fields)
+    hi = len(columns) if open_ended else len(fields)
     if not lo <= len(columns) <= hi and rules.is_enabled("column-count-mismatch"):
         expected = f"{len(fields)} fields"
-        if info.extra_items or by_alias:
+        if open_ended:
             expected = f"{lo} required {unit}"
         elif lo < hi:
             expected = f"{lo} required and {hi} total {unit}"
         return [
             (
                 "column-count-mismatch",
-                f"{type_name} has {expected} but query returns {len(columns)} columns",
+                f"{type_name} has {expected} but {counted}",
             )
         ]
 
@@ -998,20 +1068,36 @@ def _structural_diagnostics(
             return [
                 (
                     "column-type-mismatch",
-                    f"{type_name}.{field} is {declared_type} but query column "
+                    f"{type_name}.{field} is {declared_type} but {source} {item} "
                     f"'{col.name}' infers {col.python_type}",
                 )
             ]
-        return _field_diagnostics(
-            f"{type_name}.{field}", field_type(info, field), col, rules
+        found = _field_diagnostics(
+            f"{type_name}.{field}", field_type(info, field), col, rules, f"{source} {item}"
         ) + _json_diagnostics(
             f"{type_name}.{field}", info.annotations.get(field), col, type_defs, info.aliases, rules
         )
+        nested = _row_type_of(info.annotations.get(field), type_defs)
+        if col.python_type is None and col.sql_type and composite and nested:
+            if (fields := composite(col.sql_type)) is not None:
+                found += _structural_diagnostics(
+                    f"{type_name}.{field}",
+                    nested,
+                    fields,
+                    rules,
+                    type_defs,
+                    composite,
+                    f"composite {col.sql_type.lower()}",
+                )
+        return found
 
     if not by_name:
         pairs = list(zip(fields, columns, strict=False))
         return [d for (field, _), col in pairs for d in type_mismatch(field, col)] + [
-            ("column-name-mismatch", f"{type_name}.{field} doesn't match query column '{col.name}'")
+            (
+                "column-name-mismatch",
+                f"{type_name}.{field} doesn't match {source} {item} '{col.name}'",
+            )
             for (field, _), col in pairs
             if field != col.name
         ]
@@ -1028,15 +1114,18 @@ def _structural_diagnostics(
         and key not in info.opaque
         and not names.intersection(info.column_names(key))
     ]
-    noun = "key" if info.kind == "TypedDict" else "field"
+    noun = {"TypedDict": "key", "Protocol": "attribute"}.get(info.kind, "field")
     return (
         [d for col, field in known for d in type_mismatch(field, col)]
         + [
-            ("typeddict-key-mismatch", f"{type_name} has no {noun} for query column '{col.name}'")
+            (
+                "typeddict-key-mismatch",
+                f"{type_name} has no {noun} for {source} {item} '{col.name}'",
+            )
             for col in unknown
         ]
         + [
-            ("typeddict-key-mismatch", f"{type_name}.{key} is required but missing from query")
+            ("typeddict-key-mismatch", f"{type_name}.{key} is required but missing from {source}")
             for key in missing
         ]
     )

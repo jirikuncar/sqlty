@@ -43,11 +43,11 @@ mod typed;
 #[cfg(test)]
 pub(crate) use api::load_schema;
 pub use api::{
-    analyze_select, analyze_with_diagnostics, infer_type, load_schema_with_skipped, parse_error,
-    returns_rows,
+    analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
+    load_schema_with_skipped, parse_error, returns_rows,
 };
 pub(crate) use api::{typed, view_columns};
-pub(crate) use dialect::SqlDialect;
+pub use dialect::{SqlDialect, UnknownDialect};
 use expr::from_sql_type;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
@@ -161,6 +161,7 @@ impl SchemaColumn {
             Some(python_type) => Typed {
                 python: Some(Rc::from(python_type.as_str())),
                 sql: Some(Rc::from(self.sql_type.as_str())),
+                values: self.values.clone(),
             },
             None => from_sql_type(&self.sql_type, dialect),
         }
