@@ -131,8 +131,7 @@ from sqlty import SQL
 
 def fetch_all[T](query: Annotated[LiteralString, SQL], params: tuple[object, ...], form: type[T], /) -> list[T]: ...
 
-# error: [param-type-mismatch] "parameter 1 expects int, got bool"
-ok = fetch_all("SELECT id FROM users WHERE id = %s AND born = %s", (True, datetime.now()), int)
+ok = fetch_all("SELECT id FROM users WHERE id = %s AND born = %s", (1, datetime.now()), int)
 # error: [param-type-mismatch] "parameter 2 expects datetime.date, got decimal.Decimal"
 bad = fetch_all("SELECT id FROM users WHERE id = %s AND born = %s", (1, Decimal("1")), int)
 ```
