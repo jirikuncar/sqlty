@@ -675,12 +675,13 @@ def _param_diagnostics(
         )
     # sqlite3 is dynamically typed, and a cast converts whatever it is given.
     typed = dialect.lower() != "sqlite"
+    postgres = dialect.lower() in ("postgres", "postgresql")
     for key, arg in passed.items():
         if (param := by_key.get(key)) is None:
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
         if arg.type == "None" or (typed and not param.cast):
-            if problem := mismatch(param.python_type, param.nullable, arg.type):
+            if problem := mismatch(param.python_type, param.nullable, arg.type, postgres=postgres):
                 found.append(("param-type-mismatch", f"{label} {problem}"))
     return found
 
