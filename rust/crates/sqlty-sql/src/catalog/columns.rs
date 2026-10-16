@@ -3,7 +3,10 @@
 //!
 //! Nothing here looks types up in the catalog; [`super::resolve`] does that.
 
-use sqlparser::ast::{ColumnDef, ColumnOption, DataType, Expr, GeneratedAs, ObjectName};
+use sqlparser::ast::{
+    ColumnDef, ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr, FunctionArguments,
+    GeneratedAs, ObjectName,
+};
 
 use crate::analyzer::SqlDialect;
 use crate::values::{self, Value};
@@ -132,6 +135,111 @@ pub(super) fn apply_check(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDi
         let found = values::check_values(expr, &|ident| fold(ident, dialect) == column.name);
         add_values(&mut column.values, found);
     }
+}
+
+/// The groups of columns a `CHECK` keeps at least one of non-null, conjunct by conjunct:
+/// `num_nonnulls(a, b) = 1` (or `>= 1`, `> 0`), `num_nulls(a, b) = 0` (each of them on its
+/// own), `a IS NOT NULL OR b IS NOT NULL`. MySQL before 8.0.16 ignores `CHECK`.
+pub(super) fn nonnull_groups(expr: &Expr, dialect: SqlDialect) -> Vec<Vec<String>> {
+    use sqlparser::ast::BinaryOperator::{And, Eq, Gt, GtEq, Lt, LtEq, Or};
+
+    if dialect == SqlDialect::MySql {
+        return Vec::new();
+    }
+    let column = |expr: &Expr| match expr {
+        Expr::Identifier(ident) => Some(fold(ident, dialect)),
+        _ => None,
+    };
+    let count = |expr: &Expr| -> Option<(String, Vec<String>)> {
+        let Expr::Function(func) = expr else {
+            return None;
+        };
+        let name = func.name.0.last()?.as_ident()?.value.to_ascii_lowercase();
+        let FunctionArguments::List(list) = &func.args else {
+            return None;
+        };
+        let columns = list
+            .args
+            .iter()
+            .map(|arg| match arg {
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => column(expr),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some((name, columns))
+    };
+    let number = |expr: &Expr| match values::constant(expr) {
+        Some(Value::Int(n)) => Some(n),
+        _ => None,
+    };
+    let mut groups = Vec::new();
+    let mut stack = vec![expr];
+    while let Some(expr) = stack.pop() {
+        match expr {
+            Expr::Nested(inner) => stack.push(inner),
+            Expr::BinaryOp {
+                left,
+                op: And,
+                right,
+            } => stack.extend([&**left, &**right]),
+            Expr::BinaryOp { left, op, right } if matches!(op, Eq | Gt | GtEq | Lt | LtEq) => {
+                // `n < num_nonnulls(...)` reads as `num_nonnulls(...) > n`.
+                let (call, op, n) = match (count(left), count(right)) {
+                    (Some(call), None) => (call, op.clone(), number(right)),
+                    (None, Some(call)) => (
+                        call,
+                        match op {
+                            Gt => Lt,
+                            GtEq => LtEq,
+                            Lt => Gt,
+                            LtEq => GtEq,
+                            other => other.clone(),
+                        },
+                        number(left),
+                    ),
+                    _ => continue,
+                };
+                let ((name, columns), Some(n)) = (call, n) else {
+                    continue;
+                };
+                match (name.as_str(), op, n) {
+                    ("num_nonnulls", Eq | GtEq, n) if n >= 1 => groups.push(columns),
+                    ("num_nonnulls", Gt, n) if n >= 0 => groups.push(columns),
+                    ("num_nulls", Eq, 0) => groups.extend(columns.into_iter().map(|c| vec![c])),
+                    _ => {}
+                }
+            }
+            Expr::BinaryOp { op: Or, .. } => {
+                let mut columns = Vec::new();
+                let mut alternatives = vec![expr];
+                while let Some(alternative) = alternatives.pop() {
+                    match alternative {
+                        Expr::Nested(inner) => alternatives.push(inner),
+                        Expr::BinaryOp {
+                            left,
+                            op: Or,
+                            right,
+                        } => {
+                            alternatives.extend([&**left, &**right]);
+                        }
+                        Expr::IsNotNull(inner) if column(inner).is_some() => {
+                            columns.extend(column(inner));
+                        }
+                        _ => {
+                            columns.clear();
+                            break;
+                        }
+                    }
+                }
+                if !columns.is_empty() {
+                    groups.push(columns);
+                }
+            }
+            Expr::IsNotNull(inner) => groups.extend(column(inner).map(|c| vec![c])),
+            _ => {}
+        }
+    }
+    groups
 }
 
 /// The Python type of a column of `sql_type` that a `CHECK` limits to `checked`: a

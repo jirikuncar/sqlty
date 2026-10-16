@@ -393,7 +393,7 @@ fn test_name_diagnostics_stay_quiet() {
     }
     // A table function's columns are not read, which is reported, not guessed.
     assert_eq!(
-        rules("SELECT x FROM generate_series(1, 3) AS g(x)"),
+        rules("SELECT word FROM pg_get_keywords() AS k"),
         ["unsupported-syntax"]
     );
 }

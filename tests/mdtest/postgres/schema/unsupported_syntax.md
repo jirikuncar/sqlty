@@ -78,11 +78,12 @@ SELECT a FROM copy
 
 ## Other dialects keep reading CREATE statements only
 
-`ALTER TABLE` and `DROP` are PostgreSQL semantics.
+Dialects other than PostgreSQL, MySQL and SQLite do not follow `ALTER TABLE`
+and `DROP`.
 
 ```toml
 [tool.sqlty]
-dialect = "mysql"
+dialect = "duckdb"
 schema = "schema.sql"
 ```
 
