@@ -351,8 +351,8 @@ class _Check:
         if helpers is not None:
             extra = frozenset(type_modules or ())
             for name in {q[1] for q in [*queries, *named]} - self.type_defs.keys():
-                if (found := helpers.row_type(parsed, name, extra)) is not None:
-                    self.type_defs[name], self.imported_defs[name] = found
+                if (imported := helpers.row_type(parsed, name, extra)) is not None:
+                    self.type_defs[name], self.imported_defs[name] = imported
         self.user_queries = [q for q in [*queries, *named] if q[1] in self.type_defs]
 
     def _unparse(self, row: ast.expr) -> str:
