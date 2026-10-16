@@ -67,6 +67,9 @@ pub(super) struct Facts {
     pub(super) non_null_exprs: Rc<FxHashSet<ExprKey>>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
+    /// Whether the select list runs several set-returning functions, which PostgreSQL
+    /// runs in lockstep, padding the shorter ones with NULL.
+    pub(super) lockstep: bool,
     /// `(reference, column)` pairs that `ROLLUP`, `CUBE`, `GROUPING SETS` or `WITH ROLLUP`
     /// turn into NULL in their subtotal rows.
     rolled_up: Rc<Vec<(String, String)>>,
@@ -490,6 +493,16 @@ impl<'a> Analyzer<'a> {
             | Expr::Ceil { expr: inner, .. }
             | Expr::Floor { expr: inner, .. } => of(inner),
             Expr::Position { expr: inner, r#in } => any_nullable([of(inner), of(r#in)]),
+            Expr::Overlay {
+                expr: inner,
+                overlay_what,
+                overlay_from,
+                overlay_for,
+            } => any_nullable(
+                [of(inner), of(overlay_what), of(overlay_from)]
+                    .into_iter()
+                    .chain(overlay_for.as_deref().map(of)),
+            ),
             Expr::Substring {
                 expr: inner,
                 substring_from,
@@ -749,6 +762,9 @@ impl<'a> Analyzer<'a> {
         facts: &Facts,
     ) -> Nullability {
         let name = function_name(func);
+        if facts.lockstep && self.is_set_returning(func) {
+            return Nullability::Nullable;
+        }
         let info = lookup(&name);
         let args = positional_args(&func.args);
         let all_positional = match &func.args {
@@ -759,7 +775,21 @@ impl<'a> Analyzer<'a> {
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
 
-        if name == "COUNT" || name == "REGR_COUNT" {
+        // `ARRAY(SELECT ...)` over no rows is an empty array.
+        if name == "COUNT"
+            || name == "REGR_COUNT"
+            || (name == "ARRAY" && matches!(func.args, FunctionArguments::Subquery(_)))
+        {
+            return Nullability::NonNull;
+        }
+        // Over no rows MySQL's BIT_AND has every bit set, BIT_OR and BIT_XOR none.
+        if self.dialect == SqlDialect::MySql
+            && matches!(name.as_str(), "BIT_AND" | "BIT_OR" | "BIT_XOR")
+        {
+            return Nullability::NonNull;
+        }
+        // SQLite's `total` is 0.0 over no rows.
+        if name == "TOTAL" && self.dialect == SqlDialect::Sqlite {
             return Nullability::NonNull;
         }
         // SQLite's two-argument MIN and MAX are scalar functions.

@@ -28,8 +28,7 @@ b: ? | ? | Nullable
 [unsupported-syntax] expression `i[1]` is not typed
 
 SELECT ARRAY(SELECT i FROM t) AS a
-a: ? | ? | Unknown
-[unknown-function] function `array` is not known to sqlty, so its result is untyped
+a: list[int] | ARRAY<INT> | NonNull
 
 SELECT i = ANY(arr) AS a, arr @> ARRAY[1] AS b, arr || 4 AS c FROM t
 a: bool | BOOLEAN | Nullable

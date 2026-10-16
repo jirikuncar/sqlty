@@ -222,3 +222,32 @@ q5 = SQL[Partial]("--sql\nSELECT 1::INTEGER AS a")
 # error: [column-type-mismatch] "Child.b is int but query column 'b' infers str"
 q6 = SQL[Child]("--sql\nSELECT 'x'::TEXT AS a, 'y'::TEXT AS b")
 ```
+
+## Protocol row types
+
+A `Protocol` says which attributes a row has, not how it is built: rows from
+a row factory such as psycopg's `namedtuple_row` satisfy it. Columns are
+matched to attributes by name, and the query may return more columns than the
+protocol lists.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import Protocol
+from sqlty import SQL
+
+class Named(Protocol):
+    id: int
+    name: str
+
+a = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name, 2::INTEGER AS extra")
+# error: [column-type-mismatch] "Named.id is int but query column 'id' infers str"
+b = SQL[Named]("--sql\nSELECT 'x'::TEXT AS id, 'x'::TEXT AS name")
+# error: [column-count-mismatch] "Named has 2 required attributes but query returns 1 columns"
+c = SQL[Named]("--sql\nSELECT 1::INTEGER AS id")
+# error: [typeddict-key-mismatch] "Named.name is required but missing from query"
+d = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS title")
+```

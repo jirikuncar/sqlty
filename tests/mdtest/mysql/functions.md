@@ -36,13 +36,23 @@ SELECT IF(id > 1, name, note) AS a, IF(id > 1, 'big', 'small') AS b, IFNULL(note
 -- columns: c: str (VARCHAR(50))
 ```
 
+## Grouping
+
+`GROUPING` tells a `WITH ROLLUP` super-aggregate row by a non-null `int`.
+
+```sql
+SELECT note, GROUPING(note) AS g FROM events GROUP BY note WITH ROLLUP
+-- columns: note: str | None (VARCHAR(50))
+-- columns: g: int (INT)
+```
+
 ## Dates and times
 
 ```sql
 SELECT NOW() AS a, CURDATE() AS b, CURTIME() AS c, DATE(happened) AS d, TIMESTAMP(day) AS e, FROM_UNIXTIME(id) AS f, LAST_DAY(day) AS g FROM events
 -- columns: a: datetime.datetime (DATETIME)
 -- columns: b: datetime.date (DATE)
--- columns: c: datetime.time (TIME)
+-- columns: c: datetime.timedelta (TIME)
 -- columns: d: datetime.date | None (DATE)
 -- columns: e: datetime.datetime | None (DATETIME)
 -- columns: f: datetime.datetime | None (DATETIME)
@@ -64,9 +74,23 @@ reads, and `NULL` when the string does not match.
 ```sql
 SELECT STR_TO_DATE(name, '%Y-%m-%d') AS a, STR_TO_DATE(name, '%H:%i') AS b, STR_TO_DATE(name, '%Y-%m-%d %H:%i:%s') AS c, STR_TO_DATE(name, note) AS d FROM events
 -- columns: a: datetime.date | None (DATE)
--- columns: b: datetime.time | None (TIME)
+-- columns: b: datetime.timedelta | None (TIME)
 -- columns: c: datetime.datetime | None (DATETIME)
 -- columns: d: None (None)
+```
+
+## Date arithmetic functions
+
+`DATE_ADD` and its kin type like `+ INTERVAL`: a date stays a date for day
+units and coarser. A number of days is a day interval.
+
+```sql
+SELECT DATE_ADD(day, INTERVAL 1 DAY) AS a, DATE_SUB(day, INTERVAL 1 HOUR) AS b, ADDDATE(day, 3) AS c, SUBDATE(happened, INTERVAL 1 MONTH) AS d, ADDTIME(happened, '01:00:00') AS e FROM events
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.datetime | None (DATETIME)
+-- columns: c: datetime.date | None (DATE)
+-- columns: d: datetime.datetime | None (DATETIME)
+-- columns: e: datetime.datetime | None (DATETIME)
 ```
 
 ## Strings
@@ -90,7 +114,7 @@ SELECT ABS(price) AS a, ROUND(ratio) AS b, TRUNCATE(price, 1) AS c, FLOOR(id) AS
 -- columns: a: decimal.Decimal (DECIMAL(10, 2))
 -- columns: b: float (DOUBLE)
 -- columns: c: decimal.Decimal (DECIMAL(10, 2))
--- columns: d: float (DOUBLE)
+-- columns: d: int (BIGINT)
 -- columns: e: int (INT)
 -- columns: f: float (DOUBLE)
 -- columns: g: float (DOUBLE)
@@ -114,4 +138,64 @@ SELECT JSON_OBJECT('id', id) AS a, JSON_ARRAY(id, name) AS b, JSON_EXTRACT(doc, 
 SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: a: typing.Any (JSON)
 -- columns: b: typing.Any (JSON)
+```
+
+## Rounding to an integer
+
+`CEIL` and `FLOOR` of an exact number are integers when the integer part fits
+a `BIGINT`, and of an approximate one a `DOUBLE`.
+
+```sql
+SELECT CEIL(price) AS a, FLOOR(price) AS b, CEILING(ratio) AS c, FLOOR(id) AS d FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: float (DOUBLE)
+-- columns: d: int (BIGINT)
+```
+
+## Session and conversion functions
+
+```sql
+SELECT GREATEST(id, 2) AS a, LEAST(name, note) AS b, LAST_INSERT_ID() AS c, DATABASE() AS d, VERSION() AS e, INET_ATON(name) AS f, INET_NTOA(id) AS g, UUID_TO_BIN(UUID()) AS h, BIN(id) AS i, UNIX_TIMESTAMP() AS j FROM events
+-- columns: a: int (INT)
+-- columns: b: str | None (VARCHAR(50))
+-- columns: c: int (BIGINT)
+-- columns: d: str | None (TEXT)
+-- columns: e: str (TEXT)
+-- columns: f: int | None (BIGINT)
+-- columns: g: str | None (TEXT)
+-- columns: h: bytes (VARBINARY)
+-- columns: i: str (TEXT)
+-- columns: j: int (BIGINT)
+```
+
+`BIT_AND`, `BIT_OR` and `BIT_XOR` are never NULL: over no rows `BIT_AND` has
+every bit set and the others none.
+
+```sql
+SELECT BIT_AND(id) AS a, BIT_OR(id) AS b, STD(price) AS c FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: float | None (DOUBLE)
+```
+
+`->` is `JSON_EXTRACT` and `->>` is `JSON_UNQUOTE(JSON_EXTRACT(...))`.
+
+```sql
+SELECT doc -> '$.a' AS a, doc ->> '$.a' AS b FROM events
+-- columns: a: typing.Any (JSON)
+-- columns: b: str | None (TEXT)
+```
+
+## Window functions and NULLIF
+
+```sql
+SELECT LAG(id) OVER (ORDER BY id) AS a, LEAD(name, 1, 'x') OVER (ORDER BY id) AS b, FIRST_VALUE(price) OVER (ORDER BY id) AS c, NTH_VALUE(name, 2) OVER (ORDER BY id) AS d, PERCENT_RANK() OVER (ORDER BY id) AS e, CUME_DIST() OVER (ORDER BY id) AS f, NULLIF(name, 'x') AS g FROM events
+-- columns: a: int | None (INT)
+-- columns: b: str (VARCHAR(50))
+-- columns: c: decimal.Decimal (DECIMAL(10, 2))
+-- columns: d: str | None (VARCHAR(50))
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+-- columns: g: str | None (VARCHAR(50))
 ```

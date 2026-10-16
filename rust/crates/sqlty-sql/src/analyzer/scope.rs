@@ -113,6 +113,17 @@ fn only_table(factor: &TableFactor) -> Option<TableFactor> {
     Some(table)
 }
 
+/// The virtual table a derived table's columns are kept under: `(alias)`, or one named
+/// after the subquery's place in the statement when it has no alias.
+fn derived_table(factor: &TableFactor) -> String {
+    match factor {
+        TableFactor::Derived {
+            alias: Some(alias), ..
+        } => format!("({})", alias.name.value.to_lowercase()),
+        _ => format!("(#{factor:p})"),
+    }
+}
+
 /// A FROM item the analyzer cannot read the columns of.
 pub(super) fn opaque_source(factor: &TableFactor) -> Source {
     let (alias, description) = match factor {
@@ -446,9 +457,7 @@ impl<'a> Analyzer<'a> {
                     scope.push(Source::named(reference, table));
                 }
                 TableFactor::Derived {
-                    subquery,
-                    alias: Some(alias),
-                    ..
+                    subquery, alias, ..
                 } => {
                     // A LATERAL subquery reads the relations before it.
                     let mut inner = analyzer.clone();
@@ -456,10 +465,16 @@ impl<'a> Analyzer<'a> {
                     let mut columns = inner
                         .query_columns(subquery)?
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
-                    rename_columns(&mut columns, alias, analyzer.dialect);
-                    let reference = alias.name.value.to_lowercase();
-                    let table = format!("({reference})");
+                    if let Some(alias) = alias {
+                        rename_columns(&mut columns, alias, analyzer.dialect);
+                    }
+                    let table = derived_table(factor);
                     analyzer.virtuals.insert(table.clone(), columns);
+                    // Without an alias (SQLite, PostgreSQL 16) its columns are read unqualified.
+                    let reference = alias
+                        .as_ref()
+                        .map(|alias| alias.name.value.to_lowercase())
+                        .unwrap_or_default();
                     scope.push(Source::named(reference, table));
                 }
                 other => {
@@ -496,11 +511,9 @@ impl<'a> Analyzer<'a> {
                 TableFactor::Table { name, .. } => self
                     .virtual_columns(&table_key(name, self.dialect))
                     .is_none_or(|columns| !columns.iter().any(Column::is_unknown_star)),
-                TableFactor::Derived {
-                    alias: Some(alias), ..
-                } => self
+                TableFactor::Derived { .. } => self
                     .virtuals
-                    .get(&format!("({})", alias.name.value.to_lowercase()))
+                    .get(&derived_table(factor))
                     .is_some_and(|columns| !columns.iter().any(Column::is_unknown_star)),
                 TableFactor::UNNEST { alias, .. } => self
                     .virtuals
