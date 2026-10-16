@@ -158,6 +158,19 @@ type-modules = ["myapp.types"]
 strings. `"sentinel"` wraps them as `SQL[UNTYPED](...)`. CLI:
 `sqlty rewrite --untyped`. See [Untyped queries](../guide/untyped.md).
 
+## `json-types`
+
+`"any"` (default) types a JSON column `typing.Any`. `"typeddict"` makes
+`rewrite` and `check --fix` type a JSON column whose shape the query spells out
+with generated `TypedDict`s, written after the imports under a
+`# sqlty: generated` line. `strip` removes them. See
+[Generated TypedDicts](../guide/json-shapes.md#generated-typeddicts).
+
+```toml
+[tool.sqlty]
+json-types = "typeddict"
+```
+
 ## `functions`
 
 An array of tables registering helper functions. `sqlty check` checks their
