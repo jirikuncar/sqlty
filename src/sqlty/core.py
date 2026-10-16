@@ -380,7 +380,41 @@ class _Check:
             for name in {q[1] for q in [*queries, *named]} - self.type_defs.keys():
                 if (imported := helpers.row_type(parsed, name, extra)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
-        self.user_queries = [q for q in [*queries, *named] if q[1] in self.type_defs]
+        # A row type named through an alias (`type Row = User`) is checked as what it names.
+        self.aliased: list[tuple[int, str, str | None, ast.expr]] = []
+        resolved = []
+        for line, name, query in [*queries, *named]:
+            target = _alias_target(name, parsed.type_aliases)
+            if target is None:
+                if name not in self.type_defs:
+                    self._specialize(name)
+                resolved.append((line, name, query))
+            elif (base := ast.unparse(target)) in self.type_defs:
+                resolved.append((line, base, query))
+            else:
+                self.aliased.append((line, name, query, target))
+        self.user_queries = [q for q in resolved if q[1] in self.type_defs]
+
+    def _specialize(self, name: str) -> None:
+        """Add ``Row[int]`` to the row types when ``Row`` is a generic class of this source."""
+        from sqlty._type_extractor import specialize
+
+        try:
+            row = ast.parse(name, mode="eval").body
+        except SyntaxError:
+            return
+        if not (isinstance(row, ast.Subscript) and isinstance(row.value, ast.Name)):
+            return
+        info = self.type_defs.get(row.value.id)
+        node = next(
+            (c for c in self.parsed.classes if info is not None and c.lineno == info.lineno),
+            None,
+        )
+        if info is None or node is None:
+            return
+        args = list(row.slice.elts) if isinstance(row.slice, ast.Tuple) else [row.slice]
+        if (generic := specialize(info, node, args, self.parsed.typing_aliases)) is not None:
+            self.type_defs[name] = generic
 
     def composite(self, sql_type: str) -> list[_RowColumn] | None:
         """The fields of the composite type ``sql_type`` as columns; None when it is not one."""
@@ -546,11 +580,38 @@ def _row_type_of(annotation: ast.expr | None, type_defs: Mapping[str, TypeInfo])
     return None
 
 
+def _check_aliases(ctx: _Check) -> None:
+    """Rows named by a module-level alias of a tuple or scalar type (``type Row = tuple[int, str]``)."""
+    shapes: dict[str, _RowShape | None] = {}
+    for line, name, query, target in ctx.aliased:
+        if (columns := _columns(query, ctx.dialect, ctx.schema_sql)) is None:
+            continue
+        if name not in shapes:
+            shapes[name] = _row_shape(target, name, ctx.parsed.typing_aliases)
+        for rule, message in _value_diagnostics(
+            shapes[name], columns, ctx.rule_config, ctx.type_defs
+        ):
+            ctx.report(rule, message, line)
+
+
+def _alias_target(name: str, aliases: Mapping[str, ast.expr]) -> ast.expr | None:
+    """What the alias ``name`` stands for, through aliases of aliases; ``None`` for no alias."""
+    target = None
+    for _ in range(16):
+        if name not in aliases:
+            break
+        target = aliases[name]
+        name = ast.unparse(target)
+    return target
+
+
 def _check_values(ctx: _Check) -> None:
     """Rows spelled as a tuple, ``list[...]`` etc. rather than a named type."""
     shapes: dict[str, _RowShape | None] = {}
     for call, row in zip(ctx.calls, ctx.rows, strict=True):
         if call.row is None or row is None or row in ctx.type_defs:
+            continue
+        if _alias_target(row, ctx.parsed.type_aliases) is not None:
             continue
         if (columns := _columns(_bound(call, ctx.dialect), ctx.dialect, ctx.schema_sql)) is None:
             continue
@@ -570,6 +631,7 @@ _CHECK_PASSES = (
     _check_unparsed,
     _check_names,
     _check_structural,
+    _check_aliases,
     _check_values,
 )
 
