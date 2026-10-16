@@ -27,7 +27,13 @@ schema = "schema.sql"
 ```sql
 SELECT * FROM items
 -- inferred: tuple[int | None, int | None, int | None, int | None, int | None, int | None, int | None]
--- expanded: SELECT a::TINYINT, b::MEDIUMINT, c::MEDIUMINT, d::MEDIUMINT, e::BIGINT, f::INT(11), g::YEAR FROM items
+-- columns: a: int | None (TINYINT)
+-- columns: b: int | None (MEDIUMINT)
+-- columns: c: int | None (MEDIUMINT)
+-- columns: d: int | None (MEDIUMINT)
+-- columns: e: int | None (BIGINT)
+-- columns: f: int | None (INT(11))
+-- columns: g: int | None (YEAR)
 ```
 
 ## Unsigned columns
@@ -55,7 +61,10 @@ schema = "schema.sql"
 ```sql
 SELECT * FROM items
 -- inferred: tuple[int | None, int | None, float | None, decimal.Decimal | None]
--- expanded: SELECT a::UINT, b::UBIGINT(20), c::UDOUBLE, d::UDECIMAL(10, 2) FROM items
+-- columns: a: int | None (UINT)
+-- columns: b: int | None (UBIGINT(20))
+-- columns: c: float | None (UDOUBLE)
+-- columns: d: decimal.Decimal | None (UDECIMAL(10, 2))
 ```
 
 ## Temporal and other columns
@@ -91,7 +100,16 @@ schema = "schema.sql"
 ```sql
 SELECT * FROM items
 -- inferred: None
--- expanded: SELECT a::DOUBLE, b::BIT(8), c::DATETIME(6), d::TIMESTAMPTZ, e::ENUM('X', 'Y'), f::SET('X', 'Y'), g::JSON, h::BLOB, i::TEXT, j::POINT FROM items
+-- columns: a: float | None (DOUBLE)
+-- columns: b: None (BIT(8))
+-- columns: c: datetime.datetime | None (DATETIME(6))
+-- columns: d: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: e: typing.Literal['x', 'y'] | None (ENUM('X', 'Y'))
+-- columns: f: None (SET('X', 'Y'))
+-- columns: g: typing.Any (JSON)
+-- columns: h: bytes | None (BLOB)
+-- columns: i: str | None (TEXT)
+-- columns: j: None (POINT)
 ```
 
 ```sql
@@ -181,5 +199,38 @@ schema = "schema.sql"
 ```sql
 SELECT * FROM items
 -- inferred: tuple[int | None, int | None, int | None, int | None]
--- expanded: SELECT a::UMEDIUMINT, b::UMEDIUMINT(8), c::UINT(5), d::UBIGINT FROM items
+-- columns: a: int | None (UMEDIUMINT)
+-- columns: b: int | None (UMEDIUMINT(8))
+-- columns: c: int | None (UINT(5))
+-- columns: d: int | None (UBIGINT)
+```
+
+## Star expansion lists the columns
+
+MySQL has no `::` cast, so `check --fix` expands `*` to the bare column names;
+the schema types them.
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INT NOT NULL PRIMARY KEY, name VARCHAR(20) NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users
+-- expanded: SELECT id, name FROM users
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("-- sql\nSELECT u.* FROM users u")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int, str]]("-- sql\nSELECT u.id, u.name FROM users u")
 ```

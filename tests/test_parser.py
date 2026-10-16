@@ -80,8 +80,9 @@ class TestParser:
     def test_schema_types(self, column_types: str, dialect: str, expected: str):
         columns = ", ".join(f"c{i} {t}" for i, t in enumerate(column_types.split(", ")))
         schema = f"CREATE TABLE t ({columns});"
-        result = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
-        assert result == f"SELECT {expected} FROM t"
+        columns = core.analyze_select("SELECT * FROM t", dialect=dialect, schema_sql=schema)
+        assert columns is not None
+        assert ", ".join(f"{c.name}::{c.sql_type}" for c in columns) == expected
 
     @pytest.mark.parametrize("dialect", ["postgres", "sqlite"])
     def test_mysql_only_column_skips_table(self, dialect: str):
@@ -90,9 +91,9 @@ class TestParser:
 
     def test_int3_unsigned_column(self):
         schema = "CREATE TABLE t (a INT, b INT3 UNSIGNED);"
-        assert core.expand_star("SELECT * FROM t", dialect="mysql", schema_sql=schema) == (
-            "SELECT a::INT, b::UMEDIUMINT FROM t"
-        )
+        columns = core.analyze_select("SELECT * FROM t", dialect="mysql", schema_sql=schema)
+        assert columns is not None
+        assert [c.sql_type for c in columns] == ["INT", "UMEDIUMINT"]
 
     def test_merge_without_returning_not_wrapped(self):
         source = 'q = "--sql\\nMERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE"'
@@ -156,7 +157,11 @@ def test_type_names(sql_type: str, python_type: str, dialect: str):
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
     assert cast == column == f"tuple[{python_type}]"
     expanded = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
-    assert expanded is not None and expanded.startswith("SELECT c::")
+    assert expanded is not None
+    if dialect == "postgres":
+        assert expanded.startswith("SELECT c::")
+    else:
+        assert expanded == "SELECT c FROM t"
 
 
 @pytest.mark.parametrize(
