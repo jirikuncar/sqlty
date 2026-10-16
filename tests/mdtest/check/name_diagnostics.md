@@ -209,19 +209,21 @@ d = SQL[tuple[int]]("--sql\nSELECT id FROM (SELECT 1::INTEGER AS id) AS s")
 
 #### Table functions
 
-A table function's columns are not read, so a column taken from one is
-reported as unsupported, never as an unknown column or table.
+The built-in set-returning functions (`generate_series`, `unnest`, the JSON
+`*_each` and `*_array_elements` families) have known columns. The columns of
+another table function are not read, so a column taken from one is reported
+as unsupported, never as an unknown column or table.
 
 ```python
 from sqlty import SQL
 
-# error:
 a = SQL[tuple[int]]("--sql\nSELECT g FROM generate_series(1, 3) AS g")
-# error: [unsupported-syntax] "column `n` may come from table function generate_series"
 b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
 # error:
-c = SQL[tuple[int]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
-# error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger"
+c = SQL[tuple[int | None]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
+# error: [unsupported-syntax] "column `word` may come from table function pg_get_keywords, which sqlty does not read the columns of"
+e = SQL[tuple[str]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger, which sqlty does not read the columns of"
 d = SQL[tuple[int]]("--sql\nSELECT tgrelid FROM pg_trigger")
 ```
 
@@ -508,14 +510,14 @@ CREATE VIEW opaque AS SELECT id, 1 OPERATOR(pg_catalog.+) 1 AS day FROM a;
 ```python
 from sqlty import SQL
 
-# error: [unknown-type] "column `a.g` has type `GEOMETRY`"
+# error: [unknown-type] "column `a.g` has type `GEOMETRY`, which has no Python type"
 x = SQL[tuple[int, str]]("--sql\nSELECT * FROM a")
-# error: [unknown-type] "column `a.g` has type `GEOMETRY`"
+# error: [unknown-type] "column `a.g` has type `GEOMETRY`, which has no Python type"
 y = SQL[tuple[int, str]]("--sql\nSELECT a.* FROM a, generate_series(1, 3) AS g(x)")
-# error: [unsupported-syntax] "view column `opaque.day` is not typed"
+# error: [unsupported-syntax] "view column `opaque.day` is not typed by the view's query"
 z = SQL[tuple[int, object]]("--sql\nSELECT * FROM opaque")
-# error: [unsupported-syntax] "`*` reads table function generate_series"
-w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, generate_series(1, 3) AS g(x)")
+# error: [unsupported-syntax] "`*` reads table function pg_get_keywords, which sqlty does not read the columns of"
+w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, pg_get_keywords() AS k")
 ```
 
 ## Functions and types the schema defines
