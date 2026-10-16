@@ -66,8 +66,14 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run Rust unit tests
-        run: cargo test --workspace --manifest-path rust/Cargo.toml
+        run: cargo nextest run --workspace --manifest-path rust/Cargo.toml
+
+      - name: Run Rust doctests
+        run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
 
   free-threaded:
     name: Threads on free-threaded Python 3.14t
