@@ -20,7 +20,7 @@ c: str | TEXT | Nullable
 
 SELECT avg(i) AS a, sum(i) AS b, round(n, 1) AS c, stddev(i) AS d FROM t
 a: decimal.Decimal | DECIMAL | Nullable
-b: int | INT | Nullable
+b: decimal.Decimal | DECIMAL | Nullable
 c: ? | ? | Unknown
 d: float | DOUBLE | Nullable
 [unknown-function] function `round` is not known to sqlty, so its result is untyped
