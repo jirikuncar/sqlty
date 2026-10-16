@@ -364,11 +364,18 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         let mut results = Vec::new();
-        for expr in conditions
-            .iter()
-            .map(|when| &when.result)
-            .chain(else_result)
-        {
+        for when in conditions {
+            // A branch reads its column where its `WHEN` holds: `WHEN s = 'a' THEN s` is 'a'.
+            let learned = self.learn(&when.condition, true, scope);
+            if learned.limits_values() {
+                let mut inner = self.clone();
+                inner.facts = self.facts.with(learned);
+                results.push(inner.expr(&when.result, scope)?);
+            } else {
+                results.push(self.expr(&when.result, scope)?);
+            }
+        }
+        if let Some(expr) = else_result {
             results.push(self.expr(expr, scope)?);
         }
         if self.dialect == SqlDialect::Postgres {
