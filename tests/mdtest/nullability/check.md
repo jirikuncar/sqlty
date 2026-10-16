@@ -299,3 +299,42 @@ def fetch[T](query: Annotated[LiteralString, SQL], row: type[T]) -> list[T]:
 rows = fetch("SELECT id, name FROM users", tuple[int, str])
 rows = fetch("SELECT id, name FROM users", tuple[int, str | None])
 ```
+
+## A row type shared by queries
+
+`redundant-optional` reports a field only when no query that loads the row type can
+return NULL for it.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+redundant-optional = "error"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE coupons (id INTEGER PRIMARY KEY, owner_id INTEGER);
+```
+
+```python
+from typing import Annotated, LiteralString, TypedDict
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+class Coupon(TypedDict):
+    id: int
+    owner_id: int | None
+
+class Mine(TypedDict):
+    id: int
+    owner_id: int | None
+
+mine = fetch_all("SELECT id, owner_id FROM coupons WHERE owner_id = %(owner)s", Coupon)
+any_ = fetch_all("SELECT id, owner_id FROM coupons WHERE owner_id = %(owner)s OR owner_id IS NULL", Coupon)
+# error: [redundant-optional] "Mine.owner_id is int | None but query column 'owner_id' is never NULL"
+only = fetch_all("SELECT id, owner_id FROM coupons WHERE owner_id = %(owner)s", Mine)
+```

@@ -38,6 +38,26 @@ class User(TypedDict):
 q = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
 
+A row type shared by several queries is judged by all of them: a field is reported only
+when no query that loads the type can return NULL for it. `sqlty check` gathers the queries
+of every checked file before it reports.
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Owned(TypedDict):
+    id: int
+    name: str | None
+
+
+named = SQL[Owned]("--sql\nSELECT id, name FROM users")
+maybe = SQL[Owned]("--sql\nSELECT u.id, o.name FROM users u LEFT JOIN users o ON o.id = u.id + 1")
+# error:
+```
+
 ## Why is this bad?
 
 Callers handle a `None` that never arrives, and the annotation hides which columns are
