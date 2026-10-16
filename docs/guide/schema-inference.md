@@ -152,6 +152,9 @@ Known values come from:
   constants, `COALESCE(col, 'none')`, `UNION` (the union of the values), `VALUES`, and
   `MIN`, `MAX`, `NULLIF`, `LAG` and `FIRST_VALUE` of a column with values.
 - **Views, CTEs and subqueries** carry the values of the columns they select.
+- **Conditions** narrow a column's values: after `WHERE status = 'paid'` (or `IN`, in
+  `AND` and `OR`, in an inner join's `ON`, or in a `CASE` branch's `WHEN`) `status` is
+  `Literal['paid']`. MySQL, whose default collations ignore case, is not narrowed.
 
 ```toml
 [tool.sqlty]
@@ -179,7 +182,7 @@ A computed value (arithmetic, `upper(col)`, `col || 'x'`, `SUM`) is the plain `s
 more than 32 values is not tracked: the column is the plain type. Not tracked either: a
 `CHECK` in MySQL (before 8.0.16 it is parsed and ignored), `CHAR(n)` columns (the database
 pads them), columns with a collation that may equate strings (`COLLATE NOCASE`, any
-`COLLATE` but `BINARY`, `C` and `POSIX`) and `citext`, a `CHECK ... NOT VALID`, and a `WHERE col = 'x'` that narrows the column. After
+`COLLATE` but `BINARY`, `C` and `POSIX`) and `citext`, and a `CHECK ... NOT VALID`. After
 `ALTER TABLE ... DROP CONSTRAINT` the table's columns, and the text and integer columns of
 the views declared so far, lose their values, as constraints are not followed by name; a MySQL
 `ALTER TABLE ... MODIFY` or `CHANGE` makes the table unknown, and an `ALTER DOMAIN` that changes a constraint leaves the domain's
