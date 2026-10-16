@@ -22,8 +22,6 @@ from sqlty._core import (
     infer_type,
     load_schema,
     returns_rows,
-    rewrite_source,
-    strip_source,
 )
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
@@ -32,8 +30,10 @@ from sqlty._core import fix_source as _fix_source
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
+from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
@@ -180,6 +180,61 @@ def schema_skipped_objects(
     return _schema_skipped_objects(schema_sql, dialect=dialect)
 
 
+def rewrite_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    keep_lines: bool = False,
+    json_types: str = "typing.Any",
+) -> str:
+    r"""Wrap each ``--sql`` string in ``SQL[T](...)``, ``T`` the row type it infers.
+
+    With ``json_types="typing.TypedDict"``, a JSON column of known shape gets a generated
+    ``TypedDict`` instead of ``typing.Any``.
+
+    Example:
+        >>> print(rewrite_source('q = "--sql\\nSELECT 1::INTEGER AS n"'))
+        from sqlty import SQL
+        q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+
+    Raises:
+        ValueError: unsupported ``import_style``
+    """
+    rewritten = _rewrite_source(
+        source,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        untyped=untyped,
+        keep_lines=keep_lines,
+    )
+    if json_types == "typing.TypedDict" and rewritten != source:
+        from sqlty._json_types import add_json_types
+
+        rewritten = add_json_types(
+            rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+        )
+    return rewritten
+
+
+def strip_source(source: str, *, import_style: str | None = None) -> str:
+    r"""Unwrap ``SQL[T](...)`` back to the string, and drop the ``TypedDict``s rewrite generated.
+
+    Example:
+        >>> strip_source('from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1")')
+        'q = "--sql\\nSELECT 1"'
+
+    Raises:
+        ValueError: unsupported ``import_style``
+    """
+    from sqlty._json_types import strip_json_types
+
+    return _strip_source(strip_json_types(source), import_style=import_style)
+
+
 def fix_source(
     source: str | ParsedSource,
     *,
@@ -188,6 +243,7 @@ def fix_source(
     import_style: str | None = None,
     untyped: bool = False,
     rules: dict[str, str] | None = None,
+    json_types: str = "typing.Any",
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
@@ -203,7 +259,7 @@ def fix_source(
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source)
-    return _fix_source(
+    fixed = _fix_source(
         parsed.text,
         dialect=dialect,
         schema_sql=schema_sql,
@@ -216,6 +272,13 @@ def fix_source(
         }
         or None,
     )
+    if json_types == "typing.TypedDict" and fixed != parsed.text:
+        from sqlty._json_types import add_json_types
+
+        fixed = add_json_types(
+            fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+        )
+    return fixed
 
 
 def check_source(
