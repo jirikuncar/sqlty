@@ -48,6 +48,24 @@ impl SqlDialect {
         }
     }
 
+    /// Whether the dialect reads PostgreSQL's `x::type` cast.
+    pub(crate) fn has_cast_operator(self) -> bool {
+        match self {
+            Self::Postgres | Self::ClickHouse => true,
+            Self::MySql | Self::Sqlite => false,
+            Self::Other(name) => matches!(
+                name,
+                "databricks"
+                    | "duckdb"
+                    | "generic"
+                    | "redshift"
+                    | "snowflake"
+                    | "spark"
+                    | "sparksql"
+            ),
+        }
+    }
+
     pub(crate) fn parser_dialect(self) -> Box<dyn sqlparser::dialect::Dialect> {
         match self {
             Self::Postgres => Box::new(PostgreSqlDialect {}),

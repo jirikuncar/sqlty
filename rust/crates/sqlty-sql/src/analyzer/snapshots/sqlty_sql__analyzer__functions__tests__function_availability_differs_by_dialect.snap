@@ -4,26 +4,20 @@ expression: "format!(\"mysql:\\n{mysql}\\npostgres:\\n{postgres}\")"
 ---
 mysql:
 SELECT ifnull(i, 0) AS a, concat_ws(',', txt, txt) AS b, if(i > 1, 1, 0) AS c FROM t
-a: ? | ? | NonNull
-b: ? | ? | NonNull
-c: ? | ? | NonNull
-[unknown-function] function `ifnull` is not known to sqlty, so its result is untyped
-[unknown-function] function `concat_ws` is not known to sqlty, so its result is untyped
-[unknown-function] function `if` is not known to sqlty, so its result is untyped
+a: int | INT | NonNull
+b: str | TEXT | NonNull
+c: typing.Literal[1, 0] | ? | NonNull
 
 SELECT date_format(ts, '%Y') AS a, curdate() AS b, group_concat(txt) AS c FROM t
-a: ? | ? | Unknown
-b: ? | ? | Unknown
+a: str | TEXT | Nullable
+b: datetime.date | DATE | NonNull
 c: str | TEXT | Nullable
-[unknown-function] function `date_format` is not known to sqlty, so its result is untyped
-[unknown-function] function `curdate` is not known to sqlty, so its result is untyped
 
 SELECT avg(i) AS a, sum(i) AS b, round(n, 1) AS c, stddev(i) AS d FROM t
 a: decimal.Decimal | DECIMAL | Nullable
-b: int | INT | Nullable
-c: ? | ? | Unknown
+b: decimal.Decimal | DECIMAL | Nullable
+c: decimal.Decimal | DECIMAL(10, 2) | NonNull
 d: float | DOUBLE | Nullable
-[unknown-function] function `round` is not known to sqlty, so its result is untyped
 
 postgres:
 SELECT ifnull(i, 0) AS a, concat_ws(',', txt, txt) AS b, if(i > 1, 1, 0) AS c FROM t

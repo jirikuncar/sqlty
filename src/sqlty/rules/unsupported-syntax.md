@@ -23,8 +23,8 @@ CREATE TABLE users (id INTEGER, name TEXT);
 ```python
 from sqlty import SQL
 
-# error: [unsupported-syntax] "expression `(1, 2)` is not typed"
-q = SQL[tuple[object]]("--sql\nSELECT (1, 2)")
+# error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
+q = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
 
 ## Why is this bad?
@@ -33,7 +33,7 @@ sqlty does not guess a type for a construct it does not understand. Without this
 
 ## How to fix
 
-Cast the expression to a type: `(1, 2)::TEXT`. For a `*` over a `USING` join, list the columns. To accept one case, put `# sqlty: ignore[unsupported-syntax]` on its line.
+Cast the expression to a type: `(1 OPERATOR(pg_catalog.+) 1)::INTEGER`. For a `*` over a `USING` join, list the columns. To accept one case, put `# sqlty: ignore[unsupported-syntax]` on its line.
 
 ## Configuration
 

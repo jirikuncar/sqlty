@@ -10,13 +10,25 @@ from typing import Any, NamedTuple, TypedDict, cast
 
 SchemaSpec = str | list[str]
 
-TOOL_KEYS = ("dialect", "schema", "rules", "import-style", "untyped", "type-modules", "functions")
+TOOL_KEYS = (
+    "dialect",
+    "schema",
+    "rules",
+    "overrides",
+    "import-style",
+    "untyped",
+    "type-modules",
+    "functions",
+    "format-command",
+)
 """Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
 
-DISCOVERY_KEYS = ("exclude", "extend-exclude")
+DISCOVERY_KEYS = ("exclude", "extend-exclude", "respect-gitignore")
 """``[tool.sqlty]`` keys that pick the files to process."""
 
 FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
+
+OVERRIDE_KEYS = ("include", "exclude", "rules")
 
 
 class KeyDoc(NamedTuple):
@@ -52,6 +64,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`check`",
         'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`',
     ),
+    "overrides": KeyDoc(
+        "array of tables",
+        "`[]`",
+        "`check`",
+        "Rule severities for the files `include` matches and `exclude` does not, on top of `rules`",
+    ),
     "import-style": KeyDoc(
         "string",
         '`"from sqlty import SQL"`',
@@ -76,6 +94,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`check`",
         "Helper functions whose string argument is a query",
     ),
+    "format-command": KeyDoc(
+        "list of strings",
+        "none",
+        "`rewrite`, `check --fix`",
+        "Formatter run on each file `rewrite` or `check --fix` changes, with the path appended",
+    ),
     "exclude": KeyDoc(
         "list of globs",
         "see [Default excludes](#exclude-and-extend-exclude)",
@@ -87,6 +111,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`[]`",
         "`rewrite`, `strip`, `check`",
         "Globs skipped in addition to `exclude` or the defaults",
+    ),
+    "respect-gitignore": KeyDoc(
+        "boolean",
+        "`true`",
+        "`rewrite`, `strip`, `check`",
+        "Skip the files `.gitignore` ignores while walking a directory",
     ),
 }
 """Reference docs per key of ``[tool.sqlty]``, in documentation order."""
@@ -176,21 +206,45 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                 f"{source}: unknown key {key!r} in [tool.sqlty]{_suggest(key, keys)}; "
                 f"expected one of: {', '.join(keys)}"
             )
-    rules = table.get("rules", {})
-    if not isinstance(rules, dict):
-        raise ConfigError(f"{source}: [tool.sqlty] rules must be a table of rule = severity")
     severities = [s.value for s in Severity]
-    for rule, severity in rules.items():
-        if rule not in RULES:
-            raise ConfigError(
-                f"{source}: unknown rule {rule!r} in [tool.sqlty.rules]"
-                f"{_suggest(rule, list(RULES))}; run `sqlty rule` for the list"
-            )
-        if severity not in severities:
-            raise ConfigError(
-                f"{source}: invalid severity {severity!r} for rule {rule!r} in "
-                f"[tool.sqlty.rules]; expected one of: {', '.join(severities)}"
-            )
+
+    def check_rules(rules: object, key: str, where: str) -> None:
+        if not isinstance(rules, dict):
+            raise ConfigError(f"{source}: {key} must be a table of rule = severity")
+        for rule, severity in rules.items():
+            if rule not in RULES:
+                raise ConfigError(
+                    f"{source}: unknown rule {rule!r} in {where}"
+                    f"{_suggest(rule, list(RULES))}; run `sqlty rule` for the list"
+                )
+            if severity not in severities:
+                raise ConfigError(
+                    f"{source}: invalid severity {severity!r} for rule {rule!r} in "
+                    f"{where}; expected one of: {', '.join(severities)}"
+                )
+
+    check_rules(table.get("rules", {}), "[tool.sqlty] rules", "[tool.sqlty.rules]")
+    overrides = table.get("overrides", [])
+    if not isinstance(overrides, list) or not all(isinstance(o, dict) for o in overrides):
+        raise ConfigError(f"{source}: [tool.sqlty] overrides must be an array of tables")
+    for override in overrides:
+        for key in override:
+            if key not in OVERRIDE_KEYS:
+                raise ConfigError(
+                    f"{source}: unknown key {key!r} in [[tool.sqlty.overrides]]"
+                    f"{_suggest(key, OVERRIDE_KEYS)}; expected one of: {', '.join(OVERRIDE_KEYS)}"
+                )
+        for key in ("include", "exclude"):
+            globs = override.get(key, [])
+            if not isinstance(globs, list) or not all(isinstance(g, str) for g in globs):
+                raise ConfigError(
+                    f"{source}: [[tool.sqlty.overrides]] {key} must be a list of glob strings"
+                )
+        check_rules(
+            override.get("rules", {}),
+            "[[tool.sqlty.overrides]] rules",
+            "[tool.sqlty.overrides.rules]",
+        )
     functions = table.get("functions", [])
     if not isinstance(functions, list):
         raise ConfigError(f"{source}: [tool.sqlty] functions must be an array of tables")
@@ -202,10 +256,31 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                         f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
                         f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
                     )
-    for key in DISCOVERY_KEYS:
+    command = table.get("format-command", [])
+    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+        raise ConfigError(
+            f"{source}: [tool.sqlty] format-command must be a list of strings, "
+            'such as ["ruff", "format"]'
+        )
+    if not isinstance(table.get("respect-gitignore", True), bool):
+        raise ConfigError(f"{source}: [tool.sqlty] respect-gitignore must be true or false")
+    for key in ("exclude", "extend-exclude"):
         value = table.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ConfigError(f"{source}: [tool.sqlty] {key} must be a list of glob strings")
+
+
+class RuleOverride(TypedDict):
+    """A ``[[tool.sqlty.overrides]]`` entry, as ty spells them: rule severities for the files
+    ``include`` matches (every file when it is empty) and ``exclude`` does not.
+
+    Globs are relative to the ``pyproject.toml`` directory; a glob without a slash
+    matches a file or directory name at any depth, as in ``exclude``.
+    """
+
+    include: list[str]
+    exclude: list[str]
+    rules: dict[str, str]
 
 
 class FunctionConfigComplete(TypedDict, total=False):
@@ -247,12 +322,15 @@ class SQLTyConfig(TypedDict, total=False):
     dialect: str
     schema: SchemaSpec  # Schema file, directory or glob, or a list of them
     rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
+    overrides: list[RuleOverride]  # rule severities for files matching globs
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"
     untyped: str  # "skip" (default) or "sentinel": SQL[UNTYPED] for uninferable queries
     type_modules: list[str]  # modules whose imports may run to resolve row types
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above
+    respect_gitignore: bool  # skip what .gitignore ignores while walking
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
+    format_command: list[str]  # formatter run on changed files, path appended
 
 
 def _schema_spec(value: Any) -> SchemaSpec:
@@ -455,6 +533,8 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
         config["exclude"] = list(tool_config["exclude"])
     if "extend-exclude" in tool_config:
         config["extend_exclude"] = list(tool_config["extend-exclude"])
+    if "respect-gitignore" in tool_config:
+        config["respect_gitignore"] = tool_config["respect-gitignore"]
 
     # Parse each configuration option
     if "dialect" in tool_config:
@@ -463,10 +543,21 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
     # Single schema path (top-level convenience key)
     if "schema" in tool_config:
         config["schema"] = _schema_spec(tool_config["schema"])
+    if "format-command" in tool_config:
+        config["format_command"] = list(tool_config["format-command"])
 
     # Rule severity overrides: [tool.sqlty.rules]
     if "rules" in tool_config and isinstance(tool_config["rules"], dict):
         config["rules"] = {str(k): str(v) for k, v in tool_config["rules"].items()}
+    if "overrides" in tool_config:
+        config["overrides"] = [
+            {
+                "include": list(o.get("include", [])),
+                "exclude": list(o.get("exclude", [])),
+                "rules": dict(o.get("rules", {})),
+            }
+            for o in tool_config["overrides"]
+        ]
 
     # Allow hyphenated key in pyproject: import-style
     if "import-style" in tool_config:

@@ -103,7 +103,8 @@ pub(crate) struct Function {
 
 #[derive(Clone, Debug)]
 enum Relation {
-    Table(Vec<SchemaColumn>),
+    /// Columns, and the groups of them a `CHECK` keeps at least one of non-null.
+    Table(Vec<SchemaColumn>, Vec<Vec<String>>),
     View(Vec<Column>),
     /// Defined, but its shape is not known.
     Unknown,
@@ -154,8 +155,17 @@ impl Catalog {
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
-            Relation::Table(columns) => Some(columns),
+            Relation::Table(columns, _) => Some(columns),
             _ => None,
+        }
+    }
+
+    /// Groups of columns of the table `name` that a `CHECK` keeps at least one of
+    /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
+    pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
+        match self.find(name) {
+            Some(Relation::Table(_, groups)) => groups,
+            _ => &[],
         }
     }
 
@@ -472,10 +482,27 @@ mod tests {
     fn test_other_dialects_ignore_postgres_statements() {
         let (c, _) = load(
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
-            "mysql",
+            "duckdb",
         );
         assert_eq!(c.table("t").map(<[SchemaColumn]>::len), Some(1));
         assert!(c.table("pg_class").is_none());
+    }
+
+    #[test]
+    fn test_mysql_and_sqlite_follow_alter_and_drop() {
+        for dialect in ["mysql", "sqlite"] {
+            let (c, _) = load(
+                "CREATE TABLE t (a INT); ALTER TABLE t ADD COLUMN b INT; \
+                 CREATE TABLE u (a INT); DROP TABLE u;",
+                dialect,
+            );
+            assert_eq!(
+                c.table("t").map(<[SchemaColumn]>::len),
+                Some(2),
+                "{dialect}"
+            );
+            assert!(c.table("u").is_none(), "{dialect}");
+        }
     }
 
     fn assert_fast(sql: &str) -> Catalog {

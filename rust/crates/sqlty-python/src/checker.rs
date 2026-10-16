@@ -17,8 +17,8 @@ use std::sync::LazyLock;
 use crate::options::Options;
 use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, marked_query, strip_line_break, wraps,
-    ImportStyle,
+    after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
+    strip_line_break, wraps, ImportStyle,
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
@@ -474,7 +474,8 @@ pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String,
         .iter()
         .map(|call| {
             let query = call.content(source).and_then(|content| {
-                let rest = after_marker(&content)?;
+                let decoded = decode_escapes(&content);
+                let rest = after_marker(&decoded)?;
                 Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
             });
             (

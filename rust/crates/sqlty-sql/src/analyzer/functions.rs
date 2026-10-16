@@ -31,6 +31,11 @@ pub(super) enum Returns {
     ArrayOf(usize),
     /// The first argument of known type, skipping `NULL` and placeholders.
     FirstKnown,
+    /// [`Returns::FirstKnown`] of the arguments from this one on: `IF(cond, a, b)`.
+    Branches(usize),
+    /// MySQL `STR_TO_DATE(s, format)`: a `DATE`, `TIME` or `DATETIME` by the parts the
+    /// literal format at this argument reads.
+    StrToDate(usize),
     /// `lower`/`upper`: the element type of a range argument, else `TEXT`.
     Bound,
     /// `AVG` and friends: `DOUBLE` for floats, `INTERVAL` for intervals, else `NUMERIC`.
@@ -332,6 +337,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("TSQUERY"),
     ),
+    (&["ROW"], Sql("RECORD")),
     (&["INT4RANGE"], Sql("INT4RANGE")),
     (&["INT8RANGE"], Sql("INT8RANGE")),
     (&["NUMRANGE"], Sql("NUMRANGE")),
@@ -463,6 +469,18 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(first)
             }
+            Returns::Branches(i) => self.function_type(
+                Returns::FirstKnown,
+                args.get(i..).unwrap_or_default(),
+                scope,
+            ),
+            Returns::StrToDate(i) => Ok(match args.get(i) {
+                Some(Expr::Value(value)) => match value.value.clone().into_string() {
+                    Some(format) => from_sql_type(str_to_date_type(&format), self.dialect),
+                    None => Typed::UNKNOWN,
+                },
+                _ => Typed::UNKNOWN,
+            }),
             Elem(i) => Ok(self.element_typed(arg(i)?.sql())),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
@@ -530,7 +548,7 @@ impl<'a> Analyzer<'a> {
             })
         };
         if typed.python.is_some() || name != "SUM" {
-            return Ok(if name == "SUM" && self.dialect == SqlDialect::Postgres {
+            return Ok(if name == "SUM" {
                 sum_type(typed, self.dialect)
             } else {
                 typed
@@ -560,13 +578,44 @@ impl<'a> Analyzer<'a> {
     }
 }
 
-/// PostgreSQL's `SUM` widens: `BIGINT` for `SMALLINT`/`INT`, `NUMERIC` for `BIGINT`/`NUMERIC`.
+/// The type MySQL's `STR_TO_DATE` returns for `format`: `DATETIME` when it reads both date
+/// and time parts, else `DATE` or `TIME`.
+fn str_to_date_type(format: &str) -> &'static str {
+    let specifiers: Vec<char> = format
+        .split('%')
+        .skip(1)
+        .filter_map(|part| part.chars().next())
+        .collect();
+    let time = specifiers.iter().any(|c| "fHhIiklprSsT".contains(*c));
+    let date = specifiers
+        .iter()
+        .any(|c| "abcDdeJjMmUuVvWwXxYy".contains(*c));
+    match (date, time) {
+        (true, true) => "DATETIME",
+        (false, true) => "TIME",
+        _ => "DATE",
+    }
+}
+
+/// `SUM` widens. PostgreSQL: `BIGINT` for `SMALLINT`/`INT`, `NUMERIC` for `BIGINT`/`NUMERIC`.
+/// MySQL: `DECIMAL` for exact values, `DOUBLE` for approximate ones, signed or `UNSIGNED`.
+/// SQLite keeps the type.
 pub(super) fn sum_type(typed: Typed, dialect: SqlDialect) -> Typed {
-    let widened = match operand_type(&typed) {
-        Some("SMALLINT" | "INT") => "BIGINT",
-        Some("BIGINT" | "DECIMAL" | "NUMERIC") => "DECIMAL",
-        Some("FLOAT") => "FLOAT",
-        Some("DOUBLE") => "DOUBLE",
+    let signed = operand_type(&typed).map(|ty| {
+        ty.strip_prefix('U')
+            .filter(|ty| numeric_rank(ty).is_some())
+            .unwrap_or(ty)
+    });
+    let widened = match (dialect, signed) {
+        (SqlDialect::Postgres, Some("SMALLINT" | "INT")) => "BIGINT",
+        (SqlDialect::Postgres, Some("BIGINT" | "DECIMAL" | "NUMERIC")) => "DECIMAL",
+        (SqlDialect::Postgres, Some("FLOAT")) => "FLOAT",
+        (SqlDialect::Postgres, Some("DOUBLE")) => "DOUBLE",
+        (
+            SqlDialect::MySql,
+            Some("TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "BIGINT" | "DECIMAL" | "NUMERIC"),
+        ) => "DECIMAL",
+        (SqlDialect::MySql, Some("FLOAT" | "REAL" | "DOUBLE")) => "DOUBLE",
         _ => return typed,
     };
     from_sql_type(widened, dialect)
@@ -694,7 +743,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "bug: MySQL SUM of an integer column is DECIMAL (MySQL reference manual, aggregate functions), but sum_type widens only in PostgreSQL"]
     fn mysql_sum_of_an_integer_is_decimal() {
         let report = super::super::test_support::report(
             "SELECT sum(i) AS total FROM t",
