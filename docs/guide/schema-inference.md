@@ -89,7 +89,9 @@ What makes a column nullable or not:
 
 - **Schema.** `NOT NULL` and `PRIMARY KEY` columns are non-null; others are nullable. In
   SQLite a `PRIMARY KEY` column is non-null only if it is `INTEGER`, `NOT NULL`, or in a
-  `WITHOUT ROWID` or `STRICT` table.
+  `WITHOUT ROWID` or `STRICT` table. A `CHECK (x IS NOT NULL)` makes `x` non-null too, and
+  `CHECK (num_nonnulls(a, b) = 1)` or `CHECK (a IS NOT NULL OR b IS NOT NULL)` makes
+  `COALESCE(a, b)` non-null.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
   is nullable.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:

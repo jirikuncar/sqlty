@@ -10,7 +10,7 @@ use sqlparser::ast::{
 
 use crate::analyzer::SqlDialect;
 
-use super::columns::{apply_check, mark_not_null, raw_column};
+use super::columns::{apply_check, mark_not_null, nonnull_groups, raw_column};
 use super::loader::{AlterFail, Loader, RawTable, Rel, TypeDef};
 use super::names::{fold, key_of, parts};
 
@@ -241,12 +241,18 @@ pub(super) fn alter_op(
         AlterTableOperation::AddConstraint {
             constraint: TableConstraint::Check(check),
             not_valid: false,
-        } => apply_check(&mut table.columns, &check.expr, dialect),
+        } => {
+            apply_check(&mut table.columns, &check.expr, dialect);
+            table
+                .nonnull_groups
+                .extend(nonnull_groups(&check.expr, dialect));
+        }
         // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
         AlterTableOperation::DropConstraint { .. } => {
             for column in &mut table.columns {
                 column.values = None;
             }
+            table.nonnull_groups.clear();
         }
         AlterTableOperation::ChangeColumn { .. }
         | AlterTableOperation::ModifyColumn { .. }
