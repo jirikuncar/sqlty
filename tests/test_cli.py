@@ -1124,3 +1124,14 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     code, out, _ = _run(["check", "."], capsys)
     assert code == 1
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
+
+
+def test_dialect_option_takes_every_dialect(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1::INTEGER AS n"\n')
+    monkeypatch.chdir(tmp_path)
+    code, out, _ = _run(["rewrite", "--diff", "--dialect", "DuckDB", "."], capsys)
+    assert code == 1
+    assert 'SQL[tuple[int]]("--sql' in out
+    code, _, err = _run(["check", "--dialect", "postgress", "."], capsys)
+    assert code == 2
+    assert "unknown dialect 'postgress' (did you mean 'postgres'?)" in err

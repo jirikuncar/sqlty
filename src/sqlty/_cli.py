@@ -182,6 +182,17 @@ def _rule_severity(severity: str, rule: str) -> tuple[str, str]:
     return rule, severity
 
 
+def _dialect(name: str) -> str:
+    """``--dialect``: a dialect name, in any case."""
+    import argparse
+
+    from sqlty._config import dialect_problem
+
+    if problem := dialect_problem(name):
+        raise argparse.ArgumentTypeError(problem)
+    return name.lower()
+
+
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared across rewrite/strip/check."""
     import argparse
@@ -195,8 +206,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--dialect",
-        choices=["postgres", "sqlite", "mysql"],
-        help="SQL dialect (default: [tool.sqlty] dialect, else postgres)",
+        type=_dialect,
+        metavar="DIALECT",
+        help="SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as "
+        "duckdb (default: [tool.sqlty] dialect, else postgres)",
     )
     parser.add_argument(
         "--schema",
