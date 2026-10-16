@@ -33,6 +33,7 @@ from sqlty._type_extractor.compat import (
     parse_tuple_annotation,
 )
 from sqlty._type_extractor.extract import extract_type_definitions
+from sqlty._type_extractor.generic import specialize
 from sqlty._type_extractor.info import TypeInfo
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "field_type",
     "is_optional",
     "parse_tuple_annotation",
+    "specialize",
 ]

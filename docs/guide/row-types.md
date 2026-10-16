@@ -506,6 +506,30 @@ spelled as bare names are checked, and types are compared only when the
 answer is certain (plain classes and unions of them, with `int` to `float`
 to `complex` promotion).
 
+## Aliases and generic row types
+
+A row type named through a module-level alias (`type Row = ...`, `Row: TypeAlias = ...`,
+`Row = tuple[...]` or `Row = OtherRow`) is checked as what it names, and a generic class
+with its type arguments applied, so one class can serve several queries:
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+class Page[T](TypedDict):
+    total: int
+    items: list[T]
+
+type Pair = tuple[int, str]
+
+ids = SQL[Page[int]]("--sql\nSELECT count(*) AS total, coalesce(array_agg(id), '{}')::INTEGER[] AS items FROM users")
+# error: [column-type-mismatch] "Pair item 1 is str but query column 'id' infers int"
+pair = SQL[Pair]("--sql\nSELECT id::INTEGER, id::INTEGER FROM users")
+```
+
+A generic alias (`type Rows[T] = list[T]`) is not resolved.
+
 ## The row type at runtime
 
 `SQL[T](...)` records `T` on the instance.
