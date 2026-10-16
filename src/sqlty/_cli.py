@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
+    from sqlty._lint import Diagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +391,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     from sqlty._config import ConfigError
     from sqlty._source import ParsedSource
-    from sqlty.core import HelperIndex, check_source, fix_source, query_statistics
+    from sqlty.core import HelperIndex, RowUsage, check_source, fix_source, query_statistics
 
     if args.error_on_warning and (args.exit_zero or args.exit_zero_on_warning):
         other = "--exit-zero" if args.exit_zero else "--exit-zero-on-warning"
@@ -432,6 +433,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
     total_warnings = 0
     total_fixed = 0
     statistics: Counter[str] = Counter()
+    # A row type shared by files is judged by all of its queries: report once every file is read.
+    row_usage = RowUsage()
+    reports: list[tuple[Path, Diagnostic]] = []
 
     for path in files:
         parsed = sources[path]
@@ -463,6 +467,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             untyped=settings.untyped,
             helpers=file_helpers,
             type_modules=settings.type_modules,
+            row_usage=row_usage,
         )
         if args.statistics:
             statistics += query_statistics(
@@ -473,19 +478,19 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 helpers=file_helpers,
             )
 
-        for diag in diagnostics:
-            severity = diag["severity"]
-            line = diag.get("line", "")
-            rule = diag["rule"]
-            message = diag["message"]
+        reports.extend((path, diag) for diag in diagnostics)
 
-            if severity == "error":
-                total_errors += 1
-            elif severity == "warn":
-                total_warnings += 1
-
-            if not args.quiet:
-                print(f"{path}:{line}: [{rule}] {message}")
+    kept = {id(diag) for diag in row_usage.filter([diag for _, diag in reports])}
+    for path, diag in reports:
+        if id(diag) not in kept:
+            continue
+        severity = diag["severity"]
+        if severity == "error":
+            total_errors += 1
+        elif severity == "warn":
+            total_warnings += 1
+        if not args.quiet:
+            print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
 
     if total_fixed and not args.quiet:
         print(f"Fixed {total_fixed} file(s)")

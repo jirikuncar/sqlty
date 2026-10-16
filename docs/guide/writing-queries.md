@@ -147,10 +147,10 @@ Queries that return rows of an unknown type (`VALUES`, unparseable `SELECT`)
 are also left alone by default; see [Untyped queries](untyped.md) to mark them
 explicitly.
 
-## f-strings and t-strings
+## f-strings
 
-An f-string or t-string is built at runtime, so it cannot be rewritten. sqlty
-skips every `--sql` string on a line that holds one:
+An f-string is built at runtime, so it cannot be rewritten. sqlty skips every
+`--sql` string on a line that holds one:
 
 ```python
 # error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
@@ -159,9 +159,33 @@ query = f"--sql\nSELECT {column}::INTEGER FROM users"
 ```
 
 `sqlty check` and `sqlty rewrite` report such strings as
-[`fstring-skipped`](../reference/rules.md#fstring-skipped) and
-[`tstring-skipped`](../reference/rules.md#tstring-skipped). Pass values as query
+[`fstring-skipped`](../reference/rules.md#fstring-skipped). Pass values as query
 parameters instead of interpolating them, and keep the query a plain literal.
+
+## t-strings
+
+A t-string ([PEP 750](https://peps.python.org/pep-0750/), Python 3.14) keeps its
+values apart from its text, so psycopg 3.3 sends them as parameters. sqlty
+reads each plain field `{value}` as a placeholder and wraps the template as
+`SQLTemplate[T]`:
+
+```python
+user_id = 1
+query = t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
+# rewritten: user_id = 1
+# rewritten: query = SQLTemplate[tuple[int, str]](t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}")
+```
+
+`string.templatelib.Template` cannot be subclassed, so `SQLTemplate[T]` holds the
+template in `.template`: pass that to psycopg, or pass the query to the
+[psycopg helpers](psycopg.md), which run the template and type the rows as `T`.
+`sqlty check` checks it like `SQL[T]`: `stale-type`, and the row type checks of
+a named row type.
+
+A field with a format spec or a conversion, such as psycopg's `{name:i}`
+identifier, `{value:l}` literal or `{part:q}` nested query, changes the text of
+the SQL. Such a template is left alone and reported as
+[`tstring-skipped`](../reference/rules.md#tstring-skipped).
 
 ## Type mapping
 
@@ -176,7 +200,7 @@ parameters instead of interpolating them, and keep the query a plain literal.
 | `DECIMAL`, `NUMERIC`, `UDECIMAL` (MySQL `... UNSIGNED`) | `decimal.Decimal`, `float` in `sqlite` and `oracle` |
 | `DATE` | `datetime.date` |
 | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` |
-| `TIME`, `TIMETZ` | `datetime.time` |
+| `TIME`, `TIMETZ` | `datetime.time`; MySQL `TIME` is `datetime.timedelta` (a duration, up to 838 hours) |
 | `INTERVAL` | `datetime.timedelta` |
 | `JSON`, `JSONB` | `typing.Any`: any JSON value can be stored |
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` |
@@ -184,7 +208,7 @@ parameters instead of interpolating them, and keep the query a plain literal.
 | `UUID` | `uuid.UUID` |
 | `BYTEA`, `BLOB`, `BINARY`, `VARBINARY` | `bytes` |
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
-| `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `TSVECTOR`, `TSQUERY` | `str` |
+| `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
 | Anything else (`SET`, `POINT`, custom types, ...) | unknown: the row type is unknown |
 
