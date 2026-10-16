@@ -272,6 +272,55 @@ wrong = SQL[Named]("--sql\nSELECT 'x'::TEXT AS id, 'ada'::TEXT AS name")
 
 Only annotated attributes count; methods and properties are not read.
 
+## Composite columns
+
+A column of a PostgreSQL composite type (`CREATE TYPE point2 AS (x int, y int)`)
+has no Python type of its own: psycopg returns it as text unless you register
+the type, and `register_composite` then builds the class you give it. When a
+field of your row type is annotated with a row type (`NamedTuple`, dataclass,
+`TypedDict`, Pydantic model), `sqlty check` compares the composite's fields with
+it, as it compares query columns with a row type. Composite fields can always
+be NULL.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TYPE point2 AS (x INTEGER, y INTEGER);
+CREATE TABLE shapes (id INTEGER PRIMARY KEY, p point2);
+```
+
+```python
+from typing import NamedTuple, TypedDict
+
+import psycopg
+from psycopg.types.composite import CompositeInfo, register_composite
+from sqlty import SQL
+from sqlty.drivers.psycopg import execute
+
+class Point(NamedTuple):
+    x: int | None
+    y: int | None
+
+class Shape(TypedDict):
+    id: int
+    p: Point | None
+
+query = SQL[Shape]("--sql\nSELECT id, p FROM shapes")
+
+with psycopg.connect("dbname=app") as conn:
+    register_composite(CompositeInfo.fetch(conn, "point2"), conn, Point)
+    shapes = execute(conn, query).fetchall()  # list[Shape], p a Point
+# error:
+```
+
+A field type that does not match is reported with the composite's name:
+`Shape.p.y is str but composite point2 field 'y' infers int`.
+
 ## Pydantic aliases and extra columns
 
 A Pydantic model validates a row by alias, so a column is matched to a field by

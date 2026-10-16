@@ -27,6 +27,24 @@ from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
 ```
 
+### Composite fields
+
+A field of a composite type the schema declares is checked the same way.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE address AS (street TEXT, zip TEXT);
+CREATE TABLE users (id INTEGER, home address);
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "type `address` has no field `city`"
+q = SQL[tuple[int, str]]("--sql\nSELECT id, (home).city FROM users")
+```
+
 ## Why is this bad?
 
 An unknown column has no type, so its annotation is not checked, and the query fails when it runs.

@@ -301,3 +301,57 @@ class User(TypedDict):
 # error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 q = SQL[User]("--sql\nSELECT id, name, email FROM users")
 ```
+
+## Composite columns
+
+A column of a composite type has no Python type of its own. When the row type's
+field names a row type (a `NamedTuple`, dataclass, `TypedDict` or model), the
+composite's fields are checked against it like query columns. Composite fields
+can always be NULL.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TYPE point2 AS (x INTEGER, y INTEGER);
+CREATE TABLE shapes (id INTEGER PRIMARY KEY, p point2);
+```
+
+```python
+from typing import NamedTuple, TypedDict
+from sqlty import SQL
+
+class Point(NamedTuple):
+    x: int | None
+    y: int | None
+
+class Shape(TypedDict):
+    id: int
+    p: Point | None
+
+class Wrong(NamedTuple):
+    x: int
+    y: str | None
+
+class BadShape(TypedDict):
+    id: int
+    p: Wrong | None
+
+class Flat(NamedTuple):
+    x: int | None
+
+class FlatShape(TypedDict):
+    id: int
+    p: Flat | None
+
+ok = SQL[Shape]("--sql\nSELECT id, p FROM shapes")
+# error: [column-type-mismatch] "BadShape.p.y is str but composite point2 field 'y' infers int"
+# error: [nullable-mismatch] "BadShape.p.x is int but composite point2 field 'x' can be NULL"
+bad = SQL[BadShape]("--sql\nSELECT id, p FROM shapes")
+# error: [column-count-mismatch] "FlatShape.p has 1 fields but composite point2 has 2 fields"
+short = SQL[FlatShape]("--sql\nSELECT id, p FROM shapes")
+```
