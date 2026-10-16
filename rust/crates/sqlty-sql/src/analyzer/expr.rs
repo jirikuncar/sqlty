@@ -292,6 +292,7 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         let (root, chain) = split_access(root, access_chain);
+        let mark = self.diag.mark();
         let mut typed = self.expr(&root, scope)?;
         for access in chain {
             typed = match access {
@@ -300,6 +301,16 @@ impl<'a> Analyzer<'a> {
                 AccessExpr::Dot(Expr::Identifier(field)) => self.field_typed(typed.sql(), field),
                 AccessExpr::Dot(_) => typed,
             };
+        }
+        let mut column = root.as_ref();
+        while let Expr::Nested(inner) = column {
+            column = inner;
+        }
+        // A composite column with no Python type of its own, read through a typed field.
+        if typed.python.is_some()
+            && matches!(column, Expr::Identifier(_) | Expr::CompoundIdentifier(_))
+        {
+            self.diag.rewind(mark);
         }
         Ok(typed)
     }
