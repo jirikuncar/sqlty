@@ -55,8 +55,8 @@ c = SQL[tuple[int]]("--sql\nSELECT id FROM users u JOIN orders o ON o.user_id = 
 d = SQL[tuple[int]]("--sql\nSELECT my_udf(id) FROM users")
 # error: [unknown-type] "type `mood` has no Python type"
 e = SQL[tuple[str]]("--sql\nSELECT name::mood FROM users")
-# error: [unsupported-syntax] "expression `(1, 2)` is not typed"
-f = SQL[tuple[object]]("--sql\nSELECT (1, 2)")
+# error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
+f = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
 
 To keep a rule on but accept one query, add `# sqlty: ignore[unknown-column]`

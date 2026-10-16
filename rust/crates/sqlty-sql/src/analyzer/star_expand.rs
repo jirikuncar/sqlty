@@ -69,11 +69,15 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
         }
         let columns = analyzer.schema_star_columns(reference, &scope)?;
         let qualifier = reference.map_or_else(String::new, |reference| format!("{reference}."));
-        items.extend(
-            columns
-                .iter()
-                .map(|col| format!("{qualifier}{}::{}", col.ident, col.sql_type)),
-        );
+        // Without `::` (MySQL, SQLite, ...) the schema alone types the columns.
+        let casts = dialect.has_cast_operator();
+        items.extend(columns.iter().map(|col| {
+            if casts {
+                format!("{qualifier}{}::{}", col.ident, col.sql_type)
+            } else {
+                format!("{qualifier}{}", col.ident)
+            }
+        }));
         has_star = true;
     }
     has_star.then(|| {

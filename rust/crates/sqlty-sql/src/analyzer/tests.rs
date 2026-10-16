@@ -142,9 +142,17 @@ fn test_mysql_column_types() {
          c INT SIGNED ZEROFILL, d MIDDLEINT(8) UNSIGNED)",
         "mysql",
     ));
+    let types: Vec<_> = analyze_select("SELECT * FROM t", "mysql", schema.as_deref())
+        .unwrap()
+        .unwrap()
+        .into_iter()
+        .map(|col| col.sql_type.unwrap())
+        .collect();
+    assert_eq!(types, ["UMEDIUMINT", "UINT", "UINT", "UMEDIUMINT(8)"]);
     assert_eq!(
         expand_star("SELECT * FROM t", "mysql", schema.as_deref()).as_deref(),
-        Some("SELECT a::UMEDIUMINT, b::UINT, c::UINT, d::UMEDIUMINT(8) FROM t")
+        Some("SELECT a, b, c, d FROM t"),
+        "MySQL has no `::`"
     );
     assert_eq!(
         names_in("SELECT 1 zerofill", "mysql"),
@@ -187,26 +195,47 @@ fn test_question_mark_placeholders() {
 
 #[test]
 fn test_dialect_type_aliases() {
-    let expand = |columns: &str, dialect: &str| {
+    let types = |columns: &str, dialect: &str| -> Vec<String> {
         let schema = Some(load_schema(&format!("CREATE TABLE t ({columns})"), dialect));
-        expand_star("SELECT * FROM t", dialect, schema.as_deref())
+        analyze_select("SELECT * FROM t", dialect, schema.as_deref())
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|col| col.sql_type.unwrap())
+            .collect()
     };
     assert_eq!(
-        expand("a INT64, b FLOAT64", "bigquery").as_deref(),
-        Some("SELECT a::BIGINT, b::DOUBLE FROM t")
+        types("a INT64, b FLOAT64", "bigquery"),
+        ["BIGINT", "DOUBLE"]
     );
     assert_eq!(
-        expand("a Int8, b INT8", "clickhouse").as_deref(),
-        Some("SELECT a::TINYINT, b::TINYINT FROM t")
+        types("a Int8, b INT8", "clickhouse"),
+        ["TINYINT", "TINYINT"]
     );
-    assert_eq!(
-        expand("a INT8", "postgres").as_deref(),
-        Some("SELECT a::BIGINT FROM t")
-    );
-    assert_eq!(
-        expand("a UNIQUEIDENTIFIER", "tsql").as_deref(),
-        Some("SELECT a::UUID FROM t")
-    );
+    assert_eq!(types("a INT8", "postgres"), ["BIGINT"]);
+    assert_eq!(types("a UNIQUEIDENTIFIER", "tsql"), ["UUID"]);
+}
+
+#[test]
+fn star_expansion_casts_only_where_the_dialect_has_a_cast_operator() {
+    let expand = |dialect: &str| {
+        let schema = Some(load_schema("CREATE TABLE t (a INTEGER, b TEXT)", dialect));
+        expand_star("SELECT * FROM t", dialect, schema.as_deref())
+    };
+    for dialect in ["postgres", "duckdb", "snowflake"] {
+        assert_eq!(
+            expand(dialect).as_deref(),
+            Some("SELECT a::INT, b::TEXT FROM t"),
+            "{dialect}"
+        );
+    }
+    for dialect in ["mysql", "sqlite", "bigquery", "tsql"] {
+        assert_eq!(
+            expand(dialect).as_deref(),
+            Some("SELECT a, b FROM t"),
+            "{dialect}"
+        );
+    }
 }
 
 #[test]
