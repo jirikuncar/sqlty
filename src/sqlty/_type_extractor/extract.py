@@ -139,6 +139,7 @@ def extract_type_definitions(
         info.lineno = node.lineno
         # A row that has a Protocol's attributes may have more.
         info.allows_extra = kind == "Protocol"
+        info.module = module
         if kind == "BaseModel":
             _set_pydantic_names(info, node)
         if (config := _pydantic_config(node, kind, imports)) is not None:

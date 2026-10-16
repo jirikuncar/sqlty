@@ -59,6 +59,7 @@ class TypeInfo:
         "lax",
         "annotations",
         "aliases",
+        "module",
     )
 
     def __init__(
@@ -95,6 +96,7 @@ class TypeInfo:
         self.lax: frozenset[str] = frozenset()
         self.annotations: dict[str, ast.expr] = {}
         self.aliases: dict[str, str] = {}
+        self.module: str | None = None  # the module that defines it, when known
 
     def field_for(self, column: str) -> str | None:
         """The field a query column fills, by name (a Pydantic alias counts); None if none does."""
