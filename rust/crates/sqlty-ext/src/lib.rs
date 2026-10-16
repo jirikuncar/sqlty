@@ -37,6 +37,7 @@ use sqlty_python::options::{ConfigError, Options};
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
+type FieldTuple = (String, Option<String>, Option<String>, Option<bool>);
 type NullableColumnTuple = (
     String,
     Option<String>,
@@ -339,6 +340,33 @@ fn analyze_columns(
             })
             .collect()
     }))
+}
+
+/// Fields of the composite type `type_name` the schema defines, as
+/// `(name, python_type, sql_type, nullable)` tuples; None when it defines no such type.
+#[pyfunction]
+#[pyo3(signature = (type_name, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
+fn composite_fields(
+    type_name: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+) -> Option<Vec<FieldTuple>> {
+    let dialect = dialect.0;
+    let schema = schema(schema_sql, dialect)?;
+    let columns = analyzer::composite_columns(type_name, dialect, &schema)?;
+    Some(
+        columns
+            .into_iter()
+            .map(|col| {
+                (
+                    col.name,
+                    col.python_type,
+                    col.sql_type,
+                    nullable(col.nullability),
+                )
+            })
+            .collect(),
+    )
 }
 
 /// Parameters of a query as `(index, name, python_type, sql_type, nullable, cast)` tuples.
@@ -720,6 +748,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
+    m.add_function(wrap_pyfunction!(composite_fields, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;

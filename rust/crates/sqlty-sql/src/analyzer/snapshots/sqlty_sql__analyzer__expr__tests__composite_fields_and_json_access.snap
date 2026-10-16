@@ -9,7 +9,7 @@ c: int | INT | Nullable
 
 SELECT (p).nope AS a FROM t
 a: ? | ? | Nullable
-[unknown-type] column `t.p` has type `PAIR`, which has no Python type
+[unknown-column] type `pair` has no field `nope`
 
 SELECT j -> 'a' AS a, j ->> 'a' AS b, j #> '{a,b}' AS c, j #>> '{a,b}' AS d FROM t
 a: typing.Any | JSONB | Nullable
