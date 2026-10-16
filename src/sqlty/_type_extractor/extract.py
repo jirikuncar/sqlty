@@ -54,6 +54,7 @@ def extract_type_definitions(
     - ``NamedTuple`` subclasses
     - ``@dataclass``-decorated classes
     - Pydantic ``BaseModel`` subclasses
+    - ``Protocol`` classes, whose attributes a row must have
 
     For each recognized class, attempts runtime resolution of field types
     using ``typing.get_type_hints()``. Falls back to AST string extraction
@@ -136,6 +137,8 @@ def extract_type_definitions(
         required -= defaulted
         info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
         info.lineno = node.lineno
+        # A row that has a Protocol's attributes may have more.
+        info.allows_extra = kind == "Protocol"
         info.module = module
         if kind == "BaseModel":
             _set_pydantic_names(info, node)
