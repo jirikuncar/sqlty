@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 
 import pytest
 
-from sqlty._cli import SettingsResolver, _is_excluded, build_parser, main
+from sqlty._cli import (
+    ConfigSource,
+    SettingsResolver,
+    _collect_python_files,
+    _is_excluded,
+    build_parser,
+    main,
+)
 from sqlty._config import ConfigError
 from sqlty._lint import RULES
 
@@ -926,3 +934,83 @@ def test_invalid_overrides_are_errors(tmp_path, monkeypatch, capsys, override, m
 
     assert code == 2
     assert message in err
+
+
+def _gitignore_project(tmp_path: Path, config: str = "") -> set[str]:
+    """A git work tree with ignored files; returns the files `check` reads."""
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    (tmp_path / ".git" / "info" / "exclude").write_text("local.py\n")
+    (tmp_path / ".gitignore").write_text("generated/\n*_pb2.py\n!keep_pb2.py\n")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / ".gitignore").write_text("build/\n")
+    (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\n{config}")
+    names = [
+        "generated/a.py",
+        "app/b.py",
+        "app/c_pb2.py",
+        "app/keep_pb2.py",
+        "app/build/d.py",
+        "local.py",
+    ]
+    for name in names:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("x = 1\n")
+    return set(names)
+
+
+def _walked(tmp_path: Path, *flags: str, root: str = ".") -> set[str]:
+    args = build_parser().parse_args(["check", *flags, root])
+    source = ConfigSource.from_args(args)
+    return {
+        p.resolve().relative_to(tmp_path).as_posix()
+        for p in _collect_python_files(args.paths, source)
+    }
+
+
+def test_walk_skips_what_git_ignores(tmp_path, monkeypatch) -> None:
+    _gitignore_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path) == {"app/b.py", "app/keep_pb2.py"}
+    assert _walked(tmp_path, root="app") == {"app/b.py", "app/keep_pb2.py"}
+
+
+@pytest.mark.parametrize(
+    ("config", "flags"),
+    [
+        ("respect-gitignore = false\n", []),
+        ("", ["--no-respect-gitignore"]),
+        ("respect-gitignore = true\n", ["--no-respect-gitignore"]),
+        ("", ["-c", "respect-gitignore = false"]),
+    ],
+)
+def test_respect_gitignore_can_be_turned_off(tmp_path, monkeypatch, config, flags) -> None:
+    every = _gitignore_project(tmp_path, config)
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path, *flags) == every
+
+
+def test_gitignore_needs_a_git_work_tree(tmp_path, monkeypatch) -> None:
+    every = _gitignore_project(tmp_path)
+    shutil.rmtree(tmp_path / ".git")
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path) == every
+
+
+def test_ignored_files_named_on_the_command_line_are_checked(tmp_path, monkeypatch) -> None:
+    _gitignore_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert _walked(tmp_path, root="generated/a.py") == {"generated/a.py"}
+
+
+def test_respect_gitignore_must_be_a_boolean(tmp_path, monkeypatch, capsys) -> None:
+    _project(tmp_path, 'respect-gitignore = "no"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "respect-gitignore must be true or false" in err

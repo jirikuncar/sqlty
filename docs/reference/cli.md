@@ -103,6 +103,7 @@ tool such as pre-commit passes file names.
 | `--exclude GLOB` | Skip this glob while walking directories, replacing [tool.sqlty] exclude and the default excludes; repeat for several. Relative to the current directory |
 | `--extend-exclude GLOB` | Skip this glob in addition to the other excludes; repeat for several. Relative to the current directory |
 | `--force-exclude` | Apply the excludes to files and directories named on the command line too |
+| `--respect-gitignore`, `--no-respect-gitignore` | Skip the files .gitignore ignores while walking directories (default: [tool.sqlty] respect-gitignore, else true) |
 | `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes |
 | `-q`, `--quiet` | Suppress non-error output |
 <!-- /generated:cli-options-common -->
@@ -125,8 +126,9 @@ sqlty rewrite [-h] [--dialect {postgres,sqlite,mysql}]
               [--schema SCHEMA] [--config-file PATH | --isolated]
               [-c KEY=VALUE] [--error RULE] [--warn RULE]
               [--ignore RULE] [--exclude GLOB] [--extend-exclude GLOB]
-              [--force-exclude] [-v] [-q] [--check] [--diff]
-              [--untyped {skip,sentinel}]
+              [--force-exclude]
+              [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
+              [--check] [--diff] [--untyped {skip,sentinel}]
               [paths ...]
 ```
 <!-- /generated:cli-usage-rewrite -->
@@ -157,7 +159,8 @@ sqlty strip [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
             [--config-file PATH | --isolated] [-c KEY=VALUE]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
-            [-v] [-q] [--check] [--diff]
+            [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
+            [--check] [--diff]
             [paths ...]
 ```
 <!-- /generated:cli-usage-strip -->
@@ -187,7 +190,8 @@ sqlty check [-h] [--dialect {postgres,sqlite,mysql}] [--schema SCHEMA]
             [--config-file PATH | --isolated] [-c KEY=VALUE]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
-            [-v] [-q] [--fix] [--exit-zero] [--exit-zero-on-warning]
+            [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
+            [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics]
             [paths ...]
 ```
