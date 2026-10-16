@@ -67,3 +67,27 @@ GROUP BY department
 HAVING COUNT(*) > 5
 -- inferred: tuple[str, int, float, datetime.date, float]
 ```
+
+## MIN and MAX of varchar are text
+
+PostgreSQL has no `min` or `max` for `varchar`; it reads the column as `text`.
+`char(n)` has its own.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE codes (v VARCHAR(20) NOT NULL, c CHAR(3) NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+```sql
+SELECT max(v), min(v), max(c) FROM codes
+-- columns: max: str | None (TEXT)
+-- columns: min: str | None (TEXT)
+-- columns: max: str | None (CHAR(3))
+```
