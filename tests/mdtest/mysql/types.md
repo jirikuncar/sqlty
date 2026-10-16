@@ -217,3 +217,30 @@ SELECT SUM(a) AS a, SUM(b) AS b, SUM(c) AS c, SUM(d) AS d, SUM(e) AS e, SUM(f) A
 -- columns: e: float | None (DOUBLE)
 -- columns: f: float | None (DOUBLE)
 ```
+
+## Date arithmetic
+
+`date ± INTERVAL n unit` is a `DATE` for day units and coarser, and a
+`DATETIME` otherwise. Other arithmetic on dates reads them as numbers
+(`20240101`), so it is left untyped.
+
+`schema.sql`:
+```sql
+CREATE TABLE events (d DATE NOT NULL, ts DATETIME NOT NULL, n INT NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT d + INTERVAL 1 DAY AS a, INTERVAL 1 MONTH + d AS b, d - INTERVAL 1 HOUR AS c, ts + INTERVAL 1 DAY AS e, d + n AS f, d - d AS g FROM events
+-- columns: a: datetime.date (DATE)
+-- columns: b: datetime.date (DATE)
+-- columns: c: datetime.datetime (DATETIME)
+-- columns: e: datetime.datetime (DATETIME)
+-- columns: f: None (None)
+-- columns: g: None (None)
+```

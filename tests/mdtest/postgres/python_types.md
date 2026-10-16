@@ -82,6 +82,18 @@ SELECT INET '10.0.0.1', CIDR '10.0.0.0/8', MACADDR '08:00:2b:01:02:03'
 -- columns: macaddr: str (MACADDR)
 ```
 
+## Records are tuples
+
+A row constructor, `ROW(...)` or `(a, b)`, is an anonymous `record`. psycopg
+loads it as a tuple, of strings in the default text format, so its fields
+are `Any`.
+
+```sql
+SELECT ROW(1, 'a'), (1, 'a') AS pair
+-- columns: row: tuple[typing.Any, ...] (RECORD)
+-- columns: pair: tuple[typing.Any, ...] (RECORD)
+```
+
 ## Text-like types are str
 
 ```sql

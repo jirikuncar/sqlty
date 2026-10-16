@@ -137,6 +137,8 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("INTERVAL", "datetime.timedelta"),
         ("JSON", ANY),
         ("JSONB", ANY),
+        // psycopg loads an anonymous record as a tuple (of strings, in text format).
+        ("RECORD", "tuple[typing.Any, ...]"),
         ("UUID", "uuid.UUID"),
         ("BYTEA", "bytes"),
         ("BLOB", "bytes"),
