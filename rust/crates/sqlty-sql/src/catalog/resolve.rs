@@ -208,16 +208,20 @@ impl Loader {
                 sql_type: short,
                 python_type: (!labels.is_empty()).then(|| literal_of(labels)),
                 allowed_values: Some(labels.as_slice().into()),
+                values: (!labels.is_empty())
+                    .then(|| labels.iter().cloned().map(Value::Str).collect()),
             },
             TypeDef::Composite(_) => UserType {
                 sql_type: short,
                 python_type: None,
                 allowed_values: None,
+                values: None,
             },
             TypeDef::Unknown => UserType {
                 sql_type: short,
                 python_type: None,
                 allowed_values: None,
+                values: None,
             },
             TypeDef::Domain(base, own) => {
                 let inner = type_key(base, self.dialect)
@@ -228,8 +232,10 @@ impl Loader {
                     sql_type: canonical_type(base, self.dialect),
                     python_type: None,
                     allowed_values: None,
+                    values: None,
                 });
                 user.python_type = narrowed(user.python_type, &user.sql_type, own.as_deref());
+                user.values = literal_values(user.python_type.as_deref());
                 user
             }
         })
@@ -252,6 +258,8 @@ pub(super) struct Resolved<'a> {
     pub(super) python_type: Option<String>,
     /// The labels of the enum the type is.
     pub(super) allowed_values: Option<&'a Arc<[String]>>,
+    /// The values of a `Literal` `python_type`.
+    pub(super) values: Option<Arc<[Value]>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -288,6 +296,7 @@ impl<'a> Resolver<'a> {
                 sql_type: format!("ARRAY<{sql}>{size}"),
                 python_type: python.map(|ty| format!("list[{ty}]")),
                 allowed_values: None,
+                values: None,
             };
         }
         if let (DataType::Enum(members, _), false) = (dt, dialect == SqlDialect::Postgres) {
@@ -302,6 +311,7 @@ impl<'a> Resolver<'a> {
                 sql_type: canonical_type(dt, dialect),
                 python_type: (!labels.is_empty()).then(|| literal_of(&labels)),
                 allowed_values: None,
+                values: (!labels.is_empty()).then(|| labels.into_iter().map(Value::Str).collect()),
             };
         }
         match type_key(dt, dialect).and_then(|name| self.user_type(&name)) {
@@ -309,11 +319,13 @@ impl<'a> Resolver<'a> {
                 sql_type: found.sql_type.clone(),
                 python_type: found.python_type.clone(),
                 allowed_values: found.allowed_values.as_ref(),
+                values: found.values.clone(),
             },
             None => Resolved {
                 sql_type: canonical_type(dt, dialect),
                 python_type: None,
                 allowed_values: None,
+                values: None,
             },
         }
     }
@@ -337,6 +349,7 @@ impl<'a> Resolver<'a> {
             name: name.to_string(),
             ident: ident.to_string(),
             sql_type: resolved.sql_type,
+            values: literal_values(python_type.as_deref()),
             python_type,
             not_null,
             allowed_values: resolved.allowed_values.cloned(),
@@ -368,6 +381,12 @@ impl<'a> Resolver<'a> {
             Rel::View(columns) => Relation::View(columns.clone()),
         }
     }
+}
+
+/// The values of a `Literal` Python type, read once when the catalog is built so the
+/// analyzer gets them as data.
+pub(super) fn literal_values(python: Option<&str>) -> Option<Arc<[Value]>> {
+    python.and_then(values::parse).map(Arc::from)
 }
 
 /// The labels of an enum as a `typing.Literal`.

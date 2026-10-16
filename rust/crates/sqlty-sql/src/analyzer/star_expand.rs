@@ -10,7 +10,7 @@ use super::names::object_name;
 use super::preprocess::parse_first;
 use super::query::{leftmost_select, Analyzer};
 use super::scope::{relation_name, relations, table_scope, Scope};
-use super::SchemaData;
+use super::{SchemaColumn, SchemaData};
 
 pub(super) static STAR_ITEM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").unwrap());
@@ -49,10 +49,26 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
             continue;
         };
         let reference = star.get(1).map(|m| m.as_str());
-        // Expansion writes `t.col` for `t.*` but a bare `col` for `*`, which would be
-        // ambiguous with more than one source.
-        if reference.is_none() && sources.len() != 1 {
-            return None;
+        // A bare `*` over several sources lists each one's columns qualified by it, in
+        // FROM order: a bare `col` could be ambiguous.
+        if reference.is_none() && sources.len() > 1 {
+            if !analyzer.star_resolvable(&select.from, None) {
+                return None;
+            }
+            for factor in &sources {
+                let qualifier = unquoted_reference(factor)?;
+                if ctes.iter().any(|cte| cte.eq_ignore_ascii_case(&qualifier)) {
+                    return None;
+                }
+                let columns = analyzer.schema_star_columns(Some(&qualifier), &scope)?;
+                items.extend(
+                    columns
+                        .iter()
+                        .map(|col| cast_column(&qualifier, col, dialect)),
+                );
+            }
+            has_star = true;
+            continue;
         }
         let shadowed_by_cte = sources.iter().any(|factor| {
             let TableFactor::Table { name, .. } = factor else {
@@ -68,16 +84,12 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
             return None;
         }
         let columns = analyzer.schema_star_columns(reference, &scope)?;
-        let qualifier = reference.map_or_else(String::new, |reference| format!("{reference}."));
-        // Without `::` (MySQL, SQLite, ...) the schema alone types the columns.
-        let casts = dialect.has_cast_operator();
-        items.extend(columns.iter().map(|col| {
-            if casts && !col.sql_type.is_empty() {
-                format!("{qualifier}{}::{}", col.ident, col.sql_type)
-            } else {
-                format!("{qualifier}{}", col.ident)
-            }
-        }));
+        let qualifier = reference.unwrap_or_default();
+        items.extend(
+            columns
+                .iter()
+                .map(|col| cast_column(qualifier, col, dialect)),
+        );
         has_star = true;
     }
     has_star.then(|| {
@@ -88,6 +100,34 @@ pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Opt
             &sql[from_idx..]
         )
     })
+}
+
+/// `qualifier.col::TYPE` (just `col` without a qualifier); without `::` (MySQL, SQLite,
+/// ...) the schema alone types the column, so it is written bare.
+fn cast_column(qualifier: &str, col: &SchemaColumn, dialect: SqlDialect) -> String {
+    let name = if qualifier.is_empty() {
+        col.ident.clone()
+    } else {
+        format!("{qualifier}.{}", col.ident)
+    };
+    if dialect.has_cast_operator() && !col.sql_type.is_empty() {
+        format!("{name}::{}", col.sql_type)
+    } else {
+        name
+    }
+}
+
+/// The name a FROM item is referred to by, when it needs no quoting: its alias, else its
+/// table name without the schema.
+fn unquoted_reference(factor: &TableFactor) -> Option<String> {
+    let ident = match factor {
+        TableFactor::Table {
+            alias: Some(alias), ..
+        } => &alias.name,
+        TableFactor::Table { name, .. } => name.0.last()?.as_ident()?,
+        _ => return None,
+    };
+    ident.quote_style.is_none().then(|| ident.value.clone())
 }
 
 /// The stars that shape a statement's result, each named by its clause: `SELECT *`,

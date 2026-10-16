@@ -166,6 +166,7 @@ impl<'a> Analyzer<'a> {
         let typed = |python: &str, sql: &str| Typed {
             python: Some(Rc::from(python)),
             sql: Some(Rc::from(sql)),
+            values: None,
         };
         match (self.dialect, column) {
             (SqlDialect::Sqlite, "rowid" | "oid" | "_rowid_") => Some(typed("int", "INT")),
@@ -314,10 +315,8 @@ impl<'a> Analyzer<'a> {
             return typed;
         };
         // No value left means no row: keep the declared set rather than an empty one.
-        match crate::values::render(&crate::values::intersect(known, allowed)) {
-            Some(python) => Typed::new(Some(python), typed.sql().map(String::from)),
-            None => typed,
-        }
+        let sql = typed.sql.clone();
+        Typed::of_values(crate::values::intersect(known, allowed), sql).unwrap_or(typed)
     }
 
     /// `ambiguous-column`: an unqualified column in more than one FROM source. Columns

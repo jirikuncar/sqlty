@@ -29,12 +29,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::pybacked::PyBackedStr;
 
 use rewriter::ImportStyle;
 use sqlty_python::options::{ConfigError, Options};
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
+type FieldTuple = (String, Option<String>, Option<String>, Option<bool>);
 type NullableColumnTuple = (
     String,
     Option<String>,
@@ -146,6 +148,26 @@ impl From<Error> for PyErr {
     }
 }
 
+/// A dialect name from Python, parsed once: an unknown name is a `ValueError` that lists
+/// the valid ones. Holds the canonical name `sqlty-sql` takes.
+#[derive(Clone, Copy)]
+struct DialectArg(&'static str);
+
+impl DialectArg {
+    const POSTGRES: Self = Self("postgres");
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for DialectArg {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let name: PyBackedStr = obj.extract()?;
+        name.parse::<sqlty_sql::Dialect>()
+            .map(|dialect| Self(dialect.name()))
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+}
+
 /// Whether a column or parameter can be NULL (True), cannot (False), or is not known (None).
 fn nullable(nullability: analyzer::Nullability) -> Option<bool> {
     match nullability {
@@ -168,13 +190,14 @@ fn nullable(nullability: analyzer::Nullability) -> Option<bool> {
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn infer_type(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
 ) -> Result<Option<String>, Error> {
+    let dialect = dialect.0;
     Ok(py.detach(|| analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref()))?)
 }
 
@@ -185,13 +208,14 @@ fn infer_type(
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_select(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
 ) -> Result<Option<Vec<ColumnTuple>>, Error> {
+    let dialect = dialect.0;
     let columns = py.detach(|| {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
@@ -213,13 +237,14 @@ fn analyze_select(
 /// Raises:
 ///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_columns(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
 ) -> Result<Option<Vec<NullableColumnTuple>>, Error> {
+    let dialect = dialect.0;
     let columns = py.detach(|| {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
@@ -239,6 +264,32 @@ fn analyze_columns(
     }))
 }
 
+/// Fields of the composite type `type_name` the schema defines, as
+/// `(name, python_type, sql_type, nullable)` tuples; None when it defines no such type.
+#[pyfunction]
+#[pyo3(signature = (type_name, *, dialect = "postgres", schema_sql = None))]
+fn composite_fields(
+    type_name: &str,
+    dialect: &str,
+    schema_sql: Option<&str>,
+) -> Option<Vec<FieldTuple>> {
+    let schema = schema(schema_sql, dialect)?;
+    let columns = analyzer::composite_columns(type_name, dialect, &schema)?;
+    Some(
+        columns
+            .into_iter()
+            .map(|col| {
+                (
+                    col.name,
+                    col.python_type,
+                    col.sql_type,
+                    nullable(col.nullability),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Parameters of a query as `(index, name, python_type, sql_type, nullable, cast)` tuples.
 ///
 /// A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) takes its type from its context: the
@@ -248,13 +299,14 @@ fn analyze_columns(
 /// True when the type is that of an explicit cast, which accepts any value. Types are
 /// None when the context does not say. Returns None when the query doesn't parse.
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_params(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
 ) -> Option<Vec<ParamTuple>> {
+    let dialect = dialect.0;
     let params = py.detach(|| {
         analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
@@ -281,6 +333,13 @@ fn python_types() -> Vec<&'static str> {
     analyzer::python_types().into_iter().collect()
 }
 
+/// Every dialect name the other functions accept (besides the aliases `postgresql` and
+/// `tsql`).
+#[pyfunction]
+fn dialect_names() -> Vec<&'static str> {
+    sqlty_sql::Dialect::NAMES.to_vec()
+}
+
 /// The rules `query_diagnostics` reports, which are off by default.
 #[pyfunction]
 fn name_rules() -> Vec<&'static str> {
@@ -297,13 +356,14 @@ fn name_rules() -> Vec<&'static str> {
 /// Example:
 ///     query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn query_diagnostics(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
 ) -> Vec<(String, String)> {
+    let dialect = dialect.0;
     py.detach(|| {
         analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
             .1
@@ -316,8 +376,9 @@ fn query_diagnostics(
 /// Names of the schema tables that could not be parsed, even without their
 /// constraints; their columns are unknown to inference.
 #[pyfunction]
-#[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
-fn schema_skipped_tables(py: Python<'_>, schema_sql: &str, dialect: &str) -> Vec<String> {
+#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
+fn schema_skipped_tables(py: Python<'_>, schema_sql: &str, dialect: DialectArg) -> Vec<String> {
+    let dialect = dialect.0;
     py.detach(|| skipped_objects(schema_sql, dialect, Some("table")))
         .into_iter()
         .map(|(_, name)| name)
@@ -327,12 +388,13 @@ fn schema_skipped_tables(py: Python<'_>, schema_sql: &str, dialect: &str) -> Vec
 /// `(kind, name)` of the schema tables and views that could not be parsed, `kind` being
 /// `"table"` or `"view"`; their columns are unknown to inference.
 #[pyfunction]
-#[pyo3(signature = (schema_sql, *, dialect = "postgres"))]
+#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
 fn schema_skipped_objects(
     py: Python<'_>,
     schema_sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
 ) -> Vec<(String, String)> {
+    let dialect = dialect.0;
     py.detach(|| skipped_objects(schema_sql, dialect, None))
 }
 
@@ -350,8 +412,9 @@ fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(
 /// Example:
 ///     parse_error("SELECT id FROM", dialect="postgres")  # "Expected: ..., found: EOF ..."
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres"))]
-fn parse_error(py: Python<'_>, sql: &str, dialect: &str) -> Option<String> {
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
+fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String> {
+    let dialect = dialect.0;
     py.detach(|| analyzer::parse_error(sql, dialect))
 }
 
@@ -359,8 +422,9 @@ fn parse_error(py: Python<'_>, sql: &str, dialect: &str) -> Option<String> {
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres"))]
-fn returns_rows(py: Python<'_>, sql: &str, dialect: &str) -> bool {
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
+fn returns_rows(py: Python<'_>, sql: &str, dialect: DialectArg) -> bool {
+    let dialect = dialect.0;
     py.detach(|| analyzer::returns_rows(sql, dialect))
 }
 
@@ -374,16 +438,17 @@ fn returns_rows(py: Python<'_>, sql: &str, dialect: &str) -> bool {
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, keep_lines = false))]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, untyped = false, keep_lines = false))]
 fn rewrite_source(
     py: Python<'_>,
     source: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
     import_style: Option<&str>,
     untyped: bool,
     keep_lines: bool,
 ) -> Result<String, Error> {
+    let dialect = dialect.0;
     py.detach(|| {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
@@ -414,7 +479,7 @@ fn strip_source(py: Python<'_>, source: &str, import_style: Option<&str>) -> Res
 /// Raises:
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, untyped = false, rules = None, suppressed = None))]
 #[expect(
     clippy::too_many_arguments,
     reason = "the keyword-only Python signature is the API"
@@ -422,13 +487,14 @@ fn strip_source(py: Python<'_>, source: &str, import_style: Option<&str>) -> Res
 fn fix_source(
     py: Python<'_>,
     source: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
     import_style: Option<&str>,
     untyped: bool,
     rules: Option<HashMap<String, String>>,
     suppressed: Option<rewriter::Suppressed>,
 ) -> Result<String, Error> {
+    let dialect = dialect.0;
     py.detach(|| {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
@@ -447,13 +513,14 @@ fn fix_source(
 /// Returns:
 ///     SQL with expanded columns, or None if expansion is not possible
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", schema_sql = None))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn expand_star(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
 ) -> Option<String> {
+    let dialect = dialect.0;
     py.detach(|| analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref()))
 }
 
@@ -464,13 +531,14 @@ fn expand_star(
 ///     select_star_finding("SELECT u.* FROM users u", has_schema=True)
 ///     # ("select-star", "SELECT u.* used — expand to explicit column list")
 #[pyfunction]
-#[pyo3(signature = (sql, *, dialect = "postgres", has_schema = false))]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, has_schema = false))]
 fn select_star_finding(
     py: Python<'_>,
     sql: &str,
-    dialect: &str,
+    dialect: DialectArg,
     has_schema: bool,
 ) -> Option<(&'static str, String)> {
+    let dialect = dialect.0;
     py.detach(|| checker::select_star_finding(sql, dialect, has_schema))
         .map(|(rule, message)| (rule.name(), message))
 }
@@ -495,7 +563,7 @@ struct DiagnosticOut {
 /// Raises:
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = "postgres", schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[expect(
     clippy::too_many_arguments,
     reason = "the keyword-only Python signature is the API"
@@ -507,13 +575,14 @@ struct DiagnosticOut {
 fn check_source(
     py: Python<'_>,
     source: &str,
-    dialect: &str,
+    dialect: DialectArg,
     schema_sql: Option<&str>,
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
     any_calls: Vec<usize>,
 ) -> Result<Vec<DiagnosticOut>, Error> {
+    let dialect = dialect.0;
     py.detach(|| {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
@@ -589,8 +658,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
+    m.add_function(wrap_pyfunction!(composite_fields, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
+    m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;

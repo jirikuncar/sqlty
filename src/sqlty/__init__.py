@@ -1,6 +1,7 @@
 """SQLTy - Type-safe SQL queries for Python."""
 
 import sys
+from string.templatelib import Template
 from typing import get_args, overload
 
 if sys.version_info >= (3, 15):
@@ -24,11 +25,36 @@ def __getattr__(name: str) -> str:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["SQL", "UNTYPED", "row_form"]
+__all__ = ["SQL", "UNTYPED", "SQLTemplate", "row_form"]
 
 
 class SQL[T](str):
     pass
+
+
+class SQLTemplate[T]:
+    """A t-string query, ``SQLTemplate[T](t"--sql\\n...")``, whose rows are ``T``.
+
+    ``string.templatelib.Template`` cannot be subclassed, so the template is kept in
+    ``template``: pass that to a driver that runs templates (psycopg >= 3.3), or the
+    whole query to the ``sqlty.drivers.psycopg`` helpers. ``row_form`` reads ``T``.
+
+    Example:
+        >>> user_id = 1
+        >>> query = SQLTemplate[tuple[int]](t"--sql\\nSELECT id::INTEGER FROM users WHERE id = {user_id}")
+        >>> query.template.values
+        (1,)
+        >>> row_form(query)
+        tuple[int]
+    """
+
+    __slots__ = ("__orig_class__", "template")
+
+    def __init__(self, template: Template, /) -> None:
+        self.template = template
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.template!r})"
 
 
 UNTYPED = sentinel("UNTYPED")
@@ -44,14 +70,14 @@ _MISSING: object = object()
 
 
 @overload
-def row_form[T](query: SQL[T], /) -> TypeForm[T]: ...
+def row_form[T](query: SQL[T] | SQLTemplate[T], /) -> TypeForm[T]: ...
 
 
 @overload
-def row_form[T, D](query: SQL[T], default: D, /) -> TypeForm[T] | D: ...
+def row_form[T, D](query: SQL[T] | SQLTemplate[T], default: D, /) -> TypeForm[T] | D: ...
 
 
-def row_form(query: str, default: object = _MISSING, /) -> object:
+def row_form(query: object, default: object = _MISSING, /) -> object:
     """Return the row type ``T`` a ``SQL[T](...)`` instance was built with.
 
     The type is read from ``__orig_class__``, so it exists only for queries

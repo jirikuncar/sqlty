@@ -59,15 +59,20 @@ SELECT ltrim(name) AS a, hex(name) AS b, printf('%d', id) AS c, instr(name, 'a')
 
 ## Numbers
 
+`mod` is one of the math functions, which return a real; `%` keeps integers.
+`total` is `0.0` over no rows, where `sum` is `NULL`.
+
 ```sql
-SELECT abs(id) AS a, round(ratio) AS b, round(id) AS c, random() AS d, sqrt(id) AS e, floor(ratio) AS f, total(ratio) AS g FROM events
+SELECT abs(id) AS a, round(ratio) AS b, round(id) AS c, random() AS d, sqrt(id) AS e, floor(ratio) AS f, total(ratio) AS g, mod(id, 2) AS h, id % 2 AS i FROM events
 -- columns: a: int (INT)
 -- columns: b: float (DOUBLE)
 -- columns: c: float (DOUBLE)
 -- columns: d: int (BIGINT)
 -- columns: e: float (DOUBLE)
 -- columns: f: float (DOUBLE)
--- columns: g: float | None (DOUBLE)
+-- columns: g: float (DOUBLE)
+-- columns: h: float (DOUBLE)
+-- columns: i: int (INT)
 ```
 
 ## JSON
@@ -82,7 +87,57 @@ SELECT json_object('id', id) AS a, json_array(id, name) AS b, json_array_length(
 -- columns: d: int (BIGINT)
 ```
 
+`->` gives the element as JSON text. `->>` gives its SQL value, an integer, a
+real or text, so its type is not known.
+
+```sql
+SELECT note -> '$.a' AS a, note ->> '$.a' AS b FROM events
+-- columns: a: str | None (TEXT)
+-- columns: b: typing.Any (None)
+```
+
 ```sql
 SELECT json_group_array(id) AS a FROM events
 -- columns: a: str | None (TEXT)
+```
+
+## Window functions and NULLIF
+
+```sql
+SELECT lag(id) OVER (ORDER BY id) AS a, lead(name, 1, 'x') OVER (ORDER BY id) AS b, first_value(ratio) OVER (ORDER BY id) AS c, nth_value(name, 2) OVER (ORDER BY id) AS d, percent_rank() OVER (ORDER BY id) AS e, cume_dist() OVER (ORDER BY id) AS f, nullif(name, 'x') AS g FROM events
+-- columns: a: int | None (INT)
+-- columns: b: str (TEXT)
+-- columns: c: float (FLOAT)
+-- columns: d: str | None (TEXT)
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+-- columns: g: str | None (TEXT)
+```
+
+## Blobs and other built-ins
+
+`unhex` is `NULL` for text that is not hexadecimal. `likely` and `likelihood`
+pass their argument through, and the `glob` and `like` functions are 0 or 1.
+
+```sql
+SELECT zeroblob(4) AS a, randomblob(4) AS b, unhex(name) AS c, sqlite_version() AS d, likely(id > 1) AS e, likelihood(name, 0.5) AS f, glob('a*', name) AS g, like('a%', name) AS h FROM events
+-- columns: a: bytes (BLOB)
+-- columns: b: bytes (BLOB)
+-- columns: c: bytes | None (BLOB)
+-- columns: d: str (TEXT)
+-- columns: e: bool (BOOLEAN)
+-- columns: f: str (TEXT)
+-- columns: g: int (BIGINT)
+-- columns: h: int (BIGINT)
+```
+
+## Subqueries without an alias
+
+SQLite reads a subquery in `FROM` without an alias; its columns are referenced
+unqualified.
+
+```sql
+SELECT n, upper FROM (SELECT id AS n, upper(name) AS upper FROM events)
+-- columns: n: int (INT)
+-- columns: upper: str (TEXT)
 ```

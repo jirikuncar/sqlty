@@ -31,6 +31,7 @@
 //! ```
 
 pub mod analyzer;
+pub use analyzer::{SqlDialect as Dialect, UnknownDialect};
 pub(crate) mod catalog;
 pub(crate) mod ddl;
 pub mod diagnostics;
