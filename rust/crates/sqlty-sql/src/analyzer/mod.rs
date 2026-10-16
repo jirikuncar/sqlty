@@ -41,8 +41,8 @@ mod typed;
 #[cfg(test)]
 pub(crate) use api::load_schema;
 pub use api::{
-    analyze_select, analyze_with_diagnostics, infer_type, load_schema_with_skipped, parse_error,
-    returns_rows,
+    analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
+    load_schema_with_skipped, parse_error, returns_rows,
 };
 pub(crate) use api::{typed, view_columns};
 pub(crate) use dialect::SqlDialect;
