@@ -304,7 +304,8 @@ test with an explicit expected error count.
 ```
 src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
-├── core.py              # Public API over the Rust engine, plus row type checks
+├── core.py              # Public API over the Rust engine
+├── _check.py            # Python check passes of check_source: row types, parameters
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _type_extractor/     # Row types (TypedDict, dataclass, ...) for structural checks
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
@@ -313,6 +314,7 @@ src/sqlty/
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
+│   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core
 ```
