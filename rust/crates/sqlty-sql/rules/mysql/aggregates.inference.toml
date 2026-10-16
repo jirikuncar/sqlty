@@ -1,0 +1,21 @@
+# MySQL SUM.
+
+[[function]]
+id = "mysql.aggregate.sum-exact"
+function = "SUM"
+dialects = ["mysql"]
+argument = ["TINYINT", "SMALLINT", "MEDIUMINT", "INT", "BIGINT", "DECIMAL", "NUMERIC", "UTINYINT", "USMALLINT", "UMEDIUMINT", "UINT", "UBIGINT", "UDECIMAL"]
+type = "DECIMAL"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (The SUM() and AVG() functions return a DECIMAL value for exact-value arguments)"
+reasoning = "SUM of integers or decimals gives an exact DECIMAL."
+
+[[function]]
+id = "mysql.aggregate.sum-approximate"
+function = "SUM"
+dialects = ["mysql"]
+argument = ["FLOAT", "REAL", "DOUBLE", "UDOUBLE"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (a DOUBLE value for approximate-value arguments)"
+reasoning = "SUM of floating-point values gives a DOUBLE."

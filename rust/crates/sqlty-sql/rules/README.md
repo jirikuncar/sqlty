@@ -59,6 +59,31 @@ placeholder or `NULL` operand takes the other operand's type.
 | `short-circuit` | an operand is, the right side read under what the left proves (`AND`, `OR`) |
 | `nonzero-divisor` | the divisor is zero, unless it is a number other than zero; else as `operands` |
 
+### Function rules
+
+A `[[function]]` table types a call of a built-in function by its first
+argument:
+
+```toml
+[[function]]
+id = "postgres.aggregate.sum-integers"
+function = "SUM"
+dialects = ["postgres"]
+argument = ["SMALLINT", "INT"]
+type = "BIGINT"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( integer ) → bigint)"
+reasoning = "Summing small integers widens to bigint so the sum fits."
+```
+
+`function` or `functions` name upper-case built-ins, and `argument` is an
+operand predicate as above; `@known` admits any typed argument. `type` is a SQL
+type, `@unknown`, `@code`, `@argument` (the argument's type, value set
+included, as `MIN` and `MAX` return one of the values) or `@argument-as TYPE`
+(the argument's Python type under another SQL type). `nullability` is required:
+`non-null`, or `aggregate`, the empty-group and NULL-argument behaviour of
+aggregates in `analyzer/nullability.rs`.
+
 ## How a rule is chosen
 
 For `left op right`, the rules of `op` are tried in order: those of the dialect

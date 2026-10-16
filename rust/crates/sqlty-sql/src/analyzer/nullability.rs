@@ -17,7 +17,7 @@ use sqlparser::ast::{
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
-use super::inference::RuleNullability;
+use super::inference::{function_rules, FunctionNullability, RuleNullability};
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::split_access;
@@ -779,9 +779,19 @@ impl<'a> Analyzer<'a> {
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
 
+        let rules = function_rules(&name);
+        if rules
+            .iter()
+            .any(|rule| rule.nullability == FunctionNullability::NonNull)
+        {
+            if let Ok(Some((rule, _))) = self.function_rule(&name, args.first().copied(), scope) {
+                if rule.nullability == FunctionNullability::NonNull {
+                    return Nullability::NonNull;
+                }
+            }
+        }
         // `ARRAY(SELECT ...)` over no rows is an empty array.
-        if name == "COUNT"
-            || name == "REGR_COUNT"
+        if name == "REGR_COUNT"
             || (name == "ARRAY" && matches!(func.args, FunctionArguments::Subquery(_)))
         {
             return Nullability::NonNull;

@@ -6,6 +6,7 @@ use sqlparser::ast::{BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Functio
 
 use super::dialect::SqlDialect;
 use super::expr::{from_sql_type, range_element};
+use super::inference::{function_rules, FunctionRule};
 use super::literals::{strip, value_set};
 use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
 use super::query::Analyzer;
@@ -76,7 +77,6 @@ pub(super) const COMMON_FUNCTIONS: &[(&[&str], Returns)] = &[
         Sql("INT"),
     ),
     (&["ROW_NUMBER", "RANK", "DENSE_RANK"], Sql("BIGINT")),
-    (&["AVG"], Returns::Mean),
     (&["COALESCE"], Returns::FirstKnown),
     (
         &[
@@ -624,16 +624,36 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// SUM/MIN/MAX take their argument's type; SUM falls back to `NUMERIC`.
-    pub(super) fn aggregate(
+    /// The inference rule for a call of the built-in `name` (upper case), with the first
+    /// argument's type when a rule read it.
+    pub(super) fn function_rule(
         &self,
         name: &str,
         arg: Option<&Expr>,
         scope: &Scope,
-    ) -> Inferred<Typed> {
-        let mut typed = arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope))?;
-        if name == "SUM" {
-            typed = strip(typed, self.dialect);
+    ) -> Inferred<Option<(&'static FunctionRule, Option<Typed>)>> {
+        let rules = function_rules(name);
+        if rules.is_empty() {
+            return Ok(None);
+        }
+        let typed = if rules.iter().any(FunctionRule::reads_argument) {
+            Some(arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope))?)
+        } else {
+            None
+        };
+        let argument = typed.as_ref().and_then(operand_type);
+        let found = rules
+            .iter()
+            .find(|rule| rule.applies(self.dialect, argument));
+        Ok(found.map(|rule| (rule, typed.clone())))
+    }
+
+    /// `SUM` of what no inference rule types: its argument's own type (a value set dropped),
+    /// else `NUMERIC`, or an error for a column the schema table it reads lacks.
+    pub(super) fn sum(&self, typed: Typed, arg: Option<&Expr>, scope: &Scope) -> Inferred<Typed> {
+        let typed = strip(typed, self.dialect);
+        if typed.python.is_some() {
+            return Ok(typed);
         }
         let numeric = || {
             Ok(Typed {
@@ -642,20 +662,6 @@ impl<'a> Analyzer<'a> {
                 values: None,
             })
         };
-        // PostgreSQL has no `min`/`max` for `varchar`: they read it as `text`.
-        if self.dialect == SqlDialect::Postgres
-            && name != "SUM"
-            && typed.sql().map(super::operators::type_base) == Some("VARCHAR")
-        {
-            typed = Typed::new(typed.python().map(String::from), Some("TEXT".to_string()));
-        }
-        if typed.python.is_some() || name != "SUM" {
-            return Ok(if name == "SUM" {
-                sum_type(typed, self.dialect)
-            } else {
-                typed
-            });
-        }
         if scope.is_empty() {
             return numeric();
         }
@@ -697,30 +703,6 @@ fn str_to_date_type(format: &str) -> &'static str {
         (false, true) => "TIME",
         _ => "DATE",
     }
-}
-
-/// `SUM` widens. PostgreSQL: `BIGINT` for `SMALLINT`/`INT`, `NUMERIC` for `BIGINT`/`NUMERIC`.
-/// MySQL: `DECIMAL` for exact values, `DOUBLE` for approximate ones, signed or `UNSIGNED`.
-/// SQLite keeps the type.
-pub(super) fn sum_type(typed: Typed, dialect: SqlDialect) -> Typed {
-    let signed = operand_type(&typed).map(|ty| {
-        ty.strip_prefix('U')
-            .filter(|ty| numeric_rank(ty).is_some())
-            .unwrap_or(ty)
-    });
-    let widened = match (dialect, signed) {
-        (SqlDialect::Postgres, Some("SMALLINT" | "INT")) => "BIGINT",
-        (SqlDialect::Postgres, Some("BIGINT" | "DECIMAL" | "NUMERIC")) => "DECIMAL",
-        (SqlDialect::Postgres, Some("FLOAT")) => "FLOAT",
-        (SqlDialect::Postgres, Some("DOUBLE")) => "DOUBLE",
-        (
-            SqlDialect::MySql,
-            Some("TINYINT" | "SMALLINT" | "MEDIUMINT" | "INT" | "BIGINT" | "DECIMAL" | "NUMERIC"),
-        ) => "DECIMAL",
-        (SqlDialect::MySql, Some("FLOAT" | "REAL" | "DOUBLE")) => "DOUBLE",
-        _ => return typed,
-    };
-    from_sql_type(widened, dialect)
 }
 
 /// The digits before the point of a `DECIMAL(p, s)`: `p - s`; MySQL's bare `DECIMAL` is
@@ -801,28 +783,35 @@ mod tests {
         }
     }
 
+    const DDL: &str = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT NOT NULL, \
+                       n NUMERIC(10, 2) NOT NULL, f DOUBLE PRECISION, txt TEXT, \
+                       d DATE, ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ, iv INTERVAL, \
+                       arr INT[] NOT NULL, tags TEXT[], r INT4RANGE, j JSONB)";
+
     #[test]
     fn sum_widens_in_postgres() {
         let widen = |sql: &str| {
-            let typed = Typed::of_sql(sql, SqlDialect::Postgres);
-            sum_type(typed, SqlDialect::Postgres)
-                .sql()
-                .map(str::to_string)
+            let declared = if sql == "DOUBLE" {
+                "DOUBLE PRECISION"
+            } else {
+                sql
+            };
+            let ddl = format!("CREATE TABLE t (c {declared})");
+            let schema = crate::analyzer::load_schema(&ddl, "postgres");
+            crate::analyzer::analyze_select("SELECT SUM(c) AS s FROM t", "postgres", Some(&schema))
+                .ok()
+                .flatten()
+                .and_then(|columns| columns[0].sql_type.clone())
         };
         assert_eq!(widen("SMALLINT").as_deref(), Some("BIGINT"));
         assert_eq!(widen("INT").as_deref(), Some("BIGINT"));
         assert_eq!(widen("BIGINT").as_deref(), Some("DECIMAL"));
         assert_eq!(widen("DECIMAL(10, 2)").as_deref(), Some("DECIMAL"));
-        assert_eq!(widen("FLOAT").as_deref(), Some("FLOAT"));
+        assert_eq!(widen("REAL").as_deref(), Some("FLOAT"));
         assert_eq!(widen("DOUBLE").as_deref(), Some("DOUBLE"));
         assert_eq!(widen("INTERVAL").as_deref(), Some("INTERVAL"));
         assert_eq!(widen("TEXT").as_deref(), Some("TEXT"));
     }
-
-    const DDL: &str = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT NOT NULL, \
-                       n NUMERIC(10, 2) NOT NULL, f DOUBLE PRECISION, txt TEXT, \
-                       d DATE, ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ, iv INTERVAL, \
-                       arr INT[] NOT NULL, tags TEXT[], r INT4RANGE, j JSONB)";
 
     #[test]
     fn aggregates_in_postgres() {
