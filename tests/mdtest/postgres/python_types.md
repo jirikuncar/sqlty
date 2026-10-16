@@ -82,6 +82,13 @@ SELECT INET '10.0.0.1', CIDR '10.0.0.0/8', MACADDR '08:00:2b:01:02:03'
 -- columns: macaddr: str (MACADDR)
 ```
 
+`macaddr8` is `str` too.
+
+```sql
+SELECT '08:00:2b:01:02:03:04:05'::macaddr8 AS m
+-- columns: m: str (MACADDR8)
+```
+
 ## Records are tuples
 
 A row constructor, `ROW(...)` or `(a, b)`, is an anonymous `record`. psycopg

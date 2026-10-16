@@ -117,6 +117,29 @@ SELECT a, c, d, e, g, h, i FROM items
 -- inferred: tuple[float | None, datetime.datetime | None, datetime.datetime | None, typing.Literal['x', 'y'] | None, typing.Any, bytes | None, str | None]
 ```
 
+## TIME is a duration
+
+A MySQL `TIME` spans `-838:59:59` to `838:59:59`, and PyMySQL, mysqlclient and
+mysql-connector load it as `datetime.timedelta`, not `datetime.time`.
+
+`schema.sql`:
+```sql
+CREATE TABLE shifts (id INT PRIMARY KEY, length TIME NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT length, TIMEDIFF(NOW(), NOW()) AS d, CAST('10:00' AS TIME) AS c FROM shifts
+-- columns: length: datetime.timedelta (TIME)
+-- columns: d: datetime.timedelta (TIME)
+-- columns: c: datetime.timedelta (TIME)
+```
+
 ## Unsigned NUMERIC and FIXED are rejected
 
 `UNSIGNED` applies to `DECIMAL` (or `DEC`), not to its synonyms `NUMERIC` and
