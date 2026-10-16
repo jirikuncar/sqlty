@@ -35,6 +35,7 @@ use sqlty_python::options::{ConfigError, Options};
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
+type FieldTuple = (String, Option<String>, Option<String>, Option<bool>);
 type NullableColumnTuple = (
     String,
     Option<String>,
@@ -247,7 +248,7 @@ fn composite_fields(
     type_name: &str,
     dialect: &str,
     schema_sql: Option<&str>,
-) -> Option<Vec<(String, Option<String>, Option<String>, Option<bool>)>> {
+) -> Option<Vec<FieldTuple>> {
     let schema = schema(schema_sql, dialect)?;
     let columns = analyzer::composite_columns(type_name, dialect, &schema)?;
     Some(
