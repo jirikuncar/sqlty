@@ -10,7 +10,16 @@ from typing import Any, NamedTuple, TypedDict, cast
 
 SchemaSpec = str | list[str]
 
-TOOL_KEYS = ("dialect", "schema", "rules", "import-style", "untyped", "type-modules", "functions")
+TOOL_KEYS = (
+    "dialect",
+    "schema",
+    "rules",
+    "import-style",
+    "untyped",
+    "type-modules",
+    "functions",
+    "format-command",
+)
 """Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
 
 DISCOVERY_KEYS = ("exclude", "extend-exclude")
@@ -75,6 +84,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`[]`",
         "`check`",
         "Helper functions whose string argument is a query",
+    ),
+    "format-command": KeyDoc(
+        "list of strings",
+        "none",
+        "`rewrite`, `check --fix`",
+        "Formatter run on each file `rewrite` or `check --fix` changes, with the path appended",
     ),
     "exclude": KeyDoc(
         "list of globs",
@@ -202,6 +217,12 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                         f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
                         f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
                     )
+    command = table.get("format-command", [])
+    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+        raise ConfigError(
+            f"{source}: [tool.sqlty] format-command must be a list of strings, "
+            'such as ["ruff", "format"]'
+        )
     for key in DISCOVERY_KEYS:
         value = table.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
@@ -253,6 +274,7 @@ class SQLTyConfig(TypedDict, total=False):
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
+    format_command: list[str]  # formatter run on changed files, path appended
 
 
 def _schema_spec(value: Any) -> SchemaSpec:
@@ -463,6 +485,8 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
     # Single schema path (top-level convenience key)
     if "schema" in tool_config:
         config["schema"] = _schema_spec(tool_config["schema"])
+    if "format-command" in tool_config:
+        config["format_command"] = list(tool_config["format-command"])
 
     # Rule severity overrides: [tool.sqlty.rules]
     if "rules" in tool_config and isinstance(tool_config["rules"], dict):

@@ -342,6 +342,8 @@ def _transform_files(
             _print_diff(path, original, result)
         else:
             path.write_text(result, encoding="utf-8")
+            if verb == "rewrite":
+                _format(path, resolver.for_file(path).format_command)
             if args.verbose:
                 print(f"{done} {path}")
 
@@ -352,6 +354,25 @@ def _transform_files(
             sys.exit(EXIT_FOUND)
         elif args.check and not args.quiet:
             print("All files up to date")
+
+
+def _format(path: Path, command: tuple[str, ...]) -> bool:
+    """Run the configured formatter on ``path``; whether it ran and succeeded."""
+    import subprocess
+
+    if not command:
+        return False
+    try:
+        result = subprocess.run([*command, str(path)], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        logger.warning("format-command %s failed on %s: %s", command[0], path, exc)
+        return False
+    if result.returncode != 0:
+        logger.warning(
+            "format-command %s failed on %s: %s", command[0], path, result.stderr.strip()
+        )
+        return False
+    return True
 
 
 def _cmd_check(args: argparse.Namespace) -> None:
@@ -418,6 +439,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             )
             if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")
+                if _format(path, settings.format_command):
+                    fixed = path.read_text(encoding="utf-8")
                 parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
@@ -797,6 +820,7 @@ class Settings:
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     functions: tuple[tuple[str, str, str | None], ...] = ()
+    format_command: tuple[str, ...] = ()
 
 
 class SettingsResolver:
@@ -867,6 +891,7 @@ class SettingsResolver:
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])
             ),
+            format_command=tuple(config.get("format_command", ())),
         )
 
 

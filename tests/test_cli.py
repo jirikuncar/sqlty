@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -834,3 +836,84 @@ def test_inline_config_error_names_its_source(tmp_path, monkeypatch, capsys, val
     assert code == 2
     assert message in err
     assert "pyproject.toml" not in err
+
+
+_FORMATTER = """import sys
+from pathlib import Path
+
+path = Path(sys.argv[-1])
+if "fail" in path.read_text():
+    sys.exit("cannot format")
+path.write_text("# formatted\\n" + path.read_text())
+"""
+
+
+def _format_project(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "fmt.py").write_text(_FORMATTER)
+    command = ", ".join(f'"{part}"' for part in (Path(sys.executable).as_posix(), "fmt.py"))
+    (tmp_path / "pyproject.toml").write_text(f"[tool.sqlty]\nformat-command = [{command}]\n")
+    (tmp_path / "new.py").write_text('q = "--sql\\nSELECT 1::INTEGER"\n')
+    (tmp_path / "done.py").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+
+def test_format_command_runs_on_files_rewrite_changes(tmp_path, monkeypatch, capsys) -> None:
+    _format_project(tmp_path, monkeypatch)
+
+    _run(["rewrite", "new.py", "done.py"], capsys)
+
+    assert (tmp_path / "new.py").read_text().startswith("# formatted\nfrom sqlty import SQL\n")
+    assert (tmp_path / "done.py").read_text() == "x = 1\n"
+
+
+def test_format_command_runs_before_check_reads_a_fixed_file(tmp_path, monkeypatch, capsys) -> None:
+    _format_project(tmp_path, monkeypatch)
+    (tmp_path / "new.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")\n'
+        'r = f"--sql\\nSELECT {x}"\n'
+    )
+
+    _, out, _ = _run(["check", "--fix", "new.py"], capsys)
+
+    assert (tmp_path / "new.py").read_text().startswith("# formatted\n")
+    assert "new.py:4: [fstring-skipped]" in out
+
+
+def test_failing_format_command_keeps_the_file(tmp_path, monkeypatch, capsys, caplog) -> None:
+    _format_project(tmp_path, monkeypatch)
+    (tmp_path / "new.py").write_text('fail = "--sql\\nSELECT 1::INTEGER"\n')
+
+    code, _, _ = _run(["rewrite", "new.py"], capsys)
+
+    assert code == 0
+    assert (tmp_path / "new.py").read_text().startswith("from sqlty import SQL\n")
+    assert "format-command" in caplog.text and "cannot format" in caplog.text
+
+
+def test_rewrite_is_idempotent_with_ruff_format(tmp_path, monkeypatch, capsys) -> None:
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff is not installed")
+    (tmp_path / "pyproject.toml").write_text(
+        f'[tool.sqlty]\nformat-command = ["{Path(ruff).as_posix()}", "format", "--quiet"]\n'
+    )
+    long = ", ".join(f"{i}::INTEGER AS column_{i}" for i in range(8))
+    (tmp_path / "q.py").write_text(f'q = "--sql\\nSELECT {long}"\n')
+    monkeypatch.chdir(tmp_path)
+
+    _run(["rewrite", "q.py"], capsys)
+    once = (tmp_path / "q.py").read_text()
+    _, out, _ = _run(["rewrite", "--check", "q.py"], capsys)
+
+    assert once.startswith("from sqlty import SQL\n\nq = SQL[")
+    assert "All files up to date" in out
+
+
+def test_format_command_must_be_a_list(tmp_path, monkeypatch, capsys) -> None:
+    _project(tmp_path, 'format-command = "ruff format"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "format-command must be a list of strings" in err
