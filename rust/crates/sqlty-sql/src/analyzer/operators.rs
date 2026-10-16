@@ -4,6 +4,7 @@ use sqlparser::ast::{BinaryOperator, Expr, Value};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
+use super::inference::{binary_rules, BinaryRule, RuleType};
 use super::literals::{merge, python_kind};
 use super::query::Analyzer;
 use super::scope::Scope;
@@ -22,15 +23,22 @@ impl<'a> Analyzer<'a> {
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
         let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
+        if let Some((rule, typed)) = self.binary_rule(left, op, right, scope)? {
+            return Ok(match rule.result {
+                RuleType::Sql(name) => from_sql_type(name, self.dialect),
+                RuleType::Any => Typed::python_only("typing.Any"),
+                RuleType::Left => match typed {
+                    Some((left, _)) => left,
+                    None => self.expr(left, scope)?,
+                },
+            });
+        }
         match op {
             Gt | Lt | GtEq | LtEq | Spaceship | Eq | NotEq | And | Or | Xor | Match | Regexp
             | Glob | PGOverlap | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
             | PGRegexNotIMatch | PGLikeMatch | PGILikeMatch | PGNotLikeMatch | PGNotILikeMatch
             | PGStartsWith | AtAt | AtArrow | ArrowAt | AtQuestion | Question | QuestionAnd
             | QuestionPipe | Overlaps => sql("BOOLEAN"),
-            // SQLite's `->>` gives the element's SQL value: an integer, a real or text.
-            LongArrow if self.dialect == SqlDialect::Sqlite => Ok(Typed::python_only("typing.Any")),
-            LongArrow | HashLongArrow => sql("TEXT"),
             // The element as JSON: text in SQLite, a `JSON` value in MySQL.
             Arrow if self.dialect == SqlDialect::Sqlite => sql("TEXT"),
             Arrow if self.dialect == SqlDialect::MySql => sql("JSON"),
@@ -119,6 +127,36 @@ impl<'a> Analyzer<'a> {
             }
             _ => Ok(Typed::UNKNOWN),
         }
+    }
+}
+
+/// The rule that applies to an operator, with the operand types when it read them.
+type RuleMatch = (&'static BinaryRule, Option<(Typed, Typed)>);
+
+impl Analyzer<'_> {
+    /// The inference rule for `left op right`, with the operand types when it read them.
+    pub(super) fn binary_rule(
+        &self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Option<RuleMatch>> {
+        let rules = binary_rules(op);
+        if rules.is_empty() {
+            return Ok(None);
+        }
+        let typed = if rules.iter().any(BinaryRule::reads_operands) {
+            Some((self.expr(left, scope)?, self.expr(right, scope)?))
+        } else {
+            None
+        };
+        let (l, r) = match &typed {
+            Some((l, r)) => (operand_type(l), operand_type(r)),
+            None => (None, None),
+        };
+        let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
+        Ok(found.map(|rule| (rule, typed.clone())))
     }
 }
 

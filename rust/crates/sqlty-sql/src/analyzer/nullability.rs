@@ -17,6 +17,7 @@ use sqlparser::ast::{
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
+use super::inference::RuleNullability;
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::split_access;
@@ -623,6 +624,13 @@ impl<'a> Analyzer<'a> {
     ) -> Nullability {
         use BinaryOperator::*;
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
+        if let Ok(Some((rule, _))) = self.binary_rule(left, op, right, scope) {
+            return match rule.nullability {
+                RuleNullability::Operands => any_nullable([of(left), of(right)]),
+                RuleNullability::Nullable => Nullability::Nullable,
+                RuleNullability::NonNull => Nullability::NonNull,
+            };
+        }
         match op {
             // The right side is read where the left one is true (AND) or false (OR).
             And | Or => {
@@ -642,7 +650,7 @@ impl<'a> Analyzer<'a> {
                 Nullability::Nullable
             }
             // JSON accessors yield NULL for a missing key or a JSON null.
-            Arrow | LongArrow | HashArrow | HashLongArrow => Nullability::Nullable,
+            Arrow | HashArrow => Nullability::Nullable,
             _ => any_nullable([of(left), of(right)]),
         }
     }

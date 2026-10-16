@@ -1,0 +1,10 @@
+# SQLite's JSON accessors.
+
+[[rule]]
+id = "sqlite.json.long-arrow"
+operator = "LongArrow"
+dialects = ["sqlite"]
+type = "@any"
+nullability = "nullable"
+reference = "SQLite documentation, JSON Functions And Operators, 4.6 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
+reasoning = "`->>` gives the SQL value of the element (INTEGER, REAL or TEXT), not always text; a missing path gives NULL."
