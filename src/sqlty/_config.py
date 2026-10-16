@@ -244,7 +244,7 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                 )
 
     if "dialect" in table and (problem := dialect_problem(table["dialect"])):
-        raise ConfigError(f"{source}: {problem} in [tool.sqlty]")
+        raise ConfigError(f"{source}: [tool.sqlty] {problem}")
     check_rules(table.get("rules", {}), "[tool.sqlty] rules", "[tool.sqlty.rules]")
     overrides = table.get("overrides", [])
     if not isinstance(overrides, list) or not all(isinstance(o, dict) for o in overrides):
