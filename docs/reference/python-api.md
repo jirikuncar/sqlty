@@ -201,7 +201,7 @@ Schema(dialect="postgres")
 | `analyze_params(sql, *, dialect="postgres", schema_sql=None)` | Query parameters as `ParamInfo(number, name, python_type, sql_type, nullable, cast)`, or `None` |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
-| `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False)` | Rewritten source |
-| `strip_source(source, *, import_style=None)` | Stripped source |
-| `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None)` | Source with `sqlty check --fix` applied |
+| `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, json_types="typing.Any")` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
+| `strip_source(source, *, import_style=None)` | Stripped source, without generated `TypedDict`s |
+| `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line` |

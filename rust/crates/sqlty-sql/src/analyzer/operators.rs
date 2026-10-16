@@ -11,9 +11,10 @@ use super::scope::Scope;
 use super::typed::Typed;
 use super::{Inferred, DECIMAL};
 
-impl<'a> Analyzer<'a> {
-    /// Result type of `left op right`: predicates are `BOOLEAN`, text and JSON operators
-    /// give `TEXT` or `JSONB`, arithmetic promotes its operands.
+impl Analyzer<'_> {
+    /// Result type of `left op right`: an inference rule's (`rules/`), else the code's for
+    /// what rules cannot express: MySQL date arithmetic with an interval's unit, the JSON
+    /// accessors, and date, time and interval arithmetic.
     pub(super) fn binary_op(
         &self,
         left: &Expr,
@@ -22,23 +23,63 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
-        let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
-        if let Some((rule, typed)) = self.binary_rule(left, op, right, scope)? {
-            return Ok(match rule.result {
-                RuleType::Sql(name) => from_sql_type(name, self.dialect),
-                RuleType::Any => Typed::python_only("typing.Any"),
-                RuleType::Left => match typed {
-                    Some((left, _)) => left,
-                    None => self.expr(left, scope)?,
-                },
-            });
+        if self.dialect == SqlDialect::MySql && matches!(op, Plus | Minus) {
+            let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+            if let Some(typed) = mysql_date_add(op, (left, &l), (right, &r)) {
+                return Ok(from_sql_type(typed, self.dialect));
+            }
         }
+        let Some((rule, operands)) = self.binary_rule(left, op, right, scope)? else {
+            return self.typed_by_code(op, left, right, None, scope);
+        };
+        if rule.result == RuleType::Code {
+            return self.typed_by_code(op, left, right, operands, scope);
+        }
+        let reads = !matches!(
+            rule.result,
+            RuleType::Sql(_) | RuleType::Any | RuleType::Unknown
+        );
+        let (l, r) = match operands {
+            Some(operands) => operands,
+            None if reads => self.rule_operands(left, op, right, scope)?,
+            None => (Typed::UNKNOWN, Typed::UNKNOWN),
+        };
+        let rank = |t: &Typed| operand_type(t).and_then(numeric_rank);
+        let promoted = |least: usize| match (rank(&l), rank(&r)) {
+            (Some(a), Some(b)) => {
+                from_sql_type(NUMERIC_RANKS[a.max(b).max(least)][0], self.dialect)
+            }
+            _ => Typed::UNKNOWN,
+        };
+        Ok(match rule.result {
+            RuleType::Sql(name) => from_sql_type(name, self.dialect),
+            RuleType::Any => Typed::python_only("typing.Any"),
+            RuleType::Unknown => Typed::UNKNOWN,
+            RuleType::Promote => promoted(0),
+            RuleType::PromoteToDecimal => promoted(3),
+            RuleType::PromoteLeft => rank(&l).map_or(Typed::UNKNOWN, |a| {
+                from_sql_type(NUMERIC_RANKS[a][0], self.dialect)
+            }),
+            RuleType::Left => l,
+            RuleType::Right => r,
+            RuleType::Common => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
+            RuleType::Code => unreachable!("handled above"),
+        })
+    }
+
+    /// The type of what no inference rule types: the JSON accessors, and date, time and
+    /// interval arithmetic. `operands` are the rule operands when a rule read them.
+    fn typed_by_code(
+        &self,
+        op: &BinaryOperator,
+        left: &Expr,
+        right: &Expr,
+        operands: Option<(Typed, Typed)>,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        use BinaryOperator::*;
+        let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
         match op {
-            Gt | Lt | GtEq | LtEq | Spaceship | Eq | NotEq | And | Or | Xor | Match | Regexp
-            | Glob | PGOverlap | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
-            | PGRegexNotIMatch | PGLikeMatch | PGILikeMatch | PGNotLikeMatch | PGNotILikeMatch
-            | PGStartsWith | AtAt | AtArrow | ArrowAt | AtQuestion | Question | QuestionAnd
-            | QuestionPipe | Overlaps => sql("BOOLEAN"),
             // The element as JSON: text in SQLite, a `JSON` value in MySQL.
             Arrow if self.dialect == SqlDialect::Sqlite => sql("TEXT"),
             Arrow if self.dialect == SqlDialect::MySql => sql("JSON"),
@@ -50,77 +91,10 @@ impl<'a> Analyzer<'a> {
                     "JSONB"
                 })
             }
-            StringConcat if self.dialect != SqlDialect::MySql => {
-                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-                let array = |t: &Typed| t.sql().is_some_and(|ty| array_element(ty).is_some());
-                if l.sql() == Some("JSONB") || r.sql() == Some("JSONB") {
-                    sql("JSONB")
-                } else if self.dialect == SqlDialect::Postgres && (array(&l) || array(&r)) {
-                    // `anyarray || anyarray`, `anyarray || elem` and `elem || anyarray`.
-                    Ok(match (array(&l), array(&r)) {
-                        (true, true) => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
-                        (true, false) => l,
-                        _ => r,
-                    })
-                } else if is_text(&l) || is_text(&r) {
-                    sql("TEXT")
-                } else {
-                    Ok(Typed::UNKNOWN)
-                }
-            }
-            PGExp => {
-                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-                let numeric = |t: &Typed| matches!(operand_type(t), Some("DECIMAL" | "NUMERIC"));
-                sql(if numeric(&l) && numeric(&r) {
-                    "DECIMAL"
-                } else {
-                    "DOUBLE"
-                })
-            }
-            BitwiseAnd | BitwiseOr | PGBitwiseXor | PGBitwiseShiftLeft | PGBitwiseShiftRight
-                if self.dialect == SqlDialect::Postgres =>
-            {
-                // Integer operands: the wider type; a shift keeps its left operand's type.
-                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-                if is_address(&l) || is_address(&r) {
-                    // `<<` and `>>` test containment; `&` and `|` mask an address.
-                    return sql(match op {
-                        PGBitwiseShiftLeft | PGBitwiseShiftRight => "BOOLEAN",
-                        _ => "INET",
-                    });
-                }
-                let integer = |t: &Typed| {
-                    operand_type(t)
-                        .and_then(numeric_rank)
-                        .filter(|rank| *rank <= 2)
-                };
-                let shift = matches!(op, PGBitwiseShiftLeft | PGBitwiseShiftRight);
-                Ok(match (integer(&l), integer(&r)) {
-                    (Some(a), Some(b)) => {
-                        let rank = if shift { a } else { a.max(b) };
-                        from_sql_type(NUMERIC_RANKS[rank][0], self.dialect)
-                    }
-                    _ => Typed::UNKNOWN,
-                })
-            }
-            Custom(name)
-                if self.dialect == SqlDialect::Postgres
-                    && matches!(name.as_str(), "<<=" | ">>=") =>
-            {
-                sql("BOOLEAN")
-            }
             Plus | Minus | Multiply | Divide | Modulo => {
-                let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-                if self.dialect == SqlDialect::MySql {
-                    if let Some(typed) = mysql_date_add(op, (left, &l), (right, &r)) {
-                        return Ok(from_sql_type(typed, self.dialect));
-                    }
-                }
-                let wild = |expr: &Expr| matches!(expr, Expr::Value(v) if matches!(v.value, Value::Null | Value::Placeholder(_)));
-                let (l, r) = match (wild(left), wild(right)) {
-                    (true, false) => (r.clone(), r),
-                    (false, true) => (l.clone(), l),
-                    _ => (l, r),
+                let (l, r) = match operands {
+                    Some(operands) => operands,
+                    None => self.rule_operands(left, op, right, scope)?,
                 };
                 Ok(arithmetic(op, &l, &r, self.dialect)
                     .map_or(Typed::UNKNOWN, |ty| from_sql_type(&ty, self.dialect)))
@@ -128,12 +102,29 @@ impl<'a> Analyzer<'a> {
             _ => Ok(Typed::UNKNOWN),
         }
     }
-}
 
-/// The rule that applies to an operator, with the operand types when it read them.
-type RuleMatch = (&'static BinaryRule, Option<(Typed, Typed)>);
+    /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`
+    /// takes the other operand's type.
+    fn rule_operands(
+        &self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+        scope: &Scope,
+    ) -> Inferred<(Typed, Typed)> {
+        use BinaryOperator::*;
+        let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
+        if !matches!(op, Plus | Minus | Multiply | Divide | Modulo) {
+            return Ok((l, r));
+        }
+        let wild = |expr: &Expr| matches!(expr, Expr::Value(v) if matches!(v.value, Value::Null | Value::Placeholder(_)));
+        Ok(match (wild(left), wild(right)) {
+            (true, false) => (r.clone(), r),
+            (false, true) => (l.clone(), l),
+            _ => (l, r),
+        })
+    }
 
-impl Analyzer<'_> {
     /// The inference rule for `left op right`, with the operand types when it read them.
     pub(super) fn binary_rule(
         &self,
@@ -147,17 +138,26 @@ impl Analyzer<'_> {
             return Ok(None);
         }
         let typed = if rules.iter().any(BinaryRule::reads_operands) {
-            Some((self.expr(left, scope)?, self.expr(right, scope)?))
+            Some(self.rule_operands(left, op, right, scope)?)
         } else {
             None
         };
         let (l, r) = match &typed {
-            Some((l, r)) => (operand_type(l), operand_type(r)),
+            Some((l, r)) => (rule_type(l), rule_type(r)),
             None => (None, None),
         };
         let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
         Ok(found.map(|rule| (rule, typed.clone())))
     }
+}
+
+/// The rule that applies to an operator, with the operand types when it read them.
+type RuleMatch = (&'static BinaryRule, Option<(Typed, Typed)>);
+
+/// The SQL type an inference rule sees for an operand: its type's base name (`ARRAY` for
+/// any array), or that of a literal (`TEXT` for a string).
+fn rule_type(typed: &Typed) -> Option<&str> {
+    operand_type(typed).or_else(|| (python_kind(typed) == Some("str")).then_some("TEXT"))
 }
 
 pub(super) fn type_base(sql_type: &str) -> &str {
@@ -173,11 +173,6 @@ pub(super) fn operand_type(typed: &Typed) -> Option<&str> {
         (None, Some(DECIMAL)) => Some("DECIMAL"),
         _ => None,
     }
-}
-
-/// An `inet` or `cidr` value.
-fn is_address(typed: &Typed) -> bool {
-    matches!(operand_type(typed), Some("INET" | "CIDR"))
 }
 
 pub(super) fn is_text(typed: &Typed) -> bool {
@@ -196,9 +191,6 @@ pub(super) const NUMERIC_RANKS: [&[&str]; 6] = [
     &["FLOAT", "REAL"],
     &["DOUBLE"],
 ];
-
-/// The rank of `FLOAT` (`real`) in [`NUMERIC_RANKS`].
-const FLOAT_RANK: usize = 4;
 
 pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
     NUMERIC_RANKS
@@ -247,20 +239,7 @@ pub(super) fn arithmetic(
 ) -> Option<String> {
     use BinaryOperator::*;
     let (l, r) = (operand_type(left), operand_type(right));
-    if let (Some(a), Some(b)) = (l, r) {
-        if let (Some(a), Some(b)) = (numeric_rank(a), numeric_rank(b)) {
-            let mut rank = a.max(b);
-            // PostgreSQL has `real` operators for two `real`s only: anything else with a
-            // `real` resolves to `double precision`.
-            if dialect == SqlDialect::Postgres && rank == FLOAT_RANK && a != b {
-                rank = FLOAT_RANK + 1;
-            }
-            let mysql_division = dialect == SqlDialect::MySql && *op == Divide;
-            let rank = if mysql_division { rank.max(3) } else { rank };
-            return Some(NUMERIC_RANKS[rank][0].to_string());
-        }
-    }
-    // MySQL reads a date as a number in arithmetic, and SQLite stores it as text.
+    // Numbers are typed by inference rules (`rules/`). MySQL reads a date as a number in arithmetic, and SQLite stores it as text.
     if dialect != SqlDialect::Postgres {
         return None;
     }
@@ -476,14 +455,63 @@ mod tests {
         assert_eq!(numeric_rank("TINYINT"), numeric_rank("SMALLINT"));
     }
 
+    /// The type of `left op right` over columns of the two types, as a query infers it.
+    fn arithmetic_type(left: &str, symbol: &str, right: &str, dialect: &str) -> Option<String> {
+        thread_local! {
+            static SCHEMAS: std::cell::RefCell<std::collections::HashMap<String, crate::analyzer::Schema>> =
+                std::cell::RefCell::default();
+        }
+        const TYPES: [&str; 11] = [
+            "SMALLINT",
+            "INT",
+            "BIGINT",
+            "DECIMAL",
+            "DOUBLE",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "TIMESTAMPTZ",
+            "INTERVAL",
+            "TEXT",
+        ];
+        let column = |ty: &str| format!("c_{}", ty.to_lowercase());
+        let ddl = TYPES
+            .iter()
+            .map(|ty| {
+                let declared = if *ty == "DOUBLE" {
+                    "DOUBLE PRECISION"
+                } else {
+                    ty
+                };
+                format!("{} {declared}", column(ty))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let schema = SCHEMAS.with_borrow_mut(|schemas| {
+            schemas
+                .entry(dialect.to_string())
+                .or_insert_with(|| {
+                    crate::analyzer::load_schema(&format!("CREATE TABLE t ({ddl})"), dialect)
+                })
+                .clone()
+        });
+        crate::analyzer::analyze_select(
+            &format!(
+                "SELECT {} {symbol} {} AS x FROM t",
+                column(left),
+                column(right)
+            ),
+            dialect,
+            Some(&schema),
+        )
+        .ok()
+        .flatten()
+        .and_then(|columns| columns[0].sql_type.clone())
+    }
+
     #[test]
     fn arithmetic_promotes_numbers_and_types_date_math() {
-        let operators = [
-            ("+", BinaryOperator::Plus),
-            ("-", BinaryOperator::Minus),
-            ("*", BinaryOperator::Multiply),
-            ("/", BinaryOperator::Divide),
-        ];
+        let operators = ["+", "-", "*", "/"];
         let types = [
             "SMALLINT",
             "INT",
@@ -498,12 +526,10 @@ mod tests {
             "TEXT",
         ];
         let mut lines = Vec::new();
-        for (symbol, op) in &operators {
+        for symbol in operators {
             for left in types {
                 for right in types {
-                    if let Some(result) =
-                        arithmetic(op, &sql(left), &sql(right), SqlDialect::Postgres)
-                    {
+                    if let Some(result) = arithmetic_type(left, symbol, right, "postgres") {
                         lines.push(format!("{left} {symbol} {right} = {result}"));
                     }
                 }
@@ -514,23 +540,16 @@ mod tests {
 
     #[test]
     fn mysql_division_is_at_least_decimal() {
-        let int = sql("INT");
         assert_eq!(
-            arithmetic(&BinaryOperator::Divide, &int, &int, SqlDialect::MySql).as_deref(),
+            arithmetic_type("INT", "/", "INT", "mysql").as_deref(),
             Some("DECIMAL")
         );
         assert_eq!(
-            arithmetic(&BinaryOperator::Divide, &int, &int, SqlDialect::Postgres).as_deref(),
+            arithmetic_type("INT", "/", "INT", "postgres").as_deref(),
             Some("INT")
         );
         assert_eq!(
-            arithmetic(
-                &BinaryOperator::Divide,
-                &int,
-                &sql("DOUBLE"),
-                SqlDialect::MySql
-            )
-            .as_deref(),
+            arithmetic_type("INT", "/", "DOUBLE", "mysql").as_deref(),
             Some("DOUBLE")
         );
     }

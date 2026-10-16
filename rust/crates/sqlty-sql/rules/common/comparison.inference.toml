@@ -1,0 +1,60 @@
+# Comparisons and predicates: true, false, or NULL when an operand is.
+
+[[rule]]
+id = "common.comparison"
+operators = ["Eq", "NotEq", "Lt", "LtEq", "Gt", "GtEq", "Spaceship"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.2, Table 9.1 Comparison Operators; MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators; SQLite documentation, SQL Language Expressions, 2 Operators"
+reasoning = "A comparison is boolean, and NULL when either operand is."
+
+[[rule]]
+id = "common.logical.and-or"
+operators = ["And", "Or"]
+type = "BOOLEAN"
+nullability = "short-circuit"
+reference = "PostgreSQL 17 documentation, 9.1 Logical Operators; MySQL 8.4 Reference Manual, 14.4.3 Logical Operators"
+reasoning = "AND and OR are three-valued: their right side is read where the left one is true (AND) or not true (OR), so what the left side proves narrows it."
+
+[[rule]]
+id = "common.logical.xor"
+operator = "Xor"
+type = "BOOLEAN"
+reference = "MySQL 8.4 Reference Manual, 14.4.3 Logical Operators (XOR)"
+reasoning = "XOR is boolean, and NULL when either operand is."
+
+[[rule]]
+id = "common.pattern"
+operators = [
+    "Match",
+    "Regexp",
+    "Glob",
+    "PGRegexMatch",
+    "PGRegexIMatch",
+    "PGRegexNotMatch",
+    "PGRegexNotIMatch",
+    "PGLikeMatch",
+    "PGILikeMatch",
+    "PGNotLikeMatch",
+    "PGNotILikeMatch",
+    "PGStartsWith",
+]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.7.1 LIKE and Table 9.16 Regular Expression Match Operators, Table 9.10 Other String Functions and Operators (text ^@ text); MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; SQLite documentation, SQL Language Expressions, 5 The LIKE, GLOB, REGEXP, MATCH, and extract operators"
+reasoning = "A pattern match tells whether the text matches: boolean, NULL when either operand is."
+
+[[rule]]
+id = "common.containment"
+operators = [
+    "AtArrow",
+    "ArrowAt",
+    "PGOverlap",
+    "AtAt",
+    "AtQuestion",
+    "Question",
+    "QuestionAnd",
+    "QuestionPipe",
+    "Overlaps",
+]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, Table 9.54 Array Operators, Table 9.56 Range Operators, Table 9.46 Additional jsonb Operators, Table 9.42 Text Search Operators, 9.9 Date/Time Functions and Operators (OVERLAPS)"
+reasoning = "Containment, overlap, key existence and text search tests are boolean, NULL when either operand is."

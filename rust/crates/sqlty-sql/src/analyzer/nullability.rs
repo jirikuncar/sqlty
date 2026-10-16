@@ -629,26 +629,22 @@ impl<'a> Analyzer<'a> {
                 RuleNullability::Operands => any_nullable([of(left), of(right)]),
                 RuleNullability::Nullable => Nullability::Nullable,
                 RuleNullability::NonNull => Nullability::NonNull,
+                // The right side is read where the left one is true (AND) or not true (OR).
+                RuleNullability::ShortCircuit => {
+                    let known = if *op == And {
+                        self.learn(left, true, scope)
+                    } else {
+                        self.learn_not_true(left, scope, facts)
+                    };
+                    any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
+                }
+                RuleNullability::NonzeroDivisor if !is_nonzero_number(right) => {
+                    Nullability::Nullable
+                }
+                RuleNullability::NonzeroDivisor => any_nullable([of(left), of(right)]),
             };
         }
         match op {
-            // The right side is read where the left one is true (AND) or false (OR).
-            And | Or => {
-                let known = if *op == And {
-                    self.learn(left, true, scope)
-                } else {
-                    self.learn_not_true(left, scope, facts)
-                };
-                any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
-            }
-            // MySQL's null-safe equality; a vector distance in PostgreSQL.
-            Spaceship if self.dialect == SqlDialect::MySql => Nullability::NonNull,
-            // SQLite and MySQL give NULL for a division by zero, PostgreSQL raises.
-            Divide | Modulo | MyIntegerDivide
-                if self.dialect != SqlDialect::Postgres && !is_nonzero_number(right) =>
-            {
-                Nullability::Nullable
-            }
             // JSON accessors yield NULL for a missing key or a JSON null.
             Arrow | HashArrow => Nullability::Nullable,
             _ => any_nullable([of(left), of(right)]),

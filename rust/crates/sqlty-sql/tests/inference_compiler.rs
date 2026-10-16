@@ -148,9 +148,50 @@ fn a_later_rule_an_earlier_one_covers_is_an_error() {
     let shadowed = format!("{general}\n{specific}");
     let message = error("rules/common/a.inference.toml", &shadowed);
     assert!(
-        message.contains(
-            "rule test.specific (rules/common/a.inference.toml) overlaps rule test.long-arrow"
-        ),
+        message.contains("rule test.specific (rules/common/a.inference.toml) never applies to LongArrow: rule test.long-arrow"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_partial_overlap_with_another_result_is_an_error_unless_shadowed() {
+    let json = VALID.replace("test.long-arrow", "test.left");
+    let right = VALID
+        .replace("test.long-arrow", "test.right")
+        .replace("left = [\"@json\"]", "right = [\"@text\"]")
+        .replace("type = \"TEXT\"", "type = \"JSONB\"");
+    let message = error("rules/common/a.inference.toml", &format!("{json}\n{right}"));
+    assert!(
+        message.contains("rule test.right (rules/common/a.inference.toml) overlaps rule test.left"),
+        "{message}"
+    );
+    let shadowing = json.replace("operator =", "shadows = [\"test.right\"]\noperator =");
+    assert!(compile_one(
+        "rules/common/a.inference.toml",
+        &format!("{shadowing}\n{right}")
+    )
+    .is_ok());
+    let unknown = json.replace("operator =", "shadows = [\"test.nope\"]\noperator =");
+    let message = error("rules/common/a.inference.toml", &unknown);
+    assert!(
+        message.contains("`shadows` names unknown rule test.nope"),
+        "{message}"
+    );
+}
+
+#[test]
+fn one_rule_can_cover_several_operators() {
+    let rule = VALID.replace(
+        "operator = \"LongArrow\"",
+        "operators = [\"LongArrow\", \"HashLongArrow\"]",
+    );
+    let code = compile_one("rules/common/a.inference.toml", &rule).unwrap();
+    assert!(code.contains("BinaryOperator::HashLongArrow { .. } => &BINARY_RULES[0..1]"));
+    assert!(code.contains("BinaryOperator::LongArrow { .. } => &BINARY_RULES[1..2]"));
+    let both = rule.replace("operators =", "operator = \"Eq\"\noperators =");
+    let message = error("rules/common/a.inference.toml", &both);
+    assert!(
+        message.contains("give `operator` or `operators`, not both"),
         "{message}"
     );
 }

@@ -18,7 +18,7 @@ import pytest
 import sqlty.core as core
 from sqlty._source import ParsedSource
 from tests._mdtest.parser import parse
-from tests._mdtest.runner import comments, string_constants
+from tests._mdtest.runner import comments, string_constants, without_generated
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN = [
@@ -38,6 +38,7 @@ def _corpus(kind: str) -> list[Any]:
                 "schema_sql": section.schema_sql,
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
+                "json_types": settings.get("json-types", "typing.Any"),
             }
             units = [u for u in section.units if u.lang == kind]
             for i, unit in enumerate(units):
@@ -110,14 +111,15 @@ def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
 def _check_outputs(source: str, options: dict) -> None:
     """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid and every
     comment, rewrite and strip keep every string as it is, and ``check --fix`` is idempotent."""
-    expected, kept = string_constants(source), comments(source)
-    rewritten = core.rewrite_source(source, **options)
+    original = without_generated(source)
+    expected, kept = string_constants(original), comments(original)
+    rewritten = without_generated(core.rewrite_source(source, **options))
     assert (string_constants(rewritten), comments(rewritten)) == (expected, kept), rewritten
     stripped = core.strip_source(source, import_style=options["import_style"])
     assert (string_constants(stripped), comments(stripped)) == (expected, kept), stripped
     fixed = core.fix_source(source, **options)
     ast.parse(fixed)
-    assert comments(fixed) == kept, fixed
+    assert comments(without_generated(fixed)) == kept, fixed
     assert core.fix_source(fixed, **options) == fixed
 
 
@@ -275,9 +277,10 @@ def test_skipping_the_rust_checker_changes_no_diagnostics(
         core.strip_source(source, import_style=style),
         core.fix_source(source, **options),
     ]
-    with_shortcut = [core.check_source(text, **options) for text in variants]
+    checked = {key: value for key, value in options.items() if key != "json_types"}
+    with_shortcut = [core.check_source(text, **checked) for text in variants]
     monkeypatch.setattr(ParsedSource, "may_need_rust_check", lambda self, import_style=None: True)
-    assert with_shortcut == [core.check_source(text, **options) for text in variants]
+    assert with_shortcut == [core.check_source(text, **checked) for text in variants]
 
 
 @pytest.mark.parametrize(
