@@ -116,8 +116,14 @@ def _class(name: str | None, parsed: ParsedSource) -> str | None:
     return full if full in _IMPORTED else None
 
 
-def mismatch(expected: str | None, nullable: bool | None, actual: str | None) -> str | None:
+def mismatch(
+    expected: str | None, nullable: bool | None, actual: str | None, *, postgres: bool = False
+) -> str | None:
     """Why a value of type ``actual`` can't be passed for a parameter of type ``expected``, else ``None``.
+
+    PostgreSQL has no implicit cast between ``boolean`` and the number types, and the
+    drivers send a ``bool`` as a ``boolean`` and an ``int`` as an integer, so with
+    ``postgres`` neither is taken for the other.
 
     Example:
         >>> mismatch("int", None, "datetime.date")
@@ -128,6 +134,8 @@ def mismatch(expected: str | None, nullable: bool | None, actual: str | None) ->
         'expects list[int], got list[bytes]'
         >>> [mismatch("int", None, a) for a in ("bool", "str", "float", None)]
         [None, None, None, None]
+        >>> mismatch("int", None, "bool", postgres=True), mismatch("bool", None, "int", postgres=True)
+        ('expects int, got bool', 'expects bool, got int')
     """
     if actual is None:
         return None
@@ -137,10 +145,12 @@ def mismatch(expected: str | None, nullable: bool | None, actual: str | None) ->
         return None
     if expected.startswith("list["):
         if actual.startswith("list["):
-            inner = mismatch(expected[5:-1], None, actual[5:-1])
+            inner = mismatch(expected[5:-1], None, actual[5:-1], postgres=postgres)
             return None if inner is None else f"expects {expected}, got {actual}"
         return None if actual == "list" else f"expects {expected}, got {actual}"
     accepted = _ACCEPTS.get(expected)
+    if postgres and accepted is not None:
+        accepted = accepted - ({"int"} if expected == "bool" else {"bool"})
     if accepted is None or actual in accepted:
         return None
     return f"expects {expected}, got {actual}"
