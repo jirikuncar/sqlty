@@ -22,7 +22,7 @@ TOOL_KEYS = (
 )
 """Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
 
-DISCOVERY_KEYS = ("exclude", "extend-exclude")
+DISCOVERY_KEYS = ("exclude", "extend-exclude", "respect-gitignore")
 """``[tool.sqlty]`` keys that pick the files to process."""
 
 FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
@@ -104,6 +104,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`[]`",
         "`rewrite`, `strip`, `check`",
         "Globs skipped in addition to `exclude` or the defaults",
+    ),
+    "respect-gitignore": KeyDoc(
+        "boolean",
+        "`true`",
+        "`rewrite`, `strip`, `check`",
+        "Skip the files `.gitignore` ignores while walking a directory",
     ),
 }
 """Reference docs per key of ``[tool.sqlty]``, in documentation order."""
@@ -243,7 +249,9 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                         f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
                         f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
                     )
-    for key in DISCOVERY_KEYS:
+    if not isinstance(table.get("respect-gitignore", True), bool):
+        raise ConfigError(f"{source}: [tool.sqlty] respect-gitignore must be true or false")
+    for key in ("exclude", "extend-exclude"):
         value = table.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ConfigError(f"{source}: [tool.sqlty] {key} must be a list of glob strings")
@@ -307,6 +315,7 @@ class SQLTyConfig(TypedDict, total=False):
     type_modules: list[str]  # modules whose imports may run to resolve row types
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above
+    respect_gitignore: bool  # skip what .gitignore ignores while walking
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
 
 
@@ -510,6 +519,8 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
         config["exclude"] = list(tool_config["exclude"])
     if "extend-exclude" in tool_config:
         config["extend_exclude"] = list(tool_config["extend-exclude"])
+    if "respect-gitignore" in tool_config:
+        config["respect_gitignore"] = tool_config["respect-gitignore"]
 
     # Parse each configuration option
     if "dialect" in tool_config:

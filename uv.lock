@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -560,6 +560,7 @@ wheels = [
 name = "sqlty"
 source = { editable = "." }
 dependencies = [
+    { name = "pathspec" },
     { name = "typing-extensions", marker = "python_full_version < '3.15'" },
 ]
 
@@ -590,6 +591,7 @@ psycopg = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pathspec", specifier = ">=0.12.1" },
     { name = "psycopg", marker = "extra == 'psycopg'", specifier = ">=3.2.12" },
     { name = "typing-extensions", marker = "python_full_version < '3.15'", specifier = ">=4.15.0" },
 ]
