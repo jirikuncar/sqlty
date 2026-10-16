@@ -96,8 +96,8 @@ c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
 d = SQL[tuple[int]]("--sql\nSELECT 1 UNION TABLE users")
 # error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
 e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
-# error: [unsupported-syntax] "expression `(1, 2)` is not typed"
-f = SQL[tuple[object]]("--sql\nSELECT (1, 2)")
+# error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
+f = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
 
 #### Annotated helpers
@@ -148,6 +148,20 @@ ambiguous-column = "error"
 unknown-function = "error"
 unknown-type = "error"
 unsupported-syntax = "error"
+```
+
+#### Row constructors
+
+`ROW(...)` and `(a, b)` build a record, not a call to a function `row`.
+
+```python
+from typing import Any
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[tuple[Any, ...]]]("--sql\nSELECT ROW(id, name) AS r FROM users")
+# error:
+b = SQL[tuple[tuple[Any, ...]]]("--sql\nSELECT (id, name) AS r FROM users")
 ```
 
 #### CTEs
@@ -390,7 +404,7 @@ select-star = "ignore"
 ```sql
 CREATE TABLE users (id INTEGER, name TEXT);
 CREATE VIEW typed AS SELECT id, name FROM users;
-CREATE VIEW opaque AS SELECT id, (1, 2) AS day FROM users;
+CREATE VIEW opaque AS SELECT id, 1 OPERATOR(pg_catalog.+) 1 AS day FROM users;
 ```
 
 ```python
@@ -488,7 +502,7 @@ select-star = "ignore"
 
 ```sql
 CREATE TABLE a (id INTEGER, g GEOMETRY);
-CREATE VIEW opaque AS SELECT id, (1, 2) AS day FROM a;
+CREATE VIEW opaque AS SELECT id, 1 OPERATOR(pg_catalog.+) 1 AS day FROM a;
 ```
 
 ```python

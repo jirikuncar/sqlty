@@ -69,12 +69,7 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
     MariaDB read `--` as a comment only before whitespace. Use `-- sql`
     instead; see [`mysql-sql-marker`](rules.md#mysql-sql-marker).
 
-## Known gaps
-
-- **SQLite free-form type names.** SQLite accepts any type name and derives an
-  affinity (sqlite.org/datatype3.html section 3.1), but `UNSIGNED BIG INT`,
-  `VARYING CHARACTER(255)` or `NATIVE CHARACTER(70)` make sqlty skip the
-  table.
+## Changes from the sqlglot backend
 
 Earlier versions also shipped a pure-Python backend built on
 [sqlglot](https://sqlglot.com). Removing it changed:
