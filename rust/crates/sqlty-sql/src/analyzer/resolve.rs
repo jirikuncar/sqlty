@@ -233,8 +233,24 @@ impl<'a> Analyzer<'a> {
 
     /// Whether the source says `column` of `table` can be NULL (see [`ColumnRef`]).
     pub(super) fn declared_nullability(&self, table: &str, column: &str) -> Nullability {
-        self.find_column(table, column)
-            .map_or(Nullability::Unknown, |found| found.nullability())
+        match self.find_column(table, column) {
+            // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.
+            Some(ColumnRef::Schema(_)) if self.checked_non_null(table, &[column]) => {
+                Nullability::NonNull
+            }
+            found => found.map_or(Nullability::Unknown, |found| found.nullability()),
+        }
+    }
+
+    /// Whether `columns` of the schema table `table` include a group a `CHECK` keeps at
+    /// least one of non-null.
+    pub(super) fn checked_non_null(&self, table: &str, columns: &[&str]) -> bool {
+        self.virtual_columns(table).is_none()
+            && self
+                .schema
+                .nonnull_groups(table)
+                .iter()
+                .any(|group| group.iter().all(|name| columns.contains(&name.as_str())))
     }
 
     /// Type of a column: its qualifier's source, else the first source having it, the

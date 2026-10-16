@@ -18,7 +18,8 @@ use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject
 use crate::values::{self, Value};
 
 use super::columns::{
-    apply_check, column_named, is_rowid_type, mark_not_null, merge_column, raw_column, RawColumn,
+    apply_check, column_named, is_rowid_type, mark_not_null, merge_column, nonnull_groups,
+    raw_column, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
 use super::{Catalog, BUILTIN_SCHEMAS};
@@ -30,6 +31,8 @@ pub(super) struct RawTable {
     pub(super) parents: Vec<String>,
     /// The shape is not known: nothing may be inferred from it.
     pub(super) unknown: bool,
+    /// Groups of columns a `CHECK` keeps at least one of non-null.
+    pub(super) nonnull_groups: Vec<Vec<String>>,
 }
 
 pub(super) enum Rel {
@@ -358,9 +361,21 @@ impl Loader {
                 }
             }
         }
+        for def in &create.columns {
+            for option in &def.options {
+                if let ColumnOption::Check(check) = &option.option {
+                    table
+                        .nonnull_groups
+                        .extend(nonnull_groups(&check.expr, self.dialect));
+                }
+            }
+        }
         for constraint in &create.constraints {
             if let TableConstraint::Check(check) = constraint {
                 apply_check(&mut table.columns, &check.expr, self.dialect);
+                table
+                    .nonnull_groups
+                    .extend(nonnull_groups(&check.expr, self.dialect));
             }
             if let TableConstraint::PrimaryKey(pk) = constraint {
                 if loose_keys

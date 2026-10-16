@@ -547,6 +547,32 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Whether `args` hold every column of a group a `CHECK` keeps at least one of non-null
+    /// (`num_nonnulls(a, b) = 1`), from a relation that is not null-extended here.
+    fn coalesces_checked_group(&self, args: &[&Expr], scope: &Scope, facts: &Facts) -> bool {
+        let mut by_relation: Vec<(String, String, Vec<String>)> = Vec::new();
+        for arg in args {
+            if !matches!(arg, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
+                continue;
+            }
+            let Some((reference, table, column)) = self.locate_column(arg, scope) else {
+                continue;
+            };
+            // A subtotal row or a null-extended row makes every column NULL at once.
+            if facts.column(&reference, &column, Nullability::NonNull) != Nullability::NonNull {
+                continue;
+            }
+            match by_relation.iter_mut().find(|(r, _, _)| *r == reference) {
+                Some((_, _, columns)) => columns.push(column),
+                None => by_relation.push((reference, table, vec![column])),
+            }
+        }
+        by_relation.iter().any(|(_, table, columns)| {
+            let columns: Vec<&str> = columns.iter().map(String::as_str).collect();
+            self.checked_non_null(table, &columns)
+        })
+    }
+
     fn binary_nullability(
         &self,
         left: &Expr,
@@ -752,6 +778,9 @@ impl<'a> Analyzer<'a> {
             return Nullability::Nullable;
         }
         match name.as_str() {
+            "COALESCE" | "IFNULL" | "NVL" if self.coalesces_checked_group(&args, scope, facts) => {
+                Nullability::NonNull
+            }
             "COALESCE" | "IFNULL" | "NVL" => all_nullable(args.iter().map(|arg| of(arg))),
             "GREATEST" | "LEAST" if postgres => all_nullable(args.iter().map(|arg| of(arg))),
             "GREATEST" | "LEAST" => any_nullable(args.iter().map(|arg| of(arg))),
