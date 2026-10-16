@@ -18,12 +18,14 @@ use sqlparser::ast::{
     UnaryOperator,
 };
 
+use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
 use super::nullability::{Facts, Nullability};
 use super::query::Analyzer;
 use super::registry::lookup;
 use super::scope::Scope;
+use crate::values::Value;
 use rustc_hash::FxHashSet;
 
 /// Columns and expressions proven not NULL.
@@ -35,19 +37,63 @@ pub(super) struct Learned {
     present: HashSet<String>,
     /// Expressions such as `doc -> 'k'`.
     exprs: FxHashSet<ExprKey>,
+    /// `(reference, column, values)`: the values `col = 'x'` or `col IN (...)` leaves.
+    values: Vec<ColumnValues>,
+}
+
+/// The values a column of a relation is limited to.
+pub(super) type ColumnValues = (String, String, Vec<Value>);
+
+/// `known` with `found` added: the sets of one column intersect, as `AND` does.
+pub(super) fn restrict(
+    known: &mut Vec<ColumnValues>,
+    found: impl IntoIterator<Item = ColumnValues>,
+) {
+    for (reference, column, values) in found {
+        match known
+            .iter_mut()
+            .find(|(r, c, _)| *r == reference && *c == column)
+        {
+            Some((_, _, seen)) => *seen = crate::values::intersect(std::mem::take(seen), &values),
+            None => known.push((reference, column, values)),
+        }
+    }
 }
 
 impl Learned {
+    /// Whether this limits the values of a column.
+    pub(super) fn limits_values(&self) -> bool {
+        !self.values.is_empty()
+    }
+
     fn union(mut self, other: Learned) -> Learned {
         self.columns.extend(other.columns);
         self.present.extend(other.present);
         self.exprs.extend(other.exprs);
+        restrict(&mut self.values, other.values);
         self
     }
 
     /// What both hold: facts that follow from either side of an `OR`.
     fn intersect(self, other: &Learned) -> Learned {
+        // A column limited on both sides takes the values of either.
+        let values = self
+            .values
+            .iter()
+            .filter_map(|(reference, column, values)| {
+                let (_, _, others) = other
+                    .values
+                    .iter()
+                    .find(|(r, c, _)| r == reference && c == column)?;
+                Some((
+                    reference.clone(),
+                    column.clone(),
+                    crate::values::union(values.clone(), others.clone()),
+                ))
+            })
+            .collect();
         Learned {
+            values,
             columns: self
                 .columns
                 .into_iter()
@@ -79,6 +125,9 @@ impl Facts {
         }
         if !learned.exprs.is_empty() {
             Rc::make_mut(&mut facts.non_null_exprs).extend(learned.exprs);
+        }
+        if !learned.values.is_empty() {
+            restrict(Rc::make_mut(&mut facts.values), learned.values);
         }
         facts
     }
@@ -233,6 +282,32 @@ impl<'a> Analyzer<'a> {
                     Learned::default()
                 }
             }
+            Expr::BinaryOp {
+                left,
+                op: Eq,
+                right,
+            } if truth => {
+                let mut learned = self.proven(cond, scope);
+                learned
+                    .values
+                    .extend(self.column_values(left, &[right.as_ref()], scope));
+                learned
+                    .values
+                    .extend(self.column_values(right, &[left.as_ref()], scope));
+                learned
+            }
+            Expr::InList {
+                expr: inner,
+                list,
+                negated: false,
+            } if truth => {
+                let mut learned = self.proven(cond, scope);
+                let list: Vec<&Expr> = list.iter().collect();
+                learned
+                    .values
+                    .extend(self.column_values(inner, &list, scope));
+                learned
+            }
             Expr::AllOp { .. } | Expr::IsNotDistinctFrom(..) | Expr::IsDistinctFrom(..) => {
                 Learned::default()
             }
@@ -241,6 +316,35 @@ impl<'a> Analyzer<'a> {
             // whose NULL would have made it NULL.
             other => self.proven(other, scope),
         }
+    }
+
+    /// `column = constant` or `column IN (constants)`: the values the column keeps. Only
+    /// where comparison is exact: MySQL compares with case-insensitive collations by
+    /// default, and a `citext` column ignores case.
+    fn column_values(
+        &self,
+        column: &Expr,
+        constants: &[&Expr],
+        scope: &Scope,
+    ) -> Option<ColumnValues> {
+        if !matches!(self.dialect, SqlDialect::Postgres | SqlDialect::Sqlite)
+            || !matches!(column, Expr::Identifier(_) | Expr::CompoundIdentifier(_))
+        {
+            return None;
+        }
+        let values = constants
+            .iter()
+            .map(|expr| crate::values::constant(expr))
+            .collect::<Option<Vec<_>>>()?;
+        let (reference, _, name) = self.locate_column(column, scope)?;
+        let typed = self.resolve_column(column, scope)?.0;
+        if typed
+            .sql()
+            .is_some_and(|sql| sql.eq_ignore_ascii_case("CITEXT"))
+        {
+            return None;
+        }
+        Some((reference, name, values))
     }
 
     /// What is proven not NULL where `cond` is not true: false, or NULL. Only a condition

@@ -6,7 +6,8 @@ Default severity: **error**
 
 Reports a field of a user-defined row type (or an item of a helper's `tuple[...]` row
 type) that cannot hold the JSON its query column builds. The column must be built in the
-query, with `jsonb_build_object()`, `jsonb_agg()`, `to_jsonb()` and the like (PostgreSQL),
+query, with `jsonb_build_object()`, `jsonb_agg()`, `to_jsonb()` and the like (PostgreSQL) or
+`JSON_OBJECT()`, `JSON_ARRAY()`, `JSON_ARRAYAGG()` and `JSON_OBJECTAGG()` (MySQL),
 so that sqlty knows its shape; the annotation is followed through nested `TypedDict`s,
 `list[...]` and `dict[str, ...]`. A scalar of the wrong type, a member that can be `null`
 while the annotation is not optional, a required key the query may omit or never builds,

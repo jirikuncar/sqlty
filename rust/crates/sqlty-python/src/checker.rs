@@ -387,14 +387,9 @@ pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Opti
     }
     let stars = stars.join(" and ");
     Some(if has_schema {
-        let hint = if stars == "SELECT *" {
-            " (joins need a manual edit)"
-        } else {
-            ""
-        };
         (
             Rule::SelectStar,
-            format!("{stars} used — expand to explicit column list{hint}"),
+            format!("{stars} used — expand to explicit column list"),
         )
     } else {
         (

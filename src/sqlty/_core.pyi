@@ -24,6 +24,12 @@ def analyze_params(
     dialect: str = "postgres",
     schema_sql: str | None = None,
 ) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool]] | None: ...
+def composite_fields(
+    type_name: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | None = None,
+) -> list[tuple[str, str | None, str | None, bool | None]] | None: ...
 def query_diagnostics(
     sql: str,
     *,
