@@ -708,6 +708,7 @@ mod tests {
             "SELECT * FROM missing",
             "SELECT users.* FROM users, missing",
             "SELECT * FROM users, generate_series(1, 2) AS g",
+            "SELECT * FROM users, pg_get_keywords() AS k",
             "SELECT nope.* FROM users",
             "SELECT * FROM users JOIN orders USING (id)",
         ];
