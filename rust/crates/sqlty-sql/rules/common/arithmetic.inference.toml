@@ -1,0 +1,45 @@
+# Arithmetic on numbers. A placeholder or NULL operand takes the other operand's type
+# (analyzer/operators.rs); dates, times and intervals are typed in code.
+
+[[rule]]
+id = "common.arithmetic.numbers"
+operators = ["Plus", "Minus", "Multiply"]
+left = ["@numeric"]
+right = ["@numeric"]
+type = "@promote"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators; MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators; SQLite documentation, SQL Language Expressions, 2 Operators"
+reasoning = "Arithmetic on two numbers gives the wider of their types."
+
+[[rule]]
+id = "common.arithmetic.division"
+operators = ["Divide", "Modulo"]
+left = ["@numeric"]
+right = ["@numeric"]
+type = "@promote"
+nullability = "nonzero-divisor"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result); SQLite documentation, SQL Language Expressions, 2 Operators (the result of any binary operator is either a numeric value or NULL)"
+reasoning = "Division gives the wider type, and NULL for a zero divisor."
+
+[[rule]]
+id = "common.arithmetic.division-other"
+operators = ["Divide", "Modulo"]
+type = "@code"
+nullability = "nonzero-divisor"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result)"
+reasoning = "A division by zero gives NULL whatever the operand types; the type of other operands is found in code."
+
+[[rule]]
+id = "common.arithmetic.power-numeric"
+operator = "PGExp"
+left = ["DECIMAL", "NUMERIC"]
+right = ["DECIMAL", "NUMERIC"]
+type = "DECIMAL"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
+reasoning = "`^` keeps exact numbers exact."
+
+[[rule]]
+id = "common.arithmetic.power"
+operator = "PGExp"
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (double precision ^ double precision → double precision)"
+reasoning = "`^` on anything but two exact numbers is computed in double precision."
