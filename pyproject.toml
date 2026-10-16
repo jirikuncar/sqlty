@@ -46,7 +46,7 @@ Issues = "https://github.com/jirikuncar/sqlty/issues"
 sqlty = "sqlty._cli:main"
 
 [project.optional-dependencies]
-psycopg = ["psycopg>=3.2.12"]
+psycopg = ["psycopg>=3.3.6"]
 
 [build-system]
 requires = ["maturin>=1.12.1,<2.0"]
@@ -65,19 +65,19 @@ include = ["src/sqlty_magic.pth"]
 
 [dependency-groups]
 dev = [
-    "inline-snapshot>=0.15.0",
+    "inline-snapshot>=0.36.0",
     "maturin>=1.12.1,<2.0",
     "mypy>=2.4.0",
-    "pre-commit>=4.0.1",
+    "pre-commit>=4.6.2",
     "pyright>=1.1.414",
     "pytest>=8.4.2",
-    "pytest-cov>=6.0.0",
+    "pytest-cov>=7.1.0",
     "pytest-randomly>=3.16.0",
-    "ruff>=0.16.10",
+    "ruff>=0.17.0",
     "ty>=0.0.85",
 ]
 cli = ["rich>=15.0.0"]
-psycopg = ["psycopg>=3.2.12"]
+psycopg = ["psycopg>=3.3.6"]
 fuzz = [
     "hypothesis>=6.140",
 ]
