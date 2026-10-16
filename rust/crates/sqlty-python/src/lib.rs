@@ -37,4 +37,5 @@ pub mod options;
 pub mod rewriter;
 pub mod rules;
 pub(crate) mod scan;
+pub(crate) mod template;
 pub(crate) mod tokens;

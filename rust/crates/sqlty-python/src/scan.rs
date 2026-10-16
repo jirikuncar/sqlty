@@ -10,6 +10,7 @@ use std::ops::Range;
 
 use crate::rewriter::{after_marker, LineIndex};
 use crate::rules::Rule;
+use crate::template::template_content;
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls, Call, Calls, Kind, Token};
 
 /// A string literal, or implicitly concatenated literals, and what the passes ask of it.
@@ -114,6 +115,17 @@ impl<'s> Scan<'s> {
         group
             .iter()
             .all(|&i| self.tokens[i].is_template(&self.text))
+    }
+
+    /// The first field of `group`'s t-strings that keeps it from being read as a query.
+    pub(crate) fn template_blocker(&self, group: &[usize]) -> Option<String> {
+        group.iter().find_map(|&i| {
+            let token = &self.tokens[i];
+            (token.prefix(&self.text) == "t")
+                .then(|| template_content(&self.text[token.span.clone()], &self.text).err())
+                .flatten()
+                .filter(|field| !field.is_empty())
+        })
     }
 
     /// Spans of plain string literals (no prefix but `u`), outside comments.
