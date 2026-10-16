@@ -58,7 +58,12 @@ CREATE TABLE t (a INT64, b FLOAT64, c BIGNUMERIC, d STRING, e BYTES, f BOOL)
 ```sql
 SELECT * FROM t
 -- inferred: tuple[int | None, float | None, decimal.Decimal | None, str | None, bytes | None, bool | None]
--- expanded: SELECT a::BIGINT, b::DOUBLE, c::BIGDECIMAL, d::TEXT, e::BINARY, f::BOOLEAN FROM t
+-- columns: a: int | None (BIGINT)
+-- columns: b: float | None (DOUBLE)
+-- columns: c: decimal.Decimal | None (BIGDECIMAL)
+-- columns: d: str | None (TEXT)
+-- columns: e: bytes | None (BINARY)
+-- columns: f: bool | None (BOOLEAN)
 ```
 
 ### Snowflake
@@ -77,7 +82,11 @@ CREATE TABLE t (a NUMBER(10,2), b TIMESTAMP_NTZ, c TIMESTAMP_TZ, d TIMESTAMP_LTZ
 ```sql
 SELECT * FROM t
 -- inferred: tuple[decimal.Decimal | None, datetime.datetime | None, datetime.datetime | None, datetime.datetime | None, str | None]
--- expanded: SELECT a::DECIMAL(10, 2), b::TIMESTAMP, c::TIMESTAMPTZ, d::TIMESTAMPTZ, e::VARCHAR FROM t
+-- columns: a: decimal.Decimal | None (DECIMAL(10, 2))
+-- columns: b: datetime.datetime | None (TIMESTAMP)
+-- columns: c: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: d: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: e: str | None (VARCHAR)
 ```
 
 ### ClickHouse
@@ -96,7 +105,12 @@ CREATE TABLE t (a Int8, b Int32, c UInt64, d Float32, e Float64, f String)
 ```sql
 SELECT * FROM t
 -- inferred: tuple[int | None, int | None, int | None, float | None, float | None, str | None]
--- expanded: SELECT a::TINYINT, b::INT, c::UBIGINT, d::FLOAT, e::DOUBLE, f::TEXT FROM t
+-- columns: a: int | None (TINYINT)
+-- columns: b: int | None (INT)
+-- columns: c: int | None (UBIGINT)
+-- columns: d: float | None (FLOAT)
+-- columns: e: float | None (DOUBLE)
+-- columns: f: str | None (TEXT)
 ```
 
 ### T-SQL
@@ -115,7 +129,11 @@ CREATE TABLE t (a INT, b DATETIME2, c DATETIMEOFFSET, d UNIQUEIDENTIFIER, e NVAR
 ```sql
 SELECT * FROM t
 -- inferred: tuple[int | None, datetime.datetime | None, datetime.datetime | None, uuid.UUID | None, str | None]
--- expanded: SELECT a::INT, b::TIMESTAMP, c::TIMESTAMPTZ, d::UUID, e::VARCHAR(10) FROM t
+-- columns: a: int | None (INT)
+-- columns: b: datetime.datetime | None (TIMESTAMP)
+-- columns: c: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: d: uuid.UUID | None (UUID)
+-- columns: e: str | None (VARCHAR(10))
 ```
 
 ### Oracle
@@ -134,7 +152,10 @@ CREATE TABLE t (a NUMBER(10,2), b VARCHAR2(20), c CLOB, d DATE)
 ```sql
 SELECT * FROM t
 -- inferred: tuple[float | None, str | None, str | None, datetime.date | None]
--- expanded: SELECT a::DECIMAL(10, 2), b::VARCHAR(20), c::TEXT, d::DATE FROM t
+-- columns: a: float | None (DECIMAL(10, 2))
+-- columns: b: str | None (VARCHAR(20))
+-- columns: c: str | None (TEXT)
+-- columns: d: datetime.date | None (DATE)
 ```
 
 ### Unknown dialect
