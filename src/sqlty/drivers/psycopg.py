@@ -2,7 +2,7 @@
 
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Any, LiteralString, cast, get_origin, is_typeddict, overload
+from typing import Any, LiteralString, cast, get_origin, is_protocol, is_typeddict, overload
 
 if sys.version_info >= (3, 15):
     from typing import TypeForm
@@ -11,7 +11,7 @@ else:
 
 from psycopg import Connection, Cursor
 from psycopg.abc import Params
-from psycopg.rows import BaseRowFactory, class_row, dict_row, tuple_row
+from psycopg.rows import BaseRowFactory, class_row, dict_row, namedtuple_row, tuple_row
 
 from sqlty import SQL, row_form
 
@@ -23,6 +23,7 @@ def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
 
     - ``tuple[...]`` -> ``tuple_row``
     - ``TypedDict``, ``dict[...]`` -> ``dict_row``
+    - ``Protocol`` -> ``namedtuple_row``: rows with every column as an attribute
     - other classes (dataclass, NamedTuple, Pydantic model, ...) -> ``class_row``
 
     Example:
@@ -34,6 +35,8 @@ def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
         return cast(BaseRowFactory[T], tuple_row)
     if origin is dict or is_typeddict(form):
         return cast(BaseRowFactory[T], dict_row)
+    if isinstance(form, type) and is_protocol(form):
+        return cast(BaseRowFactory[T], namedtuple_row)
     if isinstance(form, type):
         return class_row(form)
     raise TypeError(f"no psycopg row factory for {form!r}")

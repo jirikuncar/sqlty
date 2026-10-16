@@ -2,8 +2,8 @@
 
 `sqlty rewrite` writes `SQL[tuple[...]]`. You can replace the tuple with a
 named row type, and `sqlty check` validates it against the query columns.
-Supported forms are `TypedDict`, `NamedTuple`, `@dataclass` and Pydantic
-`BaseModel`. `TypedDict` and `NamedTuple` work in their functional forms too:
+Supported forms are `TypedDict`, `NamedTuple`, `@dataclass`, Pydantic
+`BaseModel` and `Protocol`. `TypedDict` and `NamedTuple` work in their functional forms too:
 `TypedDict("User", {"id": int})` and `NamedTuple("User", [("id", int)])`.
 
 ## Named rows
@@ -224,6 +224,102 @@ side effects is not triggered by `sqlty check`. From Python, pass a
 `HelperIndex` filled with the modules (`index.add("pkg.ids", source)`) and the
 `module` name of the checked source as `check_source(..., helpers=index,
 module=...)`.
+
+## Protocols
+
+A `Protocol` row type says which attributes a row has, not how it is built.
+Each attribute is matched to the column of its name, and the query may return
+more columns than the protocol lists. At runtime the
+[psycopg helpers](psycopg.md) build such rows with `namedtuple_row`, which
+gives every column as an attribute; `class_row` cannot build a Protocol.
+
+```python
+from typing import Protocol
+
+import psycopg
+from sqlty import SQL
+from sqlty.drivers.psycopg import execute
+
+class Named(Protocol):
+    id: int
+    name: str
+
+query = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'ada'::TEXT AS name, now() AS seen")
+
+with psycopg.connect("dbname=app") as conn:
+    row = execute(conn, query).fetchone()  # Named | None
+    if row is not None:
+        print(row.id, row.name)  # 1 ada
+# error:
+```
+
+`sqlty check` reports a missing attribute and a type mismatch:
+
+```python
+from typing import Protocol
+
+from sqlty import SQL
+
+class Named(Protocol):
+    id: int
+    name: str
+
+# error: [typeddict-key-mismatch] "Named.name is required but missing from query"
+bad = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS title")
+# error: [column-type-mismatch] "Named.id is int but query column 'id' infers str"
+wrong = SQL[Named]("--sql\nSELECT 'x'::TEXT AS id, 'ada'::TEXT AS name")
+```
+
+Only annotated attributes count; methods and properties are not read.
+
+## Composite columns
+
+A column of a PostgreSQL composite type (`CREATE TYPE point2 AS (x int, y int)`)
+has no Python type of its own: psycopg returns it as text unless you register
+the type, and `register_composite` then builds the class you give it. When a
+field of your row type is annotated with a row type (`NamedTuple`, dataclass,
+`TypedDict`, Pydantic model), `sqlty check` compares the composite's fields with
+it, as it compares query columns with a row type. Composite fields can always
+be NULL.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TYPE point2 AS (x INTEGER, y INTEGER);
+CREATE TABLE shapes (id INTEGER PRIMARY KEY, p point2);
+```
+
+```python
+from typing import NamedTuple, TypedDict
+
+import psycopg
+from psycopg.types.composite import CompositeInfo, register_composite
+from sqlty import SQL
+from sqlty.drivers.psycopg import execute
+
+class Point(NamedTuple):
+    x: int | None
+    y: int | None
+
+class Shape(TypedDict):
+    id: int
+    p: Point | None
+
+query = SQL[Shape]("--sql\nSELECT id, p FROM shapes")
+
+with psycopg.connect("dbname=app") as conn:
+    register_composite(CompositeInfo.fetch(conn, "point2"), conn, Point)
+    shapes = execute(conn, query).fetchall()  # list[Shape], p a Point
+# error:
+```
+
+A field type that does not match is reported with the composite's name:
+`Shape.p.y is str but composite point2 field 'y' infers int`.
 
 ## Pydantic aliases and extra columns
 

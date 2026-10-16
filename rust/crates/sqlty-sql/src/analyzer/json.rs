@@ -135,7 +135,7 @@ impl<'a> Analyzer<'a> {
         sql_type: Option<&str>,
         scope: &Scope,
     ) -> Inferred<Option<JsonShape>> {
-        if self.dialect != SqlDialect::Postgres
+        if !matches!(self.dialect, SqlDialect::Postgres | SqlDialect::MySql)
             || !matches!(sql_type.map(type_base), Some("JSON" | "JSONB"))
         {
             return Ok(None);
@@ -281,7 +281,18 @@ impl<'a> Analyzer<'a> {
     fn json_function(&self, name: &str, args: &[&Expr], scope: &Scope) -> Inferred<JsonShape> {
         Ok(match (name, args) {
             ("JSON_BUILD_OBJECT" | "JSONB_BUILD_OBJECT", _) => self.build_object(args, scope)?,
-            ("JSON_BUILD_ARRAY" | "JSONB_BUILD_ARRAY", _) => {
+            ("JSON_OBJECT", _) if self.dialect == SqlDialect::MySql => {
+                self.build_object(args, scope)?
+            }
+            ("JSON_ARRAYAGG", [arg]) if self.dialect == SqlDialect::MySql => {
+                JsonShape::Array(Box::new(self.json_value(arg, scope)?))
+            }
+            ("JSON_OBJECTAGG", [_, value]) if self.dialect == SqlDialect::MySql => {
+                JsonShape::Map(Box::new(self.json_value(value, scope)?))
+            }
+            ("JSON_BUILD_ARRAY" | "JSONB_BUILD_ARRAY" | "JSON_ARRAY", _)
+                if name != "JSON_ARRAY" || self.dialect == SqlDialect::MySql =>
+            {
                 let mut element: Option<JsonValue> = None;
                 for arg in args {
                     let value = self.json_value(arg, scope)?;
@@ -370,6 +381,18 @@ impl<'a> Analyzer<'a> {
             self.json_shape(expr, scope)?
         } else {
             self.shape_of_type(&typed, 0)
+        };
+        // MySQL has no boolean type: a BOOLEAN column is a TINYINT, which JSON gets as a
+        // number; only TRUE and FALSE are JSON booleans.
+        let shape = match (self.dialect, &shape, expr) {
+            (SqlDialect::MySql, JsonShape::Boolean, Expr::Value(_)) => shape,
+            (
+                SqlDialect::MySql,
+                JsonShape::Boolean,
+                Expr::Identifier(_) | Expr::CompoundIdentifier(_),
+            ) => JsonShape::Integer,
+            (SqlDialect::MySql, JsonShape::Boolean, _) => JsonShape::Any,
+            _ => shape,
         };
         Ok(JsonValue::new(shape, nullable))
     }
@@ -582,9 +605,29 @@ mod tests {
 
     #[test]
     fn other_dialects_have_no_shapes() {
-        let columns = analyze_select("SELECT json_object('a', 1)", "mysql", None)
+        let columns = analyze_select("SELECT json_object('a', 1)", "sqlite", None)
             .unwrap()
             .unwrap();
         assert_eq!(columns[0].json, None);
+    }
+
+    #[test]
+    fn mysql_json_object_is_an_object() {
+        let columns = analyze_select("SELECT json_object('a', 1, 'b', TRUE)", "mysql", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            columns[0].json.as_ref().map(JsonShape::to_json),
+            analyze_select(
+                "SELECT jsonb_build_object('a', 1, 'b', TRUE)",
+                "postgres",
+                None
+            )
+            .unwrap()
+            .unwrap()[0]
+                .json
+                .as_ref()
+                .map(JsonShape::to_json)
+        );
     }
 }

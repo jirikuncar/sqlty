@@ -72,6 +72,8 @@ pub(super) struct Facts {
     rolled_up: Rc<Vec<(String, String)>>,
     /// Other grouping expressions such subtotal rows set to NULL.
     rolled_up_exprs: Rc<FxHashSet<ExprKey>>,
+    /// The values the conditions in force leave a column (`WHERE status = 'paid'`).
+    pub(super) values: Rc<Vec<super::narrowing::ColumnValues>>,
 }
 
 impl Facts {
@@ -125,6 +127,7 @@ impl Facts {
         forget(&mut self.non_null, |(r, _)| shadowed(r));
         forget(&mut self.present, |r| shadowed(r));
         forget(&mut self.rolled_up, |(r, _)| shadowed(r));
+        forget(&mut self.values, |(r, _, _)| shadowed(r));
         // An expression does not say which relation its names belong to, and the nested
         // SELECT may bind them to its own: none of them carries over.
         self.non_null_exprs = Rc::default();
@@ -485,6 +488,16 @@ impl<'a> Analyzer<'a> {
             | Expr::Ceil { expr: inner, .. }
             | Expr::Floor { expr: inner, .. } => of(inner),
             Expr::Position { expr: inner, r#in } => any_nullable([of(inner), of(r#in)]),
+            Expr::Overlay {
+                expr: inner,
+                overlay_what,
+                overlay_from,
+                overlay_for,
+            } => any_nullable(
+                [of(inner), of(overlay_what), of(overlay_from)]
+                    .into_iter()
+                    .chain(overlay_for.as_deref().map(of)),
+            ),
             Expr::Substring {
                 expr: inner,
                 substring_from,
@@ -732,7 +745,11 @@ impl<'a> Analyzer<'a> {
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
 
-        if name == "COUNT" || name == "REGR_COUNT" {
+        // `ARRAY(SELECT ...)` over no rows is an empty array.
+        if name == "COUNT"
+            || name == "REGR_COUNT"
+            || (name == "ARRAY" && matches!(func.args, FunctionArguments::Subquery(_)))
+        {
             return Nullability::NonNull;
         }
         // SQLite's two-argument MIN and MAX are scalar functions.

@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, TypedDict
+from typing import Any, Literal, NamedTuple, Protocol, TypedDict
 
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from psycopg.rows import dict_row, tuple_row  # noqa: E402
+from psycopg.rows import dict_row, namedtuple_row, tuple_row  # noqa: E402
 
 from sqlty import SQL, row_form  # noqa: E402
 from sqlty.drivers.psycopg import execute, row_factory, scalar  # noqa: E402
@@ -31,6 +31,11 @@ class UserNT(NamedTuple):
 
 
 class UserTD(TypedDict):
+    id: int
+    name: str
+
+
+class Named(Protocol):
     id: int
     name: str
 
@@ -69,6 +74,10 @@ def test_row_factory_class(form: Any) -> None:
     assert row_factory(form).__qualname__.startswith("class_row")
 
 
+def test_row_factory_protocol() -> None:
+    assert row_factory(Named) is namedtuple_row
+
+
 @pytest.mark.parametrize("form", [int | str, list[int]])
 def test_row_factory_unsupported(form: Any) -> None:
     with pytest.raises(TypeError, match="no psycopg row factory"):
@@ -105,6 +114,12 @@ def test_execute_pydantic(conn: Any) -> None:
         name: str
 
     assert execute(conn, SQL[User](QUERY)).fetchone() == User(id=1, name="ada")
+
+
+def test_execute_protocol(conn: Any) -> None:
+    row: Named | None = execute(conn, SQL[Named](QUERY)).fetchone()
+    assert row is not None
+    assert (row.id, row.name) == (1, "ada")
 
 
 def test_execute_params(conn: Any) -> None:
