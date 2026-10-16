@@ -61,6 +61,15 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+A subquery over the same table as the outer query names the table once.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `nope` does not exist in `users`"
+g = SQL[tuple[int]]("--sql\nSELECT (SELECT nope FROM users) FROM users")
+```
+
 #### Ambiguous columns
 
 ```python
@@ -87,8 +96,8 @@ c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
 d = SQL[tuple[int]]("--sql\nSELECT 1 UNION TABLE users")
 # error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
 e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
-# error: [unsupported-syntax] "expression `(1, 2)` is not typed"
-f = SQL[tuple[object]]("--sql\nSELECT (1, 2)")
+# error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
+f = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
 
 #### Annotated helpers
@@ -141,6 +150,20 @@ unknown-type = "error"
 unsupported-syntax = "error"
 ```
 
+#### Row constructors
+
+`ROW(...)` and `(a, b)` build a record, not a call to a function `row`.
+
+```python
+from typing import Any
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[tuple[Any, ...]]]("--sql\nSELECT ROW(id, name) AS r FROM users")
+# error:
+b = SQL[tuple[tuple[Any, ...]]]("--sql\nSELECT (id, name) AS r FROM users")
+```
+
 #### CTEs
 
 ```python
@@ -186,19 +209,21 @@ d = SQL[tuple[int]]("--sql\nSELECT id FROM (SELECT 1::INTEGER AS id) AS s")
 
 #### Table functions
 
-A table function's columns are not read, so a column taken from one is
-reported as unsupported, never as an unknown column or table.
+The built-in set-returning functions (`generate_series`, `unnest`, the JSON
+`*_each` and `*_array_elements` families) have known columns. The columns of
+another table function are not read, so a column taken from one is reported
+as unsupported, never as an unknown column or table.
 
 ```python
 from sqlty import SQL
 
-# error:
 a = SQL[tuple[int]]("--sql\nSELECT g FROM generate_series(1, 3) AS g")
-# error: [unsupported-syntax] "column `n` may come from table function generate_series"
 b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
 # error:
-c = SQL[tuple[int]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
-# error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger"
+c = SQL[tuple[int | None]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
+# error: [unsupported-syntax] "column `word` may come from table function pg_get_keywords, which sqlty does not read the columns of"
+e = SQL[tuple[str]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger, which sqlty does not read the columns of"
 d = SQL[tuple[int]]("--sql\nSELECT tgrelid FROM pg_trigger")
 ```
 
@@ -381,7 +406,7 @@ select-star = "ignore"
 ```sql
 CREATE TABLE users (id INTEGER, name TEXT);
 CREATE VIEW typed AS SELECT id, name FROM users;
-CREATE VIEW opaque AS SELECT id, (1, 2) AS day FROM users;
+CREATE VIEW opaque AS SELECT id, 1 OPERATOR(pg_catalog.+) 1 AS day FROM users;
 ```
 
 ```python
@@ -479,20 +504,20 @@ select-star = "ignore"
 
 ```sql
 CREATE TABLE a (id INTEGER, g GEOMETRY);
-CREATE VIEW opaque AS SELECT id, (1, 2) AS day FROM a;
+CREATE VIEW opaque AS SELECT id, 1 OPERATOR(pg_catalog.+) 1 AS day FROM a;
 ```
 
 ```python
 from sqlty import SQL
 
-# error: [unknown-type] "column `a.g` has type `GEOMETRY`"
+# error: [unknown-type] "column `a.g` has type `GEOMETRY`, which has no Python type"
 x = SQL[tuple[int, str]]("--sql\nSELECT * FROM a")
-# error: [unknown-type] "column `a.g` has type `GEOMETRY`"
+# error: [unknown-type] "column `a.g` has type `GEOMETRY`, which has no Python type"
 y = SQL[tuple[int, str]]("--sql\nSELECT a.* FROM a, generate_series(1, 3) AS g(x)")
-# error: [unsupported-syntax] "view column `opaque.day` is not typed"
+# error: [unsupported-syntax] "view column `opaque.day` is not typed by the view's query"
 z = SQL[tuple[int, object]]("--sql\nSELECT * FROM opaque")
-# error: [unsupported-syntax] "`*` reads table function generate_series"
-w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, generate_series(1, 3) AS g(x)")
+# error: [unsupported-syntax] "`*` reads table function pg_get_keywords, which sqlty does not read the columns of"
+w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, pg_get_keywords() AS k")
 ```
 
 ## Functions and types the schema defines

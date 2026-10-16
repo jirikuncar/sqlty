@@ -115,7 +115,7 @@ CREATE TABLE sales (id INT NOT NULL PRIMARY KEY, region VARCHAR(20) NOT NULL, am
 
 ```sql
 SELECT CAST(region AS CHAR), count(*), sum(amount) FROM sales GROUP BY region WITH ROLLUP
--- inferred: tuple[str | None, int, int | None]
+-- inferred: tuple[str | None, int, decimal.Decimal | None]
 ```
 
 ## Division and modulo by zero are NULL in MySQL and SQLite

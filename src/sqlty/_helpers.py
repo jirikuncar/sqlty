@@ -16,11 +16,14 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
+
+if TYPE_CHECKING:
+    from sqlty._type_extractor import TypeInfo
 
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
 # Names that mark where a helper takes the query's parameters: a ``params`` argument holding
@@ -227,6 +230,7 @@ class HelperIndex:
         self._pattern: re.Pattern[str] | None = None
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
+        self._row_types: dict[tuple[str, frozenset[str]], dict[str, TypeInfo]] = {}
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
@@ -237,6 +241,7 @@ class HelperIndex:
         other.prefixes = set(self.prefixes)
         other.type_modules = self.type_modules
         other._exports = self._exports
+        other._row_types = self._row_types
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
@@ -255,6 +260,8 @@ class HelperIndex:
         self.prefixes.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
         self.namespaces.pop(module, None)
         self._exports.pop(module, None)
+        for key in [key for key in self._row_types if key[0] == module]:
+            del self._row_types[key]
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
         self.modules.setdefault(module, {}).update(found)
@@ -329,6 +336,41 @@ class HelperIndex:
         return self._constant(
             (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix, name
         )
+
+    def row_type(
+        self, parsed: ParsedSource, dotted: str, type_modules: frozenset[str]
+    ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
+        """The row type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
+
+        Returns it with the row types of its module, which its nested types refer to.
+        Re-exports are followed; the module is read from its source, never imported.
+        """
+        functions, modules = _imports(parsed, parsed.module)
+        prefix, _, name = dotted.rpartition(".")
+        if not prefix:
+            if name not in functions:
+                return None
+            module, name = functions[name]
+        else:
+            head, _, rest = prefix.partition(".")
+            mod = modules.get(head)
+            module = (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
+        return self._row_type(module, name, type_modules)
+
+    def _row_type(
+        self, module: str, name: str, type_modules: frozenset[str], _depth: int = 0
+    ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
+        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+            return None
+        if (defs := self._row_types.get((module, type_modules))) is None:
+            from sqlty._type_extractor import extract_type_definitions
+
+            defs = extract_type_definitions(parsed, self, module, type_modules)
+            self._row_types[module, type_modules] = defs
+        if name in defs:
+            return defs[name], defs
+        exports = self._reexports(module, parsed)
+        return self._row_type(*exports[name], type_modules, _depth + 1) if name in exports else None
 
     def _constant(
         self, module: str, name: str, _depth: int = 0
