@@ -65,8 +65,7 @@ CREATE TABLE orders (
 
 ## ALTER TABLE MODIFY and CHANGE
 
-MySQL `ALTER TABLE` is not followed, but `MODIFY` and `CHANGE` retype a column, so the table
-becomes unknown rather than keep the old `ENUM` labels.
+`MODIFY` and `CHANGE` replace a column's definition, its `ENUM` labels included.
 
 `schema.sql`:
 
@@ -79,7 +78,7 @@ ALTER TABLE u ADD COLUMN b INT;
 
 ```sql
 SELECT a FROM t
--- columns: a: None (None)
+-- columns: a: typing.Literal['x', 'y', 'z'] (ENUM('X', 'Y', 'Z'))
 ```
 
 ```sql

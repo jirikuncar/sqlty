@@ -133,7 +133,7 @@ impl Loader {
                             .filter(|_| matches!(f.returns, RawReturn::SetOf(_)))
                             .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                             .and_then(|key| match relations.get(&key) {
-                                Some(Relation::Table(columns)) => Some(columns.clone()),
+                                Some(Relation::Table(columns, _)) => Some(columns.clone()),
                                 _ => None,
                             });
                         match rows {
@@ -352,6 +352,17 @@ impl<'a> Resolver<'a> {
                     .columns
                     .iter()
                     .map(|c| self.column(&c.name, &c.ident, &c.ty, c.not_null, c.checks()))
+                    .collect(),
+                // A group naming a dropped or renamed column no longer holds.
+                table
+                    .nonnull_groups
+                    .iter()
+                    .filter(|group| {
+                        group
+                            .iter()
+                            .all(|name| table.columns.iter().any(|c| c.name == *name))
+                    })
+                    .cloned()
                     .collect(),
             ),
             Rel::View(columns) => Relation::View(columns.clone()),

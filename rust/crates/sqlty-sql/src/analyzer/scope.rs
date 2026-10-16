@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use sqlparser::ast::{Join, JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins};
+use sqlparser::ast::{
+    Expr, Join, JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins,
+};
 
 use crate::catalog::{fold, FunctionReturn};
 
@@ -12,6 +14,7 @@ use super::memo::SubqueryMemo;
 use super::names::{object_name, table_key};
 use super::nullability::Nullability;
 use super::query::{rename_columns, Analyzer, Column};
+use super::table_functions::table_args;
 use super::typed::Typed;
 use super::{Inferred, SchemaColumn};
 
@@ -291,6 +294,15 @@ impl Virtuals {
     }
 }
 
+/// The lower-case name of a function called in `FROM`, without its schema.
+fn function_name_of(name: &ObjectName) -> String {
+    name.0
+        .last()
+        .and_then(|part| part.as_ident())
+        .map(|ident| ident.value.to_lowercase())
+        .unwrap_or_default()
+}
+
 impl<'a> Analyzer<'a> {
     /// Columns of a CTE, derived table or schema view; a CTE hides a view of its name.
     pub(super) fn virtual_columns(&self, table: &str) -> Option<&[Column]> {
@@ -355,6 +367,55 @@ impl<'a> Analyzer<'a> {
         for factor in relations(from) {
             let only = only_table(factor);
             let factor = only.as_ref().unwrap_or(factor);
+            // A built-in set-returning function, which may read the relations before it.
+            let builtin = match factor {
+                TableFactor::Table {
+                    name,
+                    alias,
+                    args: Some(args),
+                    with_ordinality,
+                    ..
+                } if analyzer.function_rows(name, args.args.len()).is_none() => {
+                    let function = function_name_of(name);
+                    analyzer
+                        .builtin_rows(&function, &table_args(&args.args), &scope)?
+                        .map(|rows| (function, alias, rows, *with_ordinality))
+                }
+                TableFactor::Function {
+                    name,
+                    args,
+                    alias,
+                    with_ordinality,
+                    ..
+                } => {
+                    let function = function_name_of(name);
+                    analyzer
+                        .builtin_rows(&function, &table_args(args), &scope)?
+                        .map(|rows| (function, alias, rows, *with_ordinality))
+                }
+                TableFactor::UNNEST {
+                    alias,
+                    array_exprs,
+                    with_ordinality,
+                    ..
+                } => {
+                    let arrays: Vec<&Expr> = array_exprs.iter().collect();
+                    analyzer
+                        .builtin_rows("unnest", &arrays, &scope)?
+                        .map(|rows| ("unnest".to_string(), alias, rows, *with_ordinality))
+                }
+                _ => None,
+            };
+            if let Some((function, alias, rows, ordinality)) = builtin {
+                let columns = rows.named(alias.as_ref(), ordinality, analyzer.dialect);
+                let reference = alias
+                    .as_ref()
+                    .map_or(function, |alias| alias.name.value.to_lowercase());
+                let table = format!("({reference})");
+                analyzer.virtuals.insert(table.clone(), columns);
+                scope.push(Source::named(reference, table));
+                continue;
+            }
             match factor {
                 TableFactor::Table {
                     name,
@@ -441,6 +502,15 @@ impl<'a> Analyzer<'a> {
                     .virtuals
                     .get(&format!("({})", alias.name.value.to_lowercase()))
                     .is_some_and(|columns| !columns.iter().any(Column::is_unknown_star)),
+                TableFactor::UNNEST { alias, .. } => self
+                    .virtuals
+                    .get(&format!(
+                        "({})",
+                        alias
+                            .as_ref()
+                            .map_or("unnest".to_string(), |a| a.name.value.to_lowercase())
+                    ))
+                    .is_some(),
                 _ => false,
             })
     }
@@ -755,6 +825,8 @@ mod tests {
             "SELECT * FROM pg_catalog.pg_tables",
             "SELECT tablename FROM pg_tables",
             "SELECT a.id, g FROM a, generate_series(1, 3) AS g",
+            "SELECT * FROM pg_get_keywords() AS k",
+            "SELECT k.word FROM pg_get_keywords() AS k",
             "SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l",
             "SELECT * FROM missing",
             "SELECT * FROM missing AS m JOIN a ON true",
