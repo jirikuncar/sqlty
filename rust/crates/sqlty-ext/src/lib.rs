@@ -9,10 +9,11 @@
 //!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
 //! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
-//! - Schema: `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
+//! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
-//! threads, because callers pass the same few schemas call after call. The stub
+//! threads, because callers pass the same few schemas call after call; `load_schema`
+//! returns a handle to pass instead of the text, which skips the lookup. The stub
 //! `sqlty/_core.pyi` must match the signatures here.
 //!
 //! The crate is a `cdylib`, so it has no Rust API and no doc tests; the unit tests cover
@@ -109,13 +110,90 @@ fn cached_schema(schema_sql: &str, dialect: &str) -> Arc<LoadedSchema> {
     loaded
 }
 
-fn schema(schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
-    Some(cached_schema(schema_sql?, dialect).schema.clone())
+/// A `schema_sql` argument: SQL text, looked up in the cache by content, or a [`SchemaHandle`]
+/// from `load_schema`, which skips the lookup.
+enum SchemaArg<S = PyBackedStr> {
+    Text(S),
+    Loaded(Arc<LoadedSchema>, Arc<str>, &'static str),
+}
+
+impl<S: AsRef<str>> SchemaArg<S> {
+    /// The parsed schema for `dialect`; a handle loaded for another dialect is parsed again.
+    fn loaded(self, dialect: &str) -> Arc<LoadedSchema> {
+        match self {
+            Self::Text(text) => cached_schema(text.as_ref(), dialect),
+            Self::Loaded(loaded, _, loaded_dialect) if loaded_dialect == dialect => loaded,
+            Self::Loaded(_, text, _) => cached_schema(&text, dialect),
+        }
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for SchemaArg {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        if let Ok(handle) = obj.cast::<SchemaHandle>() {
+            let handle = handle.get();
+            return Ok(Self::Loaded(
+                Arc::clone(&handle.loaded),
+                Arc::clone(&handle.text),
+                handle.dialect,
+            ));
+        }
+        Ok(Self::Text(obj.extract()?))
+    }
+}
+
+/// A schema parsed once by `load_schema`. Pass it wherever a `schema_sql` is taken, so a
+/// caller that checks many queries against one schema does not have it looked up by text
+/// on every call.
+#[pyclass(frozen, name = "Schema", module = "sqlty._core")]
+struct SchemaHandle {
+    loaded: Arc<LoadedSchema>,
+    text: Arc<str>,
+    dialect: &'static str,
+}
+
+#[pymethods]
+impl SchemaHandle {
+    /// The dialect the schema was parsed as.
+    #[getter]
+    fn dialect(&self) -> &'static str {
+        self.dialect
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Schema(dialect={:?})", self.dialect)
+    }
+}
+
+/// Parse `schema_sql` once, for passing as `schema_sql` to the other functions.
+#[pyfunction]
+#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
+fn load_schema(py: Python<'_>, schema_sql: &str, dialect: DialectArg) -> SchemaHandle {
+    let dialect = dialect.0;
+    let loaded = py.detach(|| {
+        let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+        Arc::new(LoadedSchema { schema, skipped })
+    });
+    SchemaHandle {
+        loaded,
+        text: Arc::from(schema_sql),
+        dialect,
+    }
+}
+
+fn schema<S: AsRef<str>>(arg: Option<SchemaArg<S>>, dialect: &str) -> Option<analyzer::Schema> {
+    Some(arg?.loaded(dialect).schema.clone())
 }
 
 /// The schema, unless `source` cannot hold a query: every query, wrapper and
 /// diagnostic involves the text `sql` (`--sql`, `SQL[...]`), in any case.
-fn schema_for(source: &str, schema_sql: Option<&str>, dialect: &str) -> Option<analyzer::Schema> {
+fn schema_for<S: AsRef<str>>(
+    source: &str,
+    schema_sql: Option<SchemaArg<S>>,
+    dialect: &str,
+) -> Option<analyzer::Schema> {
     if source
         .as_bytes()
         .windows(3)
@@ -194,7 +272,7 @@ fn infer_type(
     py: Python<'_>,
     sql: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
 ) -> Result<Option<String>, Error> {
     let dialect = dialect.0;
     Ok(py.detach(|| analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref()))?)
@@ -212,7 +290,7 @@ fn analyze_select(
     py: Python<'_>,
     sql: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
 ) -> Result<Option<Vec<ColumnTuple>>, Error> {
     let dialect = dialect.0;
     let columns = py.detach(|| {
@@ -241,7 +319,7 @@ fn analyze_columns(
     py: Python<'_>,
     sql: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
 ) -> Result<Option<Vec<NullableColumnTuple>>, Error> {
     let dialect = dialect.0;
     let columns = py.detach(|| {
@@ -277,7 +355,7 @@ fn analyze_params(
     py: Python<'_>,
     sql: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
 ) -> Option<Vec<ParamTuple>> {
     let dialect = dialect.0;
     let params = py.detach(|| {
@@ -334,7 +412,7 @@ fn query_diagnostics(
     py: Python<'_>,
     sql: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
 ) -> Vec<(String, String)> {
     let dialect = dialect.0;
     py.detach(|| {
@@ -350,7 +428,11 @@ fn query_diagnostics(
 /// constraints; their columns are unknown to inference.
 #[pyfunction]
 #[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
-fn schema_skipped_tables(py: Python<'_>, schema_sql: &str, dialect: DialectArg) -> Vec<String> {
+fn schema_skipped_tables(
+    py: Python<'_>,
+    schema_sql: SchemaArg,
+    dialect: DialectArg,
+) -> Vec<String> {
     let dialect = dialect.0;
     py.detach(|| skipped_objects(schema_sql, dialect, Some("table")))
         .into_iter()
@@ -364,15 +446,20 @@ fn schema_skipped_tables(py: Python<'_>, schema_sql: &str, dialect: DialectArg) 
 #[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
 fn schema_skipped_objects(
     py: Python<'_>,
-    schema_sql: &str,
+    schema_sql: SchemaArg,
     dialect: DialectArg,
 ) -> Vec<(String, String)> {
     let dialect = dialect.0;
     py.detach(|| skipped_objects(schema_sql, dialect, None))
 }
 
-fn skipped_objects(schema_sql: &str, dialect: &str, only: Option<&str>) -> Vec<(String, String)> {
-    cached_schema(schema_sql, dialect)
+fn skipped_objects<S: AsRef<str>>(
+    schema_sql: SchemaArg<S>,
+    dialect: &str,
+    only: Option<&str>,
+) -> Vec<(String, String)> {
+    schema_sql
+        .loaded(dialect)
         .skipped
         .iter()
         .filter(|(kind, _)| only.is_none_or(|only| only == *kind))
@@ -416,7 +503,7 @@ fn rewrite_source(
     py: Python<'_>,
     source: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
     import_style: Option<&str>,
     untyped: bool,
     keep_lines: bool,
@@ -461,7 +548,7 @@ fn fix_source(
     py: Python<'_>,
     source: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
     import_style: Option<&str>,
     untyped: bool,
     rules: Option<HashMap<String, String>>,
@@ -491,7 +578,7 @@ fn expand_star(
     py: Python<'_>,
     sql: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
 ) -> Option<String> {
     let dialect = dialect.0;
     py.detach(|| analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref()))
@@ -549,7 +636,7 @@ fn check_source(
     py: Python<'_>,
     source: &str,
     dialect: DialectArg,
-    schema_sql: Option<&str>,
+    schema_sql: Option<SchemaArg>,
     rules: Option<HashMap<String, String>>,
     import_style: Option<&str>,
     untyped: bool,
@@ -628,6 +715,8 @@ fn query_sites(
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
+    m.add_function(wrap_pyfunction!(load_schema, m)?)?;
+    m.add_class::<SchemaHandle>()?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
@@ -726,30 +815,31 @@ mod tests {
 
     #[test]
     fn schema_is_absent_without_schema_sql() {
-        assert!(schema(None, "postgres").is_none());
-        assert!(schema(Some("CREATE TABLE sqlty_ext_present (x INT)"), "postgres").is_some());
+        assert!(schema::<&str>(None, "postgres").is_none());
+        let text = SchemaArg::Text("CREATE TABLE sqlty_ext_present (x INT)");
+        assert!(schema(Some(text), "postgres").is_some());
     }
 
     #[test]
     fn schema_for_skips_sources_that_cannot_hold_a_query() {
-        let ddl = Some("CREATE TABLE sqlty_ext_for (x INT)");
-        assert!(schema_for("print('hello')", ddl, "postgres").is_none());
-        assert!(schema_for("q = SQL[int]('SELECT 1')", ddl, "postgres").is_some());
-        assert!(schema_for("x = '--SQL\\nSELECT 1'", ddl, "postgres").is_some());
-        assert!(schema_for("SQL", None, "postgres").is_none());
-        assert!(schema_for("", ddl, "postgres").is_none());
+        let ddl = || Some(SchemaArg::Text("CREATE TABLE sqlty_ext_for (x INT)"));
+        assert!(schema_for("print('hello')", ddl(), "postgres").is_none());
+        assert!(schema_for("q = SQL[int]('SELECT 1')", ddl(), "postgres").is_some());
+        assert!(schema_for("x = '--SQL\\nSELECT 1'", ddl(), "postgres").is_some());
+        assert!(schema_for::<&str>("SQL", None, "postgres").is_none());
+        assert!(schema_for("", ddl(), "postgres").is_none());
     }
 
     #[test]
     fn skipped_objects_lists_what_the_schema_could_not_parse() {
         let sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;";
-        let all = skipped_objects(sql, "postgres", None);
+        let all = skipped_objects(SchemaArg::Text(sql), "postgres", None);
         assert!(
             all.iter().all(|(_, name)| name != "sqlty_ext_ok"),
             "a parsed table is not skipped: {all:?}"
         );
-        let tables = skipped_objects(sql, "postgres", Some("table"));
-        let views = skipped_objects(sql, "postgres", Some("view"));
+        let tables = skipped_objects(SchemaArg::Text(sql), "postgres", Some("table"));
+        let views = skipped_objects(SchemaArg::Text(sql), "postgres", Some("view"));
         assert!(views.is_empty());
         assert_eq!(tables, all);
     }

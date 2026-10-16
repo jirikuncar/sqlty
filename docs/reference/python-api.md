@@ -103,6 +103,7 @@ from sqlty.core import (
     expand_star,
     fix_source,
     infer_type,
+    load_schema,
     returns_rows,
     rewrite_source,
     strip_source,
@@ -154,8 +155,23 @@ Traceback (most recent call last):
 ValueError: unknown dialect "postgress"; expected one of: postgres, mysql, sqlite, ...
 ```
 
+`schema_sql` takes the schema's SQL text, or a `Schema` from `load_schema`.
+Text is parsed once and cached, but each call still finds it by comparing the
+whole text. When you check many queries against one schema, load it once and
+pass the handle:
+
+```pycon
+>>> from sqlty.core import load_schema
+>>> schema = load_schema("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);")
+>>> schema
+Schema(dialect="postgres")
+>>> infer_type("SELECT id, name FROM users", schema_sql=schema)
+'tuple[int, str | None]'
+```
+
 | Function | Returns |
 |----------|---------|
+| `load_schema(schema_sql, *, dialect="postgres")` | A parsed `Schema`, for any `schema_sql` argument |
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
 | `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
 | `json_shapes(sql, *, dialect="postgres", schema_sql=None)` | `(column, shape)` pairs for columns that build JSON of a known shape |

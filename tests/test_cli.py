@@ -20,6 +20,7 @@ from sqlty._cli import (
 )
 from sqlty._config import ConfigError
 from sqlty._lint import RULES
+from sqlty.core import infer_type
 
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
@@ -684,7 +685,11 @@ def test_inline_config_overrides(tmp_path, monkeypatch) -> None:
 
     assert settings.dialect == "sqlite"
     assert settings.rules == {"select-star": "error", "stale-type": "ignore"}
-    assert settings.schema_sql is not None and "users" in settings.schema_sql
+    assert settings.schema is not None and settings.schema.dialect == "sqlite"
+    assert (
+        infer_type("SELECT * FROM users", dialect="sqlite", schema_sql=settings.schema)
+        == "tuple[int]"
+    )
     from sqlty._cli import _collect_python_files
 
     assert _collect_python_files(args.paths, resolver.source) == [Path("q.py")]
