@@ -36,6 +36,16 @@ SELECT IF(id > 1, name, note) AS a, IF(id > 1, 'big', 'small') AS b, IFNULL(note
 -- columns: c: str (VARCHAR(50))
 ```
 
+## Grouping
+
+`GROUPING` tells a `WITH ROLLUP` super-aggregate row by a non-null `int`.
+
+```sql
+SELECT note, GROUPING(note) AS g FROM events GROUP BY note WITH ROLLUP
+-- columns: note: str | None (VARCHAR(50))
+-- columns: g: int (INT)
+```
+
 ## Dates and times
 
 ```sql

@@ -217,10 +217,13 @@ impl<'a> Analyzer<'a> {
                 Ok(from_sql_type("RECORD", self.dialect))
             }
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
-            Expr::Trim { .. } | Expr::Substring { .. } if self.dialect == SqlDialect::Postgres => {
+            Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. }
+                if self.dialect == SqlDialect::Postgres =>
+            {
                 Ok(from_sql_type("TEXT", self.dialect))
             }
-            Expr::Trim { .. } | Expr::Substring { .. } => known("str"),
+            Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. } => known("str"),
+            Expr::Collate { expr: inner, .. } => self.expr(inner, scope),
             Expr::Position { .. } => known("int"),
             Expr::Subquery(query) => {
                 Ok(
@@ -397,6 +400,17 @@ impl<'a> Analyzer<'a> {
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
     fn call_typed(&self, func: &Function, scope: &Scope) -> Inferred<Typed> {
         let name = self.builtin_name(&func.name);
+        if let (FunctionArguments::Subquery(query), "ARRAY", SqlDialect::Postgres) =
+            (&func.args, name.as_str(), self.dialect)
+        {
+            let columns = self.subquery_columns(query, scope, Reporting::Record);
+            let elem = first_column(&columns)?
+                .map(Column::typed)
+                .and_then(|typed| typed.sql().or_else(|| category(&typed)).map(String::from));
+            return Ok(elem.map_or(Typed::UNKNOWN, |elem| {
+                from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
+            }));
+        }
         let args = positional_args(&func.args);
         let arg = args.first().copied();
         match name.as_str() {
