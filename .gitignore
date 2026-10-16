@@ -33,3 +33,6 @@ bench-result.json
 
 # Claude Code local settings
 .claude/
+
+# Hypothesis example database (tests/test_fuzz.py)
+.hypothesis/

@@ -78,6 +78,9 @@ dev = [
 ]
 cli = ["rich>=15.0.0"]
 psycopg = ["psycopg>=3.2.12"]
+fuzz = [
+    "hypothesis>=6.140",
+]
 
 [tool.pytest.ini_options]
 addopts = ["-p", "tests._mdtest.plugin", "--cov-report=term-missing", "--cov-report=html", "-v"]

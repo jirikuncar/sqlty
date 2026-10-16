@@ -223,6 +223,16 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                     f"{where}; expected one of: {', '.join(severities)}"
                 )
 
+    if "dialect" in table:
+        from sqlty._core import dialect_names
+
+        dialect = table["dialect"]
+        names = dialect_names()
+        if not isinstance(dialect, str) or dialect.lower() not in (*names, "postgresql", "tsql"):
+            raise ConfigError(
+                f"{source}: unknown dialect {dialect!r} in [tool.sqlty]"
+                f"{_suggest(str(dialect), names)}; expected one of: {', '.join(names)}"
+            )
     check_rules(table.get("rules", {}), "[tool.sqlty] rules", "[tool.sqlty.rules]")
     overrides = table.get("overrides", [])
     if not isinstance(overrides, list) or not all(isinstance(o, dict) for o in overrides):

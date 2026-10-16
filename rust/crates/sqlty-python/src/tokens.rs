@@ -40,6 +40,99 @@ impl Token {
     pub(crate) fn is_plain(&self, source: &str) -> bool {
         self.kind == Kind::Str && matches!(self.prefix(source).as_str(), "" | "u")
     }
+
+    /// A t-string (no `r` or `f` with it) whose fields are all plain values, so it can be
+    /// read as a query with placeholders (see [`template_content`]).
+    pub(crate) fn is_template(&self, source: &str) -> bool {
+        self.kind == Kind::Str
+            && self.prefix(source) == "t"
+            && template_content(&source[self.span.clone()]).is_some()
+    }
+}
+
+/// The text of a t-string literal (prefix and quotes included) as a query: each
+/// replacement field `{expr}` becomes a `%s` placeholder, `{{` and `}}` become braces, and
+/// a `%` of the text is escaped as `%%`. `None` when a field has a conversion (`!r`), a
+/// format spec (psycopg's `:i`, `:l`, `:q` change the SQL itself) or is a `{x=}` debug
+/// field.
+pub(crate) fn template_content(literal: &str) -> Option<String> {
+    let quoted = literal.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+    let triple = quoted.starts_with("\"\"\"") || quoted.starts_with("'''");
+    let quote = if triple { 3 } else { 1 };
+    let body = quoted.get(quote..quoted.len().checked_sub(quote)?)?;
+    let bytes = body.as_bytes();
+    let mut out = String::with_capacity(body.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => {
+                let next = body[i + 1..].chars().next().map_or(0, char::len_utf8);
+                out.push_str(&body[i..i + 1 + next]);
+                i += 1 + next;
+            }
+            b'{' if bytes.get(i + 1) == Some(&b'{') => {
+                out.push('{');
+                i += 2;
+            }
+            b'}' if bytes.get(i + 1) == Some(&b'}') => {
+                out.push('}');
+                i += 2;
+            }
+            b'{' => {
+                let end = field_end(bytes, i + 1, triple)?;
+                if !is_value_field(&body[i + 1..end - 1]) {
+                    return None;
+                }
+                out.push_str("%s");
+                i = end;
+            }
+            b'%' => {
+                out.push_str("%%");
+                i += 1;
+            }
+            _ => {
+                let len = body[i..].chars().next().map_or(1, char::len_utf8);
+                out.push_str(&body[i..i + len]);
+                i += len;
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Whether a replacement field is a bare expression: no `!conversion`, `:spec` or `=`.
+fn is_value_field(field: &str) -> bool {
+    let bytes = field.as_bytes();
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' => match string_end(bytes, i, false) {
+                Some(end) => i = end,
+                None => return false,
+            },
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'!' if depth == 0 && bytes.get(i + 1) != Some(&b'=') => return false,
+            b':' if depth == 0 => return false,
+            b'=' if depth == 0 => {
+                let rest = field[i + 1..].trim();
+                let before = bytes.get(i.wrapping_sub(1)).copied();
+                if rest.is_empty() && !matches!(before, Some(b'=' | b'!' | b'<' | b'>')) {
+                    return false;
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    !field.trim().is_empty()
 }
 
 fn is_name_byte(byte: u8) -> bool {
@@ -317,14 +410,22 @@ pub(crate) fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
     groups
 }
 
-/// The concatenated content of string literals.
+/// The concatenated content of string literals; a t-string's is read as a query (see
+/// [`template_content`]).
 pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
     spans
         .iter()
         .map(|span| {
             let literal = &source[span.clone()];
             let quoted = literal.trim_start_matches(|c: char| c.is_ascii_alphabetic());
-            crate::rewriter::extract_string_content(quoted)
+            let prefix = &literal[..literal.len() - quoted.len()];
+            match prefix
+                .eq_ignore_ascii_case("t")
+                .then(|| template_content(literal))
+            {
+                Some(Some(query)) => query,
+                _ => crate::rewriter::extract_string_content(quoted).to_string(),
+            }
         })
         .collect()
 }
@@ -338,10 +439,12 @@ pub(crate) struct Call {
     pub open: usize,
     /// Whether the name is the wrapper itself, not `mod.{wrapper}`.
     pub exact: bool,
+    /// Whether it is a `SQLTemplate[T](t"...")` call.
+    pub template: bool,
     /// The argument's string literals.
     pub strings: Vec<Range<usize>>,
-    /// Whether the argument is plain string literals only, with comments and a
-    /// trailing comma.
+    /// Whether the argument is plain string literals only (t-strings of value fields for a
+    /// `SQLTemplate` call), with comments and a trailing comma.
     pub plain: bool,
     /// The trailing comma.
     pub comma: Option<Range<usize>>,
@@ -428,14 +531,26 @@ impl std::ops::Deref for Calls {
     }
 }
 
-/// Every `{wrapper}[T](...)` and `mod.{wrapper}[T](...)` call in `source`, in source order.
+/// The name `SQLTemplate` goes by next to `wrapper`: `SQLTemplate`, or `mod.SQLTemplate`
+/// when the wrapper is `mod.SQL`.
+pub(crate) fn template_wrapper(wrapper: &str) -> String {
+    match wrapper.rsplit_once('.') {
+        Some((module, _)) => format!("{module}.SQLTemplate"),
+        None => "SQLTemplate".to_string(),
+    }
+}
+
+/// Every `{wrapper}[T](...)` and `mod.{wrapper}[T](...)` call in `source`, in source order,
+/// and the `SQLTemplate[T](...)` calls next to them.
 pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Calls {
+    let template = template_wrapper(wrapper);
     let dotted = format!(".{wrapper}");
     let mut calls = Vec::new();
     for (i, token) in tokens.iter().enumerate() {
         let name = &source[token.span.clone()];
+        let is_template = name == template || name.ends_with(".SQLTemplate");
         if token.kind != Kind::Name
-            || !(name == wrapper || name.ends_with(&dotted))
+            || !(name == wrapper || name.ends_with(&dotted) || is_template)
             || !is_op(source, tokens, i + 1, "[")
         {
             continue;
@@ -470,7 +585,14 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ca
             .filter(|&&j| tokens[j].kind == Kind::Str)
             .map(|&j| tokens[j].span.clone())
             .collect();
-        let plain = !code.is_empty() && code.iter().all(|&j| tokens[j].is_plain(source));
+        let plain = !code.is_empty()
+            && code.iter().all(|&j| {
+                if is_template {
+                    tokens[j].is_template(source)
+                } else {
+                    tokens[j].is_plain(source)
+                }
+            });
         let bare = plain && {
             let (first, last) = (code[0], code[code.len() - 1]);
             let outside = (open + 1..close)
@@ -484,7 +606,8 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ca
             span: token.span.start..tokens[close].span.end,
             annotation: tokens[i + 1].span.end..tokens[close_bracket].span.start,
             open: tokens[open].span.start,
-            exact: name == wrapper,
+            exact: name == wrapper || name == template,
+            template: is_template,
             strings,
             plain,
             comma,

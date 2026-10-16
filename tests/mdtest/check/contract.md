@@ -392,7 +392,7 @@ CREATE TABLE users (id INT NOT NULL);
 ```
 
 ```python
-# error: [select-star] "SELECT * used — expand to explicit column list (joins need a manual edit)"
+# error: [select-star] "SELECT * used — expand to explicit column list"
 # error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```

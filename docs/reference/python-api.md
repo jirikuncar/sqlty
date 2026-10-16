@@ -3,7 +3,7 @@
 ## `sqlty`
 
 ```python
-from sqlty import SQL, UNTYPED, row_form, sqlty
+from sqlty import SQL, UNTYPED, SQLTemplate, row_form, sqlty
 ```
 
 ### `SQL[T]`
@@ -22,6 +22,29 @@ query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 `T` is `tuple[...]` as inferred, a [row type](../guide/row-types.md) you
 write, or [`UNTYPED`](#untyped). String operations return plain `str`.
 
+### `SQLTemplate[T]`
+
+```python
+class SQLTemplate[T]:
+    template: string.templatelib.Template
+    def __init__(self, template: Template, /) -> None: ...
+```
+
+A [t-string](../guide/writing-queries.md#t-strings) query whose rows are `T`.
+`Template` cannot be subclassed, so the template is kept in `template`: pass
+that to a driver that runs templates (psycopg 3.3), or the whole query to
+[`execute`](#sqltydriverspsycopg) and `scalar`. `sqlty rewrite` creates instances:
+
+```pycon
+>>> from sqlty import SQLTemplate, row_form
+>>> user_id = 1
+>>> query = SQLTemplate[tuple[int]](t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id}")
+>>> query.template.values
+(1,)
+>>> row_form(query)
+tuple[int]
+```
+
 ### `UNTYPED`
 
 A [PEP 661](https://peps.python.org/pep-0661/) sentinel used as the row type
@@ -31,8 +54,8 @@ its rows as a concrete type. See [Untyped queries](../guide/untyped.md).
 ### `row_form(query[, default])`
 
 ```python
-def row_form[T](query: SQL[T], /) -> TypeForm[T]: ...
-def row_form[T, D](query: SQL[T], default: D, /) -> TypeForm[T] | D: ...
+def row_form[T](query: SQL[T] | SQLTemplate[T], /) -> TypeForm[T]: ...
+def row_form[T, D](query: SQL[T] | SQLTemplate[T], default: D, /) -> TypeForm[T] | D: ...
 ```
 
 Returns the `T` an instance was built with, read from `__orig_class__`:
@@ -140,6 +163,18 @@ column, so `None` is not a valid argument:
 3 int True
 >>> analyze_params("SELECT name FROM users WHERE id = ANY(%(ids)s)", schema_sql=schema)
 [ParamInfo(number=1, name='ids', python_type='list[int]', sql_type='ARRAY<INT>', nullable=None, cast=False)]
+```
+
+`dialect` takes `postgres` (the default), `mysql`, `sqlite` or another
+sqlparser dialect, in any case. An unknown name raises `ValueError` rather than
+reading the query as generic SQL:
+
+```pycon
+>>> infer_type("SELECT 1::INTEGER", dialect="PostgreSQL")
+'tuple[int]'
+>>> infer_type("SELECT 1", dialect="postgress")  # doctest: +ELLIPSIS
+Traceback (most recent call last):
+ValueError: unknown dialect "postgress"; expected one of: postgres, mysql, sqlite, ...
 ```
 
 | Function | Returns |
