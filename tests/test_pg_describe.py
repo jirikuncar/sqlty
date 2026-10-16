@@ -77,6 +77,7 @@ SQL_TO_PG = {
     "JSON": "json",
     "JSONB": "jsonb",
     "BYTEA": "bytea",
+    "VARBINARY": "bytea",
     "INET": "inet",
     "CIDR": "cidr",
     "MACADDR": "macaddr",

@@ -67,6 +67,9 @@ pub(super) struct Facts {
     pub(super) non_null_exprs: Rc<FxHashSet<ExprKey>>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
+    /// Whether the select list runs several set-returning functions, which PostgreSQL
+    /// runs in lockstep, padding the shorter ones with NULL.
+    pub(super) lockstep: bool,
     /// `(reference, column)` pairs that `ROLLUP`, `CUBE`, `GROUPING SETS` or `WITH ROLLUP`
     /// turn into NULL in their subtotal rows.
     rolled_up: Rc<Vec<(String, String)>>,
@@ -735,6 +738,9 @@ impl<'a> Analyzer<'a> {
         facts: &Facts,
     ) -> Nullability {
         let name = function_name(func);
+        if facts.lockstep && self.is_set_returning(func) {
+            return Nullability::Nullable;
+        }
         let info = lookup(&name);
         let args = positional_args(&func.args);
         let all_positional = match &func.args {
