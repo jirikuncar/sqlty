@@ -11,12 +11,10 @@ Type-safe raw SQL without an ORM or a database connection. sqlty reads row and
 parameter types from your SQL and schema, and checks them on every commit, so a
 migration that changes a column is caught in review, not in production.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/demo.gif" alt="A terminal session: sqlty rewrite adds the row type to a query, a migration makes email nullable, sqlty check --fix updates the type and mypy reports the line that would crash" width="720">
-  <br>
-  <em>A migration makes <code>email</code> nullable. sqlty and mypy find the code that would crash.</em>
-  (<a href="https://github.com/jirikuncar/sqlty/blob/main/docs/assets/demo.tape">view source</a>)
-</p>
+![A terminal session: sqlty rewrite adds the row type to a query, a migration makes email nullable, sqlty check --fix updates the type and mypy reports the line that would crash](https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/demo.gif)
+
+*A migration makes `email` nullable. sqlty and mypy find the code that would crash.*
+([view source](https://github.com/jirikuncar/sqlty/blob/main/docs/assets/demo.tape))
 
 **Documentation: [jirikuncar.github.io/sqlty](https://jirikuncar.github.io/sqlty/)**
 
