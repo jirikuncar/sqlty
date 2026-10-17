@@ -4,7 +4,10 @@ Default severity: **ignore**
 
 ## What it does
 
-Reports a column that the table it is read from does not have. The table must be known: a column of an unknown table is covered by `unknown-table` instead.
+Reports a column that the table it is read from does not have: in the select
+list, `WHERE` and `JOIN ... ON`, and in what `INSERT`, `UPDATE` and `DELETE`
+write and read. The table must be known: a column of an unknown table is
+covered by `unknown-table` instead.
 
 ```toml
 [tool.sqlty]

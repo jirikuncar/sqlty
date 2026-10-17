@@ -61,6 +61,43 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### INSERT, UPDATE and DELETE
+
+A statement that returns no rows is checked too: the table it writes, the
+columns it sets, and the names its values, conditions and source query read.
+
+```python
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+a = "--sql\nINSERT INTO users (id, nmae) VALUES (1, 'x')"
+# error: [unknown-table] "table `missing` is not defined in the schema"
+b = "--sql\nINSERT INTO missing (a) VALUES (1)"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+c = "--sql\nINSERT INTO orders (id, user_id) SELECT id, nope FROM users"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+# error: [unknown-column] "column `nope` does not exist in `teams`, `users`"
+d = "--sql\nUPDATE users SET nmae = 'x', team_id = (SELECT nope FROM teams) WHERE id = 1"
+# error: [unknown-column] "column `idd` does not exist in `u`"
+e = "--sql\nUPDATE users AS u SET name = 'x' WHERE u.idd = 1"
+# error: [unknown-column] "column `titel` does not exist in `teams`"
+f = "--sql\nDELETE FROM teams WHERE titel = 'x'"
+g = "--sql\nDELETE FROM orders WHERE user_id IN (SELECT id FROM users WHERE team_id = 1)"
+```
+
+A query's `WHERE` and `JOIN ... ON` are checked as well, not only the columns
+that shape its result. `UPDATE ... FROM` and `DELETE ... USING` read the joined
+tables too.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `idd` does not exist in `t`"
+# error: [unknown-column] "column `nmae` does not exist in `u`"
+h = SQL[tuple[int]]("--sql\nSELECT u.id FROM users u JOIN teams t ON t.idd = u.team_id WHERE u.nmae = 'x'")
+# error: [unknown-column] "column `nope` does not exist in `t`"
+i = "--sql\nUPDATE users u SET name = t.title FROM teams t WHERE t.id = u.team_id AND t.nope"
+j = "--sql\nDELETE FROM orders o USING users u WHERE u.id = o.user_id AND u.name = 'x'"
+```
+
 A subquery over the same table as the outer query names the table once.
 
 ```python
