@@ -62,6 +62,10 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_strip(args)
             case "check":
                 _cmd_check(args)
+            case "breaking":
+                from sqlty._breaking import main as breaking
+
+                breaking(args)
             case "rule":
                 _cmd_rule(args.name)
             case "version":
@@ -165,6 +169,40 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="After the summary, print how many queries were typed, partially typed, unparsed "
         "and skipped",
+    )
+
+    # --- breaking ---
+    breaking_parser = subparsers.add_parser(
+        "breaking",
+        help="Check the queries and schema of two git revisions across, as during a rolling "
+        "deploy: sqlty breaking --against origin/main",
+    )
+    breaking_parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="Files or directories to check, in both revisions (default: current directory)",
+    )
+    breaking_parser.add_argument(
+        "--against",
+        required=True,
+        metavar="REF",
+        help="The baseline revision: a branch, tag, SHA or HEAD~1",
+    )
+    breaking_parser.add_argument(
+        "--head",
+        metavar="REF",
+        help="The new revision (default: the working tree, uncommitted changes included)",
+    )
+    breaking_parser.add_argument(
+        "--direction",
+        choices=["backward", "forward", "both"],
+        default="both",
+        help="backward: queries of --against on the schema of --head (migrate first); forward: "
+        "queries of --head on the schema of --against (deploy first)",
+    )
+    breaking_parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Print nothing; only the exit code tells"
     )
 
     # --- rule ---

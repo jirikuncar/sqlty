@@ -358,6 +358,66 @@ def check_source(
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 
+# The name rules `breaking` turns on: a schema change shows up as a name that no longer
+# resolves, or an INSERT that no longer sets every required column.
+BREAKING_RULES = (
+    "unknown-table",
+    "unknown-column",
+    "ambiguous-column",
+    "unknown-function",
+    "unknown-type",
+    "insert-missing-column",
+)
+
+
+def breaking_source(
+    source: str | ParsedSource,
+    *,
+    schema_sql: str | Schema | None,
+    against_sql: str | Schema | None,
+    dialect: str = "postgres",
+    rules: dict[str, str] | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+    type_modules: Iterable[str] | None = None,
+) -> list[Diagnostic]:
+    """The diagnostics ``source`` gets against ``against_sql`` but not against its own
+    ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
+
+    Both checks enable the name rules of ``BREAKING_RULES`` on top of ``rules``, so a
+    dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
+    leaves out, are reported, besides the row type checks.
+
+    Example:
+        >>> old = "CREATE TABLE users (id INT NOT NULL, bio TEXT)"
+        >>> new = "CREATE TABLE users (id INT NOT NULL)"
+        >>> [d["message"] for d in breaking_source('q = "--sql\\\\nSELECT bio FROM users"', schema_sql=old, against_sql=new)]
+        ['column `bio` does not exist in `users`']
+    """
+    rules = (rules or {}) | {
+        name: "error" for name in BREAKING_RULES if (rules or {}).get(name, "ignore") == "ignore"
+    }
+    parsed = ParsedSource.of(source, module)
+
+    def check(schema: str | Schema | None) -> list[Diagnostic]:
+        return check_source(
+            parsed,
+            dialect=dialect,
+            schema_sql=schema,
+            rules=rules,
+            import_style=import_style,
+            untyped=untyped,
+            helpers=helpers,
+            module=module,
+            type_modules=type_modules,
+        )
+
+    own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}
+    return [d for d in check(against_sql) if (d.get("line"), d["rule"], d["message"]) not in own]
+
+
 def query_statistics(
     source: str | ParsedSource,
     *,
