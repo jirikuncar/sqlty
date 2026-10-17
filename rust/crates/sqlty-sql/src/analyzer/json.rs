@@ -89,32 +89,76 @@ fn path_keys(expr: &Expr) -> Option<Vec<String>> {
     }
 }
 
+/// What `->` or `#>` extracts: its shape, whether it can be missing (SQL `NULL`) and
+/// whether it can be a JSON `null`.
+#[derive(Clone, Debug)]
+pub(super) struct Extracted {
+    pub(super) shape: JsonShape,
+    pub(super) missing: bool,
+    pub(super) null: bool,
+}
+
+impl Extracted {
+    const UNKNOWN: Extracted = Extracted {
+        shape: JsonShape::Any,
+        missing: true,
+        null: true,
+    };
+}
+
 /// The member `key` of an object or map.
-fn member(base: &JsonShape, key: &str) -> JsonShape {
+fn member(base: &JsonShape, key: &str) -> Extracted {
     match base {
-        JsonShape::Object(fields) => fields
-            .iter()
-            .find(|field| field.name == key)
-            .map_or(JsonShape::Any, |field| field.value.shape.clone()),
-        JsonShape::Map(value) => value.shape.clone(),
-        _ => JsonShape::Any,
+        JsonShape::Object(fields) => {
+            fields
+                .iter()
+                .find(|field| field.name == key)
+                .map_or(Extracted::UNKNOWN, |field| Extracted {
+                    shape: field.value.shape.clone(),
+                    missing: field.optional,
+                    null: field.value.nullable,
+                })
+        }
+        JsonShape::Map(value) => Extracted {
+            shape: value.shape.clone(),
+            missing: true,
+            null: value.nullable,
+        },
+        _ => Extracted::UNKNOWN,
     }
 }
 
-/// The elements of an array.
-fn element(base: &JsonShape) -> JsonShape {
+/// An element of an array, missing when the index is out of range.
+fn element(base: &JsonShape) -> Extracted {
     match base {
-        JsonShape::Array(value) => value.shape.clone(),
-        _ => JsonShape::Any,
+        JsonShape::Array(value) => Extracted {
+            shape: value.shape.clone(),
+            missing: true,
+            null: value.nullable,
+        },
+        _ => Extracted::UNKNOWN,
     }
 }
 
-/// The shape of `base` followed along the path keys, an array being indexed by a number.
-fn follow(base: &JsonShape, keys: &[String]) -> JsonShape {
-    keys.iter().fold(base.clone(), |shape, key| match shape {
-        JsonShape::Array(_) if key.parse::<i64>().is_ok() => element(&shape),
-        JsonShape::Object(_) | JsonShape::Map(_) => member(&shape, key),
-        _ => JsonShape::Any,
+/// `base` followed along the path keys, an array being indexed by a number. A JSON
+/// `null` on the way makes the rest of the path missing.
+fn follow(base: &JsonShape, keys: &[String]) -> Extracted {
+    let start = Extracted {
+        shape: base.clone(),
+        missing: false,
+        null: false,
+    };
+    keys.iter().fold(start, |seen, key| {
+        let next = match seen.shape {
+            JsonShape::Array(_) if key.parse::<i64>().is_ok() => element(&seen.shape),
+            JsonShape::Object(_) | JsonShape::Map(_) => member(&seen.shape, key),
+            _ => Extracted::UNKNOWN,
+        };
+        Extracted {
+            shape: next.shape,
+            missing: seen.missing || seen.null || next.missing,
+            null: next.null,
+        }
     })
 }
 
@@ -163,24 +207,9 @@ impl<'a> Analyzer<'a> {
             }
             Expr::BinaryOp {
                 left,
-                op: BinaryOperator::Arrow,
+                op: BinaryOperator::Arrow | BinaryOperator::HashArrow,
                 right,
-            } => {
-                let base = self.json_shape(left, scope)?;
-                Ok(match (string_literal(right), index_literal(right)) {
-                    (Some(key), _) => member(&base, key),
-                    (None, Some(_)) => element(&base),
-                    _ => JsonShape::Any,
-                })
-            }
-            Expr::BinaryOp {
-                left,
-                op: BinaryOperator::HashArrow,
-                right,
-            } => {
-                let base = self.json_shape(left, scope)?;
-                Ok(path_keys(right).map_or(JsonShape::Any, |keys| follow(&base, &keys)))
-            }
+            } => Ok(self.extracted(left, right, expr, scope)?.shape),
             Expr::Case {
                 operand,
                 conditions,
@@ -233,6 +262,52 @@ impl<'a> Analyzer<'a> {
             }
             _ => Ok(JsonShape::Any),
         }
+    }
+
+    /// What `left -> right` or `left #> right` (`op` in `expr`) extracts from a JSON value
+    /// of known shape.
+    fn extracted(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        expr: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Extracted> {
+        let base = self.json_shape(left, scope)?;
+        let unknown = Extracted::UNKNOWN;
+        Ok(match expr {
+            Expr::BinaryOp {
+                op: BinaryOperator::HashArrow,
+                ..
+            } => path_keys(right).map_or(unknown, |keys| follow(&base, &keys)),
+            _ => match (string_literal(right), index_literal(right)) {
+                (Some(key), _) => member(&base, key),
+                (None, Some(_)) => element(&base),
+                _ => unknown,
+            },
+        })
+    }
+
+    /// What PostgreSQL's `->` or `#>` in `expr` extracts from a JSON value; `None` for any
+    /// other expression.
+    pub(super) fn json_extract(&self, expr: &Expr, scope: &Scope) -> Option<Extracted> {
+        let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Arrow | BinaryOperator::HashArrow,
+            right,
+        } = expr
+        else {
+            return None;
+        };
+        if self.dialect != SqlDialect::Postgres
+            || !matches!(
+                self.expr(left, scope).ok()?.sql().map(type_base),
+                Some("JSON" | "JSONB")
+            )
+        {
+            return None;
+        }
+        self.extracted(left, right, expr, scope).ok()
     }
 
     /// References of the relations a condition proves present with `r IS NOT NULL` or
@@ -375,7 +450,11 @@ impl<'a> Analyzer<'a> {
                 row.nullable || self.facts.is_null_extended(&reference),
             ));
         }
-        let nullable = self.nullability(expr, scope, &self.facts) == Nullability::Nullable;
+        // psycopg loads a JSON `null` as `None`, like a SQL `NULL`.
+        let nullable = self.nullability(expr, scope, &self.facts) == Nullability::Nullable
+            || self
+                .json_extract(expr, scope)
+                .is_some_and(|value| value.null);
         let typed = self.expr(expr, scope)?;
         let shape = if matches!(typed.sql().map(type_base), Some("JSON" | "JSONB")) {
             self.json_shape(expr, scope)?
