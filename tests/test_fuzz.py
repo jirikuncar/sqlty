@@ -14,6 +14,7 @@ query Hypothesis could shrink it to.
 
 from __future__ import annotations
 
+import ast
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from sqlty import core
+from sqlty._core import python_types as _python_types
 
 pytestmark = pytest.mark.skipif(not os.environ.get("SQLTY_FUZZ"), reason="set SQLTY_FUZZ=1 to fuzz")
 
@@ -243,3 +245,137 @@ def test_server_agrees(conn: Any, case: Case, rows: int) -> None:
             ):
                 problems.append(f"column {column.name!r} typed {python_type} holds NULL")
     assert not problems, f"{case.schema}\n{case.query}\n  " + "\n  ".join(problems)
+
+
+# Type names by the grammar sqlparser reads, with and without parameters.
+SCALAR_TYPES = [
+    "INT",
+    "INTEGER",
+    "SMALLINT",
+    "BIGINT",
+    "REAL",
+    "FLOAT",
+    "FLOAT(8)",
+    "DOUBLE PRECISION",
+    "NUMERIC",
+    "NUMERIC(10)",
+    "NUMERIC(10, 2)",
+    "DECIMAL(5, 1)",
+    "DEC",
+    "DECFLOAT",
+    "CHAR",
+    "CHAR(3)",
+    "CHARACTER VARYING(9)",
+    "VARCHAR(20)",
+    "NVARCHAR(4)",
+    "TEXT",
+    "CLOB",
+    "CHARACTER LARGE OBJECT",
+    "BINARY LARGE OBJECT",
+    "BLOB",
+    "BYTEA",
+    "BINARY(4)",
+    "VARBINARY(8)",
+    "BOOLEAN",
+    "BOOL",
+    "DATE",
+    "TIME",
+    "TIME(3)",
+    "TIME WITH TIME ZONE",
+    "TIMESTAMP",
+    "TIMESTAMP(6) WITH TIME ZONE",
+    "TIMESTAMP WITHOUT TIME ZONE",
+    "TIMESTAMPTZ",
+    "INTERVAL",
+    "INTERVAL DAY TO SECOND",
+    "INTERVAL YEAR TO MONTH",
+    "INTERVAL HOUR",
+    "JSON",
+    "JSONB",
+    "UUID",
+    "BIT(3)",
+    "BIT VARYING(5)",
+    "VARBIT",
+    "INET",
+    "CIDR",
+    "MACADDR",
+    "MONEY",
+    "XML",
+    "INT4RANGE",
+    "TSTZRANGE",
+    "POINT",
+    "OID",
+    "REGCLASS",
+    "TSVECTOR",
+]
+DIALECT_TYPES = {
+    "postgres": [],
+    "mysql": [
+        "SIGNED",
+        "UNSIGNED",
+        "INT UNSIGNED",
+        "YEAR",
+        "DATETIME",
+        "DATETIME(6)",
+        "TINYTEXT",
+        "MEDIUMBLOB",
+        "ENUM('a', 'b')",
+        "SET('a', 'b')",
+        "TINYINT(1)",
+    ],
+    "sqlite": ["UNSIGNED_BIG_INT", "NATIVE_CHARACTER", "VARYING_CHARACTER", "ANY", "WIDGET"],
+    "duckdb": [
+        "HUGEINT",
+        "UBIGINT",
+        "UTINYINT",
+        "STRUCT(a INT, b VARCHAR)",
+        "MAP(VARCHAR, INT)",
+        "UNION(n INT, s VARCHAR)",
+    ],
+}
+
+
+@st.composite
+def type_names(draw: st.DrawFn, dialect: str) -> str:
+    scalar = st.sampled_from(SCALAR_TYPES + DIALECT_TYPES[dialect])
+    name = draw(scalar)
+    for _ in range(draw(st.integers(0, 2))):
+        wrap = draw(st.sampled_from(["[]", "[3]", " ARRAY", " MULTISET", "row"]))
+        name = f"ROW(a {name}, b {draw(scalar)})" if wrap == "row" else f"{name}{wrap}"
+    return name
+
+
+def _names(node: ast.AST) -> Iterator[str]:
+    """The dotted names a type expression uses: `typing.Any`, `list`, ..."""
+    if isinstance(node, ast.Attribute):
+        yield ast.unparse(node)
+        return
+    if isinstance(node, ast.Name):
+        yield node.id
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _names(child)
+
+
+ALLOWED = set(_python_types()) | {"list", "dict", "tuple", "typing.Literal", "None"}
+
+
+@FUZZ
+@given(
+    st.sampled_from(sorted(DIALECT_TYPES)).flatmap(lambda d: st.tuples(st.just(d), type_names(d)))
+)
+def test_type_names_map_to_valid_python_types(case: tuple[str, str]) -> None:
+    from sqlty._core import parse_error
+
+    dialect, name = case
+    query = f"SELECT CAST(x AS {name}) AS c"
+    if parse_error(query, dialect=dialect) is not None:
+        return
+    columns = core.analyze_select(query, dialect=dialect)
+    assert columns is not None, f"{dialect}: {query} parses but is not analyzed"
+    python_type = columns[0].python_type
+    if python_type is None:
+        return
+    tree = ast.parse(python_type, mode="eval")
+    unknown = set(_names(tree)) - ALLOWED
+    assert not unknown, f"{dialect}: {name} -> {python_type} uses {unknown}"
