@@ -2,7 +2,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BIGINT",
@@ -17,7 +17,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BINARY",
@@ -32,7 +32,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BLOB",
@@ -47,7 +47,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BOOLEAN",
@@ -62,7 +62,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "CHAR",
@@ -77,7 +77,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "CLOB",
@@ -92,7 +92,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DATE",
@@ -107,7 +107,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DATETIME",
@@ -122,7 +122,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DECIMAL",
@@ -137,7 +137,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DOUBLE",
@@ -152,7 +152,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DOUBLE PRECISION",
@@ -167,7 +167,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIMESTAMP WITHOUT TIME ZONE",
@@ -182,7 +182,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "FLOAT",
@@ -197,7 +197,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INTEGER",
@@ -212,7 +212,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INTERVAL",
@@ -227,22 +227,22 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "JSON",
-   "expected": "dict",
+   "expected": null,
    "provenance": "sqlalchemy.types.JSON",
    "schema": ""
   },
   "sqlty": "typing.Any",
   "nullable": false,
-  "outcome": "match"
+  "outcome": "not-comparable"
  },
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BYTEA",
@@ -257,7 +257,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NCHAR",
@@ -272,7 +272,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMERIC",
@@ -287,7 +287,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NVARCHAR",
@@ -302,7 +302,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "REAL",
@@ -317,7 +317,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "SMALLINT",
@@ -332,7 +332,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR",
@@ -347,7 +347,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TEXT",
@@ -362,7 +362,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIME WITHOUT TIME ZONE",
@@ -377,7 +377,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "UUID",
@@ -392,7 +392,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARBINARY",
@@ -407,22 +407,22 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BIT(1)",
-   "expected": null,
+   "expected": "sqlalchemy.dialects.postgresql.bitstring.BitString",
    "provenance": "sqlalchemy.dialects.postgresql.BIT",
    "schema": ""
   },
   "sqlty": "str",
   "nullable": false,
-  "outcome": "not-comparable"
+  "outcome": "mismatch"
  },
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "CIDR",
@@ -437,7 +437,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "CITEXT",
@@ -452,7 +452,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DATEMULTIRANGE",
@@ -467,7 +467,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DATERANGE",
@@ -482,7 +482,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "HSTORE",
@@ -497,7 +497,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INET",
@@ -512,7 +512,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INT4MULTIRANGE",
@@ -527,7 +527,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INT4RANGE",
@@ -542,7 +542,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INT8MULTIRANGE",
@@ -557,7 +557,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INT8RANGE",
@@ -572,22 +572,22 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "JSONB",
-   "expected": "dict",
+   "expected": null,
    "provenance": "sqlalchemy.dialects.postgresql.JSONB",
    "schema": ""
   },
   "sqlty": "typing.Any",
   "nullable": false,
-  "outcome": "match"
+  "outcome": "not-comparable"
  },
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "JSONPATH",
@@ -602,7 +602,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "MACADDR",
@@ -617,7 +617,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "MACADDR8",
@@ -632,7 +632,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "MONEY",
@@ -647,7 +647,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMMULTIRANGE",
@@ -662,7 +662,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMRANGE",
@@ -677,7 +677,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "OID",
@@ -692,7 +692,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "REGCLASS",
@@ -707,7 +707,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "REGCONFIG",
@@ -722,7 +722,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TSMULTIRANGE",
@@ -737,7 +737,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TSQUERY",
@@ -752,7 +752,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TSRANGE",
@@ -767,7 +767,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TSTZMULTIRANGE",
@@ -782,7 +782,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TSTZRANGE",
@@ -797,7 +797,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TSVECTOR",
@@ -812,7 +812,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "count(i)",
@@ -827,7 +827,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "sum(i)",
@@ -842,7 +842,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "sum(n)",
@@ -857,7 +857,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "avg(i)",
@@ -872,7 +872,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "min(s)",
@@ -887,7 +887,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "max(d)",
@@ -902,7 +902,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "now()",
@@ -917,7 +917,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "CURRENT_DATE",
@@ -932,7 +932,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "CURRENT_TIMESTAMP",
@@ -947,7 +947,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "LOCALTIME",
@@ -962,7 +962,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "CURRENT_USER",
@@ -977,7 +977,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "coalesce(i, b)",
@@ -992,7 +992,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "char_length(s)",
@@ -1007,7 +1007,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "lower(s)",
@@ -1022,7 +1022,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "upper(s)",
@@ -1037,7 +1037,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "concat(s, s)",
@@ -1052,7 +1052,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "random()",
@@ -1067,7 +1067,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "abs(n)",
@@ -1082,7 +1082,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "round(n)",
@@ -1097,7 +1097,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "percent_rank()",
@@ -1112,7 +1112,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "cume_dist()",
@@ -1127,7 +1127,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "rank()",
@@ -1142,7 +1142,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "row_number()",
@@ -1157,7 +1157,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "array_agg(i)",
@@ -1172,7 +1172,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i + i",
@@ -1187,7 +1187,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i + b",
@@ -1202,7 +1202,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i + n",
@@ -1217,7 +1217,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i + f",
@@ -1232,7 +1232,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i / CAST(i AS NUMERIC)",
@@ -1247,7 +1247,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i %% n",
@@ -1262,7 +1262,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "n * n",
@@ -1277,7 +1277,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "s || s",
@@ -1292,7 +1292,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i || s",
@@ -1307,7 +1307,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "d + iv",
@@ -1322,7 +1322,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "ts - ts",
@@ -1337,7 +1337,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "ts - iv",
@@ -1352,7 +1352,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i = i",
@@ -1367,7 +1367,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "s LIKE 'a%%'",
@@ -1382,7 +1382,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "bo AND bo",
@@ -1397,7 +1397,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "BIGINT",
@@ -1412,7 +1412,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "BINARY",
@@ -1427,7 +1427,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "BLOB",
@@ -1442,7 +1442,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "BOOL",
@@ -1457,7 +1457,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "CHAR",
@@ -1472,7 +1472,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "CLOB",
@@ -1487,7 +1487,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "DATE",
@@ -1502,7 +1502,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "DATETIME",
@@ -1517,7 +1517,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "DECIMAL",
@@ -1532,7 +1532,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "DOUBLE",
@@ -1547,7 +1547,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "DOUBLE PRECISION",
@@ -1562,7 +1562,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "ENUM()",
@@ -1577,7 +1577,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "FLOAT",
@@ -1592,7 +1592,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "INTEGER",
@@ -1607,22 +1607,22 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "JSON",
-   "expected": "dict",
+   "expected": null,
    "provenance": "sqlalchemy.types.JSON",
    "schema": ""
   },
   "sqlty": "typing.Any",
   "nullable": false,
-  "outcome": "match"
+  "outcome": "not-comparable"
  },
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "NATIONAL CHAR",
@@ -1637,7 +1637,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "NUMERIC",
@@ -1652,7 +1652,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "REAL",
@@ -1667,7 +1667,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "SMALLINT",
@@ -1682,7 +1682,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "TEXT",
@@ -1697,7 +1697,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "TIME",
@@ -1712,7 +1712,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "TIMESTAMP",
@@ -1727,7 +1727,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "UUID",
@@ -1742,7 +1742,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "CHAR(32)",
@@ -1757,7 +1757,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "BIT",
@@ -1772,7 +1772,37 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INET4",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.mysql.INET4",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.1.4",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INET6",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.mysql.INET6",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "LONGBLOB",
@@ -1787,7 +1817,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "LONGTEXT",
@@ -1802,7 +1832,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "MEDIUMBLOB",
@@ -1817,7 +1847,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "MEDIUMINT",
@@ -1832,7 +1862,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "MEDIUMTEXT",
@@ -1847,7 +1877,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "SET()",
@@ -1862,7 +1892,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "TINYBLOB",
@@ -1877,7 +1907,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "TINYINT",
@@ -1892,7 +1922,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "TINYTEXT",
@@ -1907,7 +1937,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "column",
    "sql": "YEAR",
@@ -1922,7 +1952,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "count(i)",
@@ -1937,7 +1967,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "sum(i)",
@@ -1952,7 +1982,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "sum(n)",
@@ -1967,7 +1997,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "avg(i)",
@@ -1982,7 +2012,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "min(s)",
@@ -1997,7 +2027,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "max(d)",
@@ -2012,7 +2042,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "now()",
@@ -2027,7 +2057,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "CURRENT_DATE",
@@ -2042,7 +2072,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "CURRENT_TIMESTAMP",
@@ -2057,7 +2087,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LOCALTIME",
@@ -2072,7 +2102,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "CURRENT_USER",
@@ -2087,7 +2117,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "coalesce(i, b)",
@@ -2102,7 +2132,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "char_length(s)",
@@ -2117,7 +2147,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "lower(s)",
@@ -2132,7 +2162,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "upper(s)",
@@ -2147,7 +2177,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "concat(s, s)",
@@ -2162,7 +2192,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "rand()",
@@ -2177,7 +2207,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "abs(n)",
@@ -2192,7 +2222,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "round(n)",
@@ -2207,7 +2237,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "percent_rank()",
@@ -2222,7 +2252,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "cume_dist()",
@@ -2237,7 +2267,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "rank()",
@@ -2252,7 +2282,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "row_number()",
@@ -2267,7 +2297,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "array_agg(i)",
@@ -2282,7 +2312,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i + i",
@@ -2297,7 +2327,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i + b",
@@ -2312,7 +2342,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i + n",
@@ -2327,7 +2357,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i + f",
@@ -2342,7 +2372,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i / i",
@@ -2357,7 +2387,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i %% n",
@@ -2372,7 +2402,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "n * n",
@@ -2387,7 +2417,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "concat(s, s)",
@@ -2402,7 +2432,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "concat(i, s)",
@@ -2417,7 +2447,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "d + iv",
@@ -2432,7 +2462,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ts - ts",
@@ -2447,7 +2477,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ts - iv",
@@ -2462,7 +2492,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i = i",
@@ -2477,7 +2507,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "s LIKE 'a%%'",
@@ -2492,7 +2522,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "bo = 1 AND bo = 1",
@@ -2507,7 +2537,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BIGINT",
@@ -2522,7 +2552,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BINARY",
@@ -2537,7 +2567,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BLOB",
@@ -2552,7 +2582,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BOOLEAN",
@@ -2567,7 +2597,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "CHAR",
@@ -2582,7 +2612,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "CLOB",
@@ -2597,7 +2627,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DATE",
@@ -2612,7 +2642,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DATETIME",
@@ -2627,7 +2657,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DECIMAL",
@@ -2642,7 +2672,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DOUBLE",
@@ -2657,7 +2687,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DOUBLE PRECISION",
@@ -2672,7 +2702,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "VARCHAR",
@@ -2687,7 +2717,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "FLOAT",
@@ -2702,7 +2732,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "INTEGER",
@@ -2717,22 +2747,22 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "JSON",
-   "expected": "dict",
+   "expected": null,
    "provenance": "sqlalchemy.types.JSON",
    "schema": ""
   },
   "sqlty": "typing.Any",
   "nullable": false,
-  "outcome": "match"
+  "outcome": "not-comparable"
  },
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "NCHAR",
@@ -2747,7 +2777,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "NUMERIC",
@@ -2762,7 +2792,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "NVARCHAR",
@@ -2777,7 +2807,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "REAL",
@@ -2792,7 +2822,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "SMALLINT",
@@ -2807,7 +2837,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TEXT",
@@ -2822,7 +2852,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TIME",
@@ -2837,7 +2867,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TIMESTAMP",
@@ -2852,7 +2882,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "UUID",
@@ -2867,7 +2897,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "CHAR(32)",
@@ -2882,7 +2912,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "VARBINARY",
@@ -2897,7 +2927,22 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.sqlite.JSONB",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "count(i)",
@@ -2912,7 +2957,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "sum(i)",
@@ -2927,7 +2972,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "sum(n)",
@@ -2942,7 +2987,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "avg(i)",
@@ -2957,7 +3002,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "min(s)",
@@ -2972,7 +3017,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "max(d)",
@@ -2987,7 +3032,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "CURRENT_TIMESTAMP",
@@ -3002,7 +3047,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "CURRENT_DATE",
@@ -3017,7 +3062,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "CURRENT_TIMESTAMP",
@@ -3032,7 +3077,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "LOCALTIME",
@@ -3047,7 +3092,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "CURRENT_USER",
@@ -3062,7 +3107,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "coalesce(i, b)",
@@ -3077,7 +3122,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "length(s)",
@@ -3092,7 +3137,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "lower(s)",
@@ -3107,7 +3152,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "upper(s)",
@@ -3122,7 +3167,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "concat(s, s)",
@@ -3137,7 +3182,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "random()",
@@ -3152,7 +3197,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "abs(n)",
@@ -3167,7 +3212,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "round(n)",
@@ -3182,7 +3227,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "percent_rank()",
@@ -3197,7 +3242,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "cume_dist()",
@@ -3212,7 +3257,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "rank()",
@@ -3227,7 +3272,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "row_number()",
@@ -3242,7 +3287,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "array_agg(i)",
@@ -3257,7 +3302,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i + i",
@@ -3272,7 +3317,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i + b",
@@ -3287,7 +3332,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i + n",
@@ -3302,7 +3347,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i + f",
@@ -3317,7 +3362,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i / (i + 0.0)",
@@ -3332,7 +3377,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i % n",
@@ -3347,7 +3392,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "n * n",
@@ -3362,7 +3407,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "s || s",
@@ -3377,7 +3422,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i || s",
@@ -3392,7 +3437,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "d + iv",
@@ -3407,7 +3452,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "ts - ts",
@@ -3422,7 +3467,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "ts - iv",
@@ -3437,7 +3482,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i = i",
@@ -3452,7 +3497,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "s LIKE 'a%'",
@@ -3467,7 +3512,7 @@
  {
   "row": {
    "source": "sqlalchemy",
-   "version": "2.0.43",
+   "version": "2.1.4",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "bo = 1 AND bo = 1",

@@ -1,19 +1,20 @@
-# sqlalchemy 2.0.43 vs sqlty
+# sqlalchemy 2.1.4 vs sqlty
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|
-| mysql | column | 29 | 2 | 2 | 2 |
+| mysql | column | 28 | 2 | 2 | 5 |
 | mysql | expression | 23 | 5 | 4 | 7 |
-| postgres | column | 29 | 0 | 0 | 25 |
+| postgres | column | 27 | 1 | 0 | 26 |
 | postgres | expression | 27 | 5 | 0 | 7 |
-| sqlite | column | 17 | 9 | 0 | 0 |
+| sqlite | column | 16 | 9 | 0 | 2 |
 | sqlite | expression | 12 | 14 | 6 | 7 |
-| **all** | | **137** | **35** | **12** | **48** |
+| **all** | | **133** | **36** | **12** | **54** |
 
 ## mismatch
 
 | Dialect | SQL | Expected | sqlty | Provenance |
 |---------|-----|----------|-------|------------|
+| postgres | `BIT(1)` | `sqlalchemy.dialects.postgresql.bitstring.BitString` | `str` | sqlalchemy.dialects.postgresql.BIT |
 | postgres | `LOCALTIME` | `datetime.datetime` | `datetime.time` | func.localtime |
 | postgres | `percent_rank()` | `decimal.Decimal` | `float` | func.percent_rank |
 | postgres | `cume_dist()` | `decimal.Decimal` | `float` | func.cume_dist |
