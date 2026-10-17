@@ -26,6 +26,7 @@ from sqlty._core import (
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
+from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
@@ -93,6 +94,51 @@ def json_shapes(
     except RuntimeError:
         return []
     return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
+
+
+class InferenceRule(NamedTuple):
+    """An inference rule of the engine: ``rust/crates/sqlty-sql/rules/``."""
+
+    id: str
+    reference: str
+    reasoning: str
+
+
+class ColumnRules(NamedTuple):
+    """The inference rules behind a result column's type and nullability."""
+
+    name: str
+    type_rule: InferenceRule | None
+    nullability_rule: InferenceRule | None
+
+
+def explain_select(
+    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
+) -> list[ColumnRules] | None:
+    """The inference rules behind each column of ``analyze_select``, or ``None`` when the
+    query returns no rows or doesn't parse.
+
+    A column gets the rules of its outermost operator or function call; a column
+    reference, a cast or a set operation has none. ``sqlty check --explain`` prints them.
+
+    Example:
+        >>> [rules] = explain_select("SELECT 1::SMALLINT + 1::SMALLINT AS total")
+        >>> rules.type_rule.id
+        'common.arithmetic.numbers'
+        >>> explain_select("SELECT 1::INTEGER AS one")
+        [ColumnRules(name='one', type_rule=None, nullability_rule=None)]
+    """
+    columns = _explain_select(sql, dialect=dialect, schema_sql=schema_sql)
+    if columns is None:
+        return None
+    return [
+        ColumnRules(
+            name,
+            InferenceRule(*type_rule) if type_rule else None,
+            InferenceRule(*nullability_rule) if nullability_rule else None,
+        )
+        for name, type_rule, nullability_rule in columns
+    ]
 
 
 class ParamInfo(NamedTuple):

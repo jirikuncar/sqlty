@@ -305,6 +305,42 @@ fn analyze_select(
     }))
 }
 
+/// `(id, reference, reasoning)` of an inference rule.
+type RuleTuple = (&'static str, &'static str, &'static str);
+
+/// `(name, type_rule, nullability_rule)` of a result column.
+type ColumnRulesTuple = (String, Option<RuleTuple>, Option<RuleTuple>);
+
+/// The inference rules behind each result column of a query, as `(name, type_rule,
+/// nullability_rule)` tuples whose rules are `(id, reference, reasoning)` or None.
+/// Returns None when the query returns no rows or doesn't parse.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
+fn explain_select(
+    py: Python<'_>,
+    sql: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+) -> Option<Vec<ColumnRulesTuple>> {
+    let dialect = dialect.0;
+    let columns = py.detach(|| {
+        analyzer::explain_select(sql, dialect, schema(schema_sql, dialect).as_deref())
+    })?;
+    let tuple = |rule: analyzer::RuleRef| (rule.id, rule.reference, rule.reasoning);
+    Some(
+        columns
+            .into_iter()
+            .map(|column| {
+                (
+                    column.name,
+                    column.type_rule.map(tuple),
+                    column.nullability_rule.map(tuple),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Result columns of a query as `(name, python_type, sql_type, nullable, json_shape)` tuples.
 ///
 /// `python_type` is never spelled `T | None` here, unlike in `analyze_select`: `nullable` says
@@ -746,6 +782,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(load_schema, m)?)?;
     m.add_class::<SchemaHandle>()?;
     m.add_function(wrap_pyfunction!(analyze_select, m)?)?;
+    m.add_function(wrap_pyfunction!(explain_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(composite_fields, m)?)?;

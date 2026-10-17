@@ -15,6 +15,7 @@ use crate::values;
 
 use super::dialect::SqlDialect;
 use super::dml::{dml_scope, returning};
+use super::explain::Explained;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
@@ -112,6 +113,8 @@ pub(super) struct Analyzer<'a> {
     /// What is known about NULLs in the SELECT being analyzed: null-extended relations
     /// and columns its conditions rule out as NULL.
     pub(super) facts: Facts,
+    /// Where the rules of projected columns go, when `--explain` asked for them.
+    pub(super) explain: Option<Explained>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -124,6 +127,7 @@ impl<'a> Analyzer<'a> {
             outer: Rc::default(),
             merged: Rc::default(),
             facts: Facts::default(),
+            explain: None,
         }
     }
 
@@ -326,6 +330,7 @@ impl<'a> Analyzer<'a> {
         from: Option<&[TableWithJoins]>,
     ) -> Inferred<Vec<Column>> {
         let mut columns = Vec::new();
+        let mut rules = self.explain.as_ref().map(|_| Vec::new());
         let mut lockstep_facts;
         let facts = if self.dialect == SqlDialect::Postgres && self.set_returning_items(items) > 1 {
             lockstep_facts = self.facts.clone();
@@ -348,6 +353,9 @@ impl<'a> Analyzer<'a> {
                 ),
                 SelectItem::Wildcard(_) => {
                     columns.extend(self.star(None, scope, from));
+                    if let Some(rules) = &mut rules {
+                        rules.resize(columns.len(), (None, None));
+                    }
                     continue;
                 }
                 SelectItem::QualifiedWildcard(
@@ -355,6 +363,9 @@ impl<'a> Analyzer<'a> {
                     _,
                 ) => {
                     columns.extend(self.star(Some(&object_name(name)), scope, from));
+                    if let Some(rules) = &mut rules {
+                        rules.resize(columns.len(), (None, None));
+                    }
                     continue;
                 }
                 SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
@@ -363,6 +374,9 @@ impl<'a> Analyzer<'a> {
                         "`<expression>.*` is not expanded",
                     );
                     columns.push(Column::unknown("*"));
+                    if let Some(rules) = &mut rules {
+                        rules.push((None, None));
+                    }
                     continue;
                 }
             };
@@ -394,6 +408,12 @@ impl<'a> Analyzer<'a> {
                 json,
                 values,
             });
+            if let Some(rules) = &mut rules {
+                rules.push(self.column_rules(expr, scope));
+            }
+        }
+        if let (Some(rules), Some(explain)) = (rules, &self.explain) {
+            explain.borrow_mut().insert(items.as_ptr() as usize, rules);
         }
         Ok(columns)
     }
