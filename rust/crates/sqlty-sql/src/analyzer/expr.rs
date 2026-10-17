@@ -145,9 +145,11 @@ impl<'a> Analyzer<'a> {
             _ => 0,
         };
         match self.schema.function(&table_key(name, self.dialect), count) {
-            Some(FunctionReturn::Scalar(typed) | FunctionReturn::SetOf(typed)) => {
-                typed.clone().into()
-            }
+            Some(
+                FunctionReturn::Scalar(typed)
+                | FunctionReturn::SetOf(typed)
+                | FunctionReturn::Row(typed, _),
+            ) => typed.clone().into(),
             _ => Typed::UNKNOWN,
         }
     }
