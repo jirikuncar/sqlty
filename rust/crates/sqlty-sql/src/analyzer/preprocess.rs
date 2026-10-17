@@ -84,10 +84,19 @@ fn iso_types(sql: &str) -> Cow<'_, str> {
     })
 }
 
-/// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`), then
-/// `INT3`/`MIDDLEINT` before `UNSIGNED`.
-pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 2]> = LazyLock::new(|| {
+/// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`),
+/// `INT3`/`MIDDLEINT` before `UNSIGNED`, and the `NATIONAL` spellings of `NCHAR` and
+/// `NVARCHAR`.
+pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
     [
+        (
+            Regex::new(r"(?i)\bNATIONAL\s+(?:VARCHAR|(?:CHAR|CHARACTER)\s+VARYING)\b").unwrap(),
+            "NVARCHAR",
+        ),
+        (
+            Regex::new(r"(?i)\bNATIONAL\s+(?:CHAR|CHARACTER)\b").unwrap(),
+            "NCHAR",
+        ),
         (
             Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
             " UNSIGNED",

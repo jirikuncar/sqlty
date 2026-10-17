@@ -182,6 +182,26 @@ reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (t
 reasoning = "Subtracting timestamps with time zone gives an interval."
 
 [[rule]]
+id = "postgres.datetime.timestamp-date-difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["TIMESTAMP", "TIMESTAMPTZ"]
+right = ["DATE"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval); 10.2 Operators (an implicit cast, here date to timestamp, picks that operator)"
+reasoning = "The date converts to a timestamp, so the difference is an interval."
+
+[[rule]]
+id = "postgres.datetime.date-timestamp-difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["DATE"]
+right = ["TIMESTAMP", "TIMESTAMPTZ"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval); 10.2 Operators (an implicit cast, here date to timestamp, picks that operator)"
+reasoning = "The date converts to a timestamp, so the difference is an interval."
+
+[[rule]]
 id = "postgres.datetime.intervals"
 operators = ["Plus", "Minus"]
 dialects = ["postgres"]

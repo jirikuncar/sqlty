@@ -70,8 +70,8 @@ SELECT * FROM items
 ## Temporal and other columns
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
-variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
-in the expansion; an `ENUM` column is a `typing.Literal` of its labels.
+variants collapse to `BLOB` and `TEXT`, and `REAL` is `DOUBLE`. `ENUM` and `SET`
+labels keep their case; an `ENUM` column is a `typing.Literal` of its labels.
 Types follow PyMySQL: `BIT(n)` and spatial types such as `POINT` are `bytes`, and
 a `SET` is the `str` of its comma-separated members.
 
@@ -104,8 +104,8 @@ SELECT * FROM items
 -- columns: b: bytes | None (BIT(8))
 -- columns: c: datetime.datetime | None (DATETIME(6))
 -- columns: d: datetime.datetime | None (TIMESTAMPTZ)
--- columns: e: typing.Literal['x', 'y'] | None (ENUM('X', 'Y'))
--- columns: f: str | None (SET('X', 'Y'))
+-- columns: e: typing.Literal['x', 'y'] | None (ENUM('x', 'y'))
+-- columns: f: str | None (SET('x', 'y'))
 -- columns: g: typing.Any (JSON)
 -- columns: h: bytes | None (BLOB)
 -- columns: i: str | None (TEXT)

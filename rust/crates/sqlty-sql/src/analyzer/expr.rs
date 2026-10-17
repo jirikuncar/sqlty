@@ -193,6 +193,18 @@ impl<'a> Analyzer<'a> {
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL", self.dialect))
             }
+            // MySQL reads a bare `CURRENT_USER`, and PostgreSQL `CURRENT_ROLE`, reserved
+            // words both, as functions without parentheses.
+            Expr::Identifier(ident)
+                if ident.quote_style.is_none()
+                    && matches!(
+                        (self.dialect, ident.value.to_ascii_lowercase().as_str()),
+                        (SqlDialect::MySql, "current_user")
+                            | (SqlDialect::Postgres, "current_role")
+                    ) =>
+            {
+                Ok(from_sql_type("TEXT", self.dialect))
+            }
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
