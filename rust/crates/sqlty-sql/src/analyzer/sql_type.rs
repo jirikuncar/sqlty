@@ -45,6 +45,45 @@ pub(crate) enum SqlType {
     Unmapped(String),
 }
 
+/// Built-in PostgreSQL types sqlty has no Python type for: ranges and multiranges, which
+/// psycopg loads as its own `Range`, and the geometric and snapshot types.
+const UNMAPPED_BUILTINS: [&str; 21] = [
+    "INT4RANGE",
+    "INT8RANGE",
+    "NUMRANGE",
+    "TSRANGE",
+    "TSTZRANGE",
+    "DATERANGE",
+    "INT4MULTIRANGE",
+    "INT8MULTIRANGE",
+    "NUMMULTIRANGE",
+    "TSMULTIRANGE",
+    "TSTZMULTIRANGE",
+    "DATEMULTIRANGE",
+    "POINT",
+    "LINE",
+    "LSEG",
+    "BOX",
+    "PATH",
+    "POLYGON",
+    "CIRCLE",
+    "PG_LSN",
+    "PG_SNAPSHOT",
+];
+
+/// Whether `dt` is a type the dialect itself defines that has no Python type: unlike a
+/// name the schema may declare, it is unmapped with or without a schema.
+pub(crate) fn is_unmapped_builtin(dt: &DataType, dialect: SqlDialect) -> bool {
+    match SqlType::of(dt, dialect) {
+        SqlType::Unmapped(_) => true,
+        SqlType::Scalar(name) => {
+            let base = name.split('(').next().unwrap_or_default();
+            dialect == SqlDialect::Postgres && UNMAPPED_BUILTINS.contains(&base)
+        }
+        _ => false,
+    }
+}
+
 /// Canonical spelling of a SQL type, e.g. `INTEGER` -> `INT`, `INT[]` -> `ARRAY<INT>`.
 pub(crate) fn canonical_type(dt: &DataType, dialect: SqlDialect) -> String {
     SqlType::of(dt, dialect).to_string()

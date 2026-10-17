@@ -17,6 +17,7 @@ use super::names::{split_access, table_key};
 use super::operators::{category, common_of, common_type, operand_type, type_base};
 use super::query::{Analyzer, Column};
 use super::scope::Scope;
+use super::sql_type::is_unmapped_builtin;
 use super::typed::Typed;
 use super::{decimal_type, Inferred};
 
@@ -262,7 +263,8 @@ impl<'a> Analyzer<'a> {
             None => from_sql_type(&sql_type, self.dialect),
         };
         if !typed.is_known() && self.diag.enabled() {
-            if self.schema.is_empty() || self.defines_type(data_type) {
+            let builtin = is_unmapped_builtin(data_type, self.dialect);
+            if (self.schema.is_empty() && !builtin) || self.defines_type(data_type) {
                 self.diag.explain_silently();
             } else {
                 self.diag.record(
