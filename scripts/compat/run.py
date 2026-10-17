@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from harness import run  # noqa: E402
 
-SOURCES = {"sqlalchemy": "sqlalchemy_rows"}
+SOURCES = {"sqlalchemy": "sqlalchemy_rows", "drivers": "drivers"}
 
 
 def main(argv: list[str]) -> int:

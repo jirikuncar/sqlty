@@ -136,6 +136,9 @@ def _same(sqlty: str, expected: str) -> bool:
         return True
     if "[" not in expected and sqlty.split("[", 1)[0] == expected:
         return True
+    # An observed value's type is one member of a union; an `int` is a valid `float`.
+    if expected in sqlty.split(" | ") or (expected, sqlty) == ("int", "float"):
+        return True
     if sqlty.startswith("typing.Literal["):
         literal = sqlty.removeprefix("typing.Literal[")
         return expected == ("str" if literal[:1] in "'\"" else "int")
