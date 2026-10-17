@@ -22,6 +22,7 @@ nav = [
     { "Schema inference" = "guide/schema-inference.md" },
     { "Name diagnostics" = "guide/name-diagnostics.md" },
     { "Breaking schema changes" = "guide/breaking-changes.md" },
+    { "Drivers and ORMs" = "guide/drivers-and-orms.md" },
     { "Untyped queries" = "guide/untyped.md" },
     { "Row types" = "guide/row-types.md" },
     { "JSON shapes" = "guide/json-shapes.md" },
