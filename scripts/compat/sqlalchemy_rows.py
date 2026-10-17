@@ -48,6 +48,9 @@ def _python(type_engine: object) -> str | None:
         python = type_engine.python_type  # type: ignore[attr-defined]
     except NotImplementedError:
         return None
+    # SQLAlchemy 2.1 says `object` where 2.0 raised: it has no Python type either way.
+    if python is object:
+        return None
     module = python.__module__
     return python.__name__ if module == "builtins" else f"{module}.{python.__qualname__}"
 
