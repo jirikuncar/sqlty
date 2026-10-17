@@ -29,6 +29,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...) or one of the results below |
 | `nullability` | no | One of the nullabilities below; `operands` by default |
 | `shadows` | no | Ids of later rules of the same tier this one takes precedence over where both match |
+| `left-parameter`, `right-parameter` | no | The SQL type (`TEXT`, `ARRAY<TEXT>`, ...) a placeholder on that side gets when the other operand matches its own `left` or `right` |
 | `reference` | yes | The documentation the rule follows: product, version, section |
 | `reasoning` | yes | Why, in one sentence |
 
@@ -38,6 +39,24 @@ Operand types are the canonical names the analyzer gives (`INT`, `BIGINT`,
 `@text`, `@json`, `@address` (`INET`, `CIDR`), `@array`. A string literal is
 `TEXT`, a number literal `INT`, `DECIMAL` or `DOUBLE`. In arithmetic, a
 placeholder or `NULL` operand takes the other operand's type.
+
+A parameter type types a placeholder operand, as `analyze_params` reports it: in
+`doc -> $1` with a `jsonb` `doc`, the rule below makes `$1` text. Only the other
+operand's predicate is checked, so one rule can give both sides' parameter types
+(`jsonb @> jsonb`). The first rule of the operator that gives a type wins.
+
+```toml
+[[rule]]
+id = "postgres.json.arrow-jsonb"
+operator = "Arrow"
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "JSONB"
+nullability = "nullable"
+right-parameter = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb -> text → jsonb)"
+reasoning = "`->` on a jsonb value gives jsonb; a missing member or element gives NULL."
+```
 
 | `type` | Result |
 |--------|--------|
@@ -118,8 +137,7 @@ The operands are typed only when a rule of the operator lists operand types.
 
 `analyzer/operators.rs` keeps what rules cannot express, each documented where
 it lives: MySQL `date ± INTERVAL n unit` (the unit decides between `DATE` and
-`DATETIME`), and until their ports the JSON accessors (`->`, `#>`, `#-`) and
-date, time and interval arithmetic. Rules with `type = "@code"` give those
+`DATETIME`), and until its port date, time and interval arithmetic. Rules with `type = "@code"` give those
 operators their nullability.
 
 ## Adding a rule

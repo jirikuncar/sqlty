@@ -1,0 +1,123 @@
+# PostgreSQL's json and jsonb operators. A placeholder next to a JSON value gets the
+# type the operator's other form takes: text for a key, text[] for a path.
+
+[[rule]]
+id = "postgres.json.arrow-json"
+operator = "Arrow"
+dialects = ["postgres"]
+left = ["JSON"]
+type = "JSON"
+nullability = "nullable"
+right-parameter = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json -> text → json, json -> integer → json)"
+reasoning = "`->` on a json value gives json; a missing member or element gives NULL."
+
+[[rule]]
+id = "postgres.json.arrow-jsonb"
+operator = "Arrow"
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "JSONB"
+nullability = "nullable"
+right-parameter = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb -> text → jsonb, jsonb -> integer → jsonb)"
+reasoning = "`->` on a jsonb value gives jsonb; a missing member or element gives NULL."
+
+[[rule]]
+id = "postgres.json.arrow"
+operator = "Arrow"
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb -> text → jsonb)"
+reasoning = "`->` on a value of unknown type is read as jsonb's, the type PostgreSQL code mostly stores."
+
+[[rule]]
+id = "postgres.json.hash-arrow-json"
+operator = "HashArrow"
+dialects = ["postgres"]
+left = ["JSON"]
+type = "JSON"
+nullability = "nullable"
+right-parameter = "ARRAY<TEXT>"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json #> text[] → json)"
+reasoning = "`#>` on a json value gives json; a missing path gives NULL."
+
+[[rule]]
+id = "postgres.json.hash-arrow-jsonb"
+operator = "HashArrow"
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "JSONB"
+nullability = "nullable"
+right-parameter = "ARRAY<TEXT>"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb #> text[] → jsonb)"
+reasoning = "`#>` on a jsonb value gives jsonb; a missing path gives NULL."
+
+[[rule]]
+id = "postgres.json.hash-arrow"
+operator = "HashArrow"
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb #> text[] → jsonb)"
+reasoning = "`#>` on a value of unknown type is read as jsonb's, the type PostgreSQL code mostly stores."
+
+[[rule]]
+id = "postgres.json.hash-minus-json"
+operator = "HashMinus"
+dialects = ["postgres"]
+left = ["@json"]
+type = "JSONB"
+right-parameter = "ARRAY<TEXT>"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb #- text[] → jsonb)"
+reasoning = "`#-` deletes the value at a path and gives the jsonb that remains; a missing path leaves it whole."
+
+[[rule]]
+id = "postgres.json.hash-minus"
+operator = "HashMinus"
+dialects = ["postgres"]
+type = "JSONB"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb #- text[] → jsonb)"
+reasoning = "`#-` exists only for jsonb, so it gives jsonb."
+
+[[rule]]
+id = "postgres.json.minus"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "JSONB"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb - text → jsonb, jsonb - text[] → jsonb, jsonb - integer → jsonb)"
+reasoning = "`-` deletes keys or an element from a jsonb value and gives the jsonb that remains."
+
+[[rule]]
+id = "postgres.json.key-exists"
+operator = "Question"
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "BOOLEAN"
+right-parameter = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb ? text → boolean)"
+reasoning = "`?` tests whether a key or array element exists."
+
+[[rule]]
+id = "postgres.json.keys-exist"
+operators = ["QuestionPipe", "QuestionAnd"]
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "BOOLEAN"
+right-parameter = "ARRAY<TEXT>"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb ?| text[] → boolean, jsonb ?& text[] → boolean)"
+reasoning = "`?|` and `?&` test whether any or all of the keys exist."
+
+[[rule]]
+id = "postgres.json.contains"
+operators = ["AtArrow", "ArrowAt"]
+dialects = ["postgres"]
+left = ["JSONB"]
+right = ["JSONB"]
+type = "BOOLEAN"
+left-parameter = "JSONB"
+right-parameter = "JSONB"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb @> jsonb → boolean, jsonb <@ jsonb → boolean)"
+reasoning = "`@>` and `<@` test containment between two jsonb values, so a placeholder next to one is jsonb."

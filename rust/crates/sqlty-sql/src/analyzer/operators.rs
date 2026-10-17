@@ -13,8 +13,8 @@ use super::{Inferred, DECIMAL};
 
 impl Analyzer<'_> {
     /// Result type of `left op right`: an inference rule's (`rules/`), else the code's for
-    /// what rules cannot express: MySQL date arithmetic with an interval's unit, the JSON
-    /// accessors, and date, time and interval arithmetic.
+    /// what rules cannot express: MySQL date arithmetic with an interval's unit, and date,
+    /// time and interval arithmetic.
     pub(super) fn binary_op(
         &self,
         left: &Expr,
@@ -67,8 +67,8 @@ impl Analyzer<'_> {
         })
     }
 
-    /// The type of what no inference rule types: the JSON accessors, and date, time and
-    /// interval arithmetic. `operands` are the rule operands when a rule read them.
+    /// The type of what no inference rule types: date, time and interval arithmetic.
+    /// `operands` are the rule operands when a rule read them.
     fn typed_by_code(
         &self,
         op: &BinaryOperator,
@@ -78,19 +78,7 @@ impl Analyzer<'_> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
-        let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
         match op {
-            // The element as JSON: text in SQLite, a `JSON` value in MySQL.
-            Arrow if self.dialect == SqlDialect::Sqlite => sql("TEXT"),
-            Arrow if self.dialect == SqlDialect::MySql => sql("JSON"),
-            Arrow | HashArrow | HashMinus if self.dialect == SqlDialect::Postgres => {
-                let json = self.expr(left, scope)?.sql() == Some("JSON");
-                sql(if json && *op != HashMinus {
-                    "JSON"
-                } else {
-                    "JSONB"
-                })
-            }
             Plus | Minus | Multiply | Divide | Modulo => {
                 let (l, r) = match operands {
                     Some(operands) => operands,
@@ -112,9 +100,8 @@ impl Analyzer<'_> {
         right: &Expr,
         scope: &Scope,
     ) -> Inferred<(Typed, Typed)> {
-        use BinaryOperator::*;
         let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
-        if !matches!(op, Plus | Minus | Multiply | Divide | Modulo) {
+        if !is_arithmetic(op) {
             return Ok((l, r));
         }
         let wild = |expr: &Expr| matches!(expr, Expr::Value(v) if matches!(v.value, Value::Null | Value::Placeholder(_)));
@@ -137,17 +124,25 @@ impl Analyzer<'_> {
         if rules.is_empty() {
             return Ok(None);
         }
-        let typed = if rules.iter().any(BinaryRule::reads_operands) {
-            Some(self.rule_operands(left, op, right, scope)?)
-        } else {
-            None
+        let reads_left = rules.iter().any(BinaryRule::reads_left);
+        let reads_right = rules.iter().any(BinaryRule::reads_right);
+        // Arithmetic reads both sides: a placeholder takes the other operand's type.
+        if reads_left && reads_right || (reads_left || reads_right) && is_arithmetic(op) {
+            let typed = self.rule_operands(left, op, right, scope)?;
+            let (l, r) = (rule_type(&typed.0), rule_type(&typed.1));
+            let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
+            return Ok(found.map(|rule| (rule, Some(typed.clone()))));
+        }
+        let side = |read: bool, expr: &Expr| -> Inferred<Option<Typed>> {
+            read.then(|| self.expr(expr, scope)).transpose()
         };
-        let (l, r) = match &typed {
-            Some((l, r)) => (rule_type(l), rule_type(r)),
-            None => (None, None),
-        };
+        let (l, r) = (side(reads_left, left)?, side(reads_right, right)?);
+        let (l, r) = (
+            l.as_ref().and_then(rule_type),
+            r.as_ref().and_then(rule_type),
+        );
         let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
-        Ok(found.map(|rule| (rule, typed.clone())))
+        Ok(found.map(|rule| (rule, None)))
     }
 }
 
@@ -228,6 +223,11 @@ pub(super) fn mysql_date_add(
     }
 }
 
+fn is_arithmetic(op: &BinaryOperator) -> bool {
+    use BinaryOperator::*;
+    matches!(op, Plus | Minus | Multiply | Divide | Modulo)
+}
+
 /// Result type of `left op right` for numbers (promoted to the wider type), and in
 /// PostgreSQL for dates, times, timestamps and intervals; a placeholder or `NULL` operand
 /// takes the other's type.
@@ -246,8 +246,6 @@ pub(super) fn arithmetic(
     let temporal = |ty: Option<&str>| matches!(ty, Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ"));
     let integer = |ty: &str| numeric_rank(ty).is_some_and(|rank| rank <= 2);
     match (l, r) {
-        // `jsonb - key`, `jsonb - index` and `jsonb - keys`.
-        (Some("JSONB"), _) if *op == Minus => Some("JSONB".to_string()),
         (Some("INET" | "CIDR"), Some("INET" | "CIDR")) if *op == Minus => {
             Some("BIGINT".to_string())
         }

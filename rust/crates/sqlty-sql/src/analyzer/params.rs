@@ -24,6 +24,7 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
+use super::inference::binary_rules;
 use super::literals::strip;
 use super::names::{object_name, table_key};
 use super::nullability::Nullability;
@@ -516,6 +517,12 @@ impl<'a> Analyzer<'a> {
             return;
         };
         let other_type = operand_type(&typed);
+        let ruled = binary_rules(op)
+            .iter()
+            .find_map(|rule| rule.parameter(self.dialect, left, other_type));
+        if let Some(sql_type) = ruled {
+            return out.add(index, self.param_typed(sql_type), Nullability::Unknown);
+        }
         let array = typed.sql().is_some_and(|sql| array_element(sql).is_some());
         let sql_type = match (op, other_type) {
             (Plus | Minus | Multiply | Divide | Modulo, Some(ty)) if numeric_rank(ty).is_some() => {
@@ -528,15 +535,8 @@ impl<'a> Analyzer<'a> {
             (StringConcat, _) if array => {
                 return out.add(index, typed, Nullability::Unknown);
             }
-            (AtArrow | ArrowAt | PGOverlap, Some("JSONB")) => "JSONB",
             (AtArrow | ArrowAt | PGOverlap, _) if array => {
                 return out.add(index, typed, Nullability::Unknown);
-            }
-            (Question, Some("JSONB")) if !left => "TEXT",
-            (QuestionPipe | QuestionAnd, Some("JSONB")) if !left => "ARRAY<TEXT>",
-            (Arrow | LongArrow, Some("JSON" | "JSONB")) if !left => "TEXT",
-            (HashArrow | HashLongArrow | HashMinus, Some("JSON" | "JSONB")) if !left => {
-                "ARRAY<TEXT>"
             }
             (PGBitwiseShiftLeft | PGBitwiseShiftRight | PGOverlap, Some("INET" | "CIDR")) => "INET",
             (Custom(name), Some("INET" | "CIDR")) if matches!(name.as_str(), "<<=" | ">>=") => {

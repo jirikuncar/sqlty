@@ -1,6 +1,15 @@
 # SQLite's JSON accessors.
 
 [[rule]]
+id = "sqlite.json.arrow"
+operator = "Arrow"
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "nullable"
+reference = "SQLite documentation, JSON Functions And Operators, 4.6 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
+reasoning = "`->` gives the text JSON representation of the subcomponent; a missing path gives NULL."
+
+[[rule]]
 id = "sqlite.json.long-arrow"
 operator = "LongArrow"
 dialects = ["sqlite"]

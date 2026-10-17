@@ -1,4 +1,33 @@
-# JSON accessors that give text, in every dialect that has them.
+# JSON accessors in every dialect that has them. A placeholder next to a JSON value is
+# its key or path.
+
+[[rule]]
+id = "common.json.arrow"
+operators = ["Arrow", "HashArrow"]
+type = "@unknown"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json -> text, json #> text[])"
+reasoning = "`->` and `#>` give JSON in a form each dialect defines; a missing member or path gives NULL."
+
+[[rule]]
+id = "common.json.long-arrow-json"
+operator = "LongArrow"
+left = ["@json"]
+type = "TEXT"
+nullability = "nullable"
+right-parameter = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json ->> text → text); MySQL 8.4 Reference Manual, 14.17.3 Functions That Search JSON Values (->>)"
+reasoning = "`->>` on a JSON value takes a key or path as text, and extracts the member as text."
+
+[[rule]]
+id = "common.json.hash-long-arrow-json"
+operator = "HashLongArrow"
+left = ["@json"]
+type = "TEXT"
+nullability = "nullable"
+right-parameter = "ARRAY<TEXT>"
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json #>> text[] → text)"
+reasoning = "`#>>` on a JSON value takes a path as text[], and extracts the value at it as text."
 
 [[rule]]
 id = "common.json.long-arrow"

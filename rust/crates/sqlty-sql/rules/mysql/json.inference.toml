@@ -1,0 +1,21 @@
+# MySQL's JSON accessors.
+
+[[rule]]
+id = "mysql.json.arrow-json"
+operator = "Arrow"
+dialects = ["mysql"]
+left = ["@json"]
+type = "JSON"
+nullability = "nullable"
+right-parameter = "TEXT"
+reference = "MySQL 8.4 Reference Manual, 14.17.3 Functions That Search JSON Values (column->path, the same as JSON_EXTRACT(column, path))"
+reasoning = "`->` extracts a JSON value at a path, given as a string; a path that matches nothing gives NULL."
+
+[[rule]]
+id = "mysql.json.arrow"
+operator = "Arrow"
+dialects = ["mysql"]
+type = "JSON"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.17.3 Functions That Search JSON Values (column->path, the same as JSON_EXTRACT(column, path))"
+reasoning = "`->` extracts a JSON value; a path that matches nothing gives NULL."

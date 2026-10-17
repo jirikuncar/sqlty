@@ -167,6 +167,8 @@ impl From<FunctionDef> for RuleDef {
             result: def.result,
             nullability: def.nullability,
             shadows: def.shadows,
+            left_parameter: None,
+            right_parameter: None,
         }
     }
 }
@@ -194,6 +196,12 @@ struct RuleDef {
     /// Ids of later rules of the same tier this one takes precedence over where both match.
     #[serde(default)]
     shadows: Vec<String>,
+    /// The SQL type a placeholder on the left gets when the right operand matches `right`.
+    #[serde(default, rename = "left-parameter")]
+    left_parameter: Option<String>,
+    /// The SQL type a placeholder on the right gets when the left operand matches `left`.
+    #[serde(default, rename = "right-parameter")]
+    right_parameter: Option<String>,
 }
 
 fn operands() -> String {
@@ -225,8 +233,13 @@ struct Rule {
 }
 
 impl Rule {
-    fn outcome(&self) -> (&str, &str) {
-        (&self.def.result, &self.def.nullability)
+    fn outcome(&self) -> (&str, &str, Option<&str>, Option<&str>) {
+        (
+            &self.def.result,
+            &self.def.nullability,
+            self.def.left_parameter.as_deref(),
+            self.def.right_parameter.as_deref(),
+        )
     }
 }
 
@@ -338,6 +351,10 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     {
         return fail(format!("unknown result type {:?}", def.result));
     }
+    let mut parameters = def.left_parameter.iter().chain(&def.right_parameter);
+    if let Some(parameter) = parameters.find(|ty| !is_parameter_type(ty)) {
+        return fail(format!("unknown parameter type {parameter:?}"));
+    }
     let nullabilities: &[(&str, &str)] = if function {
         &FUNCTION_NULLABILITIES
     } else {
@@ -369,6 +386,17 @@ fn is_operator(name: &str) -> bool {
             name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                 && name.chars().all(|c| c.is_ascii_alphanumeric())
         }
+    }
+}
+
+/// A SQL type, or an array of one (`ARRAY<TEXT>`), as a parameter may have.
+fn is_parameter_type(name: &str) -> bool {
+    match name
+        .strip_prefix("ARRAY<")
+        .and_then(|rest| rest.strip_suffix('>'))
+    {
+        Some(element) => is_sql_type(element),
+        None => is_sql_type(name),
     }
 }
 
@@ -641,7 +669,8 @@ fn generate_binary(rules: &[&Rule]) -> String {
             out,
             "    // rule {} ({}), {op}\n    BinaryRule {{\n        id: {:?},\n        reference: {:?},\n        \
              reasoning: {:?},\n        dialects: &[{}],\n        left: {},\n        right: {},\n        \
-             result: {result},\n        nullability: {nullability},\n    }},",
+             result: {result},\n        nullability: {nullability},\n        left_parameter: {:?},\n        \
+             right_parameter: {:?},\n    }},",
             def.id,
             rule.file,
             def.id,
@@ -650,6 +679,8 @@ fn generate_binary(rules: &[&Rule]) -> String {
             rule.dialects.join(", "),
             operand(&rule.left),
             operand(&rule.right),
+            def.left_parameter,
+            def.right_parameter,
         );
     }
     out.push_str("];\n\n");

@@ -257,3 +257,26 @@ fn function_rules_name_functions_and_their_own_results() {
         assert!(message.contains(expected), "{message}");
     }
 }
+
+#[test]
+fn parameter_types_are_generated_and_checked() {
+    let rule = VALID.replace(
+        "operator =",
+        "right-parameter = \"ARRAY<TEXT>\"\noperator =",
+    );
+    let code = compile_one("rules/common/a.inference.toml", &rule).unwrap();
+    assert!(code.contains("left_parameter: None"));
+    assert!(code.contains(r#"right_parameter: Some("ARRAY<TEXT>")"#));
+    let unknown = VALID.replace("operator =", "left-parameter = \"STRING\"\noperator =");
+    let message = error("rules/common/a.inference.toml", &unknown);
+    assert!(
+        message.contains("unknown parameter type \"STRING\""),
+        "{message}"
+    );
+    let function = FUNCTION.replace("function =", "right-parameter = \"TEXT\"\nfunction =");
+    let message = error("rules/common/a.inference.toml", &function);
+    assert!(
+        message.contains("unknown field `right-parameter`"),
+        "{message}"
+    );
+}
