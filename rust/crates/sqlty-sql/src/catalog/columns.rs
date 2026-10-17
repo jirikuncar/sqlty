@@ -20,6 +20,9 @@ pub(super) struct RawColumn {
     pub(super) ident: String,
     pub(super) ty: DataType,
     pub(super) not_null: bool,
+    /// An INSERT that leaves it out still gives it a value: a `DEFAULT`, `serial`,
+    /// identity, generated or auto-increment column, or SQLite's rowid.
+    pub(super) has_default: bool,
     /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
     pub(super) primary_key: bool,
     /// The values a `CHECK` constraint limits the column to, when it lists them.
@@ -95,6 +98,21 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         .options
         .iter()
         .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)));
+    let has_default = serial
+        || (dialect == SqlDialect::Sqlite && primary_key && is_rowid_type(&column.data_type))
+        || column.options.iter().any(|option| match &option.option {
+            ColumnOption::Default(_)
+            | ColumnOption::Generated { .. }
+            | ColumnOption::Identity(_)
+            | ColumnOption::Materialized(_)
+            | ColumnOption::Alias(_) => true,
+            ColumnOption::DialectSpecific(tokens) => tokens.iter().any(|token| {
+                let word = token.to_string();
+                word.eq_ignore_ascii_case("AUTO_INCREMENT")
+                    || word.eq_ignore_ascii_case("AUTOINCREMENT")
+            }),
+            _ => false,
+        });
     let name = fold(&column.name, dialect);
     // MySQL before 8.0.16 parses `CHECK` and ignores it.
     let collated = column.options.iter().any(
@@ -119,6 +137,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         },
         ty: column.data_type.clone(),
         not_null,
+        has_default,
         primary_key,
         values,
         collated,

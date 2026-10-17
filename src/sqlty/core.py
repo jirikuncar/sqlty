@@ -139,11 +139,12 @@ def analyze_params(
 def query_diagnostics(
     sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
 ) -> list[tuple[str, str]]:
-    """Why a query has untyped columns, as ``(rule, message)`` pairs.
+    """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
 
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
-    ``unknown-function``, ``unknown-type`` and ``unsupported-syntax``. Tables and
-    columns are only judged when ``schema_sql`` defines some tables.
+    ``unknown-function``, ``unknown-type``, ``unsupported-syntax`` and
+    ``insert-missing-column``. Tables and columns are only judged when ``schema_sql``
+    defines some tables.
 
     Example:
         >>> query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")

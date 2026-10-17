@@ -36,6 +36,7 @@ stale-type = "error"
 | [`unknown-function`](#unknown-function) | Names | ignore | no | Function whose result sqlty cannot type |
 | [`unknown-type`](#unknown-type) | Names | ignore | no | Cast or column type without a Python type |
 | [`unsupported-syntax`](#unsupported-syntax) | Names | ignore | no | Construct that parses but is not typed |
+| [`insert-missing-column`](#insert-missing-column) | Names | ignore | no | INSERT that leaves out a `NOT NULL` column without a default |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
@@ -549,8 +550,9 @@ counts such queries as unparsed whether or not the rule is enabled.
 
 ## Name rules
 
-These six rules explain why a result column is untyped: with all of them
-enabled and a schema configured, no column is left untyped without a diagnostic. They are off by
+The first six rules explain why a result column is untyped: with all of them
+enabled and a schema configured, no column is left untyped without a diagnostic.
+`insert-missing-column` checks what an `INSERT` writes. They are off by
 default because they report code that passes today. The
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to enable
 them. All but `unsupported-syntax` are only judged when a
@@ -588,6 +590,13 @@ Default: ignore. A cast target or schema column type with no Python type.
 Default: ignore. A construct that parses but that sqlty does not type: an
 expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
 of a table function. `NULL` and placeholders are not reported.
+
+### insert-missing-column
+
+Default: ignore. An `INSERT` with a column list (or MySQL's `INSERT ... SET`)
+that leaves out a schema column declared `NOT NULL` without a default. A
+`DEFAULT`, `serial`, identity, generated or auto-increment column, and SQLite's
+`INTEGER PRIMARY KEY`, get a value anyway.
 
 ## Rewrite rules
 

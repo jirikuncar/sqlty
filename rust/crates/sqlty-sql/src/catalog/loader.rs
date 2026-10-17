@@ -380,6 +380,15 @@ impl Loader {
                     .extend(nonnull_groups(&check.expr, self.dialect));
             }
             if let TableConstraint::PrimaryKey(pk) = constraint {
+                // SQLite fills a sole `INTEGER PRIMARY KEY`, the rowid, on INSERT.
+                if let ([key], SqlDialect::Sqlite) = (pk.columns.as_slice(), self.dialect) {
+                    if let Expr::Identifier(ident) = &key.column.expr {
+                        let name = fold(ident, self.dialect);
+                        if let Some(column) = table.columns.iter_mut().find(|c| c.name == name) {
+                            column.has_default |= is_rowid_type(&column.ty);
+                        }
+                    }
+                }
                 if loose_keys
                     && !(pk.columns.len() == 1
                         && column_named(&table.columns, &pk.columns[0].column.expr, self.dialect)

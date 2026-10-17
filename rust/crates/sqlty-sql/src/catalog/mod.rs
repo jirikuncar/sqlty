@@ -65,6 +65,9 @@ pub struct SchemaColumn {
     /// Declared `NOT NULL`, `PRIMARY KEY` or an identity / `serial` column. Not used for
     /// inference yet.
     pub not_null: bool,
+    /// Whether an INSERT that leaves the column out still gives it a value: a `DEFAULT`,
+    /// `serial`, identity, generated or auto-increment column, or SQLite's rowid.
+    pub has_default: bool,
     /// The labels of the enum the column has, `None` for other types.
     pub allowed_values: Option<Arc<[String]>>,
     /// The values of a `Literal` `python_type`, as data.
