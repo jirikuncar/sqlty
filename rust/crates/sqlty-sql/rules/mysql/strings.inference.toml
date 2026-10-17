@@ -1,0 +1,51 @@
+# MySQL string functions over binary strings, and the result type of ROUND and TRUNCATE.
+
+[[function]]
+id = "mysql.string.binary"
+functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "CONCAT", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE", "REGEXP_SUBSTR"]
+dialects = ["mysql"]
+argument = ["@binary"]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reasoning = "A string function of a binary string gives a binary string, which MySQL drivers return as bytes."
+
+[[function]]
+id = "mysql.aggregate.bit-binary"
+functions = ["BIT_AND", "BIT_OR", "BIT_XOR"]
+dialects = ["mysql"]
+argument = ["@binary"]
+type = "VARBINARY"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (BIT_AND(): binary-string arguments produce a binary string result)"
+reasoning = "Over binary strings the bit aggregates work bytewise and give a binary string."
+
+[[function]]
+id = "mysql.numeric.round-integer"
+functions = ["ROUND", "TRUNCATE"]
+dialects = ["mysql"]
+argument = ["@integer"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any integer type, the return type is always BIGINT; TRUNCATE() follows the same rules)"
+reasoning = "Rounding an integer gives a BIGINT."
+
+[[function]]
+id = "mysql.numeric.round-decimal"
+functions = ["ROUND", "TRUNCATE"]
+dialects = ["mysql"]
+argument = ["DECIMAL", "NUMERIC", "UDECIMAL"]
+type = "@argument"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is a DECIMAL value, the return type is also DECIMAL; TRUNCATE() follows the same rules)"
+reasoning = "Rounding a decimal gives a decimal."
+
+[[function]]
+id = "mysql.numeric.round-other"
+functions = ["ROUND", "TRUNCATE"]
+dialects = ["mysql"]
+argument = ["@known"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any floating-point type or of any non-numeric type, the return type is always DOUBLE; TRUNCATE() follows the same rules)"
+reasoning = "Rounding a float, a string or a date gives a DOUBLE."

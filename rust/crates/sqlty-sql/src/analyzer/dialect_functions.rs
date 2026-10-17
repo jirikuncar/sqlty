@@ -58,6 +58,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
             "CURRENT_USER",
             "SESSION_USER",
             "SYSTEM_USER",
+            "CURRENT_ROLE",
             "VERSION",
             "INET_NTOA",
             "INET6_NTOA",
@@ -68,7 +69,32 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("TEXT"),
     ),
-    (&["UUID_TO_BIN", "INET6_ATON"], Sql("VARBINARY")),
+    (
+        &[
+            "UUID_TO_BIN",
+            "INET6_ATON",
+            "UNHEX",
+            "COMPRESS",
+            "UNCOMPRESS",
+        ],
+        Sql("VARBINARY"),
+    ),
+    (
+        &["REGEXP_SUBSTR", "REGEXP_REPLACE", "COLLATION", "CHARSET"],
+        Sql("TEXT"),
+    ),
+    (&["REGEXP_INSTR", "REGEXP_LIKE"], Sql("BIGINT")),
+    (
+        &[
+            "ST_DISTANCE",
+            "ST_DISTANCE_SPHERE",
+            "ST_AREA",
+            "ST_LENGTH",
+            "ST_X",
+            "ST_Y",
+        ],
+        Sql("DOUBLE"),
+    ),
     (
         &[
             "NOW",

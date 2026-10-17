@@ -332,3 +332,11 @@ dialects = ["postgres"]
 type = "BOOLEAN"
 reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet <<= inet → boolean, inet >>= inet → boolean)"
 reasoning = "`<<=` and `>>=` test whether one network contains or equals the other."
+
+[[rule]]
+id = "postgres.range.adjacency"
+operators = ["Custom:-|-", "AndLt", "AndGt"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange -|- anyrange → boolean, anyrange &< anyrange → boolean, anyrange &> anyrange → boolean)"
+reasoning = "Range adjacency and extent tests are predicates."

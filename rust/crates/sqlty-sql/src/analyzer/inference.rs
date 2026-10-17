@@ -163,6 +163,8 @@ pub(crate) enum FunctionNullability {
     /// An aggregate's: NULL over no rows, unless the group is known to hold one (a plain
     /// `GROUP BY`), and as its argument is over the rows (`analyzer/nullability.rs`).
     Aggregate,
+    /// A scalar function's, as the analyzer's function table says: NULL when an argument is.
+    Strict,
 }
 
 /// An inference rule for a function call, by its first argument.

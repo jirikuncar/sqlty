@@ -16,6 +16,7 @@ source has no Python type for it).
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -109,7 +110,9 @@ def run(rows: list[Row]) -> Report:
             query = "SELECT c FROM t"
         else:
             schema = row.schema
-            query = f"SELECT {row.sql} AS x FROM t" if schema else f"SELECT {row.sql} AS x"
+            table = re.search(r"CREATE TABLE (\w+)", schema)
+            source = table.group(1) if table else "t"
+            query = f"SELECT {row.sql} AS x FROM {source}" if schema else f"SELECT {row.sql} AS x"
         try:
             columns = core.analyze_select(query, dialect=row.dialect, schema_sql=schema or None)
         except RuntimeError:
