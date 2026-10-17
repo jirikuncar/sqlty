@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+# `uv run` must not sync: that would build the extension again, through the release profile.
+env:
+  UV_NO_SYNC: "1"
+
 jobs:
   fuzz:
     name: Fuzz the analyzer
@@ -49,8 +53,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install the project (with Rust extension)
-        run: uv sync --all-groups
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
 
       - name: Build Rust extension
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml

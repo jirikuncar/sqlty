@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Each job builds the extension once, with `maturin develop` on a cached target dir;
+# `uv run` must not sync, which would build it again through the release profile.
+env:
+  UV_NO_SYNC: "1"
+
 concurrency:
   group: tests-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -53,16 +58,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build artifacts
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            rust/target
-            ~/.cargo/registry
-          key: rust-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-
+          workspaces: rust -> target
+          key: python-${{ matrix.python-version }}
+          # Pull requests restore main's cache; only main writes it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install the project (with Rust extension)
-        run: uv sync --all-groups
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
 
       - name: Build Rust extension
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -93,6 +97,12 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the extension and run the thread tests
         run: |
@@ -136,16 +146,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build artifacts
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            rust/target
-            ~/.cargo/registry
-          key: rust-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-
+          workspaces: rust -> target
+          # Pull requests restore main's cache; only main writes it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install the project (with Rust extension)
-        run: uv sync --all-groups
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
 
       - name: Build Rust extension
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -178,16 +186,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build artifacts
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            rust/target
-            ~/.cargo/registry
-          key: rust-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-
+          workspaces: rust -> target
+          # Pull requests restore main's cache; only main writes it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install the project (with Rust extension)
-        run: uv sync --all-groups
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
 
       - name: Build Rust extension
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -212,16 +218,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build artifacts
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            rust/target
-            ~/.cargo/registry
-          key: rust-bench-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: rust-bench-${{ runner.os }}-
+          workspaces: rust -> target
+          # Pull requests restore main's cache; only main writes it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install the project
-        run: uv sync --all-groups
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
 
       - name: Build the release extension
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -298,8 +302,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install the project
-        run: uv sync --all-groups
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
+
+      # The hooks check examples with sqlty, so they need the extension.
+      - name: Build Rust extension
+        run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       # Type checker tests of SQL[T] run with pytest in the test jobs
       - name: Run prek
