@@ -38,6 +38,7 @@ nav = [
     { "CLI" = "reference/cli.md" },
     { "Configuration" = "reference/configuration.md" },
     { "Rules" = "reference/rules.md" },
+    { "Type mapping" = "reference/types.md" },
     { "Python API" = "reference/python-api.md" },
     { "Engine" = "reference/engine.md" },
   ] },
