@@ -375,6 +375,22 @@ const SIGNATURES: &[(&[&str], &[&str])] = &[
     (&["SUBSTR"], &["TEXT", "INT", "INT"]),
     (&["DATE_TRUNC"], &["TEXT"]),
     (&["TO_CHAR"], &["", "TEXT"]),
+    (&["PG_NOTIFY"], &["TEXT", "TEXT"]),
+    (
+        &[
+            "PG_ADVISORY_LOCK",
+            "PG_ADVISORY_LOCK_SHARED",
+            "PG_ADVISORY_UNLOCK",
+            "PG_ADVISORY_UNLOCK_SHARED",
+            "PG_ADVISORY_XACT_LOCK",
+            "PG_ADVISORY_XACT_LOCK_SHARED",
+            "PG_TRY_ADVISORY_LOCK",
+            "PG_TRY_ADVISORY_LOCK_SHARED",
+            "PG_TRY_ADVISORY_XACT_LOCK",
+            "PG_TRY_ADVISORY_XACT_LOCK_SHARED",
+        ],
+        &["BIGINT"],
+    ),
 ];
 
 /// Functions whose arguments share one type.

@@ -62,6 +62,23 @@ SELECT id FROM users WHERE id = %(id)s OR age > %(id)s OR name = %(name)s
 -- params: name: str (TEXT)
 ```
 
+### `:name`, as SQLAlchemy's `text()` writes it
+
+`::` casts, array slices and a `:name` followed by `::` are not placeholders.
+
+```sql
+SELECT tags[1:2], age::text, :id::int AS id FROM users WHERE id = :id AND name = :name AND born > '2024-01-01 10:30'
+-- params: id: int (INT)
+-- params: name: str (TEXT)
+```
+
+```sql
+INSERT INTO users (id, name, uid) VALUES (:id, :name, :uid)
+-- params: id: int (INT) NOT NULL
+-- params: name: str (TEXT) NOT NULL
+-- params: uid: uuid.UUID (UUID) NOT NULL
+```
+
 ### Qualified columns, joins and subqueries
 
 ```sql
@@ -189,6 +206,41 @@ SELECT lpad(name, %s, %s), coalesce(age, %s) FROM users WHERE lower(name) = lowe
 -- params: 2: str (TEXT)
 -- params: 3: int (INT)
 -- params: 4: str (TEXT)
+```
+
+### SUBSTRING bounds and server functions
+
+```sql
+SELECT substr(name, %s), substring(name FROM %s FOR %s), pg_notify(%s, %s), pg_advisory_lock(%s) FROM users
+-- params: 1: int (INT)
+-- params: 2: int (INT)
+-- params: 3: int (INT)
+-- params: 4: str (TEXT)
+-- params: 5: str (TEXT)
+-- params: 6: int (BIGINT)
+```
+
+### Functions in the schema
+
+A function the schema declares types its arguments, when the overloads a call
+fits agree on them. A `VARIADIC` argument stays untyped.
+
+`schema.sql`:
+
+```sql
+CREATE FUNCTION finish_job(job_id BIGINT, new_status TEXT) RETURNS VOID LANGUAGE sql AS 'SELECT 1';
+CREATE FUNCTION tag(id INTEGER, VARIADIC names TEXT[]) RETURNS INTEGER LANGUAGE sql AS 'SELECT 1';
+CREATE FUNCTION pick(a INTEGER) RETURNS INTEGER LANGUAGE sql AS 'SELECT 1';
+CREATE FUNCTION pick(a TEXT) RETURNS INTEGER LANGUAGE sql AS 'SELECT 1';
+```
+
+```sql
+SELECT finish_job(%(job_id)s, %(status)s), tag(%(id)s, %(name)s), pick(%(a)s)
+-- params: job_id: int (BIGINT)
+-- params: status: str (TEXT)
+-- params: id: int (INT)
+-- params: name: None (None)
+-- params: a: None (None)
 ```
 
 ## Operators type the other operand
