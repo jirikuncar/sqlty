@@ -56,7 +56,8 @@ def _matches(value: object, tp: Any) -> bool:
             and all(_matches(item, arg) for item, arg in zip(value, args, strict=True))
         )
     if tp is float:
-        return isinstance(value, float)
+        # The numeric tower: a type checker accepts an `int` where `float` is annotated.
+        return isinstance(value, (float, int)) and not isinstance(value, bool)
     if tp is int:
         return isinstance(value, int) and not isinstance(value, bool)
     return isinstance(value, tp)
