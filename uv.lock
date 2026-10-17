@@ -631,7 +631,6 @@ cli = [
     { name = "rich" },
 ]
 dev = [
-    { name = "duckdb" },
     { name = "inline-snapshot" },
     { name = "maturin" },
     { name = "mypy" },
@@ -646,6 +645,9 @@ dev = [
     { name = "ty" },
     { name = "vale" },
     { name = "zizmor" },
+]
+duckdb = [
+    { name = "duckdb" },
 ]
 fuzz = [
     { name = "hypothesis" },
@@ -665,7 +667,6 @@ provides-extras = ["psycopg"]
 [package.metadata.requires-dev]
 cli = [{ name = "rich", specifier = ">=15.0.0" }]
 dev = [
-    { name = "duckdb", specifier = ">=1.4.0" },
     { name = "inline-snapshot", specifier = ">=0.15.0" },
     { name = "maturin", specifier = ">=1.12.1,<2.0" },
     { name = "mypy", specifier = ">=2.4.0" },
@@ -681,6 +682,7 @@ dev = [
     { name = "vale", specifier = ">=3.22.0.0" },
     { name = "zizmor", specifier = ">=1.31.1" },
 ]
+duckdb = [{ name = "duckdb", specifier = ">=1.4.0" }]
 fuzz = [{ name = "hypothesis", specifier = ">=6.140" }]
 psycopg = [{ name = "psycopg", specifier = ">=3.2.12" }]
 

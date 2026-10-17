@@ -50,13 +50,16 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
+          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
+          cache-dependency-glob: uv.lock
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.14"
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal && rustup default stable
 
       - name: Install the dependencies
-        run: uv sync --all-groups --no-install-project
+        run: uv sync --all-groups --no-group duckdb --no-install-project
 
       - name: Build Rust extension
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml

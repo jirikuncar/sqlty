@@ -74,7 +74,6 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-randomly>=3.16.0",
     "pyyaml>=6.0.2",
-    "duckdb>=1.4.0",
     "ruff>=0.16.10",
     "ty>=0.0.85",
     "rumdl>=0.3.0",
@@ -82,6 +81,8 @@ dev = [
     "zizmor>=1.31.1",
 ]
 cli = ["rich>=15.0.0"]
+# Only the DuckDB type tests need it, and it has no wheel for every Python.
+duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
 fuzz = [
     "hypothesis>=6.140",
