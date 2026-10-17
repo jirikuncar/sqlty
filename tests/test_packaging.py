@@ -190,3 +190,28 @@ def test_version_falls_back_when_not_installed(monkeypatch: pytest.MonkeyPatch) 
         assert sqlty.__version__ == "0.0.0"
     finally:
         vars(sqlty).pop("__version__", None)
+
+
+def test_supported_pythons_agree() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    prefix = "Programming Language :: Python :: 3."
+    supported = sorted(
+        (
+            c.removeprefix("Programming Language :: Python :: ")
+            for c in project["classifiers"]
+            if c.startswith(prefix)
+        ),
+        key=lambda version: int(version.split(".")[1]),
+    )
+    workflows = ROOT / ".github" / "workflows"
+    tests = yaml.safe_load((workflows / "tests.yml").read_text())["jobs"]
+    wheels = yaml.safe_load((workflows / "pypi.yml").read_text())["jobs"]["build-wheels"]["steps"]
+    step = {step.get("name"): step for step in wheels}
+    interpreters = step["Set up the supported Pythons"]["with"]["python-version"]
+    imported = step["Import the wheel on each Python"]["run"]
+
+    assert len(supported) == 2, "sqlty supports the two latest CPython releases"
+    assert project["requires-python"] == f">={supported[0]}"
+    assert tests["test"]["strategy"]["matrix"]["python-version"] == supported
+    assert interpreters.split() == supported
+    assert f"for v in {' '.join(supported)};" in imported
