@@ -45,6 +45,13 @@ JOIN information_schema.key_column_usage kcu USING (constraint_name)
 -- inferred: tuple[str | None, str | None, str | None, int | None]
 ```
 
+```sql
+SELECT tc.constraint_name, ccu.table_name, ccu.column_name
+FROM information_schema.table_constraints tc
+JOIN information_schema.constraint_column_usage ccu USING (constraint_name)
+-- inferred: tuple[str | None, str | None, str | None]
+```
+
 ## Columns and defaults
 
 ```sql
@@ -99,6 +106,18 @@ SELECT name, setting, vartype, enumvals, pending_restart FROM pg_settings
 ```sql
 SELECT pid, usename, client_addr, backend_xid, query_start, state FROM pg_stat_activity
 -- inferred: tuple[int | None, str | None, ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface | None, str | None, datetime.datetime | None, str | None]
+```
+
+## Databases and statistics
+
+```sql
+SELECT datname, datcollate, datctype, datlocale, datconnlimit FROM pg_database WHERE datname = current_database()
+-- inferred: tuple[str, str, str, str | None, int]
+```
+
+```sql
+SELECT n_distinct, null_frac, most_common_freqs FROM pg_stats WHERE tablename = 'users' AND attname = 'id'
+-- inferred: tuple[float | None, float | None, list[float] | None]
 ```
 
 ## Tables, views, sequences and schemas

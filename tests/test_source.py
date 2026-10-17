@@ -118,6 +118,24 @@ def test_marker_free_file_is_neither_parsed_nor_tokenized(parses, tokenized):
     assert not tokenized
 
 
+def test_dashes_in_wide_comments_are_skipped_quickly(parses, tokenized):
+    line = (
+        "        #     "
+        + " ".join(["-" * 29, "x:", " " * 20, "8.8MB", " " * 20, "# s.memory"])
+        + "\n"
+    )
+    assert check_source(line * 40) == []
+    assert not parses
+    assert not tokenized
+
+
+@pytest.mark.parametrize(
+    "source", ['q = "-" "-sql\\nSELECT 1"', 'q = ("-"  # split\n     "-sql\\nSELECT 1")']
+)
+def test_marker_split_over_literals_and_comments_is_found(source):
+    assert ParsedSource(source).may_need_rust_check()
+
+
 def test_wrapper_without_row_type_is_not_parsed(parses):
     source = 'import os\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
     assert check_source(source) == []
