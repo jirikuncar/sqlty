@@ -83,6 +83,18 @@ SELECT CASE WHEN i > 1 THEN 1 ELSE 2.5 END, CASE WHEN i > 1 THEN i ELSE b END, C
 -- columns: case: typing.Literal[1] | None (None)
 ```
 
+### The ELSE result comes first
+
+PostgreSQL resolves the `ELSE` result before the branches. `varchar` and `text`
+convert either way, so the first one considered wins.
+
+```sql
+SELECT CASE WHEN i > 1 THEN tx ELSE v END, CASE WHEN i > 1 THEN v ELSE tx END, CASE WHEN i > 1 THEN v ELSE 'x' END FROM t
+-- columns: v: str (VARCHAR)
+-- columns: tx: str (TEXT)
+-- columns: case: str (VARCHAR(10))
+```
+
 ## ARRAY
 
 ```sql
@@ -137,6 +149,17 @@ SELECT s + 1, s + s, s + b FROM t
 -- columns: ?column?: int (INT)
 -- columns: ?column?: int (SMALLINT)
 -- columns: ?column?: int (BIGINT)
+```
+
+## Integer literals too big for a bigint
+
+PostgreSQL reads them as `numeric`.
+
+```sql
+SELECT 9223372036854775807, 9223372036854775808, 9223372036854775808 + i FROM t
+-- columns: ?column?: int (None)
+-- columns: ?column?: decimal.Decimal (None)
+-- columns: ?column?: decimal.Decimal (DECIMAL)
 ```
 
 ## Operators
