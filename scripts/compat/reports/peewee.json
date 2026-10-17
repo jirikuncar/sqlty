@@ -1,0 +1,947 @@
+[
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SERIAL",
+   "expected": "int",
+   "provenance": "peewee.AutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INTEGER AUTO_INCREMENT",
+   "expected": "int",
+   "provenance": "peewee.AutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "AUTO",
+   "expected": "int",
+   "provenance": "peewee.AutoField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGSERIAL",
+   "expected": "int",
+   "provenance": "peewee.BigAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT AUTO_INCREMENT",
+   "expected": "int",
+   "provenance": "peewee.BigAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "peewee.BigAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "peewee.IntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "peewee.IntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "peewee.IntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "peewee.BigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "peewee.BigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "peewee.BigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "peewee.SmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "peewee.SmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "peewee.SmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "peewee.FloatField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "peewee.FloatField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "peewee.FloatField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "peewee.DoubleField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "peewee.DoubleField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "peewee.DoubleField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC(10, 5)",
+   "expected": "decimal.Decimal",
+   "provenance": "peewee.DecimalField",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "NUMERIC(10, 5)",
+   "expected": "decimal.Decimal",
+   "provenance": "peewee.DecimalField",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DECIMAL(10, 5)",
+   "expected": "decimal.Decimal",
+   "provenance": "peewee.DecimalField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "peewee.CharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "peewee.CharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "peewee.CharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CHAR(10)",
+   "expected": "str",
+   "provenance": "peewee.FixedCharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "CHAR(10)",
+   "expected": "str",
+   "provenance": "peewee.FixedCharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CHAR(10)",
+   "expected": "str",
+   "provenance": "peewee.FixedCharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "peewee.TextField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "peewee.TextField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "peewee.TextField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "peewee.BlobField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "peewee.BlobField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "peewee.BlobField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "peewee.UUIDField",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARCHAR(40)",
+   "expected": "uuid.UUID",
+   "provenance": "peewee.UUIDField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "uuid.UUID",
+   "provenance": "peewee.UUIDField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "uuid.UUID",
+   "provenance": "peewee.BinaryUUIDField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARBINARY(16)",
+   "expected": "uuid.UUID",
+   "provenance": "peewee.BinaryUUIDField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "UUIDB",
+   "expected": "uuid.UUID",
+   "provenance": "peewee.BinaryUUIDField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "peewee.DateTimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "peewee.DateTimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "peewee.DateTimeField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "peewee.DateField",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "peewee.DateField",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "peewee.DateField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "peewee.TimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "peewee.TimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "peewee.TimeField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "datetime.datetime",
+   "provenance": "peewee.TimestampField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "datetime.datetime",
+   "provenance": "peewee.TimestampField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "datetime.datetime",
+   "provenance": "peewee.TimestampField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "peewee.BooleanField",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BOOL",
+   "expected": "bool",
+   "provenance": "peewee.BooleanField",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "bool",
+   "provenance": "peewee.BooleanField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "str",
+   "provenance": "peewee.IPField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "str",
+   "provenance": "peewee.IPField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "str",
+   "provenance": "peewee.IPField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "peewee.BitField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "peewee.BitField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "peewee",
+   "version": "4.5.3",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "peewee.BitField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ }
+]
