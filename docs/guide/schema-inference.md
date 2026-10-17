@@ -477,8 +477,8 @@ legacy = "--sql\nSELECT id, code, price FROM legacy"
 ### MySQL
 
 MySQL schemas may quote identifiers with backticks and use `UNSIGNED`,
-`ENUM`, `SET` and `JSON` columns. `SET` has no known Python type, so a query
-that selects one is not typed:
+`ENUM`, `SET` and `JSON` columns. A `SET` is `str`: PyMySQL returns its members
+as one comma-separated string.
 
 ```toml
 [tool.sqlty]
@@ -506,7 +506,7 @@ with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: import decimal
 # rewritten: orders = SQL[tuple[int, decimal.Decimal | None, int | None, typing.Literal['new', 'paid'] | None, typing.Any, datetime.datetime | None]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
-# rewritten: with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
+# rewritten: with_set = SQL[tuple[int, str | None]]("-- sql\nSELECT `id`, tags FROM `orders`")
 # rewritten: casts = SQL[tuple[int | None, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 

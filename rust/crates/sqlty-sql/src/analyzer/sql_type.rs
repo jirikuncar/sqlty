@@ -151,7 +151,6 @@ impl SqlType {
             DataType::Table(_)
             | DataType::NamedTable { .. }
             | DataType::Nested(_)
-            | DataType::Set(_)
             | DataType::Unspecified
             | DataType::Trigger
             | DataType::AnyType
@@ -253,6 +252,7 @@ impl SqlType {
             | DataType::BitVarying(_)
             | DataType::VarBit(_)
             | DataType::Enum(..)
+            | DataType::Set(_)
             | DataType::TsVector
             | DataType::TsQuery => SqlType::Scalar(scalar(dt, dialect)),
         }
@@ -714,6 +714,17 @@ fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {
         "TIME" if dialect == SqlDialect::MySql => Some("datetime.timedelta".to_string()),
         // MySQL drivers load `BIT(n)` as bytes, psycopg loads bit strings as text.
         "BIT" | "VARBIT" if dialect == SqlDialect::MySql => Some("bytes".to_string()),
+        // PyMySQL returns a `SET` as its comma-separated text, and spatial values in
+        // MySQL's internal binary format. (`JSON` stays `Any`: text here, parsed by psycopg.)
+        "SET" if dialect == SqlDialect::MySql => Some("str".to_string()),
+        "GEOMETRY" | "POINT" | "LINESTRING" | "POLYGON" | "MULTIPOINT" | "MULTILINESTRING"
+        | "MULTIPOLYGON" | "GEOMETRYCOLLECTION"
+            if dialect == SqlDialect::MySql =>
+        {
+            Some("bytes".to_string())
+        }
+        // sqlite3 returns the stored text: SQLite has no UUID storage class.
+        "UUID" if dialect == SqlDialect::Sqlite => Some("str".to_string()),
         "BIT" | "VARBIT" => Some("str".to_string()),
         _ => SQL_TO_PYTHON_TYPE
             .get(base)

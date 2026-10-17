@@ -5,12 +5,22 @@ The tables below are tests: each query is analyzed when the docs are tested, so
 they cannot drift from the engine. The mapping itself lives in
 `rust/crates/sqlty-sql/src/analyzer/sql_type.rs`.
 
-| Dialect | Driver the mapping follows |
-|---------|----------------------------|
-| `postgres` | [psycopg 3](https://www.psycopg.org/psycopg3/docs/basic/adapt.html) |
-| `mysql` | PyMySQL and mysqlclient |
-| `sqlite` | the standard library's [`sqlite3`](https://docs.python.org/3/library/sqlite3.html) |
-| `duckdb` | the [DuckDB Python client](https://duckdb.org/docs/current/clients/python/conversion.html) |
+| Dialect | Reference driver | Checked by |
+|---------|------------------|------------|
+| `postgres` | [psycopg 3](https://www.psycopg.org/psycopg3/docs/basic/adapt.html) | `tests/test_driver_values.py`, against PostgreSQL 17 in CI |
+| `mysql` | [PyMySQL](https://github.com/PyMySQL/PyMySQL/blob/main/pymysql/converters.py); mysqlclient agrees on every type in the table | `tests/test_driver_values.py`, with `SQLTY_MYSQL_DSN` |
+| `sqlite` | the standard library's [`sqlite3`](https://docs.python.org/3/library/sqlite3.html), without `detect_types` | `tests/test_driver_values.py`, in every run |
+| `duckdb` | the [DuckDB Python client](https://duckdb.org/docs/current/clients/python/conversion.html) | `tests/test_duckdb_types.py`, in every run |
+
+The reference driver returns the raw value: what a converter above it (an ORM,
+`detect_types`, a row factory that decodes JSON) makes of it is not modelled.
+
+!!! note "Other PostgreSQL drivers"
+    asyncpg returns `json`/`jsonb` as `str`, `bit` as `asyncpg.BitString` and
+    `"char"` as `bytes`; psycopg2 returns `bytea` as `memoryview`, and `uuid` and
+    `inet` as `str` unless you register their adapters. Annotate those fields
+    with the type your driver returns, and suppress the mismatch with
+    `# sqlty: ignore[column-type-mismatch]`.
 
 ## Deliberate differences
 
@@ -23,7 +33,11 @@ These look like bugs but follow the drivers:
 | SQLite `BOOLEAN`, and comparisons | `int` | SQLite stores booleans as the integers 0 and 1 |
 | MySQL `TIME` | `datetime.timedelta` | A MySQL `TIME` is a duration, up to 838 hours either way |
 | `BIT(n)` | `str`; `bytes` in `mysql` | psycopg loads a bit string as its text, MySQL drivers as bytes |
-| `JSON`, `JSONB` | `typing.Any` | Any JSON value can be stored; a column that builds JSON of a known shape is checked by [`json-shape-mismatch`](rules.md#json-shape-mismatch) |
+| `JSON`, `JSONB` | `typing.Any` | Any JSON value can be stored. psycopg returns it parsed, PyMySQL and `sqlite3` as text; `Any` admits both, so code that decodes it keeps its [`json-shape-mismatch`](rules.md#json-shape-mismatch) checks |
+| SQLite `UUID` | `str` | SQLite has no UUID storage class: `sqlite3` returns the stored text |
+| SQLite `NUMERIC` affinity (`NUMERIC`, `DECIMAL`, unknown names) | `float` | `sqlite3` returns an integral value as `int`, which a type checker accepts for `float`; precision beyond a double is lost on storage, not by sqlty |
+| MySQL `SET` | `str` | PyMySQL returns the members as one comma-separated string |
+| MySQL spatial types (`GEOMETRY`, `POINT`, ...) | `bytes` | PyMySQL returns MySQL's internal binary format |
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` | psycopg loads an address with a prefix (`1.2.3.4/24`) as an interface |
 | `MONEY`, `XML`, `reg*`, `xid`, `tsvector` | `str` | psycopg loads them as text |
 | `INTERVAL` with a year or month part | `datetime.timedelta` | psycopg counts a year as 365 days and a month as 30 |

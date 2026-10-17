@@ -259,8 +259,11 @@ Per dialect, with the driver each follows and why some types differ, see
 
 ### Dialect notes
 
-- The types are the ones psycopg returns: `NUMERIC` is `decimal.Decimal`, `inet`
-  an address, or an interface when the value has a prefix (`1.2.3.4/24`).
+- The types are the ones the dialect's reference driver returns: psycopg 3 for
+  PostgreSQL, PyMySQL for MySQL, `sqlite3` for SQLite (see
+  [Type mapping](../reference/types.md)). In psycopg `NUMERIC` is
+  `decimal.Decimal`, `inet` an address, or an interface when the value has a
+  prefix (`1.2.3.4/24`).
   `AVG` of integers, `SUM` without a known argument type and fractional
   literals (`1.5`) are decimals too. Drivers for SQLite and Oracle return
   floats, so `decimal.Decimal` is used in the other dialects, MySQL included.

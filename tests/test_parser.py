@@ -38,7 +38,7 @@ class TestParser:
                 "mysql",
                 "tuple[int, float]",
             ),
-            ("SELECT CAST(x AS POINT) FROM t", "mysql", None),
+            ("SELECT CAST(x AS POINT) FROM t", "mysql", "tuple[bytes]"),
             ("SELECT CAST(x AS DEC(8,3) UNSIGNED) FROM t", "mysql", "tuple[decimal.Decimal]"),
             ("SELECT CAST(x AS NUMERIC(8,3) UNSIGNED) FROM t", "mysql", None),
             ("SELECT CAST(x AS FIXED UNSIGNED) FROM t", "mysql", None),
@@ -159,6 +159,7 @@ def test_type_names(sql_type: str, python_type: str, dialect: str):
         "datetime.date",
         "datetime.time",
         "datetime.datetime",
+        "uuid.UUID",
     ):
         # sqlite3 returns stored integers and text: SQLite has no such storage class.
         python_type = "int" if python_type == "bool" else "str"
