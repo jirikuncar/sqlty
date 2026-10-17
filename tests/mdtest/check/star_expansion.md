@@ -22,7 +22,7 @@ r = SQL[tuple[int, int]]("--sql\nSELECT id, * FROM users")
 # error: [select-star-no-schema] "SELECT u.* used but no schema available"
 s = SQL[tuple[int]]("--sql\nSELECT u.* FROM users u")
 # error: [select-star-no-schema] "SELECT * used but no schema available"
-# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type: `*` is not expanded; add a schema"
 t = SQL[UNTYPED]("--sql\nSELECT id::INTEGER, * FROM users")
 ```
 
