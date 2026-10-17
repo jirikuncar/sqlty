@@ -163,6 +163,32 @@ from sqlty import SQL
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 
+### A column that may now be NULL
+
+Code annotated `str | None` for a column the new schema makes nullable reads the
+`str` rows of the old schema too. An annotation wider than the other schema's rows
+is not reported, though `sqlty check` against the old schema would report it as
+[`stale-type`](../reference/rules.md#stale-type).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+```
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+emails = SQL[tuple[str | None]]("--sql\nSELECT email FROM users")
+```
+
 ## Expand and contract
 
 To change a schema without breaking either mix, split the change:
