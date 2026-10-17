@@ -27,8 +27,8 @@ CREATE TABLE orders (
 
 ```sql
 SELECT status, kind, plan, level FROM orders
--- columns: status: typing.Literal['Pending', 'paid', 'it\'s'] (ENUM('PENDING', 'PAID', 'IT''S'))
--- columns: kind: typing.Literal['a', 'b'] | None (ENUM('A', 'B'))
+-- columns: status: typing.Literal['Pending', 'paid', 'it\'s'] (ENUM('Pending', 'paid', 'it''s'))
+-- columns: kind: typing.Literal['a', 'b'] | None (ENUM('a', 'b'))
 -- columns: plan: str | None (VARCHAR(10))
 -- columns: level: int | None (INT)
 ```
@@ -37,13 +37,13 @@ Values carry through views, `CASE` and `UNION`.
 
 ```sql
 SELECT kind FROM orders UNION SELECT 'c'
--- columns: kind: typing.Literal['a', 'b', 'c'] | None (ENUM('A', 'B'))
+-- columns: kind: typing.Literal['a', 'b', 'c'] | None (ENUM('a', 'b'))
 ```
 
 ```sql
 SELECT CASE WHEN id > 1 THEN 'x' ELSE 'y' END AS k, COALESCE(kind, 'z') AS z FROM orders
 -- columns: k: typing.Literal['x', 'y'] (None)
--- columns: z: typing.Literal['a', 'b', 'z'] (ENUM('A', 'B'))
+-- columns: z: typing.Literal['a', 'b', 'z'] (ENUM('a', 'b'))
 ```
 
 ## Rewrite
@@ -78,10 +78,10 @@ ALTER TABLE u ADD COLUMN b INT;
 
 ```sql
 SELECT a FROM t
--- columns: a: typing.Literal['x', 'y', 'z'] (ENUM('X', 'Y', 'Z'))
+-- columns: a: typing.Literal['x', 'y', 'z'] (ENUM('x', 'y', 'z'))
 ```
 
 ```sql
 SELECT a FROM u
--- columns: a: typing.Literal['x', 'y'] (ENUM('X', 'Y'))
+-- columns: a: typing.Literal['x', 'y'] (ENUM('x', 'y'))
 ```

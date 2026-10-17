@@ -70,6 +70,19 @@ SELECT t - t AS a, ts - ts AS b, tstz - tstz AS c FROM t
 -- columns: c: datetime.timedelta (INTERVAL)
 ```
 
+## Timestamps and dates
+
+A date next to a timestamp converts to one, so their difference is an interval.
+
+```sql
+SELECT ts - d AS a, d - ts AS b, tstz - d AS c, d - tstz AS e, now() - d AS f FROM t
+-- columns: a: datetime.timedelta (INTERVAL)
+-- columns: b: datetime.timedelta (INTERVAL)
+-- columns: c: datetime.timedelta (INTERVAL)
+-- columns: e: datetime.timedelta (INTERVAL)
+-- columns: f: datetime.timedelta (INTERVAL)
+```
+
 ## Intervals
 
 ```sql

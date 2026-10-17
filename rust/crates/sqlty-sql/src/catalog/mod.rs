@@ -730,6 +730,7 @@ mod tests {
                 let got = canonical_type(&create.columns[0].data_type, dialect);
                 let want = match (dialect, sql) {
                     (SqlDialect::MySql, "TIMESTAMP") => "TIMESTAMPTZ",
+                    (SqlDialect::MySql, "REAL") => "DOUBLE",
                     _ => expected,
                 };
                 assert_eq!(got, want, "{sql} in dialect #{n}");

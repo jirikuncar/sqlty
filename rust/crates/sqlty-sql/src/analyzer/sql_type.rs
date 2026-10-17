@@ -595,7 +595,7 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         DataType::Bytea => Some("VARBINARY"),
         DataType::JSON => Some("JSON"),
         DataType::JSONB => Some("JSONB"),
-        DataType::Real => Some("FLOAT"),
+        DataType::Real if dialect != SqlDialect::MySql => Some("FLOAT"),
         DataType::DoublePrecision => Some("DOUBLE"),
         DataType::Varchar(None) => Some("VARCHAR"),
         DataType::Char(None) => Some("CHAR"),
@@ -603,6 +603,24 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
     };
     if let Some(common) = common {
         return common.to_string();
+    }
+    // Labels keep their case: they are the values the column holds.
+    let labels = |labels: &mut dyn Iterator<Item = &String>| {
+        let quoted: Vec<String> = labels
+            .map(|label| format!("'{}'", label.replace('\'', "''")))
+            .collect();
+        quoted.join(", ")
+    };
+    match dt {
+        DataType::Enum(members, _) => {
+            let mut names = members.iter().map(|member| match member {
+                sqlparser::ast::EnumMember::Name(name)
+                | sqlparser::ast::EnumMember::NamedValue(name, _) => name,
+            });
+            return format!("ENUM({})", labels(&mut names));
+        }
+        DataType::Set(members) => return format!("SET({})", labels(&mut members.iter())),
+        _ => {}
     }
     let text = dt.to_string().to_uppercase();
     let (name, args) = match (text.find('('), text.find(')')) {
@@ -621,7 +639,21 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         None => (name.as_str(), false),
     };
     let mysql = dialect == SqlDialect::MySql;
+    let postgres = dialect == SqlDialect::Postgres;
+    // PostgreSQL's `FLOAT(p)` is `real` up to 24 bits of precision, `double precision` above.
+    if postgres && name == "FLOAT" {
+        let bits: Option<u32> = args.trim_matches(['(', ')']).parse().ok();
+        return if bits.is_some_and(|bits| bits <= 24) {
+            "FLOAT"
+        } else {
+            "DOUBLE"
+        }
+        .to_string();
+    }
     let base = match name {
+        // MySQL's `REAL` is `DOUBLE` unless the `REAL_AS_FLOAT` SQL mode is on.
+        "REAL" if mysql => "DOUBLE",
+        "BLOB" if mysql => "BLOB",
         "TIMESTAMP WITH TIME ZONE" => "TIMESTAMPTZ",
         "TIME WITH TIME ZONE" => "TIMETZ",
         "TIMESTAMP WITHOUT TIME ZONE" => "TIMESTAMP",
@@ -648,7 +680,6 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         "UNIQUEIDENTIFIER" => "UUID",
         "TIMESTAMP_NTZ" | "DATETIME2" => "TIMESTAMP",
         "TIMESTAMP_TZ" | "TIMESTAMP_LTZ" | "DATETIMEOFFSET" => "TIMESTAMPTZ",
-        "FLOAT" if dialect == SqlDialect::Postgres => "DOUBLE",
         "FLOAT8" | "DOUBLE PRECISION" => "DOUBLE",
         "FLOAT4" | "REAL" => "FLOAT",
         "NUMERIC" | "DEC" | "FIXED" => "DECIMAL",

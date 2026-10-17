@@ -46,7 +46,7 @@ ALTER TABLE orders MODIFY COLUMN status ENUM('new', 'paid', 'shipped');
 ```sql
 SELECT total, status FROM orders
 -- columns: total: decimal.Decimal (DECIMAL(10, 2))
--- columns: status: typing.Literal['new', 'paid', 'shipped'] | None (ENUM('NEW', 'PAID', 'SHIPPED'))
+-- columns: status: typing.Literal['new', 'paid', 'shipped'] | None (ENUM('new', 'paid', 'shipped'))
 ```
 
 ## MODIFY keeps a primary key NOT NULL

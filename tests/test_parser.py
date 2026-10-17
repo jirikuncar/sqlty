@@ -65,8 +65,8 @@ class TestParser:
             (
                 "YEAR, BIT(8), DATETIME(6), TIMESTAMP, ENUM('a'), SET('a'), JSON, LONGBLOB, TINYTEXT, POINT",
                 "mysql",
-                "c0::YEAR, c1::BIT(8), c2::DATETIME(6), c3::TIMESTAMPTZ, c4::ENUM('A'), "
-                "c5::SET('A'), c6::JSON, c7::BLOB, c8::TEXT, c9::POINT",
+                "c0::YEAR, c1::BIT(8), c2::DATETIME(6), c3::TIMESTAMPTZ, c4::ENUM('a'), "
+                "c5::SET('a'), c6::JSON, c7::BLOB, c8::TEXT, c9::POINT",
             ),
             ("INT8, INT", "sqlite", "c0::BIGINT, c1::INT"),
             (

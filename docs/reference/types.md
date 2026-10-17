@@ -37,6 +37,9 @@ These look like bugs but follow the drivers:
 | SQLite `UUID` | `str` | SQLite has no UUID storage class: `sqlite3` returns the stored text |
 | SQLite `NUMERIC` affinity (`NUMERIC`, `DECIMAL`, unknown names) | `float` | `sqlite3` returns an integral value as `int`, which a type checker accepts for `float`; precision beyond a double is lost on storage, not by sqlty |
 | MySQL `SET` | `str` | PyMySQL returns the members as one comma-separated string |
+| MySQL `BOOL`, `BOOLEAN` | `bool` | Kept to tell a flag from a number: PyMySQL returns the `TINYINT(1)` it is stored as, an `int`; `TINYINT(1)` itself is `int` |
+| MySQL `REAL` | `float` (`DOUBLE`) | `REAL` is `DOUBLE` unless the `REAL_AS_FLOAT` SQL mode is on |
+| Type names of other dialects in `postgres` (`BLOB`, `DATETIME`, `TINYINT`) | their PostgreSQL counterparts | The default dialect reads any project's names; sqlty does not check that PostgreSQL has the type, PostgreSQL rejects the query |
 | MySQL spatial types (`GEOMETRY`, `POINT`, ...) | `bytes` | PyMySQL returns MySQL's internal binary format |
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` | psycopg loads an address with a prefix (`1.2.3.4/24`) as an interface |
 | `MONEY`, `XML`, `reg*`, `xid`, `tsvector` | `str` | psycopg loads them as text |
