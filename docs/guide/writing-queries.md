@@ -233,23 +233,26 @@ field.
 | `INTEGER`, `INT`, `BIGINT`, `SMALLINT`, `TINYINT`, `MEDIUMINT`, `YEAR` | `int` |
 | `UTINYINT`, `USMALLINT`, `UMEDIUMINT`, `UINT`, `UBIGINT` (MySQL `... UNSIGNED`) | `int` |
 | `SIGNED`, `UNSIGNED` (MySQL `CAST(x AS SIGNED)`) | `int` |
-| `TEXT`, `VARCHAR`, `CHAR`, `STRING` | `str` |
+| `TEXT`, `VARCHAR`, `CHAR`, `STRING`, `CLOB`, `CHARACTER LARGE OBJECT` | `str` |
 | `BOOLEAN`, `BOOL` | `bool` |
 | `FLOAT`, `DOUBLE`, `REAL`, `UDOUBLE` (MySQL `... UNSIGNED`) | `float` |
-| `DECIMAL`, `NUMERIC`, `UDECIMAL` (MySQL `... UNSIGNED`) | `decimal.Decimal`, `float` in `sqlite` and `oracle` |
+| `DECIMAL`, `NUMERIC`, `UDECIMAL` (MySQL `... UNSIGNED`), `DECFLOAT` | `decimal.Decimal`, `float` in `sqlite` and `oracle` |
 | `DATE` | `datetime.date` |
 | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIME` | `datetime.datetime` |
 | `TIME`, `TIMETZ` | `datetime.time`; MySQL `TIME` is `datetime.timedelta` (a duration, up to 838 hours) |
-| `INTERVAL` | `datetime.timedelta` |
+| `INTERVAL`, with any qualifier (`INTERVAL DAY TO SECOND`) | `datetime.timedelta` |
 | `JSON`, `JSONB` | `typing.Any`: any JSON value can be stored |
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` |
 | `CIDR` | `ipaddress.IPv4Network \| ipaddress.IPv6Network` |
 | `UUID` | `uuid.UUID` |
-| `BYTEA`, `BLOB`, `BINARY`, `VARBINARY` | `bytes` |
+| `BYTEA`, `BLOB`, `BINARY LARGE OBJECT`, `BINARY`, `VARBINARY` | `bytes` |
+| `BIT(n)`, `BIT VARYING(n)`, `VARBIT` | `str` (psycopg); `bytes` in MySQL |
+| `ROW(a T, b U)` | `tuple[T, U]` |
+| DuckDB `STRUCT(a T, b U)`, `MAP(K, V)`, `UNION(a T, b U)` | `dict[str, T \| U]`, `dict[K, V]`, `T \| U` |
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
 | `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
-| Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
-| Anything else (`SET`, `POINT`, custom types, ...) | unknown: the row type is unknown |
+| Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]`, `INT MULTISET` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
+| Anything else (`SET`, `POINT`, ranges, custom types, ...) | unknown: the row type is unknown |
 
 ### Dialect notes
 
