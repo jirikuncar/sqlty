@@ -87,13 +87,14 @@ SELECT json_object('id', id) AS a, json_array(id, name) AS b, json_array_length(
 -- columns: d: int (BIGINT)
 ```
 
-`->` gives the element as JSON text. `->>` gives its SQL value, an integer, a
-real or text, so its type is not known.
+`->` gives the element as JSON text. `->>` and `json_extract` give its SQL value,
+an integer, a real or text, so its type is not known.
 
 ```sql
-SELECT note -> '$.a' AS a, note ->> '$.a' AS b FROM events
+SELECT note -> '$.a' AS a, note ->> '$.a' AS b, json_extract(note, '$.a') AS c FROM events
 -- columns: a: str | None (TEXT)
 -- columns: b: typing.Any (None)
+-- columns: c: typing.Any (None)
 ```
 
 ```sql

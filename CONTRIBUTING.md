@@ -57,6 +57,20 @@ Maintainers publish releases from GitHub Releases; the
 [Release workflow](.github/workflows/pypi.yml) builds wheels and uploads them to
 PyPI with trusted publishing. The version comes from `rust/Cargo.toml` (`[workspace.package]`).
 
+To release:
+
+1. Set the version in `rust/Cargo.toml` and merge it.
+2. Run the Release workflow on `main` by hand (`workflow_dispatch`). It builds every
+   wheel and the sdist, installs each wheel on every supported Python, and publishes
+   to TestPyPI. Install from there and run `sqlty version`.
+3. Publish a GitHub Release tagged `vX.Y.Z`. The workflow builds again and uploads to
+   PyPI.
+
+Supporting a new CPython means adding it to `requires-python` and the classifiers in
+`pyproject.toml`, the test matrix in `.github/workflows/tests.yml`, and the wheel
+build in `.github/workflows/pypi.yml`. Dropping one removes it from the same places.
+See [Supported Python versions](docs/installation.md#supported-python-versions).
+
 ## License
 
 Contributions are licensed under the [MIT License](LICENSE).

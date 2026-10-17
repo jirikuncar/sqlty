@@ -28,10 +28,11 @@ schema = "schema.sql"
 | pyformat | `%(name)s` | psycopg, MySQL drivers |
 | numeric | `$1`, `$2` | asyncpg, PostgreSQL |
 | qmark | `?`, `?1` | sqlite3, MySQL |
-| named | `:name` | sqlite3 (`dialect = "sqlite"`) |
+| named | `:name` | sqlite3, SQLAlchemy's `text()` (`dialect = "sqlite"` or `"postgres"`) |
 
 `%%` is a literal `%`. A placeholder inside a string literal or a comment is
-text. In PostgreSQL `?` is also the JSONB operator, so it is a placeholder
+text. `:name` is read as SQLAlchemy reads it: `::int` casts, array slices such as
+`a[1:2]`, and `:a::int` are not placeholders. In PostgreSQL `?` is also the JSONB operator, so it is a placeholder
 only when the query does not parse otherwise.
 
 ## Where a parameter gets its type
@@ -45,7 +46,8 @@ only when the query does not parse otherwise.
 | Cast | `%s::date`, `CAST(%s AS int)` | the cast type |
 | `LIMIT`, `OFFSET`, `FETCH` | `LIMIT %s` | `int` |
 | `= ANY(...)` | `id = ANY(%s)` | `list[int]` |
-| Known function | `lower(%s)`, `coalesce(age, %s)`, `lpad(name, %s, %s)` | the signature's types |
+| Known function | `lower(%s)`, `coalesce(age, %s)`, `lpad(name, %s, %s)`, `pg_notify(%s, %s)` | the signature's types |
+| Schema function | `finish_job(%s, %s)` with `CREATE FUNCTION finish_job(job_id bigint, ...)` | the declared argument types, when the overloads a call fits agree |
 
 A `NOT NULL` target column also makes the parameter non-null, and a nullable
 one nullable. Where the context says nothing (a bare `SELECT %s`, an unknown
