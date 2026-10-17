@@ -211,14 +211,93 @@ include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));
 
 #[cfg(test)]
 mod tests {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
     use super::*;
 
     #[test]
     fn every_rule_is_documented() {
-        for rule in BINARY_RULES {
-            assert!(!rule.reference.is_empty(), "{} has no reference", rule.id);
-            assert!(!rule.reasoning.is_empty(), "{} has no reasoning", rule.id);
+        let binary = BINARY_RULES.iter().map(BinaryRule::explained);
+        let functions = FUNCTION_RULES.iter().map(FunctionRule::explained);
+        for rule in binary.chain(functions) {
+            assert!(
+                !rule.reference.trim().is_empty(),
+                "{} has no reference",
+                rule.id
+            );
+            assert!(
+                !rule.reasoning.trim().is_empty(),
+                "{} has no reasoning",
+                rule.id
+            );
         }
+    }
+
+    /// Counts the heap allocations of the current thread while `COUNTING` is set.
+    struct CountingAllocator;
+
+    thread_local! {
+        static COUNTING: Cell<bool> = const { Cell::new(false) };
+        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    // SAFETY: every call is forwarded to the system allocator unchanged.
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if COUNTING.with(Cell::get) {
+                ALLOCATIONS.with(|count| count.set(count.get() + 1));
+            }
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+    #[test]
+    fn rule_dispatch_does_not_allocate() {
+        use BinaryOperator::*;
+        let operators = [
+            Plus,
+            Minus,
+            Divide,
+            LongArrow,
+            Arrow,
+            StringConcat,
+            Eq,
+            AtArrow,
+            Custom("<<=".to_string()),
+        ];
+        let dialects = [SqlDialect::Postgres, SqlDialect::MySql, SqlDialect::Sqlite];
+        COUNTING.with(|counting| counting.set(true));
+        let mut matched = 0;
+        for op in &operators {
+            for &dialect in &dialects {
+                for rule in binary_rules(op) {
+                    matched += usize::from(rule.applies(dialect, Some("INT"), Some("JSONB")));
+                    matched += usize::from(rule.parameter(dialect, false, Some("JSONB")).is_some());
+                }
+            }
+        }
+        for name in ["COUNT", "SUM", "AVG", "MIN", "UNKNOWN"] {
+            for rule in function_rules(name) {
+                matched += usize::from(rule.applies(SqlDialect::Postgres, Some("SMALLINT")));
+            }
+        }
+        COUNTING.with(|counting| counting.set(false));
+        assert_eq!(ALLOCATIONS.with(Cell::get), 0);
+        assert!(matched > 0);
+
+        // The counter sees an allocation when there is one.
+        COUNTING.with(|counting| counting.set(true));
+        drop(std::hint::black_box(vec![matched]));
+        COUNTING.with(|counting| counting.set(false));
+        assert_eq!(ALLOCATIONS.with(Cell::get), 1);
     }
 
     #[test]
