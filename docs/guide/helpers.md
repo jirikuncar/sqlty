@@ -66,7 +66,7 @@ checked.
 
 ## Import styles
 
-The marker and `Annotated` are recognised through any import form, whatever
+The marker and `Annotated` are recognized through any import form, whatever
 `import-style` says: `from sqlty import SQL as Q`, `import sqlty as sy`
 (`sy.SQL`), `from typing import Annotated as A`, `import typing as t` and
 `typing_extensions`.
@@ -150,7 +150,7 @@ With `psycopg` installed (`sqlty[psycopg]`), a `psycopg.sql` composition passed
 to the query parameter is checked too, so helpers annotated
 `Annotated[LiteralString | sql.Composable, SQL]` cover queries with dynamic
 identifiers. `sql.SQL(...)`, `.format(...)`, `.join(...)`, `sql.Composed([...])`,
-`sql.Identifier`, `sql.Placeholder` and `sql.Literal` are recognised through
+`sql.Identifier`, `sql.Placeholder` and `sql.Literal` are recognized through
 any import form (`from psycopg import sql`, `from psycopg.sql import SQL as
 PgSQL`, `import psycopg.sql`).
 

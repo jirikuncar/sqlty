@@ -137,6 +137,11 @@ bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra a
 docs:
 	$(ZENSICAL) build --clean
 
+.PHONY: lint-docs
+lint-docs:
+	uv run prek run rumdl --all-files
+	uv run prek run vale --all-files
+
 .PHONY: generate-docs
 generate-docs:
 	uv run python scripts/generate_docs.py
