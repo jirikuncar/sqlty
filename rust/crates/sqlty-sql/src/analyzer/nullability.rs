@@ -17,7 +17,7 @@ use sqlparser::ast::{
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
-use super::inference::{function_rules, FunctionNullability, RuleNullability};
+use super::inference::{binary_rules, function_rules, FunctionNullability, RuleNullability};
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::split_access;
@@ -624,7 +624,27 @@ impl<'a> Analyzer<'a> {
     ) -> Nullability {
         use BinaryOperator::*;
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
-        if let Ok(Some((rule, _))) = self.binary_rule(left, op, right, scope) {
+        let mut rules = binary_rules(op)
+            .iter()
+            .filter(|rule| rule.in_dialect(self.dialect));
+        // Rules that agree on the nullability, the last for any operands, need no types.
+        let agreed = rules.next().filter(|first| {
+            let mut last = *first;
+            rules.all(|rule| {
+                last = rule;
+                rule.nullability == first.nullability
+            }) && !last.reads_left()
+                && !last.reads_right()
+        });
+        let found = match agreed {
+            Some(rule) => Some(rule),
+            None => self
+                .binary_rule(left, op, right, scope)
+                .ok()
+                .flatten()
+                .map(|(rule, _)| rule),
+        };
+        if let Some(rule) = found {
             return match rule.nullability {
                 RuleNullability::Operands => any_nullable([of(left), of(right)]),
                 RuleNullability::Nullable => Nullability::Nullable,
@@ -644,11 +664,7 @@ impl<'a> Analyzer<'a> {
                 RuleNullability::NonzeroDivisor => any_nullable([of(left), of(right)]),
             };
         }
-        match op {
-            // JSON accessors yield NULL for a missing key or a JSON null.
-            Arrow | HashArrow => Nullability::Nullable,
-            _ => any_nullable([of(left), of(right)]),
-        }
+        any_nullable([of(left), of(right)])
     }
 
     fn substring_nullability(

@@ -75,12 +75,43 @@ pub(crate) struct BinaryRule {
     right: Option<&'static [&'static str]>,
     pub(crate) result: RuleType,
     pub(crate) nullability: RuleNullability,
+    /// The SQL type a placeholder on the left gets when the right operand matches.
+    left_parameter: Option<&'static str>,
+    /// The SQL type a placeholder on the right gets when the left operand matches.
+    right_parameter: Option<&'static str>,
 }
 
 impl BinaryRule {
-    /// Whether the rule needs the operand types to decide whether it applies.
-    pub(crate) fn reads_operands(&self) -> bool {
-        self.left.is_some() || self.right.is_some()
+    /// The SQL type of a placeholder operand (the left one when `left`) whose other
+    /// operand has SQL type `other`, when the rule gives one.
+    pub(crate) fn parameter(
+        &self,
+        dialect: SqlDialect,
+        left: bool,
+        other: Option<&str>,
+    ) -> Option<&'static str> {
+        let (parameter, other_types) = if left {
+            (self.left_parameter, self.right)
+        } else {
+            (self.right_parameter, self.left)
+        };
+        let applies = self.dialects.is_empty() || self.dialects.contains(&dialect);
+        parameter.filter(|_| applies && admits(other_types, other))
+    }
+
+    /// Whether the rule applies in `dialect`, whatever the operands.
+    pub(crate) fn in_dialect(&self, dialect: SqlDialect) -> bool {
+        self.dialects.is_empty() || self.dialects.contains(&dialect)
+    }
+
+    /// Whether the rule needs the left operand's type to decide whether it applies.
+    pub(crate) fn reads_left(&self) -> bool {
+        self.left.is_some()
+    }
+
+    /// Whether the rule needs the right operand's type to decide whether it applies.
+    pub(crate) fn reads_right(&self) -> bool {
+        self.right.is_some()
     }
 
     /// Whether the rule applies in `dialect` to operands of these SQL types.
