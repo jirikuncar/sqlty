@@ -113,3 +113,32 @@ CREATE TABLE orders (status TEXT NOT NULL CHECK (status IN ('new', 'paid')));
 SELECT status FROM orders
 -- columns: status: app.Status (TEXT)
 ```
+
+## Rewriting imports the type's module
+
+`rewrite` and `check --fix` import the module a Python type names, as they import
+`datetime` for a date.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.types]
+DATE = "datetime.date"
+"events.status" = "app.models.Status"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (day DATE NOT NULL, status TEXT NOT NULL);
+```
+
+```python
+q = "--sql\nSELECT day, status FROM events"
+# rewritten-file: import datetime
+# rewritten-file: import app.models
+# rewritten-file: from sqlty import SQL
+# rewritten-file: q = SQL[tuple[datetime.date, app.models.Status]]("--sql\nSELECT day, status FROM events")
+```

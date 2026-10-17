@@ -12,8 +12,8 @@ use crate::checker::check_source;
 use crate::edit::apply_edits;
 use crate::options::Options;
 use crate::rewriter::{
-    has_import, header_end, line_ending, suppresses, with_wrapper_imports, ImportStyle, Spelling,
-    Suppressed, TYPE_MODULES,
+    has_import, header_end, line_ending, suppresses, type_modules, with_wrapper_imports,
+    ImportStyle, Spelling, Suppressed,
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
@@ -92,18 +92,30 @@ pub fn fix_source(
     if !wrapped.is_empty() {
         let scan = Scan::new(&fixed, &options.style.wrapper_name);
         let wrapped: Vec<&str> = wrapped.iter().map(String::as_str).collect();
-        fixed = with_wrapper_imports(fixed.clone(), &scan, &wrapped, &options.style, false);
+        fixed = with_wrapper_imports(
+            fixed.clone(),
+            &scan,
+            &wrapped,
+            &options.style,
+            &type_modules(options),
+            false,
+        );
     }
     if fixed == source {
         return fixed;
     }
-    fix_imports(fixed, &options.style, &introduced)
+    fix_imports(fixed, &options.style, &type_modules(options), &introduced)
 }
 
-/// Add the [`TYPE_MODULES`] imports new row types need; drop an `UNTYPED` import no longer used.
-fn fix_imports(mut source: String, style: &ImportStyle, introduced: &BTreeSet<String>) -> String {
-    let mut missing: Vec<String> = TYPE_MODULES
-        .into_iter()
+/// Add the `modules` imports new row types need; drop an `UNTYPED` import no longer used.
+fn fix_imports(
+    mut source: String,
+    style: &ImportStyle,
+    modules: &[String],
+    introduced: &BTreeSet<String>,
+) -> String {
+    let mut missing: Vec<String> = modules
+        .iter()
         .filter(|module| {
             introduced
                 .iter()
