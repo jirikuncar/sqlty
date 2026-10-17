@@ -294,9 +294,17 @@ impl<'a> Resolver<'a> {
                 _ => String::new(),
             };
             let python = python.or_else(|| typed(sql.clone(), None, dialect).0);
+            // DuckDB's fixed-size `ARRAY` comes back as a tuple (see `SqlType::python`).
+            let fixed = !size.is_empty() && dialect == SqlDialect::Other("duckdb");
             return Resolved {
                 sql_type: format!("ARRAY<{sql}>{size}"),
-                python_type: python.map(|ty| format!("list[{ty}]")),
+                python_type: python.map(|ty| {
+                    if fixed {
+                        format!("tuple[{ty}, ...]")
+                    } else {
+                        format!("list[{ty}]")
+                    }
+                }),
                 allowed_values: None,
                 values: None,
             };

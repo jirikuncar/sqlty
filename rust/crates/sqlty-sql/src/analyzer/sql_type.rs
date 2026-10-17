@@ -326,6 +326,14 @@ impl SqlType {
     pub(crate) fn python(&self, dialect: SqlDialect) -> Option<String> {
         let any = |ty: &SqlType| ty.python(dialect).unwrap_or_else(|| ANY.to_string());
         match self {
+            // DuckDB's fixed-size `ARRAY` comes back as a tuple, its `LIST` as a list.
+            SqlType::Array {
+                element,
+                size: Some(_),
+            } if dialect == SqlDialect::Other("duckdb") => Some(format!(
+                "tuple[{}, ...]",
+                element.as_deref().map_or_else(|| ANY.to_string(), any)
+            )),
             SqlType::Array { element, .. } => {
                 Some(match element.as_deref().and_then(|e| e.python(dialect)) {
                     Some(item) => format!("list[{item}]"),

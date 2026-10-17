@@ -26,6 +26,7 @@ These look like bugs but follow the drivers:
 | `MONEY`, `XML`, `reg*`, `xid`, `tsvector` | `str` | psycopg loads them as text |
 | `INTERVAL` with a year or month part | `datetime.timedelta` | psycopg counts a year as 365 days and a month as 30 |
 | Ranges, geometric types | unknown | psycopg loads ranges as its own `Range`; [`unknown-type`](rules.md#unknown-type) names them |
+| DuckDB `T[3]` | `tuple[T, ...]` | The DuckDB client returns a fixed-size `ARRAY` as a tuple, a `LIST` (`T[]`) as a list |
 
 ## PostgreSQL
 

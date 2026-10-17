@@ -74,6 +74,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-randomly>=3.16.0",
     "pyyaml>=6.0.2",
+    "duckdb>=1.4.0",
     "ruff>=0.16.10",
     "ty>=0.0.85",
 ]
