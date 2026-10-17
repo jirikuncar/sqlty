@@ -15,7 +15,10 @@ use crate::values::{self, Value};
 use super::columns::{narrowed, Checks};
 use super::loader::{Loader, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
-use super::{Catalog, Function, FunctionReturn, Relation, SchemaColumn, UserType, BUILTIN_SCHEMAS};
+use super::{
+    Catalog, Function, FunctionReturn, Relation, SchemaColumn, TypeOverrides, UserType,
+    BUILTIN_SCHEMAS,
+};
 
 #[cfg(test)]
 thread_local! {
@@ -53,6 +56,7 @@ impl Loader {
             types: &user_types,
             path: &path,
             dialect,
+            overrides: &self.overrides,
         };
         let mut relations = FxHashMap::default();
         let mut user_relations = 0;
@@ -63,7 +67,7 @@ impl Loader {
             {
                 user_relations += 1;
             }
-            relations.insert(key.clone(), resolver.relation(rel));
+            relations.insert(key.clone(), resolver.relation(key, rel));
         }
         let mut composites: FxHashMap<String, Vec<SchemaColumn>> = self
             .types
@@ -102,6 +106,7 @@ impl Loader {
             search_path: path,
             user_relations,
             postgres: self.postgres,
+            overrides: Arc::clone(&self.overrides),
         }
     }
 
@@ -252,6 +257,7 @@ pub(super) struct Resolver<'a> {
     pub(super) types: &'a FxHashMap<String, UserType>,
     pub(super) path: &'a [String],
     pub(super) dialect: SqlDialect,
+    pub(super) overrides: &'a TypeOverrides,
 }
 
 /// A declared type as columns show it.
@@ -272,7 +278,18 @@ impl<'a> Resolver<'a> {
     }
 
     /// `dt` as SQL and Python types; user types are looked up once.
+    /// The type `dt` declares, with the Python type the project sets for it, if any.
     pub(super) fn resolve(&self, dt: &DataType) -> Resolved<'a> {
+        let mut resolved = self.resolve_declared(dt);
+        if let Some(python) = self.overrides.for_type(&resolved.sql_type) {
+            resolved.python_type = Some(python.to_string());
+            resolved.allowed_values = None;
+            resolved.values = None;
+        }
+        resolved
+    }
+
+    fn resolve_declared(&self, dt: &DataType) -> Resolved<'a> {
         let dialect = self.dialect;
         if let DataType::Array(
             ArrayElemTypeDef::AngleBracket(inner)
@@ -370,23 +387,31 @@ impl<'a> Resolver<'a> {
     }
 
     /// A raw relation as the catalog holds it.
-    pub(super) fn relation(&self, rel: &Rel) -> Relation {
+    pub(super) fn relation(&self, key: &str, rel: &Rel) -> Relation {
         match rel {
             Rel::Table(table) if table.unknown => Relation::Unknown,
             Rel::Table(table) => Relation::Table(
                 table
                     .columns
                     .iter()
-                    .map(|c| SchemaColumn {
-                        primary_key: c.primary_key,
-                        ..self.column(
-                            &c.name,
-                            &c.ident,
-                            &c.ty,
-                            c.not_null,
-                            c.has_default,
-                            c.checks(),
-                        )
+                    .map(|c| {
+                        let mut column = SchemaColumn {
+                            primary_key: c.primary_key,
+                            ..self.column(
+                                &c.name,
+                                &c.ident,
+                                &c.ty,
+                                c.not_null,
+                                c.has_default,
+                                c.checks(),
+                            )
+                        };
+                        if let Some(python) = self.overrides.for_column(key, &c.name) {
+                            column.python_type = Some(python.to_string());
+                            column.values = None;
+                            column.allowed_values = None;
+                        }
+                        column
                     })
                     .collect(),
                 // A group naming a dropped or renamed column no longer holds.

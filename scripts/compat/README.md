@@ -6,12 +6,18 @@ typed table, with the Python type the source expects) through
 leaves it untyped) or not comparable (the source has no Python type).
 
 ```bash
-uv run --with sqlalchemy==2.0.43 python scripts/compat/run.py sqlalchemy
+scripts/compat/run.sh sqlalchemy
 ```
 
 writes `reports/sqlalchemy.json` (every row) and `reports/sqlalchemy.md` (counts and
-the rows that differ). Sources run through `uv run --with`, so they are not dependencies
-of the project.
+the rows that differ). With no argument, `run.sh` runs every source. Each source is a
+dependency group of `pyproject.toml` here, pinned, and runs through
+`uv run --with-requirements`, so none is a dependency of sqlty.
+
+Dependabot bumps the pins weekly. Its pull request runs the `Compatibility` workflow,
+which reruns every source against PostgreSQL 17 and MySQL 8.4 and shows how the reports
+changed in the job summary; the workflow also runs weekly, for engine changes. Commit
+the regenerated reports with a bump.
 
 A source is a module with a `rows()` generator, registered in `SOURCES` of `run.py`.
 
@@ -21,21 +27,22 @@ mdtest, or a converter difference, to document.
 
 ## Sources and results
 
-| Source | Run with | Report | sqlty defects found |
-|--------|----------|--------|---------------------|
-| SQLAlchemy 2.0.43 | `--with sqlalchemy==2.0.43` | `reports/sqlalchemy.md` | 7, fixed in #412 |
-| Drivers (live) | `SQLTY_PG_DSN`, `SQLTY_MYSQL_DSN`, `--with psycopg2-binary --with asyncpg --with pymysql --with mysqlclient --with aiosqlite` | `reports/drivers.md` | PostgreSQL geometric types (#411) |
-| sqlglot 30.23.0 | a server, as above | `reports/sqlglot.md` | MySQL binary strings, `ROUND`/`TRUNCATE`, functions; PostgreSQL range operators (#413) |
-| Django 6.1.2 | `--with django==6.1.2 --with psycopg --with mysqlclient` | `reports/django.md` | none |
-| Tortoise 1.1.9 | `--with tortoise-orm==1.1.9` | `reports/tortoise.md` | none |
-| SQLModel 0.0.48 | `--with sqlmodel==0.0.48` | `reports/sqlmodel.md` | none |
-| Piccolo 1.36.0 | `--with piccolo==1.36.0` | `reports/piccolo.md` | none |
-| ormar 0.26.0 | `--with ormar==0.26.0` | `reports/ormar.md` | none |
-| peewee 4.5.3 | `--with peewee==4.5.3` | `reports/peewee.md` | none |
-| Pony 0.7.20 | a server, `--with pony==0.7.20 --with psycopg2-binary --with pymysql` | `reports/pony.md` | none |
-| SQLObject 3.14.0 | `--with sqlobject==3.14.0` | `reports/sqlobject.md` | none |
+| Source | Group | Report | sqlty defects found |
+|--------|-------|--------|---------------------|
+| SQLAlchemy | `sqlalchemy` | `reports/sqlalchemy.md` | 7, fixed in #412 |
+| Drivers (live) | `drivers`, a server | `reports/drivers.md` | PostgreSQL geometric types (#411) |
+| sqlglot | `sqlglot`, a server | `reports/sqlglot.md` | MySQL binary strings, `ROUND`/`TRUNCATE`, functions; PostgreSQL range operators (#413) |
+| Django | `django` | `reports/django.md` | none |
+| Tortoise | `tortoise` | `reports/tortoise.md` | none |
+| SQLModel | `sqlmodel` | `reports/sqlmodel.md` | none |
+| Piccolo | `piccolo` | `reports/piccolo.md` | none |
+| ormar | `ormar` | `reports/ormar.md` | none |
+| peewee | `peewee` | `reports/peewee.md` | none |
+| Pony | `pony`, a server | `reports/pony.md` | none |
+| SQLObject | `sqlobject` | `reports/sqlobject.md` | none |
 
 Every DDL spelling the ORMs write parses and has a type. Their remaining mismatches are
 converters above the driver, listed in `docs/guide/drivers-and-orms.md`: SQLite dates,
 booleans, decimals and UUIDs; UUIDs stored as `CHAR(32)`, `CHAR(36)` or `BINARY(16)`;
 durations stored as `BIGINT` microseconds or `DATETIME`; MySQL `TIME` as `datetime.time`.
+A project reading values through one of them sets `[tool.sqlty.types]`.

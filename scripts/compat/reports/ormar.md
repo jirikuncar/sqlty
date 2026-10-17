@@ -17,6 +17,6 @@
 | sqlite | `DATETIME` | `datetime.datetime` | `str` | ormar.DateTime |
 | mysql | `TIME` | `datetime.time` | `datetime.timedelta` | ormar.Time |
 | sqlite | `TIME` | `datetime.time` | `str` | ormar.Time |
-| postgres | `VARCHAR(32)` | `uuid.UUID` | `str` | ormar.UUID |
+| postgres | `CHAR(32)` | `uuid.UUID` | `str` | ormar.UUID |
 | mysql | `CHAR(32)` | `uuid.UUID` | `str` | ormar.UUID |
 | sqlite | `CHAR(32)` | `uuid.UUID` | `str` | ormar.UUID |

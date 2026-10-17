@@ -195,7 +195,7 @@ Schema(dialect="postgres")
 
 | Function | Returns |
 |----------|---------|
-| `load_schema(schema_sql, *, dialect="postgres")` | A parsed `Schema`, for any `schema_sql` argument |
+| `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
 | `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
 | `explain_select(sql, *, dialect="postgres", schema_sql=None)` | Per column, `ColumnRules(name, type_rule, nullability_rule)`: the [inference rules](engine.md#inference-rules) (`InferenceRule(id, reference, reasoning)`) behind it, or `None` |

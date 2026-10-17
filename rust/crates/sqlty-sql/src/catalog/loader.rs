@@ -7,6 +7,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::ControlFlow;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use sqlparser::ast::{
     AlterTable, AlterType, ArgMode, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind,
@@ -22,7 +23,7 @@ use super::columns::{
     raw_column, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
-use super::{Catalog, BUILTIN_SCHEMAS};
+use super::{Catalog, TypeOverrides, BUILTIN_SCHEMAS};
 
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct RawTable {
@@ -117,6 +118,8 @@ pub(super) struct Loader {
     pub(super) type_aliases: FxHashMap<String, String>,
     /// Objects whose columns or types the loader could not follow.
     pub(super) skipped: Vec<SkippedObject>,
+    /// The Python types the project sets for SQL types and columns.
+    pub(super) overrides: Arc<TypeOverrides>,
     /// Type names `SETOF` functions return: a function returning a table has its rows follow
     /// the table, so a change to a relation with one of these names refreshes the functions.
     pub(super) setof_names: FxHashSet<String>,
@@ -137,6 +140,7 @@ impl Loader {
             skipped: Vec::new(),
             type_aliases: FxHashMap::default(),
             setof_names: FxHashSet::default(),
+            overrides: Arc::default(),
         }
     }
 
@@ -508,7 +512,7 @@ impl Loader {
         let dialect = self.dialect;
         let resolved = self.cache.as_ref().map(|cache| {
             rel.as_ref()
-                .map(|rel| cache.resolver(dialect).relation(rel))
+                .map(|rel| cache.resolver(dialect).relation(&key, rel))
         });
         match rel {
             Some(rel) => self.relations.insert(key.clone(), rel),

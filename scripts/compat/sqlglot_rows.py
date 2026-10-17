@@ -19,8 +19,7 @@ from pathlib import Path
 
 from harness import Row
 
-VERSION = "30.23.0"
-URL = f"https://raw.githubusercontent.com/tobymao/sqlglot/v{VERSION}/tests/fixtures/optimizer/{{}}"
+URL = "https://raw.githubusercontent.com/tobymao/sqlglot/v{version}/tests/fixtures/optimizer/{name}"
 CACHE = Path(__file__).parent / ".cache"
 # sqlglot dialect -> sqlty dialect; "" is sqlglot's generic dialect.
 DIALECTS = {"postgres": "postgres", "mysql": "mysql", "": "generic"}
@@ -52,11 +51,15 @@ VALUES = {
 
 
 def rows() -> Iterator[Row]:
+    from importlib.metadata import version as installed
+
     from sqlty import core
+
+    version = installed("sqlglot")
 
     servers = {"postgres": _postgres(), "mysql": _mysql()}
     for name in ("annotate_functions.sql", "annotate_types.sql"):
-        for dialect, sql, expected in _pairs(_fixture(name)):
+        for dialect, sql, expected in _pairs(_fixture(name, version)):
             schema = _schema(dialect)
             provenance = f"{name}: sqlglot {expected}"
             if (run := servers.get(dialect)) is not None:
@@ -70,7 +73,7 @@ def rows() -> Iterator[Row]:
                 python = core.analyze_select(f"SELECT CAST(x AS {expected}) AS c", dialect=dialect)
                 expected_python = python[0].python_type if python else None
             yield Row(
-                "sqlglot", VERSION, dialect, "expression", sql, expected_python, provenance, schema
+                "sqlglot", version, dialect, "expression", sql, expected_python, provenance, schema
             )
 
 
@@ -135,11 +138,11 @@ def _mysql() -> Callable[[str], str] | None:
     return run
 
 
-def _fixture(name: str) -> str:
-    path = CACHE / f"{VERSION}-{name}"
+def _fixture(name: str, version: str) -> str:
+    path = CACHE / f"{version}-{name}"
     if not path.exists():
         CACHE.mkdir(exist_ok=True)
-        with urllib.request.urlopen(URL.format(name)) as response:  # noqa: S310 - a pinned GitHub URL
+        with urllib.request.urlopen(URL.format(version=version, name=name)) as response:  # noqa: S310 - a pinned GitHub URL
             path.write_bytes(response.read())
     return path.read_text()
 

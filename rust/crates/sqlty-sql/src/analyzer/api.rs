@@ -23,6 +23,18 @@ pub fn load_schema_with_skipped(schema_sql: &str, dialect: &str) -> (Schema, Vec
     (Arc::new(catalog), skipped)
 }
 
+/// [`load_schema_with_skipped`], with the Python types the project sets for SQL types and
+/// columns: a column of an overridden type, or an overridden column, and a cast to an
+/// overridden type, have that Python type.
+pub fn load_schema_with_overrides(
+    schema_sql: &str,
+    dialect: &str,
+    overrides: crate::catalog::TypeOverrides,
+) -> (Schema, Vec<SkippedObject>) {
+    let (catalog, skipped) = crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides));
+    (Arc::new(catalog), skipped)
+}
+
 #[cfg(test)]
 pub(crate) fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
