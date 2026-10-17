@@ -72,8 +72,8 @@ SELECT * FROM items
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
 variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
 in the expansion; an `ENUM` column is a `typing.Literal` of its labels.
-Unmapped types such as `BIT`, `SET` and spatial `POINT` are unknown, so a
-query selecting one has no row type.
+`BIT(n)` is `bytes`, as MySQL drivers load it. Unmapped types such as `SET` and
+spatial `POINT` are unknown, so a query selecting one has no row type.
 
 `schema.sql`:
 ```sql
@@ -101,7 +101,7 @@ schema = "schema.sql"
 SELECT * FROM items
 -- inferred: None
 -- columns: a: float | None (DOUBLE)
--- columns: b: None (BIT(8))
+-- columns: b: bytes | None (BIT(8))
 -- columns: c: datetime.datetime | None (DATETIME(6))
 -- columns: d: datetime.datetime | None (TIMESTAMPTZ)
 -- columns: e: typing.Literal['x', 'y'] | None (ENUM('X', 'Y'))

@@ -139,7 +139,7 @@ class TestQueryInput:
 def _type_table() -> dict[str, str]:
     """``SQL_TO_PYTHON_TYPE`` of the analyzer, without ``ENUM`` (its values are needed to parse)."""
     source = (
-        Path(__file__).resolve().parent.parent / "rust/crates/sqlty-sql/src/analyzer/mod.rs"
+        Path(__file__).resolve().parent.parent / "rust/crates/sqlty-sql/src/analyzer/sql_type.rs"
     ).read_text()
     constants = dict(re.findall(r'const (\w+): &str = "([\w. |]+)";', source))
     start = source.index("static SQL_TO_PYTHON_TYPE")

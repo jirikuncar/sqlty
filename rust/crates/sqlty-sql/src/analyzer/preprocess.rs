@@ -1,6 +1,7 @@
 //! Turning a query string into statements: the `--sql` marker, dialect fixes sqlparser
 //! needs, and the checks for syntax the analyzer does not read.
 
+use std::borrow::Cow;
 use std::ops::ControlFlow;
 use std::sync::LazyLock;
 
@@ -56,6 +57,33 @@ pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
 });
 
+/// ISO types sqlparser does not read, in groups 1 and 2, respelled as ones it does:
+/// `BINARY LARGE OBJECT` as `BLOB`, and `T MULTISET` as the array `T[]`. Literals, quoted
+/// names and comments are matched to be skipped.
+static ISO_TYPES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:\b(BINARY\s+LARGE\s+OBJECT)\b)|(?i:\s+(MULTISET)\b)"#,
+    )
+    .unwrap()
+});
+
+/// `sql` with [`ISO_TYPES`] respelled; borrowed when it names none.
+fn iso_types(sql: &str) -> Cow<'_, str> {
+    let names = |word: &[u8]| {
+        sql.as_bytes()
+            .windows(word.len())
+            .any(|w| w.eq_ignore_ascii_case(word))
+    };
+    if !names(b"LARGE") && !names(b"MULTISET") {
+        return Cow::Borrowed(sql);
+    }
+    ISO_TYPES.replace_all(sql, |caps: &Captures| match (caps.get(1), caps.get(2)) {
+        (Some(_), _) => "BLOB".to_string(),
+        (_, Some(_)) => "[]".to_string(),
+        _ => caps[0].to_string(),
+    })
+}
+
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`), then
 /// `INT3`/`MIDDLEINT` before `UNSIGNED`.
 pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 2]> = LazyLock::new(|| {
@@ -80,6 +108,7 @@ pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
 /// Parse schema DDL, with the MySQL column types sqlparser rejects respelled, and in
 /// SQLite multi-word type names (`UNSIGNED BIG INT`) joined into one word.
 pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    let sql = &iso_types(sql);
     if dialect == SqlDialect::Sqlite {
         return parse(sql, dialect).or_else(|| parse(&sqlite_type_names(sql)?, dialect));
     }
@@ -172,6 +201,10 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
 /// and stays uninferred rather than mistyped.
 pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = SQL_MARKER.replace(sql, "");
+    let sql = match iso_types(&sql) {
+        Cow::Borrowed(_) => sql,
+        Cow::Owned(respelled) => Cow::Owned(respelled),
+    };
     let sql = if dialect == SqlDialect::Postgres {
         let sql = drop_conflict_predicate(&sql);
         let sql = POSTGRES_LOCK_FIXES
