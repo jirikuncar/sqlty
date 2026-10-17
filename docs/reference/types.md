@@ -19,6 +19,8 @@ These look like bugs but follow the drivers:
 | SQL type | Python type | Why |
 |----------|-------------|-----|
 | `NUMERIC`, `DECIMAL`, `DECFLOAT` | `decimal.Decimal`; `float` in `sqlite` and `oracle` | SQLite stores them with `NUMERIC` affinity and `sqlite3` returns floats |
+| SQLite `DATE`, `TIME`, `TIMESTAMP`, `DATETIME` | `str` | SQLite has no date storage class: `sqlite3` returns the stored text, unless you pass `detect_types` and register converters |
+| SQLite `BOOLEAN`, and comparisons | `int` | SQLite stores booleans as the integers 0 and 1 |
 | MySQL `TIME` | `datetime.timedelta` | A MySQL `TIME` is a duration, up to 838 hours either way |
 | `BIT(n)` | `str`; `bytes` in `mysql` | psycopg loads a bit string as its text, MySQL drivers as bytes |
 | `JSON`, `JSONB` | `typing.Any` | Any JSON value can be stored; a column that builds JSON of a known shape is checked by [`json-shape-mismatch`](rules.md#json-shape-mismatch) |
@@ -119,6 +121,15 @@ SELECT CAST(x AS INTEGER) AS a, CAST(x AS REAL) AS b, CAST(x AS TEXT) AS c, CAST
 -- columns: d: bytes (VARBINARY)
 -- columns: e: float (DECIMAL)
 -- columns: f: str (VARCHAR(10))
+```
+
+```sql
+SELECT CAST(x AS DATE) AS a, CAST(x AS TIMESTAMP) AS b, CAST(x AS DATETIME) AS c, CAST(x AS BOOLEAN) AS d, 1 = 1 AS e
+-- columns: a: str (DATE)
+-- columns: b: str (TIMESTAMP)
+-- columns: c: str (DATETIME)
+-- columns: d: int (BOOLEAN)
+-- columns: e: int (BOOLEAN)
 ```
 
 ## DuckDB

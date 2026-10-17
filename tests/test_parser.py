@@ -154,6 +154,14 @@ def test_type_names(sql_type: str, python_type: str, dialect: str):
     """A mapped type name, cast or in a schema, is its Python type."""
     if (sql_type, dialect) == ("TIME", "mysql"):
         python_type = "datetime.timedelta"
+    if dialect == "sqlite" and python_type in (
+        "bool",
+        "datetime.date",
+        "datetime.time",
+        "datetime.datetime",
+    ):
+        # sqlite3 returns stored integers and text: SQLite has no such storage class.
+        python_type = "int" if python_type == "bool" else "str"
     schema = f"CREATE TABLE t (c {sql_type} NOT NULL);"
     cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
