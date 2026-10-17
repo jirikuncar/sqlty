@@ -192,7 +192,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
             [--fix] [--exit-zero] [--exit-zero-on-warning]
-            [--error-on-warning] [--statistics]
+            [--error-on-warning] [--statistics] [--explain]
             [paths ...]
 ```
 <!-- /generated:cli-usage-check -->
@@ -205,6 +205,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 | `--exit-zero-on-warning` | Exit 0 when no diagnostic has severity error (the default); cannot be combined with --error-on-warning |
 | `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
+| `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:

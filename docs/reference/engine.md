@@ -62,6 +62,35 @@ With `SQLTY_PG_DSN` set, the test also checks the fixture against the server.
 A query whose type differs from PostgreSQL's is listed in `KNOWN_GAPS` in the
 test, and here. None is listed today.
 
+## Inference rules
+
+Operators, aggregates and JSON accessors are typed by inference rules: TOML
+files in `rust/crates/sqlty-sql/rules/`, compiled into the engine. Each rule
+names the documentation it follows and why. `sqlty check --explain` prints the
+rule behind each column under a type diagnostic:
+
+```text
+q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int | None, str | None]]
+  total: type and nullability by inference rule postgres.aggregate.sum-integers
+    Summing small integers widens to bigint so the sum fits.
+    Reference: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)
+```
+
+A column gets the rules of its outermost operator or function call. A column
+reference, a cast, a literal or a set operation has none. From Python,
+`sqlty.core.explain_select` returns the same rules:
+
+```pycon
+>>> from sqlty.core import explain_select
+>>> [column] = explain_select("SELECT SUM(qty) AS total FROM orders", schema_sql="CREATE TABLE orders (qty SMALLINT NOT NULL)")
+>>> column.type_rule.id, column.nullability_rule.id
+('postgres.aggregate.sum-integers', 'postgres.aggregate.sum-integers')
+```
+
+The analyzer records the rules only when asked to, so `check` without
+`--explain` pays nothing for them. To add or change a rule, see
+[`rules/README.md`](https://github.com/jirikuncar/sqlty/blob/main/rust/crates/sqlty-sql/rules/README.md).
+
 ## Functions
 
 A call to a built-in function is typed by the function's rules in the query's

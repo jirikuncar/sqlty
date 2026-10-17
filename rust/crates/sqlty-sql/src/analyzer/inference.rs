@@ -51,12 +51,19 @@ pub(crate) enum RuleNullability {
     NonzeroDivisor,
 }
 
+/// An inference rule as `sqlty check --explain` reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuleRef {
+    /// Unique, such as `postgres.json.arrow-jsonb`.
+    pub id: &'static str,
+    /// The documentation the rule follows: name, version and section.
+    pub reference: &'static str,
+    /// Why the rule types the operator or function so, in one sentence.
+    pub reasoning: &'static str,
+}
+
 /// An inference rule for a binary operator.
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "`id`, `reference` and `reasoning` are for `--explain`"
-)]
 pub(crate) struct BinaryRule {
     /// Unique, such as `postgres.json.long-arrow`.
     pub(crate) id: &'static str,
@@ -79,6 +86,15 @@ pub(crate) struct BinaryRule {
 }
 
 impl BinaryRule {
+    /// The rule as `--explain` shows it.
+    pub(crate) fn explained(&self) -> RuleRef {
+        RuleRef {
+            id: self.id,
+            reference: self.reference,
+            reasoning: self.reasoning,
+        }
+    }
+
     /// The SQL type of a placeholder operand (the left one when `left`) whose other
     /// operand has SQL type `other`, when the rule gives one.
     pub(crate) fn parameter(
@@ -151,10 +167,6 @@ pub(crate) enum FunctionNullability {
 
 /// An inference rule for a function call, by its first argument.
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "`id`, `reference` and `reasoning` are for `--explain`"
-)]
 pub(crate) struct FunctionRule {
     pub(crate) id: &'static str,
     pub(crate) reference: &'static str,
@@ -167,6 +179,15 @@ pub(crate) struct FunctionRule {
 }
 
 impl FunctionRule {
+    /// The rule as `--explain` shows it.
+    pub(crate) fn explained(&self) -> RuleRef {
+        RuleRef {
+            id: self.id,
+            reference: self.reference,
+            reasoning: self.reasoning,
+        }
+    }
+
     /// Whether the rule needs the argument's type to decide whether it applies.
     pub(crate) fn reads_argument(&self) -> bool {
         self.argument.is_some()

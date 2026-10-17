@@ -78,6 +78,17 @@ class Run:
             case "json":
                 shapes = core.json_shapes(text, dialect=self.dialect, schema_sql=self.schema_sql)
                 return "\n".join(f"{name}: {shape}" for name, shape in shapes) or "None"
+            case "rules":
+                explained = core.explain_select(
+                    text, dialect=self.dialect, schema_sql=self.schema_sql
+                )
+                if explained is None:
+                    return "None"
+                return "\n".join(
+                    f"{c.name}: {c.type_rule.id if c.type_rule else '-'}"
+                    f" / {c.nullability_rule.id if c.nullability_rule else '-'}"
+                    for c in explained
+                )
             case "params":
                 params = core.analyze_params(text, dialect=self.dialect, schema_sql=self.schema_sql)
                 if params is None:

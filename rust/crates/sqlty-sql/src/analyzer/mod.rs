@@ -16,6 +16,7 @@ mod api;
 mod dialect;
 mod dialect_functions;
 mod dml;
+mod explain;
 mod expr;
 mod functions;
 mod hashing;
@@ -50,7 +51,9 @@ pub use api::{
 };
 pub(crate) use api::{typed, view_columns};
 pub use dialect::{SqlDialect, UnknownDialect};
+pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;
+pub use inference::RuleRef;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
 pub(crate) use preprocess::parse_ddl;

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
     from sqlty._lint import Diagnostic
+    from sqlty._source import ParsedSource
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="After the summary, print how many queries were typed, partially typed, unparsed "
         "and skipped",
+    )
+    check_parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Under a type diagnostic, print the inference rule (id, reference, reasoning) "
+        "behind each column's type and nullability",
     )
 
     # --- breaking ---
@@ -488,7 +495,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     statistics: Counter[str] = Counter()
     # A row type shared by files is judged by all of its queries: report once every file is read.
     row_usage = RowUsage()
-    reports: list[tuple[Path, Diagnostic]] = []
+    reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
 
     for path in files:
         parsed = sources[path]
@@ -532,10 +539,10 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 helpers=file_helpers,
             )
 
-        reports.extend((path, diag) for diag in diagnostics)
+        reports.extend((path, diag, parsed) for diag in diagnostics)
 
-    kept = {id(diag) for diag in row_usage.filter([diag for _, diag in reports])}
-    for path, diag in reports:
+    kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
+    for path, diag, parsed in reports:
         if id(diag) not in kept:
             continue
         severity = diag["severity"]
@@ -545,6 +552,10 @@ def _cmd_check(args: argparse.Namespace) -> None:
             total_warnings += 1
         if not args.quiet:
             print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
+            if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
+                settings = resolver.for_file(path)
+                for line in _explain(parsed, diag["line"], settings.dialect, settings.schema):
+                    print(line)
 
     if total_fixed and not args.quiet:
         print(f"Fixed {total_fixed} file(s)")
@@ -560,6 +571,49 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
         sys.exit(EXIT_FOUND)
+
+
+# Diagnostics about the type of a query's rows, which `--explain` traces to inference rules.
+_EXPLAINED_RULES = frozenset(
+    {
+        "stale-type",
+        "column-type-mismatch",
+        "nullable-mismatch",
+        "redundant-optional",
+        "literal-mismatch",
+        "redundant-literal",
+        "json-shape-mismatch",
+    }
+)
+
+
+def _explain(
+    parsed: ParsedSource, line: int, dialect: str, schema: str | Schema | None
+) -> list[str]:
+    """The inference rules behind the columns of the query on ``line``, indented."""
+    from sqlty._core import query_sites
+    from sqlty.core import explain_select
+
+    sites = [(start, text) for start, kind, text in query_sites(parsed.text) if kind == "query"]
+    query = next((text for start, text in reversed(sites) if start <= line), None)
+    lines: list[str] = []
+    for column in (
+        explain_select(query, dialect=dialect, schema_sql=schema) if query else None
+    ) or []:
+        rules = {rule for rule in (column.type_rule, column.nullability_rule) if rule is not None}
+        for rule in sorted(rules, key=lambda rule: rule.id):
+            parts = [
+                part
+                for part, by in (
+                    ("type", column.type_rule),
+                    ("nullability", column.nullability_rule),
+                )
+                if by == rule
+            ]
+            lines.append(f"  {column.name}: {' and '.join(parts)} by inference rule {rule.id}")
+            lines.append(f"    {rule.reasoning}")
+            lines.append(f"    Reference: {rule.reference}")
+    return lines
 
 
 def _format_statistics(counts: Counter[str]) -> str:
