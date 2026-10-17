@@ -1,0 +1,51 @@
+# PostgreSQL SUM, MIN and MAX.
+
+[[function]]
+id = "postgres.aggregate.sum-integers"
+function = "SUM"
+dialects = ["postgres"]
+argument = ["SMALLINT", "INT"]
+type = "BIGINT"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)"
+reasoning = "Summing small integers widens to bigint so the sum fits."
+
+[[function]]
+id = "postgres.aggregate.sum-exact"
+function = "SUM"
+dialects = ["postgres"]
+argument = ["BIGINT", "DECIMAL", "NUMERIC"]
+type = "DECIMAL"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( bigint ) → numeric, sum ( numeric ) → numeric)"
+reasoning = "Summing bigints or numerics gives an exact numeric."
+
+[[function]]
+id = "postgres.aggregate.sum-real"
+function = "SUM"
+dialects = ["postgres"]
+argument = ["FLOAT"]
+type = "FLOAT"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( real ) → real)"
+reasoning = "Summing reals gives a real."
+
+[[function]]
+id = "postgres.aggregate.sum-double"
+function = "SUM"
+dialects = ["postgres"]
+argument = ["DOUBLE"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( double precision ) → double precision)"
+reasoning = "Summing doubles gives a double."
+
+[[function]]
+id = "postgres.aggregate.min-max-varchar"
+functions = ["MIN", "MAX"]
+dialects = ["postgres"]
+argument = ["VARCHAR"]
+type = "@argument-as TEXT"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ): available for any numeric, string, ... type); the text operators read varchar as text"
+reasoning = "PostgreSQL has no min or max for varchar: it reads the values as text, so the result is text."

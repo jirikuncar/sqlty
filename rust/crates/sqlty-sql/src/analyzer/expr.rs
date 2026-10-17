@@ -10,6 +10,7 @@ use crate::diagnostics::NameRule;
 
 use super::dialect::SqlDialect;
 use super::functions::{positional_args, Returns};
+use super::inference::FunctionType;
 use super::literals::{constant, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
@@ -436,8 +437,27 @@ impl<'a> Analyzer<'a> {
         }
         let args = positional_args(&func.args);
         let arg = args.first().copied();
+        if let Some((rule, typed)) = self.function_rule(&name, arg, scope)? {
+            let argument = || match &typed {
+                Some(typed) => Ok(typed.clone()),
+                None => arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
+            };
+            return Ok(match rule.result {
+                FunctionType::Sql(sql) => from_sql_type(sql, self.dialect),
+                FunctionType::Unknown => Typed::UNKNOWN,
+                FunctionType::Argument => argument()?,
+                FunctionType::ArgumentAs(sql) => {
+                    let typed = argument()?;
+                    Typed::with_values(
+                        typed.python().map(String::from),
+                        Some(sql.to_string()),
+                        typed.values,
+                    )
+                }
+                FunctionType::Code => self.sum(argument()?, arg, scope)?,
+            });
+        }
         match name.as_str() {
-            "COUNT" => Ok(from_sql_type("BIGINT", self.dialect)),
             // Ordered-set aggregates: the type of the `WITHIN GROUP (ORDER BY x)` value.
             "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE"
                 if self.dialect == SqlDialect::Postgres && !func.within_group.is_empty() =>
@@ -457,7 +477,6 @@ impl<'a> Analyzer<'a> {
                     _ => typed,
                 })
             }
-            "SUM" | "MIN" | "MAX" => self.aggregate(&name, arg, scope),
             _ => match self.returns(&name) {
                 Some(returns) => self.function_type(returns, &args, scope),
                 None => Ok(self.user_call_typed(func)),

@@ -90,13 +90,72 @@ impl BinaryRule {
         left: Option<&str>,
         right: Option<&str>,
     ) -> bool {
-        let admits = |types: Option<&[&str]>, operand: Option<&str>| {
-            types.is_none_or(|types| operand.is_some_and(|operand| types.contains(&operand)))
-        };
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.left, left)
             && admits(self.right, right)
     }
+}
+
+/// The result type of a function rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FunctionType {
+    /// A SQL type, such as `BIGINT`.
+    Sql(&'static str),
+    /// Not known: the call stays untyped.
+    Unknown,
+    /// Typed by the analyzer's code: the rule gives the nullability only.
+    Code,
+    /// The argument's type, values included: `MIN` and `MAX` return one of them.
+    Argument,
+    /// The argument's Python type and values under another SQL type.
+    ArgumentAs(&'static str),
+}
+
+/// How a function rule's result can be NULL.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FunctionNullability {
+    /// Never NULL, such as `COUNT`.
+    NonNull,
+    /// An aggregate's: NULL over no rows, unless the group is known to hold one (a plain
+    /// `GROUP BY`), and as its argument is over the rows (`analyzer/nullability.rs`).
+    Aggregate,
+}
+
+/// An inference rule for a function call, by its first argument.
+#[derive(Debug)]
+#[allow(
+    dead_code,
+    reason = "`id`, `reference` and `reasoning` are for `--explain`"
+)]
+pub(crate) struct FunctionRule {
+    pub(crate) id: &'static str,
+    pub(crate) reference: &'static str,
+    pub(crate) reasoning: &'static str,
+    dialects: &'static [SqlDialect],
+    /// The SQL types the first argument may have; `None` for any.
+    argument: Option<&'static [&'static str]>,
+    pub(crate) result: FunctionType,
+    pub(crate) nullability: FunctionNullability,
+}
+
+impl FunctionRule {
+    /// Whether the rule needs the argument's type to decide whether it applies.
+    pub(crate) fn reads_argument(&self) -> bool {
+        self.argument.is_some()
+    }
+
+    /// Whether the rule applies in `dialect` to an argument of this SQL type.
+    pub(crate) fn applies(&self, dialect: SqlDialect, argument: Option<&str>) -> bool {
+        (self.dialects.is_empty() || self.dialects.contains(&dialect))
+            && admits(self.argument, argument)
+    }
+}
+
+/// Whether an operand of SQL type `operand` satisfies `types`; `@known` admits any typed one.
+fn admits(types: Option<&[&str]>, operand: Option<&str>) -> bool {
+    types.is_none_or(|types| {
+        operand.is_some_and(|operand| types.contains(&operand) || types.contains(&"@known"))
+    })
 }
 
 include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));

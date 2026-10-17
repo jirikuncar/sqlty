@@ -205,3 +205,55 @@ fn rules_of_different_dialects_do_not_overlap() {
     let text = format!("{sqlite}\n{mysql}");
     assert!(compile_one("rules/dialects/a.inference.toml", &text).is_ok());
 }
+
+const FUNCTION: &str = r#"
+[[function]]
+id = "test.sum"
+function = "SUM"
+argument = ["@integer"]
+type = "BIGINT"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, Table 9.60"
+reasoning = "Wider."
+"#;
+
+#[test]
+fn function_rules_become_their_own_table() {
+    let code = compile_one("rules/common/a.inference.toml", FUNCTION).unwrap();
+    assert!(code.contains("pub(crate) static FUNCTION_RULES: &[FunctionRule] = &["));
+    assert!(code.contains(r#""SUM" => &FUNCTION_RULES[0..1]"#));
+    assert!(code.contains("result: FunctionType::Sql(\"BIGINT\")"));
+    assert!(code.contains("nullability: FunctionNullability::Aggregate"));
+    let known = FUNCTION
+        .replace("[\"@integer\"]", "[\"@known\"]")
+        .replace("\"BIGINT\"", "\"@argument-as TEXT\"");
+    let code = compile_one("rules/common/a.inference.toml", &known).unwrap();
+    assert!(code.contains(r#"argument: Some(&["@known"])"#));
+    assert!(code.contains(r#"result: FunctionType::ArgumentAs("TEXT")"#));
+}
+
+#[test]
+fn function_rules_name_functions_and_their_own_results() {
+    let cases = [
+        (
+            FUNCTION.replace("\"SUM\"", "\"sum\""),
+            "function \"sum\" is not an upper-case name",
+        ),
+        (
+            FUNCTION.replace("\"BIGINT\"", "\"@promote\""),
+            "unknown result type \"@promote\"",
+        ),
+        (
+            FUNCTION.replace("\"BIGINT\"", "\"@argument-as STRING\""),
+            "unknown result type",
+        ),
+        (
+            FUNCTION.replace("\"aggregate\"", "\"operands\""),
+            "unknown nullability \"operands\"",
+        ),
+    ];
+    for (text, expected) in cases {
+        let message = error("rules/common/a.inference.toml", &text);
+        assert!(message.contains(expected), "{message}");
+    }
+}
