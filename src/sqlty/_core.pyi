@@ -7,7 +7,9 @@ class Schema:
     @property
     def dialect(self) -> str: ...
 
-def load_schema(schema_sql: str, *, dialect: str = "postgres") -> Schema: ...
+def load_schema(
+    schema_sql: str, *, dialect: str = "postgres", types: list[tuple[str, str]] | None = None
+) -> Schema: ...
 def infer_type(
     sql: str,
     *,

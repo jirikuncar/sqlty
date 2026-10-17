@@ -42,6 +42,7 @@ query-param = "query"
 | [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
+| [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
@@ -192,6 +193,27 @@ query-param = "query"
 <!-- /generated:config-function-keys -->
 
 Entries without `import-path` or `query-param` are skipped with a warning.
+
+## `types`
+
+The Python type a converter above the driver gives a SQL type or a column. sqlty
+types the value the [reference driver](types.md) returns; when your code reads
+values through something that converts them (an ORM, `sqlite3` with
+`detect_types`), say what it returns:
+
+```toml
+[tool.sqlty.types]
+DATE = "datetime.date"
+TIMESTAMP = "datetime.datetime"
+BOOLEAN = "bool"
+"events.duration" = "datetime.timedelta"
+```
+
+A key with a dot is `table.column`; any other is a SQL type name, read in the
+project's dialect (`NUMERIC` covers `DECIMAL(10, 2)`). The type applies to
+schema columns and casts; an expression over a column keeps its type when it
+returns the column's values (`MAX(day)`). See
+[Drivers and ORMs](../guide/drivers-and-orms.md#what-to-annotate).
 
 ## `format-command`
 

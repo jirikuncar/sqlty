@@ -28,7 +28,11 @@ class Run:
         self.updater = updater
         settings = section.settings
         self.dialect: str = settings.get("dialect", "postgres")
-        self.schema_sql: str | None = section.schema_sql
+        self.schema_sql: str | core.Schema | None = section.schema_sql
+        if types := settings.get("types"):
+            self.schema_sql = core.load_schema(
+                self.schema_sql or "", dialect=self.dialect, types=types
+            )
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")

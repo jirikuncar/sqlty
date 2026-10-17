@@ -46,7 +46,7 @@ mod typed;
 pub(crate) use api::load_schema;
 pub use api::{
     analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
-    load_schema_with_skipped, parse_error, returns_rows, row_type,
+    load_schema_with_overrides, load_schema_with_skipped, parse_error, returns_rows, row_type,
 };
 pub(crate) use api::{typed, view_columns};
 pub use dialect::{SqlDialect, UnknownDialect};
@@ -63,7 +63,7 @@ use sql_type::{decimal_type, python_type, ANY, DECIMAL};
 pub use star_expand::{expand_star, result_stars};
 use typed::Typed;
 
-pub use crate::catalog::{Catalog as SchemaData, SchemaColumn};
+pub use crate::catalog::{Catalog as SchemaData, SchemaColumn, TypeOverrides};
 
 /// A loaded schema, shared so callers can cache it across queries.
 pub type Schema = Arc<SchemaData>;

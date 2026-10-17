@@ -169,19 +169,36 @@ impl SchemaHandle {
 }
 
 /// Parse `schema_sql` once, for passing as `schema_sql` to the other functions.
+///
+/// `types` maps a SQL type name (`DATE`) or a `table.column` to the Python type a
+/// converter above the driver gives it (`[tool.sqlty.types]`).
+///
+/// Raises:
+///     ValueError: a key of `types` is neither a SQL type nor `table.column`
 #[pyfunction]
-#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
-fn load_schema(py: Python<'_>, schema_sql: &str, dialect: DialectArg) -> SchemaHandle {
+#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES, types = None))]
+fn load_schema(
+    py: Python<'_>,
+    schema_sql: &str,
+    dialect: DialectArg,
+    types: Option<Vec<(String, String)>>,
+) -> PyResult<SchemaHandle> {
     let dialect = dialect.0;
+    let overrides = analyzer::TypeOverrides::new(&types.unwrap_or_default(), dialect)
+        .map_err(PyValueError::new_err)?;
     let loaded = py.detach(|| {
-        let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+        let (schema, skipped) = if overrides.is_empty() {
+            analyzer::load_schema_with_skipped(schema_sql, dialect)
+        } else {
+            analyzer::load_schema_with_overrides(schema_sql, dialect, overrides)
+        };
         Arc::new(LoadedSchema { schema, skipped })
     });
-    SchemaHandle {
+    Ok(SchemaHandle {
         loaded,
         text: Arc::from(schema_sql),
         dialect,
-    }
+    })
 }
 
 fn schema<S: AsRef<str>>(arg: Option<SchemaArg<S>>, dialect: &str) -> Option<analyzer::Schema> {

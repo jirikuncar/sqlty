@@ -1,7 +1,7 @@
 //! Reading schema statements into loader operations, and the [`load`] entry point.
 
 use std::rc::Rc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use sqlparser::ast::{Statement, UserDefinedTypeRepresentation};
 use sqlparser::parser::Parser;
@@ -15,6 +15,7 @@ use super::columns::add_values;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
 use super::names::fold;
 use super::Catalog;
+use super::TypeOverrides;
 
 pub(super) static COLLATE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
@@ -204,8 +205,18 @@ pub(super) const BUILTIN_SQL: &str = include_str!("builtin_catalog.sql");
 /// relations, `search_path` and functions; it, MySQL and SQLite follow `ALTER` and `DROP`.
 /// Other dialects read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
 pub(crate) fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
+    load_with(schema_sql, dialect, Arc::default())
+}
+
+/// [`load`], with the Python types the project sets for SQL types and columns.
+pub(crate) fn load_with(
+    schema_sql: &str,
+    dialect: &str,
+    overrides: Arc<TypeOverrides>,
+) -> (Catalog, Vec<SkippedObject>) {
     let dialect = SqlDialect::from_name(dialect);
     let mut loader = Loader::new(dialect);
+    loader.overrides = overrides;
     let mut skipped = Vec::new();
     if dialect == SqlDialect::Postgres {
         let builtin = ddl::split_statements(BUILTIN_SQL, false);

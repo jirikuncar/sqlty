@@ -13,7 +13,8 @@ they cannot drift from the engine. The mapping itself lives in
 | `duckdb` | the [DuckDB Python client](https://duckdb.org/docs/current/clients/python/conversion.html) | `tests/test_duckdb_types.py`, in every run |
 
 The reference driver returns the raw value: what a converter above it (an ORM,
-`detect_types`, a row factory that decodes JSON) makes of it is not modelled. See
+`detect_types`, a row factory that decodes JSON) makes of it is not modelled, unless
+you set it with [`[tool.sqlty.types]`](configuration.md#types). See
 [Drivers and ORMs](../guide/drivers-and-orms.md) for where ORMs differ and what
 to annotate.
 
