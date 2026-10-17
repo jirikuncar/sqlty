@@ -46,7 +46,8 @@ only when the query does not parse otherwise.
 | Cast | `%s::date`, `CAST(%s AS int)` | the cast type |
 | `LIMIT`, `OFFSET`, `FETCH` | `LIMIT %s` | `int` |
 | `= ANY(...)` | `id = ANY(%s)` | `list[int]` |
-| Known function | `lower(%s)`, `coalesce(age, %s)`, `lpad(name, %s, %s)` | the signature's types |
+| Known function | `lower(%s)`, `coalesce(age, %s)`, `lpad(name, %s, %s)`, `pg_notify(%s, %s)` | the signature's types |
+| Schema function | `finish_job(%s, %s)` with `CREATE FUNCTION finish_job(job_id bigint, ...)` | the declared argument types, when the overloads a call fits agree |
 
 A `NOT NULL` target column also makes the parameter non-null, and a nullable
 one nullable. Where the context says nothing (a bare `SELECT %s`, an unknown
