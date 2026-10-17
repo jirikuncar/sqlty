@@ -156,8 +156,7 @@ impl<'a> Analyzer<'a> {
                 if let (true, SetExpr::SetOperation { left, .. }) =
                     (with.recursive, cte.query.body.as_ref())
                 {
-                    if let Some(select) = leftmost_select(left) {
-                        let mut seed = inner.select_columns(select)?;
+                    if let Some(mut seed) = inner.anchor_columns(left)? {
                         rename_columns(&mut seed, &cte.alias, self.dialect);
                         inner.virtuals.insert(name.clone(), seed);
                         recursive = true;
@@ -202,6 +201,28 @@ impl<'a> Analyzer<'a> {
             return inner.query_body(query);
         }
         self.query_body(query)
+    }
+
+    /// The columns of a recursive CTE's anchor, the leftmost branch: a `VALUES` list
+    /// outside PostgreSQL has columns of unknown type.
+    fn anchor_columns(&self, body: &SetExpr) -> Inferred<Option<Vec<Column>>> {
+        Ok(match body {
+            SetExpr::Select(select) => Some(self.select_columns(select)?),
+            SetExpr::SetOperation { left, .. } => self.anchor_columns(left)?,
+            SetExpr::Query(query) => self.anchor_columns(&query.body)?,
+            SetExpr::Values(values) if self.dialect == SqlDialect::Postgres => {
+                Some(self.values_columns(values)?)
+            }
+            SetExpr::Values(values) => {
+                let width = values.rows.first().map_or(0, |row| row.content.len());
+                Some(
+                    (1..=width)
+                        .map(|i| Column::unknown(&format!("column{i}")))
+                        .collect(),
+                )
+            }
+            _ => None,
+        })
     }
 
     pub(super) fn query_body(&self, query: &Query) -> Inferred<Option<Vec<Column>>> {

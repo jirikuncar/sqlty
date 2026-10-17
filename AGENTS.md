@@ -335,4 +335,9 @@ rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core
+proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 ```
+
+`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
+mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
+in `proofs/`.
