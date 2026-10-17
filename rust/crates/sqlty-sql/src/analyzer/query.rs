@@ -234,6 +234,7 @@ impl<'a> Analyzer<'a> {
             for condition in conditions.chain(&select.selection) {
                 analyzer.check_references(condition, &scope);
             }
+            analyzer.check_grouping(select, &scope);
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         analyzer.projection(&select.projection, &scope, Some(&select.from))

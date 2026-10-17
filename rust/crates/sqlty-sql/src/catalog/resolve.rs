@@ -356,6 +356,7 @@ impl<'a> Resolver<'a> {
             python_type,
             not_null,
             has_default,
+            primary_key: false,
             allowed_values: resolved.allowed_values.cloned(),
         }
     }
@@ -368,8 +369,9 @@ impl<'a> Resolver<'a> {
                 table
                     .columns
                     .iter()
-                    .map(|c| {
-                        self.column(
+                    .map(|c| SchemaColumn {
+                        primary_key: c.primary_key,
+                        ..self.column(
                             &c.name,
                             &c.ident,
                             &c.ty,
