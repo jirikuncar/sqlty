@@ -113,7 +113,7 @@ def test_examples_are_rewritten(example: Path) -> None:
 
 
 MARKDOWN = sorted(
-    {*ROOT.glob("*.md"), *ROOT.glob(".github/*.md")}
+    {*ROOT.glob("*.md"), *ROOT.glob(".github/*.md"), *ROOT.glob("skills/*/SKILL.md")}
     | {*ROOT.glob("docs/**/*.md"), *RULE_DOCS.glob("*.md"), *ROOT.glob("examples/*/README.md")}
 )
 
@@ -125,3 +125,20 @@ def test_links(page: Path) -> None:
     links = re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", prose)
     broken = [link for link in links if "://" not in link and not (page.parent / link).exists()]
     assert not broken
+
+
+@pytest.mark.parametrize(
+    "skill", sorted(ROOT.glob("skills/*/SKILL.md")), ids=lambda p: p.parent.name
+)
+def test_agent_skill_frontmatter(skill: Path) -> None:
+    """An Agent Skill starts with YAML front matter: its folder's name and a description."""
+    import yaml
+
+    text = skill.read_text()
+    assert text.startswith("---\n"), skill
+    meta = yaml.safe_load(text.split("---\n", 2)[1])
+    assert meta["name"] == skill.parent.name
+    assert re.fullmatch(r"[a-z0-9-]{1,64}", meta["name"])
+    assert 0 < len(meta["description"]) <= 1024
+    commands = set(re.findall(r"`sqlty (\w+)", text))
+    assert commands <= {"rewrite", "strip", "check", "breaking", "rule", "version"}, commands
