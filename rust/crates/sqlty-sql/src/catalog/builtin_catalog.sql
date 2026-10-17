@@ -71,6 +71,20 @@ CREATE TABLE pg_catalog.pg_depend (
 CREATE TABLE pg_catalog.pg_description (
     objoid oid NOT NULL, classoid oid NOT NULL, objsubid int4 NOT NULL,
     description text NOT NULL);
+CREATE TABLE pg_catalog.pg_database (
+    oid oid NOT NULL, datname name NOT NULL, datdba oid NOT NULL, encoding int4 NOT NULL,
+    datlocprovider "char" NOT NULL, datistemplate bool NOT NULL, datallowconn bool NOT NULL,
+    dathasloginevt bool NOT NULL, datconnlimit int4 NOT NULL, datfrozenxid xid NOT NULL,
+    datminmxid xid NOT NULL, dattablespace oid NOT NULL, datcollate text NOT NULL,
+    datctype text NOT NULL, datlocale text, daticurules text, datcollversion text,
+    datacl aclitem[]);
+CREATE TABLE pg_catalog.pg_stats (
+    schemaname name, tablename name, attname name, inherited bool, null_frac float4,
+    avg_width int4, n_distinct float4, most_common_vals anyarray, most_common_freqs float4[],
+    histogram_bounds anyarray, correlation float4, most_common_elems anyarray,
+    most_common_elem_freqs float4[], elem_count_histogram float4[],
+    range_length_histogram anyarray, range_empty_frac float4,
+    range_bounds_histogram anyarray);
 CREATE TABLE pg_catalog.pg_roles (
     rolname name, rolsuper bool, rolinherit bool,
     rolcreaterole bool, rolcreatedb bool, rolcanlogin bool,
@@ -166,6 +180,9 @@ CREATE TABLE information_schema.key_column_usage (
     constraint_catalog name, constraint_schema name, constraint_name name,
     table_catalog name, table_schema name, table_name name, column_name name,
     ordinal_position int4, position_in_unique_constraint int4);
+CREATE TABLE information_schema.constraint_column_usage (
+    table_catalog name, table_schema name, table_name name, column_name name,
+    constraint_catalog name, constraint_schema name, constraint_name name);
 CREATE TABLE information_schema.table_constraints (
     constraint_catalog name, constraint_schema name, constraint_name name,
     table_catalog name, table_schema name, table_name name, constraint_type varchar,

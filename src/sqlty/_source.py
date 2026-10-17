@@ -50,7 +50,8 @@ from dataclasses import dataclass
 from sqlty._psycopg import PsycopgScan
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
-_GAP = r"(?:[\s\"'rRuU]|#[^\n]*)*"
+# A comment runs to the end of its line, so the gap can split text only one way.
+_GAP = r"(?:[\s\"'rRuU]|#[^\n]*(?![^\n]))*"
 _MARKER_RE = re.compile(rf"-{_GAP}-{_GAP}s{_GAP}q{_GAP}l", re.IGNORECASE)
 _IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
 
