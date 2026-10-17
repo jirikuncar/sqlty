@@ -84,7 +84,7 @@ impl Analyzer<'_> {
             .schema
             .function(&table_key(&func.name, self.dialect), count)
         {
-            Some(FunctionReturn::Scalar(_)) => false,
+            Some(FunctionReturn::Scalar(_) | FunctionReturn::Row(..)) => false,
             Some(_) => true,
             None => SET_RETURNING.contains(&function_name(func).as_str()),
         }

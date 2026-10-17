@@ -8,7 +8,7 @@
 //! | pyformat | `%(name)s` | psycopg, MySQL drivers |
 //! | numeric | `$1` | asyncpg, PostgreSQL |
 //! | qmark | `?`, `?NNN` | sqlite3, MySQL |
-//! | named | `:name` | sqlite3 |
+//! | named | `:name` | sqlite3, SQLAlchemy's `text()` |
 //!
 //! [`rewrite`] turns the first four into numbered placeholders (`$N` in PostgreSQL, else
 //! `?N`; a `$N` written in the query is left as it is) and reports the name of each parameter, so the analyzer reads every style the same way.
@@ -162,11 +162,13 @@ fn question_mark(sql: &str, at: usize) -> Option<(usize, Token<'_>)> {
     Some((at + 1 + digits, Token::Numbered(number)))
 }
 
-/// `:name` at `at`, unless it is part of a `::` cast or follows a word.
+/// `:name` at `at`, as SQLAlchemy's `text()` reads one: not after a word, `:` or `\\`, and
+/// not followed by `:`, so `::` casts, `a[1:2]` and `:a::int` are not placeholders.
 fn colon_name(sql: &str, at: usize) -> Option<(usize, Token<'_>)> {
     let bytes = sql.as_bytes();
     if at > 0
-        && (matches!(bytes[at - 1], b':' | b'_' | b'$') || bytes[at - 1].is_ascii_alphanumeric())
+        && (matches!(bytes[at - 1], b':' | b'_' | b'$' | b'\\')
+            || bytes[at - 1].is_ascii_alphanumeric())
     {
         return None;
     }
@@ -178,6 +180,9 @@ fn colon_name(sql: &str, at: usize) -> Option<(usize, Token<'_>)> {
         .bytes()
         .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
         .count();
+    if bytes.get(at + 1 + len) == Some(&b':') {
+        return None;
+    }
     Some((at + 1 + len, Token::Named(&sql[at + 1..at + 1 + len])))
 }
 
@@ -280,7 +285,8 @@ mod tests {
         let found = rewrite("x = :id AND y::int = :id OR z = :other", ALL);
         assert_eq!(found.text, "x = $1 AND y::int = $1 OR z = $2");
         assert_eq!(found.names, [Some("id".into()), Some("other".into())]);
-        assert_eq!(text("a[1:2], t:x", ALL), "a[1:2], t:x");
+        assert_eq!(text("a[1:2], t:x, x[y:z]", ALL), "a[1:2], t:x, x[y:z]");
+        assert_eq!(text(":a::int, \\:b, :c", ALL), ":a::int, \\:b, $1");
         assert_eq!(text("x = :id", PLAIN), "x = :id");
     }
 

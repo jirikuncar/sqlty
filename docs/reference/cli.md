@@ -1,7 +1,7 @@
 # CLI
 
 <!-- generated:cli-usage -->
-```
+```text
 sqlty [-h] [--version] {rewrite,strip,check,breaking,rule,version} ...
 ```
 <!-- /generated:cli-usage -->
@@ -96,7 +96,7 @@ tool such as pre-commit passes file names.
 | `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
 | `--config-file PATH` | Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
 | `--isolated` | Ignore every configuration file; use the defaults and command-line flags |
-| `-c`, `--config KEY=VALUE` | Override a configuration key with a TOML assignment, e.g. `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`; repeat for several. Paths are relative to the current directory |
+| `-c`, `--config KEY=VALUE` | Override a configuration key with a TOML assignment, for example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`; repeat for several. Paths are relative to the current directory |
 | `--error RULE` | Treat RULE as severity error; repeat for several, the last flag for a rule wins |
 | `--warn RULE` | Treat RULE as severity warn; repeat for several, the last flag for a rule wins |
 | `--ignore RULE` | Treat RULE as severity ignore; repeat for several, the last flag for a rule wins |
@@ -121,7 +121,7 @@ skipped and reported on stderr (`fstring-skipped`, `tstring-skipped`,
 never change the exit code.
 
 <!-- generated:cli-usage-rewrite -->
-```
+```text
 sqlty rewrite [-h] [--dialect DIALECT] [--schema SCHEMA]
               [--config-file PATH | --isolated] [-c KEY=VALUE]
               [--error RULE] [--warn RULE] [--ignore RULE]
@@ -154,7 +154,7 @@ call's parentheses allow), the parentheses stay: `SQL[T]("..."  # c\n)` becomes
 which `check` still checks.
 
 <!-- generated:cli-usage-strip -->
-```
+```text
 sqlty strip [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--config-file PATH | --isolated] [-c KEY=VALUE]
             [--error RULE] [--warn RULE] [--ignore RULE]
@@ -179,13 +179,13 @@ Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when file
 Lint `--sql` strings and `SQL[T](...)` wrappers. Prints one line per
 diagnostic and a summary:
 
-```
+```text
 queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
 Found 1 warning(s)
 ```
 
 <!-- generated:cli-usage-check -->
-```
+```text
 sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--config-file PATH | --isolated] [-c KEY=VALUE]
             [--error RULE] [--warn RULE] [--ignore RULE]
@@ -210,7 +210,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 
 With `--statistics`, the last line counts the queries of the checked files:
 
-```
+```text
 Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)
 ```
 
@@ -236,13 +236,13 @@ deploy: the queries of `--against` on the schema of `--head` (backward), and the
 queries of `--head` on the schema of `--against` (forward). Prints what the other
 schema breaks:
 
-```
+```text
 app/q.py:2: [unknown-column] column `bio` does not exist in `users` (backward: the queries of origin/main against the schema of the working tree)
 Found 1 breaking change(s)
 ```
 
 <!-- generated:cli-usage-breaking -->
-```
+```text
 sqlty breaking [-h] --against REF [--head REF]
                [--direction {backward,forward,both}] [-q]
                [paths ...]
@@ -265,7 +265,7 @@ outside a git repository. See [Breaking schema changes](../guide/breaking-change
 Print a rule's documentation, or list every rule with its default severity.
 
 <!-- generated:cli-usage-rule -->
-```
+```text
 sqlty rule [-h] [name]
 ```
 <!-- /generated:cli-usage-rule -->

@@ -45,6 +45,30 @@ SELECT regexp_match(tx, 'a') AS m, regexp_matches(tx, 'a') AS ms, date_bin('15 m
 -- columns: utc: datetime.datetime (TIMESTAMPTZ)
 ```
 
+## Function-style casts
+
+`date(x)` is `x::date`, written as a call.
+
+```sql
+SELECT date(ts) AS day, date(tz) AS local FROM t
+-- columns: day: datetime.date (DATE)
+-- columns: local: datetime.date (DATE)
+```
+
+```toml
+[tool.sqlty.rules]
+unknown-function = "error"
+```
+
+```python
+import datetime
+
+from sqlty import SQL
+
+# error:
+q = SQL[tuple[datetime.date]]("--sql\nSELECT date(ts) FROM t")
+```
+
 ## Statistics and ordered-set aggregates
 
 `percentile_cont` interpolates, so it is a `double precision` (an `interval` over
