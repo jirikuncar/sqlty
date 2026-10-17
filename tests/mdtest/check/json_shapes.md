@@ -150,6 +150,39 @@ q = SQL[Order]("--sql\nSELECT coalesce(jsonb_agg(jsonb_build_object('note', note
 # error:
 ```
 
+### An extracted member keeps its null
+
+`->` and `#>` take a member with the `null` it can hold: psycopg loads a JSON `null` as
+`None`, and a JSON `null` passes `IS NOT NULL`. An array element can be missing, so it can
+be `None` too. A member every object has, of a non-null value, is never `None`.
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Row(TypedDict):
+    note: str
+    sku: str
+    first: str
+    nested: dict[str, str]
+
+
+# error: [json-shape-mismatch] "Row.nested is dict[str, str] but query column 'nested' builds JSON that does not fit: nested.x can be null but is declared str"
+# error: [nullable-mismatch] "Row.first is str but query column 'first' can be NULL"
+# error: [nullable-mismatch] "Row.note is str but query column 'note' can be NULL"
+q = SQL[Row]("""--sql
+SELECT
+    jsonb_build_object('a', note) -> 'a' AS note,
+    jsonb_build_object('a', jsonb_build_object('b', sku)) #> '{a,b}' AS sku,
+    jsonb_agg(sku) -> 0 AS first,
+    jsonb_build_object('x', jsonb_build_object('a', note) -> 'a') AS nested
+FROM lines
+WHERE jsonb_build_object('a', note) -> 'a' IS NOT NULL
+GROUP BY note, sku""")
+```
+
 ## Elements that can be null
 
 A helper's `tuple[...]` row type is checked item by item.

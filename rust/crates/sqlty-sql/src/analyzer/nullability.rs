@@ -442,9 +442,11 @@ impl<'a> Analyzer<'a> {
             | Expr::IsDistinctFrom(..)
             | Expr::IsNotDistinctFrom(..) => Nullability::NonNull,
             Expr::UnaryOp { expr: inner, .. } => of(inner),
-            Expr::BinaryOp { left, op, right } => {
-                self.binary_nullability(left, op, right, scope, facts)
-            }
+            Expr::BinaryOp { left, op, right } => match self.json_extract(expr, scope) {
+                // A member every object has is there whenever the object is.
+                Some(value) if !value.missing => of(left),
+                _ => self.binary_nullability(left, op, right, scope, facts),
+            },
             Expr::Between {
                 expr: inner,
                 low,
