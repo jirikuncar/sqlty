@@ -87,7 +87,7 @@ def _usage(parser: argparse.ArgumentParser) -> str:
     # Continuation lines are indented to the end of "usage: "; drop that prefix.
     lines = parser.format_usage().rstrip("\n").split("\n")
     lines = [lines[0].removeprefix("usage: "), *(line[len("usage: ") :] for line in lines[1:])]
-    return "```\n" + "\n".join(lines) + "\n```\n"
+    return "```text\n" + "\n".join(lines) + "\n```\n"
 
 
 def _invocation(parser: argparse.ArgumentParser, action: argparse.Action) -> str:

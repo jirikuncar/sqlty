@@ -81,7 +81,7 @@ not result types.
 
 Announcements and articles:
 
-- [Introducing sqlc – Compile SQL queries to type-safe Go](https://conroy.org/introducing-sqlc), Kyle Conroy, 2019
+- [Introducing sqlc - Compile SQL queries to type-safe Go](https://conroy.org/introducing-sqlc), Kyle Conroy, 2019
 - [Taming SQL and ORMs with sqlc](https://encore.dev/blog/go-get-it-001-sqlc), Encore, 2022
 - [sqlc on the Technology Radar](https://www.thoughtworks.com/en-au/radar/languages-and-frameworks/sqlc), Thoughtworks, 2022
 - [How psycopg row factories help you write safer applications](https://blog.dalibo.com/2022/06/01/psycopg-row-factories.html), Denis Laxalde, 2022
