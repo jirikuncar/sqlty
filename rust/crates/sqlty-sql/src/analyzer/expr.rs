@@ -353,8 +353,12 @@ impl<'a> Analyzer<'a> {
                 })
             }
             Value::Number(number, _) if number.contains('.') => known(decimal_type(self.dialect)),
+            // PostgreSQL reads an integer too big for a `bigint` as a `numeric`.
             Value::Number(number, _) => Ok(number.parse().map_or_else(
-                |_| Typed::python_only("int"),
+                |_| match self.dialect {
+                    SqlDialect::Postgres => Typed::python_only(decimal_type(self.dialect)),
+                    _ => Typed::python_only("int"),
+                },
                 |n| constant(crate::values::Value::Int(n)),
             )),
             Value::Boolean(_) => known("bool"),
@@ -389,7 +393,20 @@ impl<'a> Analyzer<'a> {
             results.push(self.expr(expr, scope)?);
         }
         if self.dialect == SqlDialect::Postgres {
-            if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
+            // PostgreSQL resolves the `ELSE` result first: of `varchar` and `text`, which
+            // convert either way, the first one wins. Value sets keep the source order.
+            let mut ordered = results.clone();
+            if else_result.is_some() {
+                ordered.rotate_right(1);
+            }
+            let first = common_of(ordered, self.dialect);
+            let common = match common_of(results.iter().cloned(), self.dialect) {
+                Some(common) if first.as_ref().is_some_and(|first| first.sql != common.sql) => {
+                    first
+                }
+                common => common,
+            };
+            if let Some(common) = common {
                 return Ok(common);
             }
         }
