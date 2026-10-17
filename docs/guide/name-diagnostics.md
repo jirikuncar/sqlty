@@ -85,8 +85,10 @@ The rules resolve the names a query defines, so these are not false positives:
   resolves through the `search_path` only. MySQL and SQLite match names without
   case.
 
-The rules read the select list of the query, so a column named only in
-`WHERE`, `ON`, `GROUP BY` or `ORDER BY` is not checked.
+The rules read the select list, `WHERE` and `JOIN ... ON` of a query, and the
+target table, set columns, values and conditions of `INSERT`, `UPDATE` and
+`DELETE`, also when they return no rows. A column named only in `GROUP BY`,
+`HAVING` or `ORDER BY` is not checked: those may name a result column's alias.
 
 `NULL` and placeholders such as `$1` have no type by nature and are not
 reported.

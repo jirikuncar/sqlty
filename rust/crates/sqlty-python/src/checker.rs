@@ -209,7 +209,11 @@ impl Checker<'_> {
                 continue;
             }
             let first = scan.tokens[group.tokens[0]].span.clone();
-            self.marker_and_syntax(&scan.content(group), group.line, &first);
+            let content = scan.content(group);
+            self.marker_and_syntax(&content, group.line, &first);
+            if after_marker(&content).is_some() {
+                self.name_diagnostics(&content, group.line);
+            }
         }
     }
 
