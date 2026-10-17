@@ -2,7 +2,8 @@
 
 <!-- generated:cli-usage -->
 ```text
-sqlty [-h] [--version] {rewrite,strip,check,breaking,rule,version} ...
+sqlty [-h] [--version]
+      {rewrite,strip,check,breaking,rule,skill,version} ...
 ```
 <!-- /generated:cli-usage -->
 
@@ -193,6 +194,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
             [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics] [--explain]
+            [--output-format {text,json,github}]
             [paths ...]
 ```
 <!-- /generated:cli-usage-check -->
@@ -206,6 +208,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 | `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
 | `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
+| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity and message) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
