@@ -193,6 +193,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `-- expanded:` | in the `sql` block | `core.expand_star()` |
 | `-- columns:` | in the `sql` block | `core.analyze_select()`: `name: type (SQL_TYPE)` per line |
 | `-- json:` | in the `sql` block | `core.json_shapes()`: `name: shape` per JSON column of known shape |
+| `-- rules:` | in the `sql` block | `core.explain_select()`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
 | `-- params:` | in the `sql` block | `core.analyze_params()`: `number-or-name: type (SQL_TYPE)` per parameter, then ` NULL` or ` NOT NULL` when known |
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |

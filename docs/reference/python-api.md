@@ -124,6 +124,7 @@ from sqlty.core import (
     analyze_select,
     check_source,
     expand_star,
+    explain_select,
     fix_source,
     infer_type,
     load_schema,
@@ -197,6 +198,7 @@ Schema(dialect="postgres")
 | `load_schema(schema_sql, *, dialect="postgres")` | A parsed `Schema`, for any `schema_sql` argument |
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
 | `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
+| `explain_select(sql, *, dialect="postgres", schema_sql=None)` | Per column, `ColumnRules(name, type_rule, nullability_rule)`: the [inference rules](engine.md#inference-rules) (`InferenceRule(id, reference, reasoning)`) behind it, or `None` |
 | `json_shapes(sql, *, dialect="postgres", schema_sql=None)` | `(column, shape)` pairs for columns that build JSON of a known shape |
 | `analyze_params(sql, *, dialect="postgres", schema_sql=None)` | Query parameters as `ParamInfo(number, name, python_type, sql_type, nullable, cast)`, or `None` |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |

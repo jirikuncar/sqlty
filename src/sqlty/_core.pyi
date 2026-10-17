@@ -20,6 +20,12 @@ def analyze_select(
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
 ) -> list[tuple[str, str | None, str | None]] | None: ...
+def explain_select(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+) -> list[tuple[str, tuple[str, str, str] | None, tuple[str, str, str] | None]] | None: ...
 def analyze_columns(
     sql: str,
     *,

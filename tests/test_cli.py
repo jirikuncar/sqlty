@@ -170,6 +170,37 @@ def test_unparseable_schema_table_is_reported_once(tmp_path, monkeypatch, caplog
     ]
 
 
+def test_check_explain_prints_the_rules_under_a_type_diagnostic(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE orders (id INTEGER NOT NULL, qty SMALLINT NOT NULL);"
+    )
+    (tmp_path / "q.py").write_text(
+        "from sqlty import SQL\n"
+        'total = SQL[tuple[int, str]]("--sql\\nSELECT SUM(qty) AS total, id FROM orders GROUP BY id")\n'
+        'ids = SQL[tuple[str]]("--sql\\nSELECT id FROM orders")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "--explain", "q.py"])
+    out = capsys.readouterr().out.splitlines()
+
+    assert out[:4] == [
+        "q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
+        "  total: type and nullability by inference rule postgres.aggregate.sum-integers",
+        "    Summing small integers widens to bigint so the sum fits.",
+        "    Reference: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions "
+        "(sum ( smallint ) → bigint, sum ( integer ) → bigint)",
+    ]
+    assert out[4].startswith("q.py:3: [stale-type]")
+    assert out[5] == "Found 2 warning(s)"
+
+    main(["check", "q.py"])
+    assert "inference rule" not in capsys.readouterr().out
+
+
 def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
     """``--statistics`` ends with one line counting queries by how far sqlty types them."""
     (tmp_path / "pyproject.toml").write_text(
