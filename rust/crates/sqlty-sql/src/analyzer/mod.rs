@@ -19,6 +19,7 @@ mod dml;
 mod explain;
 mod expr;
 mod functions;
+mod grouping;
 mod hashing;
 mod inference;
 mod json;

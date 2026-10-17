@@ -188,8 +188,8 @@ def query_diagnostics(
     """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
 
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
-    ``unknown-function``, ``unknown-type``, ``unsupported-syntax`` and
-    ``insert-missing-column``. Tables and columns are only judged when ``schema_sql``
+    ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
+    ``insert-missing-column`` and ``ungrouped-column``. Tables and columns are only judged when ``schema_sql``
     defines some tables.
 
     Example:

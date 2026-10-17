@@ -24,11 +24,13 @@ pub enum NameRule {
     UnsupportedSyntax,
     /// An INSERT that leaves out a `NOT NULL` column without a default.
     InsertMissingColumn,
+    /// A column a grouped query selects without grouping by it or aggregating it.
+    UngroupedColumn,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 7] = [
+    pub const ALL: [NameRule; 8] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -36,6 +38,7 @@ impl NameRule {
         NameRule::UnknownType,
         NameRule::UnsupportedSyntax,
         NameRule::InsertMissingColumn,
+        NameRule::UngroupedColumn,
     ];
 
     /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
@@ -48,6 +51,7 @@ impl NameRule {
             NameRule::UnknownType => "unknown-type",
             NameRule::UnsupportedSyntax => "unsupported-syntax",
             NameRule::InsertMissingColumn => "insert-missing-column",
+            NameRule::UngroupedColumn => "ungrouped-column",
         }
     }
 }
@@ -258,6 +262,7 @@ mod tests {
                 "unknown-type",
                 "unsupported-syntax",
                 "insert-missing-column",
+                "ungrouped-column",
             ]
         );
     }

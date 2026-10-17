@@ -35,6 +35,7 @@ Configuration via pyproject.toml:
     unknown-type = "ignore"             # default
     unsupported-syntax = "ignore"       # default
     insert-missing-column = "ignore"    # default
+    ungrouped-column = "ignore"         # default
     unused-ignore = "ignore"            # default
     param-count-mismatch = "error"      # default
     param-type-mismatch = "error"       # default
@@ -244,6 +245,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="INSERT leaves out a NOT NULL column that has no default",
+    ),
+    "ungrouped-column": LintRule(
+        name="ungrouped-column",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Grouped query selects a column it neither groups by nor aggregates",
     ),
     "param-count-mismatch": LintRule(
         name="param-count-mismatch",
