@@ -659,6 +659,21 @@ impl<'a> Analyzer<'a> {
                 }
             }
             Expr::Function(function) => self.function_params(function, scope, out),
+            Expr::Substring {
+                expr: text,
+                substring_from,
+                substring_for,
+                ..
+            } => {
+                if let Some(index) = placeholder_index(text) {
+                    out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
+                }
+                for bound in [substring_from, substring_for].into_iter().flatten() {
+                    if let Some(index) = placeholder_index(bound) {
+                        out.add(index, self.param_typed("INT"), Nullability::Unknown);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -677,6 +692,7 @@ impl<'a> Analyzer<'a> {
                 _ => None,
             })
             .collect();
+        let function = name;
         let name = object_name(name).to_uppercase();
         let info = lookup(&name);
         if name == "GENERATE_SERIES" {
@@ -712,6 +728,18 @@ impl<'a> Analyzer<'a> {
                 if let (Some(index), false) = (arg.and_then(placeholder_index), sql_type.is_empty())
                 {
                     out.add(index, self.param_typed(sql_type), Nullability::Unknown);
+                }
+            }
+        } else if let Some(types) = self
+            .schema
+            .function_args(&table_key(function, self.dialect), args.len())
+        {
+            for (arg, typed) in args.iter().zip(types) {
+                if let Some(index) = arg.and_then(placeholder_index) {
+                    let typed: Typed = typed.clone().into();
+                    if is_typed(&typed) {
+                        out.add(index, typed, Nullability::Unknown);
+                    }
                 }
             }
         }
