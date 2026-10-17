@@ -60,7 +60,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v7
+      - name: Set up the supported Pythons
+        uses: actions/setup-python@v7
         with:
           python-version: |
             3.14

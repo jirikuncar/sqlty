@@ -4,7 +4,7 @@ Default severity: **ignore**
 
 ## What it does
 
-Reports a query that parses, but uses a construct sqlty does not type: an expression it has no rule for, `VALUES` outside PostgreSQL, `*` over a `USING` or `NATURAL` join, a column of a table function or of a `FROM`/`USING` source of a DML statement, branches of a set operation that disagree on a type. The result is not trusted, so the column stays untyped.
+Reports a query that parses, but uses a construct sqlty does not type: an expression it has no rule for, `VALUES` outside PostgreSQL (unless it is the source of an `INSERT` without `RETURNING`, where nothing reads its types), `*` over a `USING` or `NATURAL` join, a column of a table function or of a `FROM`/`USING` source of a DML statement, branches of a set operation that disagree on a type. The result is not trusted, so the column stays untyped.
 
 ```toml
 [tool.sqlty]
@@ -25,6 +25,26 @@ from sqlty import SQL
 
 # error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
 q = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
+```
+
+### `INSERT ... VALUES` outside PostgreSQL
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+```python
+# error:
+a = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a')"
+# error: [unsupported-syntax] "a VALUES list is not typed"
+b = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') RETURNING id"
+# error: [unsupported-syntax] "a VALUES list is not typed"
+c = "--sql\nSELECT * FROM (VALUES (1, 'a')) AS v"
 ```
 
 ## Why is this bad?

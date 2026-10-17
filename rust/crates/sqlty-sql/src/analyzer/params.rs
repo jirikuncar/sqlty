@@ -109,12 +109,13 @@ impl Hints {
 ///
 /// Placeholders are read in every spelling `dialect` allows: `%s` and `%(name)s` always,
 /// `$1` always, `?` outside PostgreSQL (where it is only a placeholder when the query does
-/// not parse otherwise, being also a JSONB operator), `:name` in SQLite.
+/// not parse otherwise, being also a JSONB operator), `:name` in SQLite and PostgreSQL
+/// (SQLAlchemy's `text()`).
 pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
     let dialect = SqlDialect::from_name(dialect);
     let styles = Styles {
         question_marks: dialect != SqlDialect::Postgres,
-        colon_names: dialect == SqlDialect::Sqlite,
+        colon_names: matches!(dialect, SqlDialect::Sqlite | SqlDialect::Postgres),
         dollar_numbers: dialect == SqlDialect::Postgres,
         backslash_escapes: dialect == SqlDialect::MySql,
     };
@@ -659,6 +660,21 @@ impl<'a> Analyzer<'a> {
                 }
             }
             Expr::Function(function) => self.function_params(function, scope, out),
+            Expr::Substring {
+                expr: text,
+                substring_from,
+                substring_for,
+                ..
+            } => {
+                if let Some(index) = placeholder_index(text) {
+                    out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
+                }
+                for bound in [substring_from, substring_for].into_iter().flatten() {
+                    if let Some(index) = placeholder_index(bound) {
+                        out.add(index, self.param_typed("INT"), Nullability::Unknown);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -677,6 +693,7 @@ impl<'a> Analyzer<'a> {
                 _ => None,
             })
             .collect();
+        let function = name;
         let name = object_name(name).to_uppercase();
         let info = lookup(&name);
         if name == "GENERATE_SERIES" {
@@ -712,6 +729,18 @@ impl<'a> Analyzer<'a> {
                 if let (Some(index), false) = (arg.and_then(placeholder_index), sql_type.is_empty())
                 {
                     out.add(index, self.param_typed(sql_type), Nullability::Unknown);
+                }
+            }
+        } else if let Some(types) = self
+            .schema
+            .function_args(&table_key(function, self.dialect), args.len())
+        {
+            for (arg, typed) in args.iter().zip(types) {
+                if let Some(index) = arg.and_then(placeholder_index) {
+                    let typed: Typed = typed.clone().into();
+                    if is_typed(&typed) {
+                        out.add(index, typed, Nullability::Unknown);
+                    }
                 }
             }
         }
