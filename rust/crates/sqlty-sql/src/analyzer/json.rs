@@ -291,6 +291,18 @@ impl<'a> Analyzer<'a> {
     /// What PostgreSQL's `->` or `#>` in `expr` extracts from a JSON value; `None` for any
     /// other expression.
     pub(super) fn json_extract(&self, expr: &Expr, scope: &Scope) -> Option<Extracted> {
+        if let Expr::Function(func) = expr {
+            let name = self.builtin_name(&func.name);
+            let args = positional_args(&func.args);
+            return match (name.as_str(), args.split_first()) {
+                ("JSONB_EXTRACT_PATH" | "JSON_EXTRACT_PATH", Some((base, keys)))
+                    if self.dialect == SqlDialect::Postgres && func.over.is_none() =>
+                {
+                    self.extract_path(base, keys, scope).ok()
+                }
+                _ => None,
+            };
+        }
         let Expr::BinaryOp {
             left,
             op: BinaryOperator::Arrow | BinaryOperator::HashArrow,
@@ -308,6 +320,17 @@ impl<'a> Analyzer<'a> {
             return None;
         }
         self.extracted(left, right, expr, scope).ok()
+    }
+
+    /// `jsonb_extract_path(base, key, ...)`: `base #> '{key, ...}'` when every key is a
+    /// literal.
+    fn extract_path(&self, base: &Expr, keys: &[&Expr], scope: &Scope) -> Inferred<Extracted> {
+        let shape = self.json_shape(base, scope)?;
+        let keys: Option<Vec<String>> = keys
+            .iter()
+            .map(|key| string_literal(key).map(str::to_string))
+            .collect();
+        Ok(keys.map_or(Extracted::UNKNOWN, |keys| follow(&shape, &keys)))
     }
 
     /// References of the relations a condition proves present with `r IS NOT NULL` or
@@ -403,6 +426,9 @@ impl<'a> Analyzer<'a> {
                 unify_all(shapes)
             }
             ("NULLIF", [first, _]) => self.json_operand(first, scope)?,
+            ("JSONB_EXTRACT_PATH" | "JSON_EXTRACT_PATH", [base, keys @ ..]) => {
+                self.extract_path(base, keys, scope)?.shape
+            }
             _ => JsonShape::Any,
         })
     }
