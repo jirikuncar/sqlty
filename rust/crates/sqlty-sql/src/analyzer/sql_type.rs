@@ -456,13 +456,32 @@ fn field_name(field: &StructField, index: usize) -> String {
 fn union(parts: impl IntoIterator<Item = String>) -> String {
     let mut members: Vec<String> = Vec::new();
     for part in parts {
-        for member in part.split(" | ") {
+        for member in top_level_members(&part) {
             if !members.iter().any(|m| m == member) {
                 members.push(member.to_string());
             }
         }
     }
     members.join(" | ")
+}
+
+/// The members of a Python union outside brackets: `list[int | str] | None` has two.
+fn top_level_members(union: &str) -> Vec<&str> {
+    let mut members = Vec::new();
+    let (mut depth, mut start) = (0i32, 0);
+    for (i, c) in union.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            '|' if depth == 0 => {
+                members.push(union[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    members.push(union[start..].trim());
+    members
 }
 
 /// `text` split at the commas outside parentheses and angle brackets.

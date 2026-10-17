@@ -35,6 +35,16 @@ SELECT CAST(x AS UNION(n INT, s VARCHAR)) AS u
 -- columns: u: int | str (UNION(n INT, s VARCHAR))
 ```
 
+### A union inside a field
+
+A `STRUCT`'s value type is the union of its field types; a union nested in one of them
+stays inside its brackets.
+
+```sql
+SELECT CAST(x AS STRUCT(a UNION(x VARCHAR, y INT)[], b STRUCT(c UNION(x VARCHAR, y INT)))) AS s
+-- columns: s: dict[str, list[str | int] | dict[str, str | int]] (STRUCT(a ARRAY<UNION(x VARCHAR, y INT)>, b STRUCT(c UNION(x VARCHAR, y INT))))
+```
+
 ## Schema columns
 
 ```toml
