@@ -180,9 +180,17 @@ impl Loader {
                         }
                     }
                 };
+                let fixed = f.args.len() - usize::from(f.variadic);
                 built.push(Function {
                     required: f.required,
                     max: if f.variadic { usize::MAX } else { f.args.len() },
+                    args: f.args[..fixed]
+                        .iter()
+                        .map(|ty| {
+                            let resolved = resolver.resolve(ty);
+                            typed(resolved.sql_type, resolved.python_type, dialect)
+                        })
+                        .collect(),
                     returns,
                 });
             }

@@ -111,6 +111,8 @@ pub(crate) struct Function {
     pub required: usize,
     /// Arguments a call may give; `usize::MAX` for a `VARIADIC` function.
     pub max: usize,
+    /// The types of the arguments before any `VARIADIC` one.
+    pub args: Vec<Typed>,
     pub returns: FunctionReturn,
 }
 
@@ -296,6 +298,18 @@ impl Catalog {
         let first = fits.next()?;
         fits.all(|f| same_return(&f.returns, &first.returns))
             .then_some(&first.returns)
+    }
+
+    /// The argument types of the overloads of `name` a call with `args` arguments fits,
+    /// when they agree: what a placeholder passed to it is bound as.
+    pub(crate) fn function_args(&self, name: &str, args: usize) -> Option<&[Typed]> {
+        let key = lookup_key(&self.functions, &self.search_path, self.norm(name))?;
+        let mut fits = self.functions[key]
+            .iter()
+            .filter(|f| f.required <= args && args <= f.max);
+        let first = fits.next()?;
+        fits.all(|f| f.args == first.args)
+            .then_some(first.args.as_slice())
     }
 
     /// Whether the schema defines a function `name`, whatever is known of what it returns.
