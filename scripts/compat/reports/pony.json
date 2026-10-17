@@ -1,0 +1,542 @@
+[
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "attribute bool",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "attribute str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "attribute int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "attribute float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DECIMAL(12, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "attribute decimal.Decimal",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "attribute datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "attribute datetime.date",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "attribute datetime.time",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTERVAL",
+   "expected": "datetime.timedelta",
+   "provenance": "attribute datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "attribute uuid.UUID",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "attribute bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "typing.Any",
+   "provenance": "attribute typing.Any",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "attribute bool",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "attribute str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "attribute int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "attribute float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DECIMAL(12, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "attribute decimal.Decimal",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "attribute datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "attribute datetime.date",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "attribute datetime.time",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTERVAL DAY TO SECOND",
+   "expected": "datetime.timedelta",
+   "provenance": "attribute datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "attribute uuid.UUID",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "attribute bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": "typing.Any",
+   "provenance": "attribute typing.Any",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "attribute bool",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "attribute str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "attribute int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DOUBLE",
+   "expected": "float",
+   "provenance": "attribute float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DECIMAL(12, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "attribute decimal.Decimal",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "attribute datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "attribute datetime.date",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "attribute datetime.time",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.timedelta",
+   "provenance": "attribute datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BINARY(16)",
+   "expected": "uuid.UUID",
+   "provenance": "attribute uuid.UUID",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "LONGBLOB",
+   "expected": "bytes",
+   "provenance": "attribute bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "pony",
+   "version": "0.7.20",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "typing.Any",
+   "provenance": "attribute typing.Any",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ }
+]

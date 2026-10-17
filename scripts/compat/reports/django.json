@@ -1,0 +1,1532 @@
+[
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "AutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "int",
+   "provenance": "BigAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "bytea",
+   "expected": "bytes",
+   "provenance": "BinaryField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "boolean",
+   "expected": "bool",
+   "provenance": "BooleanField",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "CharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "date",
+   "expected": "datetime.date",
+   "provenance": "DateField",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "timestamp with time zone",
+   "expected": "datetime.datetime",
+   "provenance": "DateTimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "numeric(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "DecimalField",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "interval",
+   "expected": "datetime.timedelta",
+   "provenance": "DurationField",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "FileField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "FilePathField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "double precision",
+   "expected": "float",
+   "provenance": "FloatField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "IntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "int",
+   "provenance": "BigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "inet",
+   "expected": "str",
+   "provenance": "IPAddressField",
+   "schema": ""
+  },
+  "sqlty": "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "inet",
+   "expected": "str",
+   "provenance": "GenericIPAddressField",
+   "schema": ""
+  },
+  "sqlty": "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "jsonb",
+   "expected": "typing.Any",
+   "provenance": "JSONField",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "int",
+   "provenance": "PositiveBigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "PositiveIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "smallint",
+   "expected": "int",
+   "provenance": "PositiveSmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "SlugField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "smallint",
+   "expected": "int",
+   "provenance": "SmallAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "smallint",
+   "expected": "int",
+   "provenance": "SmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "text",
+   "expected": "str",
+   "provenance": "TextField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "time",
+   "expected": "datetime.time",
+   "provenance": "TimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "uuid",
+   "expected": "uuid.UUID",
+   "provenance": "UUIDField",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "count(i)",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "sum(i)",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "avg(i)",
+   "expected": "float",
+   "provenance": "output_field FloatField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "avg(d)",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "max(d)",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i / i",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i * d",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "ts - ts",
+   "expected": "datetime.timedelta",
+   "provenance": "output_field DurationField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts timestamp with time zone NOT NULL);"
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "integer AUTO_INCREMENT",
+   "expected": "int",
+   "provenance": "AutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "bigint AUTO_INCREMENT",
+   "expected": "int",
+   "provenance": "BigAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "longblob",
+   "expected": "bytes",
+   "provenance": "BinaryField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "bool",
+   "expected": "bool",
+   "provenance": "BooleanField",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "CharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "date",
+   "expected": "datetime.date",
+   "provenance": "DateField",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "datetime(6)",
+   "expected": "datetime.datetime",
+   "provenance": "DateTimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "numeric(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "DecimalField",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "datetime.timedelta",
+   "provenance": "DurationField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "FileField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "FilePathField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "double precision",
+   "expected": "float",
+   "provenance": "FloatField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "IntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "int",
+   "provenance": "BigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "char(15)",
+   "expected": "str",
+   "provenance": "IPAddressField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "char(39)",
+   "expected": "str",
+   "provenance": "GenericIPAddressField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "json",
+   "expected": "typing.Any",
+   "provenance": "JSONField",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "bigint UNSIGNED",
+   "expected": "int",
+   "provenance": "PositiveBigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "integer UNSIGNED",
+   "expected": "int",
+   "provenance": "PositiveIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "smallint UNSIGNED",
+   "expected": "int",
+   "provenance": "PositiveSmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "SlugField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "smallint AUTO_INCREMENT",
+   "expected": "int",
+   "provenance": "SmallAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "smallint",
+   "expected": "int",
+   "provenance": "SmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "longtext",
+   "expected": "str",
+   "provenance": "TextField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "time(6)",
+   "expected": "datetime.time",
+   "provenance": "TimeField",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "char(32)",
+   "expected": "uuid.UUID",
+   "provenance": "UUIDField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "count(i)",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "sum(i)",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "avg(i)",
+   "expected": "float",
+   "provenance": "output_field FloatField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "avg(d)",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "max(d)",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i / i",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i * d",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "ts - ts",
+   "expected": "datetime.timedelta",
+   "provenance": "output_field DurationField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d numeric(10, 2) NOT NULL, ts datetime(6) NOT NULL);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "AutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "BigAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "BinaryField",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "bool",
+   "expected": "bool",
+   "provenance": "BooleanField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "CharField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "date",
+   "expected": "datetime.date",
+   "provenance": "DateField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "datetime",
+   "expected": "datetime.datetime",
+   "provenance": "DateTimeField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "decimal",
+   "expected": "decimal.Decimal",
+   "provenance": "DecimalField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "datetime.timedelta",
+   "provenance": "DurationField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "FileField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "FilePathField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "real",
+   "expected": "float",
+   "provenance": "FloatField",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "IntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "bigint",
+   "expected": "int",
+   "provenance": "BigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "char(15)",
+   "expected": "str",
+   "provenance": "IPAddressField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "char(39)",
+   "expected": "str",
+   "provenance": "GenericIPAddressField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "text",
+   "expected": "typing.Any",
+   "provenance": "JSONField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "bigint unsigned",
+   "expected": "int",
+   "provenance": "PositiveBigIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "integer unsigned",
+   "expected": "int",
+   "provenance": "PositiveIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "smallint unsigned",
+   "expected": "int",
+   "provenance": "PositiveSmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "varchar(100)",
+   "expected": "str",
+   "provenance": "SlugField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "integer",
+   "expected": "int",
+   "provenance": "SmallAutoField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "smallint",
+   "expected": "int",
+   "provenance": "SmallIntegerField",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "text",
+   "expected": "str",
+   "provenance": "TextField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "time",
+   "expected": "datetime.time",
+   "provenance": "TimeField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "char(32)",
+   "expected": "uuid.UUID",
+   "provenance": "UUIDField",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "count(i)",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "sum(i)",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "avg(i)",
+   "expected": "float",
+   "provenance": "output_field FloatField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "avg(d)",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "max(d)",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i / i",
+   "expected": "int",
+   "provenance": "output_field IntegerField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i * d",
+   "expected": "decimal.Decimal",
+   "provenance": "output_field DecimalField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "django",
+   "version": "6.1.2",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "ts - ts",
+   "expected": "datetime.timedelta",
+   "provenance": "output_field DurationField",
+   "schema": "CREATE TABLE t (i integer NOT NULL, d decimal NOT NULL, ts datetime NOT NULL);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ }
+]

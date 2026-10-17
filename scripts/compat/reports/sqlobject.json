@@ -1,0 +1,842 @@
+[
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "col.BLOBCol",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TINYBLOB",
+   "expected": "bytes",
+   "provenance": "col.BLOBCol",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "bytes",
+   "provenance": "col.BLOBCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "col.BigIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "col.BigIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "col.BigIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOL",
+   "expected": "bool",
+   "provenance": "col.BoolCol",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BOOL",
+   "expected": "bool",
+   "provenance": "col.BoolCol",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "col.BoolCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.CurrencyCol",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.CurrencyCol",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.CurrencyCol",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "col.DateCol",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "col.DateCol",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "col.DateCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "col.DateTimeCol",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "col.DateTimeCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.DecimalCol",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.DecimalCol",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.DecimalCol",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(12)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.DecimalStringCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARCHAR(12)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.DecimalStringCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(12)",
+   "expected": "decimal.Decimal",
+   "provenance": "col.DecimalStringCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "col.FloatCol",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "col.FloatCol",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "col.FloatCol",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "col.IntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "col.IntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "col.IntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "typing.Any",
+   "provenance": "col.JSONCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "typing.Any",
+   "provenance": "col.JSONCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "typing.Any",
+   "provenance": "col.JSONCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": "typing.Any",
+   "provenance": "col.JsonbCol",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "MEDIUMINT",
+   "expected": "int",
+   "provenance": "col.MediumIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "MEDIUMINT",
+   "expected": "int",
+   "provenance": "col.MediumIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "MEDIUMINT",
+   "expected": "int",
+   "provenance": "col.MediumIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "col.SmallIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "col.SmallIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "col.SmallIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "col.StringCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "col.StringCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "col.StringCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "col.TimeCol",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "col.TimeCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTERVAL",
+   "expected": "datetime.timedelta",
+   "provenance": "col.TimedeltaCol",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "col.TimestampCol",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "col.TimestampCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TINYINT",
+   "expected": "int",
+   "provenance": "col.TinyIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TINYINT",
+   "expected": "int",
+   "provenance": "col.TinyIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TINYINT",
+   "expected": "int",
+   "provenance": "col.TinyIntCol",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "col.UnicodeCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "col.UnicodeCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "col.UnicodeCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "col.UuidCol",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARCHAR(36)",
+   "expected": "uuid.UUID",
+   "provenance": "col.UuidCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlobject",
+   "version": "3.14.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(36)",
+   "expected": "uuid.UUID",
+   "provenance": "col.UuidCol",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ }
+]
