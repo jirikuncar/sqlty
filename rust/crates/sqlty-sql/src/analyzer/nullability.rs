@@ -795,14 +795,16 @@ impl<'a> Analyzer<'a> {
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
 
+        let fixed = |nullability| match nullability {
+            FunctionNullability::NonNull => Some(Nullability::NonNull),
+            FunctionNullability::Nullable => Some(Nullability::Nullable),
+            FunctionNullability::Aggregate | FunctionNullability::Strict => None,
+        };
         let rules = function_rules(&name);
-        if rules
-            .iter()
-            .any(|rule| rule.nullability == FunctionNullability::NonNull)
-        {
+        if rules.iter().any(|rule| fixed(rule.nullability).is_some()) {
             if let Ok(Some((rule, _))) = self.function_rule(&name, args.first().copied(), scope) {
-                if rule.nullability == FunctionNullability::NonNull {
-                    return Nullability::NonNull;
+                if let Some(nullability) = fixed(rule.nullability) {
+                    return nullability;
                 }
             }
         }

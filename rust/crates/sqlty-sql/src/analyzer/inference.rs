@@ -145,6 +145,8 @@ impl BinaryRule {
 pub(crate) enum FunctionType {
     /// A SQL type, such as `BIGINT`.
     Sql(&'static str),
+    /// Any value, `typing.Any`: SQLite's `json_extract` returns the element's own type.
+    Any,
     /// Not known: the call stays untyped.
     Unknown,
     /// Typed by the analyzer's code: the rule gives the nullability only.
@@ -160,6 +162,8 @@ pub(crate) enum FunctionType {
 pub(crate) enum FunctionNullability {
     /// Never NULL, such as `COUNT`.
     NonNull,
+    /// NULL for any arguments, such as a JSON path that matches nothing.
+    Nullable,
     /// An aggregate's: NULL over no rows, unless the group is known to hold one (a plain
     /// `GROUP BY`), and as its argument is over the rows (`analyzer/nullability.rs`).
     Aggregate,
