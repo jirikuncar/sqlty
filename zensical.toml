@@ -44,6 +44,7 @@ nav = [
     { "Python API" = "reference/python-api.md" },
     { "Engine" = "reference/engine.md" },
   ] },
+  { "Credits" = "credits.md" },
 ]
 
 [project.theme]

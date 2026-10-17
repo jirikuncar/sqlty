@@ -157,6 +157,11 @@ agent carry a `Co-Authored-By` trailer. Contributors follow the
 [AI-assisted contributions](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md#ai-assisted-contributions)
 policy.
 
+## Credits
+
+The projects sqlty is built from, tested with and compared against, with their
+licenses, are in [Credits](https://jirikuncar.github.io/sqlty/credits/).
+
 ## License
 
 MIT. See [LICENSE](https://github.com/jirikuncar/sqlty/blob/main/LICENSE).
