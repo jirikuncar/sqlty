@@ -147,17 +147,36 @@ pub(crate) fn rewrite_scan(
         scan,
         &wrapped,
         &options.style,
+        &type_modules(options),
         keep_lines,
     ))
 }
 
+/// The modules a row type may name: [`TYPE_MODULES`], and those of the schema's
+/// `[tool.sqlty.types]`.
+pub(crate) fn type_modules(options: &Options) -> Vec<String> {
+    TYPE_MODULES
+        .iter()
+        .map(ToString::to_string)
+        .chain(
+            options
+                .schema
+                .map(SchemaData::type_modules)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|module| !TYPE_MODULES.contains(&module.as_str())),
+        )
+        .collect()
+}
+
 /// `result` with the imports the `wrapped` calls need: the wrapper, `UNTYPED` and the
-/// [`TYPE_MODULES`] their row types name. `scan` is of a source with the same imports.
+/// `modules` their row types name. `scan` is of a source with the same imports.
 pub(crate) fn with_wrapper_imports(
     result: String,
     scan: &Scan,
     wrapped: &[&str],
     istyle: &ImportStyle,
+    modules: &[String],
     keep_lines: bool,
 ) -> String {
     if wrapped.is_empty() {
@@ -168,7 +187,7 @@ pub(crate) fn with_wrapper_imports(
     let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
     let needs = |marker: &str| wrapped.iter().any(|r| r.contains(marker));
     let mut imports = Vec::new();
-    for module in TYPE_MODULES {
+    for module in modules {
         if needs(&format!("{module}.")) && !has_import(source, &format!("import {module}")) {
             imports.push(format!("import {module}"));
         }

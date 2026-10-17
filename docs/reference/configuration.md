@@ -215,6 +215,10 @@ schema columns and casts; an expression over a column keeps its type when it
 returns the column's values (`MAX(day)`). See
 [Drivers and ORMs](../guide/drivers-and-orms.md#what-to-annotate).
 
+`rewrite` and `check --fix` import the module a type names (`import app.models` for
+`app.models.Status`), as they import `datetime`. `strip` leaves that import, since
+it reads no configuration.
+
 ## `format-command`
 
 A formatter `rewrite` and `check --fix` run on each file they change, with the
