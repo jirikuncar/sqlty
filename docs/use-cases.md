@@ -51,4 +51,5 @@ person: one `file:line: [rule] message` line per problem and a non-zero exit
 code (see the [CLI reference](reference/cli.md) and
 [rules](reference/rules.md)).
 
-Start with [CI](recipes/ci.md).
+Start with [CI](recipes/ci.md), and give your agent the
+[sqlty skill](recipes/agents.md) so it writes queries this way from the start.

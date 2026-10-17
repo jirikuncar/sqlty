@@ -87,7 +87,7 @@ fuzz = [
 addopts = ["-p", "tests._mdtest.plugin", "--cov-report=term-missing", "--cov-report=html", "-v"]
 pythonpath = ["."]
 testpaths = ["tests", "docs", "src/sqlty/rules", "README.md"]
-mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md"]
+mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md", "skills"]
 markers = [
     "e2e: end-to-end tests (subprocess + inline-snapshot)",
     "slow: slow tests that can be skipped with -m 'not slow'",
