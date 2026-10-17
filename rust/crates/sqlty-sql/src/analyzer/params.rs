@@ -109,12 +109,13 @@ impl Hints {
 ///
 /// Placeholders are read in every spelling `dialect` allows: `%s` and `%(name)s` always,
 /// `$1` always, `?` outside PostgreSQL (where it is only a placeholder when the query does
-/// not parse otherwise, being also a JSONB operator), `:name` in SQLite.
+/// not parse otherwise, being also a JSONB operator), `:name` in SQLite and PostgreSQL
+/// (SQLAlchemy's `text()`).
 pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
     let dialect = SqlDialect::from_name(dialect);
     let styles = Styles {
         question_marks: dialect != SqlDialect::Postgres,
-        colon_names: dialect == SqlDialect::Sqlite,
+        colon_names: matches!(dialect, SqlDialect::Sqlite | SqlDialect::Postgres),
         dollar_numbers: dialect == SqlDialect::Postgres,
         backslash_escapes: dialect == SqlDialect::MySql,
     };
