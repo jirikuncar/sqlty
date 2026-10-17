@@ -42,10 +42,11 @@ pass_filenames = false
 files = '^(examples|src/sqlty|rust/crates)/'
 priority = 10
 
+# Its own mypy cache: mypy crashes when two runs write one cache at once.
 [[repos.hooks]]
 id = "typecheck-examples"
 name = "mypy + ty on examples"
-entry = "make typecheck-examples"
+entry = "env MYPY_CACHE_DIR=.mypy_cache/examples make typecheck-examples"
 language = "system"
 pass_filenames = false
 files = '^(examples|src/sqlty)/'
