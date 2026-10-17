@@ -28,10 +28,11 @@ schema = "schema.sql"
 | pyformat | `%(name)s` | psycopg, MySQL drivers |
 | numeric | `$1`, `$2` | asyncpg, PostgreSQL |
 | qmark | `?`, `?1` | sqlite3, MySQL |
-| named | `:name` | sqlite3 (`dialect = "sqlite"`) |
+| named | `:name` | sqlite3, SQLAlchemy's `text()` (`dialect = "sqlite"` or `"postgres"`) |
 
 `%%` is a literal `%`. A placeholder inside a string literal or a comment is
-text. In PostgreSQL `?` is also the JSONB operator, so it is a placeholder
+text. `:name` is read as SQLAlchemy reads it: `::int` casts, array slices such as
+`a[1:2]`, and `:a::int` are not placeholders. In PostgreSQL `?` is also the JSONB operator, so it is a placeholder
 only when the query does not parse otherwise.
 
 ## Where a parameter gets its type

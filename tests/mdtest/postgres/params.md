@@ -62,6 +62,23 @@ SELECT id FROM users WHERE id = %(id)s OR age > %(id)s OR name = %(name)s
 -- params: name: str (TEXT)
 ```
 
+### `:name`, as SQLAlchemy's `text()` writes it
+
+`::` casts, array slices and a `:name` followed by `::` are not placeholders.
+
+```sql
+SELECT tags[1:2], age::text, :id::int AS id FROM users WHERE id = :id AND name = :name AND born > '2024-01-01 10:30'
+-- params: id: int (INT)
+-- params: name: str (TEXT)
+```
+
+```sql
+INSERT INTO users (id, name, uid) VALUES (:id, :name, :uid)
+-- params: id: int (INT) NOT NULL
+-- params: name: str (TEXT) NOT NULL
+-- params: uid: uuid.UUID (UUID) NOT NULL
+```
+
 ### Qualified columns, joins and subqueries
 
 ```sql
