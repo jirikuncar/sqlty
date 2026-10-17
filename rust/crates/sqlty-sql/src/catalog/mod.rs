@@ -193,6 +193,28 @@ impl TypeOverrides {
         self.types.is_empty() && self.columns.is_empty()
     }
 
+    /// The modules the Python types name, to import where a row type spells one:
+    /// `app.models` for `app.models.Status`.
+    fn modules(&self) -> Vec<String> {
+        static DOTTED: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+").expect("valid pattern")
+        });
+        let mut modules: Vec<String> = self
+            .types
+            .values()
+            .chain(self.columns.values())
+            .flat_map(|python| DOTTED.find_iter(python))
+            .filter_map(|name| {
+                name.as_str()
+                    .rsplit_once('.')
+                    .map(|(module, _)| module.to_string())
+            })
+            .collect();
+        modules.sort();
+        modules.dedup();
+        modules
+    }
+
     fn for_type(&self, sql_type: &str) -> Option<&str> {
         self.types.get(base_name(sql_type)).map(String::as_str)
     }
@@ -305,6 +327,12 @@ impl Catalog {
     /// Whether the schema defines a domain, enum or composite type `name`.
     pub(crate) fn defines_type(&self, name: &str) -> bool {
         lookup_key(&self.type_names, &self.search_path, self.norm(name)).is_some()
+    }
+
+    /// The modules the project's `[tool.sqlty.types]` name, beyond the standard ones a row
+    /// type may need.
+    pub fn type_modules(&self) -> Vec<String> {
+        self.overrides.modules()
     }
 
     /// Whether the schema defines no table or view of its own.
