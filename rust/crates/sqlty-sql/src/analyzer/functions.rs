@@ -155,6 +155,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "QUOTE_LITERAL",
             "QUOTE_NULLABLE",
             "SPLIT_PART",
+            "NORMALIZE",
             "REGEXP_REPLACE",
             "ENCODE",
             "CONVERT_FROM",

@@ -99,8 +99,9 @@ operand predicate as above; `@known` admits any typed argument. `type` is a SQL
 type, `@unknown`, `@code`, `@argument` (the argument's type, value set
 included, as `MIN` and `MAX` return one of the values) or `@argument-as TYPE`
 (the argument's Python type under another SQL type). `nullability` is required:
-`non-null`, or `aggregate`, the empty-group and NULL-argument behaviour of
-aggregates in `analyzer/nullability.rs`.
+`non-null`; `aggregate`, the empty-group and NULL-argument behaviour of
+aggregates in `analyzer/nullability.rs`; or `strict`, a scalar function's, as the
+analyzer's function table says.
 
 ## How a rule is chosen
 

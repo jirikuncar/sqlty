@@ -205,6 +205,8 @@ impl<'a> Analyzer<'a> {
             {
                 Ok(from_sql_type("TEXT", self.dialect))
             }
+            // MySQL full-text relevance is a floating-point number.
+            Expr::MatchAgainst { .. } => Ok(from_sql_type("DOUBLE", self.dialect)),
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
