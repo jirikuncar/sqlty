@@ -13,7 +13,9 @@ they cannot drift from the engine. The mapping itself lives in
 | `duckdb` | the [DuckDB Python client](https://duckdb.org/docs/current/clients/python/conversion.html) | `tests/test_duckdb_types.py`, in every run |
 
 The reference driver returns the raw value: what a converter above it (an ORM,
-`detect_types`, a row factory that decodes JSON) makes of it is not modelled.
+`detect_types`, a row factory that decodes JSON) makes of it is not modelled. See
+[Drivers and ORMs](../guide/drivers-and-orms.md) for where ORMs differ and what
+to annotate.
 
 !!! note "Other PostgreSQL drivers"
     asyncpg returns `json`/`jsonb` as `str`, `bit` as `asyncpg.BitString` and
