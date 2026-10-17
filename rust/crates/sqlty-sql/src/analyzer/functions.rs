@@ -306,7 +306,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         Sql("TIMESTAMPTZ"),
     ),
     (&["LOCALTIMESTAMP", "MAKE_TIMESTAMP"], Sql("TIMESTAMP")),
-    (&["TO_DATE", "MAKE_DATE"], Sql("DATE")),
+    (&["TO_DATE", "MAKE_DATE", "DATE"], Sql("DATE")),
     (&["LOCALTIME", "MAKE_TIME"], Sql("TIME")),
     (
         &[
