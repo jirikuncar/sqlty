@@ -34,6 +34,8 @@ class Run:
         self.json_types: str = settings.get("json-types", "typing.Any")
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
+        # With an `against.sql` file, `# error:` asserts what `sqlty breaking` reports.
+        self.against_sql: str | None = section.files.get("against.sql")
 
     def run(self) -> None:
         failures: list[str] = []
@@ -170,9 +172,20 @@ class Run:
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
-        diagnostics = [
-            (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))
-            for d in core.check_source(
+        if self.against_sql is not None:
+            found = core.breaking_source(
+                code.text,
+                schema_sql=self.schema_sql,
+                against_sql=self.against_sql,
+                dialect=self.dialect,
+                rules=self.rules,
+                import_style=self.import_style,
+                untyped=self.untyped,
+                type_modules=self.type_modules,
+                helpers=self._helpers,
+            )
+        else:
+            found = core.check_source(
                 code.text,
                 dialect=self.dialect,
                 schema_sql=self.schema_sql,
@@ -182,6 +195,9 @@ class Run:
                 type_modules=self.type_modules,
                 helpers=self._helpers,
             )
+        diagnostics = [
+            (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))
+            for d in found
         ]
         expected = [a for a in assertions if a.expected]
         unmatched = list(expected)

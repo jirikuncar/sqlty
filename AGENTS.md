@@ -170,6 +170,9 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 - Other languages (`bash`, `text`, ...) and blocks tagged ```` ```python ignore ````
   are prose.
 - Directives: `<!-- mdtest:skip reason -->`, `<!-- mdtest:xfail reason -->`.
+- An `` `against.sql`: `` file makes `# error:` assert what `sqlty breaking`
+  reports (`core.breaking_source()`): the diagnostics that are new when the code
+  is checked against that schema instead of its own.
 
 ````markdown
 ## Schema-based TypedDict mismatch

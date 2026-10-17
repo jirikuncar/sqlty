@@ -282,8 +282,10 @@ pub(super) fn alter_op(
                     table.columns[at].values = None;
                 }
                 AlterColumnOperation::SetDefault { .. }
-                | AlterColumnOperation::DropDefault
-                | AlterColumnOperation::AddGenerated { .. } => {}
+                | AlterColumnOperation::AddGenerated { .. } => {
+                    table.columns[at].has_default = true;
+                }
+                AlterColumnOperation::DropDefault => table.columns[at].has_default = false,
             }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {

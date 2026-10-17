@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REFERENCE = ROOT / "docs" / "reference"
-COMMANDS = ("rewrite", "strip", "check", "rule")
+COMMANDS = ("rewrite", "strip", "check", "breaking", "rule")
 BLOCK = re.compile(
     r"(?P<open><!-- generated:(?P<name>[\w-]+) -->\n)(?P<body>.*?)(?P<close><!-- /generated:(?P=name) -->)",
     re.S,

@@ -117,7 +117,23 @@ impl Analyzer<'_> {
         match stmt {
             Statement::Insert(insert) => {
                 if let TableObject::TableName(name) = &insert.table {
-                    self.check_target_columns(name, &insert.columns);
+                    let assigned: Vec<ObjectName> = insert
+                        .assignments
+                        .iter()
+                        .flat_map(|assignment| match &assignment.target {
+                            AssignmentTarget::ColumnName(column) => vec![column.clone()],
+                            AssignmentTarget::Tuple(columns) => columns.clone(),
+                        })
+                        .collect();
+                    let columns = if insert.columns.is_empty() {
+                        &assigned
+                    } else {
+                        &insert.columns
+                    };
+                    self.check_target_columns(name, columns);
+                    if !columns.is_empty() {
+                        self.check_missing_columns(name, columns);
+                    }
                 }
                 if let Some(source) = &insert.source {
                     // Its diagnostics are recorded; the columns are not needed.
@@ -143,6 +159,34 @@ impl Analyzer<'_> {
                 delete.selection.iter().for_each(check);
             }
             _ => {}
+        }
+    }
+
+    /// Records `insert-missing-column` for each `NOT NULL` column of the schema table
+    /// `table` without a default that `columns` leave out.
+    fn check_missing_columns(&self, table: &ObjectName, columns: &[ObjectName]) {
+        if !self.judges_names() {
+            return;
+        }
+        let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
+            return;
+        };
+        let set: Vec<String> = columns
+            .iter()
+            .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
+            .map(|ident| fold(ident, self.dialect))
+            .collect();
+        for column in known {
+            if column.not_null && !column.has_default && !set.contains(&column.name) {
+                self.diag.record(
+                    NameRule::InsertMissingColumn,
+                    format!(
+                        "INSERT into `{}` leaves out `{}`, which is NOT NULL and has no default",
+                        object_name(table),
+                        column.ident
+                    ),
+                );
+            }
         }
     }
 

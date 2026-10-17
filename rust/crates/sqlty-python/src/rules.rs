@@ -66,7 +66,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 30] = [
+    pub const ALL: [Rule; 31] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -97,6 +97,7 @@ impl Rule {
         Rule::Name(NameRule::UnknownFunction),
         Rule::Name(NameRule::UnknownType),
         Rule::Name(NameRule::UnsupportedSyntax),
+        Rule::Name(NameRule::InsertMissingColumn),
     ];
 
     /// The kebab-case rule name.

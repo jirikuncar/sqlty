@@ -34,6 +34,7 @@ Configuration via pyproject.toml:
     unknown-function = "ignore"         # default
     unknown-type = "ignore"             # default
     unsupported-syntax = "ignore"       # default
+    insert-missing-column = "ignore"    # default
     unused-ignore = "ignore"            # default
     param-count-mismatch = "error"      # default
     param-type-mismatch = "error"       # default
@@ -237,6 +238,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="Query parses, but a construct in it is not typed, so the row type is not trusted",
+    ),
+    "insert-missing-column": LintRule(
+        name="insert-missing-column",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="INSERT leaves out a NOT NULL column that has no default",
     ),
     "param-count-mismatch": LintRule(
         name="param-count-mismatch",

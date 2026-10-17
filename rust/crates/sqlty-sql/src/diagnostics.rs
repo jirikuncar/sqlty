@@ -22,17 +22,20 @@ pub enum NameRule {
     UnknownType,
     /// A construct that parses but is not typed.
     UnsupportedSyntax,
+    /// An INSERT that leaves out a `NOT NULL` column without a default.
+    InsertMissingColumn,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 6] = [
+    pub const ALL: [NameRule; 7] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
         NameRule::UnknownFunction,
         NameRule::UnknownType,
         NameRule::UnsupportedSyntax,
+        NameRule::InsertMissingColumn,
     ];
 
     /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
@@ -44,6 +47,7 @@ impl NameRule {
             NameRule::UnknownFunction => "unknown-function",
             NameRule::UnknownType => "unknown-type",
             NameRule::UnsupportedSyntax => "unsupported-syntax",
+            NameRule::InsertMissingColumn => "insert-missing-column",
         }
     }
 }
@@ -253,6 +257,7 @@ mod tests {
                 "unknown-function",
                 "unknown-type",
                 "unsupported-syntax",
+                "insert-missing-column",
             ]
         );
     }

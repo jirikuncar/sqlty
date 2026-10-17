@@ -158,5 +158,32 @@ field must be optional too ([`nullable-mismatch`](../reference/rules.md#nullable
 Wrappers written by an earlier release are `stale-type`: `sqlty check --fix` updates
 them. See [Nullability](../guide/schema-inference.md#nullability).
 
+## Schema changes in CI
+
+Once your queries are typed, a pull request that changes the schema can break
+the code still running during the deploy. `sqlty breaking` checks the queries of
+the base branch against the new schema, and the new queries against the old
+schema:
+
+```yaml
+# .github/workflows/sqlty-breaking.yml
+name: sqlty breaking
+on: [pull_request]
+jobs:
+  breaking:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the base branch must be in the clone
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync
+      - run: uv run sqlty breaking --against origin/${{ github.base_ref }}
+```
+
+Use `--direction backward` when migrations always run before the deploy, and
+`--direction forward` when the code always ships first. See
+[Breaking schema changes](../guide/breaking-changes.md).
+
 Related issue:
 [#19 Create migration tool for existing codebases](https://github.com/jirikuncar/sqlty/issues/19).

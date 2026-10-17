@@ -73,7 +73,9 @@ impl Loader {
                     key.clone(),
                     fields
                         .iter()
-                        .map(|(name, ty)| resolver.column(name, name, ty, false, Checks::default()))
+                        .map(|(name, ty)| {
+                            resolver.column(name, name, ty, false, false, Checks::default())
+                        })
                         .collect(),
                 )),
                 _ => None,
@@ -124,7 +126,7 @@ impl Loader {
                         columns
                             .iter()
                             .map(|(name, ty)| {
-                                resolver.column(name, name, ty, false, Checks::default())
+                                resolver.column(name, name, ty, false, false, Checks::default())
                             })
                             .collect(),
                     ),
@@ -337,6 +339,7 @@ impl<'a> Resolver<'a> {
         ident: &str,
         ty: &DataType,
         not_null: bool,
+        has_default: bool,
         checked: Checks<'_>,
     ) -> SchemaColumn {
         let resolved = self.resolve(ty);
@@ -352,6 +355,7 @@ impl<'a> Resolver<'a> {
             values: literal_values(python_type.as_deref()),
             python_type,
             not_null,
+            has_default,
             allowed_values: resolved.allowed_values.cloned(),
         }
     }
@@ -364,7 +368,16 @@ impl<'a> Resolver<'a> {
                 table
                     .columns
                     .iter()
-                    .map(|c| self.column(&c.name, &c.ident, &c.ty, c.not_null, c.checks()))
+                    .map(|c| {
+                        self.column(
+                            &c.name,
+                            &c.ident,
+                            &c.ty,
+                            c.not_null,
+                            c.has_default,
+                            c.checks(),
+                        )
+                    })
                     .collect(),
                 // A group naming a dropped or renamed column no longer holds.
                 table

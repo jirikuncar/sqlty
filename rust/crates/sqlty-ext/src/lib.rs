@@ -464,9 +464,10 @@ fn name_rules() -> Vec<&'static str> {
         .collect()
 }
 
-/// Why a query has untyped columns, as `(rule, message)` pairs: `unknown-table`,
-/// `unknown-column`, `ambiguous-column`, `unknown-function`, `unknown-type` and
-/// `unsupported-syntax`. Tables, columns and ambiguity are only judged with a schema.
+/// Why a query has untyped columns, or names what it cannot, as `(rule, message)` pairs:
+/// `unknown-table`, `unknown-column`, `ambiguous-column`, `unknown-function`,
+/// `unknown-type`, `unsupported-syntax` and `insert-missing-column`. Tables, columns and
+/// ambiguity are only judged with a schema.
 ///
 /// Example:
 ///     query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
