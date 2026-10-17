@@ -72,8 +72,8 @@ SELECT * FROM items
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
 variants collapse to `BLOB` and `TEXT`. `ENUM` and `SET` values are upper-cased
 in the expansion; an `ENUM` column is a `typing.Literal` of its labels.
-`BIT(n)` is `bytes`, as MySQL drivers load it. Unmapped types such as `SET` and
-spatial `POINT` are unknown, so a query selecting one has no row type.
+Types follow PyMySQL: `BIT(n)` and spatial types such as `POINT` are `bytes`, and
+a `SET` is the `str` of its comma-separated members.
 
 `schema.sql`:
 ```sql
@@ -99,17 +99,17 @@ schema = "schema.sql"
 
 ```sql
 SELECT * FROM items
--- inferred: None
+-- inferred: tuple[float | None, bytes | None, datetime.datetime | None, datetime.datetime | None, typing.Literal['x', 'y'] | None, str | None, typing.Any, bytes | None, str | None, bytes | None]
 -- columns: a: float | None (DOUBLE)
 -- columns: b: bytes | None (BIT(8))
 -- columns: c: datetime.datetime | None (DATETIME(6))
 -- columns: d: datetime.datetime | None (TIMESTAMPTZ)
 -- columns: e: typing.Literal['x', 'y'] | None (ENUM('X', 'Y'))
--- columns: f: None (SET('X', 'Y'))
+-- columns: f: str | None (SET('X', 'Y'))
 -- columns: g: typing.Any (JSON)
 -- columns: h: bytes | None (BLOB)
 -- columns: i: str | None (TEXT)
--- columns: j: None (POINT)
+-- columns: j: bytes | None (POINT)
 ```
 
 ```sql
