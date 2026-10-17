@@ -48,7 +48,7 @@ mod typed;
 pub(crate) use api::load_schema;
 pub use api::{
     analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
-    load_schema_with_skipped, parse_error, returns_rows,
+    load_schema_with_skipped, parse_error, returns_rows, row_type,
 };
 pub(crate) use api::{typed, view_columns};
 pub use dialect::{SqlDialect, UnknownDialect};

@@ -98,17 +98,19 @@ pub fn infer_type(
     dialect: &str,
     schema: Option<&SchemaData>,
 ) -> Inferred<Option<String>> {
-    let columns = analyze_select(sql, dialect, schema)?;
-    // A column of unknown type, `*` the schema cannot resolve included, leaves the row type unknown.
-    Ok(columns.and_then(|columns| {
-        let types: Option<Vec<String>> = columns.iter().map(Column::display_type).collect();
-        let types = types?;
-        Some(if types.is_empty() {
-            "tuple[()]".to_string()
-        } else {
-            format!("tuple[{}]", types.join(", "))
-        })
-    }))
+    Ok(analyze_select(sql, dialect, schema)?.and_then(|columns| row_type(&columns)))
+}
+
+/// The row type of result columns, as [`infer_type`] spells it; `None` when a column's type,
+/// or a `*` the schema cannot resolve, is unknown.
+pub fn row_type(columns: &[Column]) -> Option<String> {
+    let types: Option<Vec<String>> = columns.iter().map(Column::display_type).collect();
+    let types = types?;
+    Some(if types.is_empty() {
+        "tuple[()]".to_string()
+    } else {
+        format!("tuple[{}]", types.join(", "))
+    })
 }
 
 /// The result columns of a query, or `None` when it returns no rows or doesn't parse.

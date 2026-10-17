@@ -12,6 +12,7 @@
 //!   unless the wrapper call is one of `any_calls`
 
 use regex::Regex;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::edit::Edit;
@@ -25,7 +26,7 @@ use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
 use sqlty_sql::analyzer::{
-    analyze_with_diagnostics, expand_star, parse_error, result_stars, SchemaData,
+    analyze_with_diagnostics, expand_star, parse_error, result_stars, row_type, SchemaData,
 };
 use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
@@ -119,6 +120,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
         spelling: Spelling::of(&scan),
+        inferred: HashMap::new(),
     };
     if options.dialect == Dialect::MySql {
         checker.mysql_markers();
@@ -142,6 +144,9 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     /// How the module can spell the row types it names.
     spelling: Spelling,
+    /// Row types the name diagnostics' analysis already inferred, by marked query, so the
+    /// annotation checks don't analyze a query twice.
+    inferred: HashMap<String, Option<String>>,
 }
 
 impl Checker<'_> {
@@ -299,9 +304,14 @@ impl Checker<'_> {
             return;
         }
         if let Some(query) = marked_query(sql_content) {
-            for found in
-                analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema).1
-            {
+            let (columns, found) =
+                analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
+            let inferred = columns
+                .ok()
+                .flatten()
+                .and_then(|columns| row_type(&columns));
+            self.inferred.insert(query, inferred);
+            for found in found {
                 self.report(Rule::Name(found.rule), found.message, line);
             }
         }
@@ -333,6 +343,21 @@ impl Checker<'_> {
         self.report_fix(rule, message, line, fix.into_iter().collect());
     }
 
+    /// The row type of marked string content, from the name diagnostics' analysis when
+    /// it ran.
+    fn infer(&self, sql_content: &str) -> Option<String> {
+        if !self.inferred.is_empty() {
+            if let Some(inferred) = marked_query(sql_content).and_then(|q| self.inferred.get(&q)) {
+                return inferred.clone();
+            }
+        }
+        infer_from_sql_content(
+            sql_content,
+            self.options.dialect.name(),
+            self.options.schema,
+        )
+    }
+
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
         let annotated = &self.scan.source()[call.annotation.clone()];
@@ -345,12 +370,9 @@ impl Checker<'_> {
         if annotated == untyped_name {
             let untyped = format!("{wrapper}[{untyped_name}]");
             // A `*` the schema cannot resolve infers no type, so none is guessed.
-            let current = infer_from_sql_content(
-                sql_content,
-                self.options.dialect.name(),
-                self.options.schema,
-            )
-            .map(|current| self.spelling.respell(current));
+            let current = self
+                .infer(sql_content)
+                .map(|current| self.spelling.respell(current));
             let message = match &current {
                 Some(current) => {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
@@ -371,12 +393,9 @@ impl Checker<'_> {
         {
             return;
         }
-        if let Some(current) = infer_from_sql_content(
-            sql_content,
-            self.options.dialect.name(),
-            self.options.schema,
-        )
-        .map(|current| self.spelling.respell(current))
+        if let Some(current) = self
+            .infer(sql_content)
+            .map(|current| self.spelling.respell(current))
         {
             if !refines_tuple(annotated, &current) {
                 self.report_fix(
