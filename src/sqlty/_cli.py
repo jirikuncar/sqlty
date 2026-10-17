@@ -1005,14 +1005,19 @@ class SettingsResolver:
         self._schema_sql = _load_schema(schema, Path.cwd()) if schema else None
         self._by_dir: dict[Path, Settings] = {}
         self._resolved: dict[Path, Path] = {}
-        self._schemas: dict[tuple[str, str], Schema] = {}
+        self._schemas: dict[tuple[str, str, tuple[tuple[str, str], ...]], Schema] = {}
 
-    def _schema(self, schema_sql: str, dialect: str) -> Schema:
+    def _schema(self, schema_sql: str, dialect: str, types: dict[str, str] | None = None) -> Schema:
         """``schema_sql`` parsed once per run, warning about the objects it could not parse."""
+        from sqlty._config import ConfigError
         from sqlty.core import load_schema, schema_skipped_objects
 
-        if (schema := self._schemas.get((schema_sql, dialect))) is None:
-            schema = self._schemas[schema_sql, dialect] = load_schema(schema_sql, dialect=dialect)
+        key = (schema_sql, dialect, tuple(sorted((types or {}).items())))
+        if (schema := self._schemas.get(key)) is None:
+            try:
+                schema = self._schemas[key] = load_schema(schema_sql, dialect=dialect, types=types)
+            except ValueError as exc:
+                raise ConfigError(f"[tool.sqlty.types]: {exc}") from None
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
                 logger.warning(
                     "Schema %s %s could not be parsed; its columns are unknown", kind, name
@@ -1076,7 +1081,9 @@ class SettingsResolver:
         dialect = args.dialect or config.get("dialect", "postgres")
         return Settings(
             dialect=dialect,
-            schema=None if schema_sql is None else self._schema(schema_sql, dialect),
+            schema=None
+            if schema_sql is None
+            else self._schema(schema_sql, dialect, config.get("types")),
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,
