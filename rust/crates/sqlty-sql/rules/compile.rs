@@ -16,7 +16,14 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 34] = [
+const SQL_TYPES: [&str; 41] = [
+    "UDECIMAL",
+    "UTINYINT",
+    "USMALLINT",
+    "UMEDIUMINT",
+    "UINT",
+    "UBIGINT",
+    "UDOUBLE",
     "SMALLINT",
     "TINYINT",
     "MEDIUMINT",
@@ -102,11 +109,66 @@ const NULLABILITIES: [(&str, &str); 5] = [
     ("nonzero-divisor", "RuleNullability::NonzeroDivisor"),
 ];
 
+/// Result types of a function rule other than a SQL type name; `@argument-as <TYPE>` keeps
+/// the argument's Python type and values under another SQL type.
+const FUNCTION_RESULTS: [(&str, &str); 3] = [
+    ("@unknown", "FunctionType::Unknown"),
+    ("@code", "FunctionType::Code"),
+    ("@argument", "FunctionType::Argument"),
+];
+
+/// How a function rule's result can be NULL.
+const FUNCTION_NULLABILITIES: [(&str, &str); 2] = [
+    ("non-null", "FunctionNullability::NonNull"),
+    ("aggregate", "FunctionNullability::Aggregate"),
+];
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuleFile {
     #[serde(default)]
     rule: Vec<RuleDef>,
+    #[serde(default)]
+    function: Vec<FunctionDef>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FunctionDef {
+    id: String,
+    reference: String,
+    reasoning: String,
+    #[serde(default)]
+    function: Option<String>,
+    #[serde(default)]
+    functions: Vec<String>,
+    #[serde(default)]
+    dialects: Vec<String>,
+    #[serde(default)]
+    argument: Vec<String>,
+    #[serde(rename = "type")]
+    result: String,
+    nullability: String,
+    #[serde(default)]
+    shadows: Vec<String>,
+}
+
+impl From<FunctionDef> for RuleDef {
+    fn from(def: FunctionDef) -> Self {
+        RuleDef {
+            id: def.id,
+            reference: def.reference,
+            reasoning: def.reasoning,
+            operator: def.function,
+            operators: def.functions,
+            dialects: def.dialects,
+            left: def.argument,
+            right: Vec::new(),
+            result: def.result,
+            nullability: def.nullability,
+            shadows: def.shadows,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -138,11 +200,21 @@ fn operands() -> String {
     "operands".to_string()
 }
 
-type Types = Option<BTreeSet<&'static str>>;
+/// An operand predicate: SQL types, and whether any typed operand is admitted (`@known`);
+/// `None` admits any operand, typed or not.
+#[derive(Clone, PartialEq, Eq)]
+struct Pred {
+    types: BTreeSet<&'static str>,
+    known: bool,
+}
+
+type Types = Option<Pred>;
 
 /// A rule as read, with where it came from and its order.
 struct Rule {
     def: RuleDef,
+    /// A function rule (`[[function]]`), whose operators are function names.
+    function: bool,
     file: String,
     /// 0 for a dialect directory, 1 for `common/`: dialect rules are tried first.
     tier: u8,
@@ -168,8 +240,13 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
     for (file, text) in sorted {
         let parsed: RuleFile = toml::from_str(text).map_err(|e| format!("{file}: {e}"))?;
         let tier = u8::from(file.contains("/common/"));
-        for def in parsed.rule {
-            let rule = check(def, file, tier)?;
+        let defs = parsed
+            .rule
+            .into_iter()
+            .map(|def| (def, false))
+            .chain(parsed.function.into_iter().map(|def| (def.into(), true)));
+        for (def, function) in defs {
+            let rule = check(def, function, file, tier)?;
             if let Some(other) = rules.iter().find(|r| r.def.id == rule.def.id) {
                 return Err(format!(
                     "rule {} ({file}): duplicate id, also in {}",
@@ -198,7 +275,7 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
 }
 
 /// Validate one rule: everything it names must exist.
-fn check(def: RuleDef, file: &str, tier: u8) -> Result<Rule, String> {
+fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, String> {
     let fail = |message: String| Err(format!("rule {} ({file}): {message}", def.id));
     if def.id.trim().is_empty() {
         return Err(format!("{file}: a rule has an empty id"));
@@ -207,10 +284,25 @@ fn check(def: RuleDef, file: &str, tier: u8) -> Result<Rule, String> {
         return fail("`reference` and `reasoning` must not be empty".to_string());
     }
     let operators: Vec<String> = def.operator.iter().chain(&def.operators).cloned().collect();
+    let (one, many) = if function {
+        ("function", "functions")
+    } else {
+        ("operator", "operators")
+    };
     if operators.is_empty() || (def.operator.is_some() && !def.operators.is_empty()) {
-        return fail("give `operator` or `operators`, not both".to_string());
+        return fail(format!("give `{one}` or `{many}`, not both"));
     }
-    if let Some(name) = operators.iter().find(|name| !is_operator(name)) {
+    if function {
+        let named = |name: &&String| {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        };
+        if let Some(name) = operators.iter().find(|name| !named(name)) {
+            return fail(format!("function {name:?} is not an upper-case name"));
+        }
+    } else if let Some(name) = operators.iter().find(|name| !is_operator(name)) {
         return fail(format!(
             "operator {name:?} is neither a sqlparser `BinaryOperator` variant nor `Custom:<text>`"
         ));
@@ -230,10 +322,28 @@ fn check(def: RuleDef, file: &str, tier: u8) -> Result<Rule, String> {
     }
     let left = operand_types(&def.left).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let right = operand_types(&def.right).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
-    if !(RESULTS.iter().any(|(name, _)| *name == def.result) || is_sql_type(&def.result)) {
+    let results: &[(&str, &str)] = if function {
+        &FUNCTION_RESULTS
+    } else {
+        &RESULTS
+    };
+    let argument_as = function
+        && def
+            .result
+            .strip_prefix("@argument-as ")
+            .is_some_and(is_sql_type);
+    if !(results.iter().any(|(name, _)| *name == def.result)
+        || is_sql_type(&def.result)
+        || argument_as)
+    {
         return fail(format!("unknown result type {:?}", def.result));
     }
-    if !NULLABILITIES
+    let nullabilities: &[(&str, &str)] = if function {
+        &FUNCTION_NULLABILITIES
+    } else {
+        &NULLABILITIES
+    };
+    if !nullabilities
         .iter()
         .any(|(name, _)| *name == def.nullability)
     {
@@ -241,6 +351,7 @@ fn check(def: RuleDef, file: &str, tier: u8) -> Result<Rule, String> {
     }
     Ok(Rule {
         def,
+        function,
         file: file.to_string(),
         tier,
         operators,
@@ -270,17 +381,22 @@ fn operand_types(names: &[String]) -> Result<Types, String> {
     if names.is_empty() {
         return Ok(None);
     }
-    let mut types = BTreeSet::new();
+    let mut pred = Pred {
+        types: BTreeSet::new(),
+        known: false,
+    };
     for name in names {
-        if let Some((_, members)) = CLASSES.iter().find(|(class, _)| class == name) {
-            types.extend(members.iter().copied());
+        if name == "@known" {
+            pred.known = true;
+        } else if let Some((_, members)) = CLASSES.iter().find(|(class, _)| class == name) {
+            pred.types.extend(members.iter().copied());
         } else if let Some(known) = SQL_TYPES.iter().find(|known| *known == name) {
-            types.insert(*known);
+            pred.types.insert(*known);
         } else {
             return Err(format!("unknown operand type {name:?}"));
         }
     }
-    Ok(Some(types))
+    Ok(Some(pred))
 }
 
 /// The operands two rules both match, with their dialects; `None` when they share none.
@@ -307,8 +423,14 @@ fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
     let both = |x: &Types, y: &Types| match (x, y) {
         (None, other) | (other, None) => Some(other.clone()),
         (Some(x), Some(y)) => {
-            let shared: BTreeSet<&'static str> = x.intersection(y).copied().collect();
-            (!shared.is_empty()).then_some(Some(shared))
+            let types: BTreeSet<&'static str> = match (x.known, y.known) {
+                (true, true) => x.types.union(&y.types).copied().collect(),
+                (true, false) => y.types.clone(),
+                (false, true) => x.types.clone(),
+                (false, false) => x.types.intersection(&y.types).copied().collect(),
+            };
+            let known = x.known && y.known;
+            (known || !types.is_empty()).then_some(Some(Pred { types, known }))
         }
     };
     Some(Region {
@@ -339,7 +461,8 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
         };
         for operator in &later.operators {
             let shadowing = rules[..i].iter().find(|earlier| {
-                earlier.tier == later.tier
+                earlier.function == later.function
+                    && earlier.tier == later.tier
                     && earlier.operators.contains(operator)
                     && covers(earlier, &whole)
             });
@@ -352,7 +475,10 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
             }
         }
         for (j, earlier) in rules[..i].iter().enumerate() {
-            if earlier.tier != later.tier || earlier.outcome() == later.outcome() {
+            if earlier.function != later.function
+                || earlier.tier != later.tier
+                || earlier.outcome() == later.outcome()
+            {
                 continue;
             }
             for operator in later
@@ -364,7 +490,8 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                     continue;
                 };
                 let decided = rules[..j].iter().any(|first| {
-                    first.tier == later.tier
+                    first.function == later.function
+                        && first.tier == later.tier
                         && first.operators.contains(operator)
                         && covers(first, &region)
                 });
@@ -403,14 +530,87 @@ fn within(a: &Types, b: &Types) -> bool {
     match (a, b) {
         (_, None) => true,
         (None, Some(_)) => false,
-        (Some(a), Some(b)) => a.is_subset(b),
+        (Some(_), Some(b)) if b.known => true,
+        (Some(a), Some(b)) => !a.known && a.types.is_subset(&b.types),
     }
 }
 
 fn generate(rules: &[Rule]) -> String {
+    let binary: Vec<&Rule> = rules.iter().filter(|rule| !rule.function).collect();
+    let functions: Vec<&Rule> = rules.iter().filter(|rule| rule.function).collect();
+    let mut out = generate_binary(&binary);
+    out.push('\n');
+    out.push_str(&generate_functions(&functions));
+    out
+}
+
+fn generate_functions(rules: &[&Rule]) -> String {
     let mut entries: Vec<(&str, &Rule)> = rules
         .iter()
-        .flat_map(|rule| rule.operators.iter().map(move |op| (op.as_str(), rule)))
+        .flat_map(|rule| {
+            rule.operators
+                .iter()
+                .map(move |name| (name.as_str(), *rule))
+        })
+        .collect();
+    entries.sort_by(|a, b| (a.0, a.1.tier).cmp(&(b.0, b.1.tier)));
+    let mut out = String::from(
+        "/// Every function inference rule, dialect rules first, each name's together.\n",
+    );
+    out.push_str("pub(crate) static FUNCTION_RULES: &[FunctionRule] = &[\n");
+    let mut ranges: Vec<(&str, usize, usize)> = Vec::new();
+    for (i, (name, rule)) in entries.iter().enumerate() {
+        match ranges.last_mut() {
+            Some((last, _, end)) if last == name => *end = i + 1,
+            _ => ranges.push((name, i, i + 1)),
+        }
+        let def = &rule.def;
+        let result = match def.result.strip_prefix("@argument-as ") {
+            Some(sql) => format!("FunctionType::ArgumentAs({sql:?})"),
+            None => FUNCTION_RESULTS
+                .iter()
+                .find(|(known, _)| *known == def.result)
+                .map_or_else(
+                    || format!("FunctionType::Sql({:?})", def.result),
+                    |(_, path)| (*path).to_string(),
+                ),
+        };
+        let nullability = FUNCTION_NULLABILITIES
+            .iter()
+            .find(|(known, _)| *known == def.nullability)
+            .unwrap()
+            .1;
+        let _ = writeln!(
+            out,
+            "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \
+             reference: {:?},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
+             argument: {},\n        result: {result},\n        nullability: {nullability},\n    }},",
+            def.id,
+            rule.file,
+            def.id,
+            def.reference.trim(),
+            def.reasoning.trim(),
+            rule.dialects.join(", "),
+            operand(&rule.left),
+        );
+    }
+    out.push_str("];\n\n");
+    out.push_str(
+        "/// The rules of the function `name` (upper case), in the order they are tried.\n",
+    );
+    out.push_str("pub(crate) fn function_rules(name: &str) -> &'static [FunctionRule] {\n");
+    out.push_str("    match name {\n");
+    for (name, start, end) in &ranges {
+        let _ = writeln!(out, "        {name:?} => &FUNCTION_RULES[{start}..{end}],");
+    }
+    out.push_str("        _ => &[],\n    }\n}\n");
+    out
+}
+
+fn generate_binary(rules: &[&Rule]) -> String {
+    let mut entries: Vec<(&str, &Rule)> = rules
+        .iter()
+        .flat_map(|rule| rule.operators.iter().map(move |op| (op.as_str(), *rule)))
         .collect();
     entries.sort_by(|a, b| (a.0, a.1.tier).cmp(&(b.0, b.1.tier)));
     let mut out = String::from("// @generated by build.rs from rules/**/*.inference.toml\n\n");
@@ -488,10 +688,12 @@ fn generate(rules: &[Rule]) -> String {
 fn operand(types: &Types) -> String {
     match types {
         None => "None".to_string(),
-        Some(types) => format!(
+        Some(pred) => format!(
             "Some(&[{}])",
-            types
-                .iter()
+            pred.known
+                .then_some("@known")
+                .into_iter()
+                .chain(pred.types.iter().copied())
                 .map(|t| format!("{t:?}"))
                 .collect::<Vec<_>>()
                 .join(", ")

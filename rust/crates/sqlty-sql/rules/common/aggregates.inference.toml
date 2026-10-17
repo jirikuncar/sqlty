@@ -1,0 +1,61 @@
+# COUNT, SUM, AVG, MIN and MAX. Their nullability over empty groups and NULL-only
+# arguments is the aggregate one of analyzer/nullability.rs, except COUNT's.
+
+[[function]]
+id = "common.aggregate.count"
+function = "COUNT"
+type = "BIGINT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (count ( * ) → bigint); MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (COUNT() returns 0 if there were no matching rows); SQLite documentation, Built-in Aggregate Functions (count(X))"
+reasoning = "COUNT counts rows, and gives 0, not NULL, over none."
+
+[[function]]
+id = "common.aggregate.sum"
+function = "SUM"
+type = "@code"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( interval ) → interval); SQLite documentation, Built-in Aggregate Functions (sum(X))"
+reasoning = "Other arguments keep their type; a column the schema lacks, or no argument type at all, is resolved in code."
+
+[[function]]
+id = "common.aggregate.avg-real"
+function = "AVG"
+argument = ["FLOAT", "DOUBLE"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (avg ( real ) → double precision); MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (a DOUBLE value for approximate-value arguments)"
+reasoning = "The mean of floating-point values is a double."
+
+[[function]]
+id = "common.aggregate.avg-interval"
+function = "AVG"
+argument = ["INTERVAL"]
+type = "INTERVAL"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (avg ( interval ) → interval)"
+reasoning = "The mean of intervals is an interval."
+
+[[function]]
+id = "common.aggregate.avg"
+function = "AVG"
+argument = ["@known"]
+type = "DECIMAL"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (avg ( integer ) → numeric); MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (a DECIMAL value for exact-value arguments); SQLite documentation, Built-in Aggregate Functions (avg(X) is always a floating point value)"
+reasoning = "The mean of exact numbers is an exact decimal (a float in SQLite, as its DECIMAL is)."
+
+[[function]]
+id = "common.aggregate.avg-untyped"
+function = "AVG"
+type = "@unknown"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (avg)"
+reasoning = "The mean of values of unknown type has no known type."
+
+[[function]]
+id = "common.aggregate.min-max"
+functions = ["MIN", "MAX"]
+type = "@argument"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ) → same as input type); MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (MIN, MAX); SQLite documentation, Built-in Aggregate Functions (max(X), min(X))"
+reasoning = "MIN and MAX return one of the values, so they keep the argument's type and value set."
