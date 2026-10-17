@@ -29,15 +29,15 @@ stale-type = "error"
 | [`select-star`](#select-star) | Query | warn | yes | `SELECT *` |
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
-| [`unparsed-query`](#unparsed-query) | Query | ignore | no | Query that does not parse, so sqlty cannot check it |
-| [`unknown-table`](#unknown-table) | Names | ignore | no | Table the schema does not define |
-| [`unknown-column`](#unknown-column) | Names | ignore | no | Column the table does not have |
-| [`ambiguous-column`](#ambiguous-column) | Names | ignore | no | Unqualified column more than one table has |
-| [`unknown-function`](#unknown-function) | Names | ignore | no | Function whose result sqlty cannot type |
-| [`unknown-type`](#unknown-type) | Names | ignore | no | Cast or column type without a Python type |
-| [`unsupported-syntax`](#unsupported-syntax) | Names | ignore | no | Construct that parses but is not typed |
-| [`insert-missing-column`](#insert-missing-column) | Names | ignore | no | INSERT that leaves out a `NOT NULL` column without a default |
-| [`ungrouped-column`](#ungrouped-column) | Names | ignore | no | Grouped query selects a column it neither groups by nor aggregates |
+| [`unparsed-query`](#unparsed-query) | Query | warn | no | Query that does not parse, so sqlty cannot check it |
+| [`unknown-table`](#unknown-table) | Names | error | no | Table the schema does not define |
+| [`unknown-column`](#unknown-column) | Names | error | no | Column the table does not have |
+| [`ambiguous-column`](#ambiguous-column) | Names | error | no | Unqualified column more than one table has |
+| [`unknown-function`](#unknown-function) | Names | warn | no | Function whose result sqlty cannot type |
+| [`unknown-type`](#unknown-type) | Names | warn | no | Cast or column type without a Python type |
+| [`unsupported-syntax`](#unsupported-syntax) | Names | warn | no | Construct that parses but is not typed |
+| [`insert-missing-column`](#insert-missing-column) | Names | error | no | INSERT that leaves out a `NOT NULL` column without a default |
+| [`ungrouped-column`](#ungrouped-column) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
@@ -46,7 +46,7 @@ stale-type = "error"
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
-| [`unused-ignore`](#unused-ignore) | Suppression | ignore | no | `# sqlty: ignore` comment that suppresses nothing |
+| [`unused-ignore`](#unused-ignore) | Suppression | warn | no | `# sqlty: ignore` comment that suppresses nothing |
 
 `nullable-mismatch` and `redundant-optional` check nullability; see
 [Nullability](../guide/schema-inference.md#nullability). `literal-mismatch` and
@@ -429,9 +429,9 @@ Fix: pass one argument per placeholder.
 
 ### unused-ignore
 
-Default: ignore. A `# sqlty: ignore` comment that suppresses no diagnostic on
-its line, or a rule listed in one that suppresses nothing. Off by default;
-enable it with `unused-ignore = "warn"`. It reports, for example:
+Default: warn. A `# sqlty: ignore` comment that suppresses no diagnostic on
+its line, or a rule listed in one that suppresses nothing. It reports, for
+example:
 
 ```text
 '# sqlty: ignore[select-star]' suppresses no diagnostic
@@ -529,15 +529,10 @@ literals, wrapped or not.
 
 ### unparsed-query
 
-Default: ignore. A query that does not parse in the configured dialect: a
+Default: warn. A query that does not parse in the configured dialect: a
 `--sql` string, the argument of `SQL[T](...)`, or a string passed to an
 `Annotated[LiteralString, SQL]` parameter. The message quotes sqlparser's
-error. Enable it with `unparsed-query = "warn"`:
-
-```toml
-[tool.sqlty.rules]
-unparsed-query = "warn"
-```
+error.
 
 ```python
 from sqlty import SQL
@@ -554,55 +549,56 @@ counts such queries as unparsed whether or not the rule is enabled.
 The first six rules explain why a result column is untyped: with all of them
 enabled and a schema configured, no column is left untyped without a diagnostic.
 `insert-missing-column` checks what an `INSERT` writes, and `ungrouped-column`
-what a grouped query selects. They are off by
-default because they report code that passes today. The
-[name diagnostics guide](../guide/name-diagnostics.md) shows how to enable
-them. All but `unsupported-syntax` are only judged when a
+what a grouped query selects. The rules for SQL the database rejects (unknown
+tables and columns, ambiguous columns, an `INSERT` missing a column, an ungrouped
+column) are errors; those for valid SQL sqlty cannot type are warnings. The
+[name diagnostics guide](../guide/name-diagnostics.md) shows how to change them. All but `unsupported-syntax` are only judged when a
 [schema](../guide/schema-inference.md) is configured, because without one every
 table, column, function and type is unknown. Tables, columns and ambiguity are
 checked only in the `postgres`, `mysql` and `sqlite` dialects.
 
 ### unknown-table
 
-Default: ignore. A `FROM`, `JOIN` or DML target that the schema does not
+Default: error. A `FROM`, `JOIN` or DML target that the schema does not
 define, or a qualifier (`x.id`) that names no table or alias of the query.
 CTEs, derived tables, views, table functions and system catalogs are not
 reported.
 
 ### unknown-column
 
-Default: ignore. A select-list column that its table does not have.
+Default: error. A column that its table does not have, in the select list,
+`WHERE`, `JOIN ... ON` and what `INSERT`, `UPDATE` and `DELETE` write.
 
 ### ambiguous-column
 
-Default: ignore. An unqualified column that more than one table of the query
+Default: error. An unqualified column that more than one table of the query
 has. Columns merged by `USING` or `NATURAL` are not ambiguous.
 
 ### unknown-function
 
-Default: ignore. A function call sqlty cannot type because it does not know
+Default: warn. A function call sqlty cannot type because it does not know
 the function.
 
 ### unknown-type
 
-Default: ignore. A cast target or schema column type with no Python type.
+Default: warn. A cast target or schema column type with no Python type.
 
 ### unsupported-syntax
 
-Default: ignore. A construct that parses but that sqlty does not type: an
+Default: warn. A construct that parses but that sqlty does not type: an
 expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
 of a table function. `NULL` and placeholders are not reported.
 
 ### insert-missing-column
 
-Default: ignore. An `INSERT` with a column list (or MySQL's `INSERT ... SET`)
+Default: error. An `INSERT` with a column list (or MySQL's `INSERT ... SET`)
 that leaves out a schema column declared `NOT NULL` without a default. A
 `DEFAULT`, `serial`, identity, generated or auto-increment column, and SQLite's
 `INTEGER PRIMARY KEY`, get a value anyway.
 
 ### ungrouped-column
 
-Default: ignore. A grouped query (`GROUP BY`, or an aggregate in the select
+Default: error. A grouped query (`GROUP BY`, or an aggregate in the select
 list) that selects a column it neither groups by nor aggregates, which
 PostgreSQL rejects. Grouping by a table's primary key covers its other columns.
 

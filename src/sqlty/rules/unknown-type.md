@@ -1,6 +1,6 @@
 # unknown-type
 
-Default severity: **ignore**
+Default severity: **warn**
 
 ## What it does
 
@@ -62,11 +62,13 @@ Cast to a type sqlty maps: `shape::TEXT`. Declare the type in the schema file if
 
 ## Configuration
 
-Off by default, because it reports code that passes today. Enable it:
+A warning by default: the SQL is valid, but sqlty cannot map the type to a Python type, so the query is
+not fully checked. A warning tells you why without failing CI on sqlty's gaps. Make it
+fail, or turn it off:
 
 ```toml
 [tool.sqlty.rules]
-unknown-type = "warn"
+unknown-type = "error"
 ```
 
-Without a schema with tables only built-in types are checked: every enum and domain would be unknown. A cast to an enum is reported until the enum is declared in the schema. `error` makes `sqlty check` fail on it.
+Without a schema with tables only built-in types are checked: every enum and domain would be unknown. A cast to an enum is reported until the enum is declared in the schema.

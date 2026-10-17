@@ -229,7 +229,7 @@ def test_check_reads_type_overrides(tmp_path, monkeypatch, capsys) -> None:
 def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
     """``--statistics`` ends with one line counting queries by how far sqlty types them."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunparsed-query = "warn"\n'
+        '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunknown-column = "warn"\n'
     )
     (tmp_path / "schema.sql").write_text(
         "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);"

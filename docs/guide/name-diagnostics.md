@@ -1,23 +1,24 @@
 # Name diagnostics
 
 A query that reads a misspelled column, an unknown table or a function sqlty
-does not know gets no type for that column, and `sqlty check` says nothing:
-the check is skipped. Six rules explain why a column is untyped. They are off
-by default, because they report code that passes today.
+does not know gets no type for that column, so its row type can't be checked.
+Six rules explain why a column is untyped. The three that report SQL the
+database rejects are errors by default; the three that report valid SQL sqlty
+can't type are warnings.
 
-| Rule | Reports |
-|------|---------|
-| [`unknown-table`](../reference/rules.md#unknown-table) | A table the schema does not define |
-| [`unknown-column`](../reference/rules.md#unknown-column) | A column the table does not have |
-| [`ambiguous-column`](../reference/rules.md#ambiguous-column) | An unqualified column in more than one table |
-| [`unknown-function`](../reference/rules.md#unknown-function) | A function sqlty cannot type |
-| [`unknown-type`](../reference/rules.md#unknown-type) | A cast or column type without a Python type |
-| [`unsupported-syntax`](../reference/rules.md#unsupported-syntax) | A construct that parses but is not typed |
+| Rule | Default | Reports |
+|------|---------|---------|
+| [`unknown-table`](../reference/rules.md#unknown-table) | error | A table the schema does not define |
+| [`unknown-column`](../reference/rules.md#unknown-column) | error | A column the table does not have |
+| [`ambiguous-column`](../reference/rules.md#ambiguous-column) | error | An unqualified column in more than one table |
+| [`unknown-function`](../reference/rules.md#unknown-function) | warn | A function sqlty cannot type |
+| [`unknown-type`](../reference/rules.md#unknown-type) | warn | A cast or column type without a Python type |
+| [`unsupported-syntax`](../reference/rules.md#unsupported-syntax) | warn | A construct that parses but is not typed |
 
-## Enable them
+## Change their severity
 
-Set the rules you want in `[tool.sqlty.rules]`, to `"warn"` to print them or
-`"error"` to fail `sqlty check`. All rules but `unsupported-syntax` need a
+Set a rule in `[tool.sqlty.rules]` to `"error"` to fail `sqlty check`, `"warn"`
+to print it, or `"ignore"` to turn it off. All rules but `unsupported-syntax` need a
 [schema](schema-inference.md): without one every name, function and type is unknown, so they stay
 silent.
 
