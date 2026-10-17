@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+# `uv run` must not sync: that would build the extension again, through the release profile.
+env:
+  UV_NO_SYNC: "1"
+
 jobs:
   compare:
     name: Compare with drivers and ORMs
@@ -62,19 +66,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build artifacts
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            rust/target
-            ~/.cargo/registry
-          key: rust-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-
+          workspaces: rust -> target
+          # Pull requests restore main's cache; only main writes it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the MySQL client library for mysqlclient
         run: sudo apt-get install -y libmysqlclient-dev pkg-config
 
-      - name: Install the project (with Rust extension)
-        run: uv sync --all-groups
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
 
       - name: Build Rust extension
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
