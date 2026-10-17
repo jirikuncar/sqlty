@@ -217,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
         "rule",
         help="Explain a lint rule (sqlty rule stale-type), or list all rules",
     )
-    rule_parser.add_argument("name", nargs="?", help="Rule name, e.g. select-star")
+    rule_parser.add_argument("name", nargs="?", help="Rule name, for example select-star")
 
     # --- version ---
     subparsers.add_parser("version", help="Print version and exit")
@@ -282,7 +282,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--config",
         action="append",
         metavar="KEY=VALUE",
-        help="Override a configuration key with a TOML assignment, e.g. "
+        help="Override a configuration key with a TOML assignment, for example "
         "`-c 'dialect = \"mysql\"'` or `-c 'rules.select-star = \"ignore\"'`; repeat for "
         "several. Paths are relative to the current directory",
     )
