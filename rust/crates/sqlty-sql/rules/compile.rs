@@ -14,9 +14,9 @@ const DIALECTS: [(&str, &str); 4] = [
     ("clickhouse", "SqlDialect::ClickHouse"),
 ];
 
-/// Canonical SQL types the analyzer gives operands (`operand_type`), which `left` and
-/// `right` may name.
-const SQL_TYPES: [&str; 33] = [
+/// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
+/// `ARRAY` is any array.
+const SQL_TYPES: [&str; 34] = [
     "SMALLINT",
     "TINYINT",
     "MEDIUMINT",
@@ -50,10 +50,11 @@ const SQL_TYPES: [&str; 33] = [
     "TSVECTOR",
     "TSQUERY",
     "MONEY",
+    "ARRAY",
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.
-const CLASSES: [(&str, &[&str]); 5] = [
+const CLASSES: [(&str, &[&str]); 6] = [
     (
         "@integer",
         &["SMALLINT", "TINYINT", "MEDIUMINT", "INT", "BIGINT"],
@@ -76,16 +77,29 @@ const CLASSES: [(&str, &[&str]); 5] = [
     ("@text", &["TEXT", "VARCHAR", "CHAR"]),
     ("@json", &["JSON", "JSONB"]),
     ("@address", &["INET", "CIDR"]),
+    ("@array", &["ARRAY"]),
 ];
 
 /// Result types other than a SQL type name.
-const RESULTS: [(&str, &str); 2] = [("@any", "RuleType::Any"), ("@left", "RuleType::Left")];
+const RESULTS: [(&str, &str); 9] = [
+    ("@any", "RuleType::Any"),
+    ("@unknown", "RuleType::Unknown"),
+    ("@code", "RuleType::Code"),
+    ("@left", "RuleType::Left"),
+    ("@right", "RuleType::Right"),
+    ("@common", "RuleType::Common"),
+    ("@promote", "RuleType::Promote"),
+    ("@promote-decimal", "RuleType::PromoteToDecimal"),
+    ("@promote-left", "RuleType::PromoteLeft"),
+];
 
 /// How a rule's result can be NULL.
-const NULLABILITIES: [(&str, &str); 3] = [
+const NULLABILITIES: [(&str, &str); 5] = [
     ("operands", "RuleNullability::Operands"),
     ("nullable", "RuleNullability::Nullable"),
     ("non-null", "RuleNullability::NonNull"),
+    ("short-circuit", "RuleNullability::ShortCircuit"),
+    ("nonzero-divisor", "RuleNullability::NonzeroDivisor"),
 ];
 
 #[derive(Deserialize)]
@@ -101,7 +115,10 @@ struct RuleDef {
     id: String,
     reference: String,
     reasoning: String,
-    operator: String,
+    #[serde(default)]
+    operator: Option<String>,
+    #[serde(default)]
+    operators: Vec<String>,
     #[serde(default)]
     dialects: Vec<String>,
     #[serde(default)]
@@ -112,11 +129,16 @@ struct RuleDef {
     result: String,
     #[serde(default = "operands")]
     nullability: String,
+    /// Ids of later rules of the same tier this one takes precedence over where both match.
+    #[serde(default)]
+    shadows: Vec<String>,
 }
 
 fn operands() -> String {
     "operands".to_string()
 }
+
+type Types = Option<BTreeSet<&'static str>>;
 
 /// A rule as read, with where it came from and its order.
 struct Rule {
@@ -124,9 +146,16 @@ struct Rule {
     file: String,
     /// 0 for a dialect directory, 1 for `common/`: dialect rules are tried first.
     tier: u8,
+    operators: Vec<String>,
     dialects: Vec<&'static str>,
-    left: Option<BTreeSet<&'static str>>,
-    right: Option<BTreeSet<&'static str>>,
+    left: Types,
+    right: Types,
+}
+
+impl Rule {
+    fn outcome(&self) -> (&str, &str) {
+        (&self.def.result, &self.def.nullability)
+    }
 }
 
 /// The Rust source of the rules in `files`, `(path, contents)` pairs with paths relative to
@@ -150,6 +179,19 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
             rules.push(rule);
         }
     }
+    for rule in &rules {
+        if let Some(id) = rule
+            .def
+            .shadows
+            .iter()
+            .find(|id| !rules.iter().any(|r| &r.def.id == *id))
+        {
+            return Err(format!(
+                "rule {} ({}): `shadows` names unknown rule {id}",
+                rule.def.id, rule.file
+            ));
+        }
+    }
     rules.sort_by_key(|rule| rule.tier);
     check_overlaps(&rules)?;
     Ok(generate(&rules))
@@ -164,10 +206,13 @@ fn check(def: RuleDef, file: &str, tier: u8) -> Result<Rule, String> {
     if def.reference.trim().is_empty() || def.reasoning.trim().is_empty() {
         return fail("`reference` and `reasoning` must not be empty".to_string());
     }
-    if !is_operator(&def.operator) {
+    let operators: Vec<String> = def.operator.iter().chain(&def.operators).cloned().collect();
+    if operators.is_empty() || (def.operator.is_some() && !def.operators.is_empty()) {
+        return fail("give `operator` or `operators`, not both".to_string());
+    }
+    if let Some(name) = operators.iter().find(|name| !is_operator(name)) {
         return fail(format!(
-            "operator {:?} is neither a sqlparser `BinaryOperator` variant nor `Custom:<text>`",
-            def.operator
+            "operator {name:?} is neither a sqlparser `BinaryOperator` variant nor `Custom:<text>`"
         ));
     }
     let mut dialects = Vec::new();
@@ -198,6 +243,7 @@ fn check(def: RuleDef, file: &str, tier: u8) -> Result<Rule, String> {
         def,
         file: file.to_string(),
         tier,
+        operators,
         dialects,
         left,
         right,
@@ -216,11 +262,11 @@ fn is_operator(name: &str) -> bool {
 }
 
 fn is_sql_type(name: &str) -> bool {
-    SQL_TYPES.contains(&name)
+    SQL_TYPES.contains(&name) && name != "ARRAY"
 }
 
 /// The SQL types an operand predicate admits; `None` for any operand.
-fn operand_types(names: &[String]) -> Result<Option<BTreeSet<&'static str>>, String> {
+fn operand_types(names: &[String]) -> Result<Types, String> {
     if names.is_empty() {
         return Ok(None);
     }
@@ -237,51 +283,123 @@ fn operand_types(names: &[String]) -> Result<Option<BTreeSet<&'static str>>, Str
     Ok(Some(types))
 }
 
-/// Within one tier, two rules for one operator must not overlap unless the earlier one is
-/// narrower: an earlier rule that covers a later one makes it unreachable, and a partial
-/// overlap makes the order decide silently.
+/// The operands two rules both match, with their dialects; `None` when they share none.
+struct Region<'r> {
+    dialects: Vec<&'r str>,
+    left: Types,
+    right: Types,
+}
+
+fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
+    let dialects: Vec<&str> = match (a.dialects.is_empty(), b.dialects.is_empty()) {
+        (true, _) => b.dialects.clone(),
+        (_, true) => a.dialects.clone(),
+        _ => a
+            .dialects
+            .iter()
+            .filter(|d| b.dialects.contains(d))
+            .copied()
+            .collect(),
+    };
+    if dialects.is_empty() && !(a.dialects.is_empty() && b.dialects.is_empty()) {
+        return None;
+    }
+    let both = |x: &Types, y: &Types| match (x, y) {
+        (None, other) | (other, None) => Some(other.clone()),
+        (Some(x), Some(y)) => {
+            let shared: BTreeSet<&'static str> = x.intersection(y).copied().collect();
+            (!shared.is_empty()).then_some(Some(shared))
+        }
+    };
+    Some(Region {
+        dialects,
+        left: both(&a.left, &b.left)?,
+        right: both(&a.right, &b.right)?,
+    })
+}
+
+/// Whether `rule` matches every operand of `region`.
+fn covers(rule: &Rule, region: &Region<'_>) -> bool {
+    within(&region.left, &rule.left)
+        && within(&region.right, &rule.right)
+        && (rule.dialects.is_empty()
+            || (!region.dialects.is_empty()
+                && region.dialects.iter().all(|d| rule.dialects.contains(d))))
+}
+
+/// Within one tier, rules for one operator that match the same operands must agree, unless
+/// an earlier rule decides those operands first: the earlier rule wins, so a later one it
+/// covers would never apply, and a partial overlap would let file order decide silently.
 fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
     for (i, later) in rules.iter().enumerate() {
-        for earlier in &rules[..i] {
-            if earlier.tier != later.tier || earlier.def.operator != later.def.operator {
-                continue;
-            }
-            let dialects = earlier.dialects.is_empty()
-                || later.dialects.is_empty()
-                || earlier.dialects.iter().any(|d| later.dialects.contains(d));
-            if !(dialects
-                && overlaps(&earlier.left, &later.left)
-                && overlaps(&earlier.right, &later.right))
-            {
-                continue;
-            }
-            let narrower = within(&earlier.left, &later.left)
-                && within(&earlier.right, &later.right)
-                && within_dialects(&earlier.dialects, &later.dialects)
-                && (earlier.left != later.left
-                    || earlier.right != later.right
-                    || earlier.dialects != later.dialects);
-            if !narrower {
+        let whole = Region {
+            dialects: later.dialects.clone(),
+            left: later.left.clone(),
+            right: later.right.clone(),
+        };
+        for operator in &later.operators {
+            let shadowing = rules[..i].iter().find(|earlier| {
+                earlier.tier == later.tier
+                    && earlier.operators.contains(operator)
+                    && covers(earlier, &whole)
+            });
+            if let Some(earlier) = shadowing {
                 return Err(format!(
-                    "rule {} ({}) overlaps rule {} ({}) for the same operands; make the earlier \
-                     rule narrower or the operand types disjoint",
+                    "rule {} ({}) never applies to {operator}: rule {} ({}) comes first and \
+                     matches every operand it does",
                     later.def.id, later.file, earlier.def.id, earlier.file
                 ));
+            }
+        }
+        for (j, earlier) in rules[..i].iter().enumerate() {
+            if earlier.tier != later.tier || earlier.outcome() == later.outcome() {
+                continue;
+            }
+            for operator in later
+                .operators
+                .iter()
+                .filter(|op| earlier.operators.contains(op))
+            {
+                let Some(region) = intersect(earlier, later) else {
+                    continue;
+                };
+                let decided = rules[..j].iter().any(|first| {
+                    first.tier == later.tier
+                        && first.operators.contains(operator)
+                        && covers(first, &region)
+                });
+                let narrower = covers(
+                    later,
+                    &Region {
+                        dialects: earlier.dialects.clone(),
+                        left: earlier.left.clone(),
+                        right: earlier.right.clone(),
+                    },
+                ) && !covers(
+                    earlier,
+                    &Region {
+                        dialects: later.dialects.clone(),
+                        left: later.left.clone(),
+                        right: later.right.clone(),
+                    },
+                );
+                let intended = earlier.def.shadows.contains(&later.def.id);
+                if !(decided || narrower || intended) {
+                    return Err(format!(
+                        "rule {} ({}) overlaps rule {} ({}) for the same operands of {operator}; \
+                         make the earlier rule narrower, the operand types disjoint, or list the \
+                         later rule in the earlier one's `shadows`",
+                        later.def.id, later.file, earlier.def.id, earlier.file
+                    ));
+                }
             }
         }
     }
     Ok(())
 }
 
-fn overlaps(a: &Option<BTreeSet<&str>>, b: &Option<BTreeSet<&str>>) -> bool {
-    match (a, b) {
-        (Some(a), Some(b)) => !a.is_disjoint(b),
-        _ => true,
-    }
-}
-
 /// Whether every operand `a` admits, `b` admits too.
-fn within(a: &Option<BTreeSet<&str>>, b: &Option<BTreeSet<&str>>) -> bool {
+fn within(a: &Types, b: &Types) -> bool {
     match (a, b) {
         (_, None) => true,
         (None, Some(_)) => false,
@@ -289,23 +407,22 @@ fn within(a: &Option<BTreeSet<&str>>, b: &Option<BTreeSet<&str>>) -> bool {
     }
 }
 
-fn within_dialects(a: &[&str], b: &[&str]) -> bool {
-    b.is_empty() || (!a.is_empty() && a.iter().all(|d| b.contains(d)))
-}
-
 fn generate(rules: &[Rule]) -> String {
+    let mut entries: Vec<(&str, &Rule)> = rules
+        .iter()
+        .flat_map(|rule| rule.operators.iter().map(move |op| (op.as_str(), rule)))
+        .collect();
+    entries.sort_by(|a, b| (a.0, a.1.tier).cmp(&(b.0, b.1.tier)));
     let mut out = String::from("// @generated by build.rs from rules/**/*.inference.toml\n\n");
     out.push_str(
-        "/// Every inference rule, dialect rules first, each operator's rules together.\n",
+        "/// Every inference rule per operator, dialect rules first, each operator's together.\n",
     );
     out.push_str("pub(crate) static BINARY_RULES: &[BinaryRule] = &[\n");
-    let mut order: Vec<&Rule> = rules.iter().collect();
-    order.sort_by(|a, b| (&a.def.operator, a.tier).cmp(&(&b.def.operator, b.tier)));
-    let mut ranges: Vec<(String, usize, usize)> = Vec::new();
-    for (i, rule) in order.iter().enumerate() {
+    let mut ranges: Vec<(&str, usize, usize)> = Vec::new();
+    for (i, (op, rule)) in entries.iter().enumerate() {
         match ranges.last_mut() {
-            Some((op, _, end)) if *op == rule.def.operator => *end = i + 1,
-            _ => ranges.push((rule.def.operator.clone(), i, i + 1)),
+            Some((last, _, end)) if last == op => *end = i + 1,
+            _ => ranges.push((op, i, i + 1)),
         }
         let def = &rule.def;
         let result = RESULTS
@@ -322,7 +439,7 @@ fn generate(rules: &[Rule]) -> String {
             .1;
         let _ = writeln!(
             out,
-            "    // rule {} ({})\n    BinaryRule {{\n        id: {:?},\n        reference: {:?},\n        \
+            "    // rule {} ({}), {op}\n    BinaryRule {{\n        id: {:?},\n        reference: {:?},\n        \
              reasoning: {:?},\n        dialects: &[{}],\n        left: {},\n        right: {},\n        \
              result: {result},\n        nullability: {nullability},\n    }},",
             def.id,
@@ -344,12 +461,12 @@ fn generate(rules: &[Rule]) -> String {
     let mut custom = Vec::new();
     for (op, start, end) in &ranges {
         match op.strip_prefix("Custom:") {
-            Some(text) => custom.push((text.to_string(), *start, *end)),
+            Some(text) => custom.push((text, *start, *end)),
             None => {
                 let _ = writeln!(
                     out,
                     "        BinaryOperator::{op} {{ .. }} => &BINARY_RULES[{start}..{end}], // {}",
-                    order[*start].def.id
+                    entries[*start].1.def.id
                 );
             }
         }
@@ -368,7 +485,7 @@ fn generate(rules: &[Rule]) -> String {
     out
 }
 
-fn operand(types: &Option<BTreeSet<&str>>) -> String {
+fn operand(types: &Types) -> String {
     match types {
         None => "None".to_string(),
         Some(types) => format!(

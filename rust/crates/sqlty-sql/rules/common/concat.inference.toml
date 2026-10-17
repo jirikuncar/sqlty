@@ -1,0 +1,35 @@
+# `||`: JSONB concatenation before text.
+
+[[rule]]
+id = "common.concat.jsonb"
+operator = "StringConcat"
+left = ["JSONB"]
+type = "JSONB"
+shadows = ["common.concat.text-right"]
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
+reasoning = "`||` on a jsonb value merges JSON."
+
+[[rule]]
+id = "common.concat.jsonb-right-operand"
+operator = "StringConcat"
+right = ["JSONB"]
+type = "JSONB"
+shadows = ["common.concat.text"]
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
+reasoning = "`||` on a jsonb value merges JSON."
+
+[[rule]]
+id = "common.concat.text"
+operator = "StringConcat"
+left = ["@text"]
+type = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.4, Table 9.9 SQL String Functions and Operators (text || anynonarray → text); SQLite documentation, SQL Language Expressions, 2 Operators (|| concatenate)"
+reasoning = "`||` with text on either side concatenates into text."
+
+[[rule]]
+id = "common.concat.text-right"
+operator = "StringConcat"
+right = ["@text"]
+type = "TEXT"
+reference = "PostgreSQL 17 documentation, 9.4, Table 9.9 SQL String Functions and Operators (anynonarray || text → text); SQLite documentation, SQL Language Expressions, 2 Operators (|| concatenate)"
+reasoning = "`||` with text on either side concatenates into text."

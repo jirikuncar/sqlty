@@ -1,0 +1,49 @@
+# PostgreSQL `||`: JSONB, then arrays, then the common rules (text).
+
+[[rule]]
+id = "postgres.concat.jsonb"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["JSONB"]
+type = "JSONB"
+shadows = ["postgres.concat.array-right"]
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
+reasoning = "`||` on a jsonb value merges JSON."
+
+[[rule]]
+id = "postgres.concat.jsonb-right-operand"
+operator = "StringConcat"
+dialects = ["postgres"]
+right = ["JSONB"]
+type = "JSONB"
+shadows = ["postgres.concat.array"]
+reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
+reasoning = "`||` on a jsonb value merges JSON."
+
+[[rule]]
+id = "postgres.concat.arrays"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["@array"]
+right = ["@array"]
+type = "@common"
+reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatiblearray || anycompatiblearray → anycompatiblearray)"
+reasoning = "Two arrays concatenate into an array of their common element type."
+
+[[rule]]
+id = "postgres.concat.array"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["@array"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatiblearray || anycompatible → anycompatiblearray)"
+reasoning = "Appending an element keeps the array's type."
+
+[[rule]]
+id = "postgres.concat.array-right"
+operator = "StringConcat"
+dialects = ["postgres"]
+right = ["@array"]
+type = "@right"
+reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatible || anycompatiblearray → anycompatiblearray)"
+reasoning = "Prepending an element keeps the array's type."

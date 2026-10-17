@@ -259,15 +259,9 @@ jobs:
       - name: Install the project
         run: uv sync --all-groups
 
-      - name: Run pre-commit
-        run: uv run pre-commit run --all-files
-
-      # pre-commit covers src/; type checker tests run with pytest in the test jobs
-      - name: Type check examples (mypy + ty)
-        run: make typecheck-examples
-
-      - name: Run clippy
-        run: cargo clippy --workspace --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+      # Type checker tests of SQL[T] run with pytest in the test jobs
+      - name: Run prek
+        run: uv run prek run --all-files --show-diff-on-failure
 
       # Show diff ONLY if previous step failed
       - name: Show git diff

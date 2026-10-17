@@ -68,11 +68,12 @@ dev = [
     "inline-snapshot>=0.15.0",
     "maturin>=1.12.1,<2.0",
     "mypy>=2.4.0",
-    "pre-commit>=4.0.1",
+    "prek>=0.5.4",
     "pyright>=1.1.414",
     "pytest>=8.4.2",
     "pytest-cov>=6.0.0",
     "pytest-randomly>=3.16.0",
+    "pyyaml>=6.0.2",
     "ruff>=0.16.10",
     "ty>=0.0.85",
 ]

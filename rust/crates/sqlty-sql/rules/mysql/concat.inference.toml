@@ -1,0 +1,9 @@
+# MySQL `||`.
+
+[[rule]]
+id = "mysql.concat.or"
+operator = "StringConcat"
+dialects = ["mysql"]
+type = "@unknown"
+reference = "MySQL 8.4 Reference Manual, 14.4.3 Logical Operators (|| is a synonym for OR unless PIPES_AS_CONCAT is enabled)"
+reasoning = "Whether `||` is OR or concatenation depends on the server's SQL mode, so the result is not typed."

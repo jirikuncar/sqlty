@@ -15,6 +15,6 @@
 
 ## Checklist
 
-- [ ] `uv run pre-commit run --all-files` passes
+- [ ] `uv run prek run --all-files` passes
 - [ ] `uv run pytest` passes
 - [ ] User-visible changes are documented in `docs/`

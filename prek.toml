@@ -1,0 +1,111 @@
+# Run with `uv run prek run --all-files`; see CONTRIBUTING.md.
+#
+# Hooks that edit files run one priority at a time, so no two of them write a
+# file at once. The read-only checks share priority 10 and run in parallel.
+# One config for the whole repository: prek runs the projects of a workspace one
+# after another, so a rust/ project would stop cargo from overlapping with mypy.
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "fix-byte-order-marker", priority = 0 },
+  { id = "mixed-line-ending", priority = 1 },
+  { id = "trailing-whitespace", priority = 2 },
+  { id = "end-of-file-fixer", priority = 3 },
+  { id = "check-yaml", priority = 10 },
+  { id = "check-toml", priority = 10 },
+  { id = "check-json", priority = 10 },
+  { id = "check-merge-conflict", priority = 10 },
+  { id = "check-case-conflict", priority = 10 },
+]
+
+[[repos]]
+repo = "local"
+
+# magic_codec/ keeps plain --sql strings: the codec wraps them at import time.
+# The examples change with the engine, so a change to it reruns them.
+[[repos.hooks]]
+id = "sqlty-rewrite-examples"
+name = "sqlty rewrite examples"
+entry = "bash -c 'uv run sqlty rewrite -q examples/0*/'"
+language = "system"
+pass_filenames = false
+files = '^(examples|src/sqlty|rust/crates)/'
+priority = 4
+
+[[repos.hooks]]
+id = "sqlty-check-examples"
+name = "sqlty check examples"
+entry = "bash -c 'uv run sqlty check -q examples/0*/'"
+language = "system"
+pass_filenames = false
+files = '^(examples|src/sqlty|rust/crates)/'
+priority = 10
+
+[[repos.hooks]]
+id = "typecheck-examples"
+name = "mypy + ty on examples"
+entry = "make typecheck-examples"
+language = "system"
+pass_filenames = false
+files = '^(examples|src/sqlty)/'
+priority = 10
+
+[[repos.hooks]]
+id = "mypy"
+name = "mypy"
+entry = "uv run mypy --scripts-are-modules src"
+language = "system"
+pass_filenames = false
+files = '^(src/|pyproject\.toml$)'
+priority = 10
+
+[[repos.hooks]]
+id = "ty"
+name = "ty"
+entry = "uv run ty check src/sqlty"
+language = "system"
+pass_filenames = false
+files = '^(src/|pyproject\.toml$)'
+priority = 10
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+entry = "cargo fmt --all --manifest-path rust/Cargo.toml --check"
+language = "system"
+pass_filenames = false
+types = ["rust"]
+priority = 10
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+entry = "cargo clippy --workspace --manifest-path rust/Cargo.toml --all-targets -q -- -D warnings"
+language = "system"
+pass_filenames = false
+files = '^rust/'
+priority = 10
+
+[[repos.hooks]]
+id = "cargo-test"
+name = "cargo test"
+entry = "cargo test --workspace --manifest-path rust/Cargo.toml -q"
+language = "system"
+pass_filenames = false
+files = '^rust/'
+priority = 10
+
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.16.10"
+hooks = [
+  # TODO remove the exclude when empty line issues in examples are fixed
+  { id = "ruff-check", args = ["--fix", "--exit-non-zero-on-fix"], exclude = '^examples/', priority = 5 },
+  { id = "ruff-format", priority = 6 },
+]
+
+[[repos]]
+repo = "https://github.com/astral-sh/uv-pre-commit"
+rev = "0.12.24"
+hooks = [{ id = "uv-lock", priority = 5 }]

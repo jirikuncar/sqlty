@@ -17,7 +17,7 @@ Conventions for both humans and AI agents: [AGENTS.md](AGENTS.md).
 
 ```bash
 uv sync --all-groups
-uv run pre-commit install
+uv run prek install
 uv run pytest
 ```
 
@@ -27,7 +27,7 @@ uv run pytest
 2. Add tests. Every new feature or behavior change needs an mdtest in
    `tests/mdtest/`; user-visible behavior also belongs in `docs/`.
    CLI changes need an e2e test in `tests/e2e/`.
-3. Run `uv run pre-commit run --all-files` and `uv run pytest`.
+3. Run `uv run prek run --all-files` and `uv run pytest`.
 4. Keep the pull request focused on one change and describe what changed and why.
    Reference the issue it resolves (`Fixes #123`).
 5. Fill in the pull request template, including the AI disclosure.
