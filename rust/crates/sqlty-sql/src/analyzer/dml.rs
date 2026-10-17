@@ -1,7 +1,7 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
 use sqlparser::ast::{
-    AssignmentTarget, FromTable, ObjectName, OutputClause, SelectItem, SetExpr, Statement,
+    AssignmentTarget, FromTable, ObjectName, OutputClause, Query, SelectItem, SetExpr, Statement,
     TableObject, UpdateTableFromKind,
 };
 
@@ -135,8 +135,16 @@ impl Analyzer<'_> {
                         self.check_missing_columns(name, columns);
                     }
                 }
-                if let Some(source) = &insert.source {
-                    // Its diagnostics are recorded; the columns are not needed.
+                // Its diagnostics are recorded; the columns are not needed. Nothing reads the
+                // types of a plain VALUES source, so outside PostgreSQL, where they are not
+                // inferred, that is not reported.
+                let untyped_values = |source: &Query| {
+                    self.dialect != SqlDialect::Postgres
+                        && insert.returning.is_none()
+                        && source.with.is_none()
+                        && matches!(source.body.as_ref(), SetExpr::Values(_))
+                };
+                if let Some(source) = insert.source.as_deref().filter(|s| !untyped_values(s)) {
                     let _ = self.query_columns(source);
                 }
             }

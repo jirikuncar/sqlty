@@ -99,6 +99,9 @@ pub(crate) enum FunctionReturn {
     SetOf(Typed),
     /// `RETURNS TABLE(...)`, `SETOF table` or several `OUT` parameters: rows of columns.
     Rows(Vec<SchemaColumn>),
+    /// A table's row type: one value, or in `FROM` one row of the table's columns. Each is
+    /// nullable, as a function that returns `NULL` gives a row of NULLs.
+    Row(Typed, Vec<SchemaColumn>),
 }
 
 /// A function overload.
@@ -351,7 +354,8 @@ impl Catalog {
 fn same_return(a: &FunctionReturn, b: &FunctionReturn) -> bool {
     match (a, b) {
         (FunctionReturn::Scalar(a), FunctionReturn::Scalar(b))
-        | (FunctionReturn::SetOf(a), FunctionReturn::SetOf(b)) => a == b,
+        | (FunctionReturn::SetOf(a), FunctionReturn::SetOf(b))
+        | (FunctionReturn::Row(a, _), FunctionReturn::Row(b, _)) => a == b,
         _ => false,
     }
 }

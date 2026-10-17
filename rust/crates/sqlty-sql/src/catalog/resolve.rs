@@ -136,16 +136,31 @@ impl Loader {
                             .collect(),
                     ),
                     RawReturn::Scalar(ty) | RawReturn::SetOf(ty) => {
+                        let set_of = matches!(f.returns, RawReturn::SetOf(_));
                         let rows = type_key(ty, dialect)
-                            .filter(|_| matches!(f.returns, RawReturn::SetOf(_)))
                             .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                             .and_then(|key| match relations.get(&key) {
                                 Some(Relation::Table(columns, _)) => Some(columns.clone()),
                                 _ => None,
                             });
                         match rows {
-                            Some(columns) => FunctionReturn::Rows(columns),
-                            None => {
+                            Some(columns) if set_of => FunctionReturn::Rows(columns),
+                            Some(columns) => {
+                                let Resolved {
+                                    sql_type: sql,
+                                    python_type: python,
+                                    ..
+                                } = resolver.resolve(ty);
+                                let columns = columns
+                                    .into_iter()
+                                    .map(|column| SchemaColumn {
+                                        not_null: false,
+                                        ..column
+                                    })
+                                    .collect();
+                                FunctionReturn::Row(typed(sql, python, dialect), columns)
+                            }
+                            _ => {
                                 let Resolved {
                                     sql_type: sql,
                                     python_type: python,
@@ -156,7 +171,7 @@ impl Loader {
                                 } else {
                                     typed(sql, python, dialect)
                                 };
-                                if matches!(f.returns, RawReturn::SetOf(_)) {
+                                if set_of {
                                     FunctionReturn::SetOf(value)
                                 } else {
                                     FunctionReturn::Scalar(value)
