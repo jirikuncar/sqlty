@@ -439,7 +439,14 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
-            let nullability = self.nullability(expr, scope, facts);
+            let mut nullability = self.nullability(expr, scope, facts);
+            // psycopg loads a JSON `null` as `None`, and it passes `IS NOT NULL`.
+            if self
+                .json_extract(expr, scope)
+                .is_some_and(|value| value.null)
+            {
+                nullability = Nullability::Nullable;
+            }
             let json = self.column_json(expr, sql_type.as_deref(), scope)?;
             columns.push(Column {
                 name,

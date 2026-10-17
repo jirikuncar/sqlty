@@ -552,9 +552,11 @@ mod tests {
             marks("SELECT doc -> 'k', doc ->> 'k', doc -> 'j' FROM t WHERE doc ? 'k'"),
             "NNN"
         );
+        // A JSON `null` passes `IS NOT NULL`, and psycopg loads it as `None`; its text does
+        // not.
         assert_eq!(
-            marks("SELECT doc -> 'k' FROM t WHERE doc -> 'k' IS NOT NULL"),
-            "-"
+            marks("SELECT doc -> 'k', doc ->> 'k' FROM t WHERE doc -> 'k' IS NOT NULL AND doc ->> 'k' IS NOT NULL"),
+            "N-"
         );
         assert_eq!(marks("SELECT doc -> 'k' FROM t WHERE NOT doc ? 'k'"), "N");
     }
