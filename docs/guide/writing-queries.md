@@ -228,6 +228,9 @@ field.
 
 ## Type mapping
 
+Per dialect, with the driver each follows and why some types differ, see
+[Type mapping](../reference/types.md).
+
 | SQL type | Python type |
 |----------|-------------|
 | `INTEGER`, `INT`, `BIGINT`, `SMALLINT`, `TINYINT`, `MEDIUMINT`, `YEAR` | `int` |
