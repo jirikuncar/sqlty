@@ -239,6 +239,115 @@ class Row(TypedDict):
 q = SQL[Row]("--sql\nSELECT jsonb_build_object('id', id, 'total', total) AS doc FROM orders")
 ```
 
+## Required and optional keys together
+
+An optional key the query never builds is fine; a required key it never builds is not,
+whatever the optional ones do.
+
+```python
+from typing import NotRequired, TypedDict
+
+from sqlty import SQL
+
+
+class Doc(TypedDict):
+    id: int
+    name: str
+    note: NotRequired[str]
+    tag: NotRequired[str]
+
+
+class Row(TypedDict):
+    doc: Doc
+
+
+q = SQL[Row]("--sql\nSELECT jsonb_build_object('id', id, 'name', 'x') AS doc FROM orders")
+# error:
+```
+
+```python
+from typing import NotRequired, TypedDict
+
+from sqlty import SQL
+
+
+class Doc(TypedDict):
+    id: int
+    name: str
+    note: NotRequired[str]
+
+
+class Row(TypedDict):
+    doc: Doc
+
+
+# error: [json-shape-mismatch] "Row.doc is Doc but query column 'doc' builds JSON that does not fit: doc.name is required by Doc but the query does not build it"
+q = SQL[Row]("--sql\nSELECT jsonb_build_object('id', id, 'note', 'x') AS doc FROM orders")
+```
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Doc(TypedDict):
+    id: int
+    name: str
+    total: float
+
+
+class Row(TypedDict):
+    doc: Doc
+
+
+# error: [json-shape-mismatch] "Row.doc is Doc but query column 'doc' builds JSON that does not fit: doc.name is required by Doc but the query does not build it; doc.total is required by Doc but the query does not build it"
+q = SQL[Row]("--sql\nSELECT jsonb_build_object('id', id) AS doc FROM orders")
+```
+
+## Keys the type does not declare
+
+`extra_items=T` and `dict[str, T]` accept further keys; a plain or closed `TypedDict` does not.
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Doc(TypedDict, closed=True):
+    id: int
+
+
+class Row(TypedDict):
+    doc: Doc
+
+
+# error: [json-shape-mismatch] "Row.doc is Doc but query column 'doc' builds JSON that does not fit: doc has key 'total' that Doc does not declare"
+q = SQL[Row]("--sql\nSELECT jsonb_build_object('id', id, 'total', total) AS doc FROM orders")
+```
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Doc(TypedDict, extra_items=float):
+    id: int
+
+
+class Row(TypedDict):
+    doc: Doc
+    free: dict[str, float]
+
+
+q = SQL[Row]("""--sql
+SELECT jsonb_build_object('id', id, 'total', total) AS doc, jsonb_build_object('a', total, 'b', total) AS free
+FROM orders""")
+# error:
+```
+
 ## total=False
 
 ```python
