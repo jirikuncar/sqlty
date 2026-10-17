@@ -68,6 +68,9 @@ pub struct SchemaColumn {
     /// Whether an INSERT that leaves the column out still gives it a value: a `DEFAULT`,
     /// `serial`, identity, generated or auto-increment column, or SQLite's rowid.
     pub has_default: bool,
+    /// Part of the table's primary key, which PostgreSQL lets a grouped query select
+    /// the table's other columns by.
+    pub primary_key: bool,
     /// The labels of the enum the column has, `None` for other types.
     pub allowed_values: Option<Arc<[String]>>,
     /// The values of a `Literal` `python_type`, as data.

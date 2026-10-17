@@ -20,9 +20,13 @@ schema = "schema.sql"
 ## Function and operator columns
 
 ```sql
-SELECT count(*), max(id), now(), id + 1 FROM users
+SELECT count(*), max(id) FROM users
 -- columns: count: int (BIGINT)
 -- columns: max: int | None (INT)
+```
+
+```sql
+SELECT now(), id + 1 FROM users
 -- columns: now: datetime.datetime (TIMESTAMPTZ)
 -- columns: ?column?: int (INT)
 ```

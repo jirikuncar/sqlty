@@ -320,11 +320,15 @@ FROM (SELECT o.id, o.status, 'n'::TEXT AS name FROM orders o) t
 A function of the column gives the plain type.
 
 ```sql
-SELECT upper(status) AS up, status || '!' AS bang, lower(status)::TEXT AS low, MAX(status) AS biggest
+SELECT upper(status) AS up, status || '!' AS bang, lower(status)::TEXT AS low
 FROM orders
 -- columns: up: str (TEXT)
 -- columns: bang: str (TEXT)
 -- columns: low: str (TEXT)
+```
+
+```sql
+SELECT MAX(status) AS biggest FROM orders
 -- columns: biggest: typing.Literal['pending', 'paid'] | None (TEXT)
 ```
 

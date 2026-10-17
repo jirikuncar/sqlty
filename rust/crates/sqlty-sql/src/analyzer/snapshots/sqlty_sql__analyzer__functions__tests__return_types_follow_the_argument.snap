@@ -61,7 +61,7 @@ c: int | INT | Nullable
 d: int | INT | Nullable
 [unknown-type] column `t.r` has type `INT4RANGE`, which has no Python type
 
-SELECT arr[1] AS a, tags[1] AS b, array_append(arr, 1) AS c, array_agg(txt) AS d FROM t GROUP BY txt
+SELECT arr[1] AS a, tags[1] AS b, array_append(arr, 1) AS c, array_agg(txt) AS d FROM t GROUP BY txt, arr, tags
 a: int | INT | Nullable
 b: str | TEXT | Nullable
 c: list[int] | ARRAY<INT> | NonNull
