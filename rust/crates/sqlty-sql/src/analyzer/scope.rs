@@ -327,7 +327,7 @@ impl<'a> Analyzer<'a> {
             |name: String, typed: Typed| Column::from_typed(name, typed, Nullability::Unknown);
         Some(
             match self.schema.function(&table_key(name, self.dialect), args)? {
-                FunctionReturn::Rows(columns) => columns
+                FunctionReturn::Rows(columns) | FunctionReturn::Row(_, columns) => columns
                     .iter()
                     .map(|col| {
                         Column::from_typed(

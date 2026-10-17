@@ -110,7 +110,9 @@ SELECT current_status(), share()
 ## Set-returning functions in FROM
 
 `RETURNS TABLE`, `SETOF` a table and `OUT` parameters give the columns of the
-row; `SETOF` a scalar type gives one column named like the function.
+row; `SETOF` a scalar type gives one column named like the function. A table's
+row type without `SETOF` gives one row of the table's columns, each nullable: a
+function that returns `NULL` gives a row of NULLs.
 
 `schema.sql`:
 
@@ -119,6 +121,7 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 CREATE FUNCTION active_users(since date) RETURNS TABLE (id integer, name text, seen timestamptz)
     LANGUAGE sql AS 'SELECT 1, ''a'', now()';
 CREATE FUNCTION all_users() RETURNS SETOF users LANGUAGE sql AS 'SELECT * FROM users';
+CREATE FUNCTION first_user() RETURNS users LANGUAGE sql AS 'SELECT * FROM users LIMIT 1';
 CREATE FUNCTION ids() RETURNS SETOF integer LANGUAGE sql AS 'SELECT 1';
 CREATE FUNCTION bounds(IN a integer, OUT lo integer, OUT hi integer)
     LANGUAGE sql AS 'SELECT a, a';
@@ -142,6 +145,16 @@ SELECT * FROM all_users()
 ```sql
 SELECT * FROM ids()
 -- inferred: tuple[int]
+```
+
+```sql
+SELECT * FROM first_user()
+-- inferred: tuple[int | None, str | None]
+```
+
+```sql
+SELECT u.id FROM first_user() AS u
+-- inferred: tuple[int | None]
 ```
 
 ```sql
