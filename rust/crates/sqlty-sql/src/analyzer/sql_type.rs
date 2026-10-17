@@ -702,6 +702,14 @@ fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {
         "DECIMAL" | "UDECIMAL" | "BIGDECIMAL" | "DECFLOAT" => {
             Some(decimal_type(dialect).to_string())
         }
+        // SQLite has no date or boolean storage class: sqlite3 returns the stored text and
+        // integers (https://www.sqlite.org/datatype3.html, 2.1 and 2.2).
+        "DATE" | "TIME" | "TIMETZ" | "TIMESTAMP" | "TIMESTAMPTZ" | "DATETIME"
+            if dialect == SqlDialect::Sqlite =>
+        {
+            Some("str".to_string())
+        }
+        "BOOLEAN" | "BOOL" if dialect == SqlDialect::Sqlite => Some("int".to_string()),
         // A MySQL `TIME` is a duration, up to 838 hours either way.
         "TIME" if dialect == SqlDialect::MySql => Some("datetime.timedelta".to_string()),
         // MySQL drivers load `BIT(n)` as bytes, psycopg loads bit strings as text.

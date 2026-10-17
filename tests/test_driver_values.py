@@ -31,10 +31,6 @@ CASES: dict[str, dict[str, str]] = tomllib.loads(
 
 # Understood mismatches, by "dialect: type", with the reason.
 KNOWN_GAPS: dict[str, str] = {
-    "sqlite: BOOLEAN": "sqlite3 returns int (#401)",
-    "sqlite: DATE": "sqlite3 returns str without detect_types (#401)",
-    "sqlite: TIMESTAMP": "sqlite3 returns str without detect_types (#401)",
-    "sqlite: DATETIME": "sqlite3 returns str (#401)",
     "sqlite: FLOATING POINT": "SQLite gives it INTEGER affinity, which keeps a non-integral value REAL",
 }
 

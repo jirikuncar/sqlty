@@ -443,7 +443,7 @@ CREATE TABLE notes (
 ```python
 notes = "--sql\nSELECT id, title, score, attachment, created_at FROM notes"
 stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
-# rewritten: notes = SQL[tuple[int, str, float | None, bytes | None, datetime.datetime | None]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
+# rewritten: notes = SQL[tuple[int, str, float | None, bytes | None, str | None]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
 # rewritten: stats = SQL[tuple[int, float | None, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
