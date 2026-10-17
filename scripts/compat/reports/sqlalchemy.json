@@ -1,0 +1,3482 @@
+[
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.BIGINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BINARY",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.BINARY",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.BLOB",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "sqlalchemy.types.BOOLEAN",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.CHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CLOB",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.CLOB",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "sqlalchemy.types.DATE",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "sqlalchemy.types.DATETIME",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DECIMAL",
+   "expected": "decimal.Decimal",
+   "provenance": "sqlalchemy.types.DECIMAL",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DOUBLE",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.DOUBLE",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.DOUBLE_PRECISION",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP WITHOUT TIME ZONE",
+   "expected": "datetime.datetime",
+   "provenance": "sqlalchemy.types.DateTime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.FLOAT",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.INT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTERVAL",
+   "expected": "datetime.timedelta",
+   "provenance": "sqlalchemy.types.Interval",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "dict",
+   "provenance": "sqlalchemy.types.JSON",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.LargeBinary",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NCHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.NCHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "sqlalchemy.types.NUMERIC",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NVARCHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.NVARCHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.REAL",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.SMALLINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.String",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.TEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIME WITHOUT TIME ZONE",
+   "expected": "datetime.time",
+   "provenance": "sqlalchemy.types.TIME",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "sqlalchemy.types.UUID",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARBINARY",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.VARBINARY",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIT(1)",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.BIT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CIDR",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.CIDR",
+   "schema": ""
+  },
+  "sqlty": "ipaddress.IPv4Network | ipaddress.IPv6Network",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CITEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.dialects.postgresql.CITEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATEMULTIRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.DATEMULTIRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATERANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.DATERANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "HSTORE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.HSTORE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INET",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.INET",
+   "schema": ""
+  },
+  "sqlty": "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT4MULTIRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.INT4MULTIRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT4RANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.INT4RANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT8MULTIRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.INT8MULTIRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT8RANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.INT8RANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": "dict",
+   "provenance": "sqlalchemy.dialects.postgresql.JSONB",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSONPATH",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.JSONPATH",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "MACADDR",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.MACADDR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "MACADDR8",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.MACADDR8",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "MONEY",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.MONEY",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMMULTIRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.NUMMULTIRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.NUMRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "OID",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.OID",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "REGCLASS",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.REGCLASS",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "REGCONFIG",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.REGCONFIG",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSMULTIRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.TSMULTIRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSQUERY",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.TSQUERY",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.TSRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSTZMULTIRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.TSTZMULTIRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSTZRANGE",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.TSTZRANGE",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSVECTOR",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.postgresql.TSVECTOR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "count(i)",
+   "expected": "int",
+   "provenance": "func.count",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "sum(i)",
+   "expected": "int",
+   "provenance": "func.sum(int)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "sum(n)",
+   "expected": "decimal.Decimal",
+   "provenance": "func.sum(numeric)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "avg(i)",
+   "expected": null,
+   "provenance": "func.avg(int)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "min(s)",
+   "expected": "str",
+   "provenance": "func.min(text)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "max(d)",
+   "expected": "datetime.date",
+   "provenance": "func.max(date)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.date",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "now()",
+   "expected": "datetime.datetime",
+   "provenance": "func.now",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "CURRENT_DATE",
+   "expected": "datetime.date",
+   "provenance": "func.current_date",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "CURRENT_TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "func.current_timestamp",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "LOCALTIME",
+   "expected": "datetime.datetime",
+   "provenance": "func.localtime",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "CURRENT_USER",
+   "expected": "str",
+   "provenance": "func.current_user",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "coalesce(i, b)",
+   "expected": "int",
+   "provenance": "func.coalesce",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "char_length(s)",
+   "expected": "int",
+   "provenance": "func.char_length",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "lower(s)",
+   "expected": null,
+   "provenance": "func.lower",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "upper(s)",
+   "expected": null,
+   "provenance": "func.upper",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "concat(s, s)",
+   "expected": "str",
+   "provenance": "func.concat",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "random()",
+   "expected": null,
+   "provenance": "func.random",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "abs(n)",
+   "expected": null,
+   "provenance": "func.abs",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "round(n)",
+   "expected": null,
+   "provenance": "func.round",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "percent_rank()",
+   "expected": "decimal.Decimal",
+   "provenance": "func.percent_rank",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "cume_dist()",
+   "expected": "decimal.Decimal",
+   "provenance": "func.cume_dist",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "rank()",
+   "expected": "int",
+   "provenance": "func.rank",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "row_number()",
+   "expected": null,
+   "provenance": "func.row_number",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "array_agg(i)",
+   "expected": "list",
+   "provenance": "func.array_agg",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "list[int]",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i + i",
+   "expected": "int",
+   "provenance": "int + int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i + b",
+   "expected": "int",
+   "provenance": "int + bigint",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i + n",
+   "expected": "decimal.Decimal",
+   "provenance": "int + numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i + f",
+   "expected": "float",
+   "provenance": "int + float",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i / CAST(i AS NUMERIC)",
+   "expected": "decimal.Decimal",
+   "provenance": "int / int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i %% n",
+   "expected": "int",
+   "provenance": "int % numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "n * n",
+   "expected": "decimal.Decimal",
+   "provenance": "numeric * numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "s || s",
+   "expected": "str",
+   "provenance": "text || text",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i || s",
+   "expected": "int",
+   "provenance": "int || text",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "d + iv",
+   "expected": "datetime.datetime",
+   "provenance": "date + interval",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "ts - ts",
+   "expected": "datetime.timedelta",
+   "provenance": "datetime - datetime",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "ts - iv",
+   "expected": "datetime.datetime",
+   "provenance": "datetime - interval",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "i = i",
+   "expected": "bool",
+   "provenance": "int = int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "s LIKE 'a%%'",
+   "expected": "bool",
+   "provenance": "text like",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "postgres",
+   "kind": "expression",
+   "sql": "bo AND bo",
+   "expected": "bool",
+   "provenance": "bool and",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts TIMESTAMP WITHOUT TIME ZONE NOT NULL, \n\tiv INTERVAL NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.BIGINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BINARY",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.BINARY",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.BLOB",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BOOL",
+   "expected": "bool",
+   "provenance": "sqlalchemy.types.BOOLEAN",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "CHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.CHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "CLOB",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.CLOB",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "sqlalchemy.types.DATE",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "sqlalchemy.types.DATETIME",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DECIMAL",
+   "expected": "decimal.Decimal",
+   "provenance": "sqlalchemy.types.DECIMAL",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DOUBLE",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.DOUBLE",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.DOUBLE_PRECISION",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "ENUM()",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.Enum",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.FLOAT",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.INT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "dict",
+   "provenance": "sqlalchemy.types.JSON",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "NATIONAL CHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.NCHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "sqlalchemy.types.NUMERIC",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.REAL",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.SMALLINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.TEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "sqlalchemy.types.TIME",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "sqlalchemy.types.TIMESTAMP",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "sqlalchemy.types.UUID",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "CHAR(32)",
+   "expected": "uuid.UUID",
+   "provenance": "sqlalchemy.types.Uuid",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIT",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.mysql.BIT",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "LONGBLOB",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.dialects.mysql.LONGBLOB",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "LONGTEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.dialects.mysql.LONGTEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "MEDIUMBLOB",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.dialects.mysql.MEDIUMBLOB",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "MEDIUMINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.dialects.mysql.MEDIUMINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "MEDIUMTEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.dialects.mysql.MEDIUMTEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "SET()",
+   "expected": "str",
+   "provenance": "sqlalchemy.dialects.mysql.SET",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TINYBLOB",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.dialects.mysql.TINYBLOB",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TINYINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.dialects.mysql.TINYINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TINYTEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.dialects.mysql.TINYTEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "YEAR",
+   "expected": null,
+   "provenance": "sqlalchemy.dialects.mysql.YEAR",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "count(i)",
+   "expected": "int",
+   "provenance": "func.count",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "sum(i)",
+   "expected": "int",
+   "provenance": "func.sum(int)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "sum(n)",
+   "expected": "decimal.Decimal",
+   "provenance": "func.sum(numeric)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "avg(i)",
+   "expected": null,
+   "provenance": "func.avg(int)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "min(s)",
+   "expected": "str",
+   "provenance": "func.min(text)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "max(d)",
+   "expected": "datetime.date",
+   "provenance": "func.max(date)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "datetime.date",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "now()",
+   "expected": "datetime.datetime",
+   "provenance": "func.now",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "CURRENT_DATE",
+   "expected": "datetime.date",
+   "provenance": "func.current_date",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "CURRENT_TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "func.current_timestamp",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "LOCALTIME",
+   "expected": "datetime.datetime",
+   "provenance": "func.localtime",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "CURRENT_USER",
+   "expected": "str",
+   "provenance": "func.current_user",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "coalesce(i, b)",
+   "expected": "int",
+   "provenance": "func.coalesce",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "char_length(s)",
+   "expected": "int",
+   "provenance": "func.char_length",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "lower(s)",
+   "expected": null,
+   "provenance": "func.lower",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "upper(s)",
+   "expected": null,
+   "provenance": "func.upper",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "concat(s, s)",
+   "expected": "str",
+   "provenance": "func.concat",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "rand()",
+   "expected": null,
+   "provenance": "func.random",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "abs(n)",
+   "expected": null,
+   "provenance": "func.abs",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "round(n)",
+   "expected": null,
+   "provenance": "func.round",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "percent_rank()",
+   "expected": "decimal.Decimal",
+   "provenance": "func.percent_rank",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "cume_dist()",
+   "expected": "decimal.Decimal",
+   "provenance": "func.cume_dist",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "rank()",
+   "expected": "int",
+   "provenance": "func.rank",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "row_number()",
+   "expected": null,
+   "provenance": "func.row_number",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "array_agg(i)",
+   "expected": "list",
+   "provenance": "func.array_agg",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i + i",
+   "expected": "int",
+   "provenance": "int + int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i + b",
+   "expected": "int",
+   "provenance": "int + bigint",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i + n",
+   "expected": "decimal.Decimal",
+   "provenance": "int + numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i + f",
+   "expected": "float",
+   "provenance": "int + float",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i / i",
+   "expected": "decimal.Decimal",
+   "provenance": "int / int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i %% n",
+   "expected": "int",
+   "provenance": "int % numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "n * n",
+   "expected": "decimal.Decimal",
+   "provenance": "numeric * numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "concat(s, s)",
+   "expected": "str",
+   "provenance": "text || text",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "concat(i, s)",
+   "expected": "int",
+   "provenance": "int || text",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "d + iv",
+   "expected": "datetime.datetime",
+   "provenance": "date + interval",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "ts - ts",
+   "expected": "datetime.timedelta",
+   "provenance": "datetime - datetime",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "ts - iv",
+   "expected": "datetime.datetime",
+   "provenance": "datetime - interval",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "i = i",
+   "expected": "bool",
+   "provenance": "int = int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "s LIKE 'a%%'",
+   "expected": "bool",
+   "provenance": "text like",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "mysql",
+   "kind": "expression",
+   "sql": "bo = 1 AND bo = 1",
+   "expected": "bool",
+   "provenance": "bool and",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOL NOT NULL\n);"
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.BIGINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BINARY",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.BINARY",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.BLOB",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "sqlalchemy.types.BOOLEAN",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.CHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CLOB",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.CLOB",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "sqlalchemy.types.DATE",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "sqlalchemy.types.DATETIME",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DECIMAL",
+   "expected": "decimal.Decimal",
+   "provenance": "sqlalchemy.types.DECIMAL",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DOUBLE",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.DOUBLE",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.DOUBLE_PRECISION",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.Enum",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.FLOAT",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.INT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "dict",
+   "provenance": "sqlalchemy.types.JSON",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NCHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.NCHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "sqlalchemy.types.NUMERIC",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NVARCHAR",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.NVARCHAR",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "sqlalchemy.types.REAL",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "sqlalchemy.types.SMALLINT",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "sqlalchemy.types.TEXT",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "sqlalchemy.types.TIME",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "sqlalchemy.types.TIMESTAMP",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "sqlalchemy.types.UUID",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CHAR(32)",
+   "expected": "uuid.UUID",
+   "provenance": "sqlalchemy.types.Uuid",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARBINARY",
+   "expected": "bytes",
+   "provenance": "sqlalchemy.types.VARBINARY",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "count(i)",
+   "expected": "int",
+   "provenance": "func.count",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "sum(i)",
+   "expected": "int",
+   "provenance": "func.sum(int)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "sum(n)",
+   "expected": "decimal.Decimal",
+   "provenance": "func.sum(numeric)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "avg(i)",
+   "expected": null,
+   "provenance": "func.avg(int)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "min(s)",
+   "expected": "str",
+   "provenance": "func.min(text)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "max(d)",
+   "expected": "datetime.date",
+   "provenance": "func.max(date)",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "CURRENT_TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "func.now",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "CURRENT_DATE",
+   "expected": "datetime.date",
+   "provenance": "func.current_date",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "CURRENT_TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "func.current_timestamp",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "LOCALTIME",
+   "expected": "datetime.datetime",
+   "provenance": "func.localtime",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "CURRENT_USER",
+   "expected": "str",
+   "provenance": "func.current_user",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "coalesce(i, b)",
+   "expected": "int",
+   "provenance": "func.coalesce",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "length(s)",
+   "expected": "int",
+   "provenance": "func.char_length",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "lower(s)",
+   "expected": null,
+   "provenance": "func.lower",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "upper(s)",
+   "expected": null,
+   "provenance": "func.upper",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "concat(s, s)",
+   "expected": "str",
+   "provenance": "func.concat",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "random()",
+   "expected": null,
+   "provenance": "func.random",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "abs(n)",
+   "expected": null,
+   "provenance": "func.abs",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "round(n)",
+   "expected": null,
+   "provenance": "func.round",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "percent_rank()",
+   "expected": "decimal.Decimal",
+   "provenance": "func.percent_rank",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "cume_dist()",
+   "expected": "decimal.Decimal",
+   "provenance": "func.cume_dist",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "rank()",
+   "expected": "int",
+   "provenance": "func.rank",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "row_number()",
+   "expected": null,
+   "provenance": "func.row_number",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "array_agg(i)",
+   "expected": "list",
+   "provenance": "func.array_agg",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i + i",
+   "expected": "int",
+   "provenance": "int + int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i + b",
+   "expected": "int",
+   "provenance": "int + bigint",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i + n",
+   "expected": "decimal.Decimal",
+   "provenance": "int + numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i + f",
+   "expected": "float",
+   "provenance": "int + float",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i / (i + 0.0)",
+   "expected": "decimal.Decimal",
+   "provenance": "int / int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i % n",
+   "expected": "int",
+   "provenance": "int % numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "n * n",
+   "expected": "decimal.Decimal",
+   "provenance": "numeric * numeric",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "s || s",
+   "expected": "str",
+   "provenance": "text || text",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i || s",
+   "expected": "int",
+   "provenance": "int || text",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "d + iv",
+   "expected": "datetime.datetime",
+   "provenance": "date + interval",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "ts - ts",
+   "expected": "datetime.timedelta",
+   "provenance": "datetime - datetime",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "ts - iv",
+   "expected": "datetime.datetime",
+   "provenance": "datetime - interval",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "i = i",
+   "expected": "bool",
+   "provenance": "int = int",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "s LIKE 'a%'",
+   "expected": "bool",
+   "provenance": "text like",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "sqlalchemy",
+   "version": "2.0.43",
+   "dialect": "sqlite",
+   "kind": "expression",
+   "sql": "bo = 1 AND bo = 1",
+   "expected": "bool",
+   "provenance": "bool and",
+   "schema": "CREATE TABLE t (\n\ti INTEGER NOT NULL, \n\tb BIGINT NOT NULL, \n\tn NUMERIC NOT NULL, \n\tf FLOAT NOT NULL, \n\ts VARCHAR(100) NOT NULL, \n\td DATE NOT NULL, \n\tts DATETIME NOT NULL, \n\tiv DATETIME NOT NULL, \n\tbo BOOLEAN NOT NULL\n);"
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ }
+]
