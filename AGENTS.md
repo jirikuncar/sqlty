@@ -46,6 +46,18 @@ make update-mdtest   # auto-update assertion comments in .md files
 make typecheck       # mypy + ty on src and examples
 ```
 
+## Inference rules
+
+Operators, aggregates and JSON accessors are typed by `*.inference.toml` files in
+`rust/crates/sqlty-sql/rules/`, compiled by `build.rs` into static match arms.
+[`rules/README.md`](rust/crates/sqlty-sql/rules/README.md) has the format, the
+lookup order and how to verify a `reference`. Every rule needs a `reference` to
+vendor documentation of the version the tests target (PostgreSQL 17, MySQL 8.4,
+SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
+assertions show which rule typed a column. `rule_dispatch_does_not_allocate`
+(`analyzer/inference.rs`) keeps rule lookup free of heap allocations.
+
 ## Benchmarks
 
 Two layers, both in the Makefile:

@@ -26,7 +26,9 @@ uv run pytest
 1. Fork the repository and create a branch from `main`.
 2. Add tests. Every new feature or behavior change needs an mdtest in
    `tests/mdtest/`; user-visible behavior also belongs in `docs/`.
-   CLI changes need an e2e test in `tests/e2e/`.
+   CLI changes need an e2e test in `tests/e2e/`. A change to how an operator,
+   aggregate or JSON accessor is typed is an inference rule: follow
+   [`rust/crates/sqlty-sql/rules/README.md`](rust/crates/sqlty-sql/rules/README.md).
 3. Run `uv run prek run --all-files` and `uv run pytest`.
 4. Keep the pull request focused on one change and describe what changed and why.
    Reference the issue it resolves (`Fixes #123`).
