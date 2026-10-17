@@ -42,3 +42,16 @@ SELECT CURRENT_USER, CURRENT_ROLE, SESSION_USER
 -- columns: current_role: str (TEXT)
 -- columns: session_user: str (TEXT)
 ```
+
+## Geometric types
+
+psycopg has no loader for `point`, `line`, `lseg`, `box`, `path`, `polygon` and
+`circle`, so it returns their text.
+
+```sql
+SELECT CAST(x AS POINT) AS a, CAST(x AS BOX) AS b, CAST(x AS POLYGON) AS c, CAST(x AS CIRCLE) AS d
+-- columns: a: str (POINT)
+-- columns: b: str (BOX)
+-- columns: c: str (POLYGON)
+-- columns: d: str (CIRCLE)
+```

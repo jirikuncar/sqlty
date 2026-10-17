@@ -46,8 +46,8 @@ pub(crate) enum SqlType {
 }
 
 /// Built-in PostgreSQL types sqlty has no Python type for: ranges and multiranges, which
-/// psycopg loads as its own `Range`, and the geometric and snapshot types.
-const UNMAPPED_BUILTINS: [&str; 21] = [
+/// psycopg loads as its own `Range`, and the snapshot types.
+const UNMAPPED_BUILTINS: [&str; 14] = [
     "INT4RANGE",
     "INT8RANGE",
     "NUMRANGE",
@@ -60,13 +60,6 @@ const UNMAPPED_BUILTINS: [&str; 21] = [
     "TSMULTIRANGE",
     "TSTZMULTIRANGE",
     "DATEMULTIRANGE",
-    "POINT",
-    "LINE",
-    "LSEG",
-    "BOX",
-    "PATH",
-    "POLYGON",
-    "CIRCLE",
     "PG_LSN",
     "PG_SNAPSHOT",
 ];
@@ -153,8 +146,7 @@ impl SqlType {
             | DataType::Nested(_)
             | DataType::Unspecified
             | DataType::Trigger
-            | DataType::AnyType
-            | DataType::GeometricType(_) => SqlType::Unmapped(scalar(dt, dialect)),
+            | DataType::AnyType => SqlType::Unmapped(scalar(dt, dialect)),
             DataType::Character(_)
             | DataType::Char(_)
             | DataType::CharacterVarying(_)
@@ -253,6 +245,7 @@ impl SqlType {
             | DataType::VarBit(_)
             | DataType::Enum(..)
             | DataType::Set(_)
+            | DataType::GeometricType(_)
             | DataType::TsVector
             | DataType::TsQuery => SqlType::Scalar(scalar(dt, dialect)),
         }
@@ -753,6 +746,12 @@ fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {
             if dialect == SqlDialect::MySql =>
         {
             Some("bytes".to_string())
+        }
+        // psycopg has no loader for the geometric types, so it returns their text.
+        "POINT" | "LINE" | "LSEG" | "BOX" | "PATH" | "POLYGON" | "CIRCLE"
+            if dialect == SqlDialect::Postgres =>
+        {
+            Some("str".to_string())
         }
         // sqlite3 returns the stored text: SQLite has no UUID storage class.
         "UUID" if dialect == SqlDialect::Sqlite => Some("str".to_string()),

@@ -7,8 +7,8 @@
 | postgres | column | 29 | 0 | 0 | 25 |
 | postgres | expression | 27 | 5 | 0 | 7 |
 | sqlite | column | 17 | 9 | 0 | 0 |
-| sqlite | expression | 11 | 15 | 6 | 7 |
-| **all** | | **136** | **36** | **12** | **48** |
+| sqlite | expression | 12 | 14 | 6 | 7 |
+| **all** | | **137** | **35** | **12** | **48** |
 
 ## mismatch
 
@@ -44,7 +44,6 @@
 | sqlite | `cume_dist()` | `decimal.Decimal` | `float` | func.cume_dist |
 | sqlite | `i + n` | `decimal.Decimal` | `float` | int + numeric |
 | sqlite | `i / (i + 0.0)` | `decimal.Decimal` | `float` | int / int |
-| sqlite | `i % n` | `int` | `float` | int % numeric |
 | sqlite | `n * n` | `decimal.Decimal` | `float` | numeric * numeric |
 | sqlite | `i || s` | `int` | `str` | int || text |
 | sqlite | `i = i` | `bool` | `int` | int = int |

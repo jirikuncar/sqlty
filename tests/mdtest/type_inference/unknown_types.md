@@ -8,7 +8,7 @@ CREATE TABLE users (
     name TEXT NOT NULL,
     email VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
-    location POINT
+    location GEOMETRY
 );
 ```
 

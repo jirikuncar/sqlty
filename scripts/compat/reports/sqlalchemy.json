@@ -3342,7 +3342,7 @@
   },
   "sqlty": "float",
   "nullable": true,
-  "outcome": "mismatch"
+  "outcome": "match"
  },
  {
   "row": {

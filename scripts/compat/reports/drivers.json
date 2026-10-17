@@ -1,0 +1,1262 @@
+[
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "sqlite3: int, aiosqlite: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "sqlite3: int, aiosqlite: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "sqlite3: float, aiosqlite: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DOUBLE",
+   "expected": "float",
+   "provenance": "sqlite3: float, aiosqlite: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "float",
+   "provenance": "sqlite3: float, aiosqlite: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "float",
+   "provenance": "sqlite3: float, aiosqlite: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(10)",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CHAR(2)",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CLOB",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "sqlite3: bytes, aiosqlite: bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "int",
+   "provenance": "sqlite3: int, aiosqlite: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "UNSIGNED BIG INT",
+   "expected": "int",
+   "provenance": "sqlite3: int, aiosqlite: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "FLOATING POINT",
+   "expected": "float",
+   "provenance": "sqlite3: float, aiosqlite: float",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NUMERIC(10)",
+   "expected": "int",
+   "provenance": "sqlite3: int, aiosqlite: int",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "str",
+   "provenance": "sqlite3: str, aiosqlite: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "psycopg: int, psycopg2: int, asyncpg: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "psycopg: int, psycopg2: int, asyncpg: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "psycopg: int, psycopg2: int, asyncpg: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "psycopg: decimal.Decimal, psycopg2: decimal.Decimal, asyncpg: decimal.Decimal",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "psycopg: float, psycopg2: float, asyncpg: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "psycopg: float, psycopg2: float, asyncpg: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(10)",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CHAR(2)",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "psycopg: bytes, psycopg2: memoryview, asyncpg: bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "psycopg: bool, psycopg2: bool, asyncpg: bool",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "psycopg: datetime.date, psycopg2: datetime.date, asyncpg: datetime.date",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "psycopg: datetime.time, psycopg2: datetime.time, asyncpg: datetime.time",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMETZ",
+   "expected": "datetime.time",
+   "provenance": "psycopg: datetime.time, psycopg2: datetime.time, asyncpg: datetime.time",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "psycopg: datetime.datetime, psycopg2: datetime.datetime, asyncpg: datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMPTZ",
+   "expected": "datetime.datetime",
+   "provenance": "psycopg: datetime.datetime, psycopg2: datetime.datetime, asyncpg: datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTERVAL",
+   "expected": "datetime.timedelta",
+   "provenance": "psycopg: datetime.timedelta, psycopg2: datetime.timedelta, asyncpg: datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTERVAL DAY TO SECOND",
+   "expected": "datetime.timedelta",
+   "provenance": "psycopg: datetime.timedelta, psycopg2: datetime.timedelta, asyncpg: datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "psycopg: uuid.UUID, psycopg2: str, asyncpg: asyncpg.pgproto.pgproto.UUID",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "dict",
+   "provenance": "psycopg: dict, psycopg2: dict, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": "list",
+   "provenance": "psycopg: list, psycopg2: list, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INET",
+   "expected": "ipaddress.IPv4Interface",
+   "provenance": "psycopg: ipaddress.IPv4Interface, psycopg2: str, asyncpg: ipaddress.IPv4Interface",
+   "schema": ""
+  },
+  "sqlty": "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CIDR",
+   "expected": "ipaddress.IPv4Network",
+   "provenance": "psycopg: ipaddress.IPv4Network, psycopg2: str, asyncpg: ipaddress.IPv4Network",
+   "schema": ""
+  },
+  "sqlty": "ipaddress.IPv4Network | ipaddress.IPv6Network",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "MACADDR",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "MONEY",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIT(3)",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: asyncpg.pgproto.types.BitString",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARBIT",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: asyncpg.pgproto.types.BitString",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "XML",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "OID",
+   "expected": "int",
+   "provenance": "psycopg: int, psycopg2: int, asyncpg: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER[]",
+   "expected": "list",
+   "provenance": "psycopg: list, psycopg2: list, asyncpg: list",
+   "schema": ""
+  },
+  "sqlty": "list[int]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT[]",
+   "expected": "list",
+   "provenance": "psycopg: list, psycopg2: list, asyncpg: list",
+   "schema": ""
+  },
+  "sqlty": "list[str]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC[]",
+   "expected": "list",
+   "provenance": "psycopg: list, psycopg2: list, asyncpg: list",
+   "schema": ""
+  },
+  "sqlty": "list[decimal.Decimal]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "POINT",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: asyncpg.pgproto.types.Point",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOX",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: asyncpg.pgproto.types.Box",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "\"char\"",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: bytes",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT4RANGE",
+   "expected": "psycopg.types.range.Range",
+   "provenance": "psycopg: psycopg.types.range.Range, psycopg2: psycopg2._range.NumericRange, asyncpg: asyncpg.types.Range",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TSTZRANGE",
+   "expected": "psycopg.types.range.Range",
+   "provenance": "psycopg: psycopg.types.range.Range, psycopg2: psycopg2._range.DateTimeTZRange, asyncpg: asyncpg.types.Range",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INT4MULTIRANGE",
+   "expected": "psycopg.types.multirange.Multirange",
+   "provenance": "psycopg: psycopg.types.multirange.Multirange, psycopg2: str, asyncpg: list",
+   "schema": ""
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "POINT",
+   "expected": "str",
+   "provenance": "psycopg: str, psycopg2: str, asyncpg: asyncpg.pgproto.types.Point",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": null,
+   "provenance": "psycopg: error: DataError, psycopg2: datetime.date, asyncpg: datetime.date",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": null,
+   "provenance": "psycopg: error: DataError, psycopg2: datetime.datetime, asyncpg: datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TINYINT",
+   "expected": "int",
+   "provenance": "pymysql: int, mysqlclient: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "pymysql: int, mysqlclient: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "INT",
+   "expected": "int",
+   "provenance": "pymysql: int, mysqlclient: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIGINT UNSIGNED",
+   "expected": "int",
+   "provenance": "pymysql: int, mysqlclient: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DECIMAL(10, 2)",
+   "expected": "decimal.Decimal",
+   "provenance": "pymysql: decimal.Decimal, mysqlclient: decimal.Decimal",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "pymysql: float, mysqlclient: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DOUBLE",
+   "expected": "float",
+   "provenance": "pymysql: float, mysqlclient: float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "VARCHAR(10)",
+   "expected": "str",
+   "provenance": "pymysql: str, mysqlclient: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "pymysql: str, mysqlclient: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "pymysql: bytes, mysqlclient: bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "BIT(8)",
+   "expected": "bytes",
+   "provenance": "pymysql: bytes, mysqlclient: bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "pymysql: datetime.date, mysqlclient: datetime.date",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.timedelta",
+   "provenance": "pymysql: datetime.timedelta, mysqlclient: datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATETIME",
+   "expected": "datetime.datetime",
+   "provenance": "pymysql: datetime.datetime, mysqlclient: datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "pymysql: datetime.datetime, mysqlclient: datetime.datetime",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "YEAR",
+   "expected": "int",
+   "provenance": "pymysql: int, mysqlclient: int",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "str",
+   "provenance": "pymysql: str, mysqlclient: str",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "ENUM('a', 'b')",
+   "expected": "str",
+   "provenance": "pymysql: str, mysqlclient: str",
+   "schema": ""
+  },
+  "sqlty": "typing.Literal['a', 'b']",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "SET('a', 'b')",
+   "expected": "str",
+   "provenance": "pymysql: str, mysqlclient: str",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "POINT",
+   "expected": "bytes",
+   "provenance": "pymysql: bytes, mysqlclient: bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "GEOMETRY",
+   "expected": "bytes",
+   "provenance": "pymysql: bytes, mysqlclient: bytes",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "str",
+   "provenance": "pymysql: str, mysqlclient: NoneType",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "drivers",
+   "version": "live",
+   "dialect": "mysql",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.timedelta",
+   "provenance": "pymysql: datetime.timedelta, mysqlclient: datetime.timedelta",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ }
+]
