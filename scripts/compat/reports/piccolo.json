@@ -1,0 +1,782 @@
+[
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT",
+   "expected": "int",
+   "provenance": "columns.BigInt",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "columns.BigInt",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGSERIAL",
+   "expected": "int",
+   "provenance": "columns.BigSerial",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "columns.BigSerial",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "columns.Blob",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "columns.Blob",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "columns.Boolean",
+   "schema": ""
+  },
+  "sqlty": "bool",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BOOLEAN",
+   "expected": "bool",
+   "provenance": "columns.Boolean",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BYTEA",
+   "expected": "bytes",
+   "provenance": "columns.Bytea",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "BLOB",
+   "expected": "bytes",
+   "provenance": "columns.Bytea",
+   "schema": ""
+  },
+  "sqlty": "bytes",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Char",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "CHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Char",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "columns.Date",
+   "schema": ""
+  },
+  "sqlty": "datetime.date",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DATE",
+   "expected": "datetime.date",
+   "provenance": "columns.Date",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "columns.Decimal",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "columns.Decimal",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "columns.DoublePrecision",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "DOUBLE PRECISION",
+   "expected": "float",
+   "provenance": "columns.DoublePrecision",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Email",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Email",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "columns.Float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "FLOAT",
+   "expected": "float",
+   "provenance": "columns.Float",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "columns.Integer",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "columns.Integer",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTERVAL",
+   "expected": "datetime.timedelta",
+   "provenance": "columns.Interval",
+   "schema": ""
+  },
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "SECONDS",
+   "expected": "datetime.timedelta",
+   "provenance": "columns.Interval",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "typing.Any",
+   "provenance": "columns.JSON",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "JSON",
+   "expected": "typing.Any",
+   "provenance": "columns.JSON",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": "typing.Any",
+   "provenance": "columns.JSONB",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "JSONB",
+   "expected": "typing.Any",
+   "provenance": "columns.JSONB",
+   "schema": ""
+  },
+  "sqlty": "typing.Any",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "columns.Numeric",
+   "schema": ""
+  },
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "NUMERIC",
+   "expected": "decimal.Decimal",
+   "provenance": "columns.Numeric",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "columns.Real",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "REAL",
+   "expected": "float",
+   "provenance": "columns.Real",
+   "schema": ""
+  },
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Secret",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Secret",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SERIAL",
+   "expected": "int",
+   "provenance": "columns.Serial",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "columns.Serial",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT",
+   "expected": "int",
+   "provenance": "columns.SmallInt",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "INTEGER",
+   "expected": "int",
+   "provenance": "columns.SmallInt",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "columns.Text",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TEXT",
+   "expected": "str",
+   "provenance": "columns.Text",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "columns.Time",
+   "schema": ""
+  },
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIME",
+   "expected": "datetime.time",
+   "provenance": "columns.Time",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "columns.Timestamp",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIMESTAMP",
+   "expected": "datetime.datetime",
+   "provenance": "columns.Timestamp",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMPTZ",
+   "expected": "datetime.datetime",
+   "provenance": "columns.Timestamptz",
+   "schema": ""
+  },
+  "sqlty": "datetime.datetime",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "TIMESTAMPTZ",
+   "expected": "datetime.datetime",
+   "provenance": "columns.Timestamptz",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "columns.UUID",
+   "schema": ""
+  },
+  "sqlty": "uuid.UUID",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "UUID",
+   "expected": "uuid.UUID",
+   "provenance": "columns.UUID",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Varchar",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "VARCHAR(255)",
+   "expected": "str",
+   "provenance": "columns.Varchar",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
+ }
+]
