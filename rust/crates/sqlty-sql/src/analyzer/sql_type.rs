@@ -334,6 +334,7 @@ impl SqlType {
                 })
             }
             SqlType::Row(fields) if fields.is_empty() => None,
+            SqlType::Struct(fields) | SqlType::Union(fields) if fields.is_empty() => None,
             SqlType::Row(fields) => Some(format!(
                 "tuple[{}]",
                 fields
@@ -805,4 +806,121 @@ fn sqlite_affinity(name: &str) -> Option<String> {
         }
         .to_string(),
     )
+}
+
+/// `proofs/SqlTy/Table.lean`: what [`scalar_python`] gives each name it knows, in each
+/// dialect, for the Lean model of the mapping. `SQLTY_UPDATE_PROOFS=1` rewrites it.
+#[cfg(test)]
+mod lean_table {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::fmt::Write;
+
+    const DIALECTS: [(&str, SqlDialect); 7] = [
+        ("postgres", SqlDialect::Postgres),
+        ("mysql", SqlDialect::MySql),
+        ("sqlite", SqlDialect::Sqlite),
+        ("clickhouse", SqlDialect::ClickHouse),
+        ("duckdb", SqlDialect::Other("duckdb")),
+        ("oracle", SqlDialect::Other("oracle")),
+        ("generic", SqlDialect::Other("generic")),
+    ];
+
+    /// The names `scalar_python` matches before `SQL_TO_PYTHON_TYPE`.
+    const MATCHED: [&str; 30] = [
+        "DECIMAL",
+        "UDECIMAL",
+        "BIGDECIMAL",
+        "DECFLOAT",
+        "DATE",
+        "TIME",
+        "TIMETZ",
+        "TIMESTAMP",
+        "TIMESTAMPTZ",
+        "DATETIME",
+        "BOOLEAN",
+        "BOOL",
+        "BIT",
+        "VARBIT",
+        "SET",
+        "GEOMETRY",
+        "POINT",
+        "LINESTRING",
+        "POLYGON",
+        "MULTIPOINT",
+        "MULTILINESTRING",
+        "MULTIPOLYGON",
+        "GEOMETRYCOLLECTION",
+        "LINE",
+        "LSEG",
+        "BOX",
+        "PATH",
+        "CIRCLE",
+        "UUID",
+        "JSON",
+    ];
+
+    /// `python` as a Lean `PyType` term; `?` for a form the table doesn't need.
+    fn term(python: &str) -> String {
+        let members = top_level_members(python);
+        if members.len() > 1 {
+            let members: Vec<String> = members.iter().map(|m| term(m)).collect();
+            return format!("(.union [{}])", members.join(", "));
+        }
+        if let Some(item) = python
+            .strip_prefix("tuple[")
+            .and_then(|rest| rest.strip_suffix(", ...]"))
+        {
+            return format!("(.tupleOf {})", term(item));
+        }
+        if python.contains(['[', ',']) {
+            return "?".to_string();
+        }
+        format!("(.name {python:?})")
+    }
+
+    #[test]
+    fn lean_scalar_table_is_current() {
+        let names: BTreeSet<&str> = SQL_TO_PYTHON_TYPE
+            .keys()
+            .copied()
+            .chain(MATCHED)
+            .chain(UNMAPPED_BUILTINS)
+            .collect();
+        let mut table = String::from(
+            "-- Generated from `scalar_python` in rust/crates/sqlty-sql/src/analyzer/sql_type.rs\n\
+             -- by `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table`; do not edit.\n\
+             import SqlTy.Dialect\nimport SqlTy.Python\n\nnamespace SqlTy\n\n\
+             /-- What each dialect's driver loads a known scalar type as; none when it has\n\
+             no Python type. -/\n\
+             def scalarTable : List (Dialect × String × Option PyType) := [\n",
+        );
+        for (lean, dialect) in DIALECTS {
+            for name in &names {
+                let python = scalar_python(name, dialect).map_or_else(
+                    || "none".to_string(),
+                    |python| format!("some {}", term(&python)),
+                );
+                writeln!(table, "  (.{lean}, {name:?}, {python}),").unwrap();
+            }
+        }
+        table.truncate(table.len() - 2);
+        table.push_str("\n]\n\nend SqlTy\n");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../proofs/SqlTy/Table.lean"
+        );
+        if std::env::var_os("SQLTY_UPDATE_PROOFS").is_some() {
+            std::fs::write(path, &table).unwrap();
+        }
+        let current = std::fs::read_to_string(path).unwrap_or_default();
+        assert!(
+            !table.contains("?"),
+            "a Python type the Lean table can't spell"
+        );
+        assert!(
+            current == table,
+            "proofs/SqlTy/Table.lean is stale: run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table`"
+        );
+    }
 }

@@ -24,6 +24,14 @@ to annotate.
     with the type your driver returns, and suppress the mismatch with
     `# sqlty: ignore[column-type-mismatch]`.
 
+## Verification
+
+A [Lean 4 model](https://github.com/jirikuncar/sqlty/tree/main/proofs) of the mapping
+proves that every SQL type, nested containers included, gets a well-formed Python type
+built from standard library classes, and that exact numbers, dates and durations keep
+their types in every dialect whose driver returns them. A conformance test compares the
+model with sqlty on random nested types.
+
 ## Deliberate differences
 
 These look like bugs but follow the drivers:
