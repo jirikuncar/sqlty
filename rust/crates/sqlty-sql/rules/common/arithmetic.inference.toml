@@ -1,5 +1,5 @@
 # Arithmetic on numbers. A placeholder or NULL operand takes the other operand's type
-# (analyzer/operators.rs); dates, times and intervals are typed in code.
+# (analyzer/operators.rs).
 
 [[rule]]
 id = "common.arithmetic.numbers"
@@ -23,19 +23,28 @@ reasoning = "Division gives the wider type, and NULL for a zero divisor."
 [[rule]]
 id = "common.arithmetic.division-other"
 operators = ["Divide", "Modulo"]
-type = "@code"
+type = "@unknown"
 nullability = "nonzero-divisor"
 reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result)"
-reasoning = "A division by zero gives NULL whatever the operand types; the type of other operands is found in code."
+reasoning = "A division by zero gives NULL whatever the operand types; other operand types have no known result."
 
 [[rule]]
 id = "common.arithmetic.power-numeric"
 operator = "PGExp"
 left = ["DECIMAL", "NUMERIC"]
+right = ["@integer", "DECIMAL", "NUMERIC"]
+type = "DECIMAL"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
+reasoning = "`^` keeps exact numbers exact: an integer converts to numeric implicitly, so numeric ^ integer is numeric."
+
+[[rule]]
+id = "common.arithmetic.power-integer-numeric"
+operator = "PGExp"
+left = ["@integer"]
 right = ["DECIMAL", "NUMERIC"]
 type = "DECIMAL"
 reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
-reasoning = "`^` keeps exact numbers exact."
+reasoning = "`^` keeps exact numbers exact: an integer converts to numeric implicitly, so integer ^ numeric is numeric."
 
 [[rule]]
 id = "common.arithmetic.power"

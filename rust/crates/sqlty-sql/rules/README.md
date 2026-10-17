@@ -63,7 +63,6 @@ reasoning = "`->` on a jsonb value gives jsonb; a missing member or element give
 | a SQL type | That type |
 | `@any` | Any value, `typing.Any` |
 | `@unknown` | Untyped |
-| `@code` | Typed by the analyzer's code; the rule gives the nullability only |
 | `@left`, `@right` | The type of that operand |
 | `@common` | The common type of both operands, as `CASE` and `UNION` unify them |
 | `@promote` | The wider number: `SMALLINT` < `INT` < `BIGINT` < `DECIMAL` < `REAL` < `DOUBLE` |
@@ -135,10 +134,10 @@ The operands are typed only when a rule of the operator lists operand types.
 
 ## What stays in code
 
-`analyzer/operators.rs` keeps what rules cannot express, each documented where
-it lives: MySQL `date ± INTERVAL n unit` (the unit decides between `DATE` and
-`DATETIME`), and until its port date, time and interval arithmetic. Rules with `type = "@code"` give those
-operators their nullability.
+`analyzer/operators.rs` keeps one case rules cannot express: MySQL
+`date ± INTERVAL n unit`, where the unit decides between `DATE` and `DATETIME`.
+It is typed before the rules are tried. For functions, `SUM` of what no rule
+types keeps its schema lookup (`type = "@code"` in a `[[function]]` table).
 
 ## Adding a rule
 

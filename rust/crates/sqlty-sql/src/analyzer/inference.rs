@@ -19,9 +19,6 @@ pub(crate) enum RuleType {
     Any,
     /// Not known: the expression stays untyped.
     Unknown,
-    /// Typed by the analyzer's code: the rule gives the nullability only, for operands
-    /// whose type depends on more than their SQL types (an interval's unit, a date).
-    Code,
     /// The type of the left operand.
     Left,
     /// The type of the right operand.

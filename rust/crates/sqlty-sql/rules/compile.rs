@@ -88,10 +88,9 @@ const CLASSES: [(&str, &[&str]); 6] = [
 ];
 
 /// Result types other than a SQL type name.
-const RESULTS: [(&str, &str); 9] = [
+const RESULTS: [(&str, &str); 8] = [
     ("@any", "RuleType::Any"),
     ("@unknown", "RuleType::Unknown"),
-    ("@code", "RuleType::Code"),
     ("@left", "RuleType::Left"),
     ("@right", "RuleType::Right"),
     ("@common", "RuleType::Common"),

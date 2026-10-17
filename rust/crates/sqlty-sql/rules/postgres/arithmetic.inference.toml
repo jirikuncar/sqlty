@@ -1,4 +1,5 @@
-# PostgreSQL arithmetic: reals, division, bitwise and network operators.
+# PostgreSQL arithmetic: reals, dates, times and intervals, addresses, division, bitwise
+# and network operators.
 
 [[rule]]
 id = "postgres.arithmetic.reals"
@@ -41,12 +42,212 @@ reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators 
 reasoning = "Division gives the wider type; a zero divisor raises an error rather than giving NULL."
 
 [[rule]]
+id = "postgres.datetime.date-interval"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["DATE"]
+right = ["INTERVAL"]
+type = "TIMESTAMP"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + interval → timestamp, date - interval → timestamp)"
+reasoning = "A date moved by an interval can land within a day, so it becomes a timestamp."
+
+[[rule]]
+id = "postgres.datetime.timestamp-interval"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["TIMESTAMP", "TIMESTAMPTZ", "TIME", "TIMETZ"]
+right = ["INTERVAL"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp + interval → timestamp, time with time zone + interval → time with time zone)"
+reasoning = "A timestamp or time moved by an interval keeps its type."
+
+[[rule]]
+id = "postgres.datetime.interval-date"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["INTERVAL"]
+right = ["DATE"]
+type = "TIMESTAMP"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + interval → timestamp; + is commutative)"
+reasoning = "An interval added to a date gives a timestamp."
+
+[[rule]]
+id = "postgres.datetime.interval-timestamp"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["INTERVAL"]
+right = ["TIMESTAMP", "TIMESTAMPTZ", "TIME", "TIMETZ"]
+type = "@right"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp + interval → timestamp; + is commutative)"
+reasoning = "An interval added to a timestamp or time keeps its type."
+
+[[rule]]
+id = "postgres.datetime.date-days"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["DATE"]
+right = ["SMALLINT", "INT"]
+type = "DATE"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + integer → date, date - integer → date)"
+reasoning = "Whole days added to or taken from a date give a date."
+
+[[rule]]
+id = "postgres.datetime.days-date"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["SMALLINT", "INT"]
+right = ["DATE"]
+type = "DATE"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + integer → date; + is commutative)"
+reasoning = "Whole days added to a date give a date."
+
+[[rule]]
+id = "postgres.datetime.date-time"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["DATE"]
+right = ["TIME"]
+type = "TIMESTAMP"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time → timestamp)"
+reasoning = "A date and a time of day make a timestamp."
+
+[[rule]]
+id = "postgres.datetime.time-date"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["TIME"]
+right = ["DATE"]
+type = "TIMESTAMP"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time → timestamp; + is commutative)"
+reasoning = "A time of day and a date make a timestamp."
+
+[[rule]]
+id = "postgres.datetime.date-timetz"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["DATE"]
+right = ["TIMETZ"]
+type = "TIMESTAMPTZ"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time with time zone → timestamp with time zone)"
+reasoning = "A date and a time with time zone make a timestamp with time zone."
+
+[[rule]]
+id = "postgres.datetime.timetz-date"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["TIMETZ"]
+right = ["DATE"]
+type = "TIMESTAMPTZ"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time with time zone → timestamp with time zone; + is commutative)"
+reasoning = "A time with time zone and a date make a timestamp with time zone."
+
+[[rule]]
+id = "postgres.datetime.date-difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["DATE"]
+right = ["DATE"]
+type = "INT"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date - date → integer)"
+reasoning = "Subtracting dates counts the days between them."
+
+[[rule]]
+id = "postgres.datetime.time-difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["TIME"]
+right = ["TIME"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (time - time → interval)"
+reasoning = "Subtracting times of day gives an interval."
+
+[[rule]]
+id = "postgres.datetime.timestamp-difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["TIMESTAMP"]
+right = ["TIMESTAMP"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval)"
+reasoning = "Subtracting timestamps gives an interval."
+
+[[rule]]
+id = "postgres.datetime.timestamptz-difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["TIMESTAMPTZ"]
+right = ["TIMESTAMPTZ"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval)"
+reasoning = "Subtracting timestamps with time zone gives an interval."
+
+[[rule]]
+id = "postgres.datetime.intervals"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["INTERVAL"]
+right = ["INTERVAL"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval + interval → interval, interval - interval → interval)"
+reasoning = "Adding or subtracting intervals gives an interval."
+
+[[rule]]
+id = "postgres.datetime.interval-scaled"
+operators = ["Multiply", "Divide"]
+dialects = ["postgres"]
+left = ["INTERVAL"]
+right = ["@numeric"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval * double precision → interval, interval / double precision → interval)"
+reasoning = "Scaling an interval by a number gives an interval."
+
+[[rule]]
+id = "postgres.datetime.scaled-interval"
+operator = "Multiply"
+dialects = ["postgres"]
+left = ["@numeric"]
+right = ["INTERVAL"]
+type = "INTERVAL"
+reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (double precision * interval → interval)"
+reasoning = "Scaling an interval by a number gives an interval."
+
+[[rule]]
+id = "postgres.network.difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["@address"]
+right = ["@address"]
+type = "BIGINT"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet - inet → bigint)"
+reasoning = "The difference of two addresses is a count."
+
+[[rule]]
+id = "postgres.network.offset"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["@address"]
+right = ["@integer"]
+type = "INET"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet + bigint → inet, inet - bigint → inet)"
+reasoning = "An address moved by an offset is an address."
+
+[[rule]]
+id = "postgres.network.offset-left"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["@integer"]
+right = ["@address"]
+type = "INET"
+reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (bigint + inet → inet)"
+reasoning = "An offset added to an address is an address."
+
+[[rule]]
 id = "postgres.arithmetic.division-other"
 operators = ["Divide", "Modulo"]
 dialects = ["postgres"]
-type = "@code"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval / double precision → interval)"
-reasoning = "A zero divisor raises an error, so the result is NULL only when an operand is; intervals are typed in code."
+type = "@unknown"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type / numeric_type; division by zero raises an error)"
+reasoning = "A zero divisor raises an error, so the result is NULL only when an operand is; other operand types have no known result."
 
 [[rule]]
 id = "postgres.bitwise.address-shift"
