@@ -11,7 +11,7 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._check import MARKER, RowUsage, apply_suppressions, is_any_row
@@ -20,7 +20,6 @@ from sqlty._core import (
     Schema,
     expand_star,
     infer_type,
-    load_schema,
     returns_rows,
 )
 from sqlty._core import analyze_columns as _analyze_columns
@@ -28,6 +27,7 @@ from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
+from sqlty._core import load_schema as _load_schema
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
@@ -41,6 +41,25 @@ from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
     pass
+
+
+def load_schema(
+    schema_sql: str, *, dialect: str = "postgres", types: Mapping[str, str] | None = None
+) -> Schema:
+    """Parse ``schema_sql`` once, for passing as ``schema_sql`` to the other functions.
+
+    ``types`` maps a SQL type name or a ``table.column`` to the Python type a converter
+    above the driver gives it, as ``[tool.sqlty.types]`` does.
+
+    Example:
+        >>> schema = load_schema("CREATE TABLE t (d DATE)", dialect="sqlite", types={"DATE": "datetime.date"})
+        >>> infer_type("SELECT d FROM t", dialect="sqlite", schema_sql=schema)
+        'tuple[datetime.date | None]'
+
+    Raises:
+        ValueError: a key of ``types`` is neither a SQL type nor ``table.column``
+    """
+    return _load_schema(schema_sql, dialect=dialect, types=list(types.items()) if types else None)
 
 
 class ColumnInfo(NamedTuple):

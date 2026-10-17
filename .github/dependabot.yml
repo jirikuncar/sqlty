@@ -12,6 +12,17 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
+  # The drivers and ORMs scripts/compat/ compares with: a bump reruns the comparisons.
+  - package-ecosystem: uv
+    directory: /scripts/compat
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      compat:
+        patterns: ["*"]
+
   - package-ecosystem: cargo
     directory: /rust
     schedule:

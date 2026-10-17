@@ -36,7 +36,7 @@ mod read;
 mod resolve;
 
 pub(crate) use names::fold;
-pub(crate) use read::load;
+pub(crate) use read::{load, load_with};
 
 use rustc_hash::FxHashMap;
 use std::sync::{Arc, LazyLock};
@@ -142,6 +142,72 @@ pub struct Catalog {
     /// Relations the schema itself defines, built-ins not counted.
     user_relations: usize,
     postgres: bool,
+    /// The Python types the project sets for SQL types and columns.
+    overrides: Arc<TypeOverrides>,
+}
+
+/// Python types a project sets for SQL types or columns (`[tool.sqlty.types]`), for
+/// values a converter above the driver changes: `DATE = "datetime.date"` when sqlite3
+/// parses declared types, `"events.duration" = "datetime.timedelta"` for a duration
+/// stored as an integer.
+#[derive(Clone, Debug, Default)]
+pub struct TypeOverrides {
+    /// Canonical SQL type name without parameters (`DATE`, `DECIMAL`) -> Python type.
+    types: FxHashMap<String, String>,
+    /// `table.column`, folded -> Python type.
+    columns: FxHashMap<String, String>,
+}
+
+impl TypeOverrides {
+    /// Overrides from `(key, python type)` pairs: a key with a dot is `table.column`, any
+    /// other a SQL type name, read in `dialect` (`NUMERIC` sets `DECIMAL`). An error names
+    /// a key that is no type.
+    pub fn new(entries: &[(String, String)], dialect: &str) -> Result<Self, String> {
+        let dialect = SqlDialect::from_name(dialect);
+        let mut overrides = TypeOverrides::default();
+        for (key, python) in entries {
+            if let Some((table, column)) = key.rsplit_once('.') {
+                let table = table.rsplit('.').next().unwrap_or(table);
+                let key = format!("{}.{}", table.to_lowercase(), column.to_lowercase());
+                overrides.columns.insert(key, python.clone());
+                continue;
+            }
+            let parsed = sqlparser::parser::Parser::new(dialect.parser_dialect().as_ref())
+                .try_with_sql(key)
+                .and_then(|mut parser| {
+                    let parsed = parser.parse_data_type()?;
+                    parser.expect_token(&sqlparser::tokenizer::Token::EOF)?;
+                    Ok(parsed)
+                })
+                .map_err(|_| format!("`{key}` is not a SQL type"))?;
+            let canonical = crate::analyzer::canonical_type(&parsed, dialect);
+            overrides
+                .types
+                .insert(base_name(&canonical).to_string(), python.clone());
+        }
+        Ok(overrides)
+    }
+
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.types.is_empty() && self.columns.is_empty()
+    }
+
+    fn for_type(&self, sql_type: &str) -> Option<&str> {
+        self.types.get(base_name(sql_type)).map(String::as_str)
+    }
+
+    fn for_column(&self, relation: &str, column: &str) -> Option<&str> {
+        let table = relation.rsplit('.').next().unwrap_or(relation);
+        self.columns
+            .get(&format!("{table}.{column}"))
+            .map(String::as_str)
+    }
+}
+
+/// A canonical type's name without its parameters: `DECIMAL(10, 2)` is `DECIMAL`.
+fn base_name(sql_type: &str) -> &str {
+    sql_type.split(['(', '<']).next().unwrap_or_default().trim()
 }
 
 const BUILTIN_SCHEMAS: [&str; 2] = ["pg_catalog", "information_schema"];
@@ -252,6 +318,7 @@ impl Catalog {
             types: &self.types,
             path: &self.search_path,
             dialect,
+            overrides: &self.overrides,
         }
     }
 

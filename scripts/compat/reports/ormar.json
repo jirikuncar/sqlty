@@ -545,7 +545,7 @@
    "version": "0.26.0",
    "dialect": "postgres",
    "kind": "column",
-   "sql": "VARCHAR(32)",
+   "sql": "CHAR(32)",
    "expected": "uuid.UUID",
    "provenance": "ormar.UUID",
    "schema": ""

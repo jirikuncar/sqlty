@@ -64,8 +64,26 @@ class Event(NamedTuple):
 events = SQL[Event]("--sql\nSELECT id, day, done FROM events")
 ```
 
-If an ORM converts the values before your code sees them, annotate the
-converted type and tell sqlty the column is converted on purpose:
+### When something converts the values
+
+If something converts the values before your code sees them, such as an ORM or
+`sqlite3` with `detect_types`, say what it returns with
+[`[tool.sqlty.types]`](../reference/configuration.md#types): by SQL type, or by
+column for a value stored in a type that doesn't say what it is, such as a
+duration in microseconds. sqlty then checks the converted types:
+
+```toml
+[tool.sqlty.types]
+DATE = "datetime.date"
+BOOLEAN = "bool"
+"events.duration" = "datetime.timedelta"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (id INTEGER PRIMARY KEY, day DATE NOT NULL, done BOOLEAN NOT NULL, duration BIGINT NOT NULL);
+```
 
 ```python
 import datetime
@@ -78,17 +96,17 @@ class Event(NamedTuple):
     id: int
     day: datetime.date
     done: bool
+    duration: datetime.timedelta
 
 
-# error: [column-type-mismatch] "Event.day is datetime.date but query column 'day' infers str"
-# error: [column-type-mismatch] "Event.done is bool but query column 'done' infers int"
-events = SQL[Event]("--sql\nSELECT id, day, done FROM events")
-converted = SQL[Event]("--sql\nSELECT id, day, done FROM events")  # sqlty: ignore[column-type-mismatch]
+# error:
+events = SQL[Event]("--sql\nSELECT id, day, done, duration FROM events")
 ```
 
-The ignore comment drops the whole row's type check, so keep it to queries an ORM
-really runs. SQLite has no date or boolean type to cast to, so a cast does not
-help there.
+For one query an ORM converts while the rest go through the driver, annotate the
+converted type and suppress the mismatch on that line:
+`# sqlty: ignore[column-type-mismatch]`. It drops the whole row's type check, so
+prefer `types` when every query of the project is converted the same way.
 
 ## Expressions ORMs type differently
 

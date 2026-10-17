@@ -201,6 +201,31 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
     assert "inference rule" not in capsys.readouterr().out
 
 
+def test_check_reads_type_overrides(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\ndialect = "sqlite"\nschema = "schema.sql"\n\n'
+        '[tool.sqlty.types]\nDATE = "datetime.date"\n"events.duration" = "datetime.timedelta"\n'
+    )
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE events (day DATE NOT NULL, duration INTEGER NOT NULL);"
+    )
+    (tmp_path / "q.py").write_text(
+        "import datetime\nfrom sqlty import SQL\n"
+        'q = SQL[tuple[datetime.date, datetime.timedelta]]("--sql\\nSELECT day, duration FROM events")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "q.py"])
+    assert capsys.readouterr().out == ""
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\ndialect = "sqlite"\nschema = "schema.sql"\n\n[tool.sqlty.types]\n"NOT A TYPE" = "int"\n'
+    )
+    with pytest.raises(SystemExit):
+        main(["check", "q.py"])
+    assert "[tool.sqlty.types]: `NOT A TYPE` is not a SQL type" in capsys.readouterr().err
+
+
 def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
     """``--statistics`` ends with one line counting queries by how far sqlty types them."""
     (tmp_path / "pyproject.toml").write_text(

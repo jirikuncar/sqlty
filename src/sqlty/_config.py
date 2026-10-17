@@ -1,5 +1,6 @@
 """Configuration loading from pyproject.toml."""
 
+import ast
 import copy
 import difflib
 import glob
@@ -20,6 +21,7 @@ TOOL_KEYS = (
     "json-types",
     "type-modules",
     "functions",
+    "types",
     "format-command",
 )
 """Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
@@ -100,6 +102,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`[]`",
         "`check`",
         "Helper functions whose string argument is a query",
+    ),
+    "types": KeyDoc(
+        "table of SQL type or `table.column` = Python type",
+        "`{}`",
+        "`rewrite`, `check`",
+        "Python types a converter above the driver gives a SQL type or a column",
     ),
     "format-command": KeyDoc(
         "list of strings",
@@ -285,6 +293,19 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                         f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
                         f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
                     )
+    types = table.get("types", {})
+    if not isinstance(types, dict) or not all(isinstance(v, str) for v in types.values()):
+        raise ConfigError(
+            f"{source}: [tool.sqlty] types must be a table of SQL type or table.column = "
+            'Python type, such as DATE = "datetime.date"'
+        )
+    for key, python in types.items():
+        try:
+            ast.parse(python, mode="eval")
+        except SyntaxError:
+            raise ConfigError(
+                f"{source}: [tool.sqlty.types] {key} = {python!r} is not a Python type expression"
+            ) from None
     command = table.get("format-command", [])
     if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
         raise ConfigError(
@@ -362,6 +383,7 @@ class SQLTyConfig(TypedDict, total=False):
     extend_exclude: list[str]  # globs excluded in addition to the above
     respect_gitignore: bool  # skip what .gitignore ignores while walking
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
+    types: dict[str, str]  # SQL type or table.column -> Python type a converter gives it
     format_command: list[str]  # formatter run on changed files, path appended
 
 
@@ -600,6 +622,9 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
 
     if "json-types" in tool_config:
         config["json_types"] = str(tool_config["json-types"])
+
+    if "types" in tool_config and isinstance(tool_config["types"], dict):
+        config["types"] = {str(k): str(v) for k, v in tool_config["types"].items()}
 
     if "type-modules" in tool_config:
         modules = tool_config["type-modules"]
