@@ -1,8 +1,8 @@
 # DuckDB nested types
 
 The types the DuckDB Python client returns for nested values: `STRUCT` and `MAP`
-are `dict`, `LIST` (`T[]`) is `list`, and `UNION` is the value of its active
-member.
+are `dict`, `LIST` (`T[]`) is `list`, a fixed-size `ARRAY` (`T[3]`) is a
+`tuple`, and `UNION` is the value of its active member.
 
 ```toml
 [tool.sqlty]
@@ -25,7 +25,7 @@ SELECT CAST(x AS STRUCT(a INT, b VARCHAR)) AS s, CAST(x AS STRUCT(a INT, b STRUC
 SELECT CAST(x AS MAP(VARCHAR, INT)) AS m, CAST(x AS INTEGER[]) AS l, CAST(x AS INTEGER[3]) AS fixed
 -- columns: m: dict[str, int] (MAP(VARCHAR, INT))
 -- columns: l: list[int] (ARRAY<INT>)
--- columns: fixed: list[int] (ARRAY<INT>[3])
+-- columns: fixed: tuple[int, ...] (ARRAY<INT>[3])
 ```
 
 ## UNION
