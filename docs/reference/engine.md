@@ -59,11 +59,8 @@ With `SQLTY_PG_DSN` set, the test also checks the fixture against the server.
 
 ### Known gaps
 
-These differ from PostgreSQL; the test lists them in `KNOWN_GAPS`:
-
-| Query | sqlty | PostgreSQL |
-|-------|-------|------------|
-| `SELECT 2.5 ^ 2` | `double precision` | `numeric`: `^` has a `numeric` form |
+A query whose type differs from PostgreSQL's is listed in `KNOWN_GAPS` in the
+test, and here. None is listed today.
 
 ## Functions
 

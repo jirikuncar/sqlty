@@ -12,9 +12,8 @@ use super::typed::Typed;
 use super::{Inferred, DECIMAL};
 
 impl Analyzer<'_> {
-    /// Result type of `left op right`: an inference rule's (`rules/`), else the code's for
-    /// what rules cannot express: MySQL date arithmetic with an interval's unit, and date,
-    /// time and interval arithmetic.
+    /// Result type of `left op right`: an inference rule's (`rules/`), except for MySQL's
+    /// `date ± INTERVAL n unit`, whose unit decides the type.
     pub(super) fn binary_op(
         &self,
         left: &Expr,
@@ -30,11 +29,8 @@ impl Analyzer<'_> {
             }
         }
         let Some((rule, operands)) = self.binary_rule(left, op, right, scope)? else {
-            return self.typed_by_code(op, left, right, None, scope);
+            return Ok(Typed::UNKNOWN);
         };
-        if rule.result == RuleType::Code {
-            return self.typed_by_code(op, left, right, operands, scope);
-        }
         let reads = !matches!(
             rule.result,
             RuleType::Sql(_) | RuleType::Any | RuleType::Unknown
@@ -63,32 +59,7 @@ impl Analyzer<'_> {
             RuleType::Left => l,
             RuleType::Right => r,
             RuleType::Common => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
-            RuleType::Code => unreachable!("handled above"),
         })
-    }
-
-    /// The type of what no inference rule types: date, time and interval arithmetic.
-    /// `operands` are the rule operands when a rule read them.
-    fn typed_by_code(
-        &self,
-        op: &BinaryOperator,
-        left: &Expr,
-        right: &Expr,
-        operands: Option<(Typed, Typed)>,
-        scope: &Scope,
-    ) -> Inferred<Typed> {
-        use BinaryOperator::*;
-        match op {
-            Plus | Minus | Multiply | Divide | Modulo => {
-                let (l, r) = match operands {
-                    Some(operands) => operands,
-                    None => self.rule_operands(left, op, right, scope)?,
-                };
-                Ok(arithmetic(op, &l, &r, self.dialect)
-                    .map_or(Typed::UNKNOWN, |ty| from_sql_type(&ty, self.dialect)))
-            }
-            _ => Ok(Typed::UNKNOWN),
-        }
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`
@@ -228,75 +199,6 @@ fn is_arithmetic(op: &BinaryOperator) -> bool {
     matches!(op, Plus | Minus | Multiply | Divide | Modulo)
 }
 
-/// Result type of `left op right` for numbers (promoted to the wider type), and in
-/// PostgreSQL for dates, times, timestamps and intervals; a placeholder or `NULL` operand
-/// takes the other's type.
-pub(super) fn arithmetic(
-    op: &BinaryOperator,
-    left: &Typed,
-    right: &Typed,
-    dialect: SqlDialect,
-) -> Option<String> {
-    use BinaryOperator::*;
-    let (l, r) = (operand_type(left), operand_type(right));
-    // Numbers are typed by inference rules (`rules/`). MySQL reads a date as a number in arithmetic, and SQLite stores it as text.
-    if dialect != SqlDialect::Postgres {
-        return None;
-    }
-    let temporal = |ty: Option<&str>| matches!(ty, Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ"));
-    let integer = |ty: &str| numeric_rank(ty).is_some_and(|rank| rank <= 2);
-    match (l, r) {
-        (Some("INET" | "CIDR"), Some("INET" | "CIDR")) if *op == Minus => {
-            Some("BIGINT".to_string())
-        }
-        (Some("INET" | "CIDR"), Some(n)) if matches!(op, Plus | Minus) && integer(n) => {
-            Some("INET".to_string())
-        }
-        (Some(n), Some("INET" | "CIDR")) if *op == Plus && integer(n) => Some("INET".to_string()),
-        (Some(a), Some("INTERVAL")) if temporal(Some(a)) && matches!(op, Plus | Minus) => {
-            Some(if a == "DATE" { "TIMESTAMP" } else { a }.to_string())
-        }
-        (Some("INTERVAL"), Some(b)) if temporal(Some(b)) && *op == Plus => {
-            Some(if b == "DATE" { "TIMESTAMP" } else { b }.to_string())
-        }
-        (Some("DATE"), Some("INT" | "SMALLINT")) if matches!(op, Plus | Minus) => {
-            Some("DATE".to_string())
-        }
-        (Some("INT" | "SMALLINT"), Some("DATE")) if *op == Plus => Some("DATE".to_string()),
-        (Some("DATE"), Some("TIME")) | (Some("TIME"), Some("DATE")) if *op == Plus => {
-            Some("TIMESTAMP".to_string())
-        }
-        (Some("DATE"), Some("TIMETZ")) | (Some("TIMETZ"), Some("DATE")) if *op == Plus => {
-            Some("TIMESTAMPTZ".to_string())
-        }
-        (Some(time @ ("TIME" | "TIMETZ")), Some("INTERVAL")) if matches!(op, Plus | Minus) => {
-            Some(time.to_string())
-        }
-        (Some("INTERVAL"), Some(time @ ("TIME" | "TIMETZ"))) if *op == Plus => {
-            Some(time.to_string())
-        }
-        (Some("TIME"), Some("TIME")) if *op == Minus => Some("INTERVAL".to_string()),
-        (Some("INTERVAL"), Some(n)) if *op == Divide && numeric_rank(n).is_some() => {
-            Some("INTERVAL".to_string())
-        }
-        (Some(a), Some(b))
-            if *op == Minus && a == b && matches!(a, "TIMESTAMP" | "TIMESTAMPTZ") =>
-        {
-            Some("INTERVAL".to_string())
-        }
-        (Some("DATE"), Some("DATE")) if *op == Minus => Some("INT".to_string()),
-        (Some("INTERVAL"), Some("INTERVAL")) if matches!(op, Plus | Minus) => {
-            Some("INTERVAL".to_string())
-        }
-        (Some("INTERVAL"), Some(n)) | (Some(n), Some("INTERVAL"))
-            if *op == Multiply && numeric_rank(n).is_some() =>
-        {
-            Some("INTERVAL".to_string())
-        }
-        _ => None,
-    }
-}
-
 /// The type of a set operation's column whose branches have types `left` and `right`,
 /// following PostgreSQL: an unknown type yields to the other, numbers promote to the
 /// wider type, text and timestamps to the preferred one, arrays by their elements;
@@ -390,7 +292,6 @@ pub(super) fn category(typed: &Typed) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use sqlparser::ast::BinaryOperator;
 
     use super::super::test_support::reports;
     use super::*;
@@ -554,25 +455,8 @@ mod tests {
 
     #[test]
     fn arithmetic_with_an_unknown_operand_has_no_type() {
-        let int = sql("INT");
-        assert_eq!(
-            arithmetic(
-                &BinaryOperator::Plus,
-                &int,
-                &Typed::UNKNOWN,
-                SqlDialect::Postgres
-            ),
-            None
-        );
-        assert_eq!(
-            arithmetic(
-                &BinaryOperator::Plus,
-                &int,
-                &literal("str"),
-                SqlDialect::Postgres
-            ),
-            None
-        );
+        assert_eq!(arithmetic_type("INT", "+", "TEXT", "postgres"), None);
+        assert_eq!(arithmetic_type("DATE", "*", "INT", "postgres"), None);
     }
 
     #[test]

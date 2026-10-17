@@ -29,9 +29,7 @@ CASES = [
 
 # Mismatches that are understood and not fixed yet, with the reason; listed in
 # docs/reference/engine.md#known-gaps.
-KNOWN_GAPS: dict[str, str] = {
-    "SELECT 2.5 ^ 2": "`^` is always double precision; PostgreSQL has numeric ^ numeric",
-}
+KNOWN_GAPS: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(("query", "server_type"), CASES)
