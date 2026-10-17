@@ -83,7 +83,7 @@ jobs:
         run: scripts/compat/run.sh
 
       - name: Summarize report changes
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           {
             echo "## Report changes"
@@ -98,7 +98,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ !cancelled() }}
         with:
           name: compat-reports
           path: scripts/compat/reports/
