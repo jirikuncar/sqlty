@@ -7,6 +7,8 @@
 
 use std::ops::Range;
 
+use crate::template::template_content;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     /// A string literal, with its prefix.
@@ -46,93 +48,8 @@ impl Token {
     pub(crate) fn is_template(&self, source: &str) -> bool {
         self.kind == Kind::Str
             && self.prefix(source) == "t"
-            && template_content(&source[self.span.clone()]).is_some()
+            && template_content(&source[self.span.clone()], source).is_ok()
     }
-}
-
-/// The text of a t-string literal (prefix and quotes included) as a query: each
-/// replacement field `{expr}` becomes a `%s` placeholder, `{{` and `}}` become braces, and
-/// a `%` of the text is escaped as `%%`. `None` when a field has a conversion (`!r`), a
-/// format spec (psycopg's `:i`, `:l`, `:q` change the SQL itself) or is a `{x=}` debug
-/// field.
-pub(crate) fn template_content(literal: &str) -> Option<String> {
-    let quoted = literal.trim_start_matches(|c: char| c.is_ascii_alphabetic());
-    let triple = quoted.starts_with("\"\"\"") || quoted.starts_with("'''");
-    let quote = if triple { 3 } else { 1 };
-    let body = quoted.get(quote..quoted.len().checked_sub(quote)?)?;
-    let bytes = body.as_bytes();
-    let mut out = String::with_capacity(body.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => {
-                let next = body[i + 1..].chars().next().map_or(0, char::len_utf8);
-                out.push_str(&body[i..i + 1 + next]);
-                i += 1 + next;
-            }
-            b'{' if bytes.get(i + 1) == Some(&b'{') => {
-                out.push('{');
-                i += 2;
-            }
-            b'}' if bytes.get(i + 1) == Some(&b'}') => {
-                out.push('}');
-                i += 2;
-            }
-            b'{' => {
-                let end = field_end(bytes, i + 1, triple)?;
-                if !is_value_field(&body[i + 1..end - 1]) {
-                    return None;
-                }
-                out.push_str("%s");
-                i = end;
-            }
-            b'%' => {
-                out.push_str("%%");
-                i += 1;
-            }
-            _ => {
-                let len = body[i..].chars().next().map_or(1, char::len_utf8);
-                out.push_str(&body[i..i + len]);
-                i += len;
-            }
-        }
-    }
-    Some(out)
-}
-
-/// Whether a replacement field is a bare expression: no `!conversion`, `:spec` or `=`.
-fn is_value_field(field: &str) -> bool {
-    let bytes = field.as_bytes();
-    let mut depth = 0usize;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' | b'\'' => match string_end(bytes, i, false) {
-                Some(end) => i = end,
-                None => return false,
-            },
-            b'(' | b'[' | b'{' => {
-                depth += 1;
-                i += 1;
-            }
-            b')' | b']' | b'}' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            b'!' if depth == 0 && bytes.get(i + 1) != Some(&b'=') => return false,
-            b':' if depth == 0 => return false,
-            b'=' if depth == 0 => {
-                let rest = field[i + 1..].trim();
-                let before = bytes.get(i.wrapping_sub(1)).copied();
-                if rest.is_empty() && !matches!(before, Some(b'=' | b'!' | b'<' | b'>')) {
-                    return false;
-                }
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
-    !field.trim().is_empty()
 }
 
 fn is_name_byte(byte: u8) -> bool {
@@ -151,7 +68,7 @@ fn has_fields(prefix: &str) -> bool {
 }
 
 /// End of the string literal whose opening quote is at `at`, if it is closed.
-fn string_end(bytes: &[u8], at: usize, fields: bool) -> Option<usize> {
+pub(crate) fn string_end(bytes: &[u8], at: usize, fields: bool) -> Option<usize> {
     let quote = bytes[at];
     let len = if bytes[at..].starts_with(&[quote; 3]) {
         3
@@ -178,7 +95,7 @@ fn string_end(bytes: &[u8], at: usize, fields: bool) -> Option<usize> {
 
 /// End of an f-string replacement field whose expression starts at `i`; `triple`
 /// when the f-string is triple-quoted.
-fn field_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
+pub(crate) fn field_end(bytes: &[u8], mut i: usize, triple: bool) -> Option<usize> {
     let mut depth = 0usize;
     while i < bytes.len() {
         match bytes[i] {
@@ -421,9 +338,9 @@ pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
             let prefix = &literal[..literal.len() - quoted.len()];
             match prefix
                 .eq_ignore_ascii_case("t")
-                .then(|| template_content(literal))
+                .then(|| template_content(literal, source))
             {
-                Some(Some(query)) => query,
+                Some(Ok(query)) => query,
                 _ => crate::rewriter::extract_string_content(quoted).to_string(),
             }
         })

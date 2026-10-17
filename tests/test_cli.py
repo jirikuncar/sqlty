@@ -125,7 +125,9 @@ def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
 
 
 F_SKIPPED = "q.py:2: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
-T_SKIPPED = "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (a field with a format spec or conversion changes the SQL)"
+T_SKIPPED = (
+    "q.py:3: [tstring-skipped] t-string with --sql prefix skipped (the field {x:i} changes the SQL)"
+)
 
 
 @pytest.mark.parametrize(
@@ -1131,6 +1133,26 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     code, out, _ = _run(["check", "."], capsys)
     assert code == 1
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
+
+
+def test_json_types_must_name_a_type(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\njson-types = "pydantic"\n')
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1::INTEGER AS n"\n')
+    monkeypatch.chdir(tmp_path)
+    code, _, err = _run(["rewrite", "."], capsys)
+    assert code == 2
+    assert "json-types must be 'typing.Any' or 'typing.TypedDict'" in err
+
+
+def test_rewrite_generates_typeddicts_for_json_columns(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\njson-types = "typing.TypedDict"\n')
+    path = tmp_path / "q.py"
+    path.write_text("q = \"--sql\\nSELECT jsonb_build_object('n', 1) AS doc\"\n")
+    monkeypatch.chdir(tmp_path)
+    assert _run(["rewrite", "."], capsys)[0] == 0
+    assert "class Doc(typing.TypedDict):\n    n: int\n" in path.read_text()
+    assert _run(["strip", "."], capsys)[0] == 0
+    assert path.read_text() == "q = \"--sql\\nSELECT jsonb_build_object('n', 1) AS doc\"\n"
 
 
 def test_dialect_option_takes_every_dialect(tmp_path, monkeypatch, capsys) -> None:

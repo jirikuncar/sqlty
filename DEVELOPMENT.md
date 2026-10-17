@@ -6,7 +6,7 @@ This guide covers development setup and workflows for SQLTy.
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the `cargo-fmt` pre-commit hook)
+- [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
@@ -28,29 +28,21 @@ sqlty's engine is the Rust extension `sqlty._core`; nothing works without it.
 uv run maturin develop
 ```
 
-### Install Pre-commit Hooks
+### Install the Hooks
 
 ```bash
-uv run pre-commit install
+uv run prek install
 ```
 
-This ensures code is formatted and checked before each commit.
-
-#### Pre-commit Hooks Configured
-
-- **Standard checks**: AST validation, YAML/TOML/JSON syntax, merge conflicts, trailing whitespace
-- **Ruff**: Code formatting and linting with automatic fixes
-- **uv-lock**: Keeps the lockfile up to date
-- **mypy** and **ty**: Type checking for `src/`
-- **sqlty-check** / **sqlty-rewrite**: lint `examples/` and rewrite their `--sql` strings in place (`magic_codec/` excluded)
-- **cargo-fmt**: `cargo fmt --check` for the Rust engine (requires `cargo`)
-- **cargo-test**: `cargo test` for the Rust engine, run when files under `rust/` change or with `--all-files` (requires `cargo`)
-
-To manually run all pre-commit hooks:
+[prek](https://prek.j178.dev) then runs the hooks of `prek.toml` on the files
+of each commit. Run them on every file with:
 
 ```bash
-uv run pre-commit run --all-files
+uv run prek run --all-files
 ```
+
+Each hook runs when the files it depends on change, and the read-only checks
+run in parallel; [AGENTS.md](AGENTS.md#hooks) lists them.
 
 ## Running Tests
 
