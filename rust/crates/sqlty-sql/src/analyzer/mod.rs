@@ -31,6 +31,7 @@ mod operators;
 mod params;
 mod preprocess;
 mod query;
+mod references;
 mod registry;
 mod resolve;
 mod scope;
