@@ -4,8 +4,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use sqlparser::ast::{
-    Expr, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement,
-    TableAlias, TableWithJoins, Value,
+    Expr, JoinConstraint, JoinOperator, Query, Select, SelectItem, SelectItemQualifiedWildcardKind,
+    SetExpr, Statement, TableAlias, TableWithJoins, Value,
 };
 
 use crate::catalog::fold;
@@ -134,16 +134,16 @@ impl<'a> Analyzer<'a> {
     pub(super) fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Column>>> {
         match stmt {
             Statement::Query(query) => self.query_columns(query),
-            _ => match returning(stmt) {
-                Some(items) => {
-                    let scope = dml_scope(stmt, self.dialect);
-                    for source in &scope {
-                        self.check_table(&source.table);
+            _ => {
+                self.dml_names(stmt);
+                match returning(stmt) {
+                    Some(items) => {
+                        let scope = dml_scope(stmt, self.dialect);
+                        self.projection(items, &scope, None).map(non_empty)
                     }
-                    self.projection(items, &scope, None).map(non_empty)
+                    None => Ok(None),
                 }
-                None => Ok(None),
-            },
+            }
         }
     }
 
@@ -216,6 +216,25 @@ impl<'a> Analyzer<'a> {
 
     pub(super) fn select_columns(&self, select: &Select) -> Inferred<Vec<Column>> {
         let (mut analyzer, scope) = self.scope_of(&select.from)?;
+        if analyzer.diag.enabled() {
+            let conditions = select
+                .from
+                .iter()
+                .flat_map(|table| &table.joins)
+                .filter_map(|join| match &join.join_operator {
+                    JoinOperator::Join(JoinConstraint::On(on))
+                    | JoinOperator::Inner(JoinConstraint::On(on))
+                    | JoinOperator::Left(JoinConstraint::On(on))
+                    | JoinOperator::LeftOuter(JoinConstraint::On(on))
+                    | JoinOperator::Right(JoinConstraint::On(on))
+                    | JoinOperator::RightOuter(JoinConstraint::On(on))
+                    | JoinOperator::FullOuter(JoinConstraint::On(on)) => Some(on),
+                    _ => None,
+                });
+            for condition in conditions.chain(&select.selection) {
+                analyzer.check_references(condition, &scope);
+            }
+        }
         analyzer.facts = analyzer.select_facts(select, &scope);
         analyzer.projection(&select.projection, &scope, Some(&select.from))
     }

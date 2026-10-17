@@ -1,10 +1,16 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
-use sqlparser::ast::{FromTable, OutputClause, SelectItem, SetExpr, Statement, TableObject};
+use sqlparser::ast::{
+    AssignmentTarget, FromTable, ObjectName, OutputClause, SelectItem, SetExpr, Statement,
+    TableObject, UpdateTableFromKind,
+};
 
 use super::dialect::SqlDialect;
 use super::names::{object_name, table_key};
+use super::query::Analyzer;
 use super::scope::{table_scope, Scope, Source, Table};
+use crate::catalog::fold;
+use crate::diagnostics::NameRule;
 
 pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
     match stmt {
@@ -72,6 +78,99 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
             scope
         }
         _ => Vec::new(),
+    }
+}
+
+impl Analyzer<'_> {
+    /// The names an INSERT, UPDATE or DELETE reads and writes: its target tables, the
+    /// columns it sets, and those its values, conditions and source query read.
+    pub(super) fn dml_names(&self, stmt: &Statement) {
+        if !self.diag.enabled() {
+            return;
+        }
+        let scope = dml_scope(stmt, self.dialect);
+        for source in &scope {
+            self.check_table(&source.table);
+        }
+        // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING.
+        let from = match stmt {
+            Statement::Update(update) => update.from.as_ref().map(|from| match from {
+                UpdateTableFromKind::BeforeSet(tables) | UpdateTableFromKind::AfterSet(tables) => {
+                    tables.as_slice()
+                }
+            }),
+            Statement::Delete(delete) => delete.using.as_deref(),
+            _ => None,
+        };
+        let targets = scope
+            .iter()
+            .filter(|source| !matches!(source.table, Table::ExtraSources))
+            .cloned();
+        let (analyzer, scope) = match from {
+            Some(from) => match self.scope_of(from) {
+                Ok((analyzer, joined)) => (analyzer, targets.chain(joined).collect()),
+                Err(_) => return,
+            },
+            None => (self.clone(), scope),
+        };
+        let check = |expr| analyzer.check_references(expr, &scope);
+        match stmt {
+            Statement::Insert(insert) => {
+                if let TableObject::TableName(name) = &insert.table {
+                    self.check_target_columns(name, &insert.columns);
+                }
+                if let Some(source) = &insert.source {
+                    // Its diagnostics are recorded; the columns are not needed.
+                    let _ = self.query_columns(source);
+                }
+            }
+            Statement::Update(update) => {
+                if let sqlparser::ast::TableFactor::Table { name, .. } = &update.table.relation {
+                    let targets: Vec<ObjectName> = update
+                        .assignments
+                        .iter()
+                        .flat_map(|assignment| match &assignment.target {
+                            AssignmentTarget::ColumnName(column) => vec![column.clone()],
+                            AssignmentTarget::Tuple(columns) => columns.clone(),
+                        })
+                        .collect();
+                    self.check_target_columns(name, &targets);
+                }
+                update.assignments.iter().for_each(|a| check(&a.value));
+                update.selection.iter().for_each(check);
+            }
+            Statement::Delete(delete) => {
+                delete.selection.iter().for_each(check);
+            }
+            _ => {}
+        }
+    }
+
+    /// Records `unknown-column` for each of `columns` (`col` or `t.col`) that the schema
+    /// table `table` does not have.
+    fn check_target_columns(&self, table: &ObjectName, columns: &[ObjectName]) {
+        if !self.judges_names() {
+            return;
+        }
+        let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
+            return;
+        };
+        for column in columns {
+            let Some(ident) = column.0.last().and_then(|part| part.as_ident()) else {
+                continue;
+            };
+            let name = fold(ident, self.dialect);
+            if !known.iter().any(|c| c.name == name) {
+                self.diag.record(
+                    NameRule::UnknownColumn,
+                    format!(
+                        "column `{}` does not exist in `{}`",
+                        ident.value,
+                        object_name(table)
+                    ),
+                );
+            }
+        }
     }
 }
 

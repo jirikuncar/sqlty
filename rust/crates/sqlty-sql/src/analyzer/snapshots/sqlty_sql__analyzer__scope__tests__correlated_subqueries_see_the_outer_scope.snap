@@ -18,3 +18,4 @@ shared: str | TEXT | Nullable
 
 SELECT (SELECT y FROM b WHERE b.id = a.nope) AS m FROM a
 m: str | TEXT | Nullable
+[unknown-column] column `nope` does not exist in `a`
