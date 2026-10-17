@@ -71,6 +71,23 @@ files = '^(src/|pyproject\.toml$)'
 priority = 10
 
 [[repos.hooks]]
+id = "rumdl"
+name = "rumdl (Markdown format and accessibility)"
+entry = "uv run rumdl check"
+language = "system"
+types = ["markdown"]
+priority = 10
+
+[[repos.hooks]]
+id = "vale"
+name = "vale (prose)"
+entry = "uv run vale --output=line"
+language = "system"
+files = '^(docs/|src/sqlty/rules/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|proofs/README\.md$|scripts/compat/README\.md$)'
+types = ["markdown"]
+priority = 10
+
+[[repos.hooks]]
 id = "cargo-fmt"
 name = "cargo fmt"
 entry = "cargo fmt --all --manifest-path rust/Cargo.toml --check"

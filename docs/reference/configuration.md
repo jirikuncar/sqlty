@@ -133,7 +133,7 @@ How rewritten code imports and spells the wrapper. Default:
 | `"import sqlty"` | `sqlty.SQL[T](...)` |
 | `"import sqlty as sy"` (any alias) | `sy.SQL[T](...)` |
 
-`strip` and `check` use the same setting to recognise wrappers, so change it
+`strip` and `check` use the same setting to recognize wrappers, so change it
 only on stripped sources. With `untyped = "sentinel"`, `UNTYPED` follows the
 style: `from sqlty import UNTYPED`, or `sqlty.UNTYPED` (`sy.UNTYPED`) for
 module imports.
@@ -187,7 +187,7 @@ query-param = "query"
 <!-- generated:config-function-keys -->
 | Key | Required | Description |
 |-----|----------|-------------|
-| `import-path` | yes | Module path and function name, e.g. `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. Use `"__main__.sql"` or the file name for a script run directly |
+| `import-path` | yes | Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. Use `"__main__.sql"` or the file name for a script run directly |
 | `query-param` | yes | Name of the parameter that holds the query |
 | `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is the row type of that call instead of an inferred one; `check` compares it with the query columns |
 <!-- /generated:config-function-keys -->
@@ -230,7 +230,7 @@ format-command = ["ruff", "format", "--quiet"]
 Files that are not changed are never formatted, and `--check` and `--diff`
 write nothing, so they run no formatter. A formatter that fails is reported as
 a warning and the file keeps sqlty's changes. `rewrite` stays idempotent with a
-formatter: a wrapper the formatter split over several lines is recognised as
+formatter: a wrapper the formatter split over several lines is recognized as
 already written.
 
 ## `exclude` and `extend-exclude`

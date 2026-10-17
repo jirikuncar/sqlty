@@ -47,7 +47,7 @@ sqlty check .
 `sqlty check` prints nothing when everything matches. Edit the first query
 to select `email::TEXT` as well, and it reports the drift:
 
-```
+```text
 queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
 Found 1 warning(s)
 ```
