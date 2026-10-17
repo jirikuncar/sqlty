@@ -460,6 +460,7 @@ impl<'a> Analyzer<'a> {
             };
             return Ok(match rule.result {
                 FunctionType::Sql(sql) => from_sql_type(sql, self.dialect),
+                FunctionType::Any => Typed::python_only("typing.Any"),
                 FunctionType::Unknown => Typed::UNKNOWN,
                 FunctionType::Argument => argument()?,
                 FunctionType::ArgumentAs(sql) => {

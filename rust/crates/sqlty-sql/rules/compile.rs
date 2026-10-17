@@ -112,15 +112,17 @@ const NULLABILITIES: [(&str, &str); 5] = [
 
 /// Result types of a function rule other than a SQL type name; `@argument-as <TYPE>` keeps
 /// the argument's Python type and values under another SQL type.
-const FUNCTION_RESULTS: [(&str, &str); 3] = [
+const FUNCTION_RESULTS: [(&str, &str); 4] = [
+    ("@any", "FunctionType::Any"),
     ("@unknown", "FunctionType::Unknown"),
     ("@code", "FunctionType::Code"),
     ("@argument", "FunctionType::Argument"),
 ];
 
 /// How a function rule's result can be NULL.
-const FUNCTION_NULLABILITIES: [(&str, &str); 3] = [
+const FUNCTION_NULLABILITIES: [(&str, &str); 4] = [
     ("non-null", "FunctionNullability::NonNull"),
+    ("nullable", "FunctionNullability::Nullable"),
     ("aggregate", "FunctionNullability::Aggregate"),
     ("strict", "FunctionNullability::Strict"),
 ];

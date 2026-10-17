@@ -6,7 +6,7 @@ operator = "Arrow"
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "nullable"
-reference = "SQLite documentation, JSON Functions And Operators, 4.6 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
+reference = "SQLite documentation, JSON Functions And Operators, 4.10 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
 reasoning = "`->` gives the text JSON representation of the subcomponent; a missing path gives NULL."
 
 [[rule]]
@@ -15,5 +15,14 @@ operator = "LongArrow"
 dialects = ["sqlite"]
 type = "@any"
 nullability = "nullable"
-reference = "SQLite documentation, JSON Functions And Operators, 4.6 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
+reference = "SQLite documentation, JSON Functions And Operators, 4.10 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
 reasoning = "`->>` gives the SQL value of the element (INTEGER, REAL or TEXT), not always text; a missing path gives NULL."
+
+[[function]]
+id = "sqlite.json.extract"
+function = "JSON_EXTRACT"
+dialects = ["sqlite"]
+type = "@any"
+nullability = "nullable"
+reference = "SQLite documentation, JSON Functions And Operators, 4.8 The json_extract() function (https://www.sqlite.org/json1.html#jex)"
+reasoning = "With one path, `json_extract` gives the SQL value of the element (INTEGER, REAL or TEXT), and NULL for a missing path or a JSON null; with more, the text of a JSON array."
