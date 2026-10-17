@@ -10,6 +10,7 @@ uv run pytest                      # all tests
 make test-mdtest                   # mdtest only
 make update-mdtest                 # update mdtest assertions
 make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
+make lint-docs                     # rumdl (Markdown) and Vale (prose) on the docs
 make typecheck                     # mypy + ty on src and examples
 uv run prek run --all-files        # all hooks (run before every commit)
 ```
@@ -108,7 +109,7 @@ creating a commit.
 **Always use `--sql\n` (newline escape) after the `--sql` prefix, not a space.**
 
 `--sql SELECT ...` with a space is a SQL comment — the parser sees an
-empty query and the string is **not** wrapped.  The newline makes the
+empty query and the string is **not** wrapped. The newline makes the
 parser treat `--sql` as a comment line and the query starts on the next line.
 
 ```python
@@ -256,7 +257,7 @@ def analyze_select(sql: str, *, dialect: str = "postgres") -> list[ColumnInfo] |
 CLI help text should be concise but complete enough for an AI agent to use the
 tool without reading source code. Include the most common usage pattern first:
 
-```
+```text
 sqlty rewrite .          # "--sql\n..." → SQL[T]("--sql\n...")
 sqlty check .            # lint for type mismatches
 sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
@@ -319,7 +320,7 @@ test with an explicit expected error count.
 
 ## Architecture overview
 
-```
+```text
 src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
 ├── core.py              # Public API over the Rust engine

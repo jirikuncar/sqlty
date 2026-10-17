@@ -104,7 +104,7 @@ sqlty rewrite app/users.py
 [`stale-rewrite`](../reference/rules.md#stale-rewrite), so you can see what is
 left:
 
-```
+```text
 app/orders.py:12: [stale-rewrite] Source has --sql strings that aren't wrapped in SQL[T]
 ```
 

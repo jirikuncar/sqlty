@@ -16,7 +16,7 @@ This guide covers development setup and workflows for SQLTy.
 uv sync --all-groups
 ```
 
-This will install all dependencies and development tools defined in `pyproject.toml`.
+This installs all dependencies and development tools defined in `pyproject.toml`.
 
 ### Build the Rust Extension
 
@@ -89,7 +89,7 @@ Format, assertions and workflow: see [AGENTS.md](AGENTS.md#markdown-tests-mdtest
 
 **Test directory layout:**
 
-```
+```text
 tests/mdtest/
   type_inference/   # basic types, datetime, uuid, dialects, schema inference
   postgres/         # SELECT, RETURNING, CTE, JSON, aggregates, star expansion, advanced
@@ -168,7 +168,7 @@ The engine parses SQL with
 to Python with PyO3.
 It follows [maturin's recommended mixed Python/Rust project layout](https://www.maturin.rs/project_layout.html).
 
-```
+```text
 rust/
 ├── Cargo.toml                # Workspace root: shared deps and package metadata
 └── crates/
@@ -273,6 +273,17 @@ The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 make docs        # strict build into site/ (fails on broken links or anchors)
 make docs-serve  # live preview at http://localhost:8000/sqlty/
 ```
+
+Two hooks check the Markdown, and `make lint-docs` runs both:
+
+- [rumdl](https://github.com/rvben/rumdl) checks formatting and accessibility (heading
+  order, image alt text, fenced code languages); `[tool.rumdl]` in `pyproject.toml`
+  configures it.
+- [Vale](https://vale.sh) checks the prose of the user-facing pages: spelling, American
+  English, no Latin abbreviations or em dashes, and inclusive language (the Google and
+  alex styles, committed under `.vale/styles`). `.vale.ini` turns off the rules that
+  conflict with the house style. Add a project word to
+  `.vale/styles/config/vocabularies/SQLTy/accept.txt`.
 
 Add new pages to `nav` in `zensical.toml`. CI builds the site on pull requests
 touching the docs and deploys it to GitHub Pages on push to `main`. One-time

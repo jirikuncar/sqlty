@@ -77,6 +77,8 @@ dev = [
     "duckdb>=1.4.0",
     "ruff>=0.16.10",
     "ty>=0.0.85",
+    "rumdl>=0.3.0",
+    "vale>=3.22.0.0",
 ]
 cli = ["rich>=15.0.0"]
 psycopg = ["psycopg>=3.2.12"]
@@ -156,3 +158,8 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.rumdl]
+# Long lines are tables and links; spaces in code spans show `--sql ` on purpose.
+disable = ["MD013", "MD038"]
+exclude = ["site", ".vale", ".github", "tests", "scripts/compat/reports", "PLAN-FUTURE.md", "rust/target", "proofs/.lake"]
