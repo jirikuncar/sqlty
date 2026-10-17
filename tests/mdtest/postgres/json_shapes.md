@@ -249,6 +249,21 @@ GROUP BY prefs
 -- json: first: string
 ```
 
+`jsonb_extract_path(doc, 'a', 'b')` and `json_extract_path` follow their keys like `#>`.
+
+```sql
+SELECT
+    jsonb_extract_path(jsonb_build_object('a', jsonb_build_object('b', id)), 'a', 'b') AS b,
+    jsonb_extract_path(jsonb_build_object('a', jsonb_build_object('b', id)), 'a') AS a,
+    json_extract_path(json_build_object('a', name), 'a') AS name,
+    jsonb_extract_path(jsonb_build_object('a', 1), 'missing') AS missing,
+    jsonb_extract_path(prefs, 'theme') AS opaque
+FROM users
+-- json: b: integer
+-- json: a: {b: integer}
+-- json: name: string
+```
+
 ## ->> is text
 
 ```sql
