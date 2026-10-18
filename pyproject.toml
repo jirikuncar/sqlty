@@ -79,6 +79,7 @@ dev = [
     "ty>=0.0.85",
     "rumdl>=0.3.0",
     "vale>=3.22.0.0",
+    "zizmor>=1.31.1",
 ]
 cli = ["rich>=15.0.0"]
 psycopg = ["psycopg>=3.2.12"]

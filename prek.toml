@@ -90,6 +90,15 @@ types = ["markdown"]
 priority = 10
 
 [[repos.hooks]]
+id = "zizmor"
+name = "zizmor (GitHub Actions security)"
+entry = "uv run zizmor --offline --quiet .github/workflows"
+language = "system"
+pass_filenames = false
+files = '^\.github/workflows/'
+priority = 10
+
+[[repos.hooks]]
 id = "cargo-fmt"
 name = "cargo fmt"
 entry = "cargo fmt --all --manifest-path rust/Cargo.toml --check"
