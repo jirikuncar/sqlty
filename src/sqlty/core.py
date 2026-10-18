@@ -443,6 +443,7 @@ BREAKING_RULES = (
     "unknown-type",
     "insert-missing-column",
 )
+CODE_RULES = ("stale-rewrite", "unused-ignore")
 
 
 def breaking_source(
@@ -465,7 +466,7 @@ def breaking_source(
     dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
     leaves out, are reported, besides the row type checks. An annotation wider than the
     other schema's rows (``str | None`` for a ``NOT NULL`` column) still reads them, so it
-    is not reported.
+    is not reported. Nor are ``CODE_RULES``, which judge the code rather than the schema.
 
     Example:
         >>> old = "CREATE TABLE users (id INT NOT NULL, bio TEXT)"
@@ -495,7 +496,9 @@ def breaking_source(
     return [
         d
         for d in check(against_sql)
-        if (d.get("line"), d["rule"], d["message"]) not in own and not widens(d)
+        if (d.get("line"), d["rule"], d["message"]) not in own
+        and d["rule"] not in CODE_RULES
+        and not widens(d)
     ]
 
 
