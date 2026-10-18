@@ -490,8 +490,10 @@ impl<'a> Analyzer<'a> {
     ) -> Inferred<Vec<Column>> {
         let source = self.source.clone().filter(|_| {
             items.iter().any(|item| {
+                // MySQL keeps a column's name as written; SQLite, as declared.
                 matches!(item, SelectItem::UnnamedExpr(expr)
-                    if !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)))
+                    if self.dialect == SqlDialect::MySql
+                        || !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)))
             })
         });
         let texts = source.as_deref().and_then(|source| {

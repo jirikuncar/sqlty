@@ -111,6 +111,24 @@ uv run pytest tests/e2e/ -v
 uv run pytest tests/e2e/ --inline-snapshot=update
 ```
 
+### Tests against the databases
+
+The queries of the Markdown tests also run on real databases, and the result columns
+must match sqlty's:
+
+| Test | Database | Compares |
+|------|----------|----------|
+| `tests/test_pg_describe.py` | PostgreSQL, with `SQLTY_PG_DSN` | names and types |
+| `tests/test_server_describe.py` | SQLite, always; MySQL, with `SQLTY_MYSQL_DSN` | names and Python types |
+| `tests/test_driver_values.py` | all three | the Python type of the value the driver returns |
+
+```bash
+SQLTY_MYSQL_DSN=mysql://root@127.0.0.1:3306/probe uv run --with pymysql pytest tests/test_server_describe.py -rs
+```
+
+Each test drops the tables it loads, so point it at a scratch server. A query the
+database rejects is skipped, with the reason.
+
 ## Development Workflow
 
 ### Type Checking

@@ -40,6 +40,13 @@ mdtest, or a converter difference, to document.
 | peewee | `peewee` | `reports/peewee.md` | none |
 | Pony | `pony`, a server | `reports/pony.md` | none |
 | SQLObject | `sqlobject` | `reports/sqlobject.md` | none |
+| MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587) |
+
+`mysql_nullability.py` is not a harness source either: it runs the MySQL queries of the
+Markdown tests on MySQL and compares sqlty's nullability with the one MySQL derives for
+`CREATE TABLE ... AS` the query. MySQL marks many expressions nullable that cannot be
+NULL, so the report is a list of leads, not of defects. `tests/test_server_describe.py`
+fails on a name or type that differs.
 
 Every DDL spelling the ORMs write parses and has a type. Their remaining mismatches are
 converters above the driver, listed in `docs/guide/drivers-and-orms.md`: SQLite dates,
