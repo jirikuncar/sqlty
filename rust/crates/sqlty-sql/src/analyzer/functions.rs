@@ -467,6 +467,15 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     ),
     (&["PG_GET_USERBYID"], Sql("NAME")),
     (&["FACTORIAL"], Sql("DECIMAL")),
+    (
+        &[
+            "COT", "SIND", "COSD", "TAND", "COTD", "ASIND", "ACOSD", "ATAND", "ATAN2D", "SINH",
+            "COSH", "TANH", "ASINH", "ACOSH", "ATANH",
+        ],
+        Sql("DOUBLE"),
+    ),
+    (&["PARSE_IDENT"], Sql("ARRAY<TEXT>")),
+    (&["PG_POSTMASTER_START_TIME"], Sql("TIMESTAMPTZ")),
     (&["RANGE_MERGE"], Arg(0)),
     (&["INT4RANGE"], Sql("INT4RANGE")),
     (&["INT8RANGE"], Sql("INT8RANGE")),
