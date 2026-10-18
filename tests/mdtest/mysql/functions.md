@@ -200,6 +200,17 @@ SELECT LAG(id) OVER (ORDER BY id) AS a, LEAD(name, 1, 'x') OVER (ORDER BY id) AS
 -- columns: g: str | None (VARCHAR(50))
 ```
 
+## JSON_TABLE
+
+`JSON_TABLE` takes its columns from its `COLUMNS` clause. A `PATH` column is NULL
+where the document lacks the member; `FOR ORDINALITY` and `EXISTS PATH` never are.
+
+```sql
+SELECT jt.n, jt.x, jt.has FROM JSON_TABLE('[{"x": "a"}, {"y": 1}]', '$[*]' COLUMNS (n FOR ORDINALITY, x VARCHAR(10) PATH '$.x', has INT EXISTS PATH '$.y')) AS jt
+-- columns: n: int (INT)
+-- columns: x: str | None (VARCHAR(10))
+-- columns: has: int (INT)
+
 ## CONVERT and more JSON functions
 
 `CONVERT(x, type)` is a cast; `CONVERT(x USING charset)` keeps the string's type.

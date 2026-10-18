@@ -155,3 +155,13 @@ SELECT generate_series(1, id) AS n, id FROM posts
 -- columns: n: int (None)
 -- columns: id: int (INT)
 ```
+
+## JSON_TABLE
+
+PostgreSQL 17's `JSON_TABLE` takes its columns from its `COLUMNS` clause.
+
+```sql
+SELECT jt.x, jt.n FROM JSON_TABLE('[1, {}]'::jsonb, '$[*]' COLUMNS (n FOR ORDINALITY, x int PATH '$')) AS jt
+-- columns: x: int | None (INT)
+-- columns: n: int (INT)
+```
