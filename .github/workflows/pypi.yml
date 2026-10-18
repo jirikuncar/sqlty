@@ -31,6 +31,7 @@ jobs:
           # Native builds in the pypa images, which ship every CPython release.
           - os: ubuntu-latest
             target: x86_64
+            pr: true
             manylinux: "2_28"
             container: quay.io/pypa/manylinux_2_28_x86_64
           - os: ubuntu-24.04-arm
@@ -49,19 +50,28 @@ jobs:
             target: x86_64
           - os: macos-14
             target: aarch64
+            pr: true
           - os: windows-latest
             target: x64
+            pr: true
           - os: windows-11-arm
             target: aarch64
       fail-fast: false
 
+    # A pull request builds one wheel per OS; a release, or a run by hand, builds all of
+    # them, so the dry run before a release covers every platform.
+    env:
+      SKIP: ${{ github.event_name == 'pull_request' && !matrix.pr }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.SKIP != 'true'
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Set up the supported Pythons
+        if: env.SKIP != 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: |
@@ -69,6 +79,7 @@ jobs:
             3.15
 
       - name: Build wheels
+        if: env.SKIP != 'true'
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
@@ -77,14 +88,14 @@ jobs:
           container: ${{ matrix.container }}
 
       - name: Install uv
-        if: ${{ !contains(matrix.target, 'musl') }}
+        if: ${{ env.SKIP != 'true' && !contains(matrix.target, 'musl') }}
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         # A release builds from a clean cache: one a pull request wrote could poison it.
         with:
           enable-cache: false
 
       - name: Import the wheel on each Python
-        if: ${{ !contains(matrix.target, 'musl') }}
+        if: ${{ env.SKIP != 'true' && !contains(matrix.target, 'musl') }}
         shell: bash
         run: |
           for v in 3.14 3.15; do
@@ -96,14 +107,17 @@ jobs:
           done
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: env.SKIP != 'true'
         with:
           python-version: "3.12"
 
       - name: Check sqlty_magic.pth is in the wheel root and RECORD
+        if: env.SKIP != 'true'
         shell: bash
         run: python tests/check_dist.py dist/*.whl
 
       - name: Upload wheels
+        if: env.SKIP != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheels-${{ strategy.job-index }}
