@@ -83,6 +83,11 @@ pub(super) struct Facts {
 }
 
 impl Facts {
+    /// Add the relations the outer joins of `from` may fill with NULLs.
+    pub(super) fn join(&mut self, from: &[TableWithJoins], dialect: SqlDialect) {
+        Rc::make_mut(&mut self.null_extended).extend(null_extended(from, dialect));
+    }
+
     /// Whether the relation `reference` can be a row of NULLs. A condition NULL cannot
     /// satisfy on one of its columns proves the row is there.
     pub(super) fn is_null_extended(&self, reference: &str) -> bool {
@@ -373,7 +378,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn select_facts(&self, select: &Select, scope: &Scope) -> Facts {
         let mut facts = self.facts.clone();
         facts.without(scope);
-        Rc::make_mut(&mut facts.null_extended).extend(null_extended(&select.from, self.dialect));
+        facts.join(&select.from, self.dialect);
         facts.grouped = is_grouped(select);
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {

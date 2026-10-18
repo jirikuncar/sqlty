@@ -14,13 +14,13 @@ use crate::json::JsonShape;
 use crate::values;
 
 use super::dialect::SqlDialect;
-use super::dml::{dml_scope, returning};
+use super::dml::{dml_scope, joined_tables, returning};
 use super::explain::Explained;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
-use super::scope::{Scope, Virtuals};
+use super::scope::{Scope, Table, Virtuals};
 use super::typed::Typed;
 use super::{Inferred, SchemaData};
 
@@ -139,8 +139,27 @@ impl<'a> Analyzer<'a> {
                 match returning(stmt) {
                     Some(items) => {
                         let scope = dml_scope(stmt, self.dialect);
-                        let mut analyzer = self.clone();
-                        analyzer.facts = self.written_facts(stmt, &scope);
+                        // PostgreSQL's RETURNING also reads the tables of FROM and USING, which
+                        // are inner joined to the target; SQLite's reads the target only.
+                        let joined = joined_tables(stmt)
+                            .filter(|_| self.dialect == SqlDialect::Postgres)
+                            .and_then(|from| Some((from, self.scope_of(from).ok()?)));
+                        let (analyzer, scope) = match joined {
+                            Some((from, (mut analyzer, sources))) => {
+                                let targets = scope
+                                    .into_iter()
+                                    .filter(|source| source.table != Table::ExtraSources);
+                                let scope: Scope = targets.chain(sources).collect();
+                                analyzer.facts = analyzer.written_facts(stmt, &scope);
+                                analyzer.facts.join(from, self.dialect);
+                                (analyzer, scope)
+                            }
+                            None => {
+                                let mut analyzer = self.clone();
+                                analyzer.facts = self.written_facts(stmt, &scope);
+                                (analyzer, scope)
+                            }
+                        };
                         analyzer.projection(items, &scope, None).map(non_empty)
                     }
                     None => Ok(None),
