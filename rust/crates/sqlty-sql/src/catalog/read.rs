@@ -134,6 +134,12 @@ pub(super) fn read_statements(
                     stmt.name_parts_after("function"),
                 )),
             }
+        } else if let Some(table) = stmt
+            .before_insert_trigger()
+            .filter(|_| matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql))
+        {
+            // A SQLite trigger cannot change the row it fires for.
+            push(OpKind::InsertTrigger(table));
         } else if matches!(
             dialect,
             SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
