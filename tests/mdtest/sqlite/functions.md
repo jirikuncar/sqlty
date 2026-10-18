@@ -176,6 +176,27 @@ SELECT id & 3 AS a, id | 4 AS b, ~id AS c, name & 1 AS d, note | 1 AS e FROM eve
 -- columns: e: int | None (BIGINT)
 ```
 
+## Branches of different types
+
+SQLite gives an expression no type: a `CASE` returns whichever branch's value
+runs, so branches of different types give their union. Numbers widen.
+`ceil` and `floor` return an integer argument as it is.
+
+```sql
+SELECT CASE WHEN id > 1 THEN id ELSE name END AS a, coalesce(note, ratio) AS b, iif(id > 1, id, ratio) AS c, max(name, id) AS d, ceil(id) AS e, floor(ratio) AS f FROM events
+-- columns: a: int | str (None)
+-- columns: b: str | float (None)
+-- columns: c: float (FLOAT)
+-- columns: d: str | int (None)
+-- columns: e: int (INT)
+-- columns: f: float (DOUBLE)
+```
+
+```sql
+SELECT id AS a FROM events UNION ALL SELECT name FROM events
+-- columns: a: int | str (None)
+```
+
 ## Subqueries without an alias
 
 SQLite reads a subquery in `FROM` without an alias; its columns are referenced

@@ -147,6 +147,21 @@ fn significant(piece: &Piece) -> bool {
 /// One statement of the schema: the pieces between two `;`.
 pub(crate) struct Statement<'a>(Vec<Piece<'a>>);
 
+/// A `BEFORE ... FOR EACH ROW` trigger, which may change each row it fires for.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RowTrigger {
+    pub name: Vec<String>,
+    pub table: Vec<String>,
+    pub events: RowEvents,
+}
+
+/// The statements a row trigger fires for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RowEvents {
+    pub insert: bool,
+    pub update: bool,
+}
+
 impl Statement<'_> {
     pub(crate) fn sql(&self) -> String {
         render(&self.0).trim().to_string()
@@ -323,9 +338,9 @@ impl Statement<'_> {
         (!name.is_empty()).then_some((kind, name, action))
     }
 
-    /// The table of a `CREATE TRIGGER ... BEFORE INSERT ... ON table ... FOR EACH ROW`: a
-    /// trigger that may set the columns of each row it inserts.
-    pub(crate) fn before_insert_trigger(&self) -> Option<Vec<String>> {
+    /// A `CREATE TRIGGER name BEFORE INSERT OR UPDATE ... ON table ... FOR EACH ROW`: a
+    /// trigger that may set the columns of each row it inserts or updates.
+    pub(crate) fn before_row_trigger(&self) -> Option<RowTrigger> {
         let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
         let mut at = pieces.iter().position(|p| is_word(p, "trigger"))? + 1;
         // Not the first word: MySQL's `DEFINER = ...`, or a `DELIMITER //` line before it.
@@ -338,7 +353,8 @@ impl Statement<'_> {
         {
             at += 3;
         }
-        at += name_parts(&pieces[at..]).1;
+        let (name, used) = name_parts(&pieces[at..]);
+        at += used;
         if !pieces.get(at).is_some_and(|p| is_word(p, "before")) {
             return None;
         }
@@ -346,9 +362,19 @@ impl Statement<'_> {
         let for_each_row = pieces[on..]
             .windows(3)
             .any(|w| is_word(w[0], "for") && is_word(w[1], "each") && is_word(w[2], "row"));
-        (pieces[at..on].iter().any(|p| is_word(p, "insert")) && for_each_row)
-            .then(|| name_parts(&pieces[on + 1..]).0)
-            .filter(|name| !name.is_empty())
+        let fires_on = |event| pieces[at..on].iter().any(|p| is_word(p, event));
+        let events = RowEvents {
+            insert: fires_on("insert"),
+            update: fires_on("update"),
+        };
+        let table = name_parts(&pieces[on + 1..]).0;
+        (for_each_row && (events.insert || events.update) && !table.is_empty()).then_some(
+            RowTrigger {
+                name,
+                table,
+                events,
+            },
+        )
     }
 
     /// The name parts after the first `keyword` (`function` in `CREATE FUNCTION a.f(...)`).
