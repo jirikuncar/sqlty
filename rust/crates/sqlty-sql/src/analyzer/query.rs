@@ -4,8 +4,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use sqlparser::ast::{
-    Expr, JoinConstraint, JoinOperator, Query, Select, SelectItem, SelectItemQualifiedWildcardKind,
-    SetExpr, Statement, TableAlias, TableWithJoins, Value,
+    Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderByKind, Query, Select, SelectItem,
+    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins, Value,
 };
 
 use crate::catalog::fold;
@@ -231,8 +231,32 @@ impl<'a> Analyzer<'a> {
             | SetExpr::Update(stmt)
             | SetExpr::Delete(stmt)
             | SetExpr::Merge(stmt) => self.statement_columns(stmt),
-            body => self.set_columns(body),
+            body => {
+                if let (SetExpr::Select(select), Some(order_by)) = (body, &query.order_by) {
+                    if let OrderByKind::Expressions(keys) = &order_by.kind {
+                        let keys: Vec<&Expr> = keys.iter().map(|key| &key.expr).collect();
+                        self.check_clause_names(select, &keys)?;
+                    }
+                }
+                self.set_columns(body)
+            }
         }
+    }
+
+    /// Checks the names that `ORDER BY` keys of `select` read, as the `WHERE` clause's
+    /// are; a result column's name or position is not a table column.
+    fn check_clause_names(&self, select: &Select, keys: &[&Expr]) -> Inferred<()> {
+        if !self.diag.enabled() {
+            return Ok(());
+        }
+        let mut quiet = self.clone();
+        quiet.diag = Diagnostics::default();
+        let (mut analyzer, scope) = quiet.scope_of(&select.from)?;
+        analyzer.diag = self.diag.clone();
+        for key in keys.iter().filter(|key| !names_result_column(key, select)) {
+            analyzer.check_references(key, &scope);
+        }
+        Ok(())
     }
 
     pub(super) fn select_columns(&self, select: &Select) -> Inferred<Vec<Column>> {
@@ -252,8 +276,26 @@ impl<'a> Analyzer<'a> {
                     | JoinOperator::FullOuter(JoinConstraint::On(on)) => Some(on),
                     _ => None,
                 });
-            for condition in conditions.chain(&select.selection) {
+            let grouping = match &select.group_by {
+                GroupByExpr::Expressions(keys, _) => keys.as_slice(),
+                GroupByExpr::All(_) => &[],
+            };
+            let keys = grouping
+                .iter()
+                .flat_map(|key| match key {
+                    Expr::Rollup(sets) | Expr::Cube(sets) | Expr::GroupingSets(sets) => {
+                        sets.iter().flatten().collect()
+                    }
+                    Expr::Tuple(exprs) => exprs.iter().collect(),
+                    key => vec![key],
+                })
+                .filter(|key| !names_result_column(key, select));
+            for condition in conditions.chain(&select.selection).chain(keys) {
                 analyzer.check_references(condition, &scope);
+            }
+            // MySQL and SQLite also read result column names in HAVING.
+            if let (Some(having), SqlDialect::Postgres) = (&select.having, self.dialect) {
+                analyzer.check_references(having, &scope);
             }
             analyzer.check_grouping(select, &scope);
         }
@@ -585,6 +627,21 @@ pub(super) fn shorten(text: &str) -> String {
     match text.char_indices().nth(MAX) {
         Some((end, _)) => format!("{}...", &text[..end]),
         None => text.to_string(),
+    }
+}
+
+/// Whether `key` is a result column of `select` by position (`ORDER BY 1`) or by name
+/// (`ORDER BY total` for `sum(x) AS total`), which `GROUP BY` and `ORDER BY` accept.
+fn names_result_column(key: &Expr, select: &Select) -> bool {
+    match key {
+        Expr::Value(value) => matches!(value.value, Value::Number(..)),
+        Expr::Identifier(ident) => select.projection.iter().any(|item| match item {
+            SelectItem::ExprWithAlias { alias, .. } => {
+                alias.value.eq_ignore_ascii_case(&ident.value)
+            }
+            _ => false,
+        }),
+        _ => false,
     }
 }
 

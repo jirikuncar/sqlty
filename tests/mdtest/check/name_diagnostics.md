@@ -61,6 +61,29 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### GROUP BY, HAVING and ORDER BY
+
+Their keys are checked like `WHERE`, except a result column named by its alias or
+position, which `GROUP BY` and `ORDER BY` accept. PostgreSQL reads no aliases in `HAVING`.
+
+```toml
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+```python
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+a = "--sql\nSELECT id FROM users ORDER BY nmae"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+b = "--sql\nSELECT name FROM users GROUP BY name, nmae"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+c = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING count(nope) > 1"
+# error: [unknown-column] "column `n` does not exist in `users`"
+d = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING n > 1"
+e = "--sql\nSELECT name AS label, count(*) AS n FROM users GROUP BY label ORDER BY n DESC, 1"
+f = "--sql\nSELECT u.name FROM users u ORDER BY u.id"
+```
+
 #### INSERT, UPDATE and DELETE
 
 A statement that returns no rows is checked too: the table it writes, the

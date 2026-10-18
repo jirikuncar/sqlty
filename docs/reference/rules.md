@@ -567,7 +567,8 @@ reported.
 ### unknown-column
 
 Default: error. A column that its table does not have, in the select list,
-`WHERE`, `JOIN ... ON` and what `INSERT`, `UPDATE` and `DELETE` write.
+`WHERE`, `JOIN ... ON`, `GROUP BY`, `HAVING`, `ORDER BY` and what `INSERT`,
+`UPDATE` and `DELETE` write.
 
 ### ambiguous-column
 
