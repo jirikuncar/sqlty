@@ -211,3 +211,17 @@ SELECT jt.n, jt.x, jt.has FROM JSON_TABLE('[{"x": "a"}, {"y": 1}]', '$[*]' COLUM
 -- columns: x: str | None (VARCHAR(10))
 -- columns: has: int (INT)
 ```
+
+## CONVERT and more JSON functions
+
+`CONVERT(x, type)` is a cast; `CONVERT(x USING charset)` keeps the string's type.
+
+```sql
+SELECT CONVERT(name, CHAR) AS a, CONVERT(id, SIGNED) AS b, CONVERT(name USING utf8mb4) AS c, ANY_VALUE(name) AS d, JSON_SEARCH(doc, 'one', 'a') AS e, JSON_PRETTY(doc) AS f FROM events
+-- columns: a: str (CHAR)
+-- columns: b: int (BIGINT)
+-- columns: c: str (VARCHAR(50))
+-- columns: d: str | None (VARCHAR(50))
+-- columns: e: typing.Any (JSON)
+-- columns: f: str | None (TEXT)
+```

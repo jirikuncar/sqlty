@@ -102,6 +102,14 @@ SELECT json_group_array(id) AS a FROM events
 -- columns: a: str | None (TEXT)
 ```
 
+`jsonb` stores JSON as a blob; `json_error_position` is where the text stops being JSON.
+
+```sql
+SELECT jsonb(note) AS a, json_error_position(note) AS b FROM events
+-- columns: a: bytes | None (BLOB)
+-- columns: b: int | None (BIGINT)
+```
+
 ## Window functions and NULLIF
 
 ```sql
