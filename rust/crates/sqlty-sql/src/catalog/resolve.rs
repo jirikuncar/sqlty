@@ -10,6 +10,7 @@ use rustc_hash::FxHashMap;
 use sqlparser::ast::{ArrayElemTypeDef, DataType, EnumMember};
 
 use crate::analyzer::{canonical_type, typed, SqlDialect};
+use crate::ddl::RowEvents;
 use crate::values::{self, Value};
 
 use super::columns::{narrowed, Checks};
@@ -140,7 +141,7 @@ impl Loader {
                         let rows = type_key(ty, dialect)
                             .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                             .and_then(|key| match relations.get(&key) {
-                                Some(Relation::Table(columns, _)) => Some(columns.clone()),
+                                Some(Relation::Table(columns, ..)) => Some(columns.clone()),
                                 _ => None,
                             });
                         match rows {
@@ -448,6 +449,13 @@ impl<'a> Resolver<'a> {
                     })
                     .cloned()
                     .collect(),
+                table
+                    .row_triggers
+                    .iter()
+                    .fold(RowEvents::default(), |all, (_, events)| RowEvents {
+                        insert: all.insert || events.insert,
+                        update: all.update || events.update,
+                    }),
             ),
             Rel::View(columns) => Relation::View(columns.clone()),
         }

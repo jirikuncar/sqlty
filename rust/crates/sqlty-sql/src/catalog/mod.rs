@@ -44,6 +44,7 @@ use std::sync::{Arc, LazyLock};
 use sqlparser::ast::DataType;
 
 use crate::analyzer::{Column, SqlDialect};
+use crate::ddl::RowEvents;
 
 use names::lookup_key;
 use resolve::Resolver;
@@ -118,8 +119,9 @@ pub(crate) struct Function {
 
 #[derive(Clone, Debug)]
 enum Relation {
-    /// Columns, and the groups of them a `CHECK` keeps at least one of non-null.
-    Table(Vec<SchemaColumn>, Vec<Vec<String>>),
+    /// Columns, the groups of them a `CHECK` keeps at least one of non-null, and the
+    /// statements a `BEFORE` row trigger fires for.
+    Table(Vec<SchemaColumn>, Vec<Vec<String>>, RowEvents),
     View(Vec<Column>),
     /// Defined, but its shape is not known.
     Unknown,
@@ -258,7 +260,7 @@ impl Catalog {
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
-            Relation::Table(columns, _) => Some(columns),
+            Relation::Table(columns, ..) => Some(columns),
             _ => None,
         }
     }
@@ -267,8 +269,17 @@ impl Catalog {
     /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
     pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
         match self.find(name) {
-            Some(Relation::Table(_, groups)) => groups,
+            Some(Relation::Table(_, groups, _)) => groups,
             _ => &[],
+        }
+    }
+
+    /// The statements a `BEFORE ... FOR EACH ROW` trigger of the table `name` fires for:
+    /// such a trigger may change any column of the row a `RETURNING` clause returns.
+    pub(crate) fn row_triggers(&self, name: &str) -> RowEvents {
+        match self.find(name) {
+            Some(Relation::Table(_, _, events)) => *events,
+            _ => RowEvents::default(),
         }
     }
 
