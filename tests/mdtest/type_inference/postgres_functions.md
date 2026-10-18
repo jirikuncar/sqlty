@@ -52,6 +52,36 @@ SELECT pg_try_advisory_lock(1) AS a, gen_random_uuid() AS b, strpos(name, 'a') A
 -- columns: d: float (DOUBLE)
 ```
 
+## random with bounds
+
+PostgreSQL 17's `random(min, max)` returns the type of its bounds.
+
+```sql
+SELECT random(1, 6) AS a, random(1, big) AS b, random(0.0, 1.5) AS c FROM users
+-- columns: a: int (INT)
+-- columns: b: int | None (BIGINT)
+-- columns: c: decimal.Decimal (DECIMAL)
+```
+
+## Functions added in PostgreSQL 14 to 17
+
+`uuid_extract_version` is NULL for a UUID of another variant, and
+`uuid_extract_timestamp` for a version without a timestamp.
+
+```sql
+SELECT trim_array(tags, 1) AS a, array_sample(tags, 1) AS b, array_shuffle(tags) AS c, random_normal() AS d, to_bin(id) AS e, to_oct(id) AS f, date_add(created_at, INTERVAL '1 day') AS g, date_subtract(created_at, INTERVAL '1 day', 'UTC') AS h, uuid_extract_version(gen_random_uuid()) AS i, uuid_extract_timestamp(gen_random_uuid()) AS j FROM users
+-- columns: a: list[str] | None (ARRAY<TEXT>)
+-- columns: b: list[str] | None (ARRAY<TEXT>)
+-- columns: c: list[str] | None (ARRAY<TEXT>)
+-- columns: d: float (DOUBLE)
+-- columns: e: str (TEXT)
+-- columns: f: str (TEXT)
+-- columns: g: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: h: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: i: int | None (SMALLINT)
+-- columns: j: datetime.datetime | None (TIMESTAMPTZ)
+```
+
 ## SUM widens like PostgreSQL
 
 ```sql

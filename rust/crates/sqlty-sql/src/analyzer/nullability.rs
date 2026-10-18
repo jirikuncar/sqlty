@@ -446,7 +446,7 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotUnknown(_)
             | Expr::IsDistinctFrom(..)
             | Expr::IsNotDistinctFrom(..) => Nullability::NonNull,
-            Expr::UnaryOp { expr: inner, .. } => of(inner),
+            Expr::UnaryOp { expr: inner, .. } | Expr::IsJson { expr: inner, .. } => of(inner),
             Expr::BinaryOp { left, op, right } => match self.json_extract(expr, scope) {
                 // A member every object has is there whenever the object is.
                 Some(value) if !value.missing => of(left),
@@ -898,6 +898,8 @@ impl<'a> Analyzer<'a> {
             "CONCAT" => any_nullable(args.iter().map(|arg| of(arg))),
             // Only a NULL separator gives NULL.
             "CONCAT_WS" => first(),
+            // PostgreSQL 17's `random(min, max)` is strict.
+            "RANDOM" if !args.is_empty() => any_nullable(args.iter().map(|arg| of(arg))),
             _ if info.is_some_and(|info| info.never_null) => Nullability::NonNull,
             _ if info.is_some_and(|info| info.returns(self.dialect).is_some())
                 && all_positional =>

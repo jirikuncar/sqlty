@@ -61,6 +61,9 @@ pub(super) enum Returns {
     /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
     /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
     Series,
+    /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
+    /// for [`Returns::Series`].
+    Random,
 }
 
 use Returns::{Arg, Elem, Sql};
@@ -153,6 +156,8 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "MD5",
             "TO_CHAR",
             "TO_HEX",
+            "TO_BIN",
+            "TO_OCT",
             "CHR",
             "QUOTE_IDENT",
             "QUOTE_LITERAL",
@@ -240,9 +245,9 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("BIGINT"),
     ),
+    (&["RANDOM"], Returns::Random),
     (
         &[
-            "RANDOM",
             "DATE_PART",
             "PI",
             "DEGREES",
@@ -347,6 +352,12 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         &["GEN_RANDOM_UUID", "UUID_GENERATE_V4", "UUID_GENERATE_V1"],
         Sql("UUID"),
     ),
+    (&["UUID_EXTRACT_VERSION"], Sql("SMALLINT")),
+    (
+        &["UUID_EXTRACT_TIMESTAMP", "DATE_ADD", "DATE_SUBTRACT"],
+        Sql("TIMESTAMPTZ"),
+    ),
+    (&["RANDOM_NORMAL"], Sql("DOUBLE")),
     (
         &[
             "SHA224",
@@ -394,9 +405,17 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_STRIP_NULLS",
             "JSON_EXTRACT_PATH",
             "JSON_ARRAY_ELEMENTS",
+            "JSON",
+            "JSON_ARRAY",
+            "JSON_SCALAR",
+            "JSON_ARRAYAGG",
+            "JSON_OBJECTAGG",
         ],
         Sql("JSON"),
     ),
+    (&["JSON_VALUE", "JSON_SERIALIZE"], Sql("TEXT")),
+    (&["JSON_QUERY"], Sql("JSONB")),
+    (&["JSON_EXISTS"], Sql("BOOLEAN")),
     (
         &[
             "JSONB_BUILD_ARRAY",
@@ -448,6 +467,9 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "ARRAY_CAT",
             "ARRAY_REMOVE",
             "ARRAY_REPLACE",
+            "TRIM_ARRAY",
+            "ARRAY_SAMPLE",
+            "ARRAY_SHUFFLE",
         ],
         Arg(0),
     ),
@@ -659,7 +681,8 @@ impl<'a> Analyzer<'a> {
                     _ => Ok(Typed::UNKNOWN),
                 }
             }
-            Returns::Series => {
+            Returns::Random if args.is_empty() => sql("DOUBLE"),
+            Returns::Random | Returns::Series => {
                 let bounds = [arg(0)?, arg(1)?];
                 match common_of(bounds, self.dialect)
                     .as_ref()
