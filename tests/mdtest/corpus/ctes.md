@@ -28,8 +28,6 @@ SELECT * FROM user_ids WHERE user_ids.id = $1
 
 ## Recursive CTE with a LATERAL step and TABLE
 
-<!-- mdtest:xfail the TABLE name statement is not analyzed, the row type is None -->
-
 Both terms produce only NOT NULL columns, `CROSS JOIN LATERAL` never null-extends, and
 `TABLE cte` is `SELECT * FROM cte`.
 

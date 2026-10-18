@@ -97,5 +97,5 @@ CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';
 
 ```sql
 SELECT a FROM v
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```

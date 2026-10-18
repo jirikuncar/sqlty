@@ -46,8 +46,6 @@ SELECT |/ n AS root_n, |/ m AS root_m FROM test_sqrt
 
 ## User-defined function
 
-<!-- mdtest:xfail a user-defined function result is typed non-null, str instead of str | None -->
-
 A PL/pgSQL function can `RETURN NULL` for any declared return type, so its result is
 nullable.
 

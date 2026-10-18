@@ -438,3 +438,52 @@ FROM users
 WHERE id IN (SELECT user_id FROM active_sessions)
 -- inferred: tuple[int, str]
 ```
+
+## The TABLE command
+
+`TABLE name` is `SELECT * FROM name`, wherever a query can start: alone, after a `WITH`
+or a set operator, and in parentheses.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE tags (id INTEGER PRIMARY KEY, label TEXT);
+```
+
+```sql
+TABLE tags ORDER BY id LIMIT 1
+-- inferred: tuple[int, str | None]
+```
+
+```sql
+WITH named AS (SELECT * FROM tags WHERE label IS NOT NULL) TABLE named
+-- inferred: tuple[int, str]
+```
+
+```sql
+SELECT t.label FROM (TABLE tags) t
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT id, label FROM tags UNION TABLE tags
+-- inferred: tuple[int, str | None]
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+TABLE tags
+-- inferred: tuple[int, str | None]
+```
