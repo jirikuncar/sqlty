@@ -90,7 +90,7 @@ UPDATE users SET nick = 'x' WHERE id = 1 RETURNING id, nick
 ```
 
 ```sql
-DELETE FROM users WHERE age IS NOT NULL RETURNING id, age
+DELETE FROM users WHERE id = 1 RETURNING id, age
 -- inferred: tuple[int, int | None]
 ```
 
@@ -146,6 +146,26 @@ RETURNING nick, age
 ```sql
 INSERT INTO users (id, name, nick) VALUES (1, 'a', 'b') ON CONFLICT DO NOTHING RETURNING nick
 -- inferred: tuple[str]
+```
+
+## RETURNING after WHERE
+
+`DELETE` returns the rows its `WHERE` let through. `UPDATE` returns them as `SET`
+leaves them: a column it sets is what it is set to, whatever `WHERE` proved.
+
+```sql
+DELETE FROM users WHERE nick = %(nick)s AND age IS DISTINCT FROM NULL RETURNING nick, age
+-- inferred: tuple[str, int]
+```
+
+```sql
+UPDATE users SET name = nick WHERE nick IS NOT NULL RETURNING name, nick
+-- inferred: tuple[str, str]
+```
+
+```sql
+UPDATE users SET nick = NULL WHERE nick IS NOT NULL RETURNING nick
+-- inferred: tuple[str | None]
 ```
 
 ## ON CONFLICT

@@ -14,14 +14,15 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Select, TableFactor, TableWithJoins,
-    UnaryOperator,
+    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Query, Select, SetExpr, TableFactor,
+    TableWithJoins, UnaryOperator,
 };
 
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
-use super::nullability::{Facts, Nullability};
+use super::json::is_null_literal;
+use super::nullability::{rows_pass_where, Facts, Nullability};
 use super::query::Analyzer;
 use super::registry::lookup;
 use super::scope::Scope;
@@ -69,6 +70,23 @@ impl Learned {
             columns: columns.into_iter().collect(),
             ..Learned::default()
         }
+    }
+
+    /// This, minus what it says about the `(reference, column)` pairs of `columns`, which
+    /// an UPDATE overwrites. Expressions may read them, so none is kept.
+    pub(super) fn without(mut self, columns: &[(String, String)]) -> Self {
+        if columns.is_empty() {
+            return self;
+        }
+        self.columns.retain(|pair| !columns.contains(pair));
+        self.null.retain(|pair| !columns.contains(pair));
+        self.values.retain(|(r, c, _)| {
+            !columns
+                .iter()
+                .any(|(reference, column)| r == reference && c == column)
+        });
+        self.exprs.clear();
+        self
     }
 
     /// Whether this limits the values of a column.
@@ -336,8 +354,22 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(inner, &list, scope));
                 learned
             }
+            // `x IS DISTINCT FROM NULL` is `x IS NOT NULL`; against anything else, `x` may
+            // be NULL whether it holds or not.
+            Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right)
+                if truth == matches!(cond, Expr::IsDistinctFrom(..)) =>
+            {
+                match (is_null_literal(left), is_null_literal(right)) {
+                    (false, true) => self.proven(left, scope),
+                    (true, false) => self.proven(right, scope),
+                    _ => Learned::default(),
+                }
+            }
             Expr::AllOp { .. } | Expr::IsNotDistinctFrom(..) | Expr::IsDistinctFrom(..) => {
                 Learned::default()
+            }
+            Expr::Exists { subquery, negated } if truth != *negated => {
+                self.learn_exists(subquery, scope)
             }
             Expr::Exists { .. } => Learned::default(),
             // A condition that is true, or false, is not NULL, and neither are the operands
@@ -382,6 +414,44 @@ impl<'a> Analyzer<'a> {
             self.learn(cond, false, scope)
         } else {
             Learned::default()
+        }
+    }
+
+    /// What a correlated `EXISTS (SELECT ... WHERE cond)` that holds proves about the
+    /// relations of `scope`: what `cond` proves about them, as some row satisfied it.
+    fn learn_exists(&self, query: &Query, scope: &Scope) -> Learned {
+        let SetExpr::Select(select) = query.body.as_ref() else {
+            return Learned::default();
+        };
+        let Some(selection) = select
+            .selection
+            .as_ref()
+            .filter(|_| rows_pass_where(select))
+        else {
+            return Learned::default();
+        };
+        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from) else {
+            return Learned::default();
+        };
+        let outer = |reference: &String| {
+            !sources.iter().any(|source| source.reference == *reference)
+                && scope.iter().any(|source| source.reference == *reference)
+        };
+        let learned = inner.learn(selection, true, &sources);
+        Learned {
+            columns: learned
+                .columns
+                .into_iter()
+                .filter(|(r, _)| outer(r))
+                .collect(),
+            present: learned.present.into_iter().filter(|r| outer(r)).collect(),
+            exprs: FxHashSet::default(),
+            values: learned
+                .values
+                .into_iter()
+                .filter(|(r, _, _)| outer(r))
+                .collect(),
+            null: learned.null.into_iter().filter(|(r, _)| outer(r)).collect(),
         }
     }
 

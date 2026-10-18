@@ -40,7 +40,7 @@ fn string_literal(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn is_null_literal(expr: &Expr) -> bool {
+pub(super) fn is_null_literal(expr: &Expr) -> bool {
     match expr {
         Expr::Nested(inner) => is_null_literal(inner),
         Expr::Value(value) => matches!(value.value, Value::Null),

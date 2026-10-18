@@ -269,6 +269,19 @@ fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
     }
 }
 
+/// Whether every row of `select` comes from rows its WHERE lets through: not so for an
+/// aggregate without GROUP BY, which returns a row when none match, or a HAVING.
+pub(super) fn rows_pass_where(select: &Select) -> bool {
+    select.having.is_none()
+        && (is_grouped(select)
+            || !select.projection.iter().any(|item| match item {
+                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                    contains_aggregate(expr)
+                }
+                _ => false,
+            }))
+}
+
 /// Whether `expr` holds an aggregate call outside any window or subquery.
 fn contains_aggregate(expr: &Expr) -> bool {
     match expr {
