@@ -473,6 +473,18 @@ from sqlty import SQL
 a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users GROUP BY name")
 ```
 
+#### Named arguments
+
+In `make_interval(days => 3)`, `days` names a parameter of the function, not a column.
+The value after `=>` is still checked.
+
+```python
+a = "--sql\nDELETE FROM users WHERE now() - make_interval(days => 3) > now()"
+b = "--sql\nUPDATE users SET name = 'a' WHERE now() < now() + make_interval(secs => id)"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+c = "--sql\nDELETE FROM users WHERE now() - make_interval(days => nope) > now()"
+```
+
 ## Without a schema nothing is guessed
 
 ```toml
