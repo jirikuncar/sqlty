@@ -504,16 +504,16 @@ impl<'a> Analyzer<'a> {
     /// `json_to_recordset(x) AS t(a int, b text)`, and its reference. Each can be NULL: a
     /// record that lacks the member has a NULL there.
     fn defined_columns(&self, factor: &TableFactor) -> Option<(String, Vec<Column>)> {
-        let alias = match factor {
-            TableFactor::Table {
-                alias: Some(alias),
-                args: Some(_),
-                ..
-            }
-            | TableFactor::Function {
-                alias: Some(alias), ..
-            } => alias,
-            _ => return None,
+        let (TableFactor::Table {
+            alias: Some(alias),
+            args: Some(_),
+            ..
+        }
+        | TableFactor::Function {
+            alias: Some(alias), ..
+        }) = factor
+        else {
+            return None;
         };
         if alias.columns.is_empty() {
             return None;
