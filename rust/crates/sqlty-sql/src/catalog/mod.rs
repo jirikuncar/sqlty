@@ -117,11 +117,29 @@ pub(crate) struct Function {
     pub returns: FunctionReturn,
 }
 
+/// A foreign key that holds for every row: `columns` of a table equal `referred` of
+/// the table `table` (a catalog key), or one of them is NULL.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ForeignKey {
+    pub columns: Vec<String>,
+    pub table: String,
+    pub referred: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct TableRelation {
+    columns: Vec<SchemaColumn>,
+    /// Groups of columns a `CHECK` keeps at least one of non-null.
+    nonnull_groups: Vec<Vec<String>>,
+    /// The statements a `BEFORE` row trigger fires for.
+    row_triggers: RowEvents,
+    foreign_keys: Vec<ForeignKey>,
+    row_security: bool,
+}
+
 #[derive(Clone, Debug)]
 enum Relation {
-    /// Columns, the groups of them a `CHECK` keeps at least one of non-null, and the
-    /// statements a `BEFORE` row trigger fires for.
-    Table(Vec<SchemaColumn>, Vec<Vec<String>>, RowEvents),
+    Table(TableRelation),
     View(Vec<Column>),
     /// Defined, but its shape is not known.
     Unknown,
@@ -260,7 +278,7 @@ impl Catalog {
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
-            Relation::Table(columns, ..) => Some(columns),
+            Relation::Table(table) => Some(&table.columns),
             _ => None,
         }
     }
@@ -269,7 +287,7 @@ impl Catalog {
     /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
     pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
         match self.find(name) {
-            Some(Relation::Table(_, groups, _)) => groups,
+            Some(Relation::Table(table)) => &table.nonnull_groups,
             _ => &[],
         }
     }
@@ -278,9 +296,27 @@ impl Catalog {
     /// such a trigger may change any column of the row a `RETURNING` clause returns.
     pub(crate) fn row_triggers(&self, name: &str) -> RowEvents {
         match self.find(name) {
-            Some(Relation::Table(_, _, events)) => *events,
+            Some(Relation::Table(table)) => table.row_triggers,
             _ => RowEvents::default(),
         }
+    }
+
+    /// The catalog key of the table `name`, the same for every spelling of it.
+    pub(crate) fn table_id(&self, name: &str) -> Option<&str> {
+        let key = lookup_key(&self.relations, &self.search_path, self.norm(name))?;
+        matches!(self.relations.get(key), Some(Relation::Table(_))).then_some(key)
+    }
+
+    /// The foreign keys of the table `name` that hold for every row and that a query sees
+    /// hold: those referencing a table without row-level security.
+    pub(crate) fn foreign_keys(&self, name: &str) -> impl Iterator<Item = &ForeignKey> {
+        let keys = match self.find(name) {
+            Some(Relation::Table(table)) => table.foreign_keys.as_slice(),
+            _ => &[],
+        };
+        keys.iter().filter(|fk| {
+            matches!(self.relations.get(&fk.table), Some(Relation::Table(target)) if !target.row_security)
+        })
     }
 
     /// Whether the schema defines a table or view `name`, whatever is known of its shape.

@@ -93,7 +93,12 @@ What makes a column nullable or not:
   `CHECK (num_nonnulls(a, b) = 1)` or `CHECK (a IS NOT NULL OR b IS NOT NULL)` makes
   `COALESCE(a, b)` non-null.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
-  is nullable.
+  is nullable. A `LEFT JOIN` from a table to the one its `NOT NULL` foreign key
+  references, on exactly the key's columns, always matches. That excludes a `DEFERRABLE`
+  key, a key added `NOT VALID` and not validated, a referenced table with row-level
+  security, SQLite, and MySQL tables of an engine other than InnoDB. A database that
+  skips foreign key checks (PostgreSQL's `session_replication_role = replica`, MySQL's
+  `foreign_key_checks = 0`) can break it.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
   `IS NOT NULL`, comparisons, `IN`, `BETWEEN`, `LIKE`, a strict function such as
   `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` proves only what both sides prove,
