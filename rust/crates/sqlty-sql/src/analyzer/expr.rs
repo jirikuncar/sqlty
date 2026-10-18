@@ -267,7 +267,7 @@ impl<'a> Analyzer<'a> {
 
     /// `CAST(x AS type)`: the type as the schema resolves it, with the reason when it has no
     /// Python type.
-    fn cast_typed(&self, data_type: &DataType) -> Typed {
+    pub(super) fn cast_typed(&self, data_type: &DataType) -> Typed {
         let (sql_type, python_type, values) = self.schema.resolve_type(data_type, self.dialect);
         let typed = match python_type {
             // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its
