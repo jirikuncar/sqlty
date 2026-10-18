@@ -4,7 +4,7 @@
 
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{Expr, Query, Visit, Visitor};
+use sqlparser::ast::{Expr, FunctionArg, FunctionArguments, Query, Visit, Visitor};
 
 use super::memo::Reporting;
 use super::query::Analyzer;
@@ -29,6 +29,7 @@ impl Analyzer<'_> {
             scope,
             aliases,
             depth: 0,
+            parameter_names: Vec::new(),
         };
         let _ = expr.visit(&mut visitor);
     }
@@ -41,6 +42,9 @@ struct References<'a, 's> {
     aliases: &'a [&'a str],
     /// How many subqueries deep the visit is; only the outermost names are resolved here.
     depth: usize,
+    /// The names of named arguments seen so far, as in `make_interval(days => 3)`: parameters,
+    /// not columns.
+    parameter_names: Vec<*const Expr>,
 }
 
 impl Visitor for References<'_, '_> {
@@ -62,6 +66,22 @@ impl Visitor for References<'_, '_> {
     }
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
+        if let Expr::Function(function) = expr {
+            if let FunctionArguments::List(list) = &function.args {
+                self.parameter_names
+                    .extend(list.args.iter().filter_map(|arg| match arg {
+                        FunctionArg::ExprNamed { name, .. } => Some(std::ptr::from_ref(name)),
+                        _ => None,
+                    }));
+            }
+        }
+        if self
+            .parameter_names
+            .iter()
+            .any(|&name| std::ptr::eq(name, expr))
+        {
+            return ControlFlow::Continue(());
+        }
         let column = match expr {
             Expr::Identifier(ident) => {
                 // `DEFAULT` in `VALUES` and `SET` is a keyword, not a column.

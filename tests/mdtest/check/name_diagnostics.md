@@ -65,6 +65,9 @@ f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 
 Their keys are checked like `WHERE`, except a result column named by its alias or
 position, which `GROUP BY` and `ORDER BY` accept. PostgreSQL reads no aliases in `HAVING`.
+A bare name in `ORDER BY` reads a result column first, aliased or not, so `id` in `g`
+is `t.id` even though both tables have the column. Without such a result column, in `h`,
+it reads the tables and is ambiguous.
 
 ```toml
 [tool.sqlty.rules]
@@ -82,6 +85,9 @@ c = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING count(nop
 d = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING n > 1"
 e = "--sql\nSELECT name AS label, count(*) AS n FROM users GROUP BY label ORDER BY n DESC, 1"
 f = "--sql\nSELECT u.name FROM users u ORDER BY u.id"
+g = "--sql\nSELECT t.id, t.title FROM teams t JOIN users u ON u.team_id = t.id ORDER BY title, id"
+# error: [ambiguous-column] "column reference `id` is ambiguous: `t`, `u` all have it"
+h = "--sql\nSELECT t.title FROM teams t JOIN users u ON u.team_id = t.id ORDER BY id"
 ```
 
 #### Result column aliases in SQLite and MySQL
@@ -175,6 +181,21 @@ h = SQL[tuple[int]]("--sql\nSELECT u.id FROM users u JOIN teams t ON t.idd = u.t
 # error: [unknown-column] "column `nope` does not exist in `t`"
 i = "--sql\nUPDATE users u SET name = t.title FROM teams t WHERE t.id = u.team_id AND t.nope"
 j = "--sql\nDELETE FROM orders o USING users u WHERE u.id = o.user_id AND u.name = 'x'"
+```
+
+An `INSERT` target may have an alias, and PostgreSQL's `ON CONFLICT DO UPDATE` reads
+the target and `EXCLUDED`, the row that was not inserted.
+
+```python
+from sqlty import SQL
+
+k = SQL[tuple[str]]("--sql\nINSERT INTO users AS u (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name WHERE u.name <> EXCLUDED.name RETURNING u.name")
+# error: [unknown-column] "column `nope` does not exist in `excluded`"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+# error: [unknown-column] "column `titel` does not exist in `users`"
+l = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET titel = EXCLUDED.nope WHERE users.nmae IS NULL"
+# error: [ambiguous-column] "column reference `name` is ambiguous: `users`, `excluded` all have it"
+m = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = name || EXCLUDED.name"
 ```
 
 A subquery over the same table as the outer query names the table once.
@@ -465,6 +486,18 @@ from sqlty import SQL
 
 # error:
 a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users GROUP BY name")
+```
+
+#### Named arguments
+
+In `make_interval(days => 3)`, `days` names a parameter of the function, not a column.
+The value after `=>` is still checked.
+
+```python
+a = "--sql\nDELETE FROM users WHERE now() - make_interval(days => 3) > now()"
+b = "--sql\nUPDATE users SET name = 'a' WHERE now() < now() + make_interval(secs => id)"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+c = "--sql\nDELETE FROM users WHERE now() - make_interval(days => nope) > now()"
 ```
 
 ## Without a schema nothing is guessed

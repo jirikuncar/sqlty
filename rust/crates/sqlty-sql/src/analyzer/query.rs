@@ -256,7 +256,23 @@ impl<'a> Analyzer<'a> {
         let (mut analyzer, scope) = quiet.scope_of(&select.from)?;
         analyzer.diag = self.diag.clone();
         let aliases = aliases(select);
-        for key in keys.iter().filter(|key| !names_result_column(key, select)) {
+        // A bare name in ORDER BY reads a result column first, aliased or not.
+        let names_output = |key: &Expr| match key {
+            Expr::Identifier(ident) => select.projection.iter().any(|item| match item {
+                SelectItem::UnnamedExpr(Expr::Identifier(column)) => {
+                    column.value.eq_ignore_ascii_case(&ident.value)
+                }
+                SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts)) => parts
+                    .last()
+                    .is_some_and(|column| column.value == ident.value),
+                _ => false,
+            }),
+            _ => false,
+        };
+        for key in keys
+            .iter()
+            .filter(|key| !names_result_column(key, select) && !names_output(key))
+        {
             analyzer.check_references_besides(key, &scope, self.aliases_in_keys(&aliases));
         }
         Ok(())
