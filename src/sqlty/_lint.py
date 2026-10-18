@@ -196,7 +196,7 @@ RULES: dict[str, LintRule] = {
         name="untyped-query",
         default_severity=Severity.WARN,
         fixable=True,
-        description="SQL[UNTYPED] query has no inferable row type; add casts or a schema",
+        description="SQL[UNTYPED] query has no inferable row type; the message names why",
     ),
     "unparsed-query": LintRule(
         name="unparsed-query",

@@ -226,21 +226,41 @@ pub(crate) fn with_wrapper_imports(
     if keep_lines {
         return insert_inline(&result, &imports.join("; "));
     }
-    let at = header_end(&result);
-    let eol = line_ending(&result, at);
-    let sep = if at > 0 && !result[..at].ends_with('\n') {
+    insert_imports(&result, &imports)
+}
+
+/// `source` with `imports` added after its header: the docstring, `from __future__`
+/// imports and the comments before them. A blank line after a docstring stays there, above
+/// the imports, and the code below them keeps one.
+pub(crate) fn insert_imports(source: &str, imports: &[String]) -> String {
+    let at = header_end(source);
+    let eol = line_ending(source, at);
+    let sep = if at > 0 && !source[..at].ends_with('\n') {
         eol
     } else {
         ""
     };
-    format!(
-        "{}{}{}{}{}",
-        &result[..at],
-        sep,
-        imports.join(eol),
-        eol,
-        &result[at..]
-    )
+    let blank = source[at..]
+        .split_inclusive('\n')
+        .take_while(|line| line.trim().is_empty() && line.ends_with('\n'))
+        .map(str::len)
+        .sum::<usize>();
+    if at == 0 || blank == 0 {
+        return format!(
+            "{}{sep}{}{eol}{}",
+            &source[..at],
+            imports.join(eol),
+            &source[at..]
+        );
+    }
+    let (above, below) = source.split_at(at + blank);
+    let next = below.trim_start();
+    let gap = if next.is_empty() || next.starts_with("import ") || next.starts_with("from ") {
+        ""
+    } else {
+        eol
+    };
+    format!("{above}{}{eol}{gap}{below}", imports.join(eol))
 }
 
 /// Line ending of the line at `at`, else of the line before it.
@@ -547,23 +567,45 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let untyped_used = source
         .lines()
         .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
-    lines_in_strings(source)
-        .filter(|&(line, quoted)| {
-            let line = line.trim_end();
-            quoted
-                || !((Some(line) == untyped_import && !untyped_used)
-                    || (Some(line) == template_import && !source.contains(&template_marker))
-                    || (line == istyle.import_line
-                        && !source.contains(&wrapper_marker)
-                        && !(module_style && source.contains(&template_marker)))
-                    || TYPE_MODULES.iter().any(|module| {
-                        line == format!("import {module}")
-                            && !source.contains(&format!("{module}."))
-                    })
-                    || unused_datetime_import(source, line))
-        })
-        .map(|(line, _)| line)
-        .collect()
+    let unused = |line: &str| {
+        let line = line.trim_end();
+        (Some(line) == untyped_import && !untyped_used)
+            || (Some(line) == template_import && !source.contains(&template_marker))
+            || (line == istyle.import_line
+                && !source.contains(&wrapper_marker)
+                && !(module_style && source.contains(&template_marker)))
+            || TYPE_MODULES.iter().any(|module| {
+                line == format!("import {module}") && !source.contains(&format!("{module}."))
+            })
+            || unused_datetime_import(source, line)
+    };
+    let lines: Vec<(&str, bool)> = lines_in_strings(source).collect();
+    let mut kept = String::with_capacity(source.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let (line, quoted) = lines[i];
+        if quoted || !unused(line) {
+            kept.push_str(line);
+            i += 1;
+            continue;
+        }
+        let end = (i..lines.len())
+            .find(|&j| lines[j].1 || !unused(lines[j].0))
+            .unwrap_or(lines.len());
+        // A block `insert_imports` set between blank lines leaves one of them.
+        let blank = |at: usize| {
+            lines
+                .get(at)
+                .is_some_and(|(line, quoted)| !quoted && line.trim().is_empty())
+        };
+        let after_blank = i > 0 && blank(i - 1);
+        i = if after_blank && blank(end) {
+            end + 1
+        } else {
+            end
+        };
+    }
+    kept
 }
 
 /// Whether `line` is a `from datetime import X` that [`Spelling`] adds, and nothing else
