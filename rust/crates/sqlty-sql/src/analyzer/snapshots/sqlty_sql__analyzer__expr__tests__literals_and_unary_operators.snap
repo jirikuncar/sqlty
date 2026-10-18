@@ -19,8 +19,8 @@ d: bool | BOOLEAN | NonNull
 
 SELECT 1e3 AS a, 0x1F AS b, X'ff' AS c, E'a\nb' AS d, $$dollar$$ AS e
 a: decimal.Decimal | ? | NonNull
-b: str | ? | NonNull
-c: str | ? | NonNull
+b: str | BIT | NonNull
+c: str | BIT | NonNull
 d: str | ? | NonNull
 e: str | ? | NonNull
 
