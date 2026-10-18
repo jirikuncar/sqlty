@@ -47,6 +47,16 @@ pub(super) static POSTGRES_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|
     ]
 });
 
+/// `TABLE name`, which PostgreSQL and MySQL read as `SELECT * FROM name`, where it starts
+/// a query: sqlparser reads it only after a set operator or a `WITH`.
+static TABLE_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
+    const NAME: &str = r#"(?:"[^"]*"|`[^`]*`|\w+)(?:\s*\.\s*(?:"[^"]*"|`[^`]*`|\w+))*"#;
+    Regex::new(&format!(
+        r"(?i)(\A\s*|[()]\s*|\b(?:UNION|INTERSECT|EXCEPT)(?:\s+(?:ALL|DISTINCT))?\s+)TABLE\s+({NAME})"
+    ))
+    .unwrap()
+});
+
 /// PostgreSQL `type 'string'` literals sqlparser only reads for its built-in types, in
 /// groups 1 and 2; literals, quoted names and comments are matched to be skipped.
 pub(super) static POSTGRES_TYPED_STRING: LazyLock<Regex> = LazyLock::new(|| {
@@ -237,6 +247,12 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
             .into_owned()
     } else {
         sql.into_owned()
+    };
+    let sql = match dialect {
+        SqlDialect::Postgres | SqlDialect::MySql => TABLE_COMMAND
+            .replace_all(&sql, "${1}SELECT * FROM $2")
+            .into_owned(),
+        _ => sql,
     };
     PLACEHOLDER
         .replace_all(&sql, |caps: &Captures| match &caps[0] {
