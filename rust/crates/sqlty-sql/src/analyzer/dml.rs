@@ -104,7 +104,8 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
 
 impl Analyzer<'_> {
     /// What `RETURNING` knows about the target's columns: those the statement writes with a
-    /// value that is never NULL are not NULL in the rows it returns.
+    /// value that is never NULL are not NULL in the rows it returns, and so are those the
+    /// `WHERE` of an UPDATE or DELETE proves, unless an UPDATE sets them.
     pub(super) fn written_facts(&self, stmt: &Statement, scope: &Scope) -> Facts {
         let mut quiet = self.clone();
         quiet.diag = Diagnostics::default();
@@ -134,6 +135,34 @@ impl Analyzer<'_> {
         if triggered {
             return self.facts.clone();
         }
+        let selection = match stmt {
+            Statement::Update(update) => update.selection.as_ref(),
+            Statement::Delete(delete) => delete.selection.as_ref(),
+            _ => None,
+        };
+        let learned =
+            selection.map_or_else(Learned::default, |cond| quiet.learn(cond, true, scope));
+        // SET reads the row WHERE let through; RETURNING returns it as SET leaves it.
+        let seen = self.facts.with(learned.clone());
+        let kept = match stmt {
+            Statement::Update(update) => {
+                let set: Vec<(String, String)> = update
+                    .assignments
+                    .iter()
+                    .flat_map(|assignment| match &assignment.target {
+                        AssignmentTarget::ColumnName(column) => vec![column],
+                        AssignmentTarget::Tuple(columns) => columns.iter().collect(),
+                    })
+                    .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
+                    .map(|ident| {
+                        let key = quiet.column_key(&target, &ident.value, scope);
+                        (target.clone(), key)
+                    })
+                    .collect();
+                self.facts.with(learned.without(&set))
+            }
+            _ => seen.clone(),
+        };
         let non_null = |nullability| nullability == Nullability::NonNull;
         let written: Vec<String> = match stmt {
             Statement::Insert(insert) => {
@@ -221,9 +250,7 @@ impl Analyzer<'_> {
                         .0
                         .last()
                         .and_then(|part| part.as_ident())
-                        .filter(|_| {
-                            non_null(quiet.nullability(&assignment.value, scope, &self.facts))
-                        })
+                        .filter(|_| non_null(quiet.nullability(&assignment.value, scope, &seen)))
                         .map(|ident| ident.value.clone()),
                     AssignmentTarget::Tuple(_) => None,
                 })
@@ -234,7 +261,7 @@ impl Analyzer<'_> {
             .iter()
             .map(|column| (target.clone(), quiet.column_key(&target, column, scope)))
             .collect();
-        self.facts.with(Learned::columns(columns))
+        kept.with(Learned::columns(columns))
     }
 
     /// The names an INSERT, UPDATE or DELETE reads and writes: its target tables, the

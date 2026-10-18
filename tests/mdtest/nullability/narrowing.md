@@ -108,11 +108,16 @@ SELECT age FROM users WHERE age > 18 OR age < 10
 -- inferred: tuple[int]
 ```
 
-`IS NULL`, `IS DISTINCT FROM` and `COALESCE(...)` tell nothing about the column.
+`IS NULL`, `IS DISTINCT FROM` a value and `COALESCE(...)` tell nothing about the column.
 
 ```sql
 SELECT age, nick FROM users WHERE age IS NULL AND coalesce(nick, 'x') = 'x'
 -- inferred: tuple[int | None, str | None]
+```
+
+```sql
+SELECT nick FROM users WHERE nick IS DISTINCT FROM 'x'
+-- inferred: tuple[str | None]
 ```
 
 `NOT` flips what is proven: a false comparison is not NULL either.
@@ -120,6 +125,37 @@ SELECT age, nick FROM users WHERE age IS NULL AND coalesce(nick, 'x') = 'x'
 ```sql
 SELECT age, nick FROM users WHERE NOT (age > 18) AND nick IS NOT NULL
 -- inferred: tuple[int, str]
+```
+
+## IS DISTINCT FROM NULL
+
+`x IS DISTINCT FROM NULL` is `x IS NOT NULL`, and `x IS NOT DISTINCT FROM NULL` is
+`x IS NULL`.
+
+```sql
+SELECT nick, age FROM users WHERE nick IS DISTINCT FROM NULL AND NOT (age IS NOT DISTINCT FROM NULL)
+-- inferred: tuple[str, int]
+```
+
+## EXISTS
+
+A correlated `EXISTS` holds when some row passes its `WHERE`, so what that `WHERE`
+proves about the outer query holds too. `NOT EXISTS`, and an aggregate that returns a
+row when none matches, prove nothing.
+
+```sql
+SELECT u.nick FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.note = u.nick)
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT u.nick FROM users u WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.note = u.nick)
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT u.nick FROM users u WHERE EXISTS (SELECT count(*) FROM orders o WHERE o.note = u.nick)
+-- inferred: tuple[str | None]
 ```
 
 ## HAVING
