@@ -156,6 +156,19 @@ SELECT substr(data, 1, 2) AS a, trim(data) AS b FROM files
 -- columns: b: str (TEXT)
 ```
 
+## Bitwise operators
+
+`&`, `|` and `~` convert their operands to 64-bit integers.
+
+```sql
+SELECT id & 3 AS a, id | 4 AS b, ~id AS c, name & 1 AS d, note | 1 AS e FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: int (BIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: int | None (BIGINT)
+```
+
 ## Subqueries without an alias
 
 SQLite reads a subquery in `FROM` without an alias; its columns are referenced

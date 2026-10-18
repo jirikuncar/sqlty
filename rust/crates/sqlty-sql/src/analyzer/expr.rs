@@ -188,6 +188,19 @@ impl<'a> Analyzer<'a> {
             } if self.dialect == SqlDialect::Postgres => {
                 Ok(strip(self.expr(inner, scope)?, self.dialect))
             }
+            Expr::UnaryOp {
+                op: UnaryOperator::BitwiseNot,
+                expr: inner,
+            } => {
+                let typed = self.expr(inner, scope)?;
+                Ok(match self.dialect {
+                    SqlDialect::Sqlite => from_sql_type("BIGINT", self.dialect),
+                    _ if typed.python.as_deref() == Some("int") => {
+                        from_sql_type("UBIGINT", self.dialect)
+                    }
+                    _ => Typed::UNKNOWN,
+                })
+            }
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
                 let typed = self.expr(timestamp, scope)?;
