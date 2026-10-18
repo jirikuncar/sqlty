@@ -1,8 +1,8 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
 use sqlparser::ast::{
-    AssignmentTarget, FromTable, ObjectName, OutputClause, Query, SelectItem, SetExpr, Statement,
-    TableObject, UpdateTableFromKind,
+    AssignmentTarget, FromTable, ObjectName, OnConflictAction, OnInsert, OutputClause, Query,
+    SelectItem, SetExpr, Statement, TableObject, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -49,7 +49,11 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
     match stmt {
         Statement::Insert(insert) => match &insert.table {
             TableObject::TableName(name) => {
-                vec![Source::named(object_name(name), table_key(name, dialect))]
+                let reference = insert.table_alias.as_ref().map_or_else(
+                    || object_name(name),
+                    |alias| alias.alias.value.to_lowercase(),
+                );
+                vec![Source::named(reference, table_key(name, dialect))]
             }
             _ => Vec::new(),
         },
@@ -133,6 +137,31 @@ impl Analyzer<'_> {
                     self.check_target_columns(name, columns);
                     if !columns.is_empty() {
                         self.check_missing_columns(name, columns);
+                    }
+                    // PostgreSQL's `ON CONFLICT DO UPDATE` reads the target and `EXCLUDED`, the
+                    // row that was not inserted. SQLite reads a bare name as the target's.
+                    if let (Some(OnInsert::OnConflict(on_conflict)), SqlDialect::Postgres) =
+                        (&insert.on, self.dialect)
+                    {
+                        if let OnConflictAction::DoUpdate(update) = &on_conflict.action {
+                            let set: Vec<ObjectName> = update
+                                .assignments
+                                .iter()
+                                .flat_map(|assignment| match &assignment.target {
+                                    AssignmentTarget::ColumnName(column) => vec![column.clone()],
+                                    AssignmentTarget::Tuple(columns) => columns.clone(),
+                                })
+                                .collect();
+                            self.check_target_columns(name, &set);
+                            let mut upsert = scope.clone();
+                            upsert.push(Source::named(
+                                "excluded".to_string(),
+                                table_key(name, self.dialect),
+                            ));
+                            let check = |expr| analyzer.check_references(expr, &upsert);
+                            update.assignments.iter().for_each(|a| check(&a.value));
+                            update.selection.iter().for_each(check);
+                        }
                     }
                 }
                 // Its diagnostics are recorded; the columns are not needed. Nothing reads the
