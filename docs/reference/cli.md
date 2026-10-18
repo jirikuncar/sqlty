@@ -248,6 +248,7 @@ Found 1 breaking change(s)
 ```text
 sqlty breaking [-h] --against REF [--head REF]
                [--direction {backward,forward,both}] [-q]
+               [--output-format {text,json,github}]
                [paths ...]
 ```
 <!-- /generated:cli-usage-breaking -->
@@ -258,6 +259,7 @@ sqlty breaking [-h] --against REF [--head REF]
 | `--against REF` | The baseline revision: a branch, tag, SHA or HEAD~1 |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
+| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message and direction) or github (GitHub Actions error annotations) |
 <!-- /generated:cli-options-breaking -->
 
 Exit code: 1 when a change breaks either direction, 2 for an unknown revision or

@@ -222,6 +222,14 @@ def build_parser() -> argparse.ArgumentParser:
     breaking_parser.add_argument(
         "-q", "--quiet", action="store_true", help="Print nothing; only the exit code tells"
     )
+    breaking_parser.add_argument(
+        "--output-format",
+        choices=["text", "json", "github"],
+        default="text",
+        help="How findings are printed: text (the default), json (an array of objects with "
+        "file, line, rule, severity, message and direction) or github (GitHub Actions error "
+        "annotations)",
+    )
 
     # --- rule ---
     rule_parser = subparsers.add_parser(
@@ -577,7 +585,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         if args.output_format == "json":
             shown.append({"file": str(path), **diag})
         elif args.output_format == "github":
-            print(_github_annotation(path, diag))
+            print(github_annotation(path, diag))
         elif not args.quiet:
             print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
             if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
@@ -604,7 +612,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         sys.exit(EXIT_FOUND)
 
 
-def _github_annotation(path: Path, diag: Diagnostic) -> str:
+def github_annotation(path: Path, diag: Diagnostic) -> str:
     """``diag`` as a GitHub Actions workflow command, which annotates the line in the diff."""
 
     def escape(text: str, *, property: bool = False) -> str:

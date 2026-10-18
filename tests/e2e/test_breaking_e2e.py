@@ -3,6 +3,7 @@
 The diagnostics themselves are specified by ``docs/guide/breaking-changes.md``; these
 cover the git side: revisions, worktree cleanup, directions, paths and exit codes."""
 
+import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -88,6 +89,30 @@ def test_paths_limit_the_files_in_both_revisions(cli: Cli, repo: Path) -> None:
     result = cli(["breaking", "--against", "HEAD", "app"], {"cwd": repo})
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_output_formats(cli: Cli, repo: Path) -> None:
+    args = ["breaking", "--against", "HEAD~1", "--head", "HEAD", "--direction", "forward"]
+
+    result = cli([*args, "--output-format", "json"], {"cwd": repo})
+    assert result.returncode == 1
+    assert json.loads(result.stdout) == [
+        {
+            "file": "app/q.py",
+            "rule": "unknown-column",
+            "message": "column `handle` does not exist in `users`",
+            "severity": "error",
+            "line": 1,
+            "direction": "forward",
+        }
+    ]
+
+    result = cli([*args, "--output-format", "github"], {"cwd": repo})
+    assert result.returncode == 1
+    assert result.stdout == (
+        "::error file=app/q.py,line=1,title=sqlty unknown-column::column `handle` does not exist "
+        "in `users` (forward: the queries of HEAD against the schema of HEAD~1)\n"
+    )
 
 
 def test_quiet_prints_nothing(cli: Cli, repo: Path) -> None:

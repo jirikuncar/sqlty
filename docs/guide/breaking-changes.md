@@ -22,7 +22,9 @@ into a temporary `git worktree`, removed afterwards, so your working tree is
 never touched.
 
 `sqlty breaking` exits 0 when both mixes are compatible, 1 when a change breaks
-one of them, and 2 on an error such as an unknown revision.
+one of them, and 2 on an error such as an unknown revision. `--output-format json`
+prints the findings as a JSON array, each with its `direction`, and `github` as
+GitHub Actions annotations.
 
 ## What it reports
 
