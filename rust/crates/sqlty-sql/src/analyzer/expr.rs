@@ -444,8 +444,12 @@ impl<'a> Analyzer<'a> {
                 return Ok(common);
             }
         }
-        // Other dialects take the first branch's type, but a set of values
-        // covers every branch.
+        if self.dialect == SqlDialect::MySql {
+            if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
+                return Ok(common);
+            }
+        }
+        // SQLite takes the first branch's type, but a set of values covers every branch.
         let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
         if value_set(&first).is_some() {
             return Ok(

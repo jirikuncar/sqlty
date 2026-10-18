@@ -36,6 +36,26 @@ SELECT IF(id > 1, name, note) AS a, IF(id > 1, 'big', 'small') AS b, IFNULL(note
 -- columns: c: str (VARCHAR(50))
 ```
 
+Branches of different types meet at a common type: numbers widen, a `DATE`
+and a `DATETIME` give a `DATETIME`, and a number and a string give a string.
+`CASE`, `COALESCE`, `GREATEST` and `UNION` follow the same rule.
+
+```sql
+SELECT IF(id > 1, id, price) AS a, IF(id > 1, day, happened) AS b, CASE WHEN id > 1 THEN id ELSE name END AS c, COALESCE(note, price) AS d, GREATEST(id, ratio) AS e, IFNULL(doc, name) AS f FROM events
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: datetime.datetime (DATETIME)
+-- columns: c: str (TEXT)
+-- columns: d: str (TEXT)
+-- columns: e: float (DOUBLE)
+-- columns: f: str (TEXT)
+```
+
+```sql
+SELECT id AS a, day AS b FROM events UNION ALL SELECT price, happened FROM events
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: datetime.datetime (DATETIME)
+```
+
 ## Grouping
 
 `GROUPING` tells a `WITH ROLLUP` super-aggregate row by a non-null `int`.
