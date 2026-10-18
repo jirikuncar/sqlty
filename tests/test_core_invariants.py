@@ -247,7 +247,9 @@ def test_user_type_check_skips_unknown_sum_column() -> None:
         "class Row(NamedTuple):\n    total: float\n"
         'q = SQL[Row]("--sql\\nSELECT SUM(nope) AS total FROM users")\n'
     )
-    assert core.check_source(source, schema_sql="CREATE TABLE users (id INT);") == []
+    assert [
+        d["rule"] for d in core.check_source(source, schema_sql="CREATE TABLE users (id INT);")
+    ] == ["unknown-column"]
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])

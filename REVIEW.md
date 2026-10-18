@@ -22,6 +22,8 @@ Style, naming and refactoring suggestions are Nit at most.
   user-visible behavior is also documented in `docs/`.
 - New lint rules have a page in `src/sqlty/rules/` and a row in
   `docs/reference/rules.md`.
+- A new lint rule is on by default, per [Lint rule defaults](CONTRIBUTING.md#lint-rule-defaults);
+  one that ships off names on its rule page the rule or workflow it conflicts with.
 - Test SQL uses `--sql\n`, never `--sql ` followed by a space.
 - Docstrings and `--help` text explain usage, with a copy-paste example.
 - Pull requests made with an AI agent disclose it, as required by

@@ -2,8 +2,8 @@
 
 The rules `unknown-table`, `unknown-column`, `ambiguous-column`,
 `unknown-function`, `unknown-type` and `unsupported-syntax` explain why a
-result column is untyped. They are off by default (see the user guide in
-`docs/guide/name-diagnostics.md`).
+result column is untyped. The first three are errors by default, the others
+warnings (see the user guide in `docs/guide/name-diagnostics.md`).
 
 ## With a schema
 
@@ -20,12 +20,12 @@ CREATE TABLE teams (id INTEGER PRIMARY KEY, title TEXT);
 CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
 ```
 
-### Off by default
+### On by default
 
 ```python
 from sqlty import SQL
 
-# error:
+# error: [unknown-table] "table `missing` is not defined in the schema"
 q = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")
 ```
 
@@ -67,6 +67,7 @@ A statement that returns no rows is checked too: the table it writes, the
 columns it sets, and the names its values, conditions and source query read.
 
 ```python
+# error: [insert-missing-column] "INSERT into `users` leaves out `name`, which is NOT NULL and has no default"
 # error: [unknown-column] "column `nmae` does not exist in `users`"
 a = "--sql\nINSERT INTO users (id, nmae) VALUES (1, 'x')"
 # error: [unknown-table] "table `missing` is not defined in the schema"
@@ -164,6 +165,7 @@ b = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")  # sqlty: ignore
 
 ```toml
 [tool.sqlty.rules]
+unknown-table = "ignore"
 unknown-column = "warn"
 ```
 
@@ -384,7 +386,7 @@ import datetime
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users")
+a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users GROUP BY name")
 ```
 
 ## Without a schema nothing is guessed

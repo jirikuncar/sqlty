@@ -1,12 +1,25 @@
 # Unused ignore
 
-`unused-ignore` is off by default: a comment that suppresses nothing is silent.
+`unused-ignore` warns by default about a comment that suppresses nothing.
 
-## Off by default
+## On by default
+
+```python
+# error: [unused-ignore] "'# sqlty: ignore' suppresses no diagnostic"
+x = 1  # sqlty: ignore
+# error: [unused-ignore] "'# sqlty: ignore[select-star]' suppresses no diagnostic"
+y = 2  # sqlty: ignore[select-star]
+```
+
+## Turned off
+
+```toml
+[tool.sqlty.rules]
+unused-ignore = "ignore"
+```
 
 ```python
 x = 1  # sqlty: ignore
-y = 2  # sqlty: ignore[select-star]
 # error:
 ```
 
