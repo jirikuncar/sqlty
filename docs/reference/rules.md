@@ -696,7 +696,7 @@ Default: warn. A query is wrapped as `SQL[UNTYPED](...)`
 known, the message suggests it.
 
 ```python
-# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type: columns `x`, `y` are untyped; add casts (for example id::INTEGER) or a schema"
 q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
