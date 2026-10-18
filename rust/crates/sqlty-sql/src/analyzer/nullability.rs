@@ -20,10 +20,11 @@ use super::hashing::ExprKey;
 use super::inference::{binary_rules, function_rules, FunctionNullability, RuleNullability};
 use super::literals::python_kind;
 use super::memo::Reporting;
-use super::names::split_access;
+use super::names::{split_access, table_key};
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::{table_scope, Scope};
+use crate::catalog::fold;
 use rustc_hash::FxHashSet;
 
 /// Whether a column can be NULL.
@@ -84,8 +85,8 @@ pub(super) struct Facts {
 
 impl Facts {
     /// Add the relations the outer joins of `from` may fill with NULLs.
-    pub(super) fn join(&mut self, from: &[TableWithJoins], dialect: SqlDialect) {
-        Rc::make_mut(&mut self.null_extended).extend(null_extended(from, dialect));
+    pub(super) fn join(&mut self, extended: Vec<String>) {
+        Rc::make_mut(&mut self.null_extended).extend(extended);
     }
 
     /// Whether the relation `reference` can be a row of NULLs. A condition NULL cannot
@@ -156,38 +157,199 @@ impl Facts {
     }
 }
 
-/// References of the relations in `from` that outer joins null-extend, nested joins included.
-pub(super) fn null_extended(from: &[TableWithJoins], dialect: SqlDialect) -> Vec<String> {
-    let mut extended = Vec::new();
-    for table in from {
-        group(table, &mut extended, dialect);
+impl Analyzer<'_> {
+    /// References of the relations the outer joins of `from` may fill with NULLs.
+    pub(super) fn null_extended(&self, from: &[TableWithJoins]) -> Vec<String> {
+        let mut extended = Vec::new();
+        for table in from {
+            self.group(table, &mut extended);
+        }
+        extended
     }
-    extended
+
+    /// The relations of one `a JOIN b JOIN c` chain, by reference; null-extended ones go to
+    /// `extended`.
+    fn group<'f>(
+        &self,
+        table: &'f TableWithJoins,
+        extended: &mut Vec<String>,
+    ) -> Vec<(String, Option<&'f TableFactor>)> {
+        let mut left = self.factor_references(&table.relation, extended);
+        for join in &table.joins {
+            let right = self.factor_references(&join.relation, extended);
+            match &join.join_operator {
+                JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply
+                    if !always_matches(join)
+                        && !self.joins_a_reference(&left, &right, join, extended) =>
+                {
+                    extended.extend(right.iter().map(|(reference, _)| reference.clone()));
+                }
+                JoinOperator::Right(_) | JoinOperator::RightOuter(_)
+                    if !self.joins_a_reference(&right, &left, join, extended) =>
+                {
+                    extended.extend(left.iter().map(|(reference, _)| reference.clone()));
+                }
+                JoinOperator::FullOuter(_) => {
+                    extended.extend(left.iter().map(|(reference, _)| reference.clone()));
+                    extended.extend(right.iter().map(|(reference, _)| reference.clone()));
+                }
+                _ => {}
+            }
+            left.extend(right);
+        }
+        left
+    }
+
+    fn factor_references<'f>(
+        &self,
+        factor: &'f TableFactor,
+        extended: &mut Vec<String>,
+    ) -> Vec<(String, Option<&'f TableFactor>)> {
+        match factor {
+            TableFactor::NestedJoin {
+                table_with_joins,
+                alias: None,
+            } => self
+                .group(table_with_joins, extended)
+                .into_iter()
+                .map(|(reference, _)| (reference, None))
+                .collect(),
+            // The reference the scope of the SELECT gives the relation.
+            other => table_scope(other, self.dialect)
+                .into_iter()
+                .map(|source| (source.reference, Some(other)))
+                .collect(),
+        }
+    }
+
+    /// Whether `join` always finds a row of `outer`, the side it would fill with NULLs: a
+    /// single base table that a `NOT NULL` foreign key of a table in `inner` references,
+    /// joined on exactly the key's columns. SQLite does not enforce foreign keys by default.
+    fn joins_a_reference(
+        &self,
+        inner: &[(String, Option<&TableFactor>)],
+        outer: &[(String, Option<&TableFactor>)],
+        join: &Join,
+        extended: &[String],
+    ) -> bool {
+        let (JoinOperator::Left(JoinConstraint::On(on))
+        | JoinOperator::LeftOuter(JoinConstraint::On(on))
+        | JoinOperator::Right(JoinConstraint::On(on))
+        | JoinOperator::RightOuter(JoinConstraint::On(on))) = &join.join_operator
+        else {
+            return false;
+        };
+        let ([(parent, Some(parent_factor))], false) = (outer, self.dialect == SqlDialect::Sqlite)
+        else {
+            return false;
+        };
+        let Some(parent_key) = self.base_table(parent_factor) else {
+            return false;
+        };
+        // `(child reference, child column, parent column)` per equality of the ON.
+        let mut pairs = Vec::new();
+        for condition in conjuncts(on) {
+            let Expr::BinaryOp {
+                left,
+                op: BinaryOperator::Eq,
+                right,
+            } = condition
+            else {
+                return false;
+            };
+            let (Some(a), Some(b)) = (self.qualified(left), self.qualified(right)) else {
+                return false;
+            };
+            let ((child, column), (_, referred)) = match (a.0 == *parent, b.0 == *parent) {
+                (false, true) => (a, b),
+                (true, false) => (b, a),
+                _ => return false,
+            };
+            pairs.push((child, column, referred));
+        }
+        let Some((child, _, _)) = pairs.first() else {
+            return false;
+        };
+        let child = child.clone();
+        if pairs.iter().any(|(reference, _, _)| *reference != child) || extended.contains(&child) {
+            return false;
+        }
+        let Some(child_key) = inner
+            .iter()
+            .find(|(reference, _)| *reference == child)
+            .and_then(|(_, factor)| self.base_table((*factor)?))
+        else {
+            return false;
+        };
+        let Some(columns) = self.schema.table(&child_key) else {
+            return false;
+        };
+        let not_null = |name: &String| columns.iter().any(|c| c.name == *name && c.not_null);
+        self.schema.foreign_keys(&child_key).any(|fk| {
+            fk.table == parent_key
+                && fk.columns.len() == pairs.len()
+                && fk.columns.iter().all(not_null)
+                && fk
+                    .columns
+                    .iter()
+                    .zip(&fk.referred)
+                    .all(|(column, referred)| {
+                        pairs.iter().any(|(_, c, r)| c == column && r == referred)
+                    })
+                && pairs.iter().all(|(_, c, r)| {
+                    fk.columns
+                        .iter()
+                        .zip(&fk.referred)
+                        .any(|(column, referred)| c == column && r == referred)
+                })
+        })
+    }
+
+    /// The catalog key of a base table in FROM: not a CTE, a view or a function.
+    fn base_table(&self, factor: &TableFactor) -> Option<String> {
+        let TableFactor::Table {
+            name, args: None, ..
+        } = factor
+        else {
+            return None;
+        };
+        let key = table_key(name, self.dialect);
+        if self.virtuals.get(&key).is_some() {
+            return None;
+        }
+        self.schema.table_id(&key).map(str::to_string)
+    }
+
+    /// `(reference, column)` of `t.col`.
+    fn qualified(&self, expr: &Expr) -> Option<(String, String)> {
+        match expr {
+            Expr::Nested(inner) => self.qualified(inner),
+            Expr::CompoundIdentifier(parts) => match parts.as_slice() {
+                [reference, column] => {
+                    Some((reference.value.to_lowercase(), fold(column, self.dialect)))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
-/// References of the relations of one `a JOIN b JOIN c` chain; null-extended ones go to `extended`.
-fn group(table: &TableWithJoins, extended: &mut Vec<String>, dialect: SqlDialect) -> Vec<String> {
-    let mut left = factor_references(&table.relation, extended, dialect);
-    for join in &table.joins {
-        let right = factor_references(&join.relation, extended, dialect);
-        match &join.join_operator {
-            JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply
-                if !always_matches(join) =>
-            {
-                extended.extend(right.iter().cloned());
-            }
-            JoinOperator::Right(_) | JoinOperator::RightOuter(_) => {
-                extended.extend(left.iter().cloned());
-            }
-            JoinOperator::FullOuter(_) => {
-                extended.extend(left.iter().cloned());
-                extended.extend(right.iter().cloned());
-            }
-            _ => {}
+/// The operands of a chain of `AND`.
+fn conjuncts(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::Nested(inner) => conjuncts(inner),
+        Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let mut all = conjuncts(left);
+            all.extend(conjuncts(right));
+            all
         }
-        left.extend(right);
+        other => vec![other],
     }
-    left
 }
 
 /// Whether an outer join always finds its one row, so it never null-extends it: a derived
@@ -209,24 +371,6 @@ fn is_true(expr: &Expr) -> bool {
         Expr::Nested(inner) => is_true(inner),
         Expr::Value(value) => matches!(value.value, Value::Boolean(true)),
         _ => false,
-    }
-}
-
-fn factor_references(
-    factor: &TableFactor,
-    extended: &mut Vec<String>,
-    dialect: SqlDialect,
-) -> Vec<String> {
-    match factor {
-        TableFactor::NestedJoin {
-            table_with_joins,
-            alias: None,
-        } => group(table_with_joins, extended, dialect),
-        // The reference the scope of the SELECT gives the relation.
-        other => table_scope(other, dialect)
-            .into_iter()
-            .map(|source| source.reference)
-            .collect(),
     }
 }
 
@@ -378,7 +522,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn select_facts(&self, select: &Select, scope: &Scope) -> Facts {
         let mut facts = self.facts.clone();
         facts.without(scope);
-        facts.join(&select.from, self.dialect);
+        facts.join(self.null_extended(&select.from));
         facts.grouped = is_grouped(select);
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {

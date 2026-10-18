@@ -219,7 +219,7 @@ UPDATE child c SET note = 'x' FROM parent p JOIN grand g ON g.id = p.grand_id WH
 ```
 
 ```sql
-UPDATE child c SET note = 'x' FROM parent p LEFT JOIN grand g ON g.id = p.grand_id WHERE p.id = c.parent_id RETURNING g.label
+UPDATE child c SET note = 'x' FROM parent p LEFT JOIN grand g ON g.label = p.name WHERE p.id = c.parent_id RETURNING g.label
 -- inferred: tuple[str | None]
 ```
 

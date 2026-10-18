@@ -151,7 +151,7 @@ impl<'a> Analyzer<'a> {
                                     .filter(|source| source.table != Table::ExtraSources);
                                 let scope: Scope = targets.chain(sources).collect();
                                 analyzer.facts = analyzer.written_facts(stmt, &scope);
-                                analyzer.facts.join(from, self.dialect);
+                                analyzer.facts.join(analyzer.null_extended(from));
                                 (analyzer, scope)
                             }
                             None => {
