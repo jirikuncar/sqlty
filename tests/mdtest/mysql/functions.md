@@ -172,7 +172,7 @@ SELECT ABS(price) AS a, ROUND(ratio) AS b, TRUNCATE(price, 1) AS c, FLOOR(id) AS
 -- columns: c: decimal.Decimal (DECIMAL(10, 2))
 -- columns: d: int (BIGINT)
 -- columns: e: int (INT)
--- columns: f: float (DOUBLE)
+-- columns: f: float | None (DOUBLE)
 -- columns: g: float (DOUBLE)
 -- columns: h: float (DOUBLE)
 -- columns: i: int (BIGINT)

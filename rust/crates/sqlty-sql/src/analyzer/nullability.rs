@@ -621,15 +621,29 @@ impl<'a> Analyzer<'a> {
                 low,
                 high,
                 ..
-            } => any_nullable([of(inner), of(low), of(high)]),
+            } => {
+                let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
+                any_nullable([of(inner), of(low), of(high)])
+            }
             Expr::InList {
                 expr: inner, list, ..
-            } => any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of))),
+            } => {
+                let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
+                any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of)))
+            }
             Expr::InSubquery {
                 expr: inner,
                 subquery,
                 ..
-            } => any_nullable([of(inner), self.subquery_column(subquery, scope)]),
+            } => any_nullable([
+                self.operand_nullability(inner, scope, facts),
+                match &*self.subquery_columns(subquery, scope, Reporting::Silent) {
+                    Ok(Some(columns)) => {
+                        any_nullable(columns.iter().map(|column| column.nullability))
+                    }
+                    _ => Nullability::Unknown,
+                },
+            ]),
             Expr::InUnnest {
                 expr: inner,
                 array_expr,
@@ -786,6 +800,19 @@ impl<'a> Analyzer<'a> {
         })
     }
 
+    /// A row is never NULL, but compared to another it is NULL when one of its fields is.
+    fn operand_nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
+        match expr {
+            Expr::Tuple(items) => any_nullable(
+                items
+                    .iter()
+                    .map(|item| self.operand_nullability(item, scope, facts)),
+            ),
+            Expr::Nested(inner) => self.operand_nullability(inner, scope, facts),
+            _ => self.nullability(expr, scope, facts),
+        }
+    }
+
     fn binary_nullability(
         &self,
         left: &Expr,
@@ -795,7 +822,7 @@ impl<'a> Analyzer<'a> {
         facts: &Facts,
     ) -> Nullability {
         use BinaryOperator::*;
-        let of = |inner: &Expr| self.nullability(inner, scope, facts);
+        let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
         let mut rules = binary_rules(op)
             .iter()
             .filter(|rule| rule.in_dialect(self.dialect));

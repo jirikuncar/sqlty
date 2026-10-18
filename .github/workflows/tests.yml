@@ -31,7 +31,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -130,7 +130,7 @@ jobs:
           uv run --no-sync pytest -p no:randomly tests/test_threads.py
 
   pg-fidelity:
-    name: PostgreSQL column names and types
+    name: PostgreSQL column names, types and nullability
     runs-on: ubuntu-latest
 
     services:

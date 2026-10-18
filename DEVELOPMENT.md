@@ -118,7 +118,7 @@ must match sqlty's:
 
 | Test | Database | Compares |
 |------|----------|----------|
-| `tests/test_pg_describe.py` | PostgreSQL, with `SQLTY_PG_DSN` | names and types |
+| `tests/test_pg_describe.py` | PostgreSQL, with `SQLTY_PG_DSN` | names and types; no NULL in a non-null column, on seeded rows |
 | `tests/test_server_describe.py` | SQLite, always; MySQL, with `SQLTY_MYSQL_DSN` | names and Python types |
 | `tests/test_driver_values.py` | all three | the Python type of the value the driver returns |
 

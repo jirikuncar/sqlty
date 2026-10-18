@@ -1,6 +1,6 @@
 # MySQL nullability against the server's
 
-336 columns, `scripts/compat/mysql_nullability.py`.
+348 columns, `scripts/compat/mysql_nullability.py`.
 
 ## Non-null in sqlty, nullable on MySQL
 
@@ -25,7 +25,6 @@
 | `tests/mdtest/mysql/functions.md:148` | `e` | `bytes` | `varbinary(48)` |
 | `tests/mdtest/mysql/functions.md:148` | `f` | `bytes` | `varbinary(3)` |
 | `tests/mdtest/mysql/functions.md:169` | `e` | `int` | `int` |
-| `tests/mdtest/mysql/functions.md:169` | `f` | `float` | `double` |
 | `tests/mdtest/mysql/functions.md:169` | `g` | `float` | `double` |
 | `tests/mdtest/mysql/functions.md:223` | `h` | `bytes` | `varbinary(16)` |
 | `tests/mdtest/mysql/functions.md:223` | `i` | `str` | `varchar(65)` |
@@ -66,6 +65,8 @@
 | `tests/mdtest/nullability/dialects.md:54` | `max(id)` | `int` | `int` |
 | `tests/mdtest/nullability/dialects.md:139` | `x / 2` | `decimal.Decimal` | `decimal(14,4)` |
 | `tests/mdtest/nullability/dialects.md:139` | `x % 2` | `int` | `int` |
+| `tests/mdtest/nullability/dialects.md:183` | `ATAN(x)` | `float` | `double` |
+| `tests/mdtest/nullability/dialects.md:183` | `POW(x, 2)` | `float` | `double` |
 | `tests/mdtest/nullability/narrowing.md:449` | `name` | `str` | `text` |
 | `tests/mdtest/type_inference/columns.md:215` | `max(id)` | `int` | `int` |
 

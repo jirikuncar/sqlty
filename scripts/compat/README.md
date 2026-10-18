@@ -40,7 +40,13 @@ mdtest, or a converter difference, to document.
 | peewee | `peewee` | `reports/peewee.md` | none |
 | Pony | `pony`, a server | `reports/pony.md` | none |
 | SQLObject | `sqlobject` | `reports/sqlobject.md` | none |
-| MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587) |
+| PostgreSQL nullability | `pg_nullability.py`, a server | `reports/pg_nullability.md` | none |
+| MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587), date arithmetic and casts (#590) |
+
+`pg_nullability.py` is not a harness source: it runs the PostgreSQL queries of the Markdown tests
+on seeded rows (`tests/_pg_seed.py`) and lists the columns sqlty types as nullable that no
+row has NULL in. `tests/test_pg_describe.py` fails on the reverse, a NULL in a column sqlty
+types as non-null.
 
 `mysql_nullability.py` is not a harness source either: it runs the MySQL queries of the
 Markdown tests on MySQL and compares sqlty's nullability with the one MySQL derives for

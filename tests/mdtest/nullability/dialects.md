@@ -159,6 +159,44 @@ SELECT x / y, x % y, x / 2, x % 2 FROM m
 -- inferred: tuple[int | None, int | None, int, int]
 ```
 
+## Math functions outside their domain are NULL in MySQL and SQLite
+
+PostgreSQL raises an error for `sqrt(-1)` or `ln(0)`. MySQL and SQLite return NULL, so
+these calls are optional even for a NOT NULL argument. SQLite's `pow` is NULL where the
+result is not a number, such as `pow(-8, 0.5)`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE m (x DOUBLE NOT NULL);
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT SQRT(x), LN(x), LOG(x), LOG(2, x), LOG2(x), LOG10(x), ACOS(x), ASIN(x), ATAN(x), POW(x, 2) FROM m
+-- inferred: tuple[float | None, float | None, float | None, float | None, float | None, float | None, float | None, float | None, float, float]
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+```sql
+SELECT sqrt(x), ln(x), log(x), log(2, x), log2(x), log10(x), acos(x), asin(x), atan(x), pow(x, 2) FROM m
+-- inferred: tuple[float | None, float | None, float | None, float | None, float | None, float | None, float | None, float | None, float, float | None]
+```
+
 ## SQLite: only an INTEGER PRIMARY KEY is never NULL
 
 SQLite lets a PRIMARY KEY column hold NULL, unless it is declared NOT NULL, the table is

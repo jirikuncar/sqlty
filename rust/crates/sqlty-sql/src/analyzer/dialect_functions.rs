@@ -276,8 +276,15 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
 ];
 
 /// MySQL functions that give NULL for some non-null arguments: a string that is not a
-/// valid date or time, or an index out of range.
+/// valid date or time, an index out of range, or a number outside a math function's domain.
 pub(super) const MYSQL_ALWAYS_NULLABLE: &[&str] = &[
+    "SQRT",
+    "LN",
+    "LOG",
+    "LOG2",
+    "LOG10",
+    "ACOS",
+    "ASIN",
     "JSON_SEARCH",
     "STR_TO_DATE",
     "DATE",
@@ -398,8 +405,20 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
 ];
 
 /// SQLite functions that give NULL for a value they cannot read: the date functions for
-/// one that is not a date, `unhex` for one that is not hexadecimal.
+/// one that is not a date, `unhex` for one that is not hexadecimal, the math functions for
+/// one outside their domain.
 pub(super) const SQLITE_ALWAYS_NULLABLE: &[&str] = &[
+    "SQRT",
+    "LN",
+    "LOG",
+    "LOG2",
+    "LOG10",
+    "ACOS",
+    "ASIN",
+    "ACOSH",
+    "ATANH",
+    "POW",
+    "POWER",
     "UNHEX",
     "DATE",
     "TIME",

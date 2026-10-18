@@ -177,6 +177,24 @@ SELECT lag(id) OVER (ORDER BY id), lag(id, 1, 0) OVER (ORDER BY id), lead(id, 1,
 -- inferred: tuple[int | None, int, int | None, int | None]
 ```
 
+## A row compared with a NULL field is NULL
+
+A row is never NULL, but comparing it, `IN`, `BETWEEN` and `OVERLAPS` is NULL when a
+field is.
+
+```sql
+SELECT (a, g) = (g, g) AS eq, (g, g) IN ((1, a)) AS listed, (g, g) IN (SELECT id, a FROM u) AS found, (g, g) < (g, g) AS fields FROM t
+-- columns: eq: bool | None (BOOLEAN)
+-- columns: listed: bool | None (BOOLEAN)
+-- columns: found: bool | None (BOOLEAN)
+-- columns: fields: bool (BOOLEAN)
+```
+
+```sql
+SELECT (DATE '2001-02-16', NULL::date) OVERLAPS (DATE '2001-10-30', DATE '2002-10-30') AS overlaps
+-- columns: overlaps: bool | None (BOOLEAN)
+```
+
 ## Division by zero raises, so it is not NULL
 
 ```sql
