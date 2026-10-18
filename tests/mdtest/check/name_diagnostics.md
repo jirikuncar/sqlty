@@ -65,6 +65,9 @@ f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 
 Their keys are checked like `WHERE`, except a result column named by its alias or
 position, which `GROUP BY` and `ORDER BY` accept. PostgreSQL reads no aliases in `HAVING`.
+A bare name in `ORDER BY` reads a result column first, aliased or not, so `id` in `g`
+is `t.id` even though both tables have the column. Without such a result column, in `h`,
+it reads the tables and is ambiguous.
 
 ```toml
 [tool.sqlty.rules]
@@ -82,6 +85,9 @@ c = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING count(nop
 d = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING n > 1"
 e = "--sql\nSELECT name AS label, count(*) AS n FROM users GROUP BY label ORDER BY n DESC, 1"
 f = "--sql\nSELECT u.name FROM users u ORDER BY u.id"
+g = "--sql\nSELECT t.id, t.title FROM teams t JOIN users u ON u.team_id = t.id ORDER BY title, id"
+# error: [ambiguous-column] "column reference `id` is ambiguous: `t`, `u` all have it"
+h = "--sql\nSELECT t.title FROM teams t JOIN users u ON u.team_id = t.id ORDER BY id"
 ```
 
 #### Result column aliases in SQLite and MySQL
