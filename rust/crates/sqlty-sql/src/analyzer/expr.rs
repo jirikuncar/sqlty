@@ -1,8 +1,8 @@
 //! Expression typing.
 
 use sqlparser::ast::{
-    AccessExpr, ArrayElemTypeDef, CaseWhen, DataType, Expr, Function, FunctionArguments, Ident,
-    ObjectName, Subscript, UnaryOperator, Value,
+    AccessExpr, ArrayElemTypeDef, CaseWhen, DataType, Expr, Function, FunctionArgumentClause,
+    FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
 use crate::catalog::{fold, FunctionReturn};
@@ -244,6 +244,7 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotUnknown(_)
             | Expr::IsDistinctFrom(..)
             | Expr::IsNotDistinctFrom(..)
+            | Expr::IsJson { .. }
             | Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 ..
@@ -464,6 +465,17 @@ impl<'a> Analyzer<'a> {
             return Ok(elem.map_or(Typed::UNKNOWN, |elem| {
                 from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
             }));
+        }
+        if let FunctionArguments::List(list) = &func.args {
+            let returning = list.clauses.iter().find_map(|clause| match clause {
+                FunctionArgumentClause::JsonReturningClause(returning) => {
+                    Some(&returning.data_type)
+                }
+                _ => None,
+            });
+            if let Some(data_type) = returning {
+                return Ok(self.cast_typed(data_type));
+            }
         }
         let args = positional_args(&func.args);
         let arg = args.first().copied();

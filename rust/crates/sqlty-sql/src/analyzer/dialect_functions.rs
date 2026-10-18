@@ -212,6 +212,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_TYPE",
             "JSON_QUOTE",
             "JSON_PRETTY",
+            "JSON_VALUE",
         ],
         Sql("TEXT"),
     ),

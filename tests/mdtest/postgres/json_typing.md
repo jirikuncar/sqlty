@@ -93,3 +93,47 @@ SELECT
 FROM users u
 -- inferred: tuple[int, str, datetime.datetime, uuid.UUID, typing.Any, bool]
 ```
+
+## SQL/JSON functions
+
+PostgreSQL 16 and 17 added the SQL standard JSON functions. A `RETURNING`
+clause gives the result type; without it, `JSON_VALUE` returns `text` and
+`JSON_QUERY` returns `jsonb`. `JSON_VALUE` and `JSON_QUERY` are NULL when the
+path matches nothing.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE docs (id INTEGER NOT NULL, body JSONB NOT NULL, raw TEXT);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT JSON_VALUE(body, '$.name') AS name, JSON_VALUE(body, '$.age' RETURNING INTEGER) AS age, JSON_QUERY(body, '$.tags') AS tags, JSON_QUERY(body, '$.tags' RETURNING TEXT) AS tags_text, JSON_EXISTS(body, '$.name') AS has_name FROM docs
+-- columns: name: str | None (TEXT)
+-- columns: age: int | None (INT)
+-- columns: tags: typing.Any (JSONB)
+-- columns: tags_text: str | None (TEXT)
+-- columns: has_name: bool (BOOLEAN)
+```
+
+```sql
+SELECT raw IS JSON AS valid, id::TEXT IS NOT JSON OBJECT AS not_object, JSON_SCALAR(id) AS scalar, JSON(raw) AS parsed, JSON_SERIALIZE(body::JSON RETURNING BYTEA) AS bytes FROM docs
+-- columns: valid: bool | None (BOOLEAN)
+-- columns: not_object: bool (BOOLEAN)
+-- columns: scalar: typing.Any (JSON)
+-- columns: parsed: typing.Any (JSON)
+-- columns: bytes: bytes (VARBINARY)
+```
+
+```sql
+SELECT JSON_ARRAY(id, raw) AS arr, JSON_ARRAY(id RETURNING JSONB) AS arr_b, JSON_ARRAYAGG(id) AS ids, JSON_OBJECTAGG(raw: id) AS by_raw FROM docs GROUP BY id, raw
+-- columns: arr: typing.Any (JSON)
+-- columns: arr_b: typing.Any (JSONB)
+-- columns: ids: typing.Any (JSON)
+-- columns: by_raw: typing.Any (JSON)
+```

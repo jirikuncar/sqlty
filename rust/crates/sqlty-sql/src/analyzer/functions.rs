@@ -394,9 +394,17 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_STRIP_NULLS",
             "JSON_EXTRACT_PATH",
             "JSON_ARRAY_ELEMENTS",
+            "JSON",
+            "JSON_ARRAY",
+            "JSON_SCALAR",
+            "JSON_ARRAYAGG",
+            "JSON_OBJECTAGG",
         ],
         Sql("JSON"),
     ),
+    (&["JSON_VALUE", "JSON_SERIALIZE"], Sql("TEXT")),
+    (&["JSON_QUERY"], Sql("JSONB")),
+    (&["JSON_EXISTS"], Sql("BOOLEAN")),
     (
         &[
             "JSONB_BUILD_ARRAY",
