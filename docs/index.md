@@ -54,8 +54,8 @@ string itself is never modified. For a file of plain `--sql` strings,
   are rewritten when imported, without a rewrite step.
 - **[Untyped queries](guide/untyped.md).** Mark queries sqlty cannot type as
   `SQL[UNTYPED]`, which type checkers refuse to treat as a concrete row.
-- **[Lint rules](reference/rules.md).** Thirteen rules with configurable
-  severity.
+- **[Lint rules](reference/rules.md).** Row type, schema, parameter
+  and query checks, each with a configurable severity.
 - **[Rust engine](reference/engine.md).** SQL parsing, type inference and
   source rewriting in Rust, exposed to Python with PyO3.
 
