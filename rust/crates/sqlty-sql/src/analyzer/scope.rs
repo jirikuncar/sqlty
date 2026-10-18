@@ -192,7 +192,7 @@ pub(super) fn any_merging_join(from: &[TableWithJoins]) -> bool {
     })
 }
 
-/// The name a relation is referred to by: its alias, else its table name.
+/// The name a relation is referred to by: its alias, else its table or function name.
 pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
     let alias = match factor {
         TableFactor::Table { name, alias, .. } => {
@@ -201,7 +201,19 @@ pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
                 |alias| alias.name.value.to_lowercase(),
             ))
         }
-        TableFactor::Derived { alias, .. } => alias.as_ref(),
+        TableFactor::Function { name, alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || function_name_of(name),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::UNNEST { alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || "unnest".to_string(),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::Derived { alias, .. } | TableFactor::JsonTable { alias, .. } => alias.as_ref(),
         _ => None,
     };
     alias.map(|alias| alias.name.value.to_lowercase())
@@ -586,15 +598,10 @@ impl<'a> Analyzer<'a> {
                     .virtuals
                     .get(&derived_table(factor))
                     .is_some_and(|columns| !columns.iter().any(Column::is_unknown_star)),
-                TableFactor::UNNEST { alias, .. } => self
-                    .virtuals
-                    .get(&format!(
-                        "({})",
-                        alias
-                            .as_ref()
-                            .map_or("unnest".to_string(), |a| a.name.value.to_lowercase())
-                    ))
-                    .is_some(),
+                TableFactor::UNNEST { .. }
+                | TableFactor::Function { .. }
+                | TableFactor::JsonTable { .. } => relation_name(factor)
+                    .is_some_and(|name| self.virtuals.contains_key(&format!("({name})"))),
                 _ => false,
             })
     }
@@ -775,6 +782,14 @@ mod tests {
         assert_eq!(
             name("SELECT 1 FROM generate_series(1, 2)"),
             Some("generate_series".into())
+        );
+        assert_eq!(
+            name("SELECT 1 FROM unnest(ARRAY[1])").as_deref(),
+            Some("unnest")
+        );
+        assert_eq!(
+            name("SELECT 1 FROM JSON_TABLE('[]', '$' COLUMNS (a int PATH '$')) AS J").as_deref(),
+            Some("j")
         );
     }
 
