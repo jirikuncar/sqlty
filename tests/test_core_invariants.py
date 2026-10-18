@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import ast
 import random
+import re
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,23 @@ def _corpus(kind: str) -> list[Any]:
 
 PYTHON = _corpus("python")
 SQL = _corpus("sql")
+
+
+def test_every_inference_rule_is_asserted() -> None:
+    """Some `-- rules:` assertion names each inference rule, so removing one fails a test."""
+    rules = {
+        rule["id"]
+        for path in (ROOT / "rust" / "crates" / "sqlty-sql" / "rules").rglob("*.inference.toml")
+        for table in tomllib.loads(path.read_text()).values()
+        for rule in table
+    }
+    asserted = {
+        rule
+        for md in [*MARKDOWN, ROOT / "README.md", *(ROOT / "src" / "sqlty" / "rules").glob("*.md")]
+        for line in re.findall(r"^-- rules: .*", md.read_text(), re.MULTILINE)
+        for rule in line.split()
+    }
+    assert sorted(rules - asserted) == []
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)

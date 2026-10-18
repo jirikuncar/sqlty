@@ -200,6 +200,16 @@ FROM users u
 -- inferred: tuple[int, str, int]
 ```
 
+## SELECT ALL before a subquery
+
+`ALL` after `SELECT` is the set quantifier, not the `ALL` comparison, so
+`SELECT ALL(SELECT 1)` returns the subquery's integer in PostgreSQL, MySQL and SQLite.
+
+```sql
+SELECT ALL(SELECT 1)
+-- inferred: tuple[int]
+```
+
 ## Simple CTE (Common Table Expression)
 
 ```sql
