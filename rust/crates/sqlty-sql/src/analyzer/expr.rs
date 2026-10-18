@@ -255,12 +255,15 @@ impl<'a> Analyzer<'a> {
                 Ok(from_sql_type("RECORD", self.dialect))
             }
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
-            Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. }
-                if self.dialect == SqlDialect::Postgres =>
-            {
+            // SQLite's trim always returns text.
+            Expr::Trim { .. } if self.dialect == SqlDialect::Sqlite => {
                 Ok(from_sql_type("TEXT", self.dialect))
             }
-            Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. } => known("str"),
+            Expr::Trim { expr: inner, .. }
+            | Expr::Substring { expr: inner, .. }
+            | Expr::Overlay { expr: inner, .. } => {
+                self.function_type(Returns::Text(0), &[inner.as_ref()], scope)
+            }
             Expr::Collate { expr: inner, .. } => self.expr(inner, scope),
             Expr::Position { .. } => Ok(from_sql_type("INT", self.dialect)),
             Expr::Subquery(query) => {

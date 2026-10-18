@@ -61,6 +61,9 @@ pub(super) enum Returns {
     /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
     /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
     Series,
+    /// A string function with a binary overload: `TEXT`, or the type of argument `i` when
+    /// it is a binary string (or, in PostgreSQL, a bit string).
+    Text(usize),
     /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
     /// for [`Returns::Series`].
     Random,
@@ -101,14 +104,13 @@ pub(super) const COMMON_FUNCTIONS: &[(&[&str], Returns)] = &[
             "LOWER",
             "TRIM",
             "CONCAT",
-            "SUBSTR",
-            "SUBSTRING",
             "REPLACE",
             "STRING_AGG",
             "GROUP_CONCAT",
         ],
         Sql("TEXT"),
     ),
+    (&["SUBSTR", "SUBSTRING"], Returns::Text(0)),
     (&["NOW", "CURRENT_TIMESTAMP"], Sql("TIMESTAMPTZ")),
     (&["CURRENT_DATE"], Sql("DATE")),
     (&["CURRENT_TIME"], Sql("TIMETZ")),
@@ -143,14 +145,10 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "RIGHT",
             "LPAD",
             "RPAD",
-            "LTRIM",
-            "RTRIM",
-            "BTRIM",
             "INITCAP",
             "REPEAT",
             "REVERSE",
             "TRANSLATE",
-            "OVERLAY",
             "CONCAT_WS",
             "FORMAT",
             "MD5",
@@ -484,6 +482,10 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     ),
     (&["GENERATE_SERIES"], Returns::Series),
     (
+        &["TRIM", "LTRIM", "RTRIM", "BTRIM", "OVERLAY"],
+        Returns::Text(0),
+    ),
+    (
         &[
             "NULLIF",
             "FIRST_VALUE",
@@ -688,6 +690,19 @@ impl<'a> Analyzer<'a> {
                     Some("DATE") => sql("TIMESTAMPTZ"),
                     Some("TIMESTAMP" | "TIMESTAMPTZ" | "INTERVAL") => Ok(typed),
                     _ => Ok(Typed::UNKNOWN),
+                }
+            }
+            Returns::Text(i) => {
+                let typed = arg(i)?;
+                match operand_type(&typed) {
+                    Some(
+                        binary @ ("VARBINARY" | "BINARY" | "BYTEA" | "BLOB" | "TINYBLOB"
+                        | "MEDIUMBLOB" | "LONGBLOB"),
+                    ) => sql(binary),
+                    Some(bits @ ("BIT" | "VARBIT")) if self.dialect == SqlDialect::Postgres => {
+                        sql(bits)
+                    }
+                    _ => sql("TEXT"),
                 }
             }
             Returns::Random if args.is_empty() => sql("DOUBLE"),
