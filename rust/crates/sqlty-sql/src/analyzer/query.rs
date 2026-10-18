@@ -139,7 +139,9 @@ impl<'a> Analyzer<'a> {
                 match returning(stmt) {
                     Some(items) => {
                         let scope = dml_scope(stmt, self.dialect);
-                        self.projection(items, &scope, None).map(non_empty)
+                        let mut analyzer = self.clone();
+                        analyzer.facts = self.written_facts(stmt, &scope);
+                        analyzer.projection(items, &scope, None).map(non_empty)
                     }
                     None => Ok(None),
                 }
