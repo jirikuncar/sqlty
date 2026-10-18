@@ -69,6 +69,14 @@ class HelperCall(NamedTuple):
     row: ast.expr | None
     typing_aliases: dict[str, str]
     params: tuple[ParamArg, ...] | None = None
+    end_line: int | None = None
+
+    @property
+    def typed_lines(self) -> range:
+        """The lines of the call when it passes a row type: its strings need no ``SQL[T]``."""
+        return (
+            range(self.line, (self.end_line or self.line) + 1) if self.row is not None else range(0)
+        )
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -593,6 +601,7 @@ def find_helper_calls(
                     _argument(helper, node, helper.row),
                     aliases,
                     _call_params(helper, node, parsed),
+                    node.end_lineno,
                 )
             )
         elif scan is not None and query is not None:
@@ -608,6 +617,7 @@ def find_helper_calls(
                     row,
                     aliases,
                     _call_params(helper, node, parsed),
+                    node.end_lineno,
                 )
             )
     return sorted(calls, key=lambda call: call.line)

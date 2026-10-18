@@ -134,3 +134,28 @@ query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[sele
 # fixed: other = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 ```
+
+## A string passed to a helper with its row type is not wrapped
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+
+names = fetch_all(
+    "--sql\nSELECT id::INTEGER FROM users",
+    int,
+)
+rows = fetch_all("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[select-star]
+# fixed: from typing import Annotated, LiteralString
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+# fixed:
+# fixed: names = fetch_all(
+# fixed:     "--sql\nSELECT id::INTEGER FROM users",
+# fixed:     int,
+# fixed: )
+# fixed: rows = fetch_all(SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users"))  # sqlty: ignore[select-star]
+```
