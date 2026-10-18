@@ -67,6 +67,40 @@ SELECT * FROM items
 -- columns: d: decimal.Decimal | None (UDECIMAL(10, 2))
 ```
 
+## Unions of signed and unsigned integers
+
+Branches of one signedness keep it, at the wider width. A signed and an unsigned
+integer widen to a signed type that holds both, and past `BIGINT UNSIGNED` that is a
+`DECIMAL`.
+
+`schema.sql`:
+```sql
+CREATE TABLE counts (
+    ub BIGINT UNSIGNED NOT NULL,
+    b BIGINT NOT NULL,
+    ui INT UNSIGNED NOT NULL,
+    i INT NOT NULL,
+    ut TINYINT UNSIGNED NOT NULL,
+    t TINYINT NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ub AS a, ui AS b, ui AS c, ut AS d, ut AS e FROM counts
+UNION ALL SELECT i, ui, i, t, i FROM counts
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: int (UINT)
+-- columns: c: int (BIGINT)
+-- columns: d: int (SMALLINT)
+-- columns: e: int (INT)
+```
+
 ## Temporal and other columns
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
