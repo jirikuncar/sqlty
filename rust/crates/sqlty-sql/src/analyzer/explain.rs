@@ -54,6 +54,7 @@ pub fn explain_select(
     );
     let explained = Explained::default();
     analyzer.explain = Some(explained.clone());
+    analyzer.source = super::api::text_source(sql, dialect);
     let columns = analyzer.statement_columns(&stmt).ok()??;
     let items = match &stmt {
         Statement::Query(query) => top_projection(query),

@@ -40,6 +40,7 @@ mod table_functions;
 mod test_support;
 #[cfg(test)]
 mod tests;
+mod text_names;
 mod typed;
 
 #[cfg(test)]
