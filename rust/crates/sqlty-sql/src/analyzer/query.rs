@@ -4,8 +4,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use sqlparser::ast::{
-    Expr, JoinConstraint, JoinOperator, Query, Select, SelectItem, SelectItemQualifiedWildcardKind,
-    SetExpr, Statement, TableAlias, TableWithJoins, Value,
+    Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderByKind, Query, Select, SelectItem,
+    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins, Value,
 };
 
 use crate::catalog::fold;
@@ -231,7 +231,41 @@ impl<'a> Analyzer<'a> {
             | SetExpr::Update(stmt)
             | SetExpr::Delete(stmt)
             | SetExpr::Merge(stmt) => self.statement_columns(stmt),
-            body => self.set_columns(body),
+            body => {
+                if let (SetExpr::Select(select), Some(order_by)) = (body, &query.order_by) {
+                    if let OrderByKind::Expressions(keys) = &order_by.kind {
+                        let keys: Vec<&Expr> = keys.iter().map(|key| &key.expr).collect();
+                        self.check_clause_names(select, &keys)?;
+                    }
+                }
+                self.set_columns(body)
+            }
+        }
+    }
+
+    /// Checks the names that `ORDER BY` keys of `select` read, as the `WHERE` clause's
+    /// are; a result column's name or position is not a table column.
+    fn check_clause_names(&self, select: &Select, keys: &[&Expr]) -> Inferred<()> {
+        if !self.diag.enabled() {
+            return Ok(());
+        }
+        let mut quiet = self.clone();
+        quiet.diag = Diagnostics::default();
+        let (mut analyzer, scope) = quiet.scope_of(&select.from)?;
+        analyzer.diag = self.diag.clone();
+        let aliases = aliases(select);
+        for key in keys.iter().filter(|key| !names_result_column(key, select)) {
+            analyzer.check_references_besides(key, &scope, self.aliases_in_keys(&aliases));
+        }
+        Ok(())
+    }
+
+    /// The result column aliases a name in `GROUP BY` or `ORDER BY` may refer to, inside
+    /// an expression too: MySQL and SQLite read them there (SQLite in `WHERE` as well).
+    fn aliases_in_keys<'s>(&self, aliases: &'s [&'s str]) -> &'s [&'s str] {
+        match self.dialect {
+            SqlDialect::Sqlite | SqlDialect::MySql => aliases,
+            _ => &[],
         }
     }
 
@@ -252,8 +286,39 @@ impl<'a> Analyzer<'a> {
                     | JoinOperator::FullOuter(JoinConstraint::On(on)) => Some(on),
                     _ => None,
                 });
-            for condition in conditions.chain(&select.selection) {
+            let grouping = match &select.group_by {
+                GroupByExpr::Expressions(keys, _) => keys.as_slice(),
+                GroupByExpr::All(_) => &[],
+            };
+            let keys = grouping
+                .iter()
+                .flat_map(|key| match key {
+                    Expr::Rollup(sets) | Expr::Cube(sets) | Expr::GroupingSets(sets) => {
+                        sets.iter().flatten().collect()
+                    }
+                    Expr::Tuple(exprs) => exprs.iter().collect(),
+                    key => vec![key],
+                })
+                .filter(|key| !names_result_column(key, select));
+            let aliases = aliases(select);
+            let in_keys = self.aliases_in_keys(&aliases);
+            let in_where = if self.dialect == SqlDialect::Sqlite {
+                in_keys
+            } else {
+                &[]
+            };
+            for condition in conditions {
                 analyzer.check_references(condition, &scope);
+            }
+            if let Some(condition) = &select.selection {
+                analyzer.check_references_besides(condition, &scope, in_where);
+            }
+            for key in keys {
+                analyzer.check_references_besides(key, &scope, in_keys);
+            }
+            // MySQL and SQLite also read result column names in HAVING.
+            if let (Some(having), SqlDialect::Postgres) = (&select.having, self.dialect) {
+                analyzer.check_references(having, &scope);
             }
             analyzer.check_grouping(select, &scope);
         }
@@ -439,7 +504,14 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
-            let nullability = self.nullability(expr, scope, facts);
+            let mut nullability = self.nullability(expr, scope, facts);
+            // psycopg loads a JSON `null` as `None`, and it passes `IS NOT NULL`.
+            if self
+                .json_extract(expr, scope)
+                .is_some_and(|value| value.null)
+            {
+                nullability = Nullability::Nullable;
+            }
             let json = self.column_json(expr, sql_type.as_deref(), scope)?;
             columns.push(Column {
                 name,
@@ -578,6 +650,33 @@ pub(super) fn shorten(text: &str) -> String {
     match text.char_indices().nth(MAX) {
         Some((end, _)) => format!("{}...", &text[..end]),
         None => text.to_string(),
+    }
+}
+
+/// The aliases `select` gives its result columns.
+fn aliases(select: &Select) -> Vec<&str> {
+    select
+        .projection
+        .iter()
+        .filter_map(|item| match item {
+            SelectItem::ExprWithAlias { alias, .. } => Some(alias.value.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether `key` is a result column of `select` by position (`ORDER BY 1`) or by name
+/// (`ORDER BY total` for `sum(x) AS total`), which `GROUP BY` and `ORDER BY` accept.
+fn names_result_column(key: &Expr, select: &Select) -> bool {
+    match key {
+        Expr::Value(value) => matches!(value.value, Value::Number(..)),
+        Expr::Identifier(ident) => select.projection.iter().any(|item| match item {
+            SelectItem::ExprWithAlias { alias, .. } => {
+                alias.value.eq_ignore_ascii_case(&ident.value)
+            }
+            _ => false,
+        }),
+        _ => false,
     }
 }
 

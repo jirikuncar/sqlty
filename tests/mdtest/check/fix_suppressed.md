@@ -128,6 +128,7 @@ other = "--sql\nSELECT id::INTEGER FROM users"
 query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 # fixed: """Queries."""
 # fixed: from __future__ import annotations
+# fixed:
 # fixed: from sqlty import SQL
 # fixed:
 # fixed: other = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")

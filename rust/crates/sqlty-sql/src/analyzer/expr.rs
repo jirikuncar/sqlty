@@ -157,6 +157,18 @@ impl<'a> Analyzer<'a> {
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
+            // MySQL's `CONVERT(x, type)`; `CONVERT(x USING charset)` keeps a string a string.
+            Expr::Convert {
+                data_type: Some(data_type),
+                is_try: false,
+                ..
+            } => Ok(self.cast_typed(data_type)),
+            Expr::Convert {
+                expr: inner,
+                data_type: None,
+                charset: Some(_),
+                ..
+            } => self.expr(inner, scope),
             Expr::TypedString(typed) => Ok(self.cast_typed(&typed.data_type)),
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => self.array_typed(&array.elem, scope),
@@ -267,7 +279,7 @@ impl<'a> Analyzer<'a> {
 
     /// `CAST(x AS type)`: the type as the schema resolves it, with the reason when it has no
     /// Python type.
-    fn cast_typed(&self, data_type: &DataType) -> Typed {
+    pub(super) fn cast_typed(&self, data_type: &DataType) -> Typed {
         let (sql_type, python_type, values) = self.schema.resolve_type(data_type, self.dialect);
         let typed = match python_type {
             // `SELECT *` writes a MySQL enum back as `x::ENUM('X', 'Y')` with its

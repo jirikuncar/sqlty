@@ -27,6 +27,7 @@ The full table, with the reason for each type, is [Type mapping](../reference/ty
 | A UUID stored as `CHAR(32)`, `CHAR(36)`, `VARCHAR(40)` or `BINARY(16)` | `str` or `bytes` | `uuid.UUID` |
 | A duration stored as `BIGINT` microseconds (Django, Tortoise) or `DATETIME` (SQLAlchemy on MySQL and SQLite) | `int`, `datetime.datetime` | `datetime.timedelta` |
 | MySQL `TIME` | `datetime.timedelta` | `datetime.time` (SQLAlchemy, Tortoise, ormar, peewee, Pony) |
+| PostgreSQL `BIT` | `str` | `BitString` (SQLAlchemy 2.1) |
 | `JSON` in MySQL and SQLite | `str`, typed `typing.Any` | the decoded value |
 | `AVG` of integers in PostgreSQL | `decimal.Decimal` | `float` (Django's `Avg`) |
 

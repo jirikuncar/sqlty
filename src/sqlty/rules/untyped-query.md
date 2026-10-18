@@ -18,7 +18,7 @@ or a schema.
 ```python
 from sqlty import SQL, UNTYPED
 
-# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type: columns `x`, `y` are untyped; add casts (for example id::INTEGER) or a schema"
 values = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # error: [untyped-query] "SQL[UNTYPED] can now be SQL[tuple[int]]; run sqlty check --fix"
 cast = SQL[UNTYPED]("--sql\nSELECT id::INTEGER FROM users")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -229,7 +230,7 @@ def test_check_reads_type_overrides(tmp_path, monkeypatch, capsys) -> None:
 def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
     """``--statistics`` ends with one line counting queries by how far sqlty types them."""
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunparsed-query = "warn"\n'
+        '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunknown-column = "warn"\n'
     )
     (tmp_path / "schema.sql").write_text(
         "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);"
@@ -1220,3 +1221,65 @@ def test_dialect_option_takes_every_dialect(tmp_path, monkeypatch, capsys) -> No
     code, _, err = _run(["check", "--dialect", "postgress", "."], capsys)
     assert code == 2
     assert "unknown dialect 'postgress' (did you mean 'postgres'?)" in err
+
+
+def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\n\n[tool.sqlty.rules]\nunknown-column = "error"\n'
+    )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT nmae FROM users")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "json", "q.py"])
+    assert json.loads(capsys.readouterr().out) == [
+        {
+            "file": "q.py",
+            "rule": "unknown-column",
+            "message": "column `nmae` does not exist in `users`",
+            "severity": "error",
+            "line": 2,
+        }
+    ]
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "github", "q.py"])
+    assert capsys.readouterr().out == (
+        "::error file=q.py,line=2,title=sqlty unknown-column::column `nmae` does not exist in `users`\n"
+    )
+
+
+def test_json_output_stays_parseable_with_fix_and_verbose(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT id::INTEGER FROM users"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "--fix", "-v", "--output-format", "json", "q.py"])
+    out, err = capsys.readouterr()
+    assert json.loads(out) == []
+    assert "Fixed q.py" in err
+
+
+@pytest.mark.parametrize("command", ["check", "rewrite", "strip"])
+def test_a_file_that_is_not_utf8_is_skipped(tmp_path, monkeypatch, caplog, command) -> None:
+    (tmp_path / "latin1.py").write_bytes('q = "caf\xe9"\n'.encode("latin-1"))
+    (tmp_path / "ok.py").write_text('q = "--sql\\nSELECT 1::INTEGER"\n')
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exit:
+        main([command, "."])
+    assert exit.value.code == 2
+    assert "latin1.py: not UTF-8" in caplog.text
+    if command == "rewrite":
+        assert (tmp_path / "ok.py").read_text().startswith("from sqlty import SQL")
+
+
+def test_skill_prints_and_installs(tmp_path, capsys) -> None:
+    main(["skill"])
+    skill = capsys.readouterr().out
+    assert skill.startswith("---\nname: sqlty\n")
+
+    main(["skill", "--install", str(tmp_path / "skills")])
+    assert (tmp_path / "skills" / "sqlty" / "SKILL.md").read_text() == skill

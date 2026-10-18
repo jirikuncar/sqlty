@@ -1,6 +1,6 @@
 # ambiguous-column
 
-Default severity: **ignore**
+Default severity: **error**
 
 ## What it does
 
@@ -38,11 +38,11 @@ Qualify the column: `u.id`. A column merged by `USING (id)` or any column of a `
 
 ## Configuration
 
-Off by default, because it reports code that passes today. Enable it:
+An error by default: the database rejects such SQL. Lower or turn it off:
 
 ```toml
 [tool.sqlty.rules]
 ambiguous-column = "warn"
 ```
 
-Only checked when a schema with tables is configured. Applies to the `postgres`, `mysql` and `sqlite` dialects. `error` makes `sqlty check` fail on it.
+Only checked when a schema with tables is configured. Applies to the `postgres`, `mysql` and `sqlite` dialects.

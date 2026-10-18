@@ -211,10 +211,12 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_UNQUOTE",
             "JSON_TYPE",
             "JSON_QUOTE",
+            "JSON_PRETTY",
         ],
         Sql("TEXT"),
     ),
     (&["ABS", "ROUND", "TRUNCATE", "MOD"], Arg(0)),
+    (&["ANY_VALUE"], Same(0)),
     (
         &[
             "SQRT", "EXP", "LN", "LOG", "LOG2", "LOG10", "POW", "POWER", "SIN", "COS", "TAN",
@@ -238,6 +240,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_KEYS",
             "JSON_ARRAY_APPEND",
             "JSON_ARRAY_INSERT",
+            "JSON_SEARCH",
         ],
         Sql("JSON"),
     ),
@@ -246,6 +249,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
 /// MySQL functions that give NULL for some non-null arguments: a string that is not a
 /// valid date or time, or an index out of range.
 pub(super) const MYSQL_ALWAYS_NULLABLE: &[&str] = &[
+    "JSON_SEARCH",
     "STR_TO_DATE",
     "DATE",
     "TIME",
@@ -277,7 +281,7 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
     WINDOW_FUNCTIONS[0],
     WINDOW_FUNCTIONS[1],
     (&["IIF"], Branches(1)),
-    (&["ZEROBLOB", "RANDOMBLOB", "UNHEX"], Sql("BLOB")),
+    (&["ZEROBLOB", "RANDOMBLOB", "UNHEX", "JSONB"], Sql("BLOB")),
     (&["LIKELIHOOD", "LIKELY", "UNLIKELY"], Same(0)),
     (&["GLOB", "LIKE"], Sql("BIGINT")),
     (&["IFNULL"], FirstKnown),
@@ -327,6 +331,7 @@ pub(super) const SQLITE_FUNCTIONS: &[(&[&str], Returns)] = &[
             "SIGN",
             "JSON_ARRAY_LENGTH",
             "JSON_VALID",
+            "JSON_ERROR_POSITION",
         ],
         Sql("BIGINT"),
     ),

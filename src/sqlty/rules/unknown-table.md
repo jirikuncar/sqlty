@@ -1,6 +1,6 @@
 # unknown-table
 
-Default severity: **ignore**
+Default severity: **error**
 
 ## What it does
 
@@ -37,11 +37,11 @@ Fix the name, or add the table to the schema file. CTEs, derived tables, views i
 
 ## Configuration
 
-Off by default, because it reports code that passes today. Enable it:
+An error by default: the database rejects such SQL. Lower or turn it off:
 
 ```toml
 [tool.sqlty.rules]
 unknown-table = "warn"
 ```
 
-Only checked when a schema with tables is configured: without one every table is unknown, so the rule stays silent. Applies to the `postgres`, `mysql` and `sqlite` dialects. Case is folded as the database does, so `Users` and `users` are one table. `error` makes `sqlty check` fail on it.
+Only checked when a schema with tables is configured: without one every table is unknown, so the rule stays silent. Applies to the `postgres`, `mysql` and `sqlite` dialects. Case is folded as the database does, so `Users` and `users` are one table.

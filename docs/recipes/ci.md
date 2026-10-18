@@ -90,7 +90,8 @@ whose row type is unknown; see [Untyped queries](../guide/untyped.md).
 ## Fail on drift and mismatches
 
 `sqlty check` exits with 1 only when a rule with severity `error` fires.
-By default that covers row type mismatches and `SELECT *` without a schema;
+By default that covers row type mismatches, names the schema doesn't have, and
+`SELECT *` without a schema;
 drift ([`stale-type`](../reference/rules.md#stale-type)) and unwrapped strings
 ([`stale-rewrite`](../reference/rules.md#stale-rewrite)) are warnings. Promote
 the rules you want to enforce:
@@ -123,11 +124,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # sqlty breaking reads the base branch
       - uses: astral-sh/setup-uv@v7
       - run: uv sync
       - run: uv run sqlty rewrite --check .
-      - run: uv run sqlty check .
+      - run: uv run sqlty check --output-format github .
+      - run: uv run sqlty breaking --output-format github --against origin/${{ github.base_ref }}
 ```
+
+Each step catches something the others don't:
+
+| Step | Fails when |
+|------|------------|
+| `sqlty rewrite --check` | a `--sql` string is not wrapped yet |
+| `sqlty check` | a rule with severity `error` fires: a row type mismatch or an unknown table or column by default, and drift such as [`stale-type`](../reference/rules.md#stale-type) once you [promote it](#fail-on-drift-and-mismatches) |
+| `sqlty breaking` | the pull request's schema breaks the base branch's queries, or its queries break on the base branch's schema: a dropped column, a column made nullable |
+
+!!! warning "`stale-type` is a warning by default"
+    A migration that makes a column nullable leaves `SQL[tuple[str]]` stale:
+    `sqlty check` reports it but exits 0. `sqlty breaking` fails on it, and so does
+    `sqlty check` with `stale-type = "error"`.
+
+`--output-format github` prints each diagnostic, and each breaking change, as a GitHub
+Actions annotation, so it shows on its line in the pull request's diff. See [Schema changes in CI](migration.md#schema-changes-in-ci)
+for the `--direction` options.
 
 ## Keeping sources stripped
 

@@ -412,6 +412,11 @@ impl<'a> Analyzer<'a> {
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
             Expr::Nested(inner) | Expr::Collate { expr: inner, .. } => of(inner),
+            Expr::Convert {
+                expr: inner,
+                is_try: false,
+                ..
+            } => of(inner),
             Expr::Cast {
                 expr: inner, kind, ..
             } => match kind {
@@ -442,9 +447,11 @@ impl<'a> Analyzer<'a> {
             | Expr::IsDistinctFrom(..)
             | Expr::IsNotDistinctFrom(..) => Nullability::NonNull,
             Expr::UnaryOp { expr: inner, .. } => of(inner),
-            Expr::BinaryOp { left, op, right } => {
-                self.binary_nullability(left, op, right, scope, facts)
-            }
+            Expr::BinaryOp { left, op, right } => match self.json_extract(expr, scope) {
+                // A member every object has is there whenever the object is.
+                Some(value) if !value.missing => of(left),
+                _ => self.binary_nullability(left, op, right, scope, facts),
+            },
             Expr::Between {
                 expr: inner,
                 low,

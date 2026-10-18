@@ -2,8 +2,8 @@
 
 The rules `unknown-table`, `unknown-column`, `ambiguous-column`,
 `unknown-function`, `unknown-type` and `unsupported-syntax` explain why a
-result column is untyped. They are off by default (see the user guide in
-`docs/guide/name-diagnostics.md`).
+result column is untyped. The first three are errors by default, the others
+warnings (see the user guide in `docs/guide/name-diagnostics.md`).
 
 ## With a schema
 
@@ -20,12 +20,12 @@ CREATE TABLE teams (id INTEGER PRIMARY KEY, title TEXT);
 CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
 ```
 
-### Off by default
+### On by default
 
 ```python
 from sqlty import SQL
 
-# error:
+# error: [unknown-table] "table `missing` is not defined in the schema"
 q = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")
 ```
 
@@ -61,12 +61,91 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### GROUP BY, HAVING and ORDER BY
+
+Their keys are checked like `WHERE`, except a result column named by its alias or
+position, which `GROUP BY` and `ORDER BY` accept. PostgreSQL reads no aliases in `HAVING`.
+
+```toml
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+```python
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+a = "--sql\nSELECT id FROM users ORDER BY nmae"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+b = "--sql\nSELECT name FROM users GROUP BY name, nmae"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+c = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING count(nope) > 1"
+# error: [unknown-column] "column `n` does not exist in `users`"
+d = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING n > 1"
+e = "--sql\nSELECT name AS label, count(*) AS n FROM users GROUP BY label ORDER BY n DESC, 1"
+f = "--sql\nSELECT u.name FROM users u ORDER BY u.id"
+```
+
+#### Result column aliases in SQLite and MySQL
+
+SQLite reads a result column's alias anywhere, `WHERE` included; MySQL in `GROUP BY`,
+`HAVING` and `ORDER BY` expressions, not in `WHERE`. PostgreSQL only reads a bare
+alias in `GROUP BY` and `ORDER BY`.
+
+##### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+# error:
+a = "--sql\nSELECT name AS n FROM users WHERE n = 'a' GROUP BY n || 'x' ORDER BY lower(n)"
+```
+
+##### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+# error: [unknown-column] "column `n` does not exist in `users`"
+a = "-- sql\nSELECT name AS n FROM users WHERE n = 'a' ORDER BY lower(n)"
+```
+
+A user variable (`@name`) or a system variable (`@@name`) is not a column:
+
+```python
+# error:
+b = "-- sql\nSELECT name, @@version FROM users WHERE id = @uid"
+```
+
 #### INSERT, UPDATE and DELETE
 
 A statement that returns no rows is checked too: the table it writes, the
 columns it sets, and the names its values, conditions and source query read.
 
 ```python
+# error: [insert-missing-column] "INSERT into `users` leaves out `name`, which is NOT NULL and has no default"
 # error: [unknown-column] "column `nmae` does not exist in `users`"
 a = "--sql\nINSERT INTO users (id, nmae) VALUES (1, 'x')"
 # error: [unknown-table] "table `missing` is not defined in the schema"
@@ -164,6 +243,7 @@ b = SQL[tuple[int]]("--sql\nSELECT nope FROM missing")  # sqlty: ignore
 
 ```toml
 [tool.sqlty.rules]
+unknown-table = "ignore"
 unknown-column = "warn"
 ```
 
@@ -384,7 +464,7 @@ import datetime
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users")
+a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users GROUP BY name")
 ```
 
 ## Without a schema nothing is guessed

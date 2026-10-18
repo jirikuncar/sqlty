@@ -2,7 +2,8 @@
 
 <!-- generated:cli-usage -->
 ```text
-sqlty [-h] [--version] {rewrite,strip,check,breaking,rule,version} ...
+sqlty [-h] [--version]
+      {rewrite,strip,check,breaking,rule,skill,version} ...
 ```
 <!-- /generated:cli-usage -->
 
@@ -81,7 +82,7 @@ tool such as pre-commit passes file names.
 |------|---------|
 | 0 | Nothing to report: no `error` diagnostic from `check`, no file changed by `--check` or `--diff`, or the files were rewritten or stripped |
 | 1 | `check` found an `error`-severity diagnostic, `breaking` found a breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
-| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist) or an internal error |
+| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist), a Python file that is not UTF-8 (reported and skipped; the other files are still processed), or an internal error |
 
 ## Common options
 
@@ -193,6 +194,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
             [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics] [--explain]
+            [--output-format {text,json,github}]
             [paths ...]
 ```
 <!-- /generated:cli-usage-check -->
@@ -206,6 +208,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 | `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
 | `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
+| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity and message) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
@@ -245,6 +248,7 @@ Found 1 breaking change(s)
 ```text
 sqlty breaking [-h] --against REF [--head REF]
                [--direction {backward,forward,both}] [-q]
+               [--output-format {text,json,github}]
                [paths ...]
 ```
 <!-- /generated:cli-usage-breaking -->
@@ -255,6 +259,7 @@ sqlty breaking [-h] --against REF [--head REF]
 | `--against REF` | The baseline revision: a branch, tag, SHA or HEAD~1 |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
+| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message and direction) or github (GitHub Actions error annotations) |
 <!-- /generated:cli-options-breaking -->
 
 Exit code: 1 when a change breaks either direction, 2 for an unknown revision or

@@ -1,6 +1,6 @@
 # unparsed-query
 
-Default severity: **ignore**
+Default severity: **warn**
 
 ## What it does
 
@@ -36,9 +36,11 @@ does not support in your dialect stays unchecked. To accept one case, put
 
 ## Configuration
 
-Off by default. Enable it to list the queries sqlty cannot check:
+A warning by default: sqlty's parser may not read SQL your database accepts, so the
+warning lists the queries sqlty cannot check without failing CI. Make it fail, or turn
+it off:
 
 ```toml
 [tool.sqlty.rules]
-unparsed-query = "warn"
+unparsed-query = "ignore"
 ```

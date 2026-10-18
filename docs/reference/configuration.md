@@ -215,6 +215,10 @@ schema columns and casts; an expression over a column keeps its type when it
 returns the column's values (`MAX(day)`). See
 [Drivers and ORMs](../guide/drivers-and-orms.md#what-to-annotate).
 
+`rewrite` and `check --fix` import the module a type names (`import app.models` for
+`app.models.Status`), as they import `datetime`. `strip` leaves that import, since
+it reads no configuration.
+
 ## `format-command`
 
 A formatter `rewrite` and `check --fix` run on each file they change, with the
@@ -232,6 +236,22 @@ write nothing, so they run no formatter. A formatter that fails is reported as
 a warning and the file keeps sqlty's changes. `rewrite` stays idempotent with a
 formatter: a wrapper the formatter split over several lines is recognized as
 already written.
+
+`rewrite` adds its imports (`from sqlty import SQL`, `import datetime`) at the top of
+the import block, below the module docstring, without sorting them into your groups.
+To keep an import sorter's check passing, sort them as part of the command, for example
+with a script:
+
+```bash
+#!/bin/sh
+# scripts/format.sh: sort imports, then format
+ruff check --select I --fix --quiet "$@" && ruff format --quiet "$@"
+```
+
+```toml
+[tool.sqlty]
+format-command = ["sh", "scripts/format.sh"]
+```
 
 ## `exclude` and `extend-exclude`
 

@@ -13,7 +13,7 @@ CREATE TABLE users (
     name TEXT NOT NULL,
     age INTEGER,
     born DATE,
-    uid UUID NOT NULL
+    uid UUID NOT NULL DEFAULT gen_random_uuid()
 );
 ```
 
