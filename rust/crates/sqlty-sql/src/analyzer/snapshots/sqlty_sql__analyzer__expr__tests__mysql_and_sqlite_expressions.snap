@@ -11,7 +11,7 @@ c: int | UBIGINT | Nullable
 SELECT TRIM(txt) AS a, SUBSTRING(txt, 1, 2) AS b, POSITION('a' IN txt) AS c FROM t
 a: str | TEXT | Nullable
 b: str | TEXT | Nullable
-c: int | ? | Nullable
+c: int | INT | Nullable
 
 SELECT e AS a, CAST(e AS CHAR) AS b, i DIV 2 AS c FROM t
 a: typing.Literal['a', 'b'] | ENUM('a', 'b') | NonNull
@@ -28,4 +28,4 @@ c: float | FLOAT | Nullable
 SELECT 1 AS a, 'x' AS b, x'ff' AS c FROM t
 a: int | ? | NonNull
 b: typing.Literal['x'] | ? | NonNull
-c: str | ? | NonNull
+c: bytes | VARBINARY | NonNull

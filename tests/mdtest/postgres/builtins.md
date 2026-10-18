@@ -127,6 +127,30 @@ SELECT substring(by from 2 for 3) AS a, substr(by, 2) AS b, overlay(by placing '
 -- columns: f: str (TEXT)
 ```
 
+## Trigonometry in degrees and hyperbolic functions
+
+```sql
+SELECT cot(d) AS a, sind(d) AS b, atan2d(d, d) AS c, tanh(d) AS e, atanh(d) AS f FROM t
+-- columns: a: float (DOUBLE)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+```
+
+## Positions, normalization and identifiers
+
+`IS NORMALIZED` of NULL is NULL.
+
+```sql
+SELECT position('a' in tx) AS a, tx IS NFC NORMALIZED AS b, n::text IS NOT NFD NORMALIZED AS c, parse_ident(tx) AS e, pg_postmaster_start_time() AS f FROM t
+-- columns: a: int (INT)
+-- columns: b: bool (BOOLEAN)
+-- columns: c: bool | None (BOOLEAN)
+-- columns: e: list[str] (ARRAY<TEXT>)
+-- columns: f: datetime.datetime (TIMESTAMPTZ)
+```
+
 ## Network addresses
 
 `<<`, `<<=`, `>>` and `>>=` test containment. An address plus or minus an
@@ -216,4 +240,21 @@ SELECT min_scale(n) AS a, trim_scale(n) AS b, erf(d) AS c, regexp_instr(tx, 'a')
 ```sql
 SELECT range_intersect_agg(int4range(i, i + 1)) AS r FROM t
 -- columns: r: None (INT4RANGE)
+```
+
+## Operators on bytes, roots, jsonb subscripts and ranges
+
+A `jsonb` subscript is `jsonb`, NULL for a missing key. `|/` and `||/` take a
+`double precision`.
+
+```sql
+SELECT by || by AS a, |/ d AS b, ||/ i AS c, jb['a'] AS e, jb['a']['b'] AS f, int4range(1, 5) * int4range(3, 7) AS g, int4range(1, 5) + int4range(3, 7) AS h, int4range(1, 5) - int4range(3, 7) AS k FROM t
+-- columns: a: bytes (VARBINARY)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: typing.Any (JSONB)
+-- columns: f: typing.Any (JSONB)
+-- columns: g: None (INT4RANGE)
+-- columns: h: None (INT4RANGE)
+-- columns: k: None (INT4RANGE)
 ```

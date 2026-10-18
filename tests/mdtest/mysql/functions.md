@@ -56,6 +56,13 @@ SELECT id AS a, day AS b FROM events UNION ALL SELECT price, happened FROM event
 -- columns: b: datetime.datetime (DATETIME)
 ```
 
+`ISNULL` is 1 or 0, never NULL.
+
+```sql
+SELECT ISNULL(note) AS a FROM events
+-- columns: a: int (BIGINT)
+```
+
 ## Grouping
 
 `GROUPING` tells a `WITH ROLLUP` super-aggregate row by a non-null `int`.
@@ -145,6 +152,15 @@ SELECT SUBSTRING(data, 1, 2) AS a, TRIM(data) AS b, LEFT(data, 1) AS c, UPPER(da
 -- columns: d: bytes (VARBINARY)
 -- columns: e: bytes (VARBINARY)
 -- columns: f: bytes (VARBINARY)
+```
+
+Hexadecimal and bit-value literals are binary strings.
+
+```sql
+SELECT X'41' AS a, 0x41 AS b, b'101' AS c FROM files
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes (VARBINARY)
 ```
 
 ## Numbers
