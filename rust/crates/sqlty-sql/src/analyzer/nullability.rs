@@ -497,7 +497,8 @@ impl<'a> Analyzer<'a> {
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
                 any_nullable([of(left), self.element_nullability(right, scope, facts)])
             }
-            Expr::Extract { expr: inner, .. }
+            Expr::Prefixed { value: inner, .. }
+            | Expr::Extract { expr: inner, .. }
             | Expr::Ceil { expr: inner, .. }
             | Expr::Floor { expr: inner, .. } => of(inner),
             Expr::Position { expr: inner, r#in } => any_nullable([of(inner), of(r#in)]),

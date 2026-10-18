@@ -24,7 +24,27 @@ reasoning = "A division by zero gives NULL whatever the operand types."
 id = "mysql.arithmetic.integer-division"
 operator = "MyIntegerDivide"
 dialects = ["mysql"]
-type = "@unknown"
+type = "BIGINT"
 nullability = "nonzero-divisor"
-reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (DIV; Division by zero produces a NULL result)"
-reasoning = "`DIV` gives NULL for a zero divisor; its type is not inferred yet."
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (DIV; the operands are converted to DECIMAL and divided before converting the result to BIGINT; Division by zero produces a NULL result)"
+reasoning = "`DIV` gives a BIGINT, and NULL for a zero divisor."
+
+[[rule]]
+id = "mysql.arithmetic.unsigned"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["mysql"]
+left = ["@unsigned"]
+right = ["@integer", "@unsigned"]
+type = "UBIGINT"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (If both operands are integers and any of them are unsigned, the result is an unsigned integer)"
+reasoning = "Integer arithmetic with an unsigned operand is unsigned, at BIGINT precision."
+
+[[rule]]
+id = "mysql.arithmetic.unsigned-right"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["mysql"]
+left = ["@integer"]
+right = ["@unsigned"]
+type = "UBIGINT"
+reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (If both operands are integers and any of them are unsigned, the result is an unsigned integer)"
+reasoning = "Integer arithmetic with an unsigned operand is unsigned, at BIGINT precision."

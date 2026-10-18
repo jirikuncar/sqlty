@@ -9,6 +9,5 @@ no rows
 mysql:
 SELECT a / b AS q, a DIV b AS d, a % b AS m FROM t
 q: decimal.Decimal | DECIMAL | Nullable
-d: ? | ? | Nullable
+d: int | BIGINT | Nullable
 m: int | INT | Nullable
-[unsupported-syntax] expression `a DIV b` is not typed

@@ -16,8 +16,7 @@ c: int | ? | Nullable
 SELECT e AS a, CAST(e AS CHAR) AS b, i DIV 2 AS c FROM t
 a: typing.Literal['a', 'b'] | ENUM('a', 'b') | NonNull
 b: str | CHAR | NonNull
-c: ? | ? | NonNull
-[unsupported-syntax] expression `i DIV 2` is not typed
+c: int | BIGINT | NonNull
 
 sqlite:
 SELECT CAST(x AS INTEGER) AS a, CAST(x AS TEXT) AS b, CAST(x AS REAL) AS c FROM t

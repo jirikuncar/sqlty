@@ -253,3 +253,40 @@ SELECT CONVERT(name, CHAR) AS a, CONVERT(id, SIGNED) AS b, CONVERT(name USING ut
 -- columns: e: typing.Any (JSON)
 -- columns: f: str | None (TEXT)
 ```
+
+## Integer division, unsigned arithmetic and introducers
+
+`DIV` is a `BIGINT`, NULL for a zero divisor. Integer arithmetic with an
+unsigned operand is unsigned. `_binary 'a'` is a binary string.
+
+```sql
+SELECT id DIV 2 AS a, price DIV 2 AS b, CAST(id AS UNSIGNED) - 1 AS c, EXTRACT(YEAR FROM day) AS d, TIMESTAMPADD(DAY, 1, day) AS e, TIMESTAMPADD(HOUR, 1, day) AS f, _utf8mb4'a' AS g, _binary'a' AS h FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: datetime.date (DATE)
+-- columns: f: datetime.datetime (DATETIME)
+-- columns: g: str (TEXT)
+-- columns: h: bytes (VARBINARY)
+```
+
+## Sets, encodings and predicates
+
+`FROM_BASE64` is NULL for text that is not base64, and `GET_FORMAT` for an
+unknown format.
+
+```sql
+SELECT EXPORT_SET(5, 'Y', 'N') AS a, MAKE_SET(1, 'a', 'b') AS b, GET_FORMAT(DATE, 'USA') AS c, FROM_BASE64(name) AS d, RANDOM_BYTES(4) AS e, COT(ratio) AS f, IS_UUID(name) AS g, IS_IPV4(name) AS h, JSON_SCHEMA_VALID('{}', doc) AS i, JSON_STORAGE_SIZE(doc) AS k, UUID_SHORT() AS l FROM events
+-- columns: a: str (TEXT)
+-- columns: b: str (TEXT)
+-- columns: c: str | None (TEXT)
+-- columns: d: bytes | None (VARBINARY)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: float (DOUBLE)
+-- columns: g: int (INT)
+-- columns: h: int (INT)
+-- columns: i: int | None (INT)
+-- columns: k: int | None (BIGINT)
+-- columns: l: int (UBIGINT)
+```
