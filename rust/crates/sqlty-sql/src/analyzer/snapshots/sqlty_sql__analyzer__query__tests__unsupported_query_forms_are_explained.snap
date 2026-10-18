@@ -3,11 +3,12 @@ source: crates/sqlty-sql/src/analyzer/query.rs
 expression: postgres
 ---
 TABLE a
-no rows
+id: int | INT | NonNull
+label: str | TEXT | Nullable
+score: decimal.Decimal | DECIMAL(5, 2) | NonNull
 
 SELECT id FROM a UNION TABLE b
 id: int | INT | Unknown
-[unsupported-syntax] a TABLE query is not typed
 
 SELECT 1 UNION VALUES (2)
 ?column?: int | ? | NonNull

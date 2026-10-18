@@ -1071,8 +1071,14 @@ impl<'a> Analyzer<'a> {
             {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }
-            // A user-defined function may or may not be strict.
-            _ => Nullability::Unknown,
+            _ => match self
+                .schema
+                .function_strict(&table_key(&func.name, self.dialect), args.len())
+            {
+                Some(true) => any_nullable(args.iter().map(|arg| of(arg))),
+                Some(false) => Nullability::Nullable,
+                None => Nullability::Unknown,
+            },
         }
     }
 }

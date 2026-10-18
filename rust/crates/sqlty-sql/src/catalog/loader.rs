@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use sqlparser::ast::{
     AlterTable, AlterType, ArgMode, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind,
-    CreateTableOptions, CreateView, DataType, Expr, ForeignKeyConstraint, FunctionReturnType,
-    Ident, ObjectName, ObjectType, Query, SqlOption, Statement, TableConstraint, Visit, Visitor,
+    CreateTableOptions, CreateView, DataType, Expr, ForeignKeyConstraint, FunctionCalledOnNull,
+    FunctionReturnType, Ident, ObjectName, ObjectType, Query, SqlOption, Statement,
+    TableConstraint, Visit, Visitor,
 };
 
 use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject, SqlDialect};
@@ -73,6 +74,7 @@ pub(super) struct RawFunction {
     pub(super) required: usize,
     pub(super) variadic: bool,
     pub(super) returns: RawReturn,
+    pub(super) strict: bool,
 }
 
 pub(super) enum RawReturn {
@@ -890,6 +892,10 @@ impl Loader {
                 .iter()
                 .any(|a| matches!(a.mode, Some(ArgMode::Variadic))),
             returns,
+            strict: matches!(
+                create.called_on_null,
+                Some(FunctionCalledOnNull::Strict | FunctionCalledOnNull::ReturnsNullOnNullInput)
+            ),
         };
         self.unknown_functions.remove(&key);
         let dialect = self.dialect;

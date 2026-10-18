@@ -110,6 +110,8 @@ What makes a column nullable or not:
   subscripts and a `CASE` without `ELSE` can always be NULL.
 - **Aggregates.** `COUNT` is never NULL. Other aggregates are nullable without a plain
   `GROUP BY` (empty input), with `FILTER`, or when the argument is.
+- **Arrays.** The nullability of an array's elements is not tracked: a `text[]` column,
+  an `ARRAY[...]` and an `array_agg` are `list[str]`, though each can hold NULLs.
 - **Subqueries.** A scalar subquery is nullable unless it always returns one row.
 - **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
   `EXCEPT` follows its left side.
@@ -313,7 +315,8 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
 - `CREATE FUNCTION ... RETURNS` types calls to the function: a scalar, a
   `SETOF`, or the columns of `RETURNS TABLE (...)` in `FROM`. Overloads are told
   apart by their number of arguments, and a built-in function of the same name
-  wins.
+  wins. Any function can return NULL, so a call is nullable, unless the function is
+  `STRICT` (`RETURNS NULL ON NULL INPUT`): then it is nullable only when an argument is.
 - `pg_catalog` and `information_schema` relations are always known, with their
   PostgreSQL column types and `NOT NULL` columns: `pg_class`, `pg_namespace`,
   `pg_attribute`, `pg_type`, `pg_index`, `pg_constraint`, `pg_enum`, `pg_proc`,
@@ -343,7 +346,7 @@ ALTER TABLE users ADD COLUMN status status NOT NULL;
 CREATE TYPE status AS ENUM ('active', 'banned');
 ALTER TYPE status ADD VALUE 'pending' BEFORE 'active';
 
-CREATE FUNCTION user_count() RETURNS bigint LANGUAGE sql AS 'SELECT count(*) FROM users';
+CREATE FUNCTION user_count() RETURNS bigint STRICT LANGUAGE sql AS 'SELECT count(*) FROM users';
 ```
 
 The `ALTER TABLE` statements come before the enum they use, and that is fine:
