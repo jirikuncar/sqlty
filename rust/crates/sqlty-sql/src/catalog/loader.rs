@@ -73,6 +73,8 @@ pub(super) enum OpKind {
     AlterType(AlterType),
     Drop(Box<Statement>),
     Function(Box<CreateFunction>),
+    /// A `BEFORE INSERT` row trigger on the named table, which may fill any of its columns.
+    InsertTrigger(Vec<String>),
     /// A statement that changes the named relation, type or function in a way this
     /// module cannot follow.
     Taint(Taint, Vec<String>),
@@ -257,6 +259,20 @@ impl Loader {
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
+            OpKind::InsertTrigger(name) => {
+                let Some(key) = self.table_key(name, &path) else {
+                    return false;
+                };
+                let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                    return false;
+                };
+                let mut table = table.clone();
+                for column in &mut table.columns {
+                    column.has_default = true;
+                }
+                self.set_relation(key, Some(Rel::Table(table)));
+                false
+            }
         };
         !blocked
     }
