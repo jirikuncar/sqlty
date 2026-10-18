@@ -401,6 +401,16 @@ impl<'a> Analyzer<'a> {
             Value::SingleQuotedString(text) => {
                 Ok(constant(crate::values::Value::Str(text.clone())))
             }
+            // `X'41'` and `B'101'` are bit strings in PostgreSQL, binary strings elsewhere.
+            Value::HexStringLiteral(_) | Value::SingleQuotedByteStringLiteral(_) => {
+                Ok(from_sql_type(
+                    match self.dialect {
+                        SqlDialect::Postgres => "BIT",
+                        _ => "VARBINARY",
+                    },
+                    self.dialect,
+                ))
+            }
             _ => known("str"),
         }
     }
