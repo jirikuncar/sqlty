@@ -63,6 +63,14 @@ pub(super) fn restrict(
 }
 
 impl Learned {
+    /// `(reference, column)` pairs known not to be NULL, and nothing else.
+    pub(super) fn columns(columns: Vec<(String, String)>) -> Self {
+        Learned {
+            columns: columns.into_iter().collect(),
+            ..Learned::default()
+        }
+    }
+
     /// Whether this limits the values of a column.
     pub(super) fn limits_values(&self) -> bool {
         !self.values.is_empty()
