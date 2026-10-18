@@ -2,7 +2,7 @@
 
 use sqlparser::ast::{
     AssignmentTarget, FromTable, ObjectName, OnConflict, OnConflictAction, OnInsert, OutputClause,
-    Query, SelectItem, SetExpr, Statement, TableObject, UpdateTableFromKind,
+    Query, SelectItem, SetExpr, Statement, TableObject, TableWithJoins, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -46,6 +46,19 @@ pub(super) fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
         _ => return None,
     };
     items.as_deref().filter(|items| !items.is_empty())
+}
+
+/// The tables of UPDATE's FROM and DELETE's USING, which the statement joins to its target.
+pub(super) fn joined_tables(stmt: &Statement) -> Option<&[TableWithJoins]> {
+    match stmt {
+        Statement::Update(update) => update.from.as_ref().map(|from| match from {
+            UpdateTableFromKind::BeforeSet(tables) | UpdateTableFromKind::AfterSet(tables) => {
+                tables.as_slice()
+            }
+        }),
+        Statement::Delete(delete) => delete.using.as_deref(),
+        _ => None,
+    }
 }
 
 /// Tables a DML statement writes to, for resolving RETURNING columns.
@@ -235,15 +248,7 @@ impl Analyzer<'_> {
             self.check_table(&source.table);
         }
         // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING.
-        let from = match stmt {
-            Statement::Update(update) => update.from.as_ref().map(|from| match from {
-                UpdateTableFromKind::BeforeSet(tables) | UpdateTableFromKind::AfterSet(tables) => {
-                    tables.as_slice()
-                }
-            }),
-            Statement::Delete(delete) => delete.using.as_deref(),
-            _ => None,
-        };
+        let from = joined_tables(stmt);
         let targets = scope
             .iter()
             .filter(|source| !matches!(source.table, Table::ExtraSources))

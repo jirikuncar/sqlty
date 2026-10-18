@@ -189,6 +189,55 @@ DELETE FROM users WHERE id = 1 RETURNING *
 -- inferred: tuple[int | None, str | None]
 ```
 
+## RETURNING reads the tables of FROM and USING
+
+`RETURNING` reads the tables of `UPDATE ... FROM` and `DELETE ... USING`, which
+are inner joined to the target, and `RETURNING *` returns their columns after the
+target's. An outer join inside `FROM` keeps its NULLs.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE grand (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL, grand_id INTEGER NOT NULL REFERENCES grand (id));
+CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent (id), note TEXT);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```sql
+UPDATE child c SET note = 'x' FROM parent p WHERE p.id = c.parent_id RETURNING c.id, p.name, name
+-- inferred: tuple[int, str, str]
+```
+
+```sql
+UPDATE child c SET note = 'x' FROM parent p JOIN grand g ON g.id = p.grand_id WHERE p.id = c.parent_id RETURNING c.id, g.label
+-- inferred: tuple[int, str]
+```
+
+```sql
+UPDATE child c SET note = 'x' FROM parent p LEFT JOIN grand g ON g.id = p.grand_id WHERE p.id = c.parent_id RETURNING g.label
+-- inferred: tuple[str | None]
+```
+
+```sql
+DELETE FROM child c USING parent p JOIN grand g ON g.id = p.grand_id WHERE p.id = c.parent_id RETURNING g.label
+-- inferred: tuple[str]
+```
+
+```sql
+UPDATE child c SET note = 'x' FROM parent p WHERE p.id = c.parent_id RETURNING *
+-- columns: id: int (INT)
+-- columns: parent_id: int (INT)
+-- columns: note: str (TEXT)
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: grand_id: int (INT)
+```
+
 ## MERGE RETURNING
 
 `MERGE ... RETURNING` needs PostgreSQL 17 or later.

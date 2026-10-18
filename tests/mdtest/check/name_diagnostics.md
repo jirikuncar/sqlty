@@ -474,8 +474,8 @@ from sqlty import SQL
 a = SQL[tuple[int, str]]("--sql\nINSERT INTO users (id, name) VALUES (1, 'a') RETURNING id, name")
 # error:
 b = SQL[tuple[int]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING u.id")
-# error: [unsupported-syntax] "column `title` may come from tables joined to the target"
-c = SQL[tuple[str]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
+# error:
+c = SQL[tuple[str | None]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
 ```
 
 #### Known functions and types
