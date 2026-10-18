@@ -53,6 +53,14 @@ SELECT * FROM generate_series('2024-01-01'::DATE, '2024-01-07'::DATE, INTERVAL '
 -- columns: day: datetime.datetime (TIMESTAMPTZ)
 ```
 
+In the select list, the values have the same types: PostgreSQL has no
+`generate_series` over dates, so it casts them to `timestamptz`.
+
+```sql
+SELECT generate_series('2024-01-01'::DATE, '2024-01-07'::DATE, '1 day') AS day
+-- columns: day: datetime.datetime (TIMESTAMPTZ)
+```
+
 ## unnest
 
 Each array gives a column of its element type, which can be NULL.
@@ -143,16 +151,16 @@ pads the shorter ones with NULL, so each of them can be NULL. One alone cannot.
 
 ```sql
 SELECT generate_series(1, 2) AS a, unnest(tags) AS tag, unnest(tags) || '!' AS loud, COALESCE(generate_series(1, 3), 0) AS c, id FROM posts
--- columns: a: int | None (None)
+-- columns: a: int | None (INT)
 -- columns: tag: str | None (TEXT)
 -- columns: loud: str | None (TEXT)
--- columns: c: int (None)
+-- columns: c: int (INT)
 -- columns: id: int (INT)
 ```
 
 ```sql
 SELECT generate_series(1, id) AS n, id FROM posts
--- columns: n: int (None)
+-- columns: n: int (INT)
 -- columns: id: int (INT)
 ```
 

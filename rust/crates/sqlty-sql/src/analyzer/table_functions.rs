@@ -9,13 +9,12 @@ use crate::catalog::FunctionReturn;
 
 use super::dialect::SqlDialect;
 use super::expr::from_sql_type;
-use super::functions::{function_name, positional_args};
+use super::functions::{function_name, positional_args, Returns};
 use super::names::table_key;
 use super::nullability::Nullability;
-use super::operators::{common_of, operand_type};
+
 use super::query::{rename_columns, Analyzer, Column};
 use super::scope::Scope;
-use super::typed::Typed;
 use super::Inferred;
 
 /// The rows of a built-in function in `FROM`, before the alias is applied.
@@ -167,29 +166,11 @@ impl Analyzer<'_> {
             return Ok(None);
         }
         Ok(match name {
-            "generate_series" => {
-                let mut bounds = Vec::new();
-                for arg in args.iter().take(2) {
-                    bounds.push(self.expr(arg, scope)?);
-                }
-                let sql = match common_of(bounds, self.dialect)
-                    .as_ref()
-                    .and_then(operand_type)
-                {
-                    Some("SMALLINT" | "INT") => Some("INT"),
-                    Some("BIGINT") => Some("BIGINT"),
-                    Some("DECIMAL" | "NUMERIC") => Some("DECIMAL"),
-                    Some("TIMESTAMP") => Some("TIMESTAMP"),
-                    Some("TIMESTAMPTZ" | "DATE") => Some("TIMESTAMPTZ"),
-                    _ => None,
-                };
-                let typed = sql.map_or(Typed::UNKNOWN, |sql| from_sql_type(sql, self.dialect));
-                Some(scalar(Column::from_typed(
-                    name.to_string(),
-                    typed,
-                    non_null,
-                )))
-            }
+            "generate_series" => Some(scalar(Column::from_typed(
+                name.to_string(),
+                self.function_type(Returns::Series, args, scope)?,
+                non_null,
+            ))),
             "unnest" => {
                 let mut columns = Vec::new();
                 for arg in args {

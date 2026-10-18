@@ -58,6 +58,9 @@ pub(super) enum Returns {
     /// `timezone(zone, ts)`, like `ts AT TIME ZONE zone`: a `TIMESTAMP` becomes a
     /// `TIMESTAMPTZ` and back, a time becomes a `TIMETZ`.
     AtZone(usize),
+    /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
+    /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
+    Series,
 }
 
 use Returns::{Arg, Elem, Sql};
@@ -445,10 +448,10 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "ARRAY_CAT",
             "ARRAY_REMOVE",
             "ARRAY_REPLACE",
-            "GENERATE_SERIES",
         ],
         Arg(0),
     ),
+    (&["GENERATE_SERIES"], Returns::Series),
     (
         &[
             "NULLIF",
@@ -653,6 +656,20 @@ impl<'a> Analyzer<'a> {
                 match operand_type(&typed) {
                     Some("DATE") => sql("TIMESTAMPTZ"),
                     Some("TIMESTAMP" | "TIMESTAMPTZ" | "INTERVAL") => Ok(typed),
+                    _ => Ok(Typed::UNKNOWN),
+                }
+            }
+            Returns::Series => {
+                let bounds = [arg(0)?, arg(1)?];
+                match common_of(bounds, self.dialect)
+                    .as_ref()
+                    .and_then(operand_type)
+                {
+                    Some("SMALLINT" | "INT") => sql("INT"),
+                    Some("BIGINT") => sql("BIGINT"),
+                    Some("DECIMAL" | "NUMERIC") => sql("DECIMAL"),
+                    Some("TIMESTAMP") => sql("TIMESTAMP"),
+                    Some("TIMESTAMPTZ" | "DATE") => sql("TIMESTAMPTZ"),
                     _ => Ok(Typed::UNKNOWN),
                 }
             }
