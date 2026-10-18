@@ -107,6 +107,26 @@ SELECT CONCAT_WS(',', name, note) AS a, LPAD(name, 5, '*') AS b, LEFT(name, 2) A
 -- columns: h: str (TEXT)
 ```
 
+### Binary strings
+
+Over a binary string, the string functions return a binary string.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE files (id INT NOT NULL PRIMARY KEY, data VARBINARY(16) NOT NULL);
+```
+
+```sql
+SELECT SUBSTRING(data, 1, 2) AS a, TRIM(data) AS b, LEFT(data, 1) AS c, UPPER(data) AS d, REPLACE(data, 'a', 'b') AS e, LPAD(data, 3, 'x') AS f FROM files
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: bytes (VARBINARY)
+```
+
 ## Numbers
 
 ```sql

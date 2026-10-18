@@ -114,6 +114,19 @@ SELECT array_positions(ia, 1) AS ps, array_dims(ia) AS dims, array_lower(ia, 1) 
 -- columns: gb: int (INT)
 ```
 
+`substring`, `substr`, `overlay` and the trim functions have `bytea`
+overloads, which return `bytea`.
+
+```sql
+SELECT substring(by from 2 for 3) AS a, substr(by, 2) AS b, overlay(by placing '\x00'::bytea from 1) AS c, btrim(by, '\x00'::bytea) AS d, trim(both '\x00'::bytea from by) AS e, substring(tx from 2) AS f FROM t
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: str (TEXT)
+```
+
 ## Network addresses
 
 `<<`, `<<=`, `>>` and `>>=` test containment. An address plus or minus an
