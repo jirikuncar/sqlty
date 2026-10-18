@@ -193,3 +193,27 @@ SELECT jsonb_object_keys(jb) AS k, regexp_split_to_table(tx, ',') AS part, jsonb
 -- columns: part: str | None (TEXT)
 -- columns: kv: tuple[typing.Any, ...] | None (RECORD)
 ```
+
+## Scales, error functions, JSON paths and range bounds
+
+`jsonb_path_match` is NULL when the path's first result is not a boolean.
+
+```sql
+SELECT min_scale(n) AS a, trim_scale(n) AS b, erf(d) AS c, regexp_instr(tx, 'a') AS e, regexp_substr(tx, 'a') AS f, jsonb_path_match(jb, '$.a == 1') AS g, jsonb_path_query_array(jb, '$.a') AS h, set_byte(by, 0, 1) AS i, bit_count(by) AS k, lower_inc(int4range(1, 5)) AS l, range_merge(int4range(1, 2), int4range(3, 4)) AS m FROM t
+-- columns: a: int | None (INT)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: float (DOUBLE)
+-- columns: e: int (INT)
+-- columns: f: str | None (TEXT)
+-- columns: g: bool | None (BOOLEAN)
+-- columns: h: typing.Any (JSONB)
+-- columns: i: bytes (VARBINARY)
+-- columns: k: int (BIGINT)
+-- columns: l: bool (BOOLEAN)
+-- columns: m: None (INT4RANGE)
+```
+
+```sql
+SELECT range_intersect_agg(int4range(i, i + 1)) AS r FROM t
+-- columns: r: None (INT4RANGE)
+```
