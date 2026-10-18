@@ -245,6 +245,7 @@ impl<'a> Analyzer<'a> {
             | Expr::IsDistinctFrom(..)
             | Expr::IsNotDistinctFrom(..)
             | Expr::IsJson { .. }
+            | Expr::IsNormalized { .. }
             | Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 ..
@@ -261,7 +262,7 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Trim { .. } | Expr::Substring { .. } | Expr::Overlay { .. } => known("str"),
             Expr::Collate { expr: inner, .. } => self.expr(inner, scope),
-            Expr::Position { .. } => known("int"),
+            Expr::Position { .. } => Ok(from_sql_type("INT", self.dialect)),
             Expr::Subquery(query) => {
                 Ok(
                     first_column(&self.subquery_columns(query, scope, Reporting::Record))?

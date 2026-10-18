@@ -114,6 +114,30 @@ SELECT array_positions(ia, 1) AS ps, array_dims(ia) AS dims, array_lower(ia, 1) 
 -- columns: gb: int (INT)
 ```
 
+## Trigonometry in degrees and hyperbolic functions
+
+```sql
+SELECT cot(d) AS a, sind(d) AS b, atan2d(d, d) AS c, tanh(d) AS e, atanh(d) AS f FROM t
+-- columns: a: float (DOUBLE)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+```
+
+## Positions, normalization and identifiers
+
+`IS NORMALIZED` of NULL is NULL.
+
+```sql
+SELECT position('a' in tx) AS a, tx IS NFC NORMALIZED AS b, n::text IS NOT NFD NORMALIZED AS c, parse_ident(tx) AS e, pg_postmaster_start_time() AS f FROM t
+-- columns: a: int (INT)
+-- columns: b: bool (BOOLEAN)
+-- columns: c: bool | None (BOOLEAN)
+-- columns: e: list[str] (ARRAY<TEXT>)
+-- columns: f: datetime.datetime (TIMESTAMPTZ)
+```
+
 ## Network addresses
 
 `<<`, `<<=`, `>>` and `>>=` test containment. An address plus or minus an
