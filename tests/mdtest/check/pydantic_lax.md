@@ -284,7 +284,7 @@ class Usage(BaseModel):
     active: Annotated[bool, Strict(False)]
 
 # error: [column-type-mismatch] "Usage.total is Annotated[int, Strict()] but query column 'total' infers decimal.Decimal"
-query = SQL[Usage]("--sql\nSELECT sum(records) AS total, active FROM usage")
+query = SQL[Usage]("--sql\nSELECT sum(records) AS total, active FROM usage GROUP BY active")
 ```
 
 ### `StrictInt`
@@ -352,8 +352,7 @@ class Usage(BaseModel):
     active: bool
 
 # error: [column-type-mismatch] "Usage.active is bool but query column 'active' infers int"
-# error: [nullable-mismatch] "Usage.total is int but query column 'total' can be NULL"
-query = SQL[Usage]("--sql\nSELECT sum(records) AS total, active FROM usage")
+query = SQL[Usage]("--sql\nSELECT sum(records) AS total, active FROM usage GROUP BY active")
 ```
 
 ## Pydantic dataclasses

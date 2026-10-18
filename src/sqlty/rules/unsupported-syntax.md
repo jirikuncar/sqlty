@@ -1,6 +1,6 @@
 # unsupported-syntax
 
-Default severity: **ignore**
+Default severity: **warn**
 
 ## What it does
 
@@ -57,11 +57,13 @@ Cast the expression to a type: `(1 OPERATOR(pg_catalog.+) 1)::INTEGER`. For a `*
 
 ## Configuration
 
-Off by default, because it reports code that passes today. Enable it:
+A warning by default: the SQL is valid, but sqlty cannot type the construct, so the query is
+not fully checked. A warning tells you why without failing CI on sqlty's gaps. Make it
+fail, or turn it off:
 
 ```toml
 [tool.sqlty.rules]
-unsupported-syntax = "warn"
+unsupported-syntax = "error"
 ```
 
-Does not need a schema, but without one only constructs are reported, not unresolved names. `error` makes `sqlty check` fail on it.
+Does not need a schema, but without one only constructs are reported, not unresolved names.

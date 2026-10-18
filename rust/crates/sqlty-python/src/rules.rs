@@ -149,7 +149,14 @@ impl Rule {
             | Rule::LiteralMismatch
             | Rule::ParamCountMismatch
             | Rule::ParamTypeMismatch
-            | Rule::SelectStarNoSchema => Severity::Error,
+            | Rule::SelectStarNoSchema
+            | Rule::Name(
+                NameRule::UnknownTable
+                | NameRule::UnknownColumn
+                | NameRule::AmbiguousColumn
+                | NameRule::InsertMissingColumn
+                | NameRule::UngroupedColumn,
+            ) => Severity::Error,
             Rule::ColumnNameMismatch
             | Rule::SelectStar
             | Rule::StaleRewrite
@@ -159,12 +166,13 @@ impl Rule {
             | Rule::FstringSkipped
             | Rule::TstringSkipped
             | Rule::UncheckedQuery
-            | Rule::UntypedQuery => Severity::Warn,
-            Rule::RedundantOptional
-            | Rule::RedundantLiteral
+            | Rule::UntypedQuery
             | Rule::UnparsedQuery
             | Rule::UnusedIgnore
-            | Rule::Name(_) => Severity::Ignore,
+            | Rule::Name(
+                NameRule::UnknownFunction | NameRule::UnknownType | NameRule::UnsupportedSyntax,
+            ) => Severity::Warn,
+            Rule::RedundantOptional | Rule::RedundantLiteral => Severity::Ignore,
         }
     }
 }
@@ -302,8 +310,16 @@ mod tests {
         let config = RuleConfig::default();
         assert_eq!(config.severity(Rule::SelectStarNoSchema), Severity::Error);
         assert_eq!(config.severity(Rule::StaleRewrite), Severity::Warn);
-        assert_eq!(config.severity(Rule::UnparsedQuery), Severity::Ignore);
-        assert!(!config.is_enabled(Rule::Name(NameRule::UnknownTable)));
+        assert_eq!(config.severity(Rule::UnparsedQuery), Severity::Warn);
+        assert_eq!(config.severity(Rule::RedundantOptional), Severity::Ignore);
+        assert_eq!(
+            config.severity(Rule::Name(NameRule::UnknownTable)),
+            Severity::Error
+        );
+        assert_eq!(
+            config.severity(Rule::Name(NameRule::UnknownFunction)),
+            Severity::Warn
+        );
     }
 
     #[test]

@@ -353,7 +353,7 @@ impl Catalog {
     }
 
     /// Whether the schema defines no table or view of its own.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.user_relations == 0
     }
 

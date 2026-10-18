@@ -380,6 +380,13 @@ impl<'a> Analyzer<'a> {
         if unqualified && all.iter().any(|source| source.reference == name) {
             return self.diag.explain_silently();
         }
+        // `VALUES (DEFAULT)` and `SET c = DEFAULT`: the keyword, not a column.
+        if unqualified
+            && column.quote_style.is_none()
+            && column.value.eq_ignore_ascii_case("DEFAULT")
+        {
+            return self.diag.explain_silently();
+        }
         let candidates: Vec<&&Source> = match &qualifier {
             Some(qualifier) => all
                 .iter()

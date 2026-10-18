@@ -12,8 +12,8 @@ use crate::checker::check_source;
 use crate::edit::apply_edits;
 use crate::options::Options;
 use crate::rewriter::{
-    has_import, header_end, line_ending, suppresses, type_modules, with_wrapper_imports,
-    ImportStyle, Spelling, Suppressed,
+    has_import, insert_imports, suppresses, type_modules, with_wrapper_imports, ImportStyle,
+    Spelling, Suppressed,
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
@@ -143,14 +143,7 @@ fn fix_imports(
         }
     }
     if !missing.is_empty() {
-        let at = header_end(&source);
-        let eol = line_ending(&source, at);
-        source = format!(
-            "{}{}{eol}{}",
-            &source[..at],
-            missing.join(eol),
-            &source[at..]
-        );
+        source = insert_imports(&source, &missing);
     }
     source
 }

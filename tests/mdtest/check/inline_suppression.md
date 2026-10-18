@@ -76,6 +76,7 @@ class User(TypedDict):
     id: str
 
 # error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
+# error: [unused-ignore] "'# sqlty: ignore[column-name-mismatch]' suppresses no diagnostic"
 q = SQL[User]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[column-name-mismatch]
 ```
 

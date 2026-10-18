@@ -166,9 +166,33 @@ q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: """Queries."""
 # rewritten-file:
 # rewritten-file: from __future__ import annotations
+# rewritten-file:
 # rewritten-file: from sqlty import SQL
 # rewritten-file:
 # rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+```
+
+### The blank line below a docstring stays
+
+The new imports go below it, at the top of the existing import block, so a formatter
+finds the docstring's blank line where it left it. An import sorter puts them in their
+groups; see [`format-command`](../../../docs/reference/configuration.md#format-command).
+
+```python
+"""App."""
+
+import os
+from pathlib import Path
+
+q = "--sql\nSELECT created_at::TIMESTAMP FROM users"
+# rewritten-file: """App."""
+# rewritten-file:
+# rewritten-file: import datetime
+# rewritten-file: from sqlty import SQL
+# rewritten-file: import os
+# rewritten-file: from pathlib import Path
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM users")
 ```
 
 ## Other leading comments stay above their code

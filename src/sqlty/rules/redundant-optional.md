@@ -84,7 +84,10 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 
 ## Configuration
 
-Off by default, because `T | None` on a non-null column is correct, only loose. Enable it:
+Off by default, because it conflicts with a documented workflow: an
+[expand and contract](../../../docs/guide/breaking-changes.md#expand-and-contract)
+migration widens an annotation to `T | None` before the schema relaxes the column, and
+`T | None` on a non-null column is correct, only loose. Enable it:
 
 ```toml
 [tool.sqlty.rules]

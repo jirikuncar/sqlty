@@ -215,8 +215,11 @@ impl Checker<'_> {
             }
             let first = scan.tokens[group.tokens[0]].span.clone();
             let content = scan.content(group);
-            self.marker_and_syntax(&content, group.line, &first);
-            if after_marker(&content).is_some() {
+            // psycopg's `sql.SQL("... {} ...")` is a template its `.format()` fills; the
+            // helper call that receives it checks the composed query.
+            let template = content.contains('{') && composes(scan.source(), first.start);
+            self.marker_and_syntax(&content, group.line, &first, template);
+            if after_marker(&content).is_some() && !template {
                 self.name_diagnostics(&content, group.line);
             }
         }
@@ -239,15 +242,21 @@ impl Checker<'_> {
         if after_marker(&sql_content).is_none() {
             return;
         }
-        self.marker_and_syntax(&sql_content, line, &call.strings[0]);
+        self.marker_and_syntax(&sql_content, line, &call.strings[0], false);
         self.name_diagnostics(&sql_content, line);
         self.select_star(call, &sql_content, line);
         self.annotation(call, &sql_content, line);
     }
 
     /// `inline-sql-comment` and `unparsed-query` of marked string content, which starts in
-    /// the literal at `first`.
-    fn marker_and_syntax(&mut self, sql_content: &str, line: usize, first: &Range<usize>) {
+    /// the literal at `first`; a `template` is not parsed.
+    fn marker_and_syntax(
+        &mut self,
+        sql_content: &str,
+        line: usize,
+        first: &Range<usize>,
+        template: bool,
+    ) {
         if INLINE_SQL_COMMENT_CONTENT.is_match(sql_content) {
             let source = self.scan.source();
             let literal = &source[first.clone()];
@@ -264,7 +273,7 @@ impl Checker<'_> {
                 fix.into_iter().collect(),
             );
         }
-        if self.rules.is_enabled(Rule::UnparsedQuery) {
+        if self.rules.is_enabled(Rule::UnparsedQuery) && !template {
             if let Some(error) = marked_query(sql_content)
                 .and_then(|sql| parse_error(&sql, self.options.dialect.name()))
             {
@@ -358,6 +367,47 @@ impl Checker<'_> {
         )
     }
 
+    /// Why a query has no row type, and what to do about it: the first name or construct
+    /// the analyzer could not type, else the untyped columns.
+    fn untyped_cause(&self, sql_content: &str) -> String {
+        let has_schema = self.options.schema.is_some_and(|schema| !schema.is_empty());
+        let Some(query) = marked_query(sql_content) else {
+            return "add casts (for example id::INTEGER) or a schema".to_string();
+        };
+        let (columns, diagnostics) =
+            analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
+        if let Some(diagnostic) = diagnostics.first() {
+            let hint = match diagnostic.rule {
+                NameRule::UnknownFunction => {
+                    "; cast its result, or declare the function in the schema"
+                }
+                NameRule::UnknownType => "; declare the type in the schema",
+                NameRule::UnsupportedSyntax => "; cast it to a type",
+                _ => "",
+            };
+            return format!("{}{hint}", diagnostic.message);
+        }
+        let untyped: Vec<String> = columns
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .iter()
+            .filter(|column| column.python_type.is_none())
+            .map(|column| format!("`{}`", column.name))
+            .collect();
+        let advice = if has_schema {
+            "cast it to a type"
+        } else {
+            "add casts (for example id::INTEGER) or a schema"
+        };
+        match untyped.as_slice() {
+            [] => advice.to_string(),
+            [star] if star == "`*`" => "`*` is not expanded; add a schema".to_string(),
+            [column] => format!("column {column} is untyped; {advice}"),
+            columns => format!("columns {} are untyped; {advice}", columns.join(", ")),
+        }
+    }
+
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
         let annotated = &self.scan.source()[call.annotation.clone()];
@@ -378,7 +428,8 @@ impl Checker<'_> {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
                 }
                 None => format!(
-                    "{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+                    "{untyped} has no inferable row type: {}",
+                    self.untyped_cause(sql_content)
                 ),
             };
             let fix = current.map(|current| Edit::new(call.annotation.clone(), current));
@@ -428,6 +479,14 @@ impl Checker<'_> {
         });
         self.diagnostics
     }
+}
+
+/// Whether the literal at `at` is the first argument of a psycopg `sql.SQL(...)` call.
+fn composes(source: &str, at: usize) -> bool {
+    source[..at]
+        .trim_end()
+        .strip_suffix('(')
+        .is_some_and(|callee| callee.trim_end().ends_with(".SQL"))
 }
 
 /// The string literal at `span`, holding all of `content`, with its `*` expanded; `None`
@@ -1208,14 +1267,14 @@ mod tests {
     }
 
     #[test]
-    fn test_name_rules_are_off_by_default() {
+    fn test_name_rules_are_on_by_default() {
         let schema = Some(sqlty_sql::analyzer::load_schema_with_skipped(
             "CREATE TABLE users (id INT)",
             "postgres",
         ));
         let schema = schema.map(|(schema, _)| schema);
         let source = r#"q = SQL[tuple[int]]("--sql\nSELECT nope FROM users")"#;
-        assert!(check_source(
+        assert!(!check_source(
             source,
             "postgres",
             schema.as_deref(),

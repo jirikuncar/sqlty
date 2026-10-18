@@ -1,6 +1,6 @@
 # unknown-function
 
-Default severity: **ignore**
+Default severity: **warn**
 
 ## What it does
 
@@ -37,11 +37,13 @@ Cast the call, `my_udf(1)::INTEGER`, which also types it. A built-in function mi
 
 ## Configuration
 
-Off by default, because it reports code that passes today. Enable it:
+A warning by default: the SQL is valid, but sqlty cannot type the function's result, so the query is
+not fully checked. A warning tells you why without failing CI on sqlty's gaps. Make it
+fail, or turn it off:
 
 ```toml
 [tool.sqlty.rules]
-unknown-function = "warn"
+unknown-function = "error"
 ```
 
-Only checked when a schema with tables is configured: without one every user function would be unknown. User-defined functions in the schema file are not read yet, so they are reported too. `error` makes `sqlty check` fail on it.
+Only checked when a schema with tables is configured: without one every user function would be unknown. User-defined functions in the schema file are not read yet, so they are reported too.

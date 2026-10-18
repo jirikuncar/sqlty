@@ -1,8 +1,9 @@
 # Untyped queries
 
-Some queries return rows whose type sqlty cannot infer: columns of tables without a schema and
-`SELECT` statements sqlty cannot parse. By default `sqlty rewrite` leaves
-them as plain strings, so nothing marks them as untyped:
+Some queries return rows whose type sqlty cannot infer: columns of tables without a schema,
+an expression it has no rule for (a function the schema doesn't declare, a bare `NULL`), and
+`SELECT` statements sqlty cannot parse. One untyped column leaves the whole row untyped. By
+default `sqlty rewrite` leaves them as plain strings, so nothing marks them as untyped:
 
 ```python
 pairs = "--sql\nSELECT x, y FROM pairs"
@@ -26,6 +27,11 @@ users = "--sql\nSELECT id::INTEGER FROM users"
 # rewritten-file: pairs = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # rewritten-file: users = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
+
+[`untyped-query`](../reference/rules.md#untyped-query) reports each `SQL[UNTYPED]`
+with what could not be typed: the unknown function or expression, or the untyped
+columns. `check --statistics` counts the partially typed queries the default mode
+leaves unwrapped.
 
 `UNTYPED` is a [PEP 661](https://peps.python.org/pep-0661/) sentinel, not
 `Any`. mypy, pyright and ty reject using an `UNTYPED` row as a concrete type,
@@ -58,7 +64,7 @@ that `rewrite` would wrap.
 Once casts or a schema make the type known, the message names it:
 
 ```python
-# error: [untyped-query] "SQL[UNTYPED] has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type: columns `x`, `y` are untyped; add casts (for example id::INTEGER) or a schema"
 pairs = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 

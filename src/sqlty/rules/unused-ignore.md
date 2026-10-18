@@ -1,6 +1,6 @@
 # unused-ignore
 
-Default severity: **ignore**
+Default severity: **warn**
 
 ## What it does
 
@@ -28,9 +28,9 @@ Remove the comment, or correct the rule name if it is misspelled.
 
 ## Configuration
 
-Off by default. Enable it to keep suppressions honest:
+A warning by default, to keep suppressions honest. Make it fail, or turn it off:
 
 ```toml
 [tool.sqlty.rules]
-unused-ignore = "warn"
+unused-ignore = "error"
 ```

@@ -51,6 +51,22 @@ welcome under these rules:
 - **Verify claims.** Behavior claims in descriptions and docs must be backed by
   tests or references, not by the agent's say-so.
 
+## Lint rule defaults
+
+A new rule ships on, so its check runs for everyone:
+
+- `error` when it reports SQL or code that fails at runtime, such as a column the
+  table does not have;
+- `warn` otherwise, including a rule that reports SQL sqlty can't type: the user learns
+  why a query is unchecked, and CI does not fail on sqlty's gaps.
+
+It ships off only when it conflicts with an existing rule or a documented workflow,
+and its rule page says which. `redundant-optional` and `redundant-literal` are off
+because they reject the widened annotations of an expand and contract migration.
+
+The default set changes only in a major version. Before 1.0.0, any minor version may
+change it, and the release notes list each change.
+
 ## Releases
 
 Maintainers publish releases from GitHub Releases; the
