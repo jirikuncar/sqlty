@@ -241,3 +241,20 @@ SELECT min_scale(n) AS a, trim_scale(n) AS b, erf(d) AS c, regexp_instr(tx, 'a')
 SELECT range_intersect_agg(int4range(i, i + 1)) AS r FROM t
 -- columns: r: None (INT4RANGE)
 ```
+
+## Operators on bytes, roots, jsonb subscripts and ranges
+
+A `jsonb` subscript is `jsonb`, NULL for a missing key. `|/` and `||/` take a
+`double precision`.
+
+```sql
+SELECT by || by AS a, |/ d AS b, ||/ i AS c, jb['a'] AS e, jb['a']['b'] AS f, int4range(1, 5) * int4range(3, 7) AS g, int4range(1, 5) + int4range(3, 7) AS h, int4range(1, 5) - int4range(3, 7) AS k FROM t
+-- columns: a: bytes (VARBINARY)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: typing.Any (JSONB)
+-- columns: f: typing.Any (JSONB)
+-- columns: g: None (INT4RANGE)
+-- columns: h: None (INT4RANGE)
+-- columns: k: None (INT4RANGE)
+```

@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 42] = [
+const SQL_TYPES: [&str; 48] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -58,11 +58,17 @@ const SQL_TYPES: [&str; 42] = [
     "TSVECTOR",
     "TSQUERY",
     "MONEY",
+    "INT4RANGE",
+    "INT8RANGE",
+    "NUMRANGE",
+    "DATERANGE",
+    "TSRANGE",
+    "TSTZRANGE",
     "ARRAY",
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.
-const CLASSES: [(&str, &[&str]); 7] = [
+const CLASSES: [(&str, &[&str]); 8] = [
     (
         "@integer",
         &["SMALLINT", "TINYINT", "MEDIUMINT", "INT", "BIGINT"],
@@ -87,6 +93,17 @@ const CLASSES: [(&str, &[&str]); 7] = [
     ("@address", &["INET", "CIDR"]),
     ("@array", &["ARRAY"]),
     ("@binary", &["BYTEA", "BLOB", "VARBINARY", "BINARY"]),
+    (
+        "@range",
+        &[
+            "INT4RANGE",
+            "INT8RANGE",
+            "NUMRANGE",
+            "DATERANGE",
+            "TSRANGE",
+            "TSTZRANGE",
+        ],
+    ),
 ];
 
 /// Result types other than a SQL type name.

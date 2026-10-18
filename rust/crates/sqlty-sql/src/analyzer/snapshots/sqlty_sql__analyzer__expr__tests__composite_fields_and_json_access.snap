@@ -18,7 +18,6 @@ c: typing.Any | JSONB | Nullable
 d: str | TEXT | Nullable
 
 SELECT j['a'] AS a, j @> '{}' AS b, j ? 'a' AS c FROM t
-a: ? | ? | Nullable
+a: typing.Any | JSONB | Nullable
 b: bool | BOOLEAN | Nullable
 c: bool | BOOLEAN | Nullable
-[unsupported-syntax] expression `j['a']` is not typed
