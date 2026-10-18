@@ -188,6 +188,10 @@ impl<'a> Analyzer<'a> {
             } if self.dialect == SqlDialect::Postgres => {
                 Ok(strip(self.expr(inner, scope)?, self.dialect))
             }
+            Expr::UnaryOp {
+                op: UnaryOperator::PGSquareRoot | UnaryOperator::PGCubeRoot,
+                ..
+            } if self.dialect == SqlDialect::Postgres => Ok(from_sql_type("DOUBLE", self.dialect)),
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
                 let typed = self.expr(timestamp, scope)?;
@@ -343,6 +347,12 @@ impl<'a> Analyzer<'a> {
         let mut typed = self.expr(&root, scope)?;
         for access in chain {
             typed = match access {
+                AccessExpr::Subscript(Subscript::Index { .. })
+                    if self.dialect == SqlDialect::Postgres
+                        && operand_type(&typed) == Some("JSONB") =>
+                {
+                    from_sql_type("JSONB", self.dialect)
+                }
                 AccessExpr::Subscript(Subscript::Index { .. }) => self.element_typed(typed.sql()),
                 AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
                 AccessExpr::Dot(Expr::Identifier(field)) => {
