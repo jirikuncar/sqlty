@@ -222,6 +222,12 @@ SELECT max(id), COUNT( * ), id  +  1, 'it''s', "dq", (ID), u.name FROM users u G
 -- columns: name: str (TEXT)
 ```
 
+```sql
+SELECT ID, u.Name FROM users u
+-- columns: ID: int (INT)
+-- columns: Name: str (TEXT)
+```
+
 ### SQLite
 
 ```toml
