@@ -140,6 +140,22 @@ SELECT zeroblob(4) AS a, randomblob(4) AS b, unhex(name) AS c, sqlite_version() 
 -- columns: h: int (BIGINT)
 ```
 
+## Blob substrings
+
+`substr` of a blob is a blob; `trim` always returns text.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE files (id INTEGER PRIMARY KEY, data BLOB NOT NULL);
+```
+
+```sql
+SELECT substr(data, 1, 2) AS a, trim(data) AS b FROM files
+-- columns: a: bytes (VARBINARY)
+-- columns: b: str (TEXT)
+```
+
 ## Subqueries without an alias
 
 SQLite reads a subquery in `FROM` without an alias; its columns are referenced
