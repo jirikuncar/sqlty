@@ -140,6 +140,13 @@ SELECT zeroblob(4) AS a, randomblob(4) AS b, unhex(name) AS c, sqlite_version() 
 -- columns: h: int (BIGINT)
 ```
 
+A blob literal is a blob.
+
+```sql
+SELECT X'41' AS a FROM events
+-- columns: a: bytes (VARBINARY)
+```
+
 ## Blob substrings
 
 `substr` of a blob is a blob; `trim` always returns text.
