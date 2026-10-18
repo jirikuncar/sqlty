@@ -177,6 +177,21 @@ i = "--sql\nUPDATE users u SET name = t.title FROM teams t WHERE t.id = u.team_i
 j = "--sql\nDELETE FROM orders o USING users u WHERE u.id = o.user_id AND u.name = 'x'"
 ```
 
+An `INSERT` target may have an alias, and PostgreSQL's `ON CONFLICT DO UPDATE` reads
+the target and `EXCLUDED`, the row that was not inserted.
+
+```python
+from sqlty import SQL
+
+k = SQL[tuple[str]]("--sql\nINSERT INTO users AS u (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name WHERE u.name <> EXCLUDED.name RETURNING u.name")
+# error: [unknown-column] "column `nope` does not exist in `excluded`"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+# error: [unknown-column] "column `titel` does not exist in `users`"
+l = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET titel = EXCLUDED.nope WHERE users.nmae IS NULL"
+# error: [ambiguous-column] "column reference `name` is ambiguous: `users`, `excluded` all have it"
+m = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = name || EXCLUDED.name"
+```
+
 A subquery over the same table as the outer query names the table once.
 
 ```python
