@@ -160,6 +160,14 @@ SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: b: typing.Any (JSON)
 ```
 
+`JSON_VALUE` returns a string, or the type of its `RETURNING` clause.
+
+```sql
+SELECT JSON_VALUE(doc, '$.name') AS a, JSON_VALUE(doc, '$.age' RETURNING SIGNED) AS b FROM events
+-- columns: a: str | None (TEXT)
+-- columns: b: int | None (BIGINT)
+```
+
 ## Rounding to an integer
 
 `CEIL` and `FLOOR` of an exact number are integers when the integer part fits
