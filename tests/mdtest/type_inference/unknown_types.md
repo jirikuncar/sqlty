@@ -85,8 +85,8 @@ query = "--sql\nSELECT some_extension_function(id) AS x FROM users"
 ```python
 from sqlty import SQL
 
+# error: [unknown-function] "function `some_extension_function` is not known to sqlty, so its result is untyped"
 q = SQL[tuple[int, bytes]]("--sql\nSELECT id, some_extension_function(id) FROM users")
-# error:
 ```
 
 ```python
@@ -97,6 +97,6 @@ class Row(NamedTuple):
     id: int
     x: dict
 
+# error: [unknown-function] "function `some_extension_function` is not known to sqlty, so its result is untyped"
 q = SQL[Row]("--sql\nSELECT id, some_extension_function(id) AS x FROM users")
-# error:
 ```

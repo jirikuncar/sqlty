@@ -310,12 +310,12 @@ class Shape(TypedDict):
     id: int
     p: Point | None
 
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 query = SQL[Shape]("--sql\nSELECT id, p FROM shapes")
 
 with psycopg.connect("dbname=app") as conn:
     register_composite(CompositeInfo.fetch(conn, "point2"), conn, Point)
     shapes = execute(conn, query).fetchall()  # list[Shape], p a Point
-# error:
 ```
 
 A field type that does not match is reported with the composite's name:

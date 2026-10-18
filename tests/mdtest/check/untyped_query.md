@@ -28,8 +28,10 @@ CREATE TABLE users (id INTEGER NOT NULL, email TEXT NOT NULL, prefs JSONB);
 ```
 
 ```python
+# error: [unknown-function] "function `mystery_fn` is not known to sqlty, so its result is untyped"
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type: function `mystery_fn` is not known to sqlty, so its result is untyped; cast its result, or declare the function in the schema"
 a = SQL[UNTYPED]("--sql\nSELECT id, mystery_fn(email) FROM users")
+# error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type: expression `1 OPERATOR(pg_catalog.+) 1` is not typed; cast it to a type"
 b = SQL[UNTYPED]("--sql\nSELECT id, 1 OPERATOR(pg_catalog.+) 1 FROM users")
 # error: [untyped-query] "SQL[UNTYPED] has no inferable row type: column `nothing` is untyped; cast it to a type"

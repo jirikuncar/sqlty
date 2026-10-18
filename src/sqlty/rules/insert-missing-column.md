@@ -1,6 +1,6 @@
 # insert-missing-column
 
-Default severity: **ignore**
+Default severity: **error**
 
 ## What it does
 
@@ -46,7 +46,7 @@ Set the column in the `INSERT`, or give it a `DEFAULT` in the schema.
 
 ## Configuration
 
-Off by default. Enable it:
+An error by default: the database rejects such SQL. Lower or turn it off:
 
 ```toml
 [tool.sqlty.rules]

@@ -1,6 +1,6 @@
 # ungrouped-column
 
-Default severity: **ignore**
+Default severity: **error**
 
 ## What it does
 
@@ -54,8 +54,7 @@ Group by the column, or aggregate it: `sum(total)`, `max(total)`.
 
 ## Configuration
 
-Off by default: it runs a second analysis of each query, as the other name rules
-do. Enable it:
+An error by default: the database rejects such SQL. Lower or turn it off:
 
 ```toml
 [tool.sqlty.rules]

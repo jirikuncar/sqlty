@@ -1,6 +1,6 @@
 # unknown-column
 
-Default severity: **ignore**
+Default severity: **error**
 
 ## What it does
 
@@ -58,11 +58,11 @@ Fix the name or add the column to the schema file. Columns of CTEs and derived t
 
 ## Configuration
 
-Off by default, because it reports code that passes today. Enable it:
+An error by default: the database rejects such SQL. Lower or turn it off:
 
 ```toml
 [tool.sqlty.rules]
 unknown-column = "warn"
 ```
 
-Only checked when a schema with tables is configured. Only the select list is resolved: a column used in `WHERE`, `ON`, `GROUP BY` or `ORDER BY` is not checked. Applies to the `postgres`, `mysql` and `sqlite` dialects. `error` makes `sqlty check` fail on it.
+Only checked when a schema with tables is configured. Only the select list is resolved: a column used in `WHERE`, `ON`, `GROUP BY` or `ORDER BY` is not checked. Applies to the `postgres`, `mysql` and `sqlite` dialects.
