@@ -490,6 +490,18 @@ def _param_diagnostics(
         if arg.type == "None" or (typed and not param.cast):
             if problem := mismatch(param.python_type, param.nullable, arg.type, postgres=postgres):
                 found.append(("param-type-mismatch", f"{label} {problem}"))
+    if call.driver == "asyncpg":
+        for param in params:
+            if param.untyped_sql_type and param.sql_type:
+                untyped, sql_type = param.untyped_sql_type.lower(), param.sql_type.lower()
+                found.append(
+                    (
+                        "param-type-mismatch",
+                        f"parameter {param.number} is an `{untyped}` to PostgreSQL, as asyncpg sends it "
+                        f"untyped, so it cannot be compared with a `{sql_type}`: "
+                        f"cast it, `${param.number}::{sql_type}`",
+                    )
+                )
     return found
 
 

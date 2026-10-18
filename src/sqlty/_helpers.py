@@ -61,7 +61,8 @@ class HelperCall(NamedTuple):
     ``query`` is ``None`` for a psycopg composition with a part that is not a literal.
     ``params`` holds the arguments the call passes for the query's placeholders, with the
     type of each where the source states it, or ``None`` when the helper takes no parameters
-    or the call does not spell them out.
+    or the call does not spell them out. ``driver`` names the driver of a recognised
+    ``execute``-like call.
     """
 
     line: int
@@ -70,6 +71,7 @@ class HelperCall(NamedTuple):
     typing_aliases: dict[str, str]
     params: tuple[ParamArg, ...] | None = None
     end_line: int | None = None
+    driver: str | None = None
 
     @property
     def typed_lines(self) -> range:

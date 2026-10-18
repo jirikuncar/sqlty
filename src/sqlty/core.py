@@ -167,7 +167,8 @@ class ParamInfo(NamedTuple):
     ``nullable`` is ``False`` when ``None`` cannot be passed (the parameter is stored in a
     ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
     ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
-    accepts any value.
+    accepts any value. ``untyped_sql_type`` is the type PostgreSQL gives the parameter when
+    the driver sends it untyped, as asyncpg does, when that differs from ``sql_type``.
     """
 
     number: int
@@ -176,6 +177,7 @@ class ParamInfo(NamedTuple):
     sql_type: str | None
     nullable: bool | None
     cast: bool = False
+    untyped_sql_type: str | None = None
 
 
 def analyze_params(
@@ -192,7 +194,7 @@ def analyze_params(
     Example:
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
         >>> analyze_params("SELECT name FROM users WHERE id = %s AND age > %(min)s", schema_sql=schema)
-        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False)]
+        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False, untyped_sql_type=None), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False, untyped_sql_type=None)]
         >>> [(p.python_type, p.nullable) for p in analyze_params("INSERT INTO users (id, name, age) VALUES ($1, $2, $3)", schema_sql=schema)]
         [('int', False), ('str', False), ('int', True)]
         >>> analyze_params("SELECT 1 FROM users WHERE id = ANY(%s)", schema_sql=schema)[0].python_type
