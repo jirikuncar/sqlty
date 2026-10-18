@@ -52,6 +52,9 @@ pub(super) enum Returns {
     /// MySQL `DATE_ADD(d, INTERVAL n unit)` and friends: like `d + INTERVAL n unit`; a
     /// number of days keeps a date a date.
     DateAdd,
+    /// MySQL `TIMESTAMPADD(unit, n, d)`: a `DATE` stays a date for day units and coarser,
+    /// anything else is a `DATETIME`.
+    TimestampAdd,
     /// MySQL `CEIL` and `FLOOR`: an integer for an exact number whose integer part fits a
     /// `BIGINT`, a `DOUBLE` for an approximate one.
     Integral,
@@ -679,6 +682,19 @@ impl<'a> Analyzer<'a> {
                     },
                     None => Typed::UNKNOWN,
                 })
+            }
+            Returns::TimestampAdd => {
+                let day_or_coarser = matches!(
+                    args.first(),
+                    Some(Expr::Identifier(unit)) if ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]
+                        .iter()
+                        .any(|coarse| unit.value.eq_ignore_ascii_case(coarse))
+                );
+                match operand_type(&arg(2)?) {
+                    Some("DATE") if day_or_coarser => sql("DATE"),
+                    Some("DATE" | "DATETIME" | "TIMESTAMP") => sql("DATETIME"),
+                    _ => Ok(Typed::UNKNOWN),
+                }
             }
             Returns::Integral => {
                 let typed = arg(0)?;

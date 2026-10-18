@@ -243,6 +243,36 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("JSON"),
     ),
+    (
+        &["EXPORT_SET", "MAKE_SET", "GET_FORMAT", "ICU_VERSION"],
+        Sql("TEXT"),
+    ),
+    (
+        &[
+            "FROM_BASE64",
+            "WEIGHT_STRING",
+            "AES_ENCRYPT",
+            "AES_DECRYPT",
+            "RANDOM_BYTES",
+        ],
+        Sql("VARBINARY"),
+    ),
+    (&["COT"], Sql("DOUBLE")),
+    (
+        &[
+            "JSON_SCHEMA_VALID",
+            "IS_IPV4",
+            "IS_IPV6",
+            "IS_IPV4_COMPAT",
+            "IS_IPV4_MAPPED",
+            "IS_UUID",
+            "COERCIBILITY",
+        ],
+        Sql("INT"),
+    ),
+    (&["JSON_STORAGE_SIZE", "JSON_STORAGE_FREE"], Sql("BIGINT")),
+    (&["UUID_SHORT"], Sql("UBIGINT")),
+    (&["TIMESTAMPADD"], Returns::TimestampAdd),
 ];
 
 /// MySQL functions that give NULL for some non-null arguments: a string that is not a
@@ -272,6 +302,9 @@ pub(super) const MYSQL_ALWAYS_NULLABLE: &[&str] = &[
     "INET6_ATON",
     "INET6_NTOA",
     "CONV",
+    "FROM_BASE64",
+    "GET_FORMAT",
+    "AES_DECRYPT",
 ];
 
 /// <https://www.sqlite.org/lang_corefunc.html>, `lang_datefunc.html`, `lang_mathfunc.html`

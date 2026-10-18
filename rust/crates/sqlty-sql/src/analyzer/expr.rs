@@ -217,6 +217,20 @@ impl<'a> Analyzer<'a> {
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL", self.dialect))
             }
+            Expr::Extract { .. } if self.dialect == SqlDialect::MySql => {
+                Ok(from_sql_type("BIGINT", self.dialect))
+            }
+            // A character set introducer: `_binary 'a'` is a binary string, `_utf8mb4 'a'` text.
+            Expr::Prefixed { prefix, .. } if self.dialect == SqlDialect::MySql => {
+                Ok(from_sql_type(
+                    if prefix.value.eq_ignore_ascii_case("_binary") {
+                        "VARBINARY"
+                    } else {
+                        "TEXT"
+                    },
+                    self.dialect,
+                ))
+            }
             // MySQL reads a bare `CURRENT_USER`, and PostgreSQL `CURRENT_ROLE`, reserved
             // words both, as functions without parentheses.
             Expr::Identifier(ident)
