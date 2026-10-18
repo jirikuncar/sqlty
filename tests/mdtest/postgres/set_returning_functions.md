@@ -173,3 +173,33 @@ SELECT jt.x, jt.n FROM JSON_TABLE('[1, {}]'::jsonb, '$[*]' COLUMNS (n FOR ORDINA
 -- columns: x: int | None (INT)
 -- columns: n: int (INT)
 ```
+
+## Stars
+
+`*` and `t.*` expand to the columns of a function in `FROM`, with or without
+`WITH ORDINALITY`, and to the columns of a `JSON_TABLE`.
+
+```sql
+SELECT * FROM unnest(ARRAY[1, 2]) WITH ORDINALITY AS u(x, o)
+-- columns: x: int | None (INT)
+-- columns: o: int (BIGINT)
+```
+
+```sql
+SELECT p.id, u.* FROM posts p, unnest(p.tags) WITH ORDINALITY u
+-- columns: id: int (INT)
+-- columns: u: str | None (TEXT)
+-- columns: ordinality: int (BIGINT)
+```
+
+```sql
+SELECT unnest.* FROM unnest(ARRAY['a'])
+-- columns: unnest: str | None (TEXT)
+```
+
+```sql
+SELECT p.id, jt.* FROM posts p, JSON_TABLE(p.doc, '$.items[*]' COLUMNS (n FOR ORDINALITY, name text PATH '$.name')) AS jt
+-- columns: id: int (INT)
+-- columns: n: int (INT)
+-- columns: name: str | None (TEXT)
+```
