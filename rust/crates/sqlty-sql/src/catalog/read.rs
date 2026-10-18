@@ -13,7 +13,7 @@ use crate::values::{self};
 use super::alter::changes_columns;
 use super::columns::add_values;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
-use super::names::fold;
+use super::names::{fold, parts};
 use super::Catalog;
 use super::TypeOverrides;
 
@@ -134,12 +134,12 @@ pub(super) fn read_statements(
                     stmt.name_parts_after("function"),
                 )),
             }
-        } else if let Some(table) = stmt
-            .before_insert_trigger()
+        } else if let Some(trigger) = stmt
+            .before_row_trigger()
             .filter(|_| matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql))
         {
             // A SQLite trigger cannot change the row it fires for.
-            push(OpKind::InsertTrigger(table));
+            push(OpKind::RowTrigger(trigger));
         } else if matches!(
             dialect,
             SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
@@ -194,6 +194,10 @@ pub(super) fn read_alter_or_drop(
             ) => {
                 push(OpKind::Drop(Box::new(drop)));
             }
+            Some(Statement::DropTrigger(drop)) => push(OpKind::DropTrigger(
+                parts(&drop.trigger_name, dialect),
+                drop.table_name.map(|table| parts(&table, dialect)),
+            )),
             _ if matches!(kind.as_str(), "table" | "view" | "materialized") => {
                 push(OpKind::Taint(Taint::Relation, name));
             }

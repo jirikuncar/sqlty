@@ -163,3 +163,70 @@ RETURNING id, nick, coalesce(nick, name)
 INSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT DO NOTHING RETURNING age
 -- inferred: tuple[int | None]
 ```
+
+## RETURNING with a BEFORE row trigger
+
+`RETURNING` returns the row after `BEFORE ... FOR EACH ROW` triggers have run, and
+such a trigger can set any column to NULL. A column it may change stays nullable
+unless the table declares it `NOT NULL`, which PostgreSQL checks after the trigger.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE progress (id INTEGER PRIMARY KEY, name TEXT NOT NULL, task TEXT);
+CREATE TABLE edits (id INTEGER PRIMARY KEY, task TEXT);
+CREATE TABLE logged (id INTEGER PRIMARY KEY, task TEXT);
+CREATE TABLE dropped (id INTEGER PRIMARY KEY, task TEXT);
+CREATE TRIGGER clear BEFORE INSERT OR UPDATE ON progress FOR EACH ROW EXECUTE FUNCTION clear_task();
+CREATE TRIGGER clear_on_edit BEFORE UPDATE OF task ON edits FOR EACH ROW EXECUTE FUNCTION clear_task();
+CREATE TRIGGER log AFTER INSERT ON logged FOR EACH ROW EXECUTE FUNCTION log_task();
+CREATE TRIGGER audit BEFORE INSERT ON logged FOR EACH STATEMENT EXECUTE FUNCTION audit();
+CREATE TRIGGER clear BEFORE INSERT ON dropped FOR EACH ROW EXECUTE FUNCTION clear_task();
+DROP TRIGGER clear ON dropped;
+```
+
+```sql
+INSERT INTO progress (id, name, task) VALUES (1, 'a', 'b') RETURNING name, task
+-- inferred: tuple[str, str | None]
+```
+
+```sql
+UPDATE progress SET task = 'a' WHERE id = 1 RETURNING task
+-- inferred: tuple[str | None]
+```
+
+```sql
+INSERT INTO progress (id, name, task) VALUES (1, 'a', 'b') ON CONFLICT (id) DO UPDATE SET task = EXCLUDED.task RETURNING task
+-- inferred: tuple[str | None]
+```
+
+A `BEFORE UPDATE` trigger fires for `UPDATE` and for the `DO UPDATE` branch of an
+upsert, not for a plain `INSERT`.
+
+```sql
+INSERT INTO edits (id, task) VALUES (1, 'a') RETURNING task
+-- inferred: tuple[str]
+```
+
+```sql
+UPDATE edits SET task = 'a' WHERE id = 1 RETURNING task
+-- inferred: tuple[str | None]
+```
+
+```sql
+INSERT INTO edits (id, task) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET task = EXCLUDED.task RETURNING task
+-- inferred: tuple[str | None]
+```
+
+`AFTER` and statement-level triggers cannot change the returned row, and a dropped
+trigger no longer fires.
+
+```sql
+INSERT INTO logged (id, task) VALUES (1, 'a') RETURNING task
+-- inferred: tuple[str]
+```
+
+```sql
+INSERT INTO dropped (id, task) VALUES (1, 'a') RETURNING task
+-- inferred: tuple[str]
+```

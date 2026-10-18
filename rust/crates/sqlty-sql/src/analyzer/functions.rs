@@ -602,22 +602,19 @@ impl<'a> Analyzer<'a> {
                 for expr in args {
                     typed_args.push(self.expr(expr, scope)?);
                 }
-                if matches!(self.dialect, SqlDialect::Postgres | SqlDialect::MySql) {
-                    if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
-                        return Ok(common);
-                    }
+                if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
+                    return Ok(common);
                 }
                 let first = typed_args
                     .iter()
                     .find(|typed| typed.is_known())
                     .cloned()
                     .unwrap_or(Typed::UNKNOWN);
-                // `COALESCE(checked_column, 'other')` takes any of the arguments' values.
-                if value_set(&first).is_some() {
-                    return Ok(common_of(typed_args, self.dialect)
-                        .unwrap_or_else(|| strip(first, self.dialect)));
-                }
-                Ok(first)
+                Ok(if value_set(&first).is_some() {
+                    strip(first, self.dialect)
+                } else {
+                    first
+                })
             }
             Returns::Branches(i) => self.function_type(
                 Returns::FirstKnown,

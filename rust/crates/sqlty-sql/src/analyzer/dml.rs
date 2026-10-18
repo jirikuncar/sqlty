@@ -13,6 +13,7 @@ use super::nullability::{Facts, Nullability};
 use super::query::Analyzer;
 use super::scope::{table_scope, Scope, Source, Table};
 use crate::catalog::fold;
+use crate::ddl::RowEvents;
 use crate::diagnostics::{Diagnostics, NameRule};
 
 pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
@@ -110,6 +111,29 @@ impl Analyzer<'_> {
         let Some(target) = scope.first().map(|source| source.reference.clone()) else {
             return self.facts.clone();
         };
+        // A `BEFORE` row trigger may change any column of the row `RETURNING` returns.
+        let triggers = match scope.first().map(|source| &source.table) {
+            Some(Table::Named(key)) => self.schema.row_triggers(key),
+            _ => RowEvents::default(),
+        };
+        let triggered = match stmt {
+            Statement::Insert(insert) => {
+                triggers.insert
+                    || triggers.update
+                        && matches!(
+                            insert.on,
+                            Some(OnInsert::OnConflict(OnConflict {
+                                action: OnConflictAction::DoUpdate(_),
+                                ..
+                            }))
+                        )
+            }
+            Statement::Update(_) => triggers.update,
+            _ => false,
+        };
+        if triggered {
+            return self.facts.clone();
+        }
         let non_null = |nullability| nullability == Nullability::NonNull;
         let written: Vec<String> = match stmt {
             Statement::Insert(insert) => {
