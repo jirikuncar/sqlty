@@ -95,6 +95,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: uv run python scripts/compat/pg_nullability.py
 
+      - name: Compare nullability with MySQL
+        if: ${{ !cancelled() }}
+        run: uv run --with pymysql python scripts/compat/mysql_nullability.py
+
       - name: Summarize report changes
         if: ${{ !cancelled() }}
         run: |

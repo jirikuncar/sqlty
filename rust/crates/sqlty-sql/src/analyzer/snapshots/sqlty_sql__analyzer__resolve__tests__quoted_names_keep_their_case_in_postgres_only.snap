@@ -22,7 +22,7 @@ SELECT mixed FROM `Case`
 mixed: int | INT | NonNull
 
 SELECT PLAIN FROM case_
-plain: ? | ? | Unknown
+PLAIN: ? | ? | Unknown
 [unknown-table] table `case_` is not defined in the schema
 
 SELECT `MIXED` FROM `case`
