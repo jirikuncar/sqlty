@@ -16,6 +16,7 @@ use sqlparser::ast::{
 };
 
 use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject, SqlDialect};
+use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
@@ -34,6 +35,8 @@ pub(super) struct RawTable {
     pub(super) unknown: bool,
     /// Groups of columns a `CHECK` keeps at least one of non-null.
     pub(super) nonnull_groups: Vec<Vec<String>>,
+    /// `BEFORE` row triggers by name, and the statements they fire for.
+    pub(super) row_triggers: Vec<(String, RowEvents)>,
 }
 
 pub(super) enum Rel {
@@ -73,8 +76,10 @@ pub(super) enum OpKind {
     AlterType(AlterType),
     Drop(Box<Statement>),
     Function(Box<CreateFunction>),
-    /// A `BEFORE INSERT` row trigger on the named table, which may fill any of its columns.
-    InsertTrigger(Vec<String>),
+    /// A `BEFORE` row trigger, which may change any column of the rows it fires for.
+    RowTrigger(RowTrigger),
+    /// `DROP TRIGGER name [ON table]`.
+    DropTrigger(Vec<String>, Option<Vec<String>>),
     /// A statement that changes the named relation, type or function in a way this
     /// module cannot follow.
     Taint(Taint, Vec<String>),
@@ -259,18 +264,43 @@ impl Loader {
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
-            OpKind::InsertTrigger(name) => {
-                let Some(key) = self.table_key(name, &path) else {
+            OpKind::RowTrigger(trigger) => {
+                let Some(key) = self.table_key(&trigger.table, &path) else {
                     return false;
                 };
                 let Some(Rel::Table(table)) = self.relations.get(&key) else {
                     return false;
                 };
                 let mut table = table.clone();
-                for column in &mut table.columns {
-                    column.has_default = true;
+                if trigger.events.insert {
+                    for column in &mut table.columns {
+                        column.has_default = true;
+                    }
                 }
+                let name = trigger.name.last().map(|name| name.to_lowercase());
+                let name = name.unwrap_or_default();
+                table.row_triggers.retain(|(other, _)| *other != name);
+                table.row_triggers.push((name, trigger.events));
                 self.set_relation(key, Some(Rel::Table(table)));
+                false
+            }
+            OpKind::DropTrigger(name, table) => {
+                let name = name.last().cloned().unwrap_or_default();
+                let keys: Vec<String> = match table {
+                    Some(table) => self.table_key(table, &path).into_iter().collect(),
+                    // MySQL names a trigger without its table.
+                    None => self.relations.keys().cloned().collect(),
+                };
+                for key in keys {
+                    let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                        continue;
+                    };
+                    if table.row_triggers.iter().any(|(other, _)| *other == name) {
+                        let mut table = table.clone();
+                        table.row_triggers.retain(|(other, _)| *other != name);
+                        self.set_relation(key, Some(Rel::Table(table)));
+                    }
+                }
                 false
             }
         };
