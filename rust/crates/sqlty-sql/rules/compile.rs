@@ -68,7 +68,7 @@ const SQL_TYPES: [&str; 48] = [
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.
-const CLASSES: [(&str, &[&str]); 8] = [
+const CLASSES: [(&str, &[&str]); 9] = [
     (
         "@integer",
         &["SMALLINT", "TINYINT", "MEDIUMINT", "INT", "BIGINT"],
