@@ -25,7 +25,7 @@ UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING *
 id: int | SERIAL | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | Nullable
-id: int | INT | Nullable
+id: int | INT | NonNull
 extra: int | INT | Nullable
 
 UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING t.id, extra

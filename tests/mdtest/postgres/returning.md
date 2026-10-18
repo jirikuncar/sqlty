@@ -185,7 +185,7 @@ schema = "schema.sql"
 ```
 
 ```sql
-DELETE FROM users WHERE id = 1 RETURNING *
+DELETE FROM users RETURNING *
 -- inferred: tuple[int | None, str | None]
 ```
 
