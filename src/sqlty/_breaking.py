@@ -110,7 +110,7 @@ def report(
 def _compare(
     direction: Literal["backward", "forward"], *, queries: Revision, schema: Revision
 ) -> list[Finding]:
-    from sqlty._cli import _module_names
+    from sqlty._cli import _module_names, read_source
     from sqlty._source import ParsedSource
     from sqlty.core import breaking_source
 
@@ -121,7 +121,10 @@ def _compare(
         own = queries.settings(relative)
         other = schema.settings(relative)
         module = _module_names(queries.resolver.resolve(path), roots)[0]
-        parsed = ParsedSource(path.read_text(encoding="utf-8"), module)
+        text = read_source(path)
+        if text is None:
+            continue
+        parsed = ParsedSource(text, module)
         for diagnostic in breaking_source(
             parsed,
             schema_sql=own.schema,

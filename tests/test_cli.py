@@ -1262,6 +1262,20 @@ def test_json_output_stays_parseable_with_fix_and_verbose(tmp_path, monkeypatch,
     assert "Fixed q.py" in err
 
 
+@pytest.mark.parametrize("command", ["check", "rewrite", "strip"])
+def test_a_file_that_is_not_utf8_is_skipped(tmp_path, monkeypatch, caplog, command) -> None:
+    (tmp_path / "latin1.py").write_bytes('q = "caf\xe9"\n'.encode("latin-1"))
+    (tmp_path / "ok.py").write_text('q = "--sql\\nSELECT 1::INTEGER"\n')
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exit:
+        main([command, "."])
+    assert exit.value.code == 2
+    assert "latin1.py: not UTF-8" in caplog.text
+    if command == "rewrite":
+        assert (tmp_path / "ok.py").read_text().startswith("from sqlty import SQL")
+
+
 def test_skill_prints_and_installs(tmp_path, capsys) -> None:
     main(["skill"])
     skill = capsys.readouterr().out
