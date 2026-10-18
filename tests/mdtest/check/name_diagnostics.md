@@ -132,6 +132,13 @@ CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);
 a = "-- sql\nSELECT name AS n FROM users WHERE n = 'a' ORDER BY lower(n)"
 ```
 
+A user variable (`@name`) or a system variable (`@@name`) is not a column:
+
+```python
+# error:
+b = "-- sql\nSELECT name, @@version FROM users WHERE id = @uid"
+```
+
 #### INSERT, UPDATE and DELETE
 
 A statement that returns no rows is checked too: the table it writes, the

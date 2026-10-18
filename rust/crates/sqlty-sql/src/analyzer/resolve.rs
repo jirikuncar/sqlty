@@ -380,6 +380,10 @@ impl<'a> Analyzer<'a> {
         if unqualified && all.iter().any(|source| source.reference == name) {
             return self.diag.explain_silently();
         }
+        // MySQL's `@name` is a user variable, `@@name` a system one.
+        if unqualified && column.quote_style.is_none() && column.value.starts_with('@') {
+            return self.diag.explain_silently();
+        }
         // `VALUES (DEFAULT)` and `SET c = DEFAULT`: the keyword, not a column.
         if unqualified
             && column.quote_style.is_none()
