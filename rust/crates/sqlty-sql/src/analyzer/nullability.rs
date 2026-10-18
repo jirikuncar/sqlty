@@ -446,7 +446,9 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotUnknown(_)
             | Expr::IsDistinctFrom(..)
             | Expr::IsNotDistinctFrom(..) => Nullability::NonNull,
-            Expr::UnaryOp { expr: inner, .. } | Expr::IsJson { expr: inner, .. } => of(inner),
+            Expr::UnaryOp { expr: inner, .. }
+            | Expr::IsJson { expr: inner, .. }
+            | Expr::IsNormalized { expr: inner, .. } => of(inner),
             Expr::BinaryOp { left, op, right } => match self.json_extract(expr, scope) {
                 // A member every object has is there whenever the object is.
                 Some(value) if !value.missing => of(left),
