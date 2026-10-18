@@ -118,6 +118,14 @@ SELECT citext 'a', name 'a', money '1', bpchar 'a'
 -- columns: bpchar: str (BPCHAR)
 ```
 
+`X'41'` and `B'101'` are bit strings.
+
+```sql
+SELECT X'41' AS a, B'101' AS b
+-- columns: a: str (BIT)
+-- columns: b: str (BIT)
+```
+
 ## Checks
 
 ```python

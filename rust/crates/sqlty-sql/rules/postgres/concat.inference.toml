@@ -47,3 +47,13 @@ right = ["@array"]
 type = "@right"
 reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatible || anycompatiblearray → anycompatiblearray)"
 reasoning = "Prepending an element keeps the array's type."
+
+[[rule]]
+id = "postgres.concat.bytea"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["@binary"]
+right = ["@binary"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.5, Table 9.11 SQL Binary String Functions and Operators (bytea || bytea → bytea)"
+reasoning = "Two binary strings concatenate into a binary string."

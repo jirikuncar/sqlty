@@ -340,3 +340,13 @@ dialects = ["postgres"]
 type = "BOOLEAN"
 reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange -|- anyrange → boolean, anyrange &< anyrange → boolean, anyrange &> anyrange → boolean)"
 reasoning = "Range adjacency and extent tests are predicates."
+
+[[rule]]
+id = "postgres.range.set-operations"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["postgres"]
+left = ["@range"]
+right = ["@range"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange + anyrange → anyrange, anyrange * anyrange → anyrange, anyrange - anyrange → anyrange)"
+reasoning = "The union, intersection and difference of two ranges are a range of their type."
