@@ -195,7 +195,8 @@ mod tests {
         );
         assert_eq!(
             show(merge(&set(&["a"]), &numbers, SqlDialect::Sqlite)),
-            "conflict"
+            "str | int | ?",
+            "SQLite returns either value"
         );
     }
 

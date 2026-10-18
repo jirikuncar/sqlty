@@ -204,6 +204,12 @@ impl<'a> Analyzer<'a> {
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
                 let returns = match self.dialect {
                     SqlDialect::MySql => Returns::Integral,
+                    // SQLite returns an integer argument as it is.
+                    SqlDialect::Sqlite
+                        if self.expr(inner, scope)?.python.as_deref() == Some("int") =>
+                    {
+                        Returns::Arg(0)
+                    }
                     _ => Returns::Real,
                 };
                 self.function_type(returns, &[inner], scope)
@@ -465,19 +471,15 @@ impl<'a> Analyzer<'a> {
                 return Ok(common);
             }
         }
-        if self.dialect == SqlDialect::MySql {
-            if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
-                return Ok(common);
-            }
+        if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
+            return Ok(common);
         }
-        // SQLite takes the first branch's type, but a set of values covers every branch.
         let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
-        if value_set(&first).is_some() {
-            return Ok(
-                common_of(results, self.dialect).unwrap_or_else(|| strip(first, self.dialect))
-            );
-        }
-        Ok(first)
+        Ok(if value_set(&first).is_some() {
+            strip(first, self.dialect)
+        } else {
+            first
+        })
     }
 
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
@@ -506,6 +508,13 @@ impl<'a> Analyzer<'a> {
             }
         }
         let args = positional_args(&func.args);
+        // SQLite's scalar `min(a, b)` returns one of its arguments.
+        if self.dialect == SqlDialect::Sqlite
+            && matches!(name.as_str(), "MIN" | "MAX")
+            && args.len() >= 2
+        {
+            return self.function_type(Returns::FirstKnown, &args, scope);
+        }
         let arg = args.first().copied();
         if let Some((rule, typed)) = self.function_rule(&name, arg, scope)? {
             let argument = || match &typed {
