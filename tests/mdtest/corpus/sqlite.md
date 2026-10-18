@@ -12,8 +12,6 @@ schema = "schema.sql"
 
 ## COALESCE parameter in UPDATE ... RETURNING
 
-<!-- mdtest:xfail a parameter inside COALESCE is not marked NULL -->
-
 The first parameter takes the column's type and may be NULL, since the column is the
 fallback.
 

@@ -778,6 +778,14 @@ impl<'a> Analyzer<'a> {
                     self.hint_pair(placeholder, other, scope, out);
                 }
             }
+            // A later argument stands in for a NULL one.
+            if matches!(name.as_str(), "COALESCE" | "IFNULL") {
+                for arg in args.iter().rev().skip(1).flatten() {
+                    if let Some(index) = placeholder_index(arg) {
+                        out.add(index, Typed::default(), Nullability::Nullable);
+                    }
+                }
+            }
         } else if let Some(types) = info.and_then(|info| info.signature) {
             for (arg, sql_type) in args.iter().zip(types) {
                 if let (Some(index), false) = (arg.and_then(placeholder_index), sql_type.is_empty())

@@ -178,6 +178,18 @@ DELETE FROM orders WHERE user_id = %s AND total > %s
 -- params: 2: decimal.Decimal (DECIMAL(10, 2))
 ```
 
+### A COALESCE fallback
+
+A parameter before the last argument of `COALESCE` may be NULL: a later argument stands
+in for it. The last one is not.
+
+```sql
+UPDATE users SET name = COALESCE(%s, name), age = COALESCE(age, %s) WHERE id = %s
+-- params: 1: str (TEXT) NULL
+-- params: 2: int (INT)
+-- params: 3: int (INT)
+```
+
 ## Explicit casts
 
 ```sql
