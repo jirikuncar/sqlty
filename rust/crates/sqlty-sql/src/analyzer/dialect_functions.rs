@@ -291,6 +291,7 @@ pub(super) const MYSQL_ALWAYS_NULLABLE: &[&str] = &[
     "ELT",
     "DATE_ADD",
     "DATE_SUB",
+    "TIMESTAMPADD",
     "ADDDATE",
     "SUBDATE",
     "ADDTIME",

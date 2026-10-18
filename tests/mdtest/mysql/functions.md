@@ -301,8 +301,8 @@ SELECT id DIV 2 AS a, price DIV 2 AS b, CAST(id AS UNSIGNED) - 1 AS c, EXTRACT(Y
 -- columns: b: int (BIGINT)
 -- columns: c: int (UBIGINT)
 -- columns: d: int (BIGINT)
--- columns: e: datetime.date (DATE)
--- columns: f: datetime.datetime (DATETIME)
+-- columns: e: datetime.date | None (DATE)
+-- columns: f: datetime.datetime | None (DATETIME)
 -- columns: g: str (TEXT)
 -- columns: h: bytes (VARBINARY)
 ```

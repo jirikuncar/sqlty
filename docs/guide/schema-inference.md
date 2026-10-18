@@ -107,7 +107,10 @@ What makes a column nullable or not:
   null-extended rows.
 - **Expressions.** Operators and most functions are NULL when an argument is.
   `COALESCE` is nullable only if every argument is. `NULLIF`, JSON accessors, array
-  subscripts and a `CASE` without `ELSE` can always be NULL.
+  subscripts and a `CASE` without `ELSE` can always be NULL. MySQL and SQLite return
+  NULL where PostgreSQL raises an error, so there a division, a math function outside its
+  domain (`sqrt(-1)`), and in MySQL a date moved out of range or a cast of a string to a
+  date can be NULL too.
 - **Aggregates.** `COUNT` is never NULL. Other aggregates are nullable without a plain
   `GROUP BY` (empty input), with `FILTER`, or when the argument is.
 - **Arrays.** The nullability of an array's elements is not tracked: a `text[]` column,

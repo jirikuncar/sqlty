@@ -140,6 +140,36 @@ SELECT x / y, x % y, x / 2, x % 2, id + y FROM m
 -- inferred: tuple[decimal.Decimal | None, int | None, decimal.Decimal, int, int]
 ```
 
+## MySQL date arithmetic and casts to dates can be NULL
+
+MySQL gives NULL for a date moved out of its range (`DATE '9999-12-31' + INTERVAL 1 DAY`)
+and for a value that does not read as a date or time (`CAST('abc' AS DATE)`). A cast of a
+value that is already a date or time cannot fail.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE e (d DATE NOT NULL, ts DATETIME NOT NULL, s VARCHAR(10) NOT NULL, n INT NOT NULL);
+```
+
+```sql
+SELECT d + INTERVAL 1 DAY AS a, ts - INTERVAL 1 HOUR AS b, TIMESTAMPADD(DAY, 1, d) AS c, CAST(s AS DATE) AS f, CAST(n AS YEAR) AS g, CONVERT(s, DATETIME) AS h, CAST(ts AS DATE) AS i, CAST(d AS DATETIME) AS j FROM e
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.datetime | None (DATETIME)
+-- columns: c: datetime.date | None (DATE)
+-- columns: f: datetime.date | None (DATE)
+-- columns: g: int | None (YEAR)
+-- columns: h: datetime.datetime | None (DATETIME)
+-- columns: i: datetime.date (DATE)
+-- columns: j: datetime.datetime (DATETIME)
+```
+
 ## SQLite division and modulo by zero
 
 ```toml
