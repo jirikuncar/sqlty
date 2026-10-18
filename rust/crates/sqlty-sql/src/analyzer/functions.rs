@@ -61,6 +61,9 @@ pub(super) enum Returns {
     /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
     /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
     Series,
+    /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
+    /// for [`Returns::Series`].
+    Random,
 }
 
 use Returns::{Arg, Elem, Sql};
@@ -240,9 +243,9 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("BIGINT"),
     ),
+    (&["RANDOM"], Returns::Random),
     (
         &[
-            "RANDOM",
             "DATE_PART",
             "PI",
             "DEGREES",
@@ -659,7 +662,8 @@ impl<'a> Analyzer<'a> {
                     _ => Ok(Typed::UNKNOWN),
                 }
             }
-            Returns::Series => {
+            Returns::Random if args.is_empty() => sql("DOUBLE"),
+            Returns::Random | Returns::Series => {
                 let bounds = [arg(0)?, arg(1)?];
                 match common_of(bounds, self.dialect)
                     .as_ref()

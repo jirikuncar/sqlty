@@ -52,6 +52,17 @@ SELECT pg_try_advisory_lock(1) AS a, gen_random_uuid() AS b, strpos(name, 'a') A
 -- columns: d: float (DOUBLE)
 ```
 
+## random with bounds
+
+PostgreSQL 17's `random(min, max)` returns the type of its bounds.
+
+```sql
+SELECT random(1, 6) AS a, random(1, big) AS b, random(0.0, 1.5) AS c FROM users
+-- columns: a: int (INT)
+-- columns: b: int | None (BIGINT)
+-- columns: c: decimal.Decimal (DECIMAL)
+```
+
 ## SUM widens like PostgreSQL
 
 ```sql
