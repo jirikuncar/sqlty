@@ -412,6 +412,11 @@ impl<'a> Analyzer<'a> {
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
             Expr::Nested(inner) | Expr::Collate { expr: inner, .. } => of(inner),
+            Expr::Convert {
+                expr: inner,
+                is_try: false,
+                ..
+            } => of(inner),
             Expr::Cast {
                 expr: inner, kind, ..
             } => match kind {
