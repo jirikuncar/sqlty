@@ -358,6 +358,47 @@ impl Checker<'_> {
         )
     }
 
+    /// Why a query has no row type, and what to do about it: the first name or construct
+    /// the analyzer could not type, else the untyped columns.
+    fn untyped_cause(&self, sql_content: &str) -> String {
+        let has_schema = self.options.schema.is_some_and(|schema| !schema.is_empty());
+        let Some(query) = marked_query(sql_content) else {
+            return "add casts (for example id::INTEGER) or a schema".to_string();
+        };
+        let (columns, diagnostics) =
+            analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
+        if let Some(diagnostic) = diagnostics.first() {
+            let hint = match diagnostic.rule {
+                NameRule::UnknownFunction => {
+                    "; cast its result, or declare the function in the schema"
+                }
+                NameRule::UnknownType => "; declare the type in the schema",
+                NameRule::UnsupportedSyntax => "; cast it to a type",
+                _ => "",
+            };
+            return format!("{}{hint}", diagnostic.message);
+        }
+        let untyped: Vec<String> = columns
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .iter()
+            .filter(|column| column.python_type.is_none())
+            .map(|column| format!("`{}`", column.name))
+            .collect();
+        let advice = if has_schema {
+            "cast it to a type"
+        } else {
+            "add casts (for example id::INTEGER) or a schema"
+        };
+        match untyped.as_slice() {
+            [] => advice.to_string(),
+            [star] if star == "`*`" => "`*` is not expanded; add a schema".to_string(),
+            [column] => format!("column {column} is untyped; {advice}"),
+            columns => format!("columns {} are untyped; {advice}", columns.join(", ")),
+        }
+    }
+
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
         let annotated = &self.scan.source()[call.annotation.clone()];
@@ -378,7 +419,8 @@ impl Checker<'_> {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
                 }
                 None => format!(
-                    "{untyped} has no inferable row type; add casts (e.g. id::INTEGER) or a schema"
+                    "{untyped} has no inferable row type: {}",
+                    self.untyped_cause(sql_content)
                 ),
             };
             let fix = current.map(|current| Edit::new(call.annotation.clone(), current));

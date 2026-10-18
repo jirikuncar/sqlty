@@ -237,6 +237,22 @@ a warning and the file keeps sqlty's changes. `rewrite` stays idempotent with a
 formatter: a wrapper the formatter split over several lines is recognized as
 already written.
 
+`rewrite` adds its imports (`from sqlty import SQL`, `import datetime`) at the top of
+the import block, below the module docstring, without sorting them into your groups.
+To keep an import sorter's check passing, sort them as part of the command, for example
+with a script:
+
+```bash
+#!/bin/sh
+# scripts/format.sh: sort imports, then format
+ruff check --select I --fix --quiet "$@" && ruff format --quiet "$@"
+```
+
+```toml
+[tool.sqlty]
+format-command = ["sh", "scripts/format.sh"]
+```
+
 ## `exclude` and `extend-exclude`
 
 Directories the CLI walks skip these globs. `exclude` replaces the default
