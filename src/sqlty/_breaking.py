@@ -72,8 +72,19 @@ def run(args: argparse.Namespace) -> list[Finding]:
         return findings
 
 
-def report(findings: list[Finding], against: str, head: str | None, quiet: bool) -> None:
-    """Print each finding as ``path:line: [rule] message (direction)``."""
+def report(
+    findings: list[Finding],
+    against: str,
+    head: str | None,
+    quiet: bool,
+    output_format: Literal["text", "json", "github"] = "text",
+) -> None:
+    """Print each finding: ``path:line: [rule] message (direction)``, a JSON array with a
+    ``direction`` per finding, or GitHub Actions annotations, all errors."""
+    import json
+
+    from sqlty._cli import github_annotation
+
     if quiet:
         return
     head = head or "the working tree"
@@ -81,13 +92,18 @@ def report(findings: list[Finding], against: str, head: str | None, quiet: bool)
         "backward": f"the queries of {against} against the schema of {head}",
         "forward": f"the queries of {head} against the schema of {against}",
     }
+    if output_format == "json":
+        rows = [{"file": str(f.path), **f.diagnostic, "direction": f.direction} for f in findings]
+        print(json.dumps(rows, indent=2))
+        return
     for finding in findings:
         d = finding.diagnostic
-        print(
-            f"{finding.path}:{d.get('line', '')}: [{d['rule']}] {d['message']} "
-            f"({finding.direction}: {titles[finding.direction]})"
-        )
-    if findings:
+        message = f"{d['message']} ({finding.direction}: {titles[finding.direction]})"
+        if output_format == "github":
+            print(github_annotation(finding.path, {**d, "message": message, "severity": "error"}))
+        else:
+            print(f"{finding.path}:{d.get('line', '')}: [{d['rule']}] {message}")
+    if findings and output_format == "text":
         print(f"Found {len(findings)} breaking change(s)")
 
 
@@ -167,6 +183,6 @@ def main(args: argparse.Namespace) -> None:
         findings = run(args)
     except GitError as exc:
         raise ConfigError(str(exc)) from exc
-    report(findings, args.against, args.head, args.quiet)
+    report(findings, args.against, args.head, args.quiet, args.output_format)
     if findings:
         sys.exit(EXIT_FOUND)

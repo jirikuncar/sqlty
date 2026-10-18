@@ -130,7 +130,7 @@ jobs:
       - run: uv sync
       - run: uv run sqlty rewrite --check .
       - run: uv run sqlty check --output-format github .
-      - run: uv run sqlty breaking --against origin/${{ github.base_ref }}
+      - run: uv run sqlty breaking --output-format github --against origin/${{ github.base_ref }}
 ```
 
 Each step catches something the others don't:
@@ -146,8 +146,8 @@ Each step catches something the others don't:
     `sqlty check` reports it but exits 0. `sqlty breaking` fails on it, and so does
     `sqlty check` with `stale-type = "error"`.
 
-`--output-format github` prints each diagnostic as a GitHub Actions annotation, so it
-shows on its line in the pull request's diff. See [Schema changes in CI](migration.md#schema-changes-in-ci)
+`--output-format github` prints each diagnostic, and each breaking change, as a GitHub
+Actions annotation, so it shows on its line in the pull request's diff. See [Schema changes in CI](migration.md#schema-changes-in-ci)
 for the `--direction` options.
 
 ## Keeping sources stripped
