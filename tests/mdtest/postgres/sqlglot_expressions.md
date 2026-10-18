@@ -73,7 +73,7 @@ SELECT INT4RANGE(1, 2) &> INT4RANGE(2, 3) AS x FROM tbl
 
 ```sql
 SELECT (tbl.date_col, tbl.date_col) OVERLAPS (tbl.date_col, tbl.date_col) AS x FROM tbl
--- columns: x: bool (BOOLEAN)
+-- columns: x: bool | None (BOOLEAN)
 ```
 
 ```sql

@@ -1,8 +1,10 @@
-"""Column names and types against a live PostgreSQL server.
+"""Column names, types and nullability against a live PostgreSQL server.
 
 Every query of the PostgreSQL mdtests that runs against an explicit schema is prepared
-on the server (nothing is executed), and the names and types of its result columns,
-as the server describes them, are compared with ``core.analyze_select``. The job runs
+on the server, and the names and types of its result columns, as the server describes
+them, are compared with ``core.analyze_select``. Every PostgreSQL query of the mdtests
+and docs with a schema then runs on rows ``tests/_pg_seed.py`` inserts, in a transaction
+rolled back after it, and a NULL in a column sqlty types as non-null fails. The job runs
 when ``SQLTY_PG_DSN`` points to a disposable database::
 
     SQLTY_PG_DSN=postgresql://postgres:postgres@localhost:5432/postgres \\
@@ -22,6 +24,9 @@ What is compared, and what is tolerated:
 - Queries the server rejects (placeholders in sqlty's ``%s`` or ``:name`` style, a
   schema using an unavailable extension) are skipped, with the reason.
 - ``KNOWN_DIFFERENCES`` lists mismatches that are understood and not fixed yet.
+
+``scripts/compat/pg_nullability.py`` reports the reverse: columns sqlty types as nullable
+that are never NULL on the seeded rows.
 """
 
 from __future__ import annotations
@@ -38,8 +43,10 @@ import pytest
 
 from sqlty import core
 from tests._mdtest.parser import Section, parse
+from tests._pg_seed import seed
 
 DSN = os.environ.get("SQLTY_PG_DSN")
+ROOT = Path(__file__).parent.parent
 CORPUS = Path(__file__).parent / "mdtest" / "postgres"
 
 needs_server = [
@@ -125,6 +132,56 @@ def _cases(path: Path, section: Section) -> Iterator[Case]:
         yield Case(f"{path.name}:{unit.lines[0][0]}", schema_sql, unit.code.text)
 
 
+@dataclass(frozen=True)
+class Queries:
+    id: str
+    schema_sql: str
+    queries: list[tuple[int, str]]
+
+
+def nullability_corpus() -> Iterator[Queries]:
+    """Each section of the mdtests and docs with a PostgreSQL schema, with its typed queries."""
+    for path in [
+        *sorted((ROOT / "tests" / "mdtest").rglob("*.md")),
+        *sorted((ROOT / "docs").rglob("*.md")),
+    ]:
+        for section in parse(path):
+            schema_sql = section.schema_sql
+            if (
+                schema_sql is None
+                or section.settings.get("dialect", "postgres") != "postgres"
+                or "skip" in section.directives
+            ):
+                continue
+            queries = [
+                (unit.lines[0][0], unit.code.text)
+                for unit in section.units
+                if unit.lang == "sql"
+                and any(a.kind in {"columns", "inferred"} for a in unit.assertions)
+            ]
+            if queries:
+                yield Queries(f"{path.relative_to(ROOT)}:{section.line}", schema_sql, queries)
+
+
+def non_null(column: core.ColumnInfo) -> bool:
+    """Whether sqlty says the column is never NULL; ``typing.Any`` (JSON) includes None."""
+    if column.python_type is None:
+        return False
+    return not {"None", "typing.Any"} & set(column.python_type.split(" | "))
+
+
+def run(conn: Any, query: str) -> list[tuple[Any, ...]] | None:
+    """The rows of a query, in a transaction rolled back after it; ``None`` if it fails."""
+    import psycopg
+
+    try:
+        with conn.transaction(force_rollback=True):
+            cursor = conn.execute(query)
+            return cursor.fetchall() if cursor.description else []
+    except psycopg.Error:
+        return None
+
+
 def _normalise(sql_type: str) -> str:
     """``DECIMAL(10, 2)`` -> ``numeric``, ``ARRAY<INT>`` -> ``int4[]``."""
     sql_type = sql_type.strip().upper()
@@ -171,6 +228,7 @@ def _known_difference(case_id: str) -> str | None:
 def conn() -> Iterator[Any]:
     psycopg = pytest.importorskip("psycopg")
     with psycopg.connect(DSN, autocommit=True) as conn:
+        conn.execute("SET statement_timeout = '5s'")
         yield conn
 
 
@@ -201,10 +259,12 @@ class Schemas:
     def __init__(self, conn: Any) -> None:
         self.conn = conn
         self.loaded: str | None = None
+        self.seeded = False
 
-    def load(self, schema_sql: str) -> None:
+    def load(self, schema_sql: str, *, seeded: bool = False) -> None:
         if schema_sql != self.loaded:
             self.loaded = schema_sql
+            self.seeded = False
             self._reset()
             try:
                 self.conn.execute(schema_sql)
@@ -215,6 +275,9 @@ class Schemas:
                     if statement.strip():
                         with contextlib.suppress(Exception):
                             self.conn.execute(statement)
+        if seeded and not self.seeded:
+            self.seeded = True
+            seed(self.conn)
 
     def _reset(self) -> None:
         schemas = self.conn.execute(
@@ -288,5 +351,25 @@ def test_matches_server(
         pytest.fail(f"{case.query}\n  " + "\n  ".join(problems))
 
 
+@pytest.mark.parametrize("section", list(nullability_corpus()), ids=lambda section: section.id)
+@needs_server[0]
+@needs_server[1]
+def test_no_null_in_a_non_null_column(section: Queries, conn: Any, schemas: Schemas) -> None:
+    schemas.load(section.schema_sql, seeded=True)
+    problems: list[str] = []
+    for line, query in section.queries:
+        ours = core.analyze_select(query, dialect="postgres", schema_sql=section.schema_sql)
+        rows = run(conn, query)
+        if not ours or not rows or len(rows[0]) != len(ours):
+            continue
+        for i, column in enumerate(ours):
+            if non_null(column) and any(row[i] is None for row in rows):
+                problems.append(
+                    f"line {line}: {column.name!r} is {column.python_type}, a row has NULL"
+                )
+    assert problems == []
+
+
 def test_corpus_is_not_empty() -> None:
     assert len(list(_corpus())) > 20
+    assert len(list(nullability_corpus())) > 100
