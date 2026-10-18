@@ -107,6 +107,26 @@ SELECT CONCAT_WS(',', name, note) AS a, LPAD(name, 5, '*') AS b, LEFT(name, 2) A
 -- columns: h: str (TEXT)
 ```
 
+### Binary strings
+
+Over a binary string, the string functions return a binary string.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE files (id INT NOT NULL PRIMARY KEY, data VARBINARY(16) NOT NULL);
+```
+
+```sql
+SELECT SUBSTRING(data, 1, 2) AS a, TRIM(data) AS b, LEFT(data, 1) AS c, UPPER(data) AS d, REPLACE(data, 'a', 'b') AS e, LPAD(data, 3, 'x') AS f FROM files
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: bytes (VARBINARY)
+```
+
 ## Numbers
 
 ```sql
@@ -138,6 +158,14 @@ SELECT JSON_OBJECT('id', id) AS a, JSON_ARRAY(id, name) AS b, JSON_EXTRACT(doc, 
 SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: a: typing.Any (JSON)
 -- columns: b: typing.Any (JSON)
+```
+
+`JSON_VALUE` returns a string, or the type of its `RETURNING` clause.
+
+```sql
+SELECT JSON_VALUE(doc, '$.name') AS a, JSON_VALUE(doc, '$.age' RETURNING SIGNED) AS b FROM events
+-- columns: a: str | None (TEXT)
+-- columns: b: int | None (BIGINT)
 ```
 
 ## Rounding to an integer

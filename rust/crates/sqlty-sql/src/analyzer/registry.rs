@@ -278,6 +278,9 @@ const ALWAYS_NULLABLE: &[&str] = &[
     "NTH_VALUE",
     // An array can hold NULL elements.
     "UNNEST",
+    // NULL for a UUID of another variant, or a version without a timestamp.
+    "UUID_EXTRACT_VERSION",
+    "UUID_EXTRACT_TIMESTAMP",
 ];
 
 /// Functions that look through NULL arguments, so a condition on their result says nothing

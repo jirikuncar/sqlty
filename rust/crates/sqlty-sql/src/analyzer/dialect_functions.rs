@@ -21,6 +21,13 @@ const WINDOW_FUNCTIONS: [(&[&str], Returns); 2] = [
 
 /// <https://dev.mysql.com/doc/refman/8.4/en/built-in-function-reference.html>
 pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
+    (
+        &[
+            "UPPER", "LOWER", "UCASE", "LCASE", "TRIM", "LTRIM", "RTRIM", "LEFT", "RIGHT", "LPAD",
+            "RPAD", "REVERSE", "REPLACE",
+        ],
+        Returns::Text(0),
+    ),
     WINDOW_FUNCTIONS[0],
     WINDOW_FUNCTIONS[1],
     (&["IF"], Branches(1)),
@@ -184,16 +191,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
             "DAYNAME",
             "MONTHNAME",
             "CONCAT_WS",
-            "LPAD",
-            "RPAD",
-            "LEFT",
-            "RIGHT",
             "REPEAT",
-            "REVERSE",
-            "LTRIM",
-            "RTRIM",
-            "UCASE",
-            "LCASE",
             "HEX",
             "MD5",
             "SHA",
@@ -212,6 +210,7 @@ pub(super) const MYSQL_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSON_TYPE",
             "JSON_QUOTE",
             "JSON_PRETTY",
+            "JSON_VALUE",
         ],
         Sql("TEXT"),
     ),
