@@ -59,6 +59,15 @@ the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column. `rule_dispatch_does_not_allocate`
 (`analyzer/inference.rs`) keeps rule lookup free of heap allocations.
 
+## Agent Skills
+
+`skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
+through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
+`.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-ext/build.rs`
+compiles them into the extension: rebuild it after editing one, or
+`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+`docs/recipes/agents.md`.
+
 ## Benchmarks
 
 Two layers, both in the Makefile:

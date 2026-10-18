@@ -131,17 +131,70 @@ def test_links(page: Path) -> None:
     "skill", sorted(ROOT.glob("skills/*/SKILL.md")), ids=lambda p: p.parent.name
 )
 def test_agent_skill_frontmatter(skill: Path) -> None:
-    """An Agent Skill starts with YAML front matter: its folder's name and a description."""
+    """An Agent Skill follows https://agentskills.io/specification: YAML front matter with its
+    folder's name and a description, and a body of at most 500 lines."""
     import yaml
 
     text = skill.read_text()
     assert text.startswith("---\n"), skill
-    meta = yaml.safe_load(text.split("---\n", 2)[1])
+    _, front, body = text.split("---\n", 2)
+    meta = yaml.safe_load(front)
     assert meta["name"] == skill.parent.name
-    assert re.fullmatch(r"[a-z0-9-]{1,64}", meta["name"])
+    assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", meta["name"]) and len(meta["name"]) <= 64
     assert 0 < len(meta["description"]) <= 1024
+    assert body.count("\n") <= 500
     commands = set(re.findall(r"`sqlty (\w+)", text))
-    assert commands <= {"rewrite", "strip", "check", "breaking", "rule", "version"}, commands
+    assert commands <= {"rewrite", "strip", "check", "breaking", "rule", "skill", "version"}, (
+        commands
+    )
+
+
+def test_skills_table_lists_every_skill() -> None:
+    """The skills table of the agents recipe lists the skills of `skills/`, in order."""
+    page = (ROOT / "docs" / "recipes" / "agents.md").read_text()
+    table = page.split("<!-- skills-table -->")[1].split("<!-- /skills-table -->")[0]
+    listed = re.findall(r"^\| `([a-z0-9-]+)` \|", table, re.M)
+    assert listed == sorted(p.parent.name for p in ROOT.glob("skills/*/SKILL.md"))
+
+
+def test_agent_skills_are_compiled_in() -> None:
+    """`sqlty skill` prints the skills of `skills/` as the extension was built with them."""
+    from sqlty._core import skills
+
+    files = {
+        p.relative_to(ROOT / "skills").as_posix(): p.read_text()
+        for p in ROOT.glob("skills/**/*")
+        if p.is_file()
+    }
+    assert dict(skills()) == files, "rebuild the extension: maturin develop"
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        ".claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        ".codex-plugin/plugin.json",
+        ".cursor-plugin/plugin.json",
+    ],
+)
+def test_plugin_manifests(manifest: str) -> None:
+    """Each client's plugin manifest is valid JSON, finds `skills/`, and has the release version."""
+    import json
+    import tomllib
+
+    version = tomllib.loads((ROOT / "rust" / "Cargo.toml").read_text())["workspace"]["package"][
+        "version"
+    ]
+    data = json.loads((ROOT / manifest).read_text())
+    plugins = data.get("plugins", [data])
+    assert [plugin["version"] for plugin in plugins] == [version]
+    assert [plugin["name"] for plugin in plugins] == ["sqlty"]
+    if "plugins" in data:
+        assert data["metadata"]["version"] == version
+        assert plugins[0]["source"] == "./"
+    elif not manifest.startswith(".claude-plugin"):
+        assert data["skills"] == "./skills/"
 
 
 def test_rule_docs_link_to_the_site() -> None:

@@ -1,35 +1,96 @@
 # Coding agents
 
-sqlty ships an [Agent Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview):
-instructions an agent loads when it writes or edits a query in a sqlty project,
-names a row type, or checks a schema change. The installed `sqlty` writes the
-skill of its own version into the directory your agent reads skills from:
+sqlty ships [Agent Skills](https://agentskills.io): instructions a coding agent
+loads when it writes a query in a sqlty project, reads a diagnostic, or plans a
+schema change. Install them through your agent's plugin marketplace, or write
+them from the installed `sqlty`.
+
+## Skills
+
+<!-- skills-table -->
+| Skill | Loads when the agent | Covers |
+|-------|----------------------|--------|
+| `sqlty` | writes or edits a `--sql` string, an `SQL[T]` wrapper or `[tool.sqlty]` | The `--sql` marker, `rewrite`, row types, `check`, `breaking`, pitfalls |
+<!-- /skills-table -->
+
+Each skill links to this site, not to files of the repository, so it works in
+any project. Its examples are tests of this repository, so they stay true to the
+engine. A skill tells the agent to trust `sqlty rule NAME` and `--help` over its
+own text when the two disagree.
+
+## Claude Code
+
+```text
+/plugin marketplace add jirikuncar/sqlty
+/plugin install sqlty@sqlty
+```
+
+Update with `/plugin marketplace update sqlty`, or from a shell:
+
+```bash
+claude plugin marketplace update sqlty
+claude plugin update sqlty@sqlty
+```
+
+## Codex
+
+```bash
+codex plugin marketplace add jirikuncar/sqlty
+codex plugin add sqlty@sqlty
+```
+
+Update with `codex plugin marketplace upgrade`.
+
+## Cursor
+
+Run `/add-plugin` in the agent chat, or import the `jirikuncar/sqlty` repository
+into a team marketplace. Cursor reads `.cursor-plugin/plugin.json`.
+
+## VS Code and GitHub Copilot
+
+Add the marketplace to your VS Code settings, then run `/plugin install` in chat:
+
+```json
+{
+  "chat.plugins.marketplaces": ["jirikuncar/sqlty"]
+}
+```
+
+The Copilot CLI uses the same marketplace:
+
+```bash
+copilot plugin marketplace add jirikuncar/sqlty
+```
+
+## `npx skills`
+
+```bash
+npx skills add jirikuncar/sqlty
+```
+
+Pass `-a claude-code`, `-a codex`, `-a cursor` and so on to choose the agents.
+
+## PyPI
+
+The installed `sqlty` writes the skills of its own version into the directory
+your agent reads skills from. Run it again after you upgrade sqlty:
 
 ```bash
 sqlty skill --install .claude/skills
 ```
 
-`sqlty skill` prints it instead, for an agent that reads one instructions file,
-such as `AGENTS.md` or a Cursor rule:
+`sqlty skill --list` lists the skills, and `sqlty skill NAME` prints one, for an
+agent that reads a single instructions file, such as `AGENTS.md`:
 
 ```bash
 sqlty skill >> AGENTS.md
 ```
 
-The skill links to this site, not to files of the repository, so it works in
-any project.
-
-The skill tells the agent to:
-
-- start each query with `--sql` and a newline, then let `sqlty rewrite` write
-  `SQL[T]` instead of guessing `T`;
-- name row types with a `TypedDict` or dataclass and let `sqlty check` compare
-  them with the query;
-- run `sqlty check`, with `--explain` to see which rule typed a column, or
-  `--output-format json` to read the diagnostics as data;
-- run `sqlty breaking --against origin/main` before a migration ships.
-
-Its examples are tests of this repository, so they stay true to the engine.
+!!! note "Marketplaces follow the default branch"
+    A marketplace install gets the skills of the repository's default branch,
+    which may be ahead of the `sqlty` you have installed. `sqlty skill --install`
+    writes the skills of your installed version. Either way, a skill asks the
+    agent to run `sqlty version` and to prefer `--help` when they disagree.
 
 ## Machine-readable diagnostics
 

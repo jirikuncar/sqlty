@@ -296,6 +296,14 @@ fn infer_type(
     Ok(py.detach(|| analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref()))?)
 }
 
+include!(concat!(env!("OUT_DIR"), "/skills.rs"));
+
+/// The files of the Agent Skills, as `(path, text)` with paths like `sqlty/SKILL.md`.
+#[pyfunction]
+fn skills() -> Vec<(&'static str, &'static str)> {
+    SKILLS.to_vec()
+}
+
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
 ///
 /// Returns None when the query returns no rows or doesn't parse; unknown types are None.
@@ -821,6 +829,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
+    m.add_function(wrap_pyfunction!(skills, m)?)?;
     Ok(())
 }
 

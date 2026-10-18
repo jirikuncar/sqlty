@@ -1276,10 +1276,30 @@ def test_a_file_that_is_not_utf8_is_skipped(tmp_path, monkeypatch, caplog, comma
         assert (tmp_path / "ok.py").read_text().startswith("from sqlty import SQL")
 
 
-def test_skill_prints_and_installs(tmp_path, capsys) -> None:
+def test_skill_prints_lists_and_installs(tmp_path, capsys, caplog) -> None:
+    skills = Path(__file__).parent.parent / "skills"
     main(["skill"])
-    skill = capsys.readouterr().out
-    assert skill.startswith("---\nname: sqlty\n")
+    assert capsys.readouterr().out == (skills / "sqlty" / "SKILL.md").read_text()
 
-    main(["skill", "--install", str(tmp_path / "skills")])
-    assert (tmp_path / "skills" / "sqlty" / "SKILL.md").read_text() == skill
+    main(["skill", "--list"])
+    listed = [line.split()[0] for line in capsys.readouterr().out.splitlines()]
+    assert listed == sorted(path.name for path in skills.iterdir())
+
+    for name in listed:
+        main(["skill", name])
+        assert capsys.readouterr().out == (skills / name / "SKILL.md").read_text()
+
+    with pytest.raises(SystemExit) as exit:
+        main(["skill", "nope"])
+    assert exit.value.code == 2
+    assert "Unknown skill 'nope'" in caplog.text
+
+    main(["skill", "--install", str(tmp_path / "installed")])
+    installed = {
+        p.relative_to(tmp_path / "installed")
+        for p in (tmp_path / "installed").rglob("*")
+        if p.is_file()
+    }
+    assert installed == {p.relative_to(skills) for p in skills.rglob("*") if p.is_file()}
+    for path in installed:
+        assert (tmp_path / "installed" / path).read_text() == (skills / path).read_text()

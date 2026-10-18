@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> None:
             case "rule":
                 _cmd_rule(args.name)
             case "skill":
-                _cmd_skill(args.install)
+                _cmd_skill(args.name, args.install, args.list)
             case "version":
                 _cmd_version()
             case _:
@@ -241,13 +241,20 @@ def build_parser() -> argparse.ArgumentParser:
     # --- skill ---
     skill_parser = subparsers.add_parser(
         "skill",
-        help="Print the Agent Skill for coding agents, or install it (sqlty skill --install .claude/skills)",
+        help="Print an Agent Skill for coding agents, or install them all (sqlty skill --install .claude/skills)",
     )
     skill_parser.add_argument(
+        "name", nargs="?", default="sqlty", help="Skill to print (default: sqlty)"
+    )
+    skill_mode = skill_parser.add_mutually_exclusive_group()
+    skill_mode.add_argument(
         "--install",
         metavar="DIR",
         type=Path,
-        help="Write the skill to DIR/sqlty/SKILL.md instead of printing it",
+        help="Write every skill to DIR/NAME/ instead of printing one",
+    )
+    skill_mode.add_argument(
+        "--list", action="store_true", help="List the skills and what each is for"
     )
 
     # --- version ---
@@ -653,18 +660,30 @@ def github_annotation(path: Path, diag: Diagnostic) -> str:
     return f"::{level} {where},title={escape('sqlty ' + diag['rule'], property=True)}::{escape(diag['message'])}"
 
 
-def _cmd_skill(install: Path | None) -> None:
-    """Skill command: print the Agent Skill, or write it under ``install``."""
-    from importlib.resources import files
+def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:
+    """Skill command: print one Agent Skill, list them, or write them all under ``install``."""
+    from sqlty._core import skills
 
-    skill = files("sqlty").joinpath("skill", "SKILL.md").read_text(encoding="utf-8")
-    if install is None:
-        print(skill, end="")
+    files = dict(skills())
+    if install is not None:
+        for path, text in files.items():
+            target = install / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+            print(f"Wrote {target}")
         return
-    target = install / "sqlty" / "SKILL.md"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(skill, encoding="utf-8")
-    print(f"Wrote {target}")
+    names = {path.split("/")[0]: text for path, text in files.items() if path.endswith("/SKILL.md")}
+    if list_skills:
+        width = max(map(len, names))
+        for skill, text in names.items():
+            description = re.search(r"^description: (.*)$", text, re.M)
+            summary = description.group(1).split(". ")[0].rstrip(".") if description else ""
+            print(f"{skill:<{width}}  {summary}")
+        return
+    if name not in names:
+        logger.error("Unknown skill %r; run `sqlty skill --list` for the list", name)
+        sys.exit(EXIT_ERROR)
+    print(names[name], end="")
 
 
 # Diagnostics about the type of a query's rows, which `--explain` traces to inference rules.

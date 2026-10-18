@@ -9,6 +9,9 @@ sqlty infers the Python row type of each SQL query from the query and the
 project's schema, writes it as `SQL[T]`, and checks it. `SQL[T]` is a `str`
 subclass: it works wherever a string query works.
 
+Run `sqlty version`: this skill may be newer or older than the installed sqlty.
+When it and `sqlty --help` or `sqlty rule NAME` disagree, trust the command.
+
 Read `[tool.sqlty]` in `pyproject.toml` first. `dialect` (default `postgres`)
 and `schema` (SQL files with `CREATE TABLE`, or migrations) decide every type.
 
