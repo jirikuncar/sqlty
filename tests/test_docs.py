@@ -142,3 +142,18 @@ def test_agent_skill_frontmatter(skill: Path) -> None:
     assert 0 < len(meta["description"]) <= 1024
     commands = set(re.findall(r"`sqlty (\w+)", text))
     assert commands <= {"rewrite", "strip", "check", "breaking", "rule", "version"}, commands
+
+
+def test_rule_docs_link_to_the_site() -> None:
+    """`sqlty rule` prints the rule pages with links a terminal user can open."""
+    from sqlty._lint import DOCS_URL, RULES, rule_doc
+
+    for name in RULES:
+        for target in re.findall(r"\]\(([^)\s]+)\)", rule_doc(name)):
+            assert not target.endswith(".md") and ".md#" not in target, (name, target)
+            if target.startswith(DOCS_URL):
+                page, _, anchor = target.removeprefix(DOCS_URL).partition("#")
+                if page == "reference/rules/":
+                    assert anchor in RULES, (name, target)
+                else:
+                    assert (ROOT / "docs" / f"{page.rstrip('/')}.md").exists(), (name, target)
