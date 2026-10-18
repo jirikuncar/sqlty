@@ -72,6 +72,18 @@ an issue.
     for the next CPython release. `requires-python` keeps installers on the last
     release that supports your interpreter.
 
+## Coding agents
+
+sqlty ships Agent Skills for Claude Code, Codex, Cursor, VS Code and other
+agents. In Claude Code:
+
+```text
+/plugin marketplace add jirikuncar/sqlty
+/plugin install sqlty@sqlty
+```
+
+[Coding agents](recipes/agents.md) covers every agent, and `sqlty skill --install`.
+
 ## Verify
 
 ```bash

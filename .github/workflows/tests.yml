@@ -329,6 +329,11 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" -B -c 'import sys; assert "sqlty" not in sys.modules; import coded'
           ! SQLTY_NO_MAGIC=1 "$RUNNER_TEMP/venv/bin/python" -B -c 'import coded'
 
+      - name: The wheel built from the sdist prints the Agent Skills
+        run: |
+          "$RUNNER_TEMP/venv/bin/sqlty" skill --list
+          "$RUNNER_TEMP/venv/bin/sqlty" skill | head -2 | grep -qx 'name: sqlty'
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -368,6 +373,9 @@ jobs:
       # Type checker tests of SQL[T] run with pytest in the test jobs
       - name: Run prek
         run: uv run prek run --all-files --show-diff-on-failure
+
+      - name: Validate the plugin manifests
+        run: npx --yes @anthropic-ai/claude-code@2.1.302 plugin validate .
 
       # Show diff ONLY if previous step failed
       - name: Show git diff

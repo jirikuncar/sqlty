@@ -8,7 +8,9 @@ A wheel must have ``sqlty_magic.pth`` at its root (so it lands in
 site-packages) and listed in RECORD; an sdist must contain
 ``src/sqlty_magic.pth`` so wheels built from it get the file too. maturin
 before 1.12.1 resolved ``[tool.maturin] include`` against ``python-source``
-and silently left the file out of the wheel. Standard library only.
+and silently left the file out of the wheel. The sdist must also contain the
+Agent Skills of ``skills/``, which the extension built from it compiles in for
+``sqlty skill``. Standard library only.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import tarfile
 import zipfile
 
 PTH = "sqlty_magic.pth"
-SKILL = "sqlty/skill/SKILL.md"
+SKILL = "skills/sqlty/SKILL.md"
 
 
 def check(path: str) -> None:
@@ -30,12 +32,13 @@ def check(path: str) -> None:
             rows = wheel.read(record).decode().splitlines()
         assert PTH in names, f"{path}: {PTH} missing from the wheel root"
         assert any(row.startswith(f"{PTH},") for row in rows), f"{path}: {PTH} missing from RECORD"
-        assert SKILL in names, f"{path}: {SKILL} missing, so `sqlty skill` fails"
     elif path.endswith(".tar.gz"):
         with tarfile.open(path) as sdist:
             names = sdist.getnames()
         assert any(n.endswith(f"/src/{PTH}") for n in names), f"{path}: src/{PTH} missing"
-        assert any(n.endswith(f"/src/{SKILL}") for n in names), f"{path}: src/{SKILL} missing"
+        assert any(n.endswith(f"/{SKILL}") for n in names), (
+            f"{path}: {SKILL} missing, so the build fails"
+        )
     else:
         raise AssertionError(f"{path}: not a wheel or sdist")
 

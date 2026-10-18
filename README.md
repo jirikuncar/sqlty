@@ -141,8 +141,9 @@ conn.execute("--sql\nSELECT emial FROM users")
 asyncpg calls ([Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)).
 These are the mistakes coding agents make: every problem is one
 `file:line: [rule] message` line and a non-zero exit code they can act on, and
-the [sqlty skill](https://jirikuncar.github.io/sqlty/recipes/agents/) teaches
-them the conventions.
+the [sqlty skills](https://jirikuncar.github.io/sqlty/recipes/agents/) teach
+them the conventions. In Claude Code, `/plugin install sqlty --marketplace jirikuncar/sqlty`
+installs them.
 
 ## Get started
 

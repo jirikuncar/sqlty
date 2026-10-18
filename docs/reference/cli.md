@@ -275,6 +275,30 @@ sqlty rule [-h] [name]
 ```
 <!-- /generated:cli-usage-rule -->
 
+## `sqlty skill`
+
+Print an Agent Skill for coding agents (`sqlty` by default), list them, or write
+them all into the directory your agent reads skills from. See
+[Coding agents](../recipes/agents.md).
+
+```bash
+sqlty skill --install .claude/skills
+```
+
+<!-- generated:cli-usage-skill -->
+```text
+sqlty skill [-h] [--install DIR | --list] [name]
+```
+<!-- /generated:cli-usage-skill -->
+
+<!-- generated:cli-options-skill -->
+| Option | Description |
+|--------|-------------|
+| `name` | Skill to print (default: sqlty) |
+| `--install DIR` | Write every skill to DIR/NAME/ instead of printing one |
+| `--list` | List the skills and what each is for |
+<!-- /generated:cli-options-skill -->
+
 ## `sqlty version`
 
 Print `sqlty <version>` and exit. `sqlty --version` does the same.

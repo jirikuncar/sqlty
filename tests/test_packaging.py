@@ -81,7 +81,7 @@ def test_maturin_ships_magic_pth() -> None:
     path would silently be missing from the wheel.
     """
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert pyproject["tool"]["maturin"]["include"] == ["src/sqlty_magic.pth"]
+    assert "src/sqlty_magic.pth" in pyproject["tool"]["maturin"]["include"]
     assert pyproject["build-system"]["requires"] == ["maturin>=1.12.1,<2.0"]
     assert PTH.is_file()
 
