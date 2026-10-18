@@ -58,3 +58,12 @@ from sqlty import SQL
 
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users FOR NO KEY UPDATE")
 ```
+
+PostgreSQL's row-lock clauses and `SET CONSTRAINTS`, which sqlparser does not read, are
+read as the closest syntax it does.
+
+```python
+# error:
+a = "--sql\nSET CONSTRAINTS ALL DEFERRED"
+b = "--sql\nSET CONSTRAINTS orders_user_id_fkey, public.items_order_id_fkey IMMEDIATE"
+```
