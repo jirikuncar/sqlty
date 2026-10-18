@@ -61,6 +61,9 @@ pub(super) enum Returns {
     /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
     /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
     Series,
+    /// A string function with a binary overload: `TEXT`, or the type of argument `i` when
+    /// it is a binary string (or, in PostgreSQL, a bit string).
+    Text(usize),
     /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
     /// for [`Returns::Series`].
     Random,
@@ -101,14 +104,13 @@ pub(super) const COMMON_FUNCTIONS: &[(&[&str], Returns)] = &[
             "LOWER",
             "TRIM",
             "CONCAT",
-            "SUBSTR",
-            "SUBSTRING",
             "REPLACE",
             "STRING_AGG",
             "GROUP_CONCAT",
         ],
         Sql("TEXT"),
     ),
+    (&["SUBSTR", "SUBSTRING"], Returns::Text(0)),
     (&["NOW", "CURRENT_TIMESTAMP"], Sql("TIMESTAMPTZ")),
     (&["CURRENT_DATE"], Sql("DATE")),
     (&["CURRENT_TIME"], Sql("TIMETZ")),
@@ -143,14 +145,10 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "RIGHT",
             "LPAD",
             "RPAD",
-            "LTRIM",
-            "RTRIM",
-            "BTRIM",
             "INITCAP",
             "REPEAT",
             "REVERSE",
             "TRANSLATE",
-            "OVERLAY",
             "CONCAT_WS",
             "FORMAT",
             "MD5",
@@ -225,7 +223,9 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "GROUPING",
             "PG_COLUMN_SIZE",
             "REGEXP_COUNT",
+            "REGEXP_INSTR",
             "SCALE",
+            "MIN_SCALE",
         ],
         Sql("INT"),
     ),
@@ -249,6 +249,8 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     (
         &[
             "DATE_PART",
+            "ERF",
+            "ERFC",
             "PI",
             "DEGREES",
             "RADIANS",
@@ -296,8 +298,13 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "EVERY",
             "LOWER_INF",
             "UPPER_INF",
+            "LOWER_INC",
+            "UPPER_INC",
             "ISEMPTY",
             "JSONB_PATH_EXISTS",
+            "JSONB_PATH_EXISTS_TZ",
+            "JSONB_PATH_MATCH",
+            "JSONB_PATH_MATCH_TZ",
             "JSON_VALID",
             "JSONB_EXISTS",
             "JSONB_EXISTS_ANY",
@@ -426,10 +433,18 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "JSONB_EXTRACT_PATH",
             "JSONB_ARRAY_ELEMENTS",
             "JSONB_PATH_QUERY",
+            "JSONB_PATH_QUERY_TZ",
             "JSONB_PATH_QUERY_FIRST",
+            "JSONB_PATH_QUERY_FIRST_TZ",
+            "JSONB_PATH_QUERY_ARRAY",
+            "JSONB_PATH_QUERY_ARRAY_TZ",
         ],
         Sql("JSONB"),
     ),
+    (&["TRIM_SCALE"], Sql("DECIMAL")),
+    (&["REGEXP_SUBSTR"], Sql("TEXT")),
+    (&["BIT_COUNT"], Sql("BIGINT")),
+    (&["SET_BYTE", "SET_BIT", "RANGE_INTERSECT_AGG"], Arg(0)),
     (&["TO_TSVECTOR", "SETWEIGHT"], Sql("TSVECTOR")),
     (
         &[
@@ -452,6 +467,15 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     ),
     (&["PG_GET_USERBYID"], Sql("NAME")),
     (&["FACTORIAL"], Sql("DECIMAL")),
+    (
+        &[
+            "COT", "SIND", "COSD", "TAND", "COTD", "ASIND", "ACOSD", "ATAND", "ATAN2D", "SINH",
+            "COSH", "TANH", "ASINH", "ACOSH", "ATANH",
+        ],
+        Sql("DOUBLE"),
+    ),
+    (&["PARSE_IDENT"], Sql("ARRAY<TEXT>")),
+    (&["PG_POSTMASTER_START_TIME"], Sql("TIMESTAMPTZ")),
     (&["RANGE_MERGE"], Arg(0)),
     (&["INT4RANGE"], Sql("INT4RANGE")),
     (&["INT8RANGE"], Sql("INT8RANGE")),
@@ -474,6 +498,10 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         Arg(0),
     ),
     (&["GENERATE_SERIES"], Returns::Series),
+    (
+        &["TRIM", "LTRIM", "RTRIM", "BTRIM", "OVERLAY"],
+        Returns::Text(0),
+    ),
     (
         &[
             "NULLIF",
@@ -679,6 +707,19 @@ impl<'a> Analyzer<'a> {
                     Some("DATE") => sql("TIMESTAMPTZ"),
                     Some("TIMESTAMP" | "TIMESTAMPTZ" | "INTERVAL") => Ok(typed),
                     _ => Ok(Typed::UNKNOWN),
+                }
+            }
+            Returns::Text(i) => {
+                let typed = arg(i)?;
+                match operand_type(&typed) {
+                    Some(
+                        binary @ ("VARBINARY" | "BINARY" | "BYTEA" | "BLOB" | "TINYBLOB"
+                        | "MEDIUMBLOB" | "LONGBLOB"),
+                    ) => sql(binary),
+                    Some(bits @ ("BIT" | "VARBIT")) if self.dialect == SqlDialect::Postgres => {
+                        sql(bits)
+                    }
+                    _ => sql("TEXT"),
                 }
             }
             Returns::Random if args.is_empty() => sql("DOUBLE"),

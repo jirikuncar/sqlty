@@ -114,6 +114,43 @@ SELECT array_positions(ia, 1) AS ps, array_dims(ia) AS dims, array_lower(ia, 1) 
 -- columns: gb: int (INT)
 ```
 
+`substring`, `substr`, `overlay` and the trim functions have `bytea`
+overloads, which return `bytea`.
+
+```sql
+SELECT substring(by from 2 for 3) AS a, substr(by, 2) AS b, overlay(by placing '\x00'::bytea from 1) AS c, btrim(by, '\x00'::bytea) AS d, trim(both '\x00'::bytea from by) AS e, substring(tx from 2) AS f FROM t
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: str (TEXT)
+```
+
+## Trigonometry in degrees and hyperbolic functions
+
+```sql
+SELECT cot(d) AS a, sind(d) AS b, atan2d(d, d) AS c, tanh(d) AS e, atanh(d) AS f FROM t
+-- columns: a: float (DOUBLE)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+```
+
+## Positions, normalization and identifiers
+
+`IS NORMALIZED` of NULL is NULL.
+
+```sql
+SELECT position('a' in tx) AS a, tx IS NFC NORMALIZED AS b, n::text IS NOT NFD NORMALIZED AS c, parse_ident(tx) AS e, pg_postmaster_start_time() AS f FROM t
+-- columns: a: int (INT)
+-- columns: b: bool (BOOLEAN)
+-- columns: c: bool | None (BOOLEAN)
+-- columns: e: list[str] (ARRAY<TEXT>)
+-- columns: f: datetime.datetime (TIMESTAMPTZ)
+```
+
 ## Network addresses
 
 `<<`, `<<=`, `>>` and `>>=` test containment. An address plus or minus an
@@ -179,6 +216,30 @@ SELECT jsonb_object_keys(jb) AS k, regexp_split_to_table(tx, ',') AS part, jsonb
 -- columns: k: str | None (TEXT)
 -- columns: part: str | None (TEXT)
 -- columns: kv: tuple[typing.Any, ...] | None (RECORD)
+```
+
+## Scales, error functions, JSON paths and range bounds
+
+`jsonb_path_match` is NULL when the path's first result is not a boolean.
+
+```sql
+SELECT min_scale(n) AS a, trim_scale(n) AS b, erf(d) AS c, regexp_instr(tx, 'a') AS e, regexp_substr(tx, 'a') AS f, jsonb_path_match(jb, '$.a == 1') AS g, jsonb_path_query_array(jb, '$.a') AS h, set_byte(by, 0, 1) AS i, bit_count(by) AS k, lower_inc(int4range(1, 5)) AS l, range_merge(int4range(1, 2), int4range(3, 4)) AS m FROM t
+-- columns: a: int | None (INT)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: float (DOUBLE)
+-- columns: e: int (INT)
+-- columns: f: str | None (TEXT)
+-- columns: g: bool | None (BOOLEAN)
+-- columns: h: typing.Any (JSONB)
+-- columns: i: bytes (VARBINARY)
+-- columns: k: int (BIGINT)
+-- columns: l: bool (BOOLEAN)
+-- columns: m: None (INT4RANGE)
+```
+
+```sql
+SELECT range_intersect_agg(int4range(i, i + 1)) AS r FROM t
+-- columns: r: None (INT4RANGE)
 ```
 
 ## Operators on bytes, roots, jsonb subscripts and ranges

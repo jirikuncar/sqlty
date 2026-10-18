@@ -9,9 +9,9 @@ b: int | BIGINT | NonNull
 c: int | UBIGINT | Nullable
 
 SELECT TRIM(txt) AS a, SUBSTRING(txt, 1, 2) AS b, POSITION('a' IN txt) AS c FROM t
-a: str | ? | Nullable
-b: str | ? | Nullable
-c: int | ? | Nullable
+a: str | TEXT | Nullable
+b: str | TEXT | Nullable
+c: int | INT | Nullable
 
 SELECT e AS a, CAST(e AS CHAR) AS b, i DIV 2 AS c FROM t
 a: typing.Literal['a', 'b'] | ENUM('a', 'b') | NonNull
