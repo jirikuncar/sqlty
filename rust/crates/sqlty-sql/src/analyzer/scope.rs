@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    Expr, Join, JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins,
+    DataType, Expr, Join, JoinConstraint, JoinOperator, JsonTableColumn, ObjectName, TableFactor,
+    TableWithJoins,
 };
 
 use crate::catalog::{fold, FunctionReturn};
@@ -501,9 +502,40 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The columns a function in `FROM` declares in its column definition list,
-    /// `json_to_recordset(x) AS t(a int, b text)`, and its reference. Each can be NULL: a
-    /// record that lacks the member has a NULL there.
+    /// `json_to_recordset(x) AS t(a int, b text)`, or a `JSON_TABLE` in its `COLUMNS`
+    /// clause, and its reference. A column can be NULL: a record or document that lacks the
+    /// member has a NULL there.
     fn defined_columns(&self, factor: &TableFactor) -> Option<(String, Vec<Column>)> {
+        if let TableFactor::JsonTable {
+            columns,
+            alias: Some(alias),
+            ..
+        } = factor
+        {
+            let columns = columns
+                .iter()
+                .map(|column| match column {
+                    JsonTableColumn::Named(column) => Some(Column::from_typed(
+                        alias_name(&column.name, self.dialect),
+                        self.cast_typed(&column.r#type),
+                        // `EXISTS PATH` is 1 or 0.
+                        if column.exists {
+                            Nullability::NonNull
+                        } else {
+                            Nullability::Nullable
+                        },
+                    )),
+                    JsonTableColumn::ForOrdinality(name) => Some(Column::from_typed(
+                        alias_name(name, self.dialect),
+                        self.cast_typed(&DataType::Int(None)),
+                        Nullability::NonNull,
+                    )),
+                    // A nested path repeats the outer columns per element.
+                    JsonTableColumn::Nested(_) => None,
+                })
+                .collect::<Option<Vec<Column>>>()?;
+            return Some((alias.name.value.to_lowercase(), columns));
+        }
         let (TableFactor::Table {
             alias: Some(alias),
             args: Some(_),
