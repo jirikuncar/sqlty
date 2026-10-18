@@ -156,6 +156,8 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "MD5",
             "TO_CHAR",
             "TO_HEX",
+            "TO_BIN",
+            "TO_OCT",
             "CHR",
             "QUOTE_IDENT",
             "QUOTE_LITERAL",
@@ -350,6 +352,12 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         &["GEN_RANDOM_UUID", "UUID_GENERATE_V4", "UUID_GENERATE_V1"],
         Sql("UUID"),
     ),
+    (&["UUID_EXTRACT_VERSION"], Sql("SMALLINT")),
+    (
+        &["UUID_EXTRACT_TIMESTAMP", "DATE_ADD", "DATE_SUBTRACT"],
+        Sql("TIMESTAMPTZ"),
+    ),
+    (&["RANDOM_NORMAL"], Sql("DOUBLE")),
     (
         &[
             "SHA224",
@@ -451,6 +459,9 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "ARRAY_CAT",
             "ARRAY_REMOVE",
             "ARRAY_REPLACE",
+            "TRIM_ARRAY",
+            "ARRAY_SAMPLE",
+            "ARRAY_SHUFFLE",
         ],
         Arg(0),
     ),
