@@ -210,6 +210,7 @@ SELECT jt.n, jt.x, jt.has FROM JSON_TABLE('[{"x": "a"}, {"y": 1}]', '$[*]' COLUM
 -- columns: n: int (INT)
 -- columns: x: str | None (VARCHAR(10))
 -- columns: has: int (INT)
+```
 
 ## CONVERT and more JSON functions
 
