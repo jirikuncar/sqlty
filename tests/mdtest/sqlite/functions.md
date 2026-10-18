@@ -163,6 +163,19 @@ SELECT substr(data, 1, 2) AS a, trim(data) AS b FROM files
 -- columns: b: str (TEXT)
 ```
 
+## Bitwise operators
+
+`&`, `|` and `~` convert their operands to 64-bit integers.
+
+```sql
+SELECT id & 3 AS a, id | 4 AS b, ~id AS c, name & 1 AS d, note | 1 AS e FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: int (BIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: int | None (BIGINT)
+```
+
 ## Branches of different types
 
 SQLite gives an expression no type: a `CASE` returns whichever branch's value
