@@ -348,10 +348,13 @@ class FlatShape(TypedDict):
     id: int
     p: Flat | None
 
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 ok = SQL[Shape]("--sql\nSELECT id, p FROM shapes")
 # error: [column-type-mismatch] "BadShape.p.y is str but composite point2 field 'y' infers int"
 # error: [nullable-mismatch] "BadShape.p.x is int but composite point2 field 'x' can be NULL"
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 bad = SQL[BadShape]("--sql\nSELECT id, p FROM shapes")
 # error: [column-count-mismatch] "FlatShape.p has 1 fields but composite point2 has 2 fields"
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 short = SQL[FlatShape]("--sql\nSELECT id, p FROM shapes")
 ```

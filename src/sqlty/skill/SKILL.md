@@ -95,12 +95,16 @@ exits 1 on a dropped or renamed table or column, a new `NOT NULL` column an
 - t-strings are checked as `SQLTemplate[T]`; psycopg's `{x:i}`, `{x:l}` and
   `{part:q}` fields are read in modules that import psycopg.
 - Types follow the dialect's driver: in SQLite a `DATE` is `str` and a `NUMERIC`
-  a `float`. See `docs/reference/types.md` before "fixing" a type.
+  a `float`. See [Type mapping](https://jirikuncar.github.io/sqlty/reference/types/) before "fixing" a type.
 
 ## Reference
 
-- Writing queries, t-strings, the type mapping: `docs/guide/writing-queries.md`, `docs/reference/types.md`
-- Row types: `docs/guide/row-types.md`
-- Parameters: `docs/guide/parameters.md`
-- Schema changes: `docs/guide/breaking-changes.md`
-- Every rule: `docs/reference/rules.md`, or `sqlty rule`
+The documentation is at <https://jirikuncar.github.io/sqlty/>:
+
+- [Writing queries](https://jirikuncar.github.io/sqlty/guide/writing-queries/), t-strings included, and the
+  [type mapping](https://jirikuncar.github.io/sqlty/reference/types/)
+- [Row types](https://jirikuncar.github.io/sqlty/guide/row-types/)
+- [Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)
+- [Schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)
+- Every rule: `sqlty rule NAME` prints its page; [all rules](https://jirikuncar.github.io/sqlty/reference/rules/)
+- `sqlty check --output-format json` prints the diagnostics as JSON

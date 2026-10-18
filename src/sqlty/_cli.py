@@ -14,6 +14,7 @@ import fnmatch
 import functools
 import gc
 import glob
+import json
 import logging
 import os
 import re
@@ -69,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
                 breaking(args)
             case "rule":
                 _cmd_rule(args.name)
+            case "skill":
+                _cmd_skill(args.install)
             case "version":
                 _cmd_version()
             case _:
@@ -177,6 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Under a type diagnostic, print the inference rule (id, reference, reasoning) "
         "behind each column's type and nullability",
     )
+    check_parser.add_argument(
+        "--output-format",
+        choices=["text", "json", "github"],
+        default="text",
+        help="How diagnostics are printed: text (file:line: [rule] message, the default), json "
+        "(an array of objects with file, line, rule, severity and message) or github (GitHub "
+        "Actions annotations). Summaries, --statistics and --explain are text only",
+    )
 
     # --- breaking ---
     breaking_parser = subparsers.add_parser(
@@ -218,6 +229,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explain a lint rule (sqlty rule stale-type), or list all rules",
     )
     rule_parser.add_argument("name", nargs="?", help="Rule name, for example select-star")
+
+    # --- skill ---
+    skill_parser = subparsers.add_parser(
+        "skill",
+        help="Print the Agent Skill for coding agents, or install it (sqlty skill --install .claude/skills)",
+    )
+    skill_parser.add_argument(
+        "--install",
+        metavar="DIR",
+        type=Path,
+        help="Write the skill to DIR/sqlty/SKILL.md instead of printing it",
+    )
 
     # --- version ---
     subparsers.add_parser("version", help="Print version and exit")
@@ -542,6 +565,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         reports.extend((path, diag, parsed) for diag in diagnostics)
 
     kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
+    shown: list[dict[str, object]] = []
     for path, diag, parsed in reports:
         if id(diag) not in kept:
             continue
@@ -550,27 +574,62 @@ def _cmd_check(args: argparse.Namespace) -> None:
             total_errors += 1
         elif severity == "warn":
             total_warnings += 1
-        if not args.quiet:
+        if args.output_format == "json":
+            shown.append({"file": str(path), **diag})
+        elif args.output_format == "github":
+            print(_github_annotation(path, diag))
+        elif not args.quiet:
             print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
             if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
                 settings = resolver.for_file(path)
                 for line in _explain(parsed, diag["line"], settings.dialect, settings.schema):
                     print(line)
 
-    if total_fixed and not args.quiet:
+    if args.output_format == "json":
+        print(json.dumps(shown, indent=2))
+    text = args.output_format == "text" and not args.quiet
+    if total_fixed and text:
         print(f"Fixed {total_fixed} file(s)")
-    if not args.quiet and (total_errors or total_warnings):
+    if text and (total_errors or total_warnings):
         parts = []
         if total_errors:
             parts.append(f"{total_errors} error(s)")
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
         print(f"Found {', '.join(parts)}")
-    if args.statistics and not args.quiet:
+    if args.statistics and text:
         print(_format_statistics(statistics))
 
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
         sys.exit(EXIT_FOUND)
+
+
+def _github_annotation(path: Path, diag: Diagnostic) -> str:
+    """``diag`` as a GitHub Actions workflow command, which annotates the line in the diff."""
+
+    def escape(text: str, *, property: bool = False) -> str:
+        text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        return text.replace(":", "%3A").replace(",", "%2C") if property else text
+
+    level = "error" if diag["severity"] == "error" else "warning"
+    where = f"file={escape(str(path), property=True)}"
+    if "line" in diag:
+        where += f",line={diag['line']}"
+    return f"::{level} {where},title={escape('sqlty ' + diag['rule'], property=True)}::{escape(diag['message'])}"
+
+
+def _cmd_skill(install: Path | None) -> None:
+    """Skill command: print the Agent Skill, or write it under ``install``."""
+    from importlib.resources import files
+
+    skill = files("sqlty").joinpath("skill", "SKILL.md").read_text(encoding="utf-8")
+    if install is None:
+        print(skill, end="")
+        return
+    target = install / "sqlty" / "SKILL.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(skill, encoding="utf-8")
+    print(f"Wrote {target}")
 
 
 # Diagnostics about the type of a query's rows, which `--explain` traces to inference rules.

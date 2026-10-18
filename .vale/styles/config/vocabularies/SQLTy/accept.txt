@@ -44,12 +44,14 @@ ESLint
 Esqueleto
 formatter
 Giacomo
+github
 glibc
 hax
 insta
 isort
 Jiri
 JOINs
+json
 Kuncar
 Kysely
 Laxalde
@@ -123,6 +125,7 @@ ty
 typing_extensions
 tysql
 uncast
+ungrouped
 uninferable
 unparseable
 unreviewed

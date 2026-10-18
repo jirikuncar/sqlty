@@ -38,6 +38,7 @@ from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
+from sqlty._widening import widens
 
 if TYPE_CHECKING:
     pass
@@ -453,7 +454,9 @@ def breaking_source(
 
     Both checks enable the name rules of ``BREAKING_RULES`` on top of ``rules``, so a
     dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
-    leaves out, are reported, besides the row type checks.
+    leaves out, are reported, besides the row type checks. An annotation wider than the
+    other schema's rows (``str | None`` for a ``NOT NULL`` column) still reads them, so it
+    is not reported.
 
     Example:
         >>> old = "CREATE TABLE users (id INT NOT NULL, bio TEXT)"
@@ -480,7 +483,11 @@ def breaking_source(
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}
-    return [d for d in check(against_sql) if (d.get("line"), d["rule"], d["message"]) not in own]
+    return [
+        d
+        for d in check(against_sql)
+        if (d.get("line"), d["rule"], d["message"]) not in own and not widens(d)
+    ]
 
 
 def query_statistics(

@@ -163,14 +163,64 @@ from sqlty import SQL
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 
+### A column that may now be NULL
+
+Code annotated `str | None` for a column the new schema makes nullable reads the
+`str` rows of the old schema too. An annotation wider than the other schema's rows
+is not reported, though `sqlty check` against the old schema would report it as
+[`stale-type`](../reference/rules.md#stale-type).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+```
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+emails = SQL[tuple[str | None]]("--sql\nSELECT email FROM users")
+```
+
 ## Expand and contract
 
-To change a schema without breaking either mix, split the change:
+To change a schema without breaking either mix, split the change into pull
+requests that each pass `sqlty check` and `sqlty breaking` in both directions.
+Renaming `users.name` to `display_name`:
 
-1. Expand: add the new table or column, nullable or with a `DEFAULT`, and
-   deploy code that writes both.
-2. Migrate the data.
-3. Contract: deploy code that reads only the new shape, then drop the old one.
+| Pull request | Schema | Code |
+|--------------|--------|------|
+| 1. Widen the code | unchanged | annotate `name` as `str \| None`, with `# sqlty: ignore[stale-type]` |
+| 2. Expand the schema | add `display_name`, nullable or with a `DEFAULT`; relax `name` to nullable | drop the `ignore` |
+| 3. Expand the code | unchanged | write both columns, read `display_name` |
+| 4. Migrate the data | backfill `display_name` | unchanged |
+| 5. Contract the code | unchanged | read and write only `display_name` |
+| 6. Contract the schema | drop `name`; make `display_name` `NOT NULL` | `sqlty check --fix` narrows `display_name` to `str` |
 
-`sqlty breaking` passes at every step of that sequence. [Migration](../recipes/migration.md#schema-changes-in-ci)
-shows how to run it in CI.
+The order matters:
+
+- **Widen the code before the schema.** Relaxing `NOT NULL` makes the old code's
+  `SQL[tuple[str]]` wrong for the new schema, which the backward check reports. Code
+  annotated `str | None` reads the rows of both schemas, so ship it first. Against
+  the old schema, `stale-type` says the annotation could be `str`: suppress it on
+  that line until the schema changes, then remove the suppression, which
+  [`unused-ignore`](../reference/rules.md#unused-ignore) reminds you of. `sqlty breaking`
+  doesn't report an annotation wider than the other schema's rows.
+- **Schema before the code that uses it.** Code that writes `display_name` in the
+  same pull request that adds it fails the forward check: the new code runs against
+  the old schema if it deploys first. If your migrations always run before the
+  deploy, `--direction backward` checks only that mix and accepts them together.
+- **Contract the code before the schema.** An `INSERT` that leaves out a column
+  which is still `NOT NULL` fails at runtime. Turn on
+  [`insert-missing-column`](../reference/rules.md#insert-missing-column) so
+  `sqlty check` reports it against the pull request's own schema.
+
+[Migration](../recipes/migration.md#schema-changes-in-ci) shows how to run
+`sqlty breaking` in CI.
