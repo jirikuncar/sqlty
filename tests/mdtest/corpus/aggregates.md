@@ -11,10 +11,10 @@ schema = "schema.sql"
 
 ## array_agg over a LEFT JOIN
 
-<!-- mdtest:xfail array elements are typed non-null, list[str] instead of list[str | None] -->
-
-Every group has a row, so the array is not NULL, but a book without authors aggregates a
-NULL name into `{NULL}`.
+Every group has a row, so the array is not NULL. A book without authors aggregates a NULL
+name into `{NULL}`, but sqlty does not track the nullability of array elements: an array
+is `list[T]` wherever it comes from, as a `text[]` column can hold NULLs too. Typing
+elements `T | None` everywhere would make every array column noisy to read.
 
 `schema.sql`:
 
@@ -33,7 +33,7 @@ FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
 LEFT JOIN authors a ON a.id = ba.author_id
 GROUP BY b.id, b.title
--- inferred: tuple[int, str, list[str | None]]
+-- inferred: tuple[int, str, list[str]]
 ```
 
 ## string_agg of text

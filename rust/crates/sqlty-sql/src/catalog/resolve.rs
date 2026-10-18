@@ -193,6 +193,7 @@ impl Loader {
                         })
                         .collect(),
                     returns,
+                    strict: f.strict,
                 });
             }
             functions.insert(key.clone(), built);
