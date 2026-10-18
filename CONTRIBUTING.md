@@ -76,8 +76,8 @@ PyPI with trusted publishing. The version comes from `rust/Cargo.toml` (`[worksp
 To release:
 
 1. Set the version in `rust/Cargo.toml` and merge it.
-2. Run the Release workflow on `main` by hand (`workflow_dispatch`). It builds every
-   wheel and the sdist, installs each wheel on every supported Python, and publishes
+2. Run the Release workflow on `main` by hand (`workflow_dispatch`). Pull requests
+   build one wheel per OS; this run builds every wheel and the sdist, installs each wheel on every supported Python, and publishes
    to TestPyPI. Install from there and run `sqlty version`.
 3. Publish a GitHub Release tagged `vX.Y.Z`. The workflow builds again and uploads to
    PyPI.
