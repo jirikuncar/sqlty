@@ -480,6 +480,38 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// `%s - INTERVAL '1 day'` compared with a date or time `other`: alone, the parameter
+    /// could be an interval too, but the comparison makes it what `other` is.
+    fn hint_shifted(&self, shifted: &Expr, other: &Expr, scope: &Scope, out: &mut Hints) {
+        let mut shifted = shifted;
+        while let Expr::Nested(inner) = shifted {
+            shifted = inner;
+        }
+        let Expr::BinaryOp { left, op, right } = shifted else {
+            return;
+        };
+        let (placeholder, interval) = match (op, placeholder_index(left), placeholder_index(right))
+        {
+            (BinaryOperator::Plus | BinaryOperator::Minus, Some(_), None) => (left, right),
+            (BinaryOperator::Plus, None, Some(_)) => (right, left),
+            _ => return,
+        };
+        let is_interval = self
+            .expr(interval, scope)
+            .is_ok_and(|typed| operand_type(&typed) == Some("INTERVAL"));
+        let Ok(typed) = self.expr(other, scope) else {
+            return;
+        };
+        if is_interval
+            && matches!(
+                operand_type(&typed),
+                Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ")
+            )
+        {
+            self.hint_pair(placeholder, other, scope, out);
+        }
+    }
+
     /// A parameter searched with `= ANY(%s)` is an array of what the other side is.
     fn hint_array(&self, array: &Expr, element: &Expr, scope: &Scope, out: &mut Hints) {
         let Some(index) = placeholder_index(array) else {
@@ -563,6 +595,8 @@ impl<'a> Analyzer<'a> {
                 } else {
                     self.hint_pair(left, right, scope, out);
                     self.hint_pair(right, left, scope, out);
+                    self.hint_shifted(left, right, scope, out);
+                    self.hint_shifted(right, left, scope, out);
                 }
             }
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
