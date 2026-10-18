@@ -1,16 +1,19 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
 use sqlparser::ast::{
-    AssignmentTarget, FromTable, ObjectName, OnConflictAction, OnInsert, OutputClause, Query,
-    SelectItem, SetExpr, Statement, TableObject, UpdateTableFromKind,
+    AssignmentTarget, FromTable, ObjectName, OnConflict, OnConflictAction, OnInsert, OutputClause,
+    Query, SelectItem, SetExpr, Statement, TableObject, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
+
 use super::names::{object_name, table_key};
+use super::narrowing::Learned;
+use super::nullability::{Facts, Nullability};
 use super::query::Analyzer;
 use super::scope::{table_scope, Scope, Source, Table};
 use crate::catalog::fold;
-use crate::diagnostics::NameRule;
+use crate::diagnostics::{Diagnostics, NameRule};
 
 pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
     match stmt {
@@ -86,6 +89,117 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
 }
 
 impl Analyzer<'_> {
+    /// What `RETURNING` knows about the target's columns: those the statement writes with a
+    /// value that is never NULL are not NULL in the rows it returns.
+    pub(super) fn written_facts(&self, stmt: &Statement, scope: &Scope) -> Facts {
+        let mut quiet = self.clone();
+        quiet.diag = Diagnostics::default();
+        let Some(target) = scope.first().map(|source| source.reference.clone()) else {
+            return self.facts.clone();
+        };
+        let non_null = |nullability| nullability == Nullability::NonNull;
+        let written: Vec<String> = match stmt {
+            Statement::Insert(insert) => {
+                let TableObject::TableName(name) = &insert.table else {
+                    return self.facts.clone();
+                };
+                let columns: Vec<String> = if insert.columns.is_empty() {
+                    self.schema
+                        .table(&table_key(name, self.dialect))
+                        .map(|columns| columns.iter().map(|c| c.ident.clone()).collect())
+                        .unwrap_or_default()
+                } else {
+                    insert
+                        .columns
+                        .iter()
+                        .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
+                        .map(|ident| ident.value.clone())
+                        .collect()
+                };
+                let values = insert
+                    .source
+                    .as_deref()
+                    .and_then(|source| quiet.query_columns(source).ok().flatten())
+                    .unwrap_or_default();
+                let inserted: Vec<String> = columns
+                    .into_iter()
+                    .zip(&values)
+                    .filter(|(_, value)| non_null(value.nullability))
+                    .map(|(column, _)| column)
+                    .collect();
+                match &insert.on {
+                    None
+                    | Some(OnInsert::OnConflict(OnConflict {
+                        action: OnConflictAction::DoNothing,
+                        ..
+                    })) => inserted,
+                    // A row that conflicts is returned as updated: a column keeps its old value
+                    // unless SET gives it one, which may read the row `EXCLUDED` from `VALUES`.
+                    Some(OnInsert::OnConflict(OnConflict {
+                        action: OnConflictAction::DoUpdate(update),
+                        ..
+                    })) => {
+                        let mut upsert = scope.clone();
+                        upsert.push(Source::named(
+                            "excluded".to_string(),
+                            table_key(name, self.dialect),
+                        ));
+                        let excluded = inserted
+                            .iter()
+                            .map(|column| {
+                                let key = quiet.column_key("excluded", column, &upsert);
+                                ("excluded".to_string(), key)
+                            })
+                            .collect();
+                        let facts = self.facts.with(Learned::columns(excluded));
+                        update
+                            .assignments
+                            .iter()
+                            .filter_map(|assignment| match &assignment.target {
+                                AssignmentTarget::ColumnName(column) => column
+                                    .0
+                                    .last()
+                                    .and_then(|part| part.as_ident())
+                                    .filter(|_| {
+                                        non_null(quiet.nullability(
+                                            &assignment.value,
+                                            &upsert,
+                                            &facts,
+                                        ))
+                                    })
+                                    .map(|ident| ident.value.clone()),
+                                AssignmentTarget::Tuple(_) => None,
+                            })
+                            .filter(|column| inserted.contains(column))
+                            .collect()
+                    }
+                    Some(_) => Vec::new(),
+                }
+            }
+            Statement::Update(update) => update
+                .assignments
+                .iter()
+                .filter_map(|assignment| match &assignment.target {
+                    AssignmentTarget::ColumnName(column) => column
+                        .0
+                        .last()
+                        .and_then(|part| part.as_ident())
+                        .filter(|_| {
+                            non_null(quiet.nullability(&assignment.value, scope, &self.facts))
+                        })
+                        .map(|ident| ident.value.clone()),
+                    AssignmentTarget::Tuple(_) => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let columns = written
+            .iter()
+            .map(|column| (target.clone(), quiet.column_key(&target, column, scope)))
+            .collect();
+        self.facts.with(Learned::columns(columns))
+    }
+
     /// The names an INSERT, UPDATE or DELETE reads and writes: its target tables, the
     /// columns it sets, and those its values, conditions and source query read.
     pub(super) fn dml_names(&self, stmt: &Statement) {

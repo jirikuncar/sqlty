@@ -19,7 +19,7 @@ shout: str | TEXT | NonNull
 UPDATE t SET note = 'x' RETURNING *
 id: int | SERIAL | NonNull
 name: str | TEXT | NonNull
-note: str | TEXT | Nullable
+note: str | TEXT | NonNull
 
 UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING *
 id: int | SERIAL | NonNull
