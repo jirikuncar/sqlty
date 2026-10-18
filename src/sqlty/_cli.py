@@ -222,6 +222,14 @@ def build_parser() -> argparse.ArgumentParser:
     breaking_parser.add_argument(
         "-q", "--quiet", action="store_true", help="Print nothing; only the exit code tells"
     )
+    breaking_parser.add_argument(
+        "--output-format",
+        choices=["text", "json", "github"],
+        default="text",
+        help="How findings are printed: text (the default), json (an array of objects with "
+        "file, line, rule, severity, message and direction) or github (GitHub Actions error "
+        "annotations)",
+    )
 
     # --- rule ---
     rule_parser = subparsers.add_parser(
@@ -421,8 +429,12 @@ def _transform_files(
         return
 
     changed = 0
+    unreadable = 0
     for path in files:
-        original = path.read_text(encoding="utf-8")
+        original = read_source(path)
+        if original is None:
+            unreadable += 1
+            continue
         result = transform(path, original, resolver.for_file(path))
         if result == original:
             continue
@@ -445,8 +457,23 @@ def _transform_files(
             if args.check and not args.quiet:
                 print(f"{changed} file(s) would be {participle}")
             sys.exit(EXIT_FOUND)
-        elif args.check and not args.quiet:
+        elif args.check and not args.quiet and not unreadable:
             print("All files up to date")
+    if unreadable:
+        sys.exit(EXIT_ERROR)
+
+
+def read_source(path: Path) -> str | None:
+    """The text of the Python file ``path``, or ``None``, logged, when it is not UTF-8.
+
+    sqlty reads and writes sources as UTF-8, Python's default; a file in another
+    encoding is skipped rather than stopping the run.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        logger.error("%s: not UTF-8 (%s at byte %d); skipped", path, exc.reason, exc.start)
+        return None
 
 
 def _format(path: Path, command: tuple[str, ...]) -> bool:
@@ -488,13 +515,17 @@ def _cmd_check(args: argparse.Namespace) -> None:
         logger.warning("No Python files found")
         return
 
+    texts = {path: read_source(path) for path in files}
+    unreadable = [path for path, text in texts.items() if text is None]
+    files = [path for path in files if texts[path] is not None]
     modules = {path: _module_names(resolver.resolve(path), args.paths) for path in files}
     sources = {
         path: ParsedSource(
-            path.read_text(encoding="utf-8"),
+            source,
             modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
         )
         for path in files
+        if (source := texts[path]) is not None
     }
     helpers = HelperIndex()
     for path, parsed in sources.items():
@@ -541,7 +572,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
-                    print(f"Fixed {path}")
+                    # JSON and annotations own stdout; progress goes to stderr then.
+                    text = args.output_format == "text"
+                    print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
         diagnostics = check_source(
             parsed,
             dialect=settings.dialect,
@@ -577,7 +610,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         if args.output_format == "json":
             shown.append({"file": str(path), **diag})
         elif args.output_format == "github":
-            print(_github_annotation(path, diag))
+            print(github_annotation(path, diag))
         elif not args.quiet:
             print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
             if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
@@ -602,9 +635,11 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
         sys.exit(EXIT_FOUND)
+    if unreadable:
+        sys.exit(EXIT_ERROR)
 
 
-def _github_annotation(path: Path, diag: Diagnostic) -> str:
+def github_annotation(path: Path, diag: Diagnostic) -> str:
     """``diag`` as a GitHub Actions workflow command, which annotates the line in the diff."""
 
     def escape(text: str, *, property: bool = False) -> str:

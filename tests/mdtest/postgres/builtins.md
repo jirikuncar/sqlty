@@ -152,3 +152,31 @@ SELECT jb - 'a' AS a, jb - ARRAY['a', 'b'] AS b FROM t
 -- columns: a: typing.Any (JSONB)
 -- columns: b: typing.Any (JSONB)
 ```
+
+## More built-ins
+
+Typed as PostgreSQL 17's `pg_typeof` reports them. A set-returning function in the select
+list gives one value per row.
+
+```sql
+SELECT timeofday() AS a, pg_column_size(tx) AS b, regexp_count(tx, 'a') AS c, scale(n) AS d, log10(n) AS e, log10(d) AS f, factorial(5) AS g, jsonb_exists(jb, 'a') AS h, has_table_privilege('t', 'select') AS i, format_type(23, NULL) AS j, pg_get_userbyid(10) AS k, unistr(tx) AS l FROM t
+-- columns: a: str (TEXT)
+-- columns: b: int (INT)
+-- columns: c: int (INT)
+-- columns: d: int | None (INT)
+-- columns: e: decimal.Decimal | None (DECIMAL)
+-- columns: f: float (DOUBLE)
+-- columns: g: decimal.Decimal (DECIMAL)
+-- columns: h: bool (BOOLEAN)
+-- columns: i: bool (BOOLEAN)
+-- columns: j: str | None (TEXT)
+-- columns: k: str (NAME)
+-- columns: l: str (TEXT)
+```
+
+```sql
+SELECT jsonb_object_keys(jb) AS k, regexp_split_to_table(tx, ',') AS part, jsonb_each(jb) AS kv FROM t
+-- columns: k: str | None (TEXT)
+-- columns: part: str | None (TEXT)
+-- columns: kv: tuple[typing.Any, ...] | None (RECORD)
+```

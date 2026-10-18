@@ -253,10 +253,20 @@ impl<'a> Analyzer<'a> {
         quiet.diag = Diagnostics::default();
         let (mut analyzer, scope) = quiet.scope_of(&select.from)?;
         analyzer.diag = self.diag.clone();
+        let aliases = aliases(select);
         for key in keys.iter().filter(|key| !names_result_column(key, select)) {
-            analyzer.check_references(key, &scope);
+            analyzer.check_references_besides(key, &scope, self.aliases_in_keys(&aliases));
         }
         Ok(())
+    }
+
+    /// The result column aliases a name in `GROUP BY` or `ORDER BY` may refer to, inside
+    /// an expression too: MySQL and SQLite read them there (SQLite in `WHERE` as well).
+    fn aliases_in_keys<'s>(&self, aliases: &'s [&'s str]) -> &'s [&'s str] {
+        match self.dialect {
+            SqlDialect::Sqlite | SqlDialect::MySql => aliases,
+            _ => &[],
+        }
     }
 
     pub(super) fn select_columns(&self, select: &Select) -> Inferred<Vec<Column>> {
@@ -290,8 +300,21 @@ impl<'a> Analyzer<'a> {
                     key => vec![key],
                 })
                 .filter(|key| !names_result_column(key, select));
-            for condition in conditions.chain(&select.selection).chain(keys) {
+            let aliases = aliases(select);
+            let in_keys = self.aliases_in_keys(&aliases);
+            let in_where = if self.dialect == SqlDialect::Sqlite {
+                in_keys
+            } else {
+                &[]
+            };
+            for condition in conditions {
                 analyzer.check_references(condition, &scope);
+            }
+            if let Some(condition) = &select.selection {
+                analyzer.check_references_besides(condition, &scope, in_where);
+            }
+            for key in keys {
+                analyzer.check_references_besides(key, &scope, in_keys);
             }
             // MySQL and SQLite also read result column names in HAVING.
             if let (Some(having), SqlDialect::Postgres) = (&select.having, self.dialect) {
@@ -628,6 +651,18 @@ pub(super) fn shorten(text: &str) -> String {
         Some((end, _)) => format!("{}...", &text[..end]),
         None => text.to_string(),
     }
+}
+
+/// The aliases `select` gives its result columns.
+fn aliases(select: &Select) -> Vec<&str> {
+    select
+        .projection
+        .iter()
+        .filter_map(|item| match item {
+            SelectItem::ExprWithAlias { alias, .. } => Some(alias.value.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Whether `key` is a result column of `select` by position (`ORDER BY 1`) or by name

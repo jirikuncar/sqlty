@@ -82,7 +82,7 @@ tool such as pre-commit passes file names.
 |------|---------|
 | 0 | Nothing to report: no `error` diagnostic from `check`, no file changed by `--check` or `--diff`, or the files were rewritten or stripped |
 | 1 | `check` found an `error`-severity diagnostic, `breaking` found a breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
-| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist) or an internal error |
+| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist), a Python file that is not UTF-8 (reported and skipped; the other files are still processed), or an internal error |
 
 ## Common options
 
@@ -248,6 +248,7 @@ Found 1 breaking change(s)
 ```text
 sqlty breaking [-h] --against REF [--head REF]
                [--direction {backward,forward,both}] [-q]
+               [--output-format {text,json,github}]
                [paths ...]
 ```
 <!-- /generated:cli-usage-breaking -->
@@ -258,6 +259,7 @@ sqlty breaking [-h] --against REF [--head REF]
 | `--against REF` | The baseline revision: a branch, tag, SHA or HEAD~1 |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
+| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message and direction) or github (GitHub Actions error annotations) |
 <!-- /generated:cli-options-breaking -->
 
 Exit code: 1 when a change breaks either direction, 2 for an unknown revision or

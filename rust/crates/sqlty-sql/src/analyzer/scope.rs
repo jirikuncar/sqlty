@@ -4,14 +4,15 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    Expr, Join, JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins,
+    DataType, Expr, Join, JoinConstraint, JoinOperator, JsonTableColumn, ObjectName, TableFactor,
+    TableWithJoins,
 };
 
 use crate::catalog::{fold, FunctionReturn};
 
 use super::dialect::SqlDialect;
 use super::memo::SubqueryMemo;
-use super::names::{object_name, table_key};
+use super::names::{alias_name, object_name, table_key};
 use super::nullability::Nullability;
 use super::query::{rename_columns, Analyzer, Column};
 use super::table_functions::table_args;
@@ -378,6 +379,12 @@ impl<'a> Analyzer<'a> {
         for factor in relations(from) {
             let only = only_table(factor);
             let factor = only.as_ref().unwrap_or(factor);
+            if let Some((reference, columns)) = analyzer.defined_columns(factor) {
+                let table = format!("({reference})");
+                analyzer.virtuals.insert(table.clone(), columns);
+                scope.push(Source::named(reference, table));
+                continue;
+            }
             // A built-in set-returning function, which may read the relations before it.
             let builtin = match factor {
                 TableFactor::Table {
@@ -492,6 +499,70 @@ impl<'a> Analyzer<'a> {
             }
         }
         Ok((analyzer, scope))
+    }
+
+    /// The columns a function in `FROM` declares in its column definition list,
+    /// `json_to_recordset(x) AS t(a int, b text)`, or a `JSON_TABLE` in its `COLUMNS`
+    /// clause, and its reference. A column can be NULL: a record or document that lacks the
+    /// member has a NULL there.
+    fn defined_columns(&self, factor: &TableFactor) -> Option<(String, Vec<Column>)> {
+        if let TableFactor::JsonTable {
+            columns,
+            alias: Some(alias),
+            ..
+        } = factor
+        {
+            let columns = columns
+                .iter()
+                .map(|column| match column {
+                    JsonTableColumn::Named(column) => Some(Column::from_typed(
+                        alias_name(&column.name, self.dialect),
+                        self.cast_typed(&column.r#type),
+                        // `EXISTS PATH` is 1 or 0.
+                        if column.exists {
+                            Nullability::NonNull
+                        } else {
+                            Nullability::Nullable
+                        },
+                    )),
+                    JsonTableColumn::ForOrdinality(name) => Some(Column::from_typed(
+                        alias_name(name, self.dialect),
+                        self.cast_typed(&DataType::Int(None)),
+                        Nullability::NonNull,
+                    )),
+                    // A nested path repeats the outer columns per element.
+                    JsonTableColumn::Nested(_) => None,
+                })
+                .collect::<Option<Vec<Column>>>()?;
+            return Some((alias.name.value.to_lowercase(), columns));
+        }
+        let (TableFactor::Table {
+            alias: Some(alias),
+            args: Some(_),
+            ..
+        }
+        | TableFactor::Function {
+            alias: Some(alias), ..
+        }) = factor
+        else {
+            return None;
+        };
+        if alias.columns.is_empty() {
+            return None;
+        }
+        let columns = alias
+            .columns
+            .iter()
+            .map(|column| {
+                let typed = self.cast_typed(column.data_type.as_ref()?);
+                Some(Column::from_typed(
+                    alias_name(&column.name, self.dialect),
+                    typed,
+                    Nullability::Nullable,
+                ))
+            })
+            .collect::<Option<Vec<Column>>>()?;
+        Some((alias.name.value.to_lowercase(), columns))
     }
 
     /// Whether `*` (or `t.*`) reads only sources with known columns: schema tables, and

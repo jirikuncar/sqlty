@@ -317,13 +317,34 @@ class RuleConfig:
         return self.severity(rule_name) != Severity.IGNORE
 
 
+DOCS_URL = "https://jirikuncar.github.io/sqlty/"
+"""The documentation site, which ``rule_doc`` links to."""
+
+
 def rule_doc(name: str) -> str:
-    """Markdown documentation of a rule, shipped as ``sqlty/rules/<name>.md``.
+    """Markdown documentation of a rule, shipped as ``sqlty/rules/<name>.md``, its links
+    to other pages pointing at the documentation site: the repository's relative paths
+    mean nothing in a user's terminal.
 
     Example:
         >>> rule_doc("stale-type").splitlines()[0]
         '# stale-type'
+        >>> "](https://jirikuncar.github.io/sqlty/guide/schema-inference/)" in rule_doc("insert-missing-column")
+        True
     """
+    import re
     from importlib.resources import files
 
-    return (files("sqlty") / "rules" / f"{name}.md").read_text(encoding="utf-8")
+    text = (files("sqlty") / "rules" / f"{name}.md").read_text(encoding="utf-8")
+
+    def absolute(match: re.Match[str]) -> str:
+        path, anchor = match["path"], match["anchor"] or ""
+        if path.startswith("../../../docs/"):
+            return (
+                f"]({DOCS_URL}{path.removeprefix('../../../docs/').removesuffix('.md')}/{anchor})"
+            )
+        if "/" not in path:
+            return f"]({DOCS_URL}reference/rules/#{path.removesuffix('.md')})"
+        return match[0]
+
+    return re.sub(r"\]\((?P<path>[^)\s:]+\.md)(?P<anchor>#[^)\s]*)?\)", absolute, text)
