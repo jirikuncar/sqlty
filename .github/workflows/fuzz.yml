@@ -52,6 +52,8 @@ jobs:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
           cache-dependency-glob: uv.lock
+          # Jobs install different groups: each keeps its own cache.
+          cache-suffix: ${{ github.job }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.14"
 
