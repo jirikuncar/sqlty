@@ -28,4 +28,4 @@ c: float | FLOAT | Nullable
 SELECT 1 AS a, 'x' AS b, x'ff' AS c FROM t
 a: int | ? | NonNull
 b: typing.Literal['x'] | ? | NonNull
-c: str | ? | NonNull
+c: bytes | VARBINARY | NonNull

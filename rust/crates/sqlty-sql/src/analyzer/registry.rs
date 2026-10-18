@@ -342,6 +342,7 @@ const NEVER_NULL: &[&str] = &[
     "JSONB_BUILD_ARRAY",
     "NUM_NULLS",
     "NUM_NONNULLS",
+    "ISNULL",
     "JSON_OBJECT",
     "JSON_ARRAY",
     "ROW",
