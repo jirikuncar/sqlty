@@ -110,6 +110,8 @@ What makes a column nullable or not:
   subscripts and a `CASE` without `ELSE` can always be NULL.
 - **Aggregates.** `COUNT` is never NULL. Other aggregates are nullable without a plain
   `GROUP BY` (empty input), with `FILTER`, or when the argument is.
+- **Arrays.** The nullability of an array's elements is not tracked: a `text[]` column,
+  an `ARRAY[...]` and an `array_agg` are `list[str]`, though each can hold NULLs.
 - **Subqueries.** A scalar subquery is nullable unless it always returns one row.
 - **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
   `EXCEPT` follows its left side.
