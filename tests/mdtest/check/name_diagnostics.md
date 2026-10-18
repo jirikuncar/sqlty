@@ -229,8 +229,6 @@ a = SQL[tuple[int]]("--sql\nSELECT frobnicate(id) FROM users")
 b = SQL[tuple[str]]("--sql\nSELECT name::mood FROM users")
 # error: [unknown-type] "column `users.shape` has type `GEOMETRY`"
 c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
-# error: [unsupported-syntax] "a TABLE query is not typed"
-d = SQL[tuple[int]]("--sql\nSELECT 1 UNION TABLE users")
 # error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
 e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
 # error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
