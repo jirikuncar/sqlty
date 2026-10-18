@@ -237,6 +237,11 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
             return Some(left);
         }
     }
+    if dialect == SqlDialect::Sqlite {
+        if let Some(union) = sqlite_union(&left, &right) {
+            return Some(union);
+        }
+    }
     if let (Some(x), Some(y)) = (
         left.sql().and_then(array_element),
         right.sql().and_then(array_element),
@@ -265,6 +270,24 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
         return None;
     };
     Some(from_sql_type(common, dialect))
+}
+
+/// SQLite has no type for an expression: a `CASE` or `UNION` of an integer and a text
+/// gives either value, so its Python type is their union. Numbers still widen.
+fn sqlite_union(left: &Typed, right: &Typed) -> Option<Typed> {
+    const NUMBERS: [&str; 4] = ["int", "float", "decimal.Decimal", "bool"];
+    let (x, y) = (left.python()?, right.python()?);
+    let numeric = |python: &str| python.split(" | ").all(|kind| NUMBERS.contains(&kind));
+    if x == y || (numeric(x) && numeric(y)) {
+        return None;
+    }
+    let mut union: Vec<&str> = x.split(" | ").collect();
+    for kind in y.split(" | ") {
+        if !union.contains(&kind) {
+            union.push(kind);
+        }
+    }
+    Some(Typed::python_only(&union.join(" | ")))
 }
 
 /// MySQL's aggregation of the types of `CASE`, `IF`, `COALESCE` or `UNION` inputs: numbers
