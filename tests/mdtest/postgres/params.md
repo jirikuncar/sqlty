@@ -286,7 +286,8 @@ SELECT id FROM events WHERE ids @> %s AND doc @> %s AND doc ? %s AND doc ->> %s 
 
 `%s - INTERVAL '1 day'` alone could be an interval or a timestamp minus one, and
 PostgreSQL reads it as an interval. Compared with a timestamp or a date, the parameter
-is what that side is.
+is what that side is for a driver that sends parameter types, as psycopg does. asyncpg
+sends them untyped, so PostgreSQL rejects the comparison; `sqlty check` reports it.
 
 ```sql
 SELECT id FROM events WHERE at < %s - INTERVAL '3 months' AND (INTERVAL '1 day' + %s) >= at AND span > %s - INTERVAL '1 day'

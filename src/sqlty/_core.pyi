@@ -39,7 +39,7 @@ def analyze_params(
     *,
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
-) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool]] | None: ...
+) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool, str | None]] | None: ...
 def composite_fields(
     type_name: str,
     *,
