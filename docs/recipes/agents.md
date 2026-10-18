@@ -10,7 +10,12 @@ them from the installed `sqlty`.
 <!-- skills-table -->
 | Skill | Loads when the agent | Covers |
 |-------|----------------------|--------|
-| `sqlty` | writes or edits a `--sql` string, an `SQL[T]` wrapper or `[tool.sqlty]` | The `--sql` marker, `rewrite`, row types, `check`, `breaking`, pitfalls |
+| `sqlty` | writes or edits a `--sql` string, an `SQL[T]` wrapper or `[tool.sqlty]` | The `--sql` marker, the rewrite and check loop, pitfalls; routes to the skills below |
+| `sqlty-adopt` | adds sqlty to a project that doesn't use it | `[tool.sqlty]`, the schema from a dump or migrations, converting one module at a time, the first CI gate |
+| `sqlty-breaking` | changes a table or writes a migration | `sqlty breaking`, its findings, an expand and contract plan |
+| `sqlty-check` | reads a diagnostic, names a row type, checks parameters | `check`, `--fix`, `--explain`, JSON output, `sqlty rule`, suppressions, severities |
+| `sqlty-ci` | sets up or repairs pre-commit or CI | the hooks, the GitHub Actions job, promoting rules to errors |
+| `sqlty-rewrite` | writes a query, or adds or removes wrappers | `rewrite`, `strip`, `--check` and `--diff`, `SQL[UNTYPED]`, `import-style`, the magic codec |
 <!-- /skills-table -->
 
 Each skill links to this site, not to files of the repository, so it works in

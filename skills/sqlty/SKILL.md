@@ -1,6 +1,6 @@
 ---
 name: sqlty
-description: Write, type and check raw SQL in Python with sqlty. Use when adding or editing a query in a project that uses sqlty (strings starting with --sql, SQL[T] or SQLTemplate[T] wrappers, a [tool.sqlty] section), when generating Python row types for a query, or when checking that queries still fit a schema migration before deploying.
+description: Write, type and check raw SQL in Python with sqlty. Use when adding or editing a query in a project that uses sqlty (strings starting with --sql, SQL[T] or SQLTemplate[T] wrappers, a [tool.sqlty] section), when generating Python row types for a query, or when checking that queries still fit a schema migration before deploying. Routes to sqlty-rewrite, sqlty-check, sqlty-breaking, sqlty-ci and sqlty-adopt for each task.
 ---
 
 # sqlty
@@ -15,79 +15,48 @@ When it and `sqlty --help` or `sqlty rule NAME` disagree, trust the command.
 Read `[tool.sqlty]` in `pyproject.toml` first. `dialect` (default `postgres`)
 and `schema` (SQL files with `CREATE TABLE`, or migrations) decide every type.
 
-## Write a typed query
+## Pick the task
 
-1. Write the query as a string whose first line is the marker `--sql`, followed by
-   a newline: `"--sql\nSELECT ..."`. With `"--sql SELECT ..."` (a space) the whole
-   query is a SQL comment and nothing is checked.
-2. Run `sqlty rewrite <file>`. It wraps the string as `SQL[T]("--sql\n...")`, with
-   `T` the inferred row type, and adds the import.
-3. Run `sqlty check <file>`. It must report nothing.
+| Task | Skill |
+|------|-------|
+| Write or edit a query; add or remove `SQL[T]` wrappers | `sqlty-rewrite` |
+| Read a diagnostic, name a row type, check parameters | `sqlty-check` |
+| Change a table, write a migration, plan a rename | `sqlty-breaking` |
+| Set up or repair pre-commit or CI | `sqlty-ci` |
+| Introduce sqlty into a project that doesn't use it | `sqlty-adopt` |
 
-```python
-user_id = 1
-q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = %s"
-# rewritten: user_id = 1
-# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = %s")
-```
+`sqlty skill NAME` prints a skill that isn't installed.
 
-A query `rewrite` leaves alone has a column sqlty cannot type: a column of a
-table the schema lacks, an unknown function, `SELECT *` with no schema. Cast it
-(`x::INTEGER`) or fix the schema; don't hand-write a guessed `T`.
+## The `--sql` marker
 
-## Name the row type
-
-Replace the tuple with a `TypedDict`, `dataclass`, `NamedTuple` or pydantic model
-whose fields are the columns, in order. `sqlty check` compares each field's name,
-type and nullability with the query:
+sqlty reads only strings whose first line is `--sql`, followed by a newline.
+With a space, the whole query is a SQL comment and nothing is checked:
 
 ```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-
-# error: [column-type-mismatch] "User.name is str but query column 'name' infers int"
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::INTEGER AS name FROM users")
+right = "--sql\nSELECT id::INTEGER FROM users"
+wrong = "--sql SELECT id::INTEGER FROM users"
+# rewritten: right = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: wrong = "--sql SELECT id::INTEGER FROM users"
 ```
 
-A column that can be NULL needs `T | None`. Run `sqlty check --fix` to update
-stale tuple types after editing a query; it never edits a named row type.
-
-## Check
-
-| Goal | Command |
-|------|---------|
-| Lint everything | `sqlty check .` |
-| Fail CI on warnings | `sqlty check --error-on-warning .` |
-| Fix what is fixable | `sqlty check --fix .` |
-| Report names the schema lacks | `sqlty check --warn unknown-table --warn unknown-column .` |
-| See which rule typed a column | `sqlty check --explain .` |
-| Learn about a rule | `sqlty rule <name>` |
-
-To inspect one query without a file, use the Python API:
+In a triple-quoted string, end the first line after `--sql`:
 
 ```python
-from sqlty.core import analyze_params, analyze_select, infer_type
-
-schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
-infer_type("SELECT id, name FROM users", schema_sql=schema)  # 'tuple[int, str | None]'
-analyze_params("SELECT name FROM users WHERE id = %s", schema_sql=schema)  # %s is an int
+q = """--sql
+SELECT id::INTEGER, name::TEXT FROM users"""
+# rewritten: q = SQL[tuple[int, str]]("""--sql
+# rewritten: SELECT id::INTEGER, name::TEXT FROM users""")
 ```
 
-## Check a schema change before deploying
+## The loop
 
 ```bash
-sqlty breaking --against origin/main
+sqlty rewrite app/queries.py   # wrap new --sql strings as SQL[T]
+sqlty check app/               # report what doesn't fit
 ```
 
-It checks the queries of `origin/main` against the schema of the working tree
-(migrate first) and the new queries against the old schema (deploy first), and
-exits 1 on a dropped or renamed table or column, a new `NOT NULL` column an
-`INSERT` leaves out, or a row type that no longer fits. Use
-`--direction backward` when migrations always run before the code ships.
+Never hand-write a guessed `T`: let `rewrite` infer it, then name it (see
+`sqlty-check`). A query `rewrite` leaves alone has a column sqlty cannot type.
 
 ## Pitfalls
 
@@ -110,4 +79,3 @@ The documentation is at <https://jirikuncar.github.io/sqlty/>:
 - [Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)
 - [Schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)
 - Every rule: `sqlty rule NAME` prints its page; [all rules](https://jirikuncar.github.io/sqlty/reference/rules/)
-- `sqlty check --output-format json` prints the diagnostics as JSON
