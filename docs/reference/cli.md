@@ -82,7 +82,7 @@ tool such as pre-commit passes file names.
 |------|---------|
 | 0 | Nothing to report: no `error` diagnostic from `check`, no file changed by `--check` or `--diff`, or the files were rewritten or stripped |
 | 1 | `check` found an `error`-severity diagnostic, `breaking` found a breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
-| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist) or an internal error |
+| 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist), a Python file that is not UTF-8 (reported and skipped; the other files are still processed), or an internal error |
 
 ## Common options
 
