@@ -110,6 +110,25 @@ SELECT * FROM jsonb_object_keys('{"a": 1}')
 -- columns: jsonb_object_keys: str (TEXT)
 ```
 
+### A column definition list
+
+A function that returns `record`, such as `jsonb_to_recordset`, takes its columns
+from the definition list after its alias. Each can be NULL: a record that lacks the
+member has a NULL there.
+
+```sql
+SELECT p.id, r.name, r.qty FROM posts p, jsonb_to_recordset(p.doc) AS r(name text, qty int)
+-- columns: id: int (INT)
+-- columns: name: str | None (TEXT)
+-- columns: qty: int | None (INT)
+```
+
+```sql
+SELECT * FROM json_to_record('{"a": 1}') AS t(a numeric, b date)
+-- columns: a: decimal.Decimal | None (DECIMAL)
+-- columns: b: datetime.date | None (DATE)
+```
+
 ## Text
 
 ```sql
