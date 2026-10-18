@@ -717,13 +717,13 @@ import typing
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[int]]("--sql\nSELECT add_one(id) FROM users")
+a = SQL[tuple[int | None]]("--sql\nSELECT add_one(id) FROM users")
 # error:
 b = SQL[tuple[typing.Literal['happy', 'sad']]]("--sql\nSELECT 'happy'::mood")
 # error:
 c = SQL[tuple[int]]("--sql\nSELECT id::percent FROM users")
 # error:
-d = SQL[tuple[int]]("--sql\nSELECT user_ids()")
+d = SQL[tuple[int | None]]("--sql\nSELECT user_ids()")
 # error:
 e = SQL[tuple[object]]("--sql\nSELECT ROW('a', 'b')::address")
 # error:

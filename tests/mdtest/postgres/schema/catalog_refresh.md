@@ -26,7 +26,7 @@ CREATE VIEW after AS SELECT f() AS x, id FROM t;
 
 ```sql
 SELECT x, id FROM before
--- inferred: tuple[int, int]
+-- inferred: tuple[int | None, int]
 ```
 
 ```sql
