@@ -64,6 +64,9 @@ pub(super) enum Returns {
     /// A string function with a binary overload: `TEXT`, or the type of argument `i` when
     /// it is a binary string (or, in PostgreSQL, a bit string).
     Text(usize),
+    /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
+    /// for [`Returns::Series`].
+    Random,
 }
 
 use Returns::{Arg, Elem, Sql};
@@ -238,9 +241,9 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         ],
         Sql("BIGINT"),
     ),
+    (&["RANDOM"], Returns::Random),
     (
         &[
-            "RANDOM",
             "DATE_PART",
             "PI",
             "DEGREES",
@@ -674,7 +677,8 @@ impl<'a> Analyzer<'a> {
                     _ => sql("TEXT"),
                 }
             }
-            Returns::Series => {
+            Returns::Random if args.is_empty() => sql("DOUBLE"),
+            Returns::Random | Returns::Series => {
                 let bounds = [arg(0)?, arg(1)?];
                 match common_of(bounds, self.dialect)
                     .as_ref()
