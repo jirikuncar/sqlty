@@ -248,7 +248,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             params: tuple[ParamArg, ...] | None = tuple(
                 ParamArg(i, arg_type(arg, parsed, stack)) for i, arg in enumerate(call.args[1:], 1)
             )
-            found.append(HelperCall(call.lineno, query, None, aliases, params))
+            found.append(HelperCall(call.lineno, query, None, aliases, params, driver=driver))
             continue
         keyword = _PARAM_KEYWORD[driver]
         arg = call.args[1] if len(call.args) > 1 else None

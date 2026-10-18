@@ -53,6 +53,10 @@ pub struct Param {
     /// Whether the type is that of an explicit cast (`%s::text`): the server converts
     /// whatever is passed, so the value is not held to it.
     pub cast: bool,
+    /// The SQL type PostgreSQL gives the parameter when the driver sends it untyped, as
+    /// asyncpg does, when that differs from `sql_type`: `$1 - INTERVAL '1 day'` compared
+    /// with a timestamp is a timestamp only if the driver says so, else an interval.
+    pub untyped_sql_type: Option<String>,
 }
 
 /// What a parameter's uses say about it. The first use that types it wins, and so does the
@@ -62,6 +66,7 @@ struct Hint {
     typed: Typed,
     nullability: Nullability,
     cast: bool,
+    untyped: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -88,6 +93,19 @@ impl Hints {
         if hint.typed.python.is_none() && typed.python.is_some() {
             hint.typed = typed;
             hint.cast = true;
+        }
+    }
+
+    /// The type of a parameter shifted by an interval, which is an interval to PostgreSQL
+    /// unless the driver sends the type.
+    fn add_shifted(&mut self, index: usize, typed: Typed) {
+        let typed_before = self
+            .0
+            .get(&index)
+            .is_some_and(|hint| hint.typed.python.is_some());
+        self.add(index, typed, Nullability::Unknown);
+        if !typed_before {
+            self.0.entry(index).or_default().untyped = Some("INTERVAL");
         }
     }
 
@@ -160,6 +178,7 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
                     sql_type: hint.typed.sql.map(|ty| ty.to_string()),
                     nullability: hint.nullability,
                     cast: hint.cast,
+                    untyped_sql_type: hint.untyped.map(str::to_string),
                 }
             })
             .collect(),
@@ -481,7 +500,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// `%s - INTERVAL '1 day'` compared with a date or time `other`: alone, the parameter
-    /// could be an interval too, but the comparison makes it what `other` is.
+    /// is an interval, but a driver that sends its type (psycopg) makes it what `other` is.
     fn hint_shifted(&self, shifted: &Expr, other: &Expr, scope: &Scope, out: &mut Hints) {
         let mut shifted = shifted;
         while let Expr::Nested(inner) = shifted {
@@ -502,13 +521,14 @@ impl<'a> Analyzer<'a> {
         let Ok(typed) = self.expr(other, scope) else {
             return;
         };
-        if is_interval
-            && matches!(
-                operand_type(&typed),
-                Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ")
-            )
-        {
-            self.hint_pair(placeholder, other, scope, out);
+        if let (true, Some(index), Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ")) = (
+            is_interval,
+            placeholder_index(placeholder),
+            operand_type(&typed),
+        ) {
+            if is_typed(&typed) {
+                out.add_shifted(index, typed);
+            }
         }
     }
 
