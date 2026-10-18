@@ -162,6 +162,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, FunctionInfo>> = LazyLock::new(|
 /// Aggregate functions, whose result over no rows is NULL (except `COUNT`).
 const AGGREGATES: &[&str] = &[
     "SUM",
+    "RANGE_INTERSECT_AGG",
     "AVG",
     "MIN",
     "MAX",
@@ -258,7 +259,6 @@ const ALWAYS_NULLABLE: &[&str] = &[
     "INET_SERVER_PORT",
     "REGEXP_MATCH",
     "REGEXP_SUBSTR",
-    "REGEXP_INSTR",
     "ARRAY_LENGTH",
     "ARRAY_UPPER",
     "ARRAY_LOWER",
@@ -269,6 +269,10 @@ const ALWAYS_NULLABLE: &[&str] = &[
     "JSONB_EXTRACT_PATH",
     "JSONB_EXTRACT_PATH_TEXT",
     "JSONB_PATH_QUERY_FIRST",
+    "JSONB_PATH_QUERY_FIRST_TZ",
+    // NULL when the path's first result is not a boolean.
+    "JSONB_PATH_MATCH",
+    "JSONB_PATH_MATCH_TZ",
     "JSON_VALUE",
     "JSON_QUERY",
     "NTH_VALUE",
