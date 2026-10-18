@@ -84,6 +84,54 @@ e = "--sql\nSELECT name AS label, count(*) AS n FROM users GROUP BY label ORDER 
 f = "--sql\nSELECT u.name FROM users u ORDER BY u.id"
 ```
 
+#### Result column aliases in SQLite and MySQL
+
+SQLite reads a result column's alias anywhere, `WHERE` included; MySQL in `GROUP BY`,
+`HAVING` and `ORDER BY` expressions, not in `WHERE`. PostgreSQL only reads a bare
+alias in `GROUP BY` and `ORDER BY`.
+
+##### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+# error:
+a = "--sql\nSELECT name AS n FROM users WHERE n = 'a' GROUP BY n || 'x' ORDER BY lower(n)"
+```
+
+##### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+# error: [unknown-column] "column `n` does not exist in `users`"
+a = "-- sql\nSELECT name AS n FROM users WHERE n = 'a' ORDER BY lower(n)"
+```
+
 #### INSERT, UPDATE and DELETE
 
 A statement that returns no rows is checked too: the table it writes, the

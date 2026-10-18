@@ -15,12 +15,19 @@ impl Analyzer<'_> {
     /// `unknown-table` and `ambiguous-column` where the rules apply. A subquery is
     /// analyzed in its own scope, correlated with `scope`.
     pub(super) fn check_references(&self, expr: &Expr, scope: &Scope) {
+        self.check_references_besides(expr, scope, &[]);
+    }
+
+    /// [`Analyzer::check_references`], reading a bare name among `aliases` as the result
+    /// column it names, as SQLite does in `WHERE` and MySQL in `GROUP BY` and `ORDER BY`.
+    pub(super) fn check_references_besides(&self, expr: &Expr, scope: &Scope, aliases: &[&str]) {
         if !self.diag.enabled() {
             return;
         }
         let mut visitor = References {
             analyzer: self,
             scope,
+            aliases,
             depth: 0,
         };
         let _ = expr.visit(&mut visitor);
@@ -30,6 +37,8 @@ impl Analyzer<'_> {
 struct References<'a, 's> {
     analyzer: &'a Analyzer<'s>,
     scope: &'a Scope,
+    /// Result column aliases a bare name may refer to.
+    aliases: &'a [&'a str],
     /// How many subqueries deep the visit is; only the outermost names are resolved here.
     depth: usize,
 }
@@ -56,7 +65,11 @@ impl Visitor for References<'_, '_> {
         let column = match expr {
             Expr::Identifier(ident) => {
                 // `DEFAULT` in `VALUES` and `SET` is a keyword, not a column.
-                ident.quote_style.is_some() || !ident.value.eq_ignore_ascii_case("default")
+                (ident.quote_style.is_some() || !ident.value.eq_ignore_ascii_case("default"))
+                    && !self
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(&ident.value))
             }
             Expr::CompoundIdentifier(_) => true,
             _ => false,
