@@ -898,6 +898,8 @@ impl<'a> Analyzer<'a> {
             "CONCAT" => any_nullable(args.iter().map(|arg| of(arg))),
             // Only a NULL separator gives NULL.
             "CONCAT_WS" => first(),
+            // PostgreSQL 17's `random(min, max)` is strict.
+            "RANDOM" if !args.is_empty() => any_nullable(args.iter().map(|arg| of(arg))),
             _ if info.is_some_and(|info| info.never_null) => Nullability::NonNull,
             _ if info.is_some_and(|info| info.returns(self.dialect).is_some())
                 && all_positional =>
