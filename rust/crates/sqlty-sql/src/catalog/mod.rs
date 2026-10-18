@@ -115,6 +115,8 @@ pub(crate) struct Function {
     /// The types of the arguments before any `VARIADIC` one.
     pub args: Vec<Typed>,
     pub returns: FunctionReturn,
+    /// `STRICT`: NULL exactly when an argument is. Any other function may return NULL.
+    pub strict: bool,
 }
 
 /// A foreign key that holds for every row: `columns` of a table equal `referred` of
@@ -379,6 +381,18 @@ impl Catalog {
         let first = fits.next()?;
         fits.all(|f| f.args == first.args)
             .then_some(first.args.as_slice())
+    }
+
+    /// Whether every overload of `name` a call with `args` arguments fits is `STRICT`;
+    /// `None` when none fits.
+    pub(crate) fn function_strict(&self, name: &str, args: usize) -> Option<bool> {
+        let key = lookup_key(&self.functions, &self.search_path, self.norm(name))?;
+        let mut fits = self.functions[key]
+            .iter()
+            .filter(|f| f.required <= args && args <= f.max)
+            .peekable();
+        fits.peek()?;
+        Some(fits.all(|f| f.strict))
     }
 
     /// Whether the schema defines a function `name`, whatever is known of what it returns.
