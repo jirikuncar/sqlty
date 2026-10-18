@@ -12,8 +12,6 @@ schema = "schema.sql"
 
 ## UPDATE with COALESCE parameters
 
-<!-- mdtest:xfail a parameter inside COALESCE is not marked NULL -->
-
 `COALESCE($2, name)` falls back to the stored NOT NULL name, so `$2` may be NULL and `name`
 stays non-null.
 
@@ -31,8 +29,6 @@ UPDATE authors SET name = COALESCE($2, name) WHERE id = $1 RETURNING id, name, b
 ```
 
 ## UPDATE ... RETURNING in a CTE
-
-<!-- mdtest:xfail a parameter inside COALESCE is not marked NULL -->
 
 The CTE exposes the RETURNING columns, and `$4` is typed by `CURRENT_TIMESTAMP`, a
 `timestamptz`.
