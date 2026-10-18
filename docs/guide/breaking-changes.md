@@ -165,6 +165,30 @@ from sqlty import SQL
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 
+### Rules about the code
+
+[`stale-rewrite`](../reference/rules.md#stale-rewrite) and
+[`unused-ignore`](../reference/rules.md#unused-ignore) judge the code, not the
+schema change, so they are not reported. Below, the old schema can type the marked
+string and leaves the suppression unused, and neither is a breaking change.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL);
+```
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL, bio TEXT);
+```
+
+```python
+# error:
+bios = "--sql\nSELECT bio FROM users"  # sqlty: ignore[unknown-column]
+```
+
 ### A column that may now be NULL
 
 Code annotated `str | None` for a column the new schema makes nullable reads the

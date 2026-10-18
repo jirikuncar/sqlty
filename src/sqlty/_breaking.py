@@ -44,6 +44,7 @@ class Revision:
     root: Path
     resolver: SettingsResolver
     files: list[Path]
+    paths: list[Path]
 
     def settings(self, relative: Path) -> Settings:
         return self.resolver.for_file(self.root / relative)
@@ -112,19 +113,30 @@ def _compare(
 ) -> list[Finding]:
     from sqlty._cli import _module_names, read_source
     from sqlty._source import ParsedSource
-    from sqlty.core import breaking_source
+    from sqlty.core import HelperIndex, breaking_source
 
-    findings: list[Finding] = []
-    roots = [queries.root]
+    roots = [queries.root / p for p in queries.paths]
+    sources: dict[Path, ParsedSource] = {}
+    index = HelperIndex()
     for path in queries.files:
+        if (text := read_source(path)) is None:
+            continue
+        names = _module_names(queries.resolver.resolve(path), roots)
+        sources[path] = ParsedSource(
+            text, names[0] + (".__init__" if path.name == "__init__.py" else "")
+        )
+        for name in names:
+            index.add(name, sources[path])
+    configured: dict[tuple[tuple[str, str, str | None], ...], HelperIndex] = {}
+    findings: list[Finding] = []
+    for path, parsed in sources.items():
         relative = path.relative_to(queries.root)
         own = queries.settings(relative)
         other = schema.settings(relative)
-        module = _module_names(queries.resolver.resolve(path), roots)[0]
-        text = read_source(path)
-        if text is None:
-            continue
-        parsed = ParsedSource(text, module)
+        if own.functions not in configured:
+            configured[own.functions] = helpers = index.fork()
+            for import_path, query_param, return_param in own.functions:
+                helpers.register(import_path, query_param, return_param)
         for diagnostic in breaking_source(
             parsed,
             schema_sql=own.schema,
@@ -134,6 +146,7 @@ def _compare(
             import_style=own.import_style,
             untyped=own.untyped,
             type_modules=own.type_modules,
+            helpers=configured[own.functions],
         ):
             findings.append(Finding(direction, relative, diagnostic))
     return findings
@@ -146,7 +159,7 @@ def _revision(label: str, root: Path, paths: list[Path]) -> Revision:
     with contextlib.chdir(root):
         resolver = SettingsResolver(args)
     files = _collect_python_files([root / p for p in paths], resolver.source)
-    return Revision(label, root, resolver, [f.resolve() for f in files])
+    return Revision(label, root, resolver, [f.resolve() for f in files], paths)
 
 
 @contextlib.contextmanager

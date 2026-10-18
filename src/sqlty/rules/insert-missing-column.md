@@ -7,7 +7,8 @@ Default severity: **error**
 Reports an `INSERT` with a column list, or MySQL's `INSERT ... SET`, that leaves
 out a schema column declared `NOT NULL` without a default. A `DEFAULT`,
 `serial`, identity, generated or auto-increment column, and SQLite's
-`INTEGER PRIMARY KEY`, get a value anyway.
+`INTEGER PRIMARY KEY`, get a value anyway. So does every column of a PostgreSQL
+or MySQL table with a `BEFORE INSERT ... FOR EACH ROW` trigger, which may set it.
 
 ```toml
 [tool.sqlty]

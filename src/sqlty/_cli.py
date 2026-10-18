@@ -571,6 +571,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 untyped=settings.untyped,
                 rules=settings.rules,
                 json_types=settings.json_types,
+                helpers=file_helpers,
             )
             if fixed != parsed.text:
                 path.write_text(fixed, encoding="utf-8")

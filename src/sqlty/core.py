@@ -311,12 +311,15 @@ def fix_source(
     untyped: bool = False,
     rules: dict[str, str] | None = None,
     json_types: str = "typing.Any",
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
     A fix for a rule is not applied to a query whose reported line carries
     ``# sqlty: ignore`` or ``# sqlty: ignore[rule]`` naming that rule, so a
     suppressed ``select-star`` is not expanded. Other rules on the line are fixed.
+    A string passed to a helper with its row type (see ``check_source``) is not wrapped.
 
     Example:
         >>> fix_source('q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]')
@@ -325,7 +328,17 @@ def fix_source(
     Raises:
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
-    parsed = ParsedSource.of(source)
+    parsed = ParsedSource.of(source, module)
+    suppressed: dict[int, list[str] | None] = {
+        line: None if ignore.rules is None else list(ignore.rules)
+        for line, ignore in parsed.ignores.items()
+    }
+    for call in find_helper_calls(parsed, helpers, module):
+        for line in call.typed_lines:
+            if line not in suppressed:
+                suppressed[line] = ["stale-rewrite"]
+            elif (named := suppressed[line]) is not None:
+                named.append("stale-rewrite")
     fixed = _fix_source(
         parsed.text,
         dialect=dialect,
@@ -333,11 +346,7 @@ def fix_source(
         import_style=import_style,
         untyped=untyped,
         rules=rules,
-        suppressed={
-            line: None if ignore.rules is None else list(ignore.rules)
-            for line, ignore in parsed.ignores.items()
-        }
-        or None,
+        suppressed=suppressed or None,
     )
     if json_types == "typing.TypedDict" and fixed != parsed.text:
         from sqlty._json_types import add_json_types
@@ -434,6 +443,7 @@ BREAKING_RULES = (
     "unknown-type",
     "insert-missing-column",
 )
+CODE_RULES = ("stale-rewrite", "unused-ignore")
 
 
 def breaking_source(
@@ -456,7 +466,7 @@ def breaking_source(
     dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
     leaves out, are reported, besides the row type checks. An annotation wider than the
     other schema's rows (``str | None`` for a ``NOT NULL`` column) still reads them, so it
-    is not reported.
+    is not reported. Nor are ``CODE_RULES``, which judge the code rather than the schema.
 
     Example:
         >>> old = "CREATE TABLE users (id INT NOT NULL, bio TEXT)"
@@ -486,7 +496,9 @@ def breaking_source(
     return [
         d
         for d in check(against_sql)
-        if (d.get("line"), d["rule"], d["message"]) not in own and not widens(d)
+        if (d.get("line"), d["rule"], d["message"]) not in own
+        and d["rule"] not in CODE_RULES
+        and not widens(d)
     ]
 
 

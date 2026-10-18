@@ -410,6 +410,10 @@ def diagnostics(
             ),
         )
     found = find_helper_calls(parsed, helpers, module)
+    typed = {line for call in found for line in call.typed_lines}
+    diagnostics = [
+        d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
+    ]
     driver_calls = find_driver_calls(parsed)
     queries = [
         (line, name, query)

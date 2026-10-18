@@ -323,6 +323,34 @@ impl Statement<'_> {
         (!name.is_empty()).then_some((kind, name, action))
     }
 
+    /// The table of a `CREATE TRIGGER ... BEFORE INSERT ... ON table ... FOR EACH ROW`: a
+    /// trigger that may set the columns of each row it inserts.
+    pub(crate) fn before_insert_trigger(&self) -> Option<Vec<String>> {
+        let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        let mut at = pieces.iter().position(|p| is_word(p, "trigger"))? + 1;
+        // Not the first word: MySQL's `DEFINER = ...`, or a `DELIMITER //` line before it.
+        if !pieces[..at].iter().any(|p| is_word(p, "create")) {
+            return None;
+        }
+        if pieces
+            .get(at..at + 3)
+            .is_some_and(|w| is_word(w[0], "if") && is_word(w[1], "not") && is_word(w[2], "exists"))
+        {
+            at += 3;
+        }
+        at += name_parts(&pieces[at..]).1;
+        if !pieces.get(at).is_some_and(|p| is_word(p, "before")) {
+            return None;
+        }
+        let on = at + pieces[at..].iter().position(|p| is_word(p, "on"))?;
+        let for_each_row = pieces[on..]
+            .windows(3)
+            .any(|w| is_word(w[0], "for") && is_word(w[1], "each") && is_word(w[2], "row"));
+        (pieces[at..on].iter().any(|p| is_word(p, "insert")) && for_each_row)
+            .then(|| name_parts(&pieces[on + 1..]).0)
+            .filter(|name| !name.is_empty())
+    }
+
     /// The name parts after the first `keyword` (`function` in `CREATE FUNCTION a.f(...)`).
     pub(crate) fn name_parts_after(&self, keyword: &str) -> Vec<String> {
         let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();

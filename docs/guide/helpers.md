@@ -60,6 +60,22 @@ names = fetch_all("SELECT name FROM users", str)
 rows = fetch_all("SELECT id, name FROM users", tuple[int, int])
 ```
 
+A `--sql` string passed with a row type is typed by it, so
+[`stale-rewrite`](../reference/rules.md#stale-rewrite) doesn't ask to wrap it in
+`SQL[T]`, and `sqlty check --fix` leaves it as it is. Without a row type it is
+still reported:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+
+names = fetch_all("--sql\nSELECT name FROM users", str)
+# error: [stale-rewrite]
+rows = fetch_all("--sql\nSELECT name FROM users")
+```
+
 A helper without such a parameter is still parsed, and `select-star` applies.
 Row types that are not known (a class from another module, `dict`) are not
 checked.

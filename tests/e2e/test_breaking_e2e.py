@@ -91,6 +91,52 @@ def test_paths_limit_the_files_in_both_revisions(cli: Cli, repo: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+HELPER_CONFIG = """\
+[tool.sqlty]
+schema = "schema.sql"
+
+[[tool.sqlty.functions]]
+import-path = "app.db.fetchone"
+query-param = "query"
+return-type-param = "return_cls"
+"""
+HELPER_CODE = """\
+from typing import TypedDict
+
+from app.db import fetchone
+
+
+class User(TypedDict):
+    id: int
+    bio: str
+
+
+def by_helper(conn):
+    return fetchone(conn, "SELECT id, bio FROM users", User)
+"""
+
+
+def test_queries_passed_to_configured_helpers_are_compared(cli: Cli, repo: Path) -> None:
+    (repo / "pyproject.toml").write_text(HELPER_CONFIG)
+    (repo / "app" / "db.py").write_text(
+        "def fetchone(conn, query, return_cls=None, /, **params): ...\n"
+    )
+    commit(
+        repo,
+        "CREATE TABLE users (id INTEGER NOT NULL, bio TEXT NOT NULL);\n",
+        HELPER_CODE,
+        "helpers",
+    )
+    (repo / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, bio TEXT);\n")
+
+    result = cli(["breaking", "--against", "HEAD", "--direction", "backward"], {"cwd": repo})
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert lines(result)[0].startswith(
+        "app/q.py:12: [nullable-mismatch] User.bio is str but query column 'bio' can be NULL (backward: "
+    )
+
+
 def test_output_formats(cli: Cli, repo: Path) -> None:
     args = ["breaking", "--against", "HEAD~1", "--head", "HEAD", "--direction", "forward"]
 
