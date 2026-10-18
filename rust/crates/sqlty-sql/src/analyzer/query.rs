@@ -8,6 +8,8 @@ use sqlparser::ast::{
     SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins, Value,
 };
 
+use sqlparser::tokenizer::Location;
+
 use crate::catalog::fold;
 use crate::diagnostics::{Diagnostics, NameRule};
 use crate::json::JsonShape;
@@ -21,6 +23,7 @@ use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
 use super::scope::{Scope, Table, Virtuals};
+use super::text_names::{item_texts, line_starts, offset, returning_start, text_column_name};
 use super::typed::Typed;
 use super::{Inferred, SchemaData};
 
@@ -115,6 +118,8 @@ pub(super) struct Analyzer<'a> {
     pub(super) facts: Facts,
     /// Where the rules of projected columns go, when `--explain` asked for them.
     pub(super) explain: Option<Explained>,
+    /// The SQL as parsed, for MySQL and SQLite, which name a column by its expression's text.
+    pub(super) source: Option<Rc<str>>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -128,6 +133,7 @@ impl<'a> Analyzer<'a> {
             merged: Rc::default(),
             facts: Facts::default(),
             explain: None,
+            source: None,
         }
     }
 
@@ -160,7 +166,9 @@ impl<'a> Analyzer<'a> {
                                 (analyzer, scope)
                             }
                         };
-                        analyzer.projection(items, &scope, None).map(non_empty)
+                        analyzer
+                            .projection(items, &scope, None, None)
+                            .map(non_empty)
                     }
                     None => Ok(None),
                 }
@@ -360,7 +368,13 @@ impl<'a> Analyzer<'a> {
             analyzer.check_grouping(select, &scope);
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
-        analyzer.projection(&select.projection, &scope, Some(&select.from))
+        let keyword = select.select_token.0.span.start;
+        analyzer.projection(
+            &select.projection,
+            &scope,
+            Some(&select.from),
+            Some(keyword),
+        )
     }
 
     /// Columns of a SELECT or set operation. Names come from the leftmost branch; each
@@ -465,13 +479,28 @@ impl<'a> Analyzer<'a> {
     }
 
     /// One column per result column; a star may yield several, or one unknown `*`
-    /// column when the schema cannot resolve it. `from` is the SELECT's FROM clause.
+    /// column when the schema cannot resolve it. `from` is the SELECT's FROM clause, and
+    /// `keyword` where its `SELECT` is (`None` for `RETURNING`).
     pub(super) fn projection(
         &self,
         items: &[SelectItem],
         scope: &Scope,
         from: Option<&[TableWithJoins]>,
+        keyword: Option<Location>,
     ) -> Inferred<Vec<Column>> {
+        let source = self.source.clone().filter(|_| {
+            items.iter().any(|item| {
+                matches!(item, SelectItem::UnnamedExpr(expr)
+                    if !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)))
+            })
+        });
+        let texts = source.as_deref().and_then(|source| {
+            let start = match keyword {
+                Some(location) => offset(source, &line_starts(source), location)?,
+                None => returning_start(source, self.dialect)?,
+            };
+            item_texts(source, start, self.dialect).filter(|texts| texts.len() == items.len())
+        });
         let mut columns = Vec::new();
         let mut rules = self.explain.as_ref().map(|_| Vec::new());
         let mut lockstep_facts;
@@ -482,9 +511,12 @@ impl<'a> Analyzer<'a> {
         } else {
             &self.facts
         };
-        for item in items {
+        for (index, item) in items.iter().enumerate() {
             let (expr, name) = match item {
-                SelectItem::UnnamedExpr(expr) => (expr, column_name(expr)),
+                SelectItem::UnnamedExpr(expr) => match &texts {
+                    Some(texts) => (expr, text_column_name(expr, texts[index], self.dialect)),
+                    None => (expr, column_name(expr)),
+                },
                 SelectItem::ExprWithAlias { expr, alias } => {
                     (expr, alias_name(alias, self.dialect))
                 }

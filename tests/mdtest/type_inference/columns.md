@@ -189,7 +189,70 @@ dialect = "mysql"
 
 ```sql
 SELECT CAST(id AS SIGNED) FROM users
--- columns: id: int (BIGINT)
+-- columns: CAST(id AS SIGNED): int (BIGINT)
+```
+
+## Unaliased columns in MySQL and SQLite
+
+MySQL and SQLite name an unaliased expression by its text, as written. A column keeps
+its name, also in parentheses or qualified, and MySQL names a string literal by its value.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT max(id), COUNT( * ), id  +  1, 'it''s', "dq", (ID), u.name FROM users u GROUP BY id, name
+-- columns: max(id): int (INT)
+-- columns: COUNT( * ): int (BIGINT)
+-- columns: id  +  1: int (INT)
+-- columns: it's: typing.Literal['it\'s'] (None)
+-- columns: dq: str (None)
+-- columns: ID: int (INT)
+-- columns: name: str (TEXT)
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+```sql
+SELECT max(id), COUNT( * ), id  +  1, 'it''s', (id), u.name FROM users u GROUP BY id, name
+-- columns: max(id): int (INT)
+-- columns: COUNT( * ): int (BIGINT)
+-- columns: id  +  1: int (INT)
+-- columns: 'it''s': typing.Literal['it\'s'] (None)
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+```
+
+### RETURNING in SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+```sql
+INSERT INTO users (id, name) VALUES (1, 'a') RETURNING id * 2, upper(name), id
+-- columns: id * 2: int (INT)
+-- columns: upper(name): str (TEXT)
+-- columns: id: int (INT)
 ```
 
 ## UUID type mapping from SQL to Python

@@ -151,6 +151,7 @@ pub fn analyze_with_diagnostics(
         dialect,
     );
     analyzer.diag = Diagnostics::collecting();
+    analyzer.source = text_source(sql, dialect);
     let columns = analyzer.statement_columns(&stmt);
     (columns, analyzer.diag.items())
 }
@@ -184,4 +185,10 @@ pub fn returns_rows(sql: &str, dialect: &str) -> bool {
         None => true,
         Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
+}
+
+/// The SQL as parsed, in the dialects that name a column by its expression's text.
+pub(super) fn text_source(sql: &str, dialect: SqlDialect) -> Option<std::rc::Rc<str>> {
+    matches!(dialect, SqlDialect::MySql | SqlDialect::Sqlite)
+        .then(|| std::rc::Rc::from(parser_input(sql, dialect)))
 }
