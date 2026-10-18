@@ -56,7 +56,9 @@ lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target (PostgreSQL 17, MySQL 8.4,
 SQLite 3), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
-assertions show which rule typed a column. `rule_dispatch_does_not_allocate`
+assertions show which rule typed a column; every rule needs one, in
+`tests/mdtest/type_inference/rule_coverage.md` if nowhere else
+(`test_every_inference_rule_is_asserted`). `rule_dispatch_does_not_allocate`
 (`analyzer/inference.rs`) keeps rule lookup free of heap allocations.
 
 ## Agent Skills

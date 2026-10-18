@@ -149,7 +149,10 @@ types keeps its schema lookup (`type = "@code"` in a `[[function]]` table).
    cite the section and table. The ISO standard is not freely available, so it
    is not cited.
 3. Delete the `match` arm the rule replaces: a behaviour lives in one place.
-4. Add an mdtest for any case none covers, and run `make test` and
+4. Add a column typed by the rule, with its `-- rules:` assertion, to
+   `tests/mdtest/type_inference/rule_coverage.md`;
+   `test_every_inference_rule_is_asserted` fails until some assertion names it.
+5. Add an mdtest for any case none covers, and run `make test` and
    `make bench-rust`.
 
 ## Design notes
