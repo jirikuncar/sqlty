@@ -549,7 +549,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
-                    print(f"Fixed {path}")
+                    # JSON and annotations own stdout; progress goes to stderr then.
+                    text = args.output_format == "text"
+                    print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
         diagnostics = check_source(
             parsed,
             dialect=settings.dialect,
