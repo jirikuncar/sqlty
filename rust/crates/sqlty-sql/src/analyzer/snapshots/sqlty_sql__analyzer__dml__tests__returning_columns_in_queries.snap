@@ -25,11 +25,12 @@ UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING *
 id: int | SERIAL | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | Nullable
+id: int | INT | Nullable
+extra: int | INT | Nullable
 
 UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING t.id, extra
 id: int | SERIAL | NonNull
-extra: ? | ? | Unknown
-[unsupported-syntax] column `extra` may come from tables joined to the target with FROM or USING, which sqlty does not read the columns of
+extra: int | INT | Nullable
 
 DELETE FROM t USING u WHERE t.id = u.id RETURNING t.*
 id: int | SERIAL | NonNull
