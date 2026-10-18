@@ -246,6 +246,9 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
         return Some(from_sql_type(&format!("ARRAY<{elem}>"), dialect));
     }
     let (a, b) = (category(&left)?, category(&right)?);
+    if dialect == SqlDialect::MySql {
+        return mysql_common_type(a, b).map(|common| from_sql_type(common, dialect));
+    }
     const TEMPORAL: [&str; 3] = ["DATE", "TIMESTAMP", "TIMESTAMPTZ"];
     let common = if let (Some(x), Some(y)) = (numeric_rank(a), numeric_rank(b)) {
         NUMERIC_RANKS[x.max(y)][0]
@@ -262,6 +265,44 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
         return None;
     };
     Some(from_sql_type(common, dialect))
+}
+
+/// MySQL's aggregation of the types of `CASE`, `IF`, `COALESCE` or `UNION` inputs: numbers
+/// widen, temporal types meet at `DATETIME`, a binary string wins and other mixes are text.
+fn mysql_common_type<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
+    const TEMPORAL: [&str; 4] = ["DATE", "TIME", "DATETIME", "TIMESTAMP"];
+    const BINARY: [&str; 6] = [
+        "VARBINARY",
+        "BINARY",
+        "BLOB",
+        "TINYBLOB",
+        "MEDIUMBLOB",
+        "LONGBLOB",
+    ];
+    let rank = |ty: &str| match ty {
+        "BOOLEAN" | "YEAR" => Some(0),
+        _ => numeric_rank(
+            ty.strip_prefix('U')
+                .filter(|signed| numeric_rank(signed).is_some())
+                .unwrap_or(ty),
+        ),
+    };
+    let known = |ty: &str| {
+        rank(ty).is_some()
+            || TEMPORAL.contains(&ty)
+            || BINARY.contains(&ty)
+            || matches!(ty, "TEXT" | "VARCHAR" | "CHAR" | "JSON")
+    };
+    if !known(a) || !known(b) {
+        return None;
+    }
+    Some(match (rank(a), rank(b)) {
+        (Some(x), Some(y)) => NUMERIC_RANKS[x.max(y)][0],
+        _ if a == b => a,
+        _ if TEMPORAL.contains(&a) && TEMPORAL.contains(&b) => "DATETIME",
+        _ if BINARY.contains(&a) || BINARY.contains(&b) => "VARBINARY",
+        _ => "TEXT",
+    })
 }
 
 /// A string literal: PostgreSQL types it `unknown` until the other inputs decide.

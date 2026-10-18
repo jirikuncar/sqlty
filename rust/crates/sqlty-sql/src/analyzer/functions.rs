@@ -602,7 +602,7 @@ impl<'a> Analyzer<'a> {
                 for expr in args {
                     typed_args.push(self.expr(expr, scope)?);
                 }
-                if self.dialect == SqlDialect::Postgres {
+                if matches!(self.dialect, SqlDialect::Postgres | SqlDialect::MySql) {
                     if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
                         return Ok(common);
                     }
