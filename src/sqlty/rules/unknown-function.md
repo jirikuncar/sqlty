@@ -46,4 +46,4 @@ fail, or turn it off:
 unknown-function = "error"
 ```
 
-Only checked when a schema with tables is configured: without one every user function would be unknown. User-defined functions in the schema file are not read yet, so they are reported too.
+Only checked when a schema with tables is configured: without one every user function would be unknown. A function the schema declares with `CREATE FUNCTION` is known.
