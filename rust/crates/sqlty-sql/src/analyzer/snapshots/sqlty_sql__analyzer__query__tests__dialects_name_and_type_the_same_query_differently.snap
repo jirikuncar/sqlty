@@ -10,15 +10,15 @@ total: int | BIGINT | NonNull
 
 mysql:
 SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
-id: int | INT | NonNull
+Id: int | INT | NonNull
 Total: int | BIGINT | NonNull
-?column?: int | INT | NonNull
+id + 1: int | INT | NonNull
 
 sqlite:
 SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id
 id: int | INT | NonNull
 Total: int | BIGINT | NonNull
-?column?: int | INT | NonNull
+id + 1: int | INT | NonNull
 
 clickhouse:
 SELECT Id, COUNT(*) AS Total, id + 1 FROM t GROUP BY Id

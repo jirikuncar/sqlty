@@ -122,7 +122,9 @@ is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, th
 target of a cast of an unnamed value (`1::int` is `int4`, `'a'::text` is `text`,
 `true::bool` is `bool`), else `?column?` (a plain `true` too). A `CASE` takes the name of its `ELSE`
 expression, if it has one. A `VALUES` list has the columns `column1`,
-`column2`, .... Alias columns that a row type matches by name.
+`column2`, .... MySQL and SQLite name an unaliased expression by its text instead
+(`max(id)`, `1 + 1`), a column by its name, and MySQL a string literal by its value.
+Alias columns that a row type matches by name.
 
 A column that can be NULL is typed `T | None`; see
 [Nullability](schema-inference.md#nullability). Annotate the field of a
