@@ -326,3 +326,18 @@ SELECT EXPORT_SET(5, 'Y', 'N') AS a, MAKE_SET(1, 'a', 'b') AS b, GET_FORMAT(DATE
 -- columns: k: int | None (BIGINT)
 -- columns: l: int (UBIGINT)
 ```
+
+## Bitwise operators
+
+Bit operations on numbers give an unsigned 64-bit integer.
+
+```sql
+SELECT id & 3 AS a, id | 4 AS b, id ^ 1 AS c, ~id AS d, id << 1 AS e, id >> 1 AS f, price | 1 AS g FROM events
+-- columns: a: int (UBIGINT)
+-- columns: b: int (UBIGINT)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (UBIGINT)
+-- columns: e: int (UBIGINT)
+-- columns: f: int (UBIGINT)
+-- columns: g: int (UBIGINT)
+```
