@@ -28,6 +28,16 @@ impl Loader {
         let mut rename = None;
         let mut failed = None;
         for op in &alter.operations {
+            if let AlterTableOperation::AddConstraint {
+                constraint: TableConstraint::ForeignKey(fk),
+                not_valid,
+            } = op
+            {
+                if let Some(fk) = self.foreign_key(fk, &fk.columns, &key, &root, path, !not_valid) {
+                    root.foreign_keys.push(fk);
+                }
+                continue;
+            }
             if let Err(fail) = alter_op(&mut root, op, true, &mut rename, self.dialect) {
                 failed = Some(fail);
                 break;
@@ -312,18 +322,43 @@ pub(super) fn alter_op(
                 .extend(nonnull_groups(&check.expr, dialect));
         }
         // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
-        AlterTableOperation::DropConstraint { .. } => {
+        AlterTableOperation::DropConstraint { name, .. } => {
             for column in &mut table.columns {
                 column.values = None;
             }
             table.nonnull_groups.clear();
+            drop_foreign_key(table, &fold(name, dialect));
         }
+        AlterTableOperation::DropForeignKey { name, .. } => {
+            drop_foreign_key(table, &fold(name, dialect));
+        }
+        AlterTableOperation::ValidateConstraint { name } => {
+            let name = fold(name, dialect);
+            for fk in &mut table.foreign_keys {
+                fk.validated |= fk.name.as_ref() == Some(&name);
+            }
+        }
+        AlterTableOperation::EnableRowLevelSecurity => table.row_security = true,
+        AlterTableOperation::DisableRowLevelSecurity => table.row_security = false,
         AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
         // Storage, options, tablespace, triggers, RLS, partitions, comments and the like
         // never change a column.
         _ => {}
     }
     Ok(())
+}
+
+/// Drop the foreign key `name`. A key declared without a name has one the database
+/// generates, so a name that matches none may be it: those are dropped too.
+fn drop_foreign_key(table: &mut RawTable, name: &str) {
+    let named = table
+        .foreign_keys
+        .iter()
+        .any(|fk| fk.name.as_deref() == Some(name));
+    table.foreign_keys.retain(|fk| match &fk.name {
+        Some(own) => own != name,
+        None => named,
+    });
 }
 
 /// Whether an `ALTER TABLE` that sqlparser cannot read may change the table's columns,
