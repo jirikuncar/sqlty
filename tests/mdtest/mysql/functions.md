@@ -330,9 +330,34 @@ SELECT CONVERT(name, CHAR) AS a, CONVERT(id, SIGNED) AS b, CONVERT(name USING ut
 -- columns: a: str (CHAR)
 -- columns: b: int (BIGINT)
 -- columns: c: str (VARCHAR(50))
--- columns: d: str | None (VARCHAR(50))
+-- columns: d: str (VARCHAR(50))
 -- columns: e: typing.Any (JSON)
 -- columns: f: str | None (TEXT)
+```
+
+## `ANY_VALUE`
+
+`ANY_VALUE` is not an aggregate in MySQL: it reads its argument in each row,
+or in each group of a `GROUP BY`. A query that calls only `ANY_VALUE` returns
+a row per row, so the column is as nullable as the argument. With another
+aggregate and no `GROUP BY`, the one group can be empty, and the value is `NULL`.
+
+```sql
+SELECT ANY_VALUE(name) AS a, ANY_VALUE(note) AS b FROM events
+-- columns: a: str (VARCHAR(50))
+-- columns: b: str | None (VARCHAR(50))
+```
+
+```sql
+SELECT ANY_VALUE(name) AS a, COUNT(*) AS c FROM events
+-- columns: a: str | None (VARCHAR(50))
+-- columns: c: int (BIGINT)
+```
+
+```sql
+SELECT day, ANY_VALUE(name) AS a FROM events GROUP BY day
+-- columns: day: datetime.date (DATE)
+-- columns: a: str (VARCHAR(50))
 ```
 
 ## Integer division, unsigned arithmetic and introducers
