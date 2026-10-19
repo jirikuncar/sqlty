@@ -536,3 +536,17 @@ SELECT ST_Collect(spot) AS a FROM places
 -- columns: a: bytes | None (GEOMETRY)
 -- rules: a: mysql.spatial.collect / mysql.spatial.collect
 ```
+
+## The `!` operator
+
+`!x` is `NOT x` on its operand alone: it binds tighter than any infix
+operator, so `!id + 1` is `(NOT id) + 1`. `!=` is still not-equal.
+
+```sql
+SELECT !note AS a, !(id > 1) AS b, !id + 1 AS c, !events.id AS d, !ISNULL(note) AS e FROM events WHERE id != 2
+-- columns: a: bool | None (BOOLEAN)
+-- columns: b: bool (BOOLEAN)
+-- columns: c: int (BIGINT)
+-- columns: d: bool (BOOLEAN)
+-- columns: e: bool (BOOLEAN)
+```
