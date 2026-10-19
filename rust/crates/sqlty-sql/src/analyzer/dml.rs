@@ -1,8 +1,9 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
 use sqlparser::ast::{
-    AssignmentTarget, FromTable, ObjectName, OnConflict, OnConflictAction, OnInsert, OutputClause,
-    Query, SelectItem, SetExpr, Statement, TableObject, TableWithJoins, UpdateTableFromKind,
+    AssignmentTarget, Expr, FromTable, Ident, ObjectName, OnConflict, OnConflictAction, OnInsert,
+    OutputClause, Query, SelectItem, SetExpr, Statement, TableObject, TableWithJoins,
+    UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -57,6 +58,24 @@ pub(super) fn joined_tables(stmt: &Statement) -> Option<&[TableWithJoins]> {
             }
         }),
         Statement::Delete(delete) => delete.using.as_deref(),
+        _ => None,
+    }
+}
+
+/// The tables MySQL's multi-table UPDATE and DELETE join, the targets among them.
+fn multi_table(stmt: &Statement) -> Option<&[TableWithJoins]> {
+    match stmt {
+        Statement::Update(update) if !update.table.joins.is_empty() => {
+            Some(std::slice::from_ref(&update.table))
+        }
+        Statement::Delete(delete) => match &delete.from {
+            FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables)
+                if tables.len() > 1 || tables.iter().any(|table| !table.joins.is_empty()) =>
+            {
+                Some(tables)
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -274,18 +293,22 @@ impl Analyzer<'_> {
         for source in &scope {
             self.check_table(&source.table);
         }
-        // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING.
-        let from = joined_tables(stmt);
-        let targets = scope
-            .iter()
-            .filter(|source| !matches!(source.table, Table::ExtraSources))
-            .cloned();
-        let (analyzer, scope) = match from {
-            Some(from) => match self.scope_of(from) {
-                Ok((analyzer, joined)) => (analyzer, targets.chain(joined).collect()),
-                Err(_) => return,
-            },
-            None => (self.clone(), scope),
+        // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING,
+        // and those MySQL's multi-table UPDATE and DELETE join, targets included.
+        let multi = multi_table(stmt);
+        let (analyzer, scope) = match (multi, joined_tables(stmt)) {
+            (None, None) => (self.clone(), scope),
+            (multi, from) => {
+                let tables: Vec<TableWithJoins> =
+                    multi.into_iter().chain(from).flatten().cloned().collect();
+                let Ok((analyzer, joined)) = self.scope_of(&tables) else {
+                    return;
+                };
+                let targets = scope.iter().filter(|source| {
+                    multi.is_none() && !matches!(source.table, Table::ExtraSources)
+                });
+                (analyzer, targets.cloned().chain(joined).collect())
+            }
         };
         let check = |expr| analyzer.check_references(expr, &scope);
         match stmt {
@@ -348,15 +371,34 @@ impl Analyzer<'_> {
                 }
             }
             Statement::Update(update) => {
-                if let sqlparser::ast::TableFactor::Table { name, .. } = &update.table.relation {
-                    let targets: Vec<ObjectName> = update
-                        .assignments
-                        .iter()
-                        .flat_map(|assignment| match &assignment.target {
-                            AssignmentTarget::ColumnName(column) => vec![column.clone()],
-                            AssignmentTarget::Tuple(columns) => columns.clone(),
-                        })
-                        .collect();
+                let targets: Vec<ObjectName> = update
+                    .assignments
+                    .iter()
+                    .flat_map(|assignment| match &assignment.target {
+                        AssignmentTarget::ColumnName(column) => vec![column.clone()],
+                        AssignmentTarget::Tuple(columns) => columns.clone(),
+                    })
+                    .collect();
+                // A target of a join is a column of any of its tables.
+                if multi.is_some() {
+                    for target in targets {
+                        let idents: Option<Vec<Ident>> = target
+                            .0
+                            .iter()
+                            .map(|part| part.as_ident().cloned())
+                            .collect();
+                        let expr = match idents {
+                            Some(mut idents) if idents.len() == 1 => {
+                                Expr::Identifier(idents.remove(0))
+                            }
+                            Some(idents) => Expr::CompoundIdentifier(idents),
+                            None => continue,
+                        };
+                        analyzer.check_references(&expr, &scope);
+                    }
+                } else if let sqlparser::ast::TableFactor::Table { name, .. } =
+                    &update.table.relation
+                {
                     self.check_target_columns(name, &targets);
                 }
                 update.assignments.iter().for_each(|a| check(&a.value));
