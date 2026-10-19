@@ -103,7 +103,8 @@ row type unknown: the string is left as it is (`SQL[UNTYPED]` with
 Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
 wider type. MySQL converts each operand to a number first, as the server does:
 unsigned, `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles,
-so `text_col + 0` is `float`. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
+so `text_col + 0` is `float`. SQLite converts a string or blob to an integer or a real,
+typed `float`, and reads a `BOOLEAN` as an integer. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
 `greatest`, `unnest` and the advisory locks are typed too. In PostgreSQL, `CASE`,
 `COALESCE`, `GREATEST`, `LEAST`, `VALUES`, `ARRAY[...]` and `UNION` resolve one type
 for their inputs as the server does: string literals and `NULL` take the type of

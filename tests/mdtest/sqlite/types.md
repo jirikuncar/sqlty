@@ -92,6 +92,32 @@ from sqlty import SQL
 q = SQL[tuple[int, object, object]]("--sql\nSELECT id, payload, extra FROM t")
 ```
 
+## Arithmetic converts operands to numbers
+
+SQLite computes with a string or blob converted to an integer or a real, typed `float`
+since either fits it, and with a `BOOLEAN` as the integer it is stored as. Unary `+`
+changes nothing, and arithmetic on dates stays untyped (see
+[date arithmetic](date_arithmetic.md)).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (i INTEGER NOT NULL, tx TEXT NOT NULL, b BLOB, d DATE NOT NULL, bo BOOLEAN NOT NULL);
+```
+
+```sql
+SELECT tx + 1 AS a, i * b AS b, d - 1 AS c, bo + 1 AS d, i / tx AS e, -tx AS f, +tx AS g, abs(b) AS h, sum(tx) AS i FROM t
+-- columns: a: float (DOUBLE)
+-- columns: b: float | None (DOUBLE)
+-- columns: c: None (None)
+-- columns: d: int (BIGINT)
+-- columns: e: float | None (DOUBLE)
+-- columns: f: float (DOUBLE)
+-- columns: g: str (TEXT)
+-- columns: h: float | None (DOUBLE)
+-- columns: i: float | None (DOUBLE)
+```
+
 ## VALUES lists
 
 A `VALUES` list has the columns `column1`, `column2`, ..., each typed by the types of its

@@ -1,0 +1,54 @@
+# SQLite arithmetic. SQLite converts a string or blob operand to an integer or a real,
+# typed as a real, and a `BOOLEAN`, stored as 0 or 1, is an integer (analyzer/operators.rs,
+# `sqlite_numeric_rank`). Arithmetic on dates, stored as text or numbers, stays untyped.
+
+[[rule]]
+id = "sqlite.arithmetic.converted"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["sqlite"]
+left = ["BOOLEAN", "@text", "@binary"]
+right = ["@numeric", "BOOLEAN", "@text", "@binary"]
+type = "@promote"
+reference = "SQLite documentation, Datatypes In SQLite, 5 Operators (Mathematical operators (+, -, *, /, %, <<, >>, &, and |) interpret both operands as if they were numbers. STRING or BLOB operands automatically convert into REAL or INTEGER values)"
+reasoning = "SQLite computes with a string or blob converted to an integer or a real, typed as a real since either fits a Python float, and a boolean as the integer it is stored as."
+
+[[rule]]
+id = "sqlite.arithmetic.converted-right"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["sqlite"]
+left = ["@numeric"]
+right = ["BOOLEAN", "@text", "@binary"]
+type = "@promote"
+reference = "SQLite documentation, Datatypes In SQLite, 5 Operators (Mathematical operators (+, -, *, /, %, <<, >>, &, and |) interpret both operands as if they were numbers. STRING or BLOB operands automatically convert into REAL or INTEGER values)"
+reasoning = "A number with a string, blob or boolean converted to a number has the wider of their types."
+
+[[rule]]
+id = "sqlite.arithmetic.division-converted"
+operators = ["Divide", "Modulo"]
+dialects = ["sqlite"]
+left = ["BOOLEAN", "@text", "@binary"]
+right = ["@numeric", "BOOLEAN", "@text", "@binary"]
+type = "@promote"
+nullability = "nonzero-divisor"
+reference = "SQLite documentation, Datatypes In SQLite, 5 Operators (Mathematical operators (+, -, *, /, %, <<, >>, &, and |) interpret both operands as if they were numbers. STRING or BLOB operands automatically convert into REAL or INTEGER values); SQL Language Expressions, 2 Operators (the result of any binary operator is either a numeric value or NULL)"
+reasoning = "Division of the operands converted to numbers has their wider type, and is NULL for a zero divisor."
+
+[[rule]]
+id = "sqlite.arithmetic.division-converted-right"
+operators = ["Divide", "Modulo"]
+dialects = ["sqlite"]
+left = ["@numeric"]
+right = ["BOOLEAN", "@text", "@binary"]
+type = "@promote"
+nullability = "nonzero-divisor"
+reference = "SQLite documentation, Datatypes In SQLite, 5 Operators (Mathematical operators (+, -, *, /, %, <<, >>, &, and |) interpret both operands as if they were numbers. STRING or BLOB operands automatically convert into REAL or INTEGER values); SQL Language Expressions, 2 Operators (the result of any binary operator is either a numeric value or NULL)"
+reasoning = "Division by a string, blob or boolean converted to a number has the wider type, and is NULL for a zero divisor."
+
+[[rule]]
+id = "sqlite.arithmetic.negate-converted"
+operator = "Prefix:Minus"
+dialects = ["sqlite"]
+right = ["@text", "@binary"]
+type = "DOUBLE"
+reference = "SQLite documentation, Datatypes In SQLite, 5 Operators (STRING or BLOB operands automatically convert into REAL or INTEGER values)"
+reasoning = "Negating a string or blob negates the integer or real it converts to, typed as a real."
