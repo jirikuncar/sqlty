@@ -67,3 +67,16 @@ read as the closest syntax it does.
 a = "--sql\nSET CONSTRAINTS ALL DEFERRED"
 b = "--sql\nSET CONSTRAINTS orders_user_id_fkey, public.items_order_id_fkey IMMEDIATE"
 ```
+
+## Syntax of another dialect
+
+Each dialect's own syntax that sqlparser does not read, such as MySQL's infix
+`MOD` or SQLite's `a IS b`, is read only in that dialect. In PostgreSQL both are
+syntax errors.
+
+```python
+# error: [unparsed-query] "found: 2"
+a = "--sql\nSELECT 5 MOD 2"
+# error: [unparsed-query] "found: 2"
+b = "--sql\nSELECT 5 IS 2"
+```
