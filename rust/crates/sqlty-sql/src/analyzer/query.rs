@@ -232,16 +232,14 @@ impl<'a> Analyzer<'a> {
         self.query_body(query)
     }
 
-    /// The columns of a recursive CTE's anchor, the leftmost branch: a `VALUES` list
-    /// outside PostgreSQL has columns of unknown type.
+    /// The columns of a recursive CTE's anchor, the leftmost branch: a `VALUES` list of
+    /// another dialect has columns of unknown type.
     fn anchor_columns(&self, body: &SetExpr) -> Inferred<Option<Vec<Column>>> {
         Ok(match body {
             SetExpr::Select(select) => Some(self.select_columns(select)?),
             SetExpr::SetOperation { left, .. } => self.anchor_columns(left)?,
             SetExpr::Query(query) => self.anchor_columns(&query.body)?,
-            SetExpr::Values(values) if self.dialect == SqlDialect::Postgres => {
-                Some(self.values_columns(values)?)
-            }
+            SetExpr::Values(values) if self.types_values() => Some(self.values_columns(values)?),
             SetExpr::Values(values) => {
                 let width = values.rows.first().map_or(0, |row| row.content.len());
                 Some(
@@ -386,7 +384,7 @@ impl<'a> Analyzer<'a> {
             branches.push(match branch {
                 SetExpr::Select(select) => Some(self.select_columns(select)?),
                 SetExpr::Query(query) => self.query_columns(query)?,
-                SetExpr::Values(values) if self.dialect == SqlDialect::Postgres => {
+                SetExpr::Values(values) if self.types_values() => {
                     Some(self.values_columns(values)?)
                 }
                 other => {
@@ -446,8 +444,17 @@ impl<'a> Analyzer<'a> {
         Ok(Some(columns))
     }
 
-    /// Columns of a `VALUES` list: `column1`, `column2`, ..., each typed by the common
-    /// type of its rows (`VALUES (1), (2.5)` is `NUMERIC`) and nullable when a row's is.
+    /// Whether the dialect's `VALUES` lists are typed: those whose column names are known.
+    fn types_values(&self) -> bool {
+        matches!(
+            self.dialect,
+            SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
+        )
+    }
+
+    /// Columns of a `VALUES` list: `column1`, `column2`, ... (MySQL's `column_0`,
+    /// `column_1`, ...), each typed by the common type of its rows (`VALUES (1), (2.5)` is
+    /// `NUMERIC`) and nullable when a row's is.
     fn values_columns(&self, values: &sqlparser::ast::Values) -> Inferred<Vec<Column>> {
         let (analyzer, scope) = self.scope_of(&[])?;
         let width = values.rows.first().map_or(0, |row| row.content.len());
@@ -470,7 +477,10 @@ impl<'a> Analyzer<'a> {
                 };
             }
             columns.push(Column::from_typed(
-                format!("column{}", index + 1),
+                match self.dialect {
+                    SqlDialect::MySql => format!("column_{index}"),
+                    _ => format!("column{}", index + 1),
+                },
                 common_of(types, self.dialect).unwrap_or(Typed::UNKNOWN),
                 nullability,
             ));
@@ -962,8 +972,27 @@ mod tests {
             "VALUES (1) UNION SELECT id FROM a",
         ];
         let postgres = reports(&queries, "postgres", Some(DDL));
-        let mysql = reports(&queries[..1], "mysql", None);
-        insta::assert_snapshot!(format!("postgres:\n{postgres}\nmysql:\n{mysql}"));
+        let mysql = reports(
+            &[
+                "VALUES ROW(1, 'a'), ROW(2, NULL)",
+                "SELECT * FROM (VALUES ROW(1, 'a')) AS v",
+                "SELECT column_1 FROM (VALUES ROW(1, 'a')) AS v",
+                "SELECT a FROM (VALUES ROW(1, 'a')) AS v(a, b)",
+            ],
+            "mysql",
+            None,
+        );
+        let sqlite = reports(
+            &[
+                "VALUES (1, 'a'), (2, 2.5)",
+                "SELECT * FROM (VALUES (1, NULL))",
+            ],
+            "sqlite",
+            None,
+        );
+        insta::assert_snapshot!(format!(
+            "postgres:\n{postgres}\nmysql:\n{mysql}\nsqlite:\n{sqlite}"
+        ));
     }
 
     #[test]

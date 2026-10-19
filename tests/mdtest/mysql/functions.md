@@ -383,6 +383,24 @@ SELECT EXPORT_SET(5, 'Y', 'N') AS a, MAKE_SET(1, 'a', 'b') AS b, GET_FORMAT(DATE
 -- columns: l: int (UBIGINT)
 ```
 
+## SOUNDS LIKE, INTERVAL() and LOCK IN SHARE MODE
+
+`a SOUNDS LIKE b` compares `SOUNDEX(a) = SOUNDEX(b)`. `INTERVAL(n, n1, n2, ...)` is the
+index of the first bound above `n`, and -1 when `n` is `NULL`. `LOCK IN SHARE MODE` is
+the older spelling of `FOR SHARE`. A built-in function's name may be quoted.
+
+```sql
+SELECT name SOUNDS LIKE 'Robert' AS a, note SOUNDS LIKE name AS b, INTERVAL(id, 1, 10, 100) AS c, `CONCAT`(name, note) AS d FROM events LOCK IN SHARE MODE
+-- columns: a: bool (BOOLEAN)
+-- columns: b: bool | None (BOOLEAN)
+-- columns: c: int (INT)
+-- columns: d: str | None (TEXT)
+-- rules: a: common.comparison / common.comparison
+-- rules: b: common.comparison / common.comparison
+-- rules: c: mysql.misc.interval / mysql.misc.interval
+-- rules: d: mysql.string.text / mysql.string.text
+```
+
 ## Bitwise operators
 
 Bit operations on numbers give an unsigned 64-bit integer.

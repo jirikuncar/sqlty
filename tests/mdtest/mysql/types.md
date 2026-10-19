@@ -406,3 +406,33 @@ SELECT d + INTERVAL 1 DAY AS a, INTERVAL 1 MONTH + d AS b, d - INTERVAL 1 HOUR A
 -- columns: f: None (None)
 -- columns: g: None (None)
 ```
+
+## VALUES lists
+
+A `VALUES` list has the columns `column_0`, `column_1`, ..., each typed by the common
+type of its rows and nullable when a row's value is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INT NOT NULL, name VARCHAR(10));
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM (VALUES ROW(1, 'a', 1.5), ROW(2, NULL, 2)) AS v
+-- columns: column_0: typing.Literal[1, 2] (None)
+-- columns: column_1: typing.Literal['a'] | None (None)
+-- columns: column_2: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT v.a, v.b FROM (VALUES ROW((SELECT max(id) FROM t), (SELECT name FROM t LIMIT 1))) AS v(a, b)
+-- columns: a: int | None (INT)
+-- columns: b: str | None (VARCHAR(10))
+```

@@ -119,12 +119,15 @@ impl<'a> Analyzer<'a> {
 
     /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a
     /// `pg_catalog.` qualifier names the same built-in, and a quoted name that is not lower
-    /// case (`"LOWER"`) is no built-in at all.
+    /// case (`"LOWER"`) is no built-in at all. Elsewhere a quoted name is the built-in's.
     pub(super) fn builtin_name(&self, name: &ObjectName) -> String {
-        if self.dialect != SqlDialect::Postgres {
-            return name.to_string().to_uppercase();
-        }
         let idents: Vec<&Ident> = name.0.iter().filter_map(|part| part.as_ident()).collect();
+        if self.dialect != SqlDialect::Postgres {
+            return match idents.as_slice() {
+                [only] => only.value.to_uppercase(),
+                _ => name.to_string().to_uppercase(),
+            };
+        }
         let bare = match idents.as_slice() {
             [only] => only,
             [schema, last] if fold(schema, self.dialect) == "pg_catalog" => last,

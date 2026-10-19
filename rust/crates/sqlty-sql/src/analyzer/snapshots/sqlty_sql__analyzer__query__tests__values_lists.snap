@@ -1,6 +1,6 @@
 ---
 source: crates/sqlty-sql/src/analyzer/query.rs
-expression: "format!(\"postgres:\\n{postgres}\\nmysql:\\n{mysql}\")"
+expression: "format!(\"postgres:\\n{postgres}\\nmysql:\\n{mysql}\\nsqlite:\\n{sqlite}\")"
 ---
 postgres:
 VALUES (1, 'a'), (2, 'b')
@@ -27,6 +27,25 @@ VALUES (1) UNION SELECT id FROM a
 column1: int | INT | NonNull
 
 mysql:
-VALUES (1, 'a'), (2, 'b')
-no rows
-[unsupported-syntax] a VALUES list is not typed
+VALUES ROW(1, 'a'), ROW(2, NULL)
+column_0: typing.Literal[1, 2] | ? | NonNull
+column_1: typing.Literal['a'] | ? | Nullable
+
+SELECT * FROM (VALUES ROW(1, 'a')) AS v
+column_0: typing.Literal[1] | ? | NonNull
+column_1: typing.Literal['a'] | ? | NonNull
+
+SELECT column_1 FROM (VALUES ROW(1, 'a')) AS v
+column_1: typing.Literal['a'] | ? | NonNull
+
+SELECT a FROM (VALUES ROW(1, 'a')) AS v(a, b)
+a: typing.Literal[1] | ? | NonNull
+
+sqlite:
+VALUES (1, 'a'), (2, 2.5)
+column1: typing.Literal[1, 2] | ? | NonNull
+column2: str | float | ? | NonNull
+
+SELECT * FROM (VALUES (1, NULL))
+column1: typing.Literal[1] | ? | NonNull
+column2: ? | ? | Nullable

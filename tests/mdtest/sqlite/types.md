@@ -117,3 +117,30 @@ SELECT tx + 1 AS a, i * b AS b, d - 1 AS c, bo + 1 AS d, i / tx AS e, -tx AS f, 
 -- columns: h: float | None (DOUBLE)
 -- columns: i: float | None (DOUBLE)
 ```
+
+## VALUES lists
+
+A `VALUES` list has the columns `column1`, `column2`, ..., each typed by the types of its
+rows and nullable when a row's value is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INTEGER NOT NULL, name TEXT);
+```
+
+```sql
+SELECT * FROM (VALUES (1, 'a'), (2, NULL))
+-- columns: column1: typing.Literal[1, 2] (None)
+-- columns: column2: typing.Literal['a'] | None (None)
+```
+
+```sql
+SELECT column1 FROM (VALUES (1), (2.5)) AS v
+-- columns: column1: float (DOUBLE)
+```
+
+```sql
+SELECT column1 AS a FROM (VALUES ((SELECT name FROM t LIMIT 1)))
+-- columns: a: str | None (TEXT)
+```
