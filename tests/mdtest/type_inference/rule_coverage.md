@@ -1003,7 +1003,7 @@ SELECT
 ```
 
 ```sql
-SELECT ST_Distance(ST_GeomFromText('POINT(1 1)'), ST_GeomFromText('POINT(2 2)')) AS spatial_double
+SELECT ST_Area(ST_GeomFromText('POLYGON((0 0,0 2,2 2,2 0,0 0))')) AS spatial_double
 -- rules: spatial_double: mysql.spatial.double / mysql.spatial.double
 ```
 

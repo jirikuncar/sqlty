@@ -373,3 +373,124 @@ SELECT id & 3 AS a, id | 4 AS b, id ^ 1 AS c, ~id AS d, id << 1 AS e, id >> 1 AS
 -- columns: f: int (UBIGINT)
 -- columns: g: int (UBIGINT)
 ```
+
+## Strings and JSON, more functions
+
+`CHAR` skips `NULL` codes, so it is never `NULL`. `LOAD_FILE` is `NULL` for a
+file the server cannot read.
+
+```sql
+SELECT CHAR(id) AS a, CHARACTER_LENGTH(name) AS b, MID(name, 1, 2) AS c, LOAD_FILE(name) AS d, JSON_MERGE(doc, doc) AS e, JSON_SCHEMA_VALIDATION_REPORT('{}', doc) AS f FROM events
+-- columns: a: bytes (VARBINARY)
+-- columns: b: int (INT)
+-- columns: c: str (TEXT)
+-- columns: d: bytes | None (VARBINARY)
+-- columns: e: typing.Any (JSON)
+-- columns: f: typing.Any (JSON)
+-- rules: a: mysql.string.char / mysql.string.char
+-- rules: b: mysql.string.character-length / mysql.string.character-length
+-- rules: c: mysql.string.string / mysql.string.string
+-- rules: d: mysql.string.load-file / mysql.string.load-file
+-- rules: e: mysql.json.merge / mysql.json.merge
+-- rules: f: mysql.json.validation-report / mysql.json.validation-report
+```
+
+## Locks, replication and digests
+
+```sql
+SELECT GET_LOCK(name, 0) AS a, IS_USED_LOCK(name) AS b, RELEASE_ALL_LOCKS() AS c, PS_CURRENT_THREAD_ID() AS d, FORMAT_BYTES(id) AS e, GTID_SUBSET(name, name) AS f, GTID_SUBTRACT(name, name) AS g FROM events
+-- columns: a: int | None (INT)
+-- columns: b: int | None (UBIGINT)
+-- columns: c: int (UBIGINT)
+-- columns: d: int | None (UBIGINT)
+-- columns: e: str (TEXT)
+-- columns: f: int (BIGINT)
+-- columns: g: str (TEXT)
+-- rules: a: mysql.system.lock / mysql.system.lock
+-- rules: b: mysql.system.lock-owner / mysql.system.lock-owner
+-- rules: c: mysql.system.release-all-locks / mysql.system.release-all-locks
+-- rules: d: mysql.system.thread-id / mysql.system.thread-id
+-- rules: e: mysql.system.format / mysql.system.format
+-- rules: f: mysql.system.gtid-subset / mysql.system.gtid-subset
+-- rules: g: mysql.system.gtid-subtract / mysql.system.gtid-subtract
+```
+
+```sql
+SELECT SOURCE_POS_WAIT(name, id) AS a, ROLES_GRAPHML() AS b, STATEMENT_DIGEST(name) AS c, UNCOMPRESSED_LENGTH(name) AS d, VALIDATE_PASSWORD_STRENGTH(name) AS e FROM events
+-- columns: a: int | None (BIGINT)
+-- columns: b: str | None (TEXT)
+-- columns: c: str (TEXT)
+-- columns: d: int (INT)
+-- columns: e: int (INT)
+-- rules: a: mysql.system.source-pos-wait / mysql.system.source-pos-wait
+-- rules: b: mysql.system.roles-graphml / mysql.system.roles-graphml
+-- rules: c: mysql.encryption.digest / mysql.encryption.digest
+-- rules: d: mysql.encryption.int / mysql.encryption.int
+-- rules: e: mysql.encryption.int / mysql.encryption.int
+```
+
+## Spatial functions
+
+A geometry is returned as bytes, in MySQL's internal format: a 4-byte SRID
+followed by the WKB. A relation between geometries is `NULL` when one of them
+is empty, and so is a part of a geometry that has no such part.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE places (
+    id INT NOT NULL PRIMARY KEY,
+    spot POINT NOT NULL,
+    area POLYGON NOT NULL,
+    route LINESTRING NOT NULL,
+    shape GEOMETRY
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ST_Contains(area, spot) AS a, MBRWithin(spot, area) AS b, ST_Distance(spot, area) AS c, ST_X(spot) AS d, ST_X(spot, 2) AS e, ST_NumPoints(route) AS f, ST_IsEmpty(shape) AS g FROM places
+-- columns: a: int | None (INT)
+-- columns: b: int | None (INT)
+-- columns: c: float | None (DOUBLE)
+-- columns: d: float (DOUBLE)
+-- columns: e: bytes (GEOMETRY)
+-- columns: f: int | None (INT)
+-- columns: g: int | None (INT)
+-- rules: a: mysql.spatial.relation / mysql.spatial.relation
+-- rules: b: mysql.spatial.relation / mysql.spatial.relation
+-- rules: c: mysql.spatial.double-nullable / mysql.spatial.double-nullable
+-- rules: d: mysql.spatial.double / mysql.spatial.double
+-- rules: e: mysql.spatial.set-coordinate / mysql.spatial.set-coordinate
+-- rules: f: mysql.spatial.int-nullable / mysql.spatial.int-nullable
+-- rules: g: mysql.spatial.int / mysql.spatial.int
+```
+
+```sql
+SELECT Point(1, 2) AS a, ST_GeomFromText('POINT(1 1)') AS b, ST_Centroid(area) AS c, ST_AsText(spot) AS d, ST_AsBinary(spot) AS e, ST_AsGeoJSON(spot) AS f, ST_LatFromGeoHash('s0') AS g FROM places
+-- columns: a: bytes (POINT)
+-- columns: b: bytes (GEOMETRY)
+-- columns: c: bytes | None (GEOMETRY)
+-- columns: d: str (TEXT)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: typing.Any (JSON)
+-- columns: g: float (DOUBLE)
+-- rules: a: mysql.spatial.point / mysql.spatial.point
+-- rules: b: mysql.spatial.geometry / mysql.spatial.geometry
+-- rules: c: mysql.spatial.geometry-nullable / mysql.spatial.geometry-nullable
+-- rules: d: mysql.spatial.text / mysql.spatial.text
+-- rules: e: mysql.spatial.varbinary / mysql.spatial.varbinary
+-- rules: f: mysql.spatial.geojson / mysql.spatial.geojson
+-- rules: g: mysql.spatial.double / mysql.spatial.double
+```
+
+```sql
+SELECT ST_Collect(spot) AS a FROM places
+-- columns: a: bytes | None (GEOMETRY)
+-- rules: a: mysql.spatial.collect / mysql.spatial.collect
+```

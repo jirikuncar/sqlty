@@ -97,6 +97,7 @@ const AGGREGATES: &[&str] = &[
     "ANY_VALUE",
     "STRING_AGG",
     "GROUP_CONCAT",
+    "ST_COLLECT",
     "ARRAY_AGG",
     "JSON_AGG",
     "JSONB_AGG",
