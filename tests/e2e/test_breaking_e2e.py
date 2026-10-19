@@ -187,3 +187,70 @@ def test_outside_a_repository_is_an_error(cli: Cli, tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert result.stderr.startswith("sqlty: error: fatal: not a git repository")
+
+
+# Severities follow `check`: a finding fails the run only at `error`, and is annotated at
+# its own level. `unknown-function` is `warn` by default, so dropping a function an old
+# query calls is a warning, not a failure.
+FUNCTION_SCHEMA = (
+    "CREATE TABLE users (id INTEGER PRIMARY KEY, bio TEXT);\n"
+    "CREATE FUNCTION slug(id INTEGER) RETURNS TEXT AS 'SELECT id::text' LANGUAGE sql STRICT;\n"
+)
+SLUG_CODE = 'slugs = "--sql\\nSELECT slug(id) FROM users"\n'
+SLUG_WARNING = (
+    "::warning file=app/q.py,line=1,title=sqlty unknown-function::function `slug` is not known "
+    "to sqlty, so its result is untyped (backward: the queries of HEAD against the schema of "
+    "the working tree)\n"
+)
+
+
+def drop_function(repo: Path, config: str = "") -> None:
+    (repo / "pyproject.toml").write_text(f'[tool.sqlty]\nschema = "schema.sql"\n{config}')
+    commit(repo, FUNCTION_SCHEMA, SLUG_CODE, "slug")
+    (repo / "schema.sql").write_text("CREATE TABLE users (id INTEGER PRIMARY KEY, bio TEXT);\n")
+
+
+BACKWARD_GITHUB = ["--direction", "backward", "--output-format", "github"]
+
+
+def test_unset_warn_rule_does_not_fail(cli: Cli, repo: Path) -> None:
+    drop_function(repo)
+
+    result = cli(["breaking", "--against", "HEAD", *BACKWARD_GITHUB], {"cwd": repo})
+
+    assert (result.returncode, result.stdout) == (0, SLUG_WARNING), result.stderr
+
+
+def test_configured_warn_rule_does_not_fail(cli: Cli, repo: Path) -> None:
+    drop_function(repo, '\n[tool.sqlty.rules]\nunknown-function = "warn"\n')
+
+    result = cli(["breaking", "--against", "HEAD", *BACKWARD_GITHUB], {"cwd": repo})
+
+    assert (result.returncode, result.stdout) == (0, SLUG_WARNING), result.stderr
+
+
+def test_configured_ignore_holds(cli: Cli, repo: Path) -> None:
+    drop_function(repo, '\n[tool.sqlty.rules]\nunknown-function = "ignore"\n')
+
+    result = cli(["breaking", "--against", "HEAD", "--direction", "backward"], {"cwd": repo})
+
+    assert (result.returncode, result.stdout) == (0, ""), result.stderr
+
+
+def test_override_ignore_holds_for_its_paths(cli: Cli, repo: Path) -> None:
+    (repo / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\n\n'
+        '[[tool.sqlty.overrides]]\ninclude = ["tests/**"]\n\n'
+        '[tool.sqlty.overrides.rules]\nunknown-column = "ignore"\n'
+    )
+    (repo / "tests").mkdir()
+    (repo / "tests" / "q.py").write_text(OLD_CODE)
+    commit(repo, OLD_SCHEMA, OLD_CODE, "override")
+    (repo / "schema.sql").write_text(NEW_SCHEMA)
+
+    result = cli(["breaking", "--against", "HEAD", "--direction", "backward"], {"cwd": repo})
+
+    assert result.returncode == 1, result.stderr
+    assert lines(result)[:-1] == [
+        f"{BACKWARD}the queries of HEAD against the schema of the working tree)"
+    ]

@@ -22,19 +22,22 @@ into a temporary `git worktree`, removed afterwards, so your working tree is
 never touched.
 
 `sqlty breaking` exits 0 when both mixes are compatible, 1 when a change breaks
-one of them, and 2 on an error such as an unknown revision. `--output-format json`
+one of them with an `error` diagnostic, and 2 on an error such as an unknown
+revision. A `warn` finding is printed but does not fail the run. `--output-format json`
 prints the findings as a JSON array, each with its `direction`, and `github` as
 GitHub Actions annotations.
 
 ## What it reports
 
 Only what the other schema breaks: a diagnostic a query already gets against its
-own schema is not repeated. On top of the rules you configure, it turns on
-`unknown-table`, `unknown-column`, `ambiguous-column`, `unknown-function`,
-`unknown-type` and [`insert-missing-column`](../reference/rules.md#insert-missing-column),
-so a name that no longer resolves is reported wherever the query reads it: the
-select list, `WHERE`, `JOIN ... ON`, and what `INSERT`, `UPDATE` and `DELETE`
-write. A row type annotation that no longer fits is reported by the usual
+own schema is not repeated. The rules and severities are the ones `sqlty check`
+uses. By default `unknown-table`, `unknown-column`, `ambiguous-column` and
+[`insert-missing-column`](../reference/rules.md#insert-missing-column) are errors,
+and `unknown-function` and `unknown-type` warnings, so a name that no longer
+resolves is reported wherever the query reads it: the select list, `WHERE`,
+`JOIN ... ON`, and what `INSERT`, `UPDATE` and `DELETE` write. A rule you set to
+`ignore`, for all files or in an override, stays off: a function of an extension
+the schema does not declare is no breaking change. A row type annotation that no longer fits is reported by the usual
 [row type checks](row-types.md).
 
 The examples below check code written for `schema.sql` against `against.sql`.
