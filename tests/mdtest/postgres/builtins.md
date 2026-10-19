@@ -258,3 +258,29 @@ SELECT by || by AS a, |/ d AS b, ||/ i AS c, jb['a'] AS e, jb['a']['b'] AS f, in
 -- columns: h: None (INT4RANGE)
 -- columns: k: None (INT4RANGE)
 ```
+
+## Examples of the documentation
+
+`scripts/compat/pg_docs.py` compares the examples of the PostgreSQL documentation with
+the server. These are the ones it found typed differently. `pg_typeof` returns a
+`regtype`, `cbrt` only has a `double precision` overload, `length` of a path is a
+distance, and `&&`, `||` and `<->` combine text search queries. `substr` and
+`IS NORMALIZED` name their columns after the functions they call.
+
+```sql
+SELECT pg_typeof(33) AS typ, cbrt(64.0) AS root, length(path '((-1,0),(1,0))') AS len,
+    'fat | rat'::tsquery && 'cat'::tsquery AS q,
+    ts_headline('{"cat":"raining cats and dogs"}'::jsonb, 'cat') AS headline
+-- columns: typ: str (REGTYPE)
+-- columns: root: float (DOUBLE)
+-- columns: len: float (DOUBLE)
+-- columns: q: str (TSQUERY)
+-- columns: headline: typing.Any (JSONB)
+```
+
+```sql
+SELECT substr('alphabet', 3), U&'\0061\0308bc' IS NFD NORMALIZED, 'a' IS NOT NORMALIZED
+-- columns: substr: str (TEXT)
+-- columns: is_normalized: bool (BOOLEAN)
+-- columns: ?column?: bool (BOOLEAN)
+```
