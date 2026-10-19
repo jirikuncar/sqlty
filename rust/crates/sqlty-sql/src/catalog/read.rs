@@ -45,8 +45,10 @@ pub(super) fn read_statements(
                 kind,
             });
         };
-        if stmt.is_create_table() || (postgres && stmt.is_create_table_any()) {
-            let (likes, text) = match postgres.then(|| stmt.without_like()).flatten() {
+        // PostgreSQL and MySQL copy a table's columns with `LIKE`.
+        let reads_like = postgres || dialect == SqlDialect::MySql;
+        if stmt.is_create_table() || (reads_like && stmt.is_create_table_any()) {
+            let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
                 Some((text, likes)) => (likes, Some(text)),
                 None => (Vec::new(), None),
             };
@@ -67,7 +69,11 @@ pub(super) fn read_statements(
             };
             match parsed.and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreateTable(create)) => {
-                    if !create.columns.is_empty() || postgres {
+                    if !create.columns.is_empty()
+                        || postgres
+                        || create.like.is_some()
+                        || !likes.is_empty()
+                    {
                         push(OpKind::Table(Box::new(create), likes));
                     }
                 }
