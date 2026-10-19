@@ -92,6 +92,8 @@ What makes a column nullable or not:
   `WITHOUT ROWID` or `STRICT` table. A `CHECK (x IS NOT NULL)` makes `x` non-null too, and
   `CHECK (num_nonnulls(a, b) = 1)` or `CHECK (a IS NOT NULL OR b IS NOT NULL)` makes
   `COALESCE(a, b)` non-null.
+  A generated column is as nullable as its expression, unless it reads another generated
+  column.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
   is nullable. A `LEFT JOIN` from a table to the one its `NOT NULL` foreign key
   references, on exactly the key's columns, always matches. That excludes a `DEFERRABLE`

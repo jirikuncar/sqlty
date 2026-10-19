@@ -72,6 +72,9 @@ pub struct SchemaColumn {
     pub has_default: bool,
     /// The `DEFAULT` an INSERT that leaves the column out writes.
     pub default: Option<Expr>,
+    /// The expression a generated column is computed from, when it reads no other
+    /// generated column.
+    pub generated: Option<Expr>,
     /// Part of the table's primary key, which PostgreSQL lets a grouped query select
     /// the table's other columns by.
     pub primary_key: bool,

@@ -319,9 +319,11 @@ pub(super) fn alter_op(
                 AlterColumnOperation::AddGenerated { .. } => {
                     table.columns[at].has_default = true;
                 }
+                // Also `DROP EXPRESSION`, read as `DROP DEFAULT`.
                 AlterColumnOperation::DropDefault => {
                     table.columns[at].has_default = false;
                     table.columns[at].default = None;
+                    table.columns[at].generated = None;
                 }
             }
         }

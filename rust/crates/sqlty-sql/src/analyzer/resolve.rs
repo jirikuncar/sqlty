@@ -14,7 +14,7 @@ use crate::diagnostics::NameRule;
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
-use super::nullability::Nullability;
+use super::nullability::{Facts, Nullability};
 use super::query::{Analyzer, Column};
 use super::scope::{resolve, Scope, Source, Table};
 use super::typed::Typed;
@@ -249,6 +249,14 @@ impl<'a> Analyzer<'a> {
             // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.
             Some(ColumnRef::Schema(_)) if self.checked_non_null(table, &[column]) => {
                 Nullability::NonNull
+            }
+            Some(ColumnRef::Schema(SchemaColumn {
+                not_null: false,
+                generated: Some(expr),
+                ..
+            })) => {
+                let scope = vec![Source::named(table.to_string(), table.to_string())];
+                self.nullability(expr, &scope, &Facts::default())
             }
             found => found.map_or(Nullability::Unknown, |found| found.nullability()),
         }
