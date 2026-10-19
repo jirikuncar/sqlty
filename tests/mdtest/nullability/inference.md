@@ -275,6 +275,6 @@ The row type is stale once nullability is on: `sqlty check` flags the old annota
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
+# error: [narrow-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
 q = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
 ```

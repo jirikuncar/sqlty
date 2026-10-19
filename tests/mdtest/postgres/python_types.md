@@ -136,7 +136,7 @@ from sqlty import SQL
 q = SQL[tuple[decimal.Decimal]]("--sql\nSELECT total FROM orders")
 meta = SQL[tuple[list[str]]]("--sql\nSELECT '[]'::jsonb")
 many = SQL[tuple[list[str], str]]("--sql\nSELECT ARRAY[name]::text[], '{}'::jsonb FROM users")
-# error: [stale-type] "SQL[tuple[float]] should be SQL[tuple[decimal.Decimal]]"
+# error: [narrow-type] "SQL[tuple[float]] should be SQL[tuple[decimal.Decimal]]"
 wrong = SQL[tuple[float]]("--sql\nSELECT total FROM orders")
 ```
 

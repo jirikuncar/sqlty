@@ -50,7 +50,7 @@ schema = "schema.sql"
 
 ```python
 # error: [mysql-sql-marker] "MySQL reads "--sql" as an expression, not a comment; use "-- sql""
-# error: [stale-type] "SQL[tuple[str, str]] should be SQL[tuple[int, str]]"
+# error: [narrow-type] "SQL[tuple[str, str]] should be SQL[tuple[int, str]]"
 a = SQL[tuple[str, str]]("--sql\nSELECT id, name FROM users")
 ```
 
@@ -84,7 +84,7 @@ c = "-- sql query notes"
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str, str]] should be SQL[tuple[int, str]]"
+# error: [narrow-type] "SQL[tuple[str, str]] should be SQL[tuple[int, str]]"
 a = SQL[tuple[str, str]]("-- sql\nSELECT id, name FROM users")
 ```
 

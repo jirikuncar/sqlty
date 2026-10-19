@@ -107,8 +107,7 @@ Start with what passes today, then tighten:
 - run: uv run sqlty check --output-format github .
 ```
 
-Promote `stale-type` to `error` once the converted modules are clean (by default
-it only warns when an annotation is wider than the rows), and add
+Promote `stale-type` to `error` once the converted modules are clean, and add
 `sqlty breaking` when schema changes start going through pull requests. See
 `sqlty-ci`.
 

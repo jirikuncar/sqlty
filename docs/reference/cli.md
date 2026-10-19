@@ -184,7 +184,7 @@ Lint `--sql` strings and `SQL[T](...)` wrappers. Prints one line per
 diagnostic and a summary:
 
 ```text
-queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
+queries.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
 Found 1 error(s)
 ```
 

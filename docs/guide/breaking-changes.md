@@ -120,7 +120,7 @@ CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[str | None]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[str | None]]"
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 

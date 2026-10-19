@@ -112,7 +112,7 @@ q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM use
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str, list[str]]] should be SQL[tuple[int, list[str]]]"
+# error: [narrow-type] "SQL[tuple[str, list[str]]] should be SQL[tuple[int, list[str]]]"
 q = SQL[tuple[str, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 # fixed: from sqlty import SQL
 # fixed:
