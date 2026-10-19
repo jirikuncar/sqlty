@@ -2,8 +2,8 @@
 //! does and typed the same: `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both
 //! from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses after a path,
 //! `json_array(SELECT ...)`, the XML functions' keywords, a window frame's `EXCLUDE`, and
-//! the comma-separated tables of MySQL's `UPDATE`. It runs only on a query that does not
-//! parse as written.
+//! MySQL's infix `MOD` and the comma-separated tables of its `UPDATE`. It runs only on a
+//! query that does not parse as written.
 
 use super::preprocess::quoted_end;
 use super::star_expand::is_word;
@@ -143,6 +143,8 @@ pub(super) fn respell(sql: &str) -> Option<String> {
                 )),
                 _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
             }
+        } else if word(i, "MOD") && i > 0 && ends_operand(sql, &tokens[i - 1]) {
+            edits.push((tokens[i].start, tokens[i].end, "%".to_string()));
         } else if call("JSON_ARRAY") && word(i + 2, "SELECT") {
             if let Some(close) = closing(&tokens, i + 1) {
                 edits.push((tokens[i + 2].start, tokens[i + 2].start, "(".to_string()));
@@ -165,6 +167,38 @@ pub(super) fn respell(sql: &str) -> Option<String> {
     }
     out.push_str(&sql[last..]);
     Some(out)
+}
+
+/// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
+fn ends_operand(sql: &str, token: &Token) -> bool {
+    const KEYWORDS: [&str; 19] = [
+        "SELECT",
+        "WHERE",
+        "AND",
+        "OR",
+        "NOT",
+        "XOR",
+        "ON",
+        "BY",
+        "WHEN",
+        "THEN",
+        "ELSE",
+        "HAVING",
+        "DISTINCT",
+        "ALL",
+        "RETURNING",
+        "BETWEEN",
+        "LIKE",
+        "CASE",
+        "IN",
+    ];
+    let text = &sql[token.start..token.end];
+    match token.kind {
+        Kind::Close => true,
+        Kind::Word => !KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k)),
+        Kind::Other => text.starts_with(['\'', '"', '`']),
+        Kind::Open | Kind::Comma => false,
+    }
 }
 
 /// The clauses after the path of `JSON_EXISTS`, `JSON_QUERY` or `JSON_VALUE`, whose

@@ -339,6 +339,17 @@ SELECT id DIV 2 AS a, price DIV 2 AS b, CAST(id AS UNSIGNED) - 1 AS c, EXTRACT(Y
 -- columns: h: bytes (VARBINARY)
 ```
 
+`MOD` between two operands is the `%` operator, and a column keeps the name
+MySQL gives it.
+
+```sql
+SELECT id MOD 3, price MOD 2 AS b, (id + 1) MOD 3 AS c, MOD(id, 0) AS d FROM events WHERE id MOD 2 = 0
+-- columns: id MOD 3: int (INT)
+-- columns: b: decimal.Decimal (DECIMAL)
+-- columns: c: int (INT)
+-- columns: d: int | None (INT)
+```
+
 ## Sets, encodings and predicates
 
 `FROM_BASE64` is NULL for text that is not base64, and `GET_FORMAT` for an
