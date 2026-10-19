@@ -88,7 +88,7 @@ import datetime
 
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, int]] should be SQL[tuple[datetime.timedelta, int]]"
+# error: [narrow-type] "SQL[tuple[int, int]] should be SQL[tuple[datetime.timedelta, int]]"
 q = SQL[tuple[int, int]]("--sql\nSELECT duration, other FROM events")
 ```
 

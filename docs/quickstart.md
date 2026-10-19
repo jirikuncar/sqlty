@@ -48,7 +48,7 @@ sqlty check .
 to select `email::TEXT` as well, and it reports the drift:
 
 ```text
-queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
+queries.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
 Found 1 error(s)
 ```
 

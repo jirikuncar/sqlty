@@ -711,6 +711,7 @@ def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:
 _EXPLAINED_RULES = frozenset(
     {
         "stale-type",
+        "narrow-type",
         "column-type-mismatch",
         "nullable-mismatch",
         "redundant-optional",

@@ -318,7 +318,7 @@ from typing import Literal
 
 from sqlty import SQL
 
-# error: [stale-type] "should be SQL[tuple[typing.Literal[1, 2, 3] | None]]"
+# error: [narrow-type] "should be SQL[tuple[typing.Literal[1, 2, 3] | None]]"
 q = SQL[tuple[Literal[1, 2, 3]]]("--sql\nSELECT priority FROM orders")
 ```
 

@@ -25,17 +25,17 @@ Every query below is typed, so `stale-type` reports its real row type.
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 a = SQL[tuple[int]]("--sql\nSELECT name FROM \"users\"")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 b = SQL[tuple[int]]('--sql\nSELECT \'x\'::TEXT AS b')
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 c = SQL[tuple[int]]("--sql\nSELECT id,\n\tname FROM users")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 d = SQL[tuple[int]]("--sql\nSELECT name FROM users WHERE name LIKE 'a\\%'")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 e = SQL[tuple[int]]("--sql\nSELECT \x6eame FROM users")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 f = SQL[tuple[int]]("--sql\nSELECT name \
 FROM users")
 ```

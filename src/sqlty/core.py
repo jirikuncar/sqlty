@@ -38,7 +38,6 @@ from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
-from sqlty._widening import widens
 
 if TYPE_CHECKING:
     pass
@@ -374,12 +373,12 @@ def check_source(
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
-    A column that can be NULL infers as ``T | None`` (``stale-type`` compares against
+    A column that can be NULL infers as ``T | None`` (``narrow-type`` compares against
     that), and ``nullable-mismatch`` reports a row field that does not admit ``None`` for it.
 
     When ``SQL[UserType](...)`` names a type defined in the same source,
     structural checks (column count, type, name, TypedDict keys) run instead
-    of ``stale-type``.
+    of ``stale-type`` and ``narrow-type``.
 
     A string literal passed to a parameter annotated
     ``Annotated[LiteralString, SQL]`` is a query too, checked against the row
@@ -488,7 +487,8 @@ def breaking_source(
         for d in check(against_sql)
         if (d.get("line"), d["rule"], d["message"]) not in own
         and d["rule"] not in CODE_RULES
-        and not widens(d)
+        # An annotation wider than the rows still reads them.
+        and d["rule"] not in {"stale-type", "redundant-optional", "redundant-literal"}
     ]
 
 

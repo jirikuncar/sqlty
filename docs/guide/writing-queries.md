@@ -184,8 +184,8 @@ query = t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
 `string.templatelib.Template` cannot be subclassed, so `SQLTemplate[T]` holds the
 template in `.template`: pass that to psycopg, or pass the query to the
 [psycopg helpers](psycopg.md), which run the template and type the rows as `T`.
-`sqlty check` checks it like `SQL[T]`: `stale-type`, and the row type checks of
-a named row type.
+`sqlty check` checks it like `SQL[T]`: `narrow-type` and `stale-type`, and the
+row type checks of a named row type.
 
 ### Format specs
 
@@ -276,7 +276,7 @@ Per dialect, with the driver each follows and why some types differ, see
 - A `TEXT[]` column gives `list[str]`. Narrowing the element type by hand (a
   `list[str]` field for `list[int]`) is not reported: elements are not compared.
   A JSON column gives `Any`, which any field accepts, and any annotation
-  (`dict`, `list[str]`, a `TypedDict`) in `SQL[tuple[...]]` is not `stale-type`.
+  (`dict`, `list[str]`, a `TypedDict`) in `SQL[tuple[...]]` is not reported.
 - An array type needs an element type: `x::INT[]` is a `list[int]`, but a bare
   `x::ARRAY` is rejected and nothing is inferred. A fixed size must be an
   integer literal (`INT[3]`, not `INT[n]`); the size itself is ignored.
@@ -300,15 +300,16 @@ it.
 ### Edit in place
 
 Change the SQL inside the wrapper and run `sqlty check`. It reports
-[`stale-type`](../reference/rules.md#stale-type) when a `SQL[tuple[...]]` no
-longer matches the query, and the
+[`narrow-type`](../reference/rules.md#narrow-type) when a `SQL[tuple[...]]` no
+longer admits the rows of the query,
+[`stale-type`](../reference/rules.md#stale-type) when it is only wider than them, and the
 [row type rules](../reference/rules.md#row-type-rules) when a named
 [row type](row-types.md) no longer fits:
 
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+# error: [narrow-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
 q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 ```
 
