@@ -66,12 +66,21 @@ reasoning = "The documentation gives each of these an `integer` result. They are
 
 [[function]]
 id = "postgres.system.name"
-functions = ["CURRENT_DATABASE", "CURRENT_SCHEMA", "CURRENT_USER", "SESSION_USER", "USER", "PG_GET_USERBYID", "PG_ENCODING_TO_CHAR"]
+functions = ["CURRENT_CATALOG", "CURRENT_DATABASE", "CURRENT_ROLE", "CURRENT_USER", "SESSION_USER", "USER", "PG_GET_USERBYID", "PG_ENCODING_TO_CHAR"]
 dialects = ["postgres"]
 type = "NAME"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives each of these a `name` result."
+
+[[function]]
+id = "postgres.system.current-schema"
+function = "CURRENT_SCHEMA"
+dialects = ["postgres"]
+type = "NAME"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions (current_schema → name: \"or a null value if the search path is empty\")"
+reasoning = "The first schema of the search path is NULL when the path names no existing schema."
 
 [[function]]
 id = "postgres.system.regtype"
@@ -300,7 +309,7 @@ reasoning = "The documentation gives each of these a `regtype` result. They are 
 
 [[function]]
 id = "postgres.system.text-nullable"
-functions = ["CURRENT_QUERY", "ICU_UNICODE_VERSION", "PG_COLLATION_FOR", "PG_CURRENT_LOGFILE", "PG_DESCRIBE_OBJECT", "PG_GET_CONSTRAINTDEF", "PG_GET_EXPR", "PG_GET_FUNCTION_ARGUMENTS", "PG_GET_FUNCTION_IDENTITY_ARGUMENTS", "PG_GET_FUNCTION_RESULT", "PG_GET_FUNCTIONDEF", "PG_GET_INDEXDEF", "PG_GET_PARTITION_CONSTRAINTDEF", "PG_GET_PARTKEYDEF", "PG_GET_RULEDEF", "PG_GET_SERIAL_SEQUENCE", "PG_GET_STATISTICSOBJDEF", "PG_GET_TRIGGERDEF", "PG_GET_VIEWDEF", "PG_LISTENING_CHANNELS", "PG_TABLESPACE_LOCATION", "PG_XACT_STATUS", "SHOBJ_DESCRIPTION", "TXID_STATUS"]
+functions = ["CURRENT_QUERY", "ICU_UNICODE_VERSION", "PG_COLLATION_FOR", "PG_CURRENT_LOGFILE", "PG_DESCRIBE_OBJECT", "PG_GET_CONSTRAINTDEF", "PG_GET_EXPR", "PG_GET_FUNCTION_ARGUMENTS", "PG_GET_FUNCTION_IDENTITY_ARGUMENTS", "PG_GET_FUNCTION_RESULT", "PG_GET_FUNCTIONDEF", "PG_GET_INDEXDEF", "PG_GET_PARTITION_CONSTRAINTDEF", "PG_GET_PARTKEYDEF", "PG_GET_RULEDEF", "PG_GET_SERIAL_SEQUENCE", "PG_GET_STATISTICSOBJDEF", "PG_GET_TRIGGERDEF", "PG_GET_VIEWDEF", "PG_LISTENING_CHANNELS", "PG_TABLESPACE_LOCATION", "PG_XACT_STATUS", "SHOBJ_DESCRIPTION", "SYSTEM_USER", "TXID_STATUS"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "nullable"

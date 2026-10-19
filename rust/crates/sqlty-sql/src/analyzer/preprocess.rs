@@ -6,7 +6,10 @@ use std::ops::ControlFlow;
 use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
-use sqlparser::ast::{visit_expressions, DataType, Expr, Statement};
+use sqlparser::ast::{
+    visit_expressions, visit_expressions_mut, DataType, Expr, Function, FunctionArguments,
+    ObjectName, Statement,
+};
 use sqlparser::parser::Parser;
 
 use super::dialect::SqlDialect;
@@ -138,8 +141,45 @@ pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new
 
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
-    (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+    let mut stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    if reject_unsupported(&stmts, dialect) {
+        return None;
+    }
+    if dialect == SqlDialect::Postgres {
+        let _ = visit_expressions_mut(&mut stmts, |expr| {
+            bare_function(expr);
+            ControlFlow::<()>::Continue(())
+        });
+    }
+    Some(stmts)
+}
+
+/// PostgreSQL's `CURRENT_ROLE`, `CURRENT_SCHEMA`, `CURRENT_CATALOG` and `SYSTEM_USER`, reserved
+/// words sqlparser reads as names, as the calls without parentheses they are.
+fn bare_function(expr: &mut Expr) {
+    let Expr::Identifier(ident) = expr else {
+        return;
+    };
+    let function = [
+        "current_role",
+        "current_schema",
+        "current_catalog",
+        "system_user",
+    ]
+    .iter()
+    .any(|name| ident.value.eq_ignore_ascii_case(name));
+    if function && ident.quote_style.is_none() {
+        *expr = Expr::Function(Function {
+            name: ObjectName::from(vec![ident.clone()]),
+            uses_odbc_syntax: false,
+            parameters: FunctionArguments::None,
+            args: FunctionArguments::None,
+            filter: None,
+            null_treatment: None,
+            over: None,
+            within_group: Vec::new(),
+        });
+    }
 }
 
 /// Parse schema DDL, with the MySQL column types sqlparser rejects respelled, and in
