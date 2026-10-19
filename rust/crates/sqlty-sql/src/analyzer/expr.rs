@@ -245,22 +245,13 @@ impl<'a> Analyzer<'a> {
                     self.dialect,
                 ))
             }
-            // MySQL reads a bare `CURRENT_USER`, and PostgreSQL `CURRENT_ROLE` (a `name`),
-            // reserved words both, as functions without parentheses.
+            // MySQL reads a bare `CURRENT_USER`, a reserved word, as a function.
             Expr::Identifier(ident)
-                if ident.quote_style.is_none()
-                    && matches!(
-                        (self.dialect, ident.value.to_ascii_lowercase().as_str()),
-                        (SqlDialect::MySql, "current_user")
-                            | (SqlDialect::Postgres, "current_role")
-                    ) =>
+                if self.dialect == SqlDialect::MySql
+                    && ident.quote_style.is_none()
+                    && ident.value.eq_ignore_ascii_case("current_user") =>
             {
-                let sql = if self.dialect == SqlDialect::Postgres {
-                    "NAME"
-                } else {
-                    "TEXT"
-                };
-                Ok(from_sql_type(sql, self.dialect))
+                Ok(from_sql_type("TEXT", self.dialect))
             }
             // MySQL full-text relevance is a floating-point number.
             Expr::MatchAgainst { .. } => Ok(from_sql_type("DOUBLE", self.dialect)),
