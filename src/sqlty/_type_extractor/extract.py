@@ -87,13 +87,19 @@ def extract_type_definitions(
     # are recognized when their base is a TypedDict defined earlier
     recognized: list[tuple[ast.ClassDef, str]] = []  # (node, kind)
     typeddict_nodes: dict[str, ast.ClassDef] = {}
+    model_nodes: dict[str, ast.ClassDef] = {}
+    dataclass_nodes: dict[str, ast.ClassDef] = {}
     classes = parsed.classes
     if functional := _functional_classes(tree, aliases):
         classes = sorted([*classes, *functional], key=lambda node: node.lineno)
     for node in classes:
-        kind = _classify_class(node, aliases, typeddict_nodes)
+        kind = _classify_class(node, aliases, typeddict_nodes, model_nodes)
         if kind == "TypedDict":
             typeddict_nodes[node.name] = node
+        elif kind == "BaseModel":
+            model_nodes[node.name] = node
+        elif kind == "dataclass":
+            dataclass_nodes[node.name] = node
         if kind:
             recognized.append((node, kind))
 
@@ -118,6 +124,8 @@ def extract_type_definitions(
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
     typeddicts: dict[str, TypeInfo] = {}
+    # Dataclasses and Pydantic models of this module, whose fields their subclasses inherit.
+    bases: dict[str, TypeInfo] = {}
     for node, kind in recognized:
         keywords = {k.arg: k.value for k in node.keywords if k.arg}
         total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
@@ -128,7 +136,8 @@ def extract_type_definitions(
             defaults_optional=kind in ("dataclass", "BaseModel"),
             kind=kind,
         )
-        parents = [typeddicts[n] for n in _base_names(node) if n in typeddicts]
+        known = typeddicts if kind == "TypedDict" else bases
+        parents = [known[n] for n in _base_names(node) if n in known and known[n].kind == kind]
         inherited = {k: v for p in parents for k, v in p.fields}
         fields = list((inherited | dict(own_fields)).items())
         required = frozenset(
@@ -136,7 +145,12 @@ def extract_type_definitions(
         )
 
         is_typeddict = kind == "TypedDict"
-        nodes = list(_lineage(node, typeddict_nodes).values()) if is_typeddict else [node]
+        lineage_of = {
+            "TypedDict": typeddict_nodes,
+            "BaseModel": model_nodes,
+            "dataclass": dataclass_nodes,
+        }
+        nodes = list(_lineage(node, lineage_of[kind]).values()) if kind in lineage_of else [node]
         defaulted = {name for n in nodes for name in _metadata_defaults(n, aliases)}
         required -= defaulted
         info = TypeInfo(name=node.name, fields=fields, kind=kind, required=required)
@@ -145,9 +159,13 @@ def extract_type_definitions(
         info.allows_extra = kind == "Protocol"
         info.module = module
         if kind == "BaseModel":
-            _set_pydantic_names(info, node, aliases)
-        if (config := _pydantic_config(node, kind, imports)) is not None:
-            info.lax = _lax_fields(node, config, aliases, imports)
+            _set_pydantic_names(info, nodes, aliases)
+        configs = [
+            config for n in nodes if (config := _pydantic_config(n, kind, imports)) is not None
+        ]
+        if configs:
+            config = {key: value for c in configs for key, value in c.items()}
+            info.lax = frozenset().union(*(_lax_fields(n, config, aliases, imports) for n in nodes))
         info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
         info.annotations = _ast_annotations(nodes, aliases)
         info.aliases = aliases
@@ -179,6 +197,8 @@ def extract_type_definitions(
             if info.resolved_hints is not None and info.extra_items_type is not None:
                 info.extra_items_hint = _unwrap_optional(info.extra_items_type)
             typeddicts[node.name] = info
+        else:
+            bases[node.name] = info
         if fields:
             result[node.name] = info
 

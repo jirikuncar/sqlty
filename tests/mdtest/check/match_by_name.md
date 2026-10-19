@@ -181,6 +181,32 @@ query = SQL[User]("--sql\nSELECT id, name FROM users")
 labelled = SQL[User]("--sql\nSELECT id, name, name AS label FROM users")
 ```
 
+## Dataclass fields of a base class
+
+A dataclass inherits the fields of the dataclasses it extends in the same
+module, bases first.
+
+```python
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class Row:
+    id: int
+
+@dataclass
+class User(Row):
+    name: str
+    email: str | None = None
+
+# error:
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+# error: [column-count-mismatch] "User has 2 required and 3 total fields but query returns 1 columns"
+short = SQL[User]("--sql\nSELECT name FROM users")
+# error: [column-type-mismatch] "User.id is int but query column 'id' infers str"
+typed = SQL[User]("--sql\nSELECT name AS id, name FROM users")
+```
+
 ## Pydantic fields with defaults are optional
 
 ```python
@@ -231,6 +257,38 @@ class User(BaseModel):
 query = SQL[User]("--sql\nSELECT id FROM users")
 # error: [typeddict-key-mismatch] "User has no field for query column '_cache'"
 cached = SQL[User]("--sql\nSELECT id, name AS _cache FROM users")
+```
+
+## Pydantic fields and config of a base model
+
+A model inherits the fields and the `extra` setting of the models it extends
+in the same module.
+
+```python
+from pydantic import BaseModel, ConfigDict
+from sqlty import SQL
+
+class Row(BaseModel):
+    id: int
+
+class User(Row):
+    name: str
+
+class Open(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: int
+
+class OpenUser(Open):
+    name: str
+
+# error:
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+# error: [column-count-mismatch] "User has 2 required fields but query returns 1 columns"
+short = SQL[User]("--sql\nSELECT name FROM users")
+# error: [typeddict-key-mismatch] "User has no field for query column 'email'"
+extra = SQL[User]("--sql\nSELECT id, name, email FROM users")
+# error:
+kept = SQL[OpenUser]("--sql\nSELECT id, name, email FROM users")
 ```
 
 ## Pydantic required field missing from the query
