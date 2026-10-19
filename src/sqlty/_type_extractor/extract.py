@@ -122,7 +122,11 @@ def extract_type_definitions(
         keywords = {k.arg: k.value for k in node.keywords if k.arg}
         total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
         own_fields, own_required = _extract_fields_from_ast(
-            node, aliases, total=total, defaults_optional=kind in ("dataclass", "BaseModel")
+            node,
+            aliases,
+            total=total,
+            defaults_optional=kind in ("dataclass", "BaseModel"),
+            kind=kind,
         )
         parents = [typeddicts[n] for n in _base_names(node) if n in typeddicts]
         inherited = {k: v for p in parents for k, v in p.fields}
@@ -141,7 +145,7 @@ def extract_type_definitions(
         info.allows_extra = kind == "Protocol"
         info.module = module
         if kind == "BaseModel":
-            _set_pydantic_names(info, node)
+            _set_pydantic_names(info, node, aliases)
         if (config := _pydantic_config(node, kind, imports)) is not None:
             info.lax = _lax_fields(node, config, aliases, imports)
         info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
@@ -153,6 +157,8 @@ def extract_type_definitions(
         ):
             cls, namespace = resolved
             hints = _type_hints(cls, namespace)
+            if not is_typeddict:
+                hints = {name: tp for name, tp in hints.items() if name in dict(fields)}
             info.declared_hints = hints
             info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
         if is_typeddict:

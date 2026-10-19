@@ -483,6 +483,7 @@ def _extract_fields_from_ast(
     *,
     total: bool = True,
     defaults_optional: bool = False,
+    kind: str = "",
 ) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """Extract annotated fields as (name, type_str) pairs plus required names.
 
@@ -494,6 +495,8 @@ def _extract_fields_from_ast(
     required: set[str] = set()
     for item in node.body:
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+            if not _takes_column(item, item.target.id, kind, aliases or {}):
+                continue
             annotation, is_required = _unwrap_qualifiers_ast(item.annotation, aliases or {})
             fields.append((item.target.id, _normalize_type_str(ast.unparse(annotation))))
             if _metadata_has_default(item.annotation, aliases or {}):
@@ -504,6 +507,41 @@ def _extract_fields_from_ast(
             elif total if is_required is None else is_required:
                 required.add(item.target.id)
     return fields, frozenset(required)
+
+
+def _takes_column(item: ast.AnnAssign, name: str, kind: str, aliases: dict[str, str]) -> bool:
+    """Whether the class-body annotation ``item`` is a constructor argument, which a column fills.
+
+    A ``ClassVar`` is not, nor are a dataclass's ``KW_ONLY`` marker and ``field(init=False)``
+    fields, or a Pydantic model's private ``_attributes``.
+
+    Example:
+        >>> items = ast.parse("a: ClassVar[int]\\n_: KW_ONLY\\nb: int = field(init=False)\\nc: int").body
+        >>> [_takes_column(i, ast.unparse(i.target), "dataclass", {}) for i in items]
+        [False, False, False, True]
+    """
+    annotation = item.annotation
+    if _is_name(
+        annotation.value if isinstance(annotation, ast.Subscript) else annotation,
+        "ClassVar",
+        aliases,
+    ):
+        return False
+    if kind == "BaseModel":
+        return not name.startswith("_")
+    if kind != "dataclass":
+        return True
+    if _get_name(annotation) == "KW_ONLY":
+        return False
+    value = item.value
+    return not (
+        isinstance(value, ast.Call)
+        and _get_name(value.func) in ("field", "Field")
+        and any(
+            k.arg == "init" and isinstance(k.value, ast.Constant) and k.value.value is False
+            for k in value.keywords
+        )
+    )
 
 
 def _has_default(value: ast.expr | None) -> bool:
@@ -730,7 +768,7 @@ def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
     return False
 
 
-def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
+def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef, aliases: dict[str, str]) -> None:
     """Read validation aliases and the ``extra`` setting from the class source.
 
     A field is matched by its ``alias`` / ``validation_alias`` string (either
@@ -751,6 +789,8 @@ def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
         if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
             continue
         name = item.target.id
+        if not _takes_column(item, name, "BaseModel", aliases):
+            continue
         calls = _field_calls(item.annotation, {})
         if isinstance(item.value, ast.Call) and _get_name(item.value.func) == "Field":
             calls.append(item.value)

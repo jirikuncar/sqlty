@@ -157,6 +157,30 @@ class User:
 query = SQL[User]("--sql\nSELECT id, name, created_at FROM users")
 ```
 
+## Dataclass annotations that take no column
+
+A `ClassVar`, the `KW_ONLY` marker and a `field(init=False)` are not arguments
+of the constructor `class_row` calls, so no column fills them.
+
+```python
+from dataclasses import KW_ONLY, dataclass, field
+from typing import ClassVar
+from sqlty import SQL
+
+@dataclass
+class User:
+    id: int
+    table: ClassVar[str]
+    _: KW_ONLY
+    name: str
+    label: str = field(init=False, default="")
+
+# error:
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+# error: [column-count-mismatch] "User has 2 fields but query returns 3 columns"
+labelled = SQL[User]("--sql\nSELECT id, name, name AS label FROM users")
+```
+
 ## Pydantic fields with defaults are optional
 
 ```python
@@ -187,6 +211,26 @@ class User(BaseModel):
 # error: [typeddict-key-mismatch] "User has no field for query column 'created_at'"
 # error: [typeddict-key-mismatch] "User has no field for query column 'email'"
 query = SQL[User]("--sql\nSELECT id, name, email, created_at FROM users")
+```
+
+## Pydantic class variables and private attributes
+
+A `ClassVar` and a private `_attribute` are not fields of a model.
+
+```python
+from typing import ClassVar
+from pydantic import BaseModel
+from sqlty import SQL
+
+class User(BaseModel):
+    id: int
+    table: ClassVar[str]
+    _cache: dict[str, int] = {}
+
+# error:
+query = SQL[User]("--sql\nSELECT id FROM users")
+# error: [typeddict-key-mismatch] "User has no field for query column '_cache'"
+cached = SQL[User]("--sql\nSELECT id, name AS _cache FROM users")
 ```
 
 ## Pydantic required field missing from the query
