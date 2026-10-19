@@ -278,6 +278,16 @@ SELECT * FROM XMLTABLE('/r/i' PASSING ('<r><i a="1">x</i></r>'::xml) COLUMNS n F
 -- columns: d: str (TEXT)
 ```
 
+The options of a column come in any order, and a bare `NULL` is the default:
+
+```sql
+SELECT * FROM XMLTABLE('/r' PASSING ('<r><c>1</c></r>'::xml) COLUMNS a int NOT NULL PATH 'c', b text DEFAULT 'x' PATH 'b', c text NULL PATH 'c', d text NOT NULL DEFAULT 'y' PATH 'd') AS x
+-- columns: a: int (INT)
+-- columns: b: str (TEXT)
+-- columns: c: str | None (TEXT)
+-- columns: d: str (TEXT)
+```
+
 Without an alias, its name is `xmltable`, and a column list renames it:
 
 ```sql
