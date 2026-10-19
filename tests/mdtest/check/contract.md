@@ -26,7 +26,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ### Detects stale type
 
 ```python
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM t")
 ```
 
@@ -392,8 +392,8 @@ CREATE TABLE users (id INT NOT NULL);
 ```
 
 ```python
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 # error: [select-star] "SELECT * used — expand to explicit column list"
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```
 
@@ -415,7 +415,7 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ## Check_source detects stale type annotations
 
 ```python
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 

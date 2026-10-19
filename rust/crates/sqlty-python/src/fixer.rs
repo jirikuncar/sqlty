@@ -19,12 +19,13 @@ use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
 
 /// The rules whose diagnostics carry a fix.
-const FIXABLE: [Rule; 6] = [
+const FIXABLE: [Rule; 7] = [
     Rule::InlineSqlComment,
     Rule::MysqlSqlMarker,
     Rule::StaleRewrite,
     Rule::SelectStar,
     Rule::StaleType,
+    Rule::NarrowType,
     Rule::UntypedQuery,
 ];
 
@@ -78,7 +79,7 @@ pub fn fix_source(
         for edit in applied {
             match rule_at[&(edit.range.start, edit.range.end)] {
                 Rule::StaleRewrite => wrapped.push(edit.replacement),
-                Rule::StaleType | Rule::UntypedQuery => {
+                Rule::StaleType | Rule::NarrowType | Rule::UntypedQuery => {
                     introduced.insert(edit.replacement);
                 }
                 _ => {}

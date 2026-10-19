@@ -78,14 +78,14 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
+# error: [narrow-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
 query = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
 ```
 
 `sqlty check --fix .` updates the type, and your type checker finds every
-caller that now needs a `None` check. `stale-type` is an error when the code
-can get rows its annotation doesn't admit, as here, and a warning when the
-annotation is only wider than it needs to be
+caller that now needs a `None` check. `narrow-type` is an error, so CI fails on
+it; an annotation that is only wider than the rows, such as `str | None` for a
+column made `NOT NULL`, is a `stale-type` warning
 ([CI](https://jirikuncar.github.io/sqlty/recipes/ci/)). For rolling deploys,
 `sqlty breaking --against origin/main` exits 1 when old code breaks on the new
 schema or new code on the old one

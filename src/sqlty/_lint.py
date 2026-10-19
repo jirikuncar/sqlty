@@ -21,7 +21,8 @@ Configuration via pyproject.toml:
     select-star = "warn"                # default
     select-star-no-schema = "error"     # default
     stale-rewrite = "warn"              # default
-    stale-type = "error"                # default; "warn" for a wider annotation
+    stale-type = "warn"                 # default
+    narrow-type = "error"               # default
     inline-sql-comment = "warn"         # default
     fstring-skipped = "warn"            # default
     tstring-skipped = "warn"            # default
@@ -158,9 +159,15 @@ RULES: dict[str, LintRule] = {
     ),
     "stale-type": LintRule(
         name="stale-type",
+        default_severity=Severity.WARN,
+        fixable=True,
+        description="SQL[tuple[...]] is wider than the rows the query returns (drift)",
+    ),
+    "narrow-type": LintRule(
+        name="narrow-type",
         default_severity=Severity.ERROR,
         fixable=True,
-        description="SQL[tuple[...]] type doesn't match current schema (drift)",
+        description="SQL[tuple[...]] doesn't admit every row the query returns",
     ),
     "mysql-sql-marker": LintRule(
         name="mysql-sql-marker",

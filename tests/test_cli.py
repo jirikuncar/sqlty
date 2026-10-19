@@ -192,13 +192,13 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
 
     assert code == 1
     assert out[:4] == [
-        "q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
+        "q.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
         "  total: type and nullability by inference rule postgres.aggregate.sum-integers",
         "    Summing small integers widens to bigint so the sum fits.",
         "    Reference: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions "
         "(sum ( smallint ) → bigint, sum ( integer ) → bigint)",
     ]
-    assert out[4].startswith("q.py:3: [stale-type]")
+    assert out[4].startswith("q.py:3: [narrow-type]")
     assert out[5] == "Found 2 error(s)"
 
     assert "inference rule" not in _run(["check", "q.py"], capsys)[1]
@@ -450,10 +450,10 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
 
     assert _run(["check", "ok.py"], capsys)[0] == 0
-    # stale-type is an error by default, a warning when the annotation admits every row.
+    # narrow-type is an error by default, stale-type a warning.
     assert _run(["check", "bad.py"], capsys)[0] == 1
     assert _run(["check", "wide.py"], capsys)[0] == 0
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "warn"\n')
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nnarrow-type = "warn"\n')
     assert _run(["check", "bad.py"], capsys)[0] == 0
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "error"\n')
     assert _run(["check", "wide.py"], capsys)[0] == 1
@@ -923,20 +923,20 @@ _OVERRIDES = """[tool.sqlty]
 schema = "schema.sql"
 
 [tool.sqlty.rules]
-stale-type = "error"
+narrow-type = "error"
 
 [[tool.sqlty.overrides]]
 include = ["tests/**", "conftest.py"]
 
 [tool.sqlty.overrides.rules]
-stale-type = "ignore"
+narrow-type = "ignore"
 
 [[tool.sqlty.overrides]]
 include = ["tests/legacy"]
 exclude = ["test_skip.py"]
 
 [tool.sqlty.overrides.rules]
-stale-type = "warn"
+narrow-type = "warn"
 """
 
 
@@ -959,8 +959,8 @@ def test_overrides_set_rule_severities_per_path(tmp_path, monkeypatch, capsys) -
     sep = os.sep
     assert code == 1
     assert out.splitlines()[:2] == [
-        f"app{sep}q.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
-        f"tests{sep}legacy{sep}test_old.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+        f"app{sep}q.py:2: [narrow-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+        f"tests{sep}legacy{sep}test_old.py:2: [narrow-type] SQL[tuple[str]] should be SQL[tuple[int]]",
     ]
     assert "Found 1 error(s), 1 warning(s)" in out
 
@@ -981,7 +981,7 @@ def test_rule_flags_win_over_overrides(tmp_path, monkeypatch, capsys) -> None:
     _overrides_project(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    _, out, _ = _run(["check", "--warn", "stale-type", "."], capsys)
+    _, out, _ = _run(["check", "--warn", "narrow-type", "."], capsys)
 
     assert "Found 5 warning(s)" in out
 

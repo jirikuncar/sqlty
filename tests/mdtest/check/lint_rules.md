@@ -83,12 +83,12 @@ r = u"--sql select id::INTEGER from users"
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 a = SQL[tuple[str]]("--sql\nSELECT 1 AS n")
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 b = SQL[tuple[str]]("""--sql
 SELECT 1 AS n""")
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 c = SQL[tuple[str]]("""--sql\nSELECT 1 AS n""")
 ```
 

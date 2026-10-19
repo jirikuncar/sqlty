@@ -20,7 +20,7 @@ q = SQL[tuple[int, str]](
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 q = SQL[tuple[int]](
     "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 )

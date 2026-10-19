@@ -648,11 +648,11 @@ a = SQL[tuple[int]]("--sql\nSELECT tableoid FROM users")
 b = SQL[tuple[str, str, str, str, str]]("--sql\nSELECT ctid, xmin, xmax, cmin, cmax FROM users")
 # error: [unknown-column] "column `oid` does not exist in `users`"
 oid = SQL[tuple[int]]("--sql\nSELECT oid FROM users")
-# error: [stale-type] "SQL[tuple[int, int]] should be SQL[tuple[int | None, str]]"
+# error: [narrow-type] "SQL[tuple[int, int]] should be SQL[tuple[int | None, str]]"
 c = SQL[tuple[int, int]]("--sql\nSELECT u.id, u.ctid FROM users u")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
 d = SQL[tuple[int]]("--sql\nSELECT id FROM ONLY users")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
 e = SQL[tuple[int]]("--sql\nSELECT users.id FROM ONLY users")
 # error: [unknown-column] "column `rowid` does not exist in `users`"
 f = SQL[tuple[int]]("--sql\nSELECT rowid FROM users")

@@ -72,7 +72,7 @@ names the documentation it follows and why. `sqlty check --explain` prints the
 rule behind each column under a type diagnostic:
 
 ```text
-q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int | None, str | None]]
+q.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int | None, str | None]]
   total: type and nullability by inference rule postgres.aggregate.sum-integers
     Summing small integers widens to bigint so the sum fits.
     Reference: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)

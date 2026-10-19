@@ -599,10 +599,10 @@ class ParsedSource:
         Every Rust rule starts from a ``--sql`` / ``-- sql`` marker at the start of a
         string (``mysql-sql-marker``, ``stale-rewrite``, ``inline-sql-comment``,
         ``unparsed-query``, ``fstring-skipped``, ``tstring-skipped``,
-        ``unchecked-query``, ``select-star*``, ``stale-type``, ``untyped-query``); the
-        wrapper call (``SQL[``, spelled as ``import_style`` says) and ``UNTYPED`` count
-        too, which also covers a marker split over concatenated literals in a call. A marker
-        split over implicit concatenation anywhere else (``"--" "sql\\n..."``) matches
+        ``unchecked-query``, ``select-star*``, ``stale-type``, ``narrow-type``,
+        ``untyped-query``); the wrapper call (``SQL[``, spelled as ``import_style`` says)
+        and ``UNTYPED`` count too, which also covers a marker split over concatenated
+        literals in a call. A marker split over implicit concatenation anywhere else (``"--" "sql\\n..."``) matches
         with quotes, prefixes, whitespace and comments allowed between its characters.
         An ``import_style`` the engine rejects always needs the call, so that it raises.
 

@@ -10,7 +10,7 @@ Python. Where the strings can't stand alone, `strip` keeps the parentheses.
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER "
                     "AS n")
 # fixed: from sqlty import SQL
@@ -57,7 +57,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER "
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("""--sql
 SELECT 1::INTEGER AS n"""  # c
 )
@@ -76,7 +76,7 @@ SELECT 1::INTEGER AS n"""  # c
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n -- \"n\")")
 # fixed: from sqlty import SQL
 # fixed:
@@ -89,7 +89,7 @@ q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n -- \"n\")")
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), SQL[tuple[int]]("--sql\nSELECT 'x'::TEXT")
 # fixed: from sqlty import SQL
 # fixed:
@@ -189,7 +189,7 @@ r = ("--sql\nSELECT 1::INTEGER "
 ```python
 import mod
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = mod.SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
 # fixed: import mod
 # fixed:

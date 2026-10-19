@@ -25,7 +25,7 @@ class User(TypedDict):
     name: str
 
 user_id = 1
-# error: [stale-type] "SQLTemplate[tuple[str]] should be SQLTemplate[tuple[int]]"
+# error: [narrow-type] "SQLTemplate[tuple[str]] should be SQLTemplate[tuple[int]]"
 a = SQLTemplate[tuple[str]](t"--sql\nSELECT id FROM users WHERE id = {user_id}")
 # error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
 b = SQLTemplate[User](t"--sql\nSELECT id, name FROM users WHERE id = {user_id}")

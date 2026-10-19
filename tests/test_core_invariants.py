@@ -122,7 +122,7 @@ def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
             import_style=options["import_style"],
             untyped=options["untyped"],
         )
-        if d["rule"] in ("stale-rewrite", "stale-type")
+        if d["rule"] in ("stale-rewrite", "stale-type", "narrow-type")
     ]
     assert not stale
 
