@@ -22,7 +22,7 @@ use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
-use super::scope::{Scope, Table, Virtuals};
+use super::scope::{any_merging_join, Scope, Table, Virtuals};
 use super::text_names::{item_texts, line_starts, offset, returning_start, text_column_name};
 use super::typed::Typed;
 use super::{Inferred, SchemaData};
@@ -609,11 +609,15 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         from: Option<&[TableWithJoins]>,
     ) -> Vec<Column> {
-        let resolvable = from.is_none_or(|from| self.star_resolvable(from, reference));
-        match resolvable
-            .then(|| self.star_columns(reference, scope))
-            .flatten()
-        {
+        let merging = reference.is_none() && from.is_some_and(any_merging_join);
+        let columns = match from {
+            Some(from) if merging => self.merged_star(from, scope),
+            _ => from
+                .is_none_or(|from| self.star_resolvable(from, reference))
+                .then(|| self.star_columns(reference, scope))
+                .flatten(),
+        };
+        match columns {
             Some(columns) => {
                 if columns.iter().any(Column::is_unknown_star) {
                     self.explain_view_star(reference, scope);
@@ -622,7 +626,7 @@ impl<'a> Analyzer<'a> {
                 columns
             }
             None => {
-                self.explain_star(reference, scope, from);
+                self.explain_star(reference, scope);
                 vec![Column::unknown("*")]
             }
         }
