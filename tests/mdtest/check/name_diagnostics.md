@@ -249,6 +249,38 @@ a = fetch_value("SELECT nope FROM users", int)
 b = fetch_value("SELECT id FROM users", int)
 ```
 
+#### MySQL multi-table UPDATE and DELETE
+
+MySQL's `UPDATE` and `DELETE` may join tables, with `JOIN` or a comma, and read all of
+them. A `SET` target is a column of the table it names, or of the one table that has it.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, team_id INTEGER);
+CREATE TABLE teams (id INTEGER PRIMARY KEY, title TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
+```
+
+```python
+from sqlty import SQL
+
+a = "-- sql\nUPDATE users u JOIN teams t ON t.id = u.team_id SET t.title = u.name WHERE title IS NULL"
+b = "-- sql\nUPDATE users u, teams t SET t.title = u.name WHERE t.id = u.team_id"
+c = "-- sql\nDELETE o FROM orders o JOIN users u ON u.id = o.user_id WHERE u.name = 'x'"
+d = "-- sql\nDELETE o, u FROM orders o, users u WHERE u.id = o.user_id AND total IS NULL"
+# error: [unknown-column] "column `nmae` does not exist in `t`"
+# error: [unknown-column] "column `titel` does not exist in `u`, `t`"
+e = "-- sql\nUPDATE users u JOIN teams t ON t.id = u.team_id SET t.nmae = 'x', titel = 'y'"
+# error: [unknown-column] "column `nope` does not exist in `u`"
+f = "-- sql\nDELETE o FROM orders o JOIN users u ON u.id = o.user_id WHERE u.nope"
+```
+
 #### Suppressed inline
 
 ```python

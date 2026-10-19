@@ -13,7 +13,7 @@ use sqlparser::ast::{
 use sqlparser::parser::Parser;
 
 use super::dialect::SqlDialect;
-use super::pg_syntax::respell;
+use super::respell::respell;
 use super::star_expand::is_word;
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
@@ -272,7 +272,7 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
         })
     };
     parse_placeholders(&sql).or_else(|| {
-        (dialect == SqlDialect::Postgres)
+        matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql)
             .then(|| respell(&sql))
             .flatten()
             .and_then(|sql| parse_placeholders(&sql))
