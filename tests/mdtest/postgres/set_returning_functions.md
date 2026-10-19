@@ -158,6 +158,37 @@ SELECT * FROM regexp_split_to_table('a b c', ' ') AS word
 -- columns: word: str (TEXT)
 ```
 
+`string_to_table` gives NULL for the pieces equal to its third argument:
+
+```sql
+SELECT * FROM regexp_matches('abc', '(b)(c)', 'g') AS m, string_to_table('a,,b', ',', '') AS piece
+-- columns: m: list[str] (ARRAY<TEXT>)
+-- columns: piece: str | None (TEXT)
+```
+
+## Other functions
+
+Any other function in `FROM` is one row source with one column of its result, as
+the rules type it in a select list:
+
+```sql
+SELECT * FROM generate_subscripts(ARRAY[1, 2], 1) AS i, lower('A'), posts, upper(posts.tags[1]) AS tag
+-- columns: i: int (INT)
+-- columns: lower: str (TEXT)
+-- columns: id: int (INT)
+-- columns: tags: list[str] (ARRAY<TEXT>)
+-- columns: doc: typing.Any (JSONB)
+-- columns: published: datetime.datetime (TIMESTAMPTZ)
+-- columns: tag: str | None (TEXT)
+```
+
+An aggregate is not allowed in `FROM`, so its star stays unknown:
+
+```sql
+SELECT * FROM count(1)
+-- columns: *: None (None)
+```
+
 ## Several in a select list
 
 PostgreSQL runs the set-returning functions of one select list in lockstep and

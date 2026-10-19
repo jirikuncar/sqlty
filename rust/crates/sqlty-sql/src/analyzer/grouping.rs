@@ -203,7 +203,7 @@ impl Visitor for Ungrouped<'_, '_> {
 }
 
 /// Whether `expr` is a call of an aggregate function, not as a window function.
-fn is_aggregate_call(expr: &Expr) -> bool {
+pub(super) fn is_aggregate_call(expr: &Expr) -> bool {
     let Expr::Function(func) = expr else {
         return false;
     };
