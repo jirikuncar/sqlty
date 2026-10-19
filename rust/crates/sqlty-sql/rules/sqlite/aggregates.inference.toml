@@ -8,3 +8,13 @@ type = "DOUBLE"
 nullability = "aggregate"
 reference = "SQLite documentation, Built-in Aggregate Functions"
 reasoning = "The function returns a floating-point value."
+
+[[function]]
+id = "sqlite.aggregate.sum-converted"
+function = "SUM"
+dialects = ["sqlite"]
+argument = ["@text", "@binary"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "SQLite documentation, Built-in Aggregate Functions (The result of sum() is an integer value if all non-NULL inputs are integers. If any input to sum() is neither an integer nor a NULL, then sum() returns a floating point value)"
+reasoning = "The sum of strings or blobs is an integer or a real, typed as a real."
