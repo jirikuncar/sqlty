@@ -310,7 +310,20 @@ SELECT jt.n, jt.x, jt.has FROM JSON_TABLE('[{"x": "a"}, {"y": 1}]', '$[*]' COLUM
 
 ## CONVERT and more JSON functions
 
-`CONVERT(x, type)` is a cast; `CONVERT(x USING charset)` keeps the string's type.
+`CONVERT(x, type)` is a cast.
+
+`CONVERT(x USING charset)` and `CHAR(n, ... USING charset)` are text, or a binary string for
+`USING binary`. Bytes that are not valid in the character set convert to `NULL`, so text
+converted from a binary string is nullable.
+
+```sql
+SELECT CONVERT(id USING utf8mb4) AS a, CONVERT(name USING binary) AS b, CONVERT(CHAR(65) USING utf8mb4) AS c, CHAR(65, 66 USING utf8mb4) AS d, CHAR(65 USING binary) AS e FROM events
+-- columns: a: str (TEXT)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: str | None (TEXT)
+-- columns: d: str | None (TEXT)
+-- columns: e: bytes (VARBINARY)
+```
 
 ```sql
 SELECT CONVERT(name, CHAR) AS a, CONVERT(id, SIGNED) AS b, CONVERT(name USING utf8mb4) AS c, ANY_VALUE(name) AS d, JSON_SEARCH(doc, 'one', 'a') AS e, JSON_PRETTY(doc) AS f FROM events

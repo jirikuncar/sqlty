@@ -1,10 +1,10 @@
 //! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
 //! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
-//! SQLite's `a IS b`, MySQL's infix `MOD` and the comma-separated tables of its `UPDATE`,
-//! and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both from x, chars)`,
-//! `substring(x similar p escape e)`, the SQL/JSON clauses after a path, `json_array(SELECT
-//! ...)` and the XML functions' keywords. It runs only on a query that does not parse as
-//! written.
+//! SQLite's `a IS b`, MySQL's infix `MOD`, its `CHAR(n USING charset)` and the
+//! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
+//! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
+//! after a path, `json_array(SELECT ...)` and the XML functions' keywords. It runs only on a
+//! query that does not parse as written.
 
 use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
@@ -163,6 +163,14 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 if word(j, "BY") && (word(j + 1, "REF") || word(j + 1, "VALUE")) {
                     edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
                 }
+            }
+        } else if dialect == SqlDialect::MySql && call("CHAR") {
+            if let Some(&using) = arguments(&tokens, i + 1)
+                .iter()
+                .find(|&&j| word(j, "USING"))
+            {
+                edits.push((tokens[i].start, tokens[i].start, "CONVERT(".to_string()));
+                edits.push((tokens[using].start, tokens[using].start, ") ".to_string()));
             }
         } else if dialect == SqlDialect::MySql
             && word(i, "MOD")
