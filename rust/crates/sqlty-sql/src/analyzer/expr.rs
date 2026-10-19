@@ -11,7 +11,7 @@ use crate::diagnostics::NameRule;
 use super::dialect::SqlDialect;
 use super::functions::{positional_args, Returns};
 use super::inference::FunctionType;
-use super::literals::{constant, strip, value_set};
+use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
 use super::operators::{category, common_of, common_type, operand_type, type_base};
@@ -179,7 +179,8 @@ impl<'a> Analyzer<'a> {
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
-            // MySQL's `CONVERT(x, type)`; `CONVERT(x USING charset)` keeps a string a string.
+            // MySQL's `CONVERT(x, type)`; `CONVERT(x USING charset)` is a binary string for
+            // `binary`, else text.
             Expr::Convert {
                 data_type: Some(data_type),
                 is_try: false,
@@ -188,9 +189,21 @@ impl<'a> Analyzer<'a> {
             Expr::Convert {
                 expr: inner,
                 data_type: None,
-                charset: Some(_),
+                charset: Some(charset),
                 ..
-            } => self.expr(inner, scope),
+            } => {
+                let typed = self.expr(inner, scope)?;
+                let (kind, sql_type) = if is_binary_charset(charset) {
+                    ("bytes", "VARBINARY")
+                } else {
+                    ("str", "TEXT")
+                };
+                Ok(if python_kind(&typed) == Some(kind) {
+                    typed
+                } else {
+                    from_sql_type(sql_type, self.dialect)
+                })
+            }
             Expr::TypedString(typed) => Ok(self.cast_typed(&typed.data_type)),
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => self.array_typed(&array.elem, scope),
@@ -612,6 +625,11 @@ impl<'a> Analyzer<'a> {
         }
         typed
     }
+}
+
+/// Whether `CONVERT(x USING charset)` gives a binary string.
+pub(super) fn is_binary_charset(charset: &ObjectName) -> bool {
+    charset.to_string().eq_ignore_ascii_case("binary")
 }
 
 #[cfg(test)]
