@@ -38,3 +38,21 @@ SELECT * FROM json_tree('{"a": [1, 2]}')
 -- columns: fullkey: str (TEXT)
 -- columns: path: str (TEXT)
 ```
+
+## jsonb_each and jsonb_tree
+
+`jsonb_each` and `jsonb_tree` have the same columns.
+
+```sql
+SELECT j.key, j.type, j.fullkey, j.parent FROM events e, jsonb_each(e.note) AS j
+-- columns: key: None (None)
+-- columns: type: str (TEXT)
+-- columns: fullkey: str (TEXT)
+-- columns: parent: int | None (BIGINT)
+```
+
+```sql
+SELECT type, path FROM jsonb_tree('{"a": [1, 2]}')
+-- columns: type: str (TEXT)
+-- columns: path: str (TEXT)
+```

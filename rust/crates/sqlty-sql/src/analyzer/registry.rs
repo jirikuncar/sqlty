@@ -131,6 +131,10 @@ const AGGREGATES: &[&str] = &[
     "TOTAL",
     "JSON_GROUP_ARRAY",
     "JSON_GROUP_OBJECT",
+    "MEDIAN",
+    "PERCENTILE",
+    "JSONB_GROUP_ARRAY",
+    "JSONB_GROUP_OBJECT",
 ];
 
 /// Aggregates that give NULL for a group of rows too: too few non-null rows for a sample
@@ -154,6 +158,8 @@ const NULL_ON_FEW_ROWS: &[&str] = &[
     "REGR_SXX",
     "REGR_SXY",
     "REGR_SYY",
+    "MEDIAN",
+    "PERCENTILE",
 ];
 
 /// Aggregates whose group of one or more rows always gives a value, whatever the rows hold.
@@ -176,6 +182,8 @@ const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
     "TOTAL",
     "JSON_GROUP_ARRAY",
     "JSON_GROUP_OBJECT",
+    "JSONB_GROUP_ARRAY",
+    "JSONB_GROUP_OBJECT",
 ];
 
 /// Positions of text and integer arguments of functions with a known signature.
