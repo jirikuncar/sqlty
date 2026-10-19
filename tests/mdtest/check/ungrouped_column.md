@@ -8,6 +8,7 @@ schema = "schema.sql"
 ungrouped-column = "error"
 stale-type = "ignore"
 narrow-type = "ignore"
+select-star = "ignore"
 ```
 
 `schema.sql`:
@@ -57,6 +58,37 @@ from sqlty import SQL
 
 # error: [ungrouped-column] "column `o.status` must appear in GROUP BY"
 a = SQL[tuple[int, str, str, int]]("--sql\nSELECT u.id, u.name, o.status, count(*) FROM users u JOIN orders o ON o.user_id = u.id GROUP BY u.id")
+```
+
+## Stars and whole rows
+
+`*` and `t.*` select every column of their tables, and a whole-row reference
+such as `row_to_json(o)` reads them all, so each must be grouped. A primary
+key covers its table. `*` over a `JOIN ... USING` is not judged.
+
+```python
+from sqlty import SQL
+
+# error: [ungrouped-column] "column `orders.id` must appear in GROUP BY"
+# error: [ungrouped-column] "column `orders.total` must appear in GROUP BY"
+a = SQL[tuple[int, int, str, int]]("--sql\nSELECT * FROM orders GROUP BY user_id, status")
+# error: [ungrouped-column] "column `o.id` must appear in GROUP BY"
+# error: [ungrouped-column] "column `o.status` must appear in GROUP BY"
+# error: [ungrouped-column] "column `o.total` must appear in GROUP BY"
+b = SQL[tuple[int, int, int, str, int]]("--sql\nSELECT o.*, count(*) FROM orders o GROUP BY o.user_id")
+# error: [ungrouped-column] "column `o.*` must appear in GROUP BY"
+c = SQL[tuple[int, str]]("--sql\nSELECT o.user_id, row_to_json(o)::text FROM orders o GROUP BY o.user_id")
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, str, str | None, int]]("--sql\nSELECT u.*, count(*) FROM users u JOIN orders o ON o.user_id = u.id GROUP BY u.id")
+b = SQL[tuple[str, int]]("--sql\nSELECT row_to_json(u)::text, count(*) FROM users u GROUP BY u.id")
+c = SQL[tuple[int, int, str, int]]("--sql\nSELECT * FROM orders GROUP BY id, user_id, status, total")
+d = SQL[tuple[str, int]]("--sql\nSELECT row_to_json(o)::text, count(*) FROM orders o GROUP BY o")
+e = SQL[tuple[int, str, str | None, int, str, int]]("--sql\nSELECT * FROM users JOIN orders USING (id) GROUP BY users.id, user_id, status, total")
 ```
 
 ## Not judged
