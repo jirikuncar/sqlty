@@ -6,7 +6,7 @@ operators = ["BitwiseAnd", "BitwiseOr"]
 dialects = ["sqlite"]
 type = "BIGINT"
 reference = "SQLite documentation, SQL Language Expressions, 2 Operators (The result of any binary operator is either a numeric value or NULL)"
-reasoning = "`&` and `|` convert their operands to 64-bit integers, so the result is an integer."
+reasoning = "`&`, `|`, `<<` and `>>` convert their operands to 64-bit integers, so the result is an integer."
 
 [[rule]]
 id = "sqlite.bitwise.not"
