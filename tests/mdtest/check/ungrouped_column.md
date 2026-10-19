@@ -7,6 +7,7 @@ schema = "schema.sql"
 [tool.sqlty.rules]
 ungrouped-column = "error"
 stale-type = "ignore"
+narrow-type = "ignore"
 ```
 
 `schema.sql`:

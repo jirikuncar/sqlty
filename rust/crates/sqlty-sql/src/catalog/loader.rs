@@ -380,6 +380,8 @@ impl Loader {
                 }
                 table.parents.push(parent);
             }
+        }
+        if self.postgres || self.dialect == SqlDialect::MySql {
             let mut like_sources: Vec<Vec<String>> = likes.to_vec();
             if let Some(
                 CreateTableLikeKind::Parenthesized(like) | CreateTableLikeKind::Plain(like),

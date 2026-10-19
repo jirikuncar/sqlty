@@ -133,7 +133,7 @@ the opposite. See [Row types](row-types.md#nullable-columns).
 ### Upgrading
 
 Before this release, row types were never `T | None`. Existing `SQL[...]` wrappers over
-nullable columns are now `stale-type`, and row types that omit `| None` are
+nullable columns are now `narrow-type` errors, and row types that omit `| None` are
 `nullable-mismatch` errors. `sqlty check --fix` updates wrappers in place, and
 `sqlty rewrite` writes the new types for unwrapped queries. Add `| None` to the flagged
 row type fields, filter the NULLs in the query, or lower the rule while you migrate:
@@ -211,7 +211,7 @@ values the `Literal` misses, and [`redundant-literal`](../reference/rules.md#red
 `sqlty rewrite` and `sqlty check --fix` now write `typing.Literal[...]` where the values
 are known: string constants (`SELECT 'paid'`; `SELECT 1` stays `int`), `CASE` over
 constants, `CHECK`ed columns and MySQL `ENUM` columns. Existing wrappers that spell `str` or `int` for
-those columns stay valid and are not `stale-type`; an annotation of a different type is.
+those columns stay valid and are not reported; an annotation of a different type is `narrow-type`.
 A row type field that is a `Literal` missing values is now a `literal-mismatch` error; add
 the values, annotate `str`, or lower the rule while you migrate:
 

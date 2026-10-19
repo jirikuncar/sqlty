@@ -85,9 +85,23 @@ fn scan(sql: &str, mysql: bool) -> Vec<Piece<'_>> {
     let bytes = sql.as_bytes();
     let mut pieces: Vec<Piece> = Vec::new();
     let mut i = 0;
+    // Inside a MySQL executable comment (`/*!50001 CREATE VIEW ... */`), which MySQL runs.
+    let mut executable = false;
     while i < bytes.len() {
         let b = bytes[i];
         let (kind, end) = match b {
+            b'/' if mysql && bytes[i..].starts_with(b"/*!") => {
+                executable = true;
+                let digits = bytes[i + 3..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_digit())
+                    .count();
+                (Kind::Comment, i + 3 + digits)
+            }
+            b'*' if executable && bytes.get(i + 1) == Some(&b'/') => {
+                executable = false;
+                (Kind::Comment, i + 2)
+            }
             _ if b.is_ascii_whitespace() => {
                 let len = bytes[i..]
                     .iter()
@@ -188,11 +202,57 @@ impl Statement<'_> {
             "recursive",
             "secure",
         ];
-        let mut words = self.0.iter().filter(|p| significant(p));
-        words.next().is_some_and(|p| is_word(p, "create"))
-            && words
-                .find(|p| !MODIFIERS.iter().any(|m| is_word(p, m)))
-                .is_some_and(|p| is_word(p, object))
+        let words: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        if !words.first().is_some_and(|p| is_word(p, "create")) {
+            return false;
+        }
+        let mut at = 1;
+        while let Some(word) = words.get(at) {
+            let next = |n: usize, w: &str| words.get(at + n).is_some_and(|p| is_word(p, w));
+            let eq = words.get(at + 1).is_some_and(|p| is_punct(p, "="));
+            at += if MODIFIERS.iter().any(|m| is_word(word, m)) {
+                1
+            // MySQL's `ALGORITHM = UNDEFINED`, `SQL SECURITY DEFINER`.
+            } else if (is_word(word, "algorithm") && eq)
+                || (is_word(word, "sql") && next(1, "security"))
+            {
+                3
+            // MySQL's `DEFINER = user@host` or `DEFINER = CURRENT_USER`.
+            } else if is_word(word, "definer") && eq {
+                if words.get(at + 3).is_some_and(|p| is_punct(p, "@")) {
+                    5
+                } else {
+                    3
+                }
+            } else {
+                return is_word(word, object);
+            };
+        }
+        false
+    }
+
+    /// A `CREATE VIEW` without the `WITH [CASCADED | LOCAL] CHECK OPTION` that ends it,
+    /// which sqlparser does not read; `None` when it has none.
+    pub(crate) fn without_check_option(&self) -> Option<String> {
+        let sig: Vec<usize> = (0..self.0.len())
+            .filter(|&at| significant(&self.0[at]))
+            .collect();
+        let words = |from: usize, expected: &[&str]| {
+            sig.len() >= from + expected.len()
+                && expected
+                    .iter()
+                    .zip(&sig[sig.len() - from - expected.len()..])
+                    .all(|(w, &at)| is_word(&self.0[at], w))
+        };
+        let start = [
+            &["with", "check", "option"][..],
+            &["with", "cascaded", "check", "option"],
+            &["with", "local", "check", "option"],
+        ]
+        .iter()
+        .find(|clause| words(0, clause))
+        .map(|clause| sig[sig.len() - clause.len()])?;
+        Some(render(&self.0[..start]).trim_end().to_string())
     }
 
     /// The name and base type of a `CREATE DOMAIN name [AS] type ...` as written, without
@@ -441,7 +501,9 @@ impl Statement<'_> {
 
     /// The view name as written, e.g. `public.recent`.
     pub(crate) fn view_name(&self) -> String {
-        self.name_after("view", |p| is_punct(p, "(") || is_word(p, "as"))
+        self.name_after("view", |p| {
+            is_punct(p, "(") || is_word(p, "as") || is_word(p, "comment")
+        })
     }
 
     fn name_after(&self, keyword: &str, ends: impl Fn(&Piece) -> bool) -> String {
@@ -493,6 +555,22 @@ impl Statement<'_> {
                 sources,
             )
         })
+    }
+
+    /// The statement without the `PARTITION BY ...` that follows its column list, which
+    /// sqlparser does not read for MySQL; `None` when it has none.
+    pub(crate) fn without_partitioning(&self) -> Option<String> {
+        let pieces = &self.0;
+        let open = pieces.iter().position(|p| is_punct(p, "("))?;
+        let close = matching_paren(pieces, open)?;
+        let sig: Vec<usize> = (close + 1..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let at = sig.windows(2).find_map(|pair| {
+            (is_word(&pieces[pair[0]], "partition") && is_word(&pieces[pair[1]], "by"))
+                .then_some(pair[0])
+        })?;
+        Some(render(&pieces[..at]).trim_end().to_string())
     }
 
     /// The statement without table constraints and column `CHECK` / `REFERENCES`
@@ -819,6 +897,39 @@ mod tests {
             .as_deref(),
             Some("CREATE TABLE t (a INT DEFAULT 1)")
         );
+    }
+
+    #[test]
+    fn test_mysql_views() {
+        let sql = "/*!50001 CREATE ALGORITHM=UNDEFINED */ /*!50013 DEFINER=`root`@`%` \
+                   SQL SECURITY DEFINER */ /*!50001 VIEW `v` AS select 1 AS `a` */ \
+                   /*!50002 WITH CASCADED CHECK OPTION */";
+        let stmt = &split_statements(sql, true)[0];
+        assert!(stmt.creates("view"));
+        assert_eq!(stmt.view_name(), "`v`");
+        let view = stmt.without_check_option().unwrap();
+        assert_eq!(
+            view.split_whitespace().collect::<Vec<_>>().join(" "),
+            "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `v` AS select 1 AS `a`"
+        );
+        let stmt = &split_statements("CREATE DEFINER = CURRENT_USER VIEW v AS SELECT 1", true)[0];
+        assert!(stmt.creates("view"));
+        assert_eq!(stmt.without_check_option(), None);
+        assert!(split_statements("/* CREATE VIEW v AS SELECT 1 */", true).is_empty());
+    }
+
+    #[test]
+    fn test_without_partitioning() {
+        let sql = "CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB \
+                   PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10))";
+        assert_eq!(
+            split_statements(sql, true)[0]
+                .without_partitioning()
+                .as_deref(),
+            Some("CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB")
+        );
+        let sql = "CREATE TABLE t (id INT)";
+        assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
     }
 
     fn first(sql: &str) -> Statement<'_> {

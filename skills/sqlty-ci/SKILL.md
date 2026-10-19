@@ -87,11 +87,11 @@ repos:
 
 ## Fail on drift
 
-`stale-type` (a `SQL[tuple[...]]` that no longer matches its query) is an error
-by default when the annotation doesn't admit the rows, such as `str` for a column
-made nullable, and a warning when it is only wider (`str | None` for a column made
-`NOT NULL`). `stale-rewrite` (an unwrapped `--sql` string) is a warning. `sqlty
-check` exits 0 on warnings. Promote what you want CI to enforce:
+`narrow-type` (a `SQL[tuple[...]]` that doesn't admit the rows its query now
+returns, such as `str` for a column made nullable) is an error. `stale-type` (a
+`SQL[tuple[...]]` only wider than the rows, such as `str | None` for a column made
+`NOT NULL`) and `stale-rewrite` (an unwrapped `--sql` string) are warnings by
+default, so `sqlty check` exits 0 on them. Promote what you want CI to enforce:
 
 ```toml
 [tool.sqlty]

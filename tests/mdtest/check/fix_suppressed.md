@@ -60,15 +60,15 @@ query = SQL[tuple[str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-st
 # fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 ```
 
-## Suppressed stale-type is not refreshed
+## Suppressed narrow-type is not refreshed
 
 ```python
 from sqlty import SQL
 
-query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[stale-type]
+query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[stale-type]
+# fixed: query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
 ```
 
 ## Suppressed inline-sql-comment is not fixed
@@ -83,12 +83,12 @@ query = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]
 ```python
 from sqlty import SQL
 
-query = SQL[tuple[str]](  # sqlty: ignore[stale-type]
+query = SQL[tuple[str]](  # sqlty: ignore[narrow-type]
     "--sql\nSELECT id::INTEGER FROM users"
 )
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: query = SQL[tuple[str]](  # sqlty: ignore[stale-type]
+# fixed: query = SQL[tuple[str]](  # sqlty: ignore[narrow-type]
 # fixed:     "--sql\nSELECT id::INTEGER FROM users"
 # fixed: )
 ```

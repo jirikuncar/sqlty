@@ -38,7 +38,7 @@ app/q.py:2: [unknown-column] column `bio` does not exist in `users` (backward: t
 |---------|-------|-----|
 | backward `unknown-column`, `unknown-table` | the new schema drops or renames what running code reads | keep the old name until no deployed code reads it (contract later) |
 | backward `insert-missing-column` | a new `NOT NULL` column without a default breaks running `INSERT`s | add it nullable or with a `DEFAULT`, tighten it later |
-| backward `stale-type`, `nullable-mismatch` | a column became nullable under code that expects a value | widen the code to `T \| None` first |
+| backward `narrow-type`, `nullable-mismatch` | a column became nullable under code that expects a value | widen the code to `T \| None` first |
 | forward `unknown-column`, `unknown-table` | new code reads what the old schema doesn't have yet | add the schema in an earlier pull request |
 
 Only what the other schema breaks is reported: a diagnostic a query already gets

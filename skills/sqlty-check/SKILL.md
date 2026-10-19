@@ -1,6 +1,6 @@
 ---
 name: sqlty-check
-description: Run sqlty check and act on its diagnostics, name the row type of a query, and check query parameters. Use when sqlty check reports a diagnostic such as [unknown-column] or [stale-type], when replacing SQL[tuple[...]] with a TypedDict, dataclass, NamedTuple or pydantic model, when a column may be NULL, when a call passes the wrong parameters, when suppressing a diagnostic with a sqlty ignore comment, or when changing a rule's severity in [tool.sqlty.rules].
+description: Run sqlty check and act on its diagnostics, name the row type of a query, and check query parameters. Use when sqlty check reports a diagnostic such as [unknown-column] or [narrow-type], when replacing SQL[tuple[...]] with a TypedDict, dataclass, NamedTuple or pydantic model, when a column may be NULL, when a call passes the wrong parameters, when suppressing a diagnostic with a sqlty ignore comment, or when changing a rule's severity in [tool.sqlty.rules].
 ---
 
 # sqlty check

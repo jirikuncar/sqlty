@@ -76,6 +76,9 @@ pub struct SchemaColumn {
     pub allowed_values: Option<Arc<[String]>>,
     /// The values of a `Literal` `python_type`, as data.
     pub(crate) values: Option<Arc<[crate::values::Value]>>,
+    /// MySQL's `INVISIBLE`: read only by name, left out of `SELECT *` and of an `INSERT`
+    /// without a column list.
+    pub invisible: bool,
 }
 
 /// A domain, enum or composite type as its columns see it: the SQL type they show (a

@@ -440,7 +440,9 @@ impl Checker<'_> {
         let literals = self.rules.is_enabled(Rule::LiteralMismatch)
             || self.rules.is_enabled(Rule::RedundantLiteral);
         if !(annotated.starts_with("tuple[")
-            && (self.rules.is_enabled(Rule::StaleType) || literals))
+            && (self.rules.is_enabled(Rule::StaleType)
+                || self.rules.is_enabled(Rule::NarrowType)
+                || literals))
         {
             return;
         }
@@ -450,7 +452,11 @@ impl Checker<'_> {
         {
             if !refines_tuple(annotated, &current) {
                 self.report_fix(
-                    Rule::StaleType,
+                    if admits_tuple(annotated, &current) {
+                        Rule::StaleType
+                    } else {
+                        Rule::NarrowType
+                    },
                     format!(
                         "{}[{annotated}] should be {}[{current}]",
                         if call.template { "SQLTemplate" } else { "SQL" },
@@ -943,6 +949,44 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
     }
 }
 
+/// Whether every row of the inferred `tuple[...]` is a row of the annotated one: `str | None`
+/// admits `str`, `str` admits `Literal['a']`, and `object` or `typing.Any` admit anything.
+fn admits_tuple(annotated: &str, inferred: &str) -> bool {
+    fn literal_class(member: &str) -> Option<&'static str> {
+        let values = member
+            .strip_prefix("typing.")
+            .unwrap_or(member)
+            .strip_prefix("Literal[")?
+            .strip_suffix(']')?;
+        let values = split_top(values, ',');
+        if values.iter().all(|v| v.starts_with(['\'', '"'])) {
+            Some("str")
+        } else if values.iter().all(|v| matches!(*v, "True" | "False")) {
+            Some("bool")
+        } else if values.iter().all(|v| v.parse::<i64>().is_ok()) {
+            Some("int")
+        } else {
+            None
+        }
+    }
+    fn admits(annotated: &str, inferred: &str) -> bool {
+        let members = split_top(annotated, '|');
+        members
+            .iter()
+            .any(|m| matches!(*m, "typing.Any" | "Any" | "object"))
+            || split_top(inferred, '|').iter().all(|member| {
+                members.contains(member)
+                    || literal_class(member).is_some_and(|class| members.contains(&class))
+            })
+    }
+    match (tuple_items(annotated), tuple_items(inferred)) {
+        (Some(ours), Some(theirs)) => {
+            ours.len() == theirs.len() && ours.iter().zip(&theirs).all(|(a, i)| admits(a, i))
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1094,9 +1138,35 @@ mod tests {
             false,
             &[],
         );
-        let stale_types: Vec<_> = diags.iter().filter(|d| d.rule == Rule::StaleType).collect();
-        assert_eq!(stale_types.len(), 1);
-        assert!(stale_types[0].message.contains("tuple[int]"));
+        let narrow: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == Rule::NarrowType)
+            .collect();
+        assert_eq!(narrow.len(), 1);
+        assert!(narrow[0].message.contains("tuple[int]"));
+    }
+
+    #[test]
+    fn test_wider_annotation_is_stale_not_narrow() {
+        for (annotated, inferred, admitted) in [
+            ("tuple[str | None]", "tuple[str]", true),
+            ("tuple[object, typing.Any]", "tuple[int | None, str]", true),
+            (
+                "tuple[str, int, bool]",
+                "tuple[Literal['a', \"b\"], typing.Literal[-1, 2], Literal[True]]",
+                true,
+            ),
+            ("tuple[str]", "tuple[str | None]", false),
+            ("tuple[int]", "tuple[int, str]", false),
+            ("tuple[int]", "tuple[Literal['a']]", false),
+            ("tuple[int]", "dict[str, int]", false),
+        ] {
+            assert_eq!(
+                admits_tuple(annotated, inferred),
+                admitted,
+                "{annotated} {inferred}"
+            );
+        }
     }
 
     #[test]

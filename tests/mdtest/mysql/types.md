@@ -436,3 +436,157 @@ SELECT v.a, v.b FROM (VALUES ROW((SELECT max(id) FROM t), (SELECT name FROM t LI
 -- columns: a: int | None (INT)
 -- columns: b: str | None (VARCHAR(10))
 ```
+
+## Partitioned tables
+
+The `PARTITION BY` clause after the column list is read past, with or without the
+`/*!50100 ... */` that `SHOW CREATE TABLE` and `mysqldump` wrap it in.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (
+    id INT NOT NULL,
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('a', 'b')),
+    day DATE NOT NULL
+) ENGINE=InnoDB
+PARTITION BY RANGE COLUMNS(day) (
+    PARTITION p0 VALUES LESS THAN ('2025-01-01'),
+    PARTITION p1 VALUES LESS THAN MAXVALUE
+);
+CREATE TABLE hits (id INT NOT NULL) PARTITION BY HASH(id) PARTITIONS 4;
+CREATE TABLE dumped (id INT NOT NULL)
+/*!50100 PARTITION BY KEY (id) PARTITIONS 2 */;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT e.id, e.kind, e.day, h.id, d.id FROM events e, hits h, dumped d
+-- columns: id: int (INT)
+-- columns: kind: str (VARCHAR(10))
+-- columns: day: datetime.date (DATE)
+-- columns: id: int (INT)
+-- columns: id: int (INT)
+```
+
+## A table copied with LIKE
+
+`CREATE TABLE ... LIKE`, with or without parentheses, copies the columns of the
+other table, `NOT NULL` included.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL, note TEXT);
+CREATE TABLE users_archive LIKE users;
+CREATE TABLE IF NOT EXISTS `users_copy` (LIKE `users`);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users_archive
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: note: str | None (TEXT)
+```
+
+```sql
+SELECT * FROM users_copy
+-- expanded: SELECT id, name, note FROM users_copy
+```
+
+## A mysqldump schema
+
+`mysqldump --no-data` wraps views and newer options in executable comments
+(`/*!50001 ... */`), which MySQL runs and other servers skip. They are read as
+MySQL reads them: a view is first created as a placeholder of literal columns,
+then replaced with its query, after its `ALGORITHM`, `DEFINER` and `SQL SECURITY`
+options and with its `WITH CHECK OPTION`.
+
+`schema.sql`:
+
+```sql
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+DROP TABLE IF EXISTS `users`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `users` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `home` point NOT NULL /*!80003 SRID 4326 */,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+DROP TABLE IF EXISTS `named`;
+/*!50001 DROP VIEW IF EXISTS `named`*/;
+/*!50001 CREATE VIEW `named` AS SELECT
+ 1 AS `id`,
+ 1 AS `name`*/;
+/*!50001 DROP VIEW IF EXISTS `named`*/;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `named` AS select `users`.`id` AS `id`,`users`.`name` AS `name` from `users` */
+/*!50002 WITH CASCADED CHECK OPTION */;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT n.id, n.name, u.home FROM named n JOIN users u ON u.id = n.id
+-- columns: id: int (UBIGINT)
+-- columns: name: str (VARCHAR(100))
+-- columns: home: bytes (POINT)
+```
+
+## Invisible columns
+
+An `INVISIBLE` column is read by name only: `SELECT *` and a view over it leave it out.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (
+    id INT NOT NULL,
+    secret VARCHAR(64) NOT NULL INVISIBLE,
+    note TEXT /*!80023 INVISIBLE */,
+    name TEXT NOT NULL
+);
+CREATE VIEW everything AS SELECT * FROM accounts;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM accounts
+-- expanded: SELECT id, name FROM accounts
+```
+
+```sql
+SELECT * FROM everything
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+```
+
+```sql
+SELECT a.*, a.secret FROM accounts a
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: secret: str (VARCHAR(64))
+```

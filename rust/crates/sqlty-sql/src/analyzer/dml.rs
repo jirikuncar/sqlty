@@ -191,7 +191,13 @@ impl Analyzer<'_> {
                 let columns: Vec<String> = if insert.columns.is_empty() {
                     self.schema
                         .table(&table_key(name, self.dialect))
-                        .map(|columns| columns.iter().map(|c| c.ident.clone()).collect())
+                        .map(|columns| {
+                            columns
+                                .iter()
+                                .filter(|c| !c.invisible)
+                                .map(|c| c.ident.clone())
+                                .collect()
+                        })
                         .unwrap_or_default()
                 } else {
                     insert

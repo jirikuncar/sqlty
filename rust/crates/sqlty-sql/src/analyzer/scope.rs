@@ -695,6 +695,7 @@ impl<'a> Analyzer<'a> {
                         self.schema.table(table).map(|columns| {
                             columns
                                 .iter()
+                                .filter(|col| !col.invisible)
                                 .map(|col| {
                                     Column::from_typed(
                                         col.name.clone(),
@@ -729,7 +730,14 @@ impl<'a> Analyzer<'a> {
             .iter()
             .map(|table| self.schema.table(table.named()?))
             .collect::<Option<Vec<_>>>()?;
-        Some(columns.into_iter().flatten().cloned().collect())
+        Some(
+            columns
+                .into_iter()
+                .flatten()
+                .filter(|col| !col.invisible)
+                .cloned()
+                .collect(),
+        )
     }
 }
 

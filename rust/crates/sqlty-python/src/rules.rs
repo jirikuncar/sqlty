@@ -38,8 +38,10 @@ pub enum Rule {
     SelectStarNoSchema,
     /// A `--sql` string that is not wrapped in `SQL[T](...)`.
     StaleRewrite,
-    /// A `SQL[tuple[...]]` that neither matches nor refines the inferred row type.
+    /// A `SQL[tuple[...]]` wider than the inferred row type: it admits every row.
     StaleType,
+    /// A `SQL[tuple[...]]` that does not admit every row the query returns.
+    NarrowType,
     /// A `--sql` marker under MySQL, which rejects it.
     MysqlSqlMarker,
     /// `"--sql SELECT ..."`: the whole query is a SQL comment.
@@ -66,7 +68,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 32] = [
+    pub const ALL: [Rule; 33] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -81,6 +83,7 @@ impl Rule {
         Rule::SelectStarNoSchema,
         Rule::StaleRewrite,
         Rule::StaleType,
+        Rule::NarrowType,
         Rule::MysqlSqlMarker,
         Rule::InlineSqlComment,
         Rule::FstringSkipped,
@@ -118,6 +121,7 @@ impl Rule {
             Rule::SelectStarNoSchema => "select-star-no-schema",
             Rule::StaleRewrite => "stale-rewrite",
             Rule::StaleType => "stale-type",
+            Rule::NarrowType => "narrow-type",
             Rule::MysqlSqlMarker => "mysql-sql-marker",
             Rule::InlineSqlComment => "inline-sql-comment",
             Rule::FstringSkipped => "fstring-skipped",
@@ -149,7 +153,7 @@ impl Rule {
             | Rule::LiteralMismatch
             | Rule::ParamCountMismatch
             | Rule::ParamTypeMismatch
-            | Rule::StaleType
+            | Rule::NarrowType
             | Rule::SelectStarNoSchema
             | Rule::Name(
                 NameRule::UnknownTable
@@ -161,6 +165,7 @@ impl Rule {
             Rule::ColumnNameMismatch
             | Rule::SelectStar
             | Rule::StaleRewrite
+            | Rule::StaleType
             | Rule::MysqlSqlMarker
             | Rule::InlineSqlComment
             | Rule::FstringSkipped
@@ -310,7 +315,8 @@ mod tests {
         let config = RuleConfig::default();
         assert_eq!(config.severity(Rule::SelectStarNoSchema), Severity::Error);
         assert_eq!(config.severity(Rule::StaleRewrite), Severity::Warn);
-        assert_eq!(config.severity(Rule::StaleType), Severity::Error);
+        assert_eq!(config.severity(Rule::StaleType), Severity::Warn);
+        assert_eq!(config.severity(Rule::NarrowType), Severity::Error);
         assert_eq!(config.severity(Rule::UnparsedQuery), Severity::Warn);
         assert_eq!(config.severity(Rule::RedundantOptional), Severity::Ignore);
         assert_eq!(

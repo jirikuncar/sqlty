@@ -45,14 +45,23 @@ pub(super) fn read_statements(
                 kind,
             });
         };
-        if stmt.is_create_table() || (postgres && stmt.is_create_table_any()) {
-            let (likes, text) = match postgres.then(|| stmt.without_like()).flatten() {
+        // PostgreSQL and MySQL copy a table's columns with `LIKE`.
+        let reads_like = postgres || dialect == SqlDialect::MySql;
+        if stmt.is_create_table() || (reads_like && stmt.is_create_table_any()) {
+            let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
                 Some((text, likes)) => (likes, Some(text)),
                 None => (Vec::new(), None),
             };
             let parsed = match &text {
                 None => parse_ddl(&stmt.sql(), dialect)
-                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect)),
+                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
+                    .or_else(|| {
+                        let text = stmt.without_partitioning()?;
+                        parse_ddl(&text, dialect).or_else(|| {
+                            let reduced = ddl::split_statements(&text, !postgres);
+                            parse_ddl(&reduced.first()?.without_constraints()?, dialect)
+                        })
+                    }),
                 Some(text) => parse_ddl(text, dialect).or_else(|| {
                     let reduced = ddl::split_statements(text, false);
                     parse_ddl(&reduced.first()?.without_constraints()?, dialect)
@@ -60,7 +69,11 @@ pub(super) fn read_statements(
             };
             match parsed.and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreateTable(create)) => {
-                    if !create.columns.is_empty() || postgres {
+                    if !create.columns.is_empty()
+                        || postgres
+                        || create.like.is_some()
+                        || !likes.is_empty()
+                    {
                         push(OpKind::Table(Box::new(create), likes));
                     }
                 }
@@ -114,7 +127,9 @@ pub(super) fn read_statements(
                 push(OpKind::Type(name, def));
             }
         } else if stmt.creates("view") {
-            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
+            let parsed = parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_ddl(&stmt.without_check_option()?, dialect));
+            match parsed.and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view))),
                 _ => {
                     skipped.push(("view", stmt.view_name()));

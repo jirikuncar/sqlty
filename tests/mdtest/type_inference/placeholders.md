@@ -103,7 +103,7 @@ schema = "schema.sql"
 ```
 
 ```python
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT id FROM users WHERE name = %(name)s")
 ```
 

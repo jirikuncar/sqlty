@@ -156,6 +156,7 @@ b = sy.SQL[sy.UNTYPED]("--sql\nSELECT name::TEXT FROM users")
 ```toml
 [tool.sqlty.rules]
 stale-type = "ignore"
+narrow-type = "ignore"
 stale-rewrite = "ignore"
 ```
 
