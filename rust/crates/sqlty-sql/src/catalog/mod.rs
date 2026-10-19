@@ -689,11 +689,13 @@ mod tests {
         }
     }
 
+    /// Catches loading that grows quadratically, which takes far longer at these sizes; a
+    /// debug build on a shared CI runner takes up to a second.
     fn assert_fast(sql: &str) -> Catalog {
         let start = std::time::Instant::now();
         let catalog = pg(sql);
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(1),
+            start.elapsed() < std::time::Duration::from_secs(5),
             "load took {:?}",
             start.elapsed()
         );
