@@ -81,7 +81,7 @@ tool such as pre-commit passes file names.
 | Code | Meaning |
 |------|---------|
 | 0 | Nothing to report: no `error` diagnostic from `check`, no file changed by `--check` or `--diff`, or the files were rewritten or stripped |
-| 1 | `check` found an `error`-severity diagnostic, `breaking` found a breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
+| 1 | `check` found an `error`-severity diagnostic, `breaking` found an `error`-severity breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
 | 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist), a Python file that is not UTF-8 (reported and skipped; the other files are still processed), or an internal error |
 
 ## Common options
@@ -262,10 +262,10 @@ sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
 | `--save PATH` | Write a snapshot of --head (its settings, schema and Python files) to PATH, a baseline for a later --against |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
-| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against) or github (GitHub Actions error annotations) |
+| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against) or github (GitHub Actions annotations, each at its severity) |
 <!-- /generated:cli-options-breaking -->
 
-Exit code: 1 when a change breaks either direction, 2 for an unknown revision or
+Exit code: 1 when a change breaks either direction with an `error` diagnostic, 2 for an unknown revision or
 outside a git repository. See [Breaking schema changes](../guide/breaking-changes.md).
 
 ## `sqlty rule`

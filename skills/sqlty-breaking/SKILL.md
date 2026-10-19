@@ -22,8 +22,10 @@ When it and `sqlty breaking --help` disagree, trust the command.
 
 `--head` defaults to the working tree, uncommitted changes included. Each
 revision is read with its own `pyproject.toml`, `schema` and Python files. It
-exits 0 when both mixes work, 1 when a change breaks one, and 2 on an error
-such as an unknown revision. Use `--direction backward` when migrations always
+exits 0 when both mixes work, 1 when a change breaks one with an `error`
+diagnostic, and 2 on an error such as an unknown revision. Rules and severities
+follow `[tool.sqlty.rules]`, as in `sqlty check`; a `warn` finding is printed
+without failing the run. Use `--direction backward` when migrations always
 run before the deploy, `--direction forward` when the code always ships first.
 
 ## Read a finding

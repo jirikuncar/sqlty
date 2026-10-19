@@ -308,5 +308,5 @@ def main(args: argparse.Namespace) -> None:
     except GitError as exc:
         raise ConfigError(str(exc)) from exc
     report(findings, args.head, args.quiet, args.output_format)
-    if findings:
+    if any(f.diagnostic["severity"] == "error" for f in findings):
         sys.exit(EXIT_FOUND)
