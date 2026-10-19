@@ -10,6 +10,15 @@ reference = "SQLite documentation, Built-in Aggregate Functions"
 reasoning = "The function returns a floating-point value."
 
 [[function]]
+id = "sqlite.aggregate.percentile"
+functions = ["MEDIAN", "PERCENTILE", "PERCENTILE_CONT", "PERCENTILE_DISC"]
+dialects = ["sqlite"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "SQLite documentation, The Percentile Extension, 2. Aggregate Functions Implemented By Percentile (https://www.sqlite.org/percentile.html)"
+reasoning = "Each gives a weighted average of the inputs or one of them, as a floating-point value, and NULL when there are no non-NULL inputs."
+
+[[function]]
 id = "sqlite.aggregate.sum-converted"
 function = "SUM"
 dialects = ["sqlite"]
