@@ -44,3 +44,21 @@ type = "TEXT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.network.boolean"
+function = "INET_SAME_FAMILY"
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reasoning = "The documentation gives the function a `boolean` result."
+
+[[function]]
+id = "postgres.network.macaddr8"
+function = "MACADDR8_SET7BIT"
+dialects = ["postgres"]
+type = "MACADDR8"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.41 MAC Address Functions"
+reasoning = "The documentation gives the function a `macaddr8` result."

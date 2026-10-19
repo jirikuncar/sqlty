@@ -9,9 +9,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use super::inference::strict_by_rule;
-use super::SqlDialect;
-
 /// How a function treats NULLs and rows, apart from its result type.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum Behavior {
@@ -37,13 +34,6 @@ pub(super) struct FunctionInfo {
 }
 
 impl FunctionInfo {
-    /// Whether the result is NULL for a NULL argument, as far as narrowing goes: a function
-    /// whose rules make it NULL when an argument is, other than an always valued aggregate.
-    pub(super) fn is_strict(name: &str, dialect: SqlDialect) -> bool {
-        strict_by_rule(name, dialect)
-            && lookup(name).is_none_or(|info| info.behavior != Behavior::AlwaysValued)
-    }
-
     pub(super) fn is_aggregate(&self) -> bool {
         self.behavior != Behavior::Scalar
     }
@@ -87,6 +77,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, FunctionInfo>> = LazyLock::new(|
 const AGGREGATES: &[&str] = &[
     "SUM",
     "RANGE_INTERSECT_AGG",
+    "RANGE_AGG",
     "AVG",
     "MIN",
     "MAX",
@@ -111,6 +102,14 @@ const AGGREGATES: &[&str] = &[
     "JSONB_AGG",
     "JSON_OBJECT_AGG",
     "JSONB_OBJECT_AGG",
+    "JSON_AGG_STRICT",
+    "JSONB_AGG_STRICT",
+    "JSON_OBJECT_AGG_STRICT",
+    "JSONB_OBJECT_AGG_STRICT",
+    "JSON_OBJECT_AGG_UNIQUE",
+    "JSONB_OBJECT_AGG_UNIQUE",
+    "JSON_OBJECT_AGG_UNIQUE_STRICT",
+    "JSONB_OBJECT_AGG_UNIQUE_STRICT",
     "JSON_ARRAYAGG",
     "JSON_OBJECTAGG",
     "XMLAGG",
@@ -163,9 +162,16 @@ const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
     "JSONB_AGG",
     "JSON_OBJECT_AGG",
     "JSONB_OBJECT_AGG",
+    "JSON_AGG_STRICT",
+    "JSONB_AGG_STRICT",
+    "JSON_OBJECT_AGG_STRICT",
+    "JSONB_OBJECT_AGG_STRICT",
+    "JSON_OBJECT_AGG_UNIQUE",
+    "JSONB_OBJECT_AGG_UNIQUE",
+    "JSON_OBJECT_AGG_UNIQUE_STRICT",
+    "JSONB_OBJECT_AGG_UNIQUE_STRICT",
     "JSON_ARRAYAGG",
     "JSON_OBJECTAGG",
-    "XMLAGG",
     "TOTAL",
     "JSON_GROUP_ARRAY",
     "JSON_GROUP_OBJECT",

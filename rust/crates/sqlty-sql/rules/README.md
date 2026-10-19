@@ -113,9 +113,9 @@ binary string. `nullability` is required:
 | `code` | `analyzer/nullability.rs` decides from the call (`LAG`'s default, `IF`'s branches) |
 
 A dialect that differs from `common/` overrides it with its own rule: `common/` makes
-`CONCAT` `non-null`, and `mysql/` makes it `strict`. A `strict` or `aggregate` function
-typed by a rule without `argument`, `arguments` or `any-argument` narrows
-`WHERE f(col) IS NOT NULL` to `col`.
+`CONCAT` `non-null`, and `mysql/` makes it `strict`. A call whose rule is `strict` or
+`aggregate` narrows `WHERE f(col) IS NOT NULL` to `col`: `lower` of a text column does,
+`lower` of a range, which is `nullable`, does not.
 
 `type` is a SQL type (`TEXT`, `ARRAY<INT>`, ...) or a computed result. A `(k)` names
 argument `k`, counting from 0:

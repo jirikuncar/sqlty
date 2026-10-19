@@ -121,7 +121,7 @@ def main() -> int:
                 continue
             for column, (name, oid) in zip(ours, server, strict=True):
                 server_type, kind = types.get(oid, (str(oid), "b"))
-                if column.python_type is None:
+                if column.python_type is None and column.sql_type is None:
                     results["untyped"].append(f"{entry} | `{server_type}` |")
                 elif why := compare(column, name, server_type, kind):
                     results["mismatch"].append(f"{entry} | {_cell(why)} |")

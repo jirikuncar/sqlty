@@ -1,6 +1,16 @@
 # PostgreSQL string functions.
 
 [[function]]
+id = "postgres.string.range-bound"
+functions = ["LOWER", "UPPER"]
+dialects = ["postgres"]
+argument = ["@range", "@multirange"]
+type = "@bound"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reasoning = "A bound has the element type of the range or multirange. It is NULL when the range is empty or the bound is infinite."
+
+[[function]]
 id = "postgres.string.bound"
 functions = ["LOWER", "UPPER"]
 dialects = ["postgres"]
@@ -29,20 +39,20 @@ reasoning = "The documentation gives each of these a `text[]` result. It is NULL
 
 [[function]]
 id = "postgres.string.boolean"
-functions = ["STARTS_WITH", "REGEXP_LIKE"]
+functions = ["STARTS_WITH", "REGEXP_LIKE", "UNICODE_ASSIGNED"]
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
 id = "postgres.string.int"
-functions = ["ASCII", "STRPOS", "REGEXP_COUNT", "REGEXP_INSTR"]
+functions = ["ASCII", "STRPOS", "REGEXP_COUNT", "REGEXP_INSTR", "CHARACTER_LENGTH"]
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
@@ -56,7 +66,7 @@ reasoning = "The documentation gives the function a `name` result."
 
 [[function]]
 id = "postgres.string.text"
-functions = ["LEFT", "RIGHT", "LPAD", "RPAD", "INITCAP", "REPEAT", "REVERSE", "TRANSLATE", "MD5", "TO_HEX", "TO_BIN", "TO_OCT", "CHR", "QUOTE_IDENT", "QUOTE_LITERAL", "SPLIT_PART", "NORMALIZE", "REGEXP_REPLACE", "UNISTR", "REGEXP_SPLIT_TO_TABLE", "STRING_TO_TABLE"]
+functions = ["LEFT", "RIGHT", "LPAD", "RPAD", "INITCAP", "REPEAT", "REVERSE", "TRANSLATE", "MD5", "TO_HEX", "TO_BIN", "TO_OCT", "CHR", "QUOTE_IDENT", "QUOTE_LITERAL", "SPLIT_PART", "NORMALIZE", "REGEXP_REPLACE", "UNISTR", "REGEXP_SPLIT_TO_TABLE", "STRING_TO_TABLE", "TO_ASCII"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"

@@ -417,7 +417,10 @@ SELECT
 
 ```sql
 SELECT
-    range_merge('{[1,2), [3,4)}'::int4multirange) AS range_argument_type,
+    range_merge('{[1,2), [3,4)}'::int4multirange) AS range_range,
+    multirange(int4range(1, 2)) AS range_multirange,
+    unnest('{[1,2), [3,4)}'::int4multirange) AS array_unnested_multirange,
+    range_agg(int4range(1, 2)) AS aggregate_multirange,
     lower_inf('(,)'::daterange) AS range_boolean,
     int4range(1, 2) AS range_int4range,
     int8range(1, 2) AS range_int8range,
@@ -425,7 +428,10 @@ SELECT
     daterange('2024-01-01'::date, '2024-02-01'::date) AS range_daterange,
     tsrange('2024-01-01'::timestamp, '2024-02-01'::timestamp) AS range_tsrange,
     tstzrange('2024-01-01'::timestamptz, '2024-02-01'::timestamptz) AS range_tstzrange
--- rules: range_argument_type: postgres.range.argument-type / postgres.range.argument-type
+-- rules: range_range: postgres.range.range / postgres.range.range
+-- rules: range_multirange: postgres.range.multirange / postgres.range.multirange
+-- rules: array_unnested_multirange: postgres.array.unnested-multirange / postgres.array.unnested-multirange
+-- rules: aggregate_multirange: postgres.aggregate.multirange / postgres.aggregate.multirange
 -- rules: range_boolean: postgres.range.boolean / postgres.range.boolean
 -- rules: range_int4range: postgres.range.int4range / postgres.range.int4range
 -- rules: range_int8range: postgres.range.int8range / postgres.range.int8range
@@ -591,6 +597,189 @@ SELECT
 ```sql
 SELECT inet_client_port() AS system_int_nullable
 -- rules: system_int_nullable: postgres.system.int-nullable / postgres.system.int-nullable
+```
+
+```sql
+SELECT
+    gin_clean_pending_list(NULL::regclass) AS admin_bigint_nullable,
+    pg_is_wal_replay_paused() AS admin_boolean_nullable,
+    pg_wal_lsn_diff(NULL::pg_lsn, NULL::pg_lsn) AS admin_decimal,
+    brin_summarize_new_values(NULL::regclass) AS admin_int_nullable,
+    pg_column_toast_chunk_id(NULL::int4) AS admin_oid_nullable,
+    pg_backup_start(NULL::text, NULL::boolean) AS admin_pg_lsn_nullable,
+    pg_backup_stop(NULL::boolean) AS admin_record_nullable,
+    pg_filenode_relation(NULL::oid, NULL::oid) AS admin_regclass_nullable,
+    pg_collation_actual_version(NULL::oid) AS admin_text_nullable,
+    pg_last_xact_replay_timestamp() AS admin_timestamptz_nullable,
+    pg_read_binary_file(NULL::text) AS admin_varbinary_nullable
+-- rules: admin_bigint_nullable: postgres.admin.bigint-nullable / postgres.admin.bigint-nullable
+-- rules: admin_boolean_nullable: postgres.admin.boolean-nullable / postgres.admin.boolean-nullable
+-- rules: admin_decimal: postgres.admin.decimal / postgres.admin.decimal
+-- rules: admin_int_nullable: postgres.admin.int-nullable / postgres.admin.int-nullable
+-- rules: admin_oid_nullable: postgres.admin.oid-nullable / postgres.admin.oid-nullable
+-- rules: admin_pg_lsn_nullable: postgres.admin.pg-lsn-nullable / postgres.admin.pg-lsn-nullable
+-- rules: admin_record_nullable: postgres.admin.record-nullable / postgres.admin.record-nullable
+-- rules: admin_regclass_nullable: postgres.admin.regclass-nullable / postgres.admin.regclass-nullable
+-- rules: admin_text_nullable: postgres.admin.text-nullable / postgres.admin.text-nullable
+-- rules: admin_timestamptz_nullable: postgres.admin.timestamptz-nullable / postgres.admin.timestamptz-nullable
+-- rules: admin_varbinary_nullable: postgres.admin.varbinary-nullable / postgres.admin.varbinary-nullable
+```
+
+```sql
+SELECT
+    json_agg_strict(NULL::int4) AS aggregate_json_strict,
+    jsonb_agg_strict(NULL::int4) AS aggregate_jsonb_strict,
+    xmlagg(NULL::xml) AS aggregate_xml
+-- rules: aggregate_json_strict: postgres.aggregate.json-strict / postgres.aggregate.json-strict
+-- rules: aggregate_jsonb_strict: postgres.aggregate.jsonb-strict / postgres.aggregate.jsonb-strict
+-- rules: aggregate_xml: postgres.aggregate.xml / postgres.aggregate.xml
+```
+
+```sql
+SELECT
+    pg_event_trigger_table_rewrite_reason() AS event_int,
+    pg_event_trigger_table_rewrite_oid() AS event_oid
+-- rules: event_int: postgres.event.int / postgres.event.int
+-- rules: event_oid: postgres.event.oid / postgres.event.oid
+```
+
+```sql
+SELECT
+    isclosed(path '((0,0),(1,1),(2,0))') AS geometry_boolean,
+    bound_box(box '(1,1),(0,0)', box '(4,4),(3,3)') AS geometry_box,
+    circle(box '(1,1),(0,0)') AS geometry_circle,
+    area(box '(2,2),(0,0)') AS geometry_double,
+    npoints(path '[(0,0),(1,1),(2,0)]') AS geometry_int,
+    line(point '(-1,0)', point '(1,0)') AS geometry_line,
+    diagonal(box '(1,2),(0,0)') AS geometry_lseg,
+    path(polygon '((0,0),(1,1),(2,0))') AS geometry_path,
+    center(box '(1,2),(0,0)') AS geometry_point,
+    polygon(box '(1,1),(0,0)') AS geometry_polygon
+-- rules: geometry_boolean: postgres.geometry.boolean / postgres.geometry.boolean
+-- rules: geometry_box: postgres.geometry.box / postgres.geometry.box
+-- rules: geometry_circle: postgres.geometry.circle / postgres.geometry.circle
+-- rules: geometry_double: postgres.geometry.double / postgres.geometry.double
+-- rules: geometry_int: postgres.geometry.int / postgres.geometry.int
+-- rules: geometry_line: postgres.geometry.line / postgres.geometry.line
+-- rules: geometry_lseg: postgres.geometry.lseg / postgres.geometry.lseg
+-- rules: geometry_path: postgres.geometry.path / postgres.geometry.path
+-- rules: geometry_point: postgres.geometry.point / postgres.geometry.point
+-- rules: geometry_polygon: postgres.geometry.polygon / postgres.geometry.polygon
+```
+
+```sql
+SELECT
+    jsonb_populate_record_valid(NULL::int4, NULL::jsonb) AS json_populate_record_valid,
+    jsonb_set_lax('[{"f1":1,"f2":null},2,null,3]', '{0,f1}', null) AS json_set_lax,
+    json_populate_record(NULL::int4, NULL::json, NULL::boolean) AS json_populated
+-- rules: json_populate_record_valid: postgres.json.populate-record-valid / postgres.json.populate-record-valid
+-- rules: json_set_lax: postgres.json.set-lax / postgres.json.set-lax
+-- rules: json_populated: postgres.json.populated / postgres.json.populated
+```
+
+```sql
+SELECT
+    trunc(macaddr '12:34:56:78:90:ab') AS math_truncated_address,
+    gcd(1071, 462) AS math_common_integer,
+    lower(int4range(1, 2)) AS string_range_bound,
+    unnest('cat:3 fat:2,4'::tsvector) AS array_unnested_tsvector
+-- rules: math_truncated_address: postgres.math.truncated-address / postgres.math.truncated-address
+-- rules: math_common_integer: postgres.math.common-integer / postgres.math.common-integer
+-- rules: string_range_bound: postgres.string.range-bound / postgres.string.range-bound
+-- rules: array_unnested_tsvector: postgres.array.unnested-tsvector / postgres.array.unnested-tsvector
+```
+
+```sql
+SELECT
+    inet_same_family(inet '192.168.1.5/24', inet '::1') AS network_boolean,
+    macaddr8_set7bit(macaddr8 '00:34:56:ab:cd:ef') AS network_macaddr8
+-- rules: network_boolean: postgres.network.boolean / postgres.network.boolean
+-- rules: network_macaddr8: postgres.network.macaddr8 / postgres.network.macaddr8
+```
+
+```sql
+SELECT generate_subscripts(NULL::int4[], NULL::integer) AS series_int
+-- rules: series_int: postgres.series.int / postgres.series.int
+```
+
+```sql
+SELECT
+    makeaclitem(NULL::oid, NULL::oid, NULL::text, NULL::boolean) AS system_aclitem,
+    acldefault(NULL::"char", NULL::oid) AS system_aclitem_array,
+    pg_blocking_pids(NULL::integer) AS system_int_array,
+    current_schemas(NULL::boolean) AS system_name_array,
+    pg_settings_get_flags(NULL::text) AS system_text_array_nullable,
+    txid_current_if_assigned() AS system_bigint_nullable,
+    pg_collation_is_visible(NULL::oid) AS system_boolean_nullable,
+    pg_notification_queue_usage() AS system_double,
+    to_regtypemod(NULL::text) AS system_type_modifier,
+    pg_my_temp_schema() AS system_oid_nullable,
+    pg_current_snapshot() AS system_pg_snapshot,
+    aclexplode(NULL::aclitem[]) AS system_record_nullable,
+    to_regclass(NULL::text) AS system_regclass_nullable,
+    to_regcollation(NULL::text) AS system_regcollation_nullable,
+    to_regnamespace(NULL::text) AS system_regnamespace_nullable,
+    to_regoper(NULL::text) AS system_regoper_nullable,
+    to_regoperator(NULL::text) AS system_regoperator_nullable,
+    to_regproc(NULL::text) AS system_regproc_nullable,
+    to_regprocedure(NULL::text) AS system_regprocedure_nullable,
+    to_regrole(NULL::text) AS system_regrole_nullable,
+    pg_basetype(NULL::regtype) AS system_regtype_nullable,
+    current_query() AS system_text_nullable,
+    pg_xact_commit_timestamp(NULL::xid) AS system_timestamptz_nullable,
+    txid_current_snapshot() AS system_txid_snapshot,
+    pg_current_xact_id_if_assigned() AS system_xid8_nullable,
+    pg_current_xact_id() AS system_xid8
+-- rules: system_aclitem: postgres.system.aclitem / postgres.system.aclitem
+-- rules: system_aclitem_array: postgres.system.aclitem-array / postgres.system.aclitem-array
+-- rules: system_int_array: postgres.system.int-array / postgres.system.int-array
+-- rules: system_name_array: postgres.system.name-array / postgres.system.name-array
+-- rules: system_text_array_nullable: postgres.system.text-array-nullable / postgres.system.text-array-nullable
+-- rules: system_bigint_nullable: postgres.system.bigint-nullable / postgres.system.bigint-nullable
+-- rules: system_boolean_nullable: postgres.system.boolean-nullable / postgres.system.boolean-nullable
+-- rules: system_double: postgres.system.double / postgres.system.double
+-- rules: system_type_modifier: postgres.system.type-modifier / postgres.system.type-modifier
+-- rules: system_oid_nullable: postgres.system.oid-nullable / postgres.system.oid-nullable
+-- rules: system_pg_snapshot: postgres.system.pg-snapshot / postgres.system.pg-snapshot
+-- rules: system_record_nullable: postgres.system.record-nullable / postgres.system.record-nullable
+-- rules: system_regclass_nullable: postgres.system.regclass-nullable / postgres.system.regclass-nullable
+-- rules: system_regcollation_nullable: postgres.system.regcollation-nullable / postgres.system.regcollation-nullable
+-- rules: system_regnamespace_nullable: postgres.system.regnamespace-nullable / postgres.system.regnamespace-nullable
+-- rules: system_regoper_nullable: postgres.system.regoper-nullable / postgres.system.regoper-nullable
+-- rules: system_regoperator_nullable: postgres.system.regoperator-nullable / postgres.system.regoperator-nullable
+-- rules: system_regproc_nullable: postgres.system.regproc-nullable / postgres.system.regproc-nullable
+-- rules: system_regprocedure_nullable: postgres.system.regprocedure-nullable / postgres.system.regprocedure-nullable
+-- rules: system_regrole_nullable: postgres.system.regrole-nullable / postgres.system.regrole-nullable
+-- rules: system_regtype_nullable: postgres.system.regtype-nullable / postgres.system.regtype-nullable
+-- rules: system_text_nullable: postgres.system.text-nullable / postgres.system.text-nullable
+-- rules: system_timestamptz_nullable: postgres.system.timestamptz-nullable / postgres.system.timestamptz-nullable
+-- rules: system_txid_snapshot: postgres.system.txid-snapshot / postgres.system.txid-snapshot
+-- rules: system_xid8_nullable: postgres.system.xid8-nullable / postgres.system.xid8-nullable
+-- rules: system_xid8: postgres.system.xid8 / postgres.system.xid8
+```
+
+```sql
+SELECT
+    ts_lexize('english_stem', 'stars') AS textsearch_text_array_nullable,
+    tsvector_to_array('fat:2,4 cat:3 rat:5A'::tsvector) AS textsearch_text_array,
+    numnode('(fat & rat) | cat'::tsquery) AS textsearch_int,
+    ts_debug('english', 'The Brightest supernovaes') AS textsearch_record,
+    get_current_ts_config() AS textsearch_regconfig
+-- rules: textsearch_text_array_nullable: postgres.textsearch.text-array-nullable / postgres.textsearch.text-array-nullable
+-- rules: textsearch_text_array: postgres.textsearch.text-array / postgres.textsearch.text-array
+-- rules: textsearch_int: postgres.textsearch.int / postgres.textsearch.int
+-- rules: textsearch_record: postgres.textsearch.record / postgres.textsearch.record
+-- rules: textsearch_regconfig: postgres.textsearch.regconfig / postgres.textsearch.regconfig
+```
+
+```sql
+SELECT
+    xpath(NULL::text, NULL::xml) AS xml_xml_array,
+    xml_is_well_formed(NULL::text) AS xml_boolean,
+    cursor_to_xml(NULL::refcursor, NULL::integer, NULL::boolean, NULL::boolean, NULL::text) AS xml_xml
+-- rules: xml_xml_array: postgres.xml.xml-array / postgres.xml.xml-array
+-- rules: xml_boolean: postgres.xml.boolean / postgres.xml.boolean
+-- rules: xml_xml: postgres.xml.xml / postgres.xml.xml
 ```
 
 ## MySQL

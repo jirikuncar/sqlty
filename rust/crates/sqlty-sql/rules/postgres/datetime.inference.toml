@@ -15,8 +15,8 @@ function = "TIMEZONE"
 dialects = ["postgres"]
 type = "@at-zone(1)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.9.4 AT TIME ZONE and AT LOCAL, timezone(zone, timestamp)"
-reasoning = "Converting the second argument between time zones swaps the two timestamp types, and a time gains a zone."
+reference = "PostgreSQL 17 documentation, 9.9.4 AT TIME ZONE and AT LOCAL, timezone(zone, timestamp), timezone(timestamp)"
+reasoning = "Converting the second argument, or the only one for the session time zone, between time zones swaps the two timestamp types, and a time gains a zone."
 
 [[function]]
 id = "postgres.datetime.boolean"
@@ -119,9 +119,9 @@ reasoning = "Truncating keeps the second argument's type, an interval's or times
 
 [[function]]
 id = "postgres.datetime.void"
-function = "PG_SLEEP"
+functions = ["PG_SLEEP", "PG_SLEEP_FOR", "PG_SLEEP_UNTIL"]
 dialects = ["postgres"]
 type = "@void"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.9.6 Delaying Execution"
-reasoning = "The function returns `void`, which the driver reads as None."
+reasoning = "Each of these returns `void`, which the driver reads as None."

@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 54] = [
+const SQL_TYPES: [&str; 82] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -70,11 +70,39 @@ const SQL_TYPES: [&str; 54] = [
     "DATERANGE",
     "TSRANGE",
     "TSTZRANGE",
+    "INT4MULTIRANGE",
+    "INT8MULTIRANGE",
+    "NUMMULTIRANGE",
+    "DATEMULTIRANGE",
+    "TSMULTIRANGE",
+    "TSTZMULTIRANGE",
+    "OID",
+    "XML",
+    "ACLITEM",
+    "POINT",
+    "LINE",
+    "BOX",
+    "CIRCLE",
+    "POLYGON",
+    "MACADDR8",
+    "PG_LSN",
+    "PG_SNAPSHOT",
+    "TXID_SNAPSHOT",
+    "XID8",
+    "REGCONFIG",
+    "REGCLASS",
+    "REGCOLLATION",
+    "REGNAMESPACE",
+    "REGOPER",
+    "REGOPERATOR",
+    "REGPROC",
+    "REGPROCEDURE",
+    "REGROLE",
     "ARRAY",
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.
-const CLASSES: [(&str, &[&str]); 9] = [
+const CLASSES: [(&str, &[&str]); 10] = [
     (
         "@integer",
         &["SMALLINT", "TINYINT", "MEDIUMINT", "INT", "BIGINT"],
@@ -114,6 +142,17 @@ const CLASSES: [(&str, &[&str]); 9] = [
             "TSTZRANGE",
         ],
     ),
+    (
+        "@multirange",
+        &[
+            "INT4MULTIRANGE",
+            "INT8MULTIRANGE",
+            "NUMMULTIRANGE",
+            "DATEMULTIRANGE",
+            "TSMULTIRANGE",
+            "TSTZMULTIRANGE",
+        ],
+    ),
 ];
 
 /// Result types other than a SQL type name.
@@ -140,7 +179,7 @@ const NULLABILITIES: [(&str, &str); 5] = [
 /// Result types of a function rule other than a SQL type name, as `FunctionType` spells
 /// them; `(k)` takes an argument position, `{}` in the path. `@argument-as <TYPE>` keeps the
 /// first argument's Python type and values under another SQL type.
-const FUNCTION_RESULTS: [(&str, &str); 25] = [
+const FUNCTION_RESULTS: [(&str, &str); 27] = [
     ("@any", "FunctionType::Any"),
     ("@unknown", "FunctionType::Unknown"),
     ("@code", "FunctionType::Code"),
@@ -178,6 +217,11 @@ const FUNCTION_RESULTS: [(&str, &str); 25] = [
     ("@series", "FunctionType::Returns(Returns::Series)"),
     ("@text(k)", "FunctionType::Returns(Returns::Text({}))"),
     ("@random", "FunctionType::Returns(Returns::Random)"),
+    ("@range(k)", "FunctionType::Returns(Returns::Range({}))"),
+    (
+        "@multirange(k)",
+        "FunctionType::Returns(Returns::Multirange({}))",
+    ),
 ];
 
 /// The Rust path of a function rule's result, when `result` names one: a SQL type, a type of

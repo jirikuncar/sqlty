@@ -46,6 +46,26 @@ reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Ta
 reasoning = "The result is an array of the argument's type."
 
 [[function]]
+id = "postgres.array.unnested-tsvector"
+function = "UNNEST"
+dialects = ["postgres"]
+argument = ["TSVECTOR"]
+type = "RECORD"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "Unnesting a `tsvector` gives one `record` of lexeme, positions and weights per lexeme."
+
+[[function]]
+id = "postgres.array.unnested-multirange"
+function = "UNNEST"
+dialects = ["postgres"]
+argument = ["@multirange"]
+type = "@range(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.59 Multirange Functions"
+reasoning = "Unnesting a multirange gives its ranges, of the matching range type."
+
+[[function]]
 id = "postgres.array.element"
 function = "UNNEST"
 dialects = ["postgres"]

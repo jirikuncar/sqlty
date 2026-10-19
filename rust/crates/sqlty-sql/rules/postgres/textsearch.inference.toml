@@ -82,16 +82,16 @@ reasoning = "The documentation gives each of these a `real` result."
 
 [[function]]
 id = "postgres.textsearch.text"
-function = "TS_HEADLINE"
+functions = ["TS_HEADLINE", "QUERYTREE"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
-reasoning = "The documentation gives the function a `text` result."
+reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
 id = "postgres.textsearch.tsquery"
-functions = ["TO_TSQUERY", "PLAINTO_TSQUERY", "PHRASETO_TSQUERY", "WEBSEARCH_TO_TSQUERY"]
+functions = ["TO_TSQUERY", "PLAINTO_TSQUERY", "PHRASETO_TSQUERY", "WEBSEARCH_TO_TSQUERY", "TS_REWRITE", "TSQUERY_PHRASE"]
 dialects = ["postgres"]
 type = "TSQUERY"
 nullability = "strict"
@@ -100,9 +100,54 @@ reasoning = "The documentation gives each of these a `tsquery` result."
 
 [[function]]
 id = "postgres.textsearch.tsvector"
-functions = ["TO_TSVECTOR", "SETWEIGHT"]
+functions = ["TO_TSVECTOR", "SETWEIGHT", "ARRAY_TO_TSVECTOR", "JSON_TO_TSVECTOR", "JSONB_TO_TSVECTOR", "STRIP", "TS_DELETE", "TS_FILTER"]
 dialects = ["postgres"]
 type = "TSVECTOR"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives each of these a `tsvector` result."
+
+[[function]]
+id = "postgres.textsearch.text-array-nullable"
+function = "TS_LEXIZE"
+dialects = ["postgres"]
+type = "ARRAY<TEXT>"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
+reasoning = "The documentation gives the function a `text[]` result. It is NULL for a word the dictionary does not know."
+
+[[function]]
+id = "postgres.textsearch.text-array"
+function = "TSVECTOR_TO_ARRAY"
+dialects = ["postgres"]
+type = "ARRAY<TEXT>"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function a `text[]` result."
+
+[[function]]
+id = "postgres.textsearch.int"
+function = "NUMNODE"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.textsearch.record"
+functions = ["TS_DEBUG", "TS_PARSE", "TS_STAT", "TS_TOKEN_TYPE"]
+dialects = ["postgres"]
+type = "RECORD"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
+reasoning = "The documentation gives each of these a `record` result."
+
+[[function]]
+id = "postgres.textsearch.regconfig"
+function = "GET_CURRENT_TS_CONFIG"
+dialects = ["postgres"]
+type = "REGCONFIG"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function a `regconfig` result."

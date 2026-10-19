@@ -94,6 +94,14 @@ SELECT lower(nick) FROM users WHERE lower(nick) IS NOT NULL
 -- inferred: tuple[str]
 ```
 
+The rule of the call decides: `upper` of a range is NULL for an infinite bound too, so
+`upper(int4range(age, 100))` proves nothing about `age`.
+
+```sql
+SELECT age FROM users WHERE upper(int4range(age, 100)) IS NOT NULL
+-- inferred: tuple[int | None]
+```
+
 ## Conditions that prove nothing
 
 `OR` proves only what both sides prove.
