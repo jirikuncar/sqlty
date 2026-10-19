@@ -1,6 +1,6 @@
 # stale-type
 
-Default severity: **warn**
+Default severity: **error**
 
 ## What it does
 
@@ -12,7 +12,13 @@ not flagged.
 ## Why is this bad?
 
 The SQL changed after the last rewrite, so the annotation describes rows the
-query no longer returns.
+query no longer returns. When the code can now get a value its annotation
+doesn't admit, such as `None` from a column made nullable, it is an error.
+
+An annotation that admits every row the query returns, only wider than it needs
+to be (`str | None` for a column made `NOT NULL`, or `object`), still works, so it
+is a warning. Setting `stale-type` in `[tool.sqlty.rules]` gives every
+`stale-type` that severity.
 
 ## Example
 
