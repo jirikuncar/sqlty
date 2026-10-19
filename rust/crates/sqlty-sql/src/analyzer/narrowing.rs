@@ -244,6 +244,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// What is proven not NULL when `cond` evaluates to `truth`.
+    #[recursive::recursive]
     pub(super) fn learn(&self, cond: &Expr, truth: bool, scope: &Scope) -> Learned {
         use BinaryOperator::*;
         match cond {
@@ -469,6 +470,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// What is not NULL when `expr` is not NULL.
+    #[recursive::recursive]
     fn proven(&self, expr: &Expr, scope: &Scope) -> Learned {
         use BinaryOperator::*;
         let mut learned = Learned::default();

@@ -10,7 +10,7 @@ use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
 use super::names::alias_name;
-use super::preprocess::{parse_first, parse_query, parser_input};
+use super::preprocess::{parse_first, parse_query, parser_input, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
 
@@ -166,6 +166,9 @@ pub fn parse_error(sql: &str, dialect: &str) -> Option<String> {
     let input = parser_input(sql, dialect);
     Some(
         match Parser::parse_sql(dialect.parser_dialect().as_ref(), &input) {
+            Ok(stmts) if too_deep(&stmts) => {
+                format!("expressions nest more than {MAX_DEPTH} levels deep")
+            }
             Ok(_) => "unsupported in this dialect".to_string(),
             Err(err) => {
                 let text = err.to_string();

@@ -7,7 +7,9 @@ Default severity: **warn**
 Reports a query that does not parse in the configured dialect: a `--sql`
 string, the argument of `SQL[T](...)`, or a string passed to an
 `Annotated[LiteralString, SQL]` parameter. The message quotes sqlparser's
-error, which points at the token it could not read.
+error, which points at the token it could not read. A query whose expressions
+nest more than 1000 levels deep, such as a chain of a thousand `OR`s, is not
+analyzed either: its depth bounds the time and memory the analysis takes.
 
 ```toml
 [tool.sqlty.rules]

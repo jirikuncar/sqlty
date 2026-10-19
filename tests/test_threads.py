@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from sqlty import _core
+from sqlty import _core, core
 
 SOURCE = 'q = "--sql\\nSELECT id::INTEGER FROM users"\nr = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")\n'
 SCHEMA = "CREATE TABLE users (id INTEGER NOT NULL);"
@@ -71,3 +71,30 @@ def test_cold_schema_cache_misses_race_to_the_same_answers() -> None:
 @pytest.mark.skipif(not FREE_THREADED, reason="the cache-miss race needs parallel threads")
 def test_free_threaded_build_runs_threads_in_parallel() -> None:
     assert not sys._is_gil_enabled()
+
+
+def _chain(terms: int) -> str:
+    return "SELECT " + " + ".join(["id"] * terms) + " AS total FROM users"
+
+
+def test_deep_expressions_analyze_on_a_small_thread_stack() -> None:
+    result: list[object] = []
+    previous = threading.stack_size(512 * 1024)
+    try:
+        thread = threading.Thread(
+            target=lambda: result.append(core.infer_type(_chain(999), schema_sql=SCHEMA))
+        )
+        thread.start()
+        thread.join()
+    finally:
+        threading.stack_size(previous)
+    assert result == ["tuple[int]"]
+
+
+def test_expressions_nested_too_deep_are_not_analyzed() -> None:
+    sql = _chain(1001)
+    assert core.analyze_select(sql, schema_sql=SCHEMA) is None
+    source = f'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\n{sql}")\n'
+    assert [(d["rule"], d["message"]) for d in core.check_source(source, schema_sql=SCHEMA)] == [
+        ("unparsed-query", "query does not parse: expressions nest more than 1000 levels deep")
+    ]
