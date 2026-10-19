@@ -2,13 +2,33 @@
 
 [[function]]
 id = "mysql.string.binary"
-functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "CONCAT", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE", "REGEXP_SUBSTR"]
+functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE", "REGEXP_SUBSTR"]
 dialects = ["mysql"]
 argument = ["@binary"]
 type = "VARBINARY"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
 reasoning = "A string function of a binary string gives a binary string, which MySQL drivers return as bytes."
+
+[[function]]
+id = "mysql.string.binary-any-argument"
+functions = ["CONCAT", "CONCAT_WS", "ELT", "EXPORT_SET", "MAKE_SET"]
+dialects = ["mysql"]
+any-argument = ["@binary"]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string."
+
+[[function]]
+id = "mysql.string.binary-pattern"
+functions = ["REGEXP_REPLACE", "REGEXP_SUBSTR"]
+dialects = ["mysql"]
+arguments = [[], ["@binary"]]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
+reasoning = "A binary pattern makes the match bytewise and the result a binary string, as a binary subject does."
 
 [[function]]
 id = "mysql.aggregate.bit-binary"

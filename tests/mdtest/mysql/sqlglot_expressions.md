@@ -367,6 +367,11 @@ SELECT REGEXP_REPLACE(tbl.str_col, tbl.str_col, tbl.str_col) AS x FROM tbl
 ```
 
 ```sql
+SELECT REGEXP_REPLACE(tbl.str_col, tbl.bin_col, tbl.str_col) AS x FROM tbl
+-- columns: x: bytes | None (VARBINARY)
+```
+
+```sql
 SELECT REGEXP_REPLACE(tbl.bin_col, tbl.str_col, tbl.bin_col) AS x FROM tbl
 -- columns: x: bytes | None (VARBINARY)
 ```

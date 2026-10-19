@@ -2,16 +2,15 @@
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|
-| generic | expression | 25 | 3 | 87 | 2 |
-| mysql | expression | 96 | 1 | 0 | 78 |
+| generic | expression | 27 | 3 | 85 | 2 |
+| mysql | expression | 97 | 0 | 0 | 78 |
 | postgres | expression | 46 | 0 | 0 | 6 |
-| **all** | | **167** | **4** | **87** | **86** |
+| **all** | | **170** | **3** | **85** | **86** |
 
 ## mismatch
 
 | Dialect | SQL | Expected | sqlty | Provenance |
 |---------|-----|----------|-------|------------|
-| mysql | `REGEXP_REPLACE(tbl.str_col, tbl.bin_col, tbl.str_col)` | `bytes` | `str` | annotate_functions.sql: sqlglot LONGBLOB, server bytes |
 | generic | `5.3` | `float` | `decimal.Decimal` | annotate_types.sql: sqlglot DOUBLE |
 | generic | `ALL(SELECT 1)` | `bool` | `int` | annotate_types.sql: sqlglot bool |
 | generic | `1 + (SELECT 2.5 AS c)` | `float` | `decimal.Decimal` | annotate_types.sql: sqlglot DOUBLE |
@@ -96,7 +95,6 @@
 | generic | `PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY tbl.bigint_col)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
 | generic | `~5` | `int` | `None` | annotate_types.sql: sqlglot INT |
 | generic | `ANY(SELECT 1)` | `bool` | `None` | annotate_types.sql: sqlglot bool |
-| generic | `CASE WHEN x THEN NULL ELSE 1 END` | `int` | `None` | annotate_types.sql: sqlglot INT |
 | generic | `IF(true, 1, null)` | `int` | `None` | annotate_types.sql: sqlglot INT |
 | generic | `IF(true, null, 1)` | `int` | `None` | annotate_types.sql: sqlglot INT |
 | generic | `STRUCT(1 AS col)` | `dict[str, int]` | `None` | annotate_types.sql: sqlglot STRUCT<col INT> |
@@ -106,4 +104,3 @@
 | generic | `STRUCT(1 AS col, 2.5, ARRAY[1, 2, 3] AS nested_array, 'foo')` | `dict[str, int | float | list[int] | str]` | `None` | annotate_types.sql: sqlglot STRUCT<col INT, DOUBLE, nested_array ARRAY<INT>, VARCHAR> |
 | generic | `STRUCT(1, 2.5, 'bar')` | `dict[str, int | float | str]` | `None` | annotate_types.sql: sqlglot STRUCT<INT, DOUBLE, VARCHAR> |
 | generic | `STRUCT(1 AS "CaseSensitive")` | `dict[str, int]` | `None` | annotate_types.sql: sqlglot STRUCT<"CaseSensitive" INT> |
-| generic | `CASE WHEN x THEN NULL ELSE CAST(y AS DECIMAL(18, 2)) END` | `decimal.Decimal` | `None` | annotate_types.sql: sqlglot DECIMAL(18,2) |

@@ -257,6 +257,30 @@ fn function_rules_read_the_first_two_arguments() {
 }
 
 #[test]
+fn function_rules_read_any_argument() {
+    let any = FUNCTION.replace("argument = [\"@integer\"]", "any-argument = [\"@binary\"]");
+    let code = compile_one("rules/common/a.inference.toml", &any).unwrap();
+    assert!(
+        code.contains(
+            "second: None,\n        any: Some(&[\"BINARY\", \"BLOB\", \"BYTEA\", \"VARBINARY\"])"
+        ),
+        "{code}"
+    );
+    let unconditional = format!(
+        "{any}{}",
+        FUNCTION
+            .replace("argument = [\"@integer\"]\n", "")
+            .replace("test.", "test.all-")
+    );
+    compile_one("rules/common/a.inference.toml", &unconditional).unwrap();
+    let error = error(
+        "rules/common/a.inference.toml",
+        &format!("{unconditional}{}", any.replace("test.", "test.again-")),
+    );
+    assert!(error.contains("never applies"), "{error}");
+}
+
+#[test]
 fn function_rules_name_functions_and_their_own_results() {
     let cases = [
         (

@@ -154,6 +154,21 @@ SELECT SUBSTRING(data, 1, 2) AS a, TRIM(data) AS b, LEFT(data, 1) AS c, UPPER(da
 -- columns: f: bytes (VARBINARY)
 ```
 
+`CONCAT`, `CONCAT_WS`, `ELT`, `EXPORT_SET` and `MAKE_SET` return a binary string when
+any argument is one. A regular expression function does when its subject or pattern is
+one; the replacement does not count.
+
+```sql
+SELECT CONCAT('a', data) AS a, CONCAT_WS(',', 'a', data) AS b, ELT(1, 'a', data) AS c, REGEXP_REPLACE('a', data, 'b') AS d, REGEXP_SUBSTR('a', data) AS e, REGEXP_REPLACE('a', 'b', data) AS f, CONCAT('a', 'b') AS g FROM files
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes | None (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes | None (VARBINARY)
+-- columns: f: str (TEXT)
+-- columns: g: str (TEXT)
+```
+
 Hexadecimal and bit-value literals are binary strings.
 
 ```sql

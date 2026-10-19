@@ -186,6 +186,8 @@ pub(crate) struct FunctionRule {
     argument: Option<&'static [&'static str]>,
     /// The SQL types the second argument may have; `None` for any.
     second: Option<&'static [&'static str]>,
+    /// The SQL types one argument at least must have; `None` for any arguments.
+    any: Option<&'static [&'static str]>,
     pub(crate) result: FunctionType,
     pub(crate) nullability: FunctionNullability,
 }
@@ -211,16 +213,26 @@ impl FunctionRule {
         predicate.is_some() || self.result == FunctionType::Argument(position)
     }
 
-    /// Whether the rule applies in `dialect` to arguments of these SQL types.
+    /// Whether the rule needs the type of every argument to decide whether it applies.
+    pub(crate) fn reads_all(&self) -> bool {
+        self.any.is_some()
+    }
+
+    /// Whether the rule applies in `dialect` to arguments of these SQL types: the first,
+    /// the second, and all of them where [`FunctionRule::reads_all`].
     pub(crate) fn applies(
         &self,
         dialect: SqlDialect,
         argument: Option<&str>,
         second: Option<&str>,
+        all: &[Option<&str>],
     ) -> bool {
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.argument, argument)
             && admits(self.second, second)
+            && self
+                .any
+                .is_none_or(|_| all.iter().any(|&operand| admits(self.any, operand)))
     }
 }
 
@@ -230,6 +242,7 @@ pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
     function_rules(name).iter().any(|rule| {
         rule.argument.is_none()
             && rule.second.is_none()
+            && rule.any.is_none()
             && (rule.dialects.is_empty() || rule.dialects.contains(&dialect))
     })
 }
@@ -320,8 +333,12 @@ mod tests {
         }
         for name in ["COUNT", "SUM", "AVG", "MIN", "UNKNOWN"] {
             for rule in function_rules(name) {
-                matched +=
-                    usize::from(rule.applies(SqlDialect::Postgres, Some("SMALLINT"), Some("TEXT")));
+                matched += usize::from(rule.applies(
+                    SqlDialect::Postgres,
+                    Some("SMALLINT"),
+                    Some("TEXT"),
+                    &[],
+                ));
             }
         }
         COUNTING.with(|counting| counting.set(false));
