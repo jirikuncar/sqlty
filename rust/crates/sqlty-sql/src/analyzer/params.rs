@@ -32,6 +32,7 @@ use super::operators::{is_text, numeric_rank, operand_type};
 use super::preprocess::{parse, parser_input};
 use super::query::{rename_columns, Analyzer, Column};
 use super::registry::lookup;
+use super::respell::respell;
 use super::scope::{relations, Scope, Source};
 use super::typed::Typed;
 use super::SchemaData;
@@ -139,7 +140,9 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
     };
     let read = |styles| {
         let rewritten = placeholders::rewrite(sql, styles);
-        let stmt = parse(&parser_input(&rewritten.text, dialect), dialect)?
+        let input = parser_input(&rewritten.text, dialect);
+        let stmt = parse(&input, dialect)
+            .or_else(|| parse(&respell(&input, dialect)?, dialect))?
             .into_iter()
             .next()?;
         Some((stmt, rewritten.names))

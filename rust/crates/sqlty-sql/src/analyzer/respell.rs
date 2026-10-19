@@ -1,15 +1,23 @@
-//! PostgreSQL and MySQL syntax sqlparser does not read, respelled as the closest syntax it
-//! does and typed the same: `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both
-//! from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses after a path,
-//! `json_array(SELECT ...)`, the XML functions' keywords, a window frame's `EXCLUDE`, and
-//! MySQL's infix `MOD` and the comma-separated tables of its `UPDATE`. It runs only on a
-//! query that does not parse as written.
+//! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
+//! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
+//! SQLite's `a IS b`, MySQL's infix `MOD` and the comma-separated tables of its `UPDATE`,
+//! and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both from x, chars)`,
+//! `substring(x similar p escape e)`, the SQL/JSON clauses after a path, `json_array(SELECT
+//! ...)` and the XML functions' keywords. It runs only on a query that does not parse as
+//! written.
 
+use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
 use super::star_expand::is_word;
 
 /// `sql` with the syntax sqlparser rejects respelled; `None` when it has none.
-pub(super) fn respell(sql: &str) -> Option<String> {
+pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
+    if !matches!(
+        dialect,
+        SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
+    ) {
+        return None;
+    }
     let tokens = tokens(sql);
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
     let word = |i: usize, name: &str| {
@@ -20,7 +28,45 @@ pub(super) fn respell(sql: &str) -> Option<String> {
     let is = |i: usize, kind: Kind| tokens.get(i).is_some_and(|t| t.kind == kind);
     for i in 0..tokens.len() {
         let call = |name: &str| word(i, name) && is(i + 1, Kind::Open);
-        if word(i, "BETWEEN") && (word(i + 1, "SYMMETRIC") || word(i + 1, "ASYMMETRIC")) {
+        if dialect != SqlDialect::MySql
+            && word(i, "EXCLUDE")
+            && (word(i + 1, "GROUP")
+                || word(i + 1, "TIES")
+                || (word(i + 1, "CURRENT") && word(i + 2, "ROW"))
+                || (word(i + 1, "NO") && word(i + 2, "OTHERS")))
+        {
+            let last = if word(i + 1, "GROUP") || word(i + 1, "TIES") {
+                i + 1
+            } else {
+                i + 2
+            };
+            // Without the current row or its peers a frame may be empty, as one that only
+            // follows the row may be; `TIES` and `NO OTHERS` keep the current row.
+            let frame = (0..i)
+                .rev()
+                .take_while(|&j| !matches!(tokens[j].kind, Kind::Open | Kind::Close))
+                .find(|&j| word(j, "ROWS") || word(j, "RANGE") || word(j, "GROUPS"));
+            match frame {
+                Some(start) if word(i + 1, "GROUP") || word(i + 1, "CURRENT") => edits.push((
+                    tokens[start].start,
+                    tokens[last].end,
+                    "ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING".to_string(),
+                )),
+                _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
+            }
+        } else if dialect == SqlDialect::Sqlite {
+            let not = word(i + 1, "NOT");
+            let operand = if not { i + 2 } else { i + 1 };
+            if word(i, "IS") && tokens.get(operand).is_some_and(|t| !is_predicate(sql, t)) {
+                edits.push(if not {
+                    let not = &tokens[i + 1];
+                    (not.start, not.end, "DISTINCT FROM".to_string())
+                } else {
+                    let at = tokens[operand].start;
+                    (at, at, "NOT DISTINCT FROM ".to_string())
+                });
+            }
+        } else if word(i, "BETWEEN") && (word(i + 1, "SYMMETRIC") || word(i + 1, "ASYMMETRIC")) {
             edits.push((tokens[i + 1].start, tokens[i + 1].end, String::new()));
         } else if word(i, "AT") && word(i + 1, "LOCAL") {
             let local = &tokens[i + 1];
@@ -118,32 +164,11 @@ pub(super) fn respell(sql: &str) -> Option<String> {
                     edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
                 }
             }
-        } else if word(i, "EXCLUDE")
-            && (word(i + 1, "GROUP")
-                || word(i + 1, "TIES")
-                || (word(i + 1, "CURRENT") && word(i + 2, "ROW"))
-                || (word(i + 1, "NO") && word(i + 2, "OTHERS")))
+        } else if dialect == SqlDialect::MySql
+            && word(i, "MOD")
+            && i > 0
+            && ends_operand(sql, &tokens[i - 1])
         {
-            let last = if word(i + 1, "GROUP") || word(i + 1, "TIES") {
-                i + 1
-            } else {
-                i + 2
-            };
-            // Without the current row or its peers a frame may be empty, as one that only
-            // follows the row may be; `TIES` and `NO OTHERS` keep the current row.
-            let frame = (0..i)
-                .rev()
-                .take_while(|&j| !matches!(tokens[j].kind, Kind::Open | Kind::Close))
-                .find(|&j| word(j, "ROWS") || word(j, "RANGE") || word(j, "GROUPS"));
-            match frame {
-                Some(start) if word(i + 1, "GROUP") || word(i + 1, "CURRENT") => edits.push((
-                    tokens[start].start,
-                    tokens[last].end,
-                    "ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING".to_string(),
-                )),
-                _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
-            }
-        } else if word(i, "MOD") && i > 0 && ends_operand(sql, &tokens[i - 1]) {
             edits.push((tokens[i].start, tokens[i].end, "%".to_string()));
         } else if call("JSON_ARRAY") && word(i + 2, "SELECT") {
             if let Some(close) = closing(&tokens, i + 1) {
@@ -167,6 +192,26 @@ pub(super) fn respell(sql: &str) -> Option<String> {
     }
     out.push_str(&sql[last..]);
     Some(out)
+}
+
+/// Whether `token` starts one of the predicates sqlparser reads after `IS [NOT]`, rather
+/// than an operand of SQLite's `IS`, its `IS NOT DISTINCT FROM`.
+fn is_predicate(sql: &str, token: &Token) -> bool {
+    const KEYWORDS: [&str; 11] = [
+        "NULL",
+        "TRUE",
+        "FALSE",
+        "UNKNOWN",
+        "DISTINCT",
+        "JSON",
+        "NORMALIZED",
+        "NFC",
+        "NFD",
+        "NFKC",
+        "NFKD",
+    ];
+    let text = &sql[token.start..token.end];
+    token.kind == Kind::Word && KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k))
 }
 
 /// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
