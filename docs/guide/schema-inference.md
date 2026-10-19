@@ -315,6 +315,9 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
 - `ALTER TYPE ... ADD VALUE` and `RENAME VALUE` change an enum's `Literal`.
 - `DROP TABLE`, `VIEW`, `TYPE`, `DOMAIN`, `FUNCTION` and `SCHEMA`.
 - `PARTITION OF`, `INHERITS` and `LIKE` give a table its parent's columns.
+- `CREATE TABLE ... AS` gives a table the columns of its query. It has no
+  constraints, so they can all be NULL (MySQL keeps `NOT NULL`). An `ALTER TABLE`
+  that changes its columns leaves its shape unknown.
 - `CREATE FUNCTION ... RETURNS` types calls to the function: a scalar, a
   `SETOF`, or the columns of `RETURNS TABLE (...)` in `FROM`. Overloads are told
   apart by their number of arguments, and a built-in function of the same name
@@ -397,7 +400,7 @@ shape: its columns get no type, and `SELECT *` over it is left alone.
 Actions that cannot change columns (constraints, storage options, ownership,
 triggers, partitions, tablespaces) never do this. `sqlty check` warns about each
 table or type it had to leave unknown.
-`CREATE TABLE ... AS`, `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
+`ALTER VIEW`, `DROP ... CASCADE` of dependent views and
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
 tables as they are where the view is created.
 

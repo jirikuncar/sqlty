@@ -16,7 +16,9 @@ use sqlparser::ast::{
     TableConstraint, Visit, Visitor,
 };
 
-use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject, SqlDialect};
+use crate::analyzer::{
+    canonical_type, typed, view_columns, Column, Nullability, SkippedObject, SqlDialect,
+};
 use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
@@ -85,7 +87,8 @@ pub(super) enum RawReturn {
 
 pub(super) enum OpKind {
     Table(Box<CreateTable>, Vec<Vec<String>>),
-    View(Box<CreateView>),
+    /// A view, or (`true`) a `CREATE TABLE ... AS` table, whose columns are a query's.
+    View(Box<CreateView>, bool),
     Domain(ObjectName, DataType, Option<Vec<Value>>),
     Type(ObjectName, TypeDef),
     AlterTable(Box<AlterTable>),
@@ -234,8 +237,11 @@ impl Loader {
                     self.give_up(op);
                 }
                 pending = rest;
-            } else if pending.iter().any(|op| !matches!(op.kind, OpKind::View(_))) {
-                pending.retain(|op| matches!(op.kind, OpKind::View(_)));
+            } else if pending
+                .iter()
+                .any(|op| !matches!(op.kind, OpKind::View(..)))
+            {
+                pending.retain(|op| matches!(op.kind, OpKind::View(..)));
             } else {
                 for op in &pending {
                     if !self.apply(op, false) {
@@ -253,7 +259,7 @@ impl Loader {
         let path = op.path.clone();
         let blocked = match &op.kind {
             OpKind::Table(create, likes) => !self.create_table(create, likes, &path),
-            OpKind::View(view) => !self.create_view(view, &path, force),
+            OpKind::View(view, table) => !self.create_view(view, *table, &path, force),
             OpKind::Domain(name, base, values) => {
                 self.cache = None;
                 let key = self.new_key(name, &path);
@@ -559,7 +565,15 @@ impl Loader {
 
     // ---- CREATE VIEW ----------------------------------------------------------------
 
-    pub(super) fn create_view(&mut self, view: &CreateView, path: &[String], force: bool) -> bool {
+    /// A `table` made by `CREATE TABLE ... AS` has no constraints: its columns may hold
+    /// any value of their type, and NULL outside MySQL, which keeps `NOT NULL`.
+    pub(super) fn create_view(
+        &mut self,
+        view: &CreateView,
+        table: bool,
+        path: &[String],
+        force: bool,
+    ) -> bool {
         if view.if_not_exists && self.relations.contains_key(&self.new_key(&view.name, path)) {
             return true;
         }
@@ -569,7 +583,26 @@ impl Loader {
         }
         let key = self.new_key(&view.name, path);
         let dialect = self.dialect;
-        let columns = view_columns(self.snapshot(), dialect, view);
+        let mut columns = view_columns(self.snapshot(), dialect, view);
+        if table {
+            for column in &mut columns {
+                forget_values(column, dialect);
+                let constant = column.python_type.as_deref().and_then(values::parse);
+                if let (None, Some(first)) = (
+                    &column.sql_type,
+                    constant.and_then(|v| v.into_iter().next()),
+                ) {
+                    let sql = match first {
+                        Value::Str(_) => "TEXT",
+                        Value::Int(_) => "INT",
+                    };
+                    (column.python_type, column.sql_type) = typed(sql.to_string(), None, dialect);
+                }
+                if dialect != SqlDialect::MySql {
+                    column.nullability = Nullability::Nullable;
+                }
+            }
+        }
         // A call to a function defined further down may be why a column is untyped.
         if !force && undefined_calls && columns.iter().any(|c| c.python_type.is_none()) {
             return false;
@@ -637,17 +670,7 @@ impl Loader {
         for rel in self.relations.values_mut() {
             let Rel::View(columns) = rel else { continue };
             for column in columns {
-                let (Some(python), Some(sql)) = (&column.python_type, &column.sql_type) else {
-                    continue;
-                };
-                let name = sql.split(['(', '<']).next().unwrap_or_default().trim();
-                let checkable = matches!(
-                    name,
-                    "TEXT" | "VARCHAR" | "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
-                );
-                if checkable && values::parse(python).is_some() {
-                    column.python_type = typed(sql.clone(), None, dialect).0;
-                }
+                forget_values(column, dialect);
             }
         }
     }
@@ -912,5 +935,20 @@ impl Loader {
         overloads.retain(|f| signature(f) != wanted);
         overloads.push(function);
         self.refresh_functions();
+    }
+}
+
+/// Widen a `Literal` `column` taken from a text or integer column to `str` / `int`.
+fn forget_values(column: &mut Column, dialect: SqlDialect) {
+    let (Some(python), Some(sql)) = (&column.python_type, &column.sql_type) else {
+        return;
+    };
+    let name = sql.split(['(', '<']).next().unwrap_or_default().trim();
+    let checkable = matches!(
+        name,
+        "TEXT" | "VARCHAR" | "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
+    );
+    if checkable && values::parse(python).is_some() {
+        column.python_type = typed(sql.clone(), None, dialect).0;
     }
 }
