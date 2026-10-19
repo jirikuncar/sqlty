@@ -134,3 +134,32 @@ a = SQL[tuple[int]]("-- sql\nSELECT id FROM old_users")
 # error: [unknown-table] "table `scratch` is not defined in the schema"
 b = SQL[tuple[int]]("-- sql\nSELECT id FROM scratch")
 ```
+
+## RENAME TABLE, an ADD list and RENAME INDEX
+
+`RENAME TABLE` renames each table in turn, so two tables can swap names.
+`ADD (a INT, b INT)` adds each column, and renaming an index leaves the
+columns as they are.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (id INT NOT NULL, KEY by_id (id));
+CREATE TABLE accounts_new (id BIGINT NOT NULL, email VARCHAR(100), KEY by_id (id));
+RENAME TABLE accounts TO accounts_old, accounts_new TO accounts;
+ALTER TABLE accounts ADD (verified BOOL NOT NULL, note TEXT), RENAME INDEX by_id TO by_key;
+ALTER TABLE accounts_old RENAME KEY by_id TO by_key;
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: id: int (BIGINT)
+-- columns: email: str | None (VARCHAR(100))
+-- columns: verified: bool (BOOLEAN)
+-- columns: note: str | None (TEXT)
+```
+
+```sql
+SELECT * FROM accounts_old
+-- columns: id: int (INT)
+```
