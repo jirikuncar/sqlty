@@ -9,6 +9,9 @@ returns: the SQL type is wider than the annotation. That is a column made
 nullable under `str`, a column added to the query, or a column whose type
 changed.
 
+It also flags a single value, such as `SQL[int]` or `SQL[list[str]]`: a row is a
+tuple, a dict or an instance of a row class, never a bare `int`.
+
 An annotation that admits every row but is wider than it needs to be is
 [`stale-type`](stale-type.md) instead.
 
@@ -25,6 +28,8 @@ from sqlty import SQL
 
 # error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [narrow-type] "SQL[int] should be SQL[tuple[int]]: a row is never a single value"
+count = SQL[int]("--sql\nSELECT count(*)::INTEGER FROM users")
 ```
 
 User-defined row types are checked by the `column-*` rules and

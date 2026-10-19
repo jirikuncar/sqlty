@@ -437,6 +437,22 @@ impl Checker<'_> {
             return;
         }
 
+        if is_scalar(annotated) && self.rules.is_enabled(Rule::NarrowType) {
+            if let Some(current) = self
+                .infer(sql_content)
+                .map(|current| self.spelling.respell(current))
+                .filter(|current| current.starts_with("tuple["))
+            {
+                let wrapper = if call.template { "SQLTemplate" } else { "SQL" };
+                self.report_fix(
+                    Rule::NarrowType,
+                    format!("{wrapper}[{annotated}] should be {wrapper}[{current}]: a row is never a single value"),
+                    line,
+                    vec![Edit::new(call.annotation.clone(), current)],
+                );
+            }
+            return;
+        }
         let literals = self.rules.is_enabled(Rule::LiteralMismatch)
             || self.rules.is_enabled(Rule::RedundantLiteral);
         if !(annotated.starts_with("tuple[")
@@ -694,6 +710,32 @@ pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String,
             )
         })
         .collect()
+}
+
+/// Whether `annotated` is a builtin scalar or collection, such as `int` or `list[str]`:
+/// a driver returns each row as a tuple, a dict or an instance of a row class.
+fn is_scalar(annotated: &str) -> bool {
+    let members = split_top(annotated, '|');
+    members.iter().any(|member| member.trim() != "None")
+        && members.iter().all(|member| {
+            let base = member.trim().split('[').next().unwrap_or_default();
+            matches!(
+                base.strip_prefix("typing.").unwrap_or(base),
+                "None"
+                    | "int"
+                    | "str"
+                    | "float"
+                    | "bool"
+                    | "bytes"
+                    | "complex"
+                    | "list"
+                    | "set"
+                    | "frozenset"
+                    | "List"
+                    | "Set"
+                    | "FrozenSet"
+            )
+        })
 }
 
 /// The items of a `tuple[...]` type, split at its top-level commas.
