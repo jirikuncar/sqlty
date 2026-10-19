@@ -52,7 +52,14 @@ pub(super) fn read_statements(
             };
             let parsed = match &text {
                 None => parse_ddl(&stmt.sql(), dialect)
-                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect)),
+                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
+                    .or_else(|| {
+                        let text = stmt.without_partitioning()?;
+                        parse_ddl(&text, dialect).or_else(|| {
+                            let reduced = ddl::split_statements(&text, !postgres);
+                            parse_ddl(&reduced.first()?.without_constraints()?, dialect)
+                        })
+                    }),
                 Some(text) => parse_ddl(text, dialect).or_else(|| {
                     let reduced = ddl::split_statements(text, false);
                     parse_ddl(&reduced.first()?.without_constraints()?, dialect)
