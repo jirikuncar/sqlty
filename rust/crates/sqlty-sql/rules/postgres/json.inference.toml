@@ -151,7 +151,7 @@ reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
 id = "postgres.json.json"
-functions = ["ROW_TO_JSON", "JSON_STRIP_NULLS", "JSON_ARRAY_ELEMENTS", "JSON", "JSON_SCALAR"]
+functions = ["ROW_TO_JSON", "JSON_STRIP_NULLS", "JSON_ARRAY_ELEMENTS", "JSON", "JSON_SCALAR", "ARRAY_TO_JSON"]
 dialects = ["postgres"]
 type = "JSON"
 nullability = "strict"
@@ -205,7 +205,7 @@ reasoning = "The documentation gives each of these a `jsonb` result. It is NULL 
 
 [[function]]
 id = "postgres.json.record"
-functions = ["JSON_EACH", "JSONB_EACH", "JSON_EACH_TEXT", "JSONB_EACH_TEXT"]
+functions = ["JSON_EACH", "JSONB_EACH", "JSON_EACH_TEXT", "JSONB_EACH_TEXT", "JSON_TO_RECORD", "JSON_TO_RECORDSET", "JSONB_TO_RECORD", "JSONB_TO_RECORDSET"]
 dialects = ["postgres"]
 type = "RECORD"
 nullability = "strict"
@@ -229,3 +229,30 @@ type = "TEXT"
 nullability = "nullable"
 reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
 reasoning = "The documentation gives each of these a `text` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
+id = "postgres.json.populate-record-valid"
+function = "JSONB_POPULATE_RECORD_VALID"
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives the function a `boolean` result. It is NULL when the JSON object is."
+
+[[function]]
+id = "postgres.json.set-lax"
+function = "JSONB_SET_LAX"
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives the function a `jsonb` result. It is NULL when the target, the path or a flag is, but not for a NULL `new_value`."
+
+[[function]]
+id = "postgres.json.populated"
+functions = ["JSON_POPULATE_RECORD", "JSONB_POPULATE_RECORD", "JSON_POPULATE_RECORDSET", "JSONB_POPULATE_RECORDSET"]
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions"
+reasoning = "The row has the composite type of the first argument, `base anyelement`. A NULL `base` gives a row of NULL fields."

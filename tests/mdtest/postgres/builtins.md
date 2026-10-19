@@ -308,3 +308,34 @@ SELECT ts_headline('english', '{"a": "cats"}'::jsonb, 'cat') AS headline,
 -- columns: matrix: list[list[int]] (ARRAY<ARRAY<INT>>)
 -- columns: element: int | None (INT)
 ```
+
+## Geometry, XML, system information and multiranges
+
+Every function the documentation lists has a type: the geometric functions return their
+geometric type, the XML functions `xml` or `boolean`, and the WAL and snapshot functions
+`pg_lsn` and `pg_snapshot`, which psycopg loads as `str`. The catalog lookups `to_regclass`
+and friends are NULL for a name that does not exist. A multirange keeps its range type:
+`range_merge` and `unnest` of a multirange give the range type, `multirange` and
+`range_agg` the multirange type, and `lower` the bound type.
+
+```sql
+SELECT area(box '(2,2),(0,0)') AS area, center(box '(1,2),(0,0)') AS center,
+    xpath('/a', '<a/>'::xml) AS nodes, xml_is_well_formed('<a/>') AS well_formed,
+    pg_current_wal_lsn() AS lsn, pg_current_snapshot() AS snapshot,
+    to_regclass('users') AS relation, gcd(1071, 462) AS divisor,
+    range_merge('{[1,2), [3,4)}'::int4multirange) AS merged,
+    multirange(int4range(1, 2)) AS multi, lower('{[1.1,2.2)}'::nummultirange) AS low,
+    timezone(timestamptz '2001-02-16 20:38:40-05') AS local_time
+-- columns: area: float (DOUBLE)
+-- columns: center: str (POINT)
+-- columns: nodes: list[str] (ARRAY<XML>)
+-- columns: well_formed: bool (BOOLEAN)
+-- columns: lsn: str | None (PG_LSN)
+-- columns: snapshot: str (PG_SNAPSHOT)
+-- columns: relation: str | None (REGCLASS)
+-- columns: divisor: int (INT)
+-- columns: merged: None (INT4RANGE)
+-- columns: multi: None (INT4MULTIRANGE)
+-- columns: low: decimal.Decimal | None (DECIMAL)
+-- columns: local_time: datetime.datetime (TIMESTAMP)
+```

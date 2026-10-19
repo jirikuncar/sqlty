@@ -46,8 +46,8 @@ pub(crate) enum SqlType {
 }
 
 /// Built-in PostgreSQL types sqlty has no Python type for: ranges and multiranges, which
-/// psycopg loads as its own `Range`, and the snapshot types.
-const UNMAPPED_BUILTINS: [&str; 14] = [
+/// psycopg loads as its own `Range`.
+const UNMAPPED_BUILTINS: [&str; 12] = [
     "INT4RANGE",
     "INT8RANGE",
     "NUMRANGE",
@@ -60,8 +60,6 @@ const UNMAPPED_BUILTINS: [&str; 14] = [
     "TSMULTIRANGE",
     "TSTZMULTIRANGE",
     "DATEMULTIRANGE",
-    "PG_LSN",
-    "PG_SNAPSHOT",
 ];
 
 /// Whether `dt` is a type the dialect itself defines that has no Python type: unlike a
@@ -550,6 +548,9 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("OID", "int"),
         ("XID", "str"),
         ("XID8", "str"),
+        ("PG_LSN", "str"),
+        ("PG_SNAPSHOT", "str"),
+        ("TXID_SNAPSHOT", "str"),
         ("CID", "str"),
         ("REGPROC", "str"),
         ("REGPROCEDURE", "str"),

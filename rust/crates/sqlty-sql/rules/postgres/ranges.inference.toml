@@ -1,13 +1,13 @@
 # PostgreSQL range functions and constructors.
 
 [[function]]
-id = "postgres.range.argument-type"
+id = "postgres.range.range"
 function = "RANGE_MERGE"
 dialects = ["postgres"]
-type = "@argument-type(0)"
+type = "@range(0)"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
-reasoning = "The result has the type of the first argument."
+reasoning = "The result is the range type of the argument, which is a range or a multirange."
 
 [[function]]
 id = "postgres.range.boolean"
@@ -71,3 +71,12 @@ type = "TSTZRANGE"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function a `tstzrange` result."
+
+[[function]]
+id = "postgres.range.multirange"
+function = "MULTIRANGE"
+dialects = ["postgres"]
+type = "@multirange(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.59 Multirange Functions"
+reasoning = "The result is the multirange type of the range argument."

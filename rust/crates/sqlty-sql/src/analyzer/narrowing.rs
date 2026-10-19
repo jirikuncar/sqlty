@@ -21,10 +21,11 @@ use sqlparser::ast::{
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
+use super::inference::FunctionNullability;
 use super::json::is_null_literal;
 use super::nullability::{rows_pass_where, Facts, Nullability};
 use super::query::Analyzer;
-use super::registry::FunctionInfo;
+use super::registry::{lookup, Behavior};
 use super::scope::Scope;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
@@ -455,6 +456,18 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Whether this call is NULL for a NULL argument, as far as narrowing goes: the rule
+    /// that types it makes it NULL when an argument is, and it is no always valued aggregate.
+    fn is_strict_call(&self, name: &str, args: &[&Expr], scope: &Scope) -> bool {
+        matches!(
+            self.function_rule(name, args, scope),
+            Ok(Some((rule, _))) if matches!(
+                rule.nullability,
+                FunctionNullability::Strict | FunctionNullability::Aggregate
+            )
+        ) && lookup(name).is_none_or(|info| info.behavior != Behavior::AlwaysValued)
+    }
+
     /// What is not NULL when `expr` is not NULL.
     fn proven(&self, expr: &Expr, scope: &Scope) -> Learned {
         use BinaryOperator::*;
@@ -529,10 +542,9 @@ impl<'a> Analyzer<'a> {
             } => return self.proven(inner, scope).union(self.proven(pattern, scope)),
             Expr::Function(func) => {
                 learned.exprs.insert(ExprKey::of(expr));
-                if func.over.is_none()
-                    && FunctionInfo::is_strict(&function_name(func), self.dialect)
-                {
-                    for arg in positional_args(&func.args) {
+                let args = positional_args(&func.args);
+                if func.over.is_none() && self.is_strict_call(&function_name(func), &args, scope) {
+                    for arg in args {
                         learned = learned.union(self.proven(arg, scope));
                     }
                 }

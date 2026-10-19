@@ -1,0 +1,91 @@
+# PostgreSQL geometric functions.
+
+[[function]]
+id = "postgres.geometry.boolean"
+functions = ["ISCLOSED", "ISOPEN"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.geometry.box"
+functions = ["BOUND_BOX", "BOX"]
+dialects = ["postgres"]
+type = "BOX"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `box` result."
+
+[[function]]
+id = "postgres.geometry.circle"
+function = "CIRCLE"
+dialects = ["postgres"]
+type = "CIRCLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives the function a `circle` result."
+
+[[function]]
+id = "postgres.geometry.double"
+functions = ["AREA", "DIAMETER", "HEIGHT", "RADIUS", "SLOPE", "WIDTH"]
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "postgres.geometry.int"
+function = "NPOINTS"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.geometry.line"
+function = "LINE"
+dialects = ["postgres"]
+type = "LINE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives the function a `line` result."
+
+[[function]]
+id = "postgres.geometry.lseg"
+functions = ["DIAGONAL", "LSEG"]
+dialects = ["postgres"]
+type = "LSEG"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `lseg` result."
+
+[[function]]
+id = "postgres.geometry.path"
+functions = ["PATH", "PCLOSE", "POPEN"]
+dialects = ["postgres"]
+type = "PATH"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `path` result."
+
+[[function]]
+id = "postgres.geometry.point"
+functions = ["CENTER", "POINT"]
+dialects = ["postgres"]
+type = "POINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `point` result."
+
+[[function]]
+id = "postgres.geometry.polygon"
+function = "POLYGON"
+dialects = ["postgres"]
+type = "POLYGON"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives the function a `polygon` result."

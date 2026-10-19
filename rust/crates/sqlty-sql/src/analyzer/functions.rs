@@ -5,7 +5,7 @@ use std::rc::Rc;
 use sqlparser::ast::{BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments};
 
 use super::dialect::SqlDialect;
-use super::expr::{from_sql_type, range_element};
+use super::expr::{from_sql_type, range_element, range_kind};
 use super::inference::{function_rules, FunctionRule};
 use super::literals::{strip, value_set};
 use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
@@ -57,7 +57,8 @@ pub(crate) enum Returns {
     /// `BIGINT`, a `DOUBLE` for an approximate one.
     Integral,
     /// `timezone(zone, ts)`, like `ts AT TIME ZONE zone`: a `TIMESTAMP` becomes a
-    /// `TIMESTAMPTZ` and back, a time becomes a `TIMETZ`.
+    /// `TIMESTAMPTZ` and back, a time becomes a `TIMETZ`. Without a zone (`timezone(ts)`,
+    /// `AT LOCAL`), the last argument is converted.
     AtZone(usize),
     /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
     /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
@@ -68,6 +69,10 @@ pub(crate) enum Returns {
     /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
     /// for [`Returns::Series`].
     Random,
+    /// The range type of a range or multirange argument: `range_merge`, `unnest`.
+    Range(usize),
+    /// The multirange type of a range or multirange argument: `multirange`, `range_agg`.
+    Multirange(usize),
 }
 
 use Returns::{Arg, Elem};
@@ -169,6 +174,17 @@ impl<'a> Analyzer<'a> {
                     from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
                 }))
             }
+            Returns::Range(i) | Returns::Multirange(i) => {
+                let typed = arg(i)?;
+                let suffix = match returns {
+                    Returns::Range(_) => "RANGE",
+                    _ => "MULTIRANGE",
+                };
+                match typed.sql().filter(|ty| range_element(ty).is_some()) {
+                    Some(ty) => sql(&format!("{}{suffix}", range_kind(ty).unwrap_or_default())),
+                    None => Ok(Typed::UNKNOWN),
+                }
+            }
             Returns::Bound => {
                 let typed = arg(0)?;
                 match typed.sql().and_then(range_element) {
@@ -238,12 +254,14 @@ impl<'a> Analyzer<'a> {
                     None => Ok(Typed::UNKNOWN),
                 }
             }
-            Returns::AtZone(i) => Ok(match operand_type(&arg(i)?) {
-                Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
-                Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
-                Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
-                _ => Typed::UNKNOWN,
-            }),
+            Returns::AtZone(i) => Ok(
+                match operand_type(&arg(i.min(args.len().saturating_sub(1)))?) {
+                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
+                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
+                    _ => Typed::UNKNOWN,
+                },
+            ),
             Returns::Trunc(i) => {
                 let typed = arg(i)?;
                 match operand_type(&typed) {

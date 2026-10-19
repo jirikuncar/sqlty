@@ -28,6 +28,16 @@ reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operato
 reasoning = "Floating-point and integer input give `double precision`, and `numeric` input gives `numeric`."
 
 [[function]]
+id = "postgres.math.truncated-address"
+function = "TRUNC"
+dialects = ["postgres"]
+argument = ["MACADDR", "MACADDR8"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.41 MAC Address Functions, Table 9.42 MAC Address 8 Functions"
+reasoning = "Truncating a MAC address keeps its type: `trunc(macaddr)` gives `macaddr`, `trunc(macaddr8)` gives `macaddr8`."
+
+[[function]]
 id = "postgres.math.scaled"
 functions = ["ROUND", "TRUNC", "LOG"]
 dialects = ["postgres"]
@@ -38,7 +48,7 @@ reasoning = "The one-argument form follows the argument as `ceil` does, and a sc
 
 [[function]]
 id = "postgres.math.decimal"
-functions = ["TRIM_SCALE", "FACTORIAL"]
+functions = ["TRIM_SCALE", "FACTORIAL", "DIV"]
 dialects = ["postgres"]
 type = "DECIMAL"
 nullability = "strict"
@@ -71,3 +81,12 @@ type = "@void"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.6 Random Functions"
 reasoning = "The function returns `void`, which the driver reads as None."
+
+[[function]]
+id = "postgres.math.common-integer"
+functions = ["GCD", "LCM"]
+dialects = ["postgres"]
+type = "@series"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions"
+reasoning = "The overloads take two `integer`, `bigint` or `numeric` arguments and return that type, so the result is the arguments' common type with `smallint` widened to `integer`."

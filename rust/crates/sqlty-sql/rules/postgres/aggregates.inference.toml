@@ -140,3 +140,39 @@ type = "JSON"
 nullability = "aggregate"
 reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "postgres.aggregate.json-strict"
+functions = ["JSON_AGG_STRICT", "JSON_OBJECT_AGG_STRICT", "JSON_OBJECT_AGG_UNIQUE", "JSON_OBJECT_AGG_UNIQUE_STRICT"]
+dialects = ["postgres"]
+type = "JSON"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "postgres.aggregate.jsonb-strict"
+functions = ["JSONB_AGG_STRICT", "JSONB_OBJECT_AGG_STRICT", "JSONB_OBJECT_AGG_UNIQUE", "JSONB_OBJECT_AGG_UNIQUE_STRICT"]
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `jsonb` result."
+
+[[function]]
+id = "postgres.aggregate.xml"
+function = "XMLAGG"
+dialects = ["postgres"]
+type = "XML"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content"
+reasoning = "`xmlagg` concatenates `xml` values into one `xml` value, NULL when every input is."
+
+[[function]]
+id = "postgres.aggregate.multirange"
+function = "RANGE_AGG"
+dialects = ["postgres"]
+type = "@multirange(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result is the multirange type of the argument, a range or a multirange. It is NULL when every input is."

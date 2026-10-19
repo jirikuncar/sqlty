@@ -253,21 +253,6 @@ pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
     })
 }
 
-/// Whether a rule types every call of `name` in `dialect` and every rule there makes it NULL
-/// when an argument is NULL, so `WHERE f(col) IS NOT NULL` proves `col` is not.
-pub(crate) fn strict_by_rule(name: &str, dialect: SqlDialect) -> bool {
-    typed_by_rule(name, dialect)
-        && function_rules(name)
-            .iter()
-            .filter(|rule| rule.dialects.is_empty() || rule.dialects.contains(&dialect))
-            .all(|rule| {
-                matches!(
-                    rule.nullability,
-                    FunctionNullability::Strict | FunctionNullability::Aggregate
-                )
-            })
-}
-
 /// Whether an operand of SQL type `operand` satisfies `types`; `@known` admits any typed one.
 fn admits(types: Option<&[&str]>, operand: Option<&str>) -> bool {
     types.is_none_or(|types| {

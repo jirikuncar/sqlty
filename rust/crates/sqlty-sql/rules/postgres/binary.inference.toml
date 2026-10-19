@@ -38,7 +38,7 @@ reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
 id = "postgres.binary.varbinary"
-functions = ["SHA224", "SHA256", "SHA384", "SHA512", "DECODE", "CONVERT_TO"]
+functions = ["SHA224", "SHA256", "SHA384", "SHA512", "DECODE", "CONVERT_TO", "CONVERT"]
 dialects = ["postgres"]
 type = "VARBINARY"
 nullability = "strict"

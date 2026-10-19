@@ -39,7 +39,7 @@ SELECT id, price::TEXT AS p, 'x' AS x, gcd(id, 6) AS g, * FROM orders
 -- rules: id: - / -
 -- rules: p: - / -
 -- rules: x: - / -
--- rules: g: - / -
+-- rules: g: postgres.math.common-integer / postgres.math.common-integer
 -- rules: id: - / -
 -- rules: qty: - / -
 -- rules: price: - / -

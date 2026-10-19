@@ -27,17 +27,25 @@ pub(super) fn array_element(sql_type: &str) -> Option<&str> {
     Some(&inner[..inner.rfind('>')?])
 }
 
-/// The element type of a range type such as `TSTZRANGE`.
+/// The element type of a range or multirange type such as `TSTZRANGE`.
 pub(super) fn range_element(sql_type: &str) -> Option<&'static str> {
-    Some(match type_base(sql_type) {
-        "INT4RANGE" => "INT",
-        "INT8RANGE" => "BIGINT",
-        "NUMRANGE" => "DECIMAL",
-        "TSRANGE" => "TIMESTAMP",
-        "TSTZRANGE" => "TIMESTAMPTZ",
-        "DATERANGE" => "DATE",
+    Some(match range_kind(sql_type)? {
+        "INT4" => "INT",
+        "INT8" => "BIGINT",
+        "NUM" => "DECIMAL",
+        "TS" => "TIMESTAMP",
+        "TSTZ" => "TIMESTAMPTZ",
+        "DATE" => "DATE",
         _ => return None,
     })
+}
+
+/// The prefix that names a range or multirange type: `INT4` for `INT4RANGE` and
+/// `INT4MULTIRANGE`.
+pub(super) fn range_kind(sql_type: &str) -> Option<&str> {
+    let base = type_base(sql_type);
+    base.strip_suffix("MULTIRANGE")
+        .or_else(|| base.strip_suffix("RANGE"))
 }
 
 pub(super) fn known(python_type: &str) -> Inferred<Typed> {
@@ -662,7 +670,10 @@ mod tests {
         assert_eq!(range_element("TSRANGE"), Some("TIMESTAMP"));
         assert_eq!(range_element("TSTZRANGE"), Some("TIMESTAMPTZ"));
         assert_eq!(range_element("DATERANGE"), Some("DATE"));
+        assert_eq!(range_element("INT4MULTIRANGE"), Some("INT"));
+        assert_eq!(range_element("DATEMULTIRANGE"), Some("DATE"));
         assert_eq!(range_element("INT"), None);
+        assert_eq!(range_element("FOORANGE"), None);
     }
 
     #[test]
