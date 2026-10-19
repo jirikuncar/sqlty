@@ -1,4 +1,4 @@
-# PostgreSQL SUM, MIN and MAX.
+# PostgreSQL aggregate functions.
 
 [[function]]
 id = "postgres.aggregate.sum-integers"
@@ -49,3 +49,130 @@ type = "@argument-as TEXT"
 nullability = "aggregate"
 reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ): available for any numeric, string, ... type); the text operators read varchar as text"
 reasoning = "PostgreSQL has no min or max for varchar: it reads the values as text, so the result is text."
+
+[[function]]
+id = "postgres.aggregate.string-agg-bytea"
+function = "STRING_AGG"
+dialects = ["postgres"]
+argument = ["@binary"]
+type = "BYTEA"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (string_agg ( value bytea, delimiter bytea ) → bytea)"
+reasoning = "Binary strings concatenate into a binary string."
+
+[[function]]
+id = "postgres.aggregate.argument-type"
+functions = ["BIT_AND", "BIT_OR", "BIT_XOR", "RANGE_INTERSECT_AGG"]
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "postgres.aggregate.array"
+function = "ARRAY_AGG"
+dialects = ["postgres"]
+type = "@array(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result is an array of the argument's type."
+
+[[function]]
+id = "postgres.aggregate.mean"
+functions = ["STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VAR_POP", "VAR_SAMP"]
+dialects = ["postgres"]
+type = "@mean"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The statistic is `double precision` for floating-point input and `numeric` otherwise, an interval's an interval."
+
+[[function]]
+id = "postgres.aggregate.argument"
+function = "ANY_VALUE"
+dialects = ["postgres"]
+type = "@same(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."
+
+[[function]]
+id = "postgres.aggregate.bigint"
+function = "REGR_COUNT"
+dialects = ["postgres"]
+type = "BIGINT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The documentation gives the function a `bigint` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "postgres.aggregate.boolean"
+functions = ["BOOL_AND", "BOOL_OR", "EVERY"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.aggregate.aggregate-double"
+functions = ["CORR", "COVAR_POP", "COVAR_SAMP", "REGR_SLOPE", "REGR_INTERCEPT", "REGR_R2", "REGR_AVGX", "REGR_AVGY", "REGR_SXX", "REGR_SYY", "REGR_SXY"]
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "postgres.aggregate.int"
+function = "GROUPING"
+dialects = ["postgres"]
+type = "INT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.64 Grouping Operations"
+reasoning = "The documentation gives the function an `integer` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "postgres.aggregate.json"
+functions = ["JSON_ARRAYAGG", "JSON_OBJECTAGG"]
+dialects = ["postgres"]
+type = "JSON"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "postgres.aggregate.json-strict"
+functions = ["JSON_AGG_STRICT", "JSON_OBJECT_AGG_STRICT", "JSON_OBJECT_AGG_UNIQUE", "JSON_OBJECT_AGG_UNIQUE_STRICT"]
+dialects = ["postgres"]
+type = "JSON"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "postgres.aggregate.jsonb-strict"
+functions = ["JSONB_AGG_STRICT", "JSONB_OBJECT_AGG_STRICT", "JSONB_OBJECT_AGG_UNIQUE", "JSONB_OBJECT_AGG_UNIQUE_STRICT"]
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `jsonb` result."
+
+[[function]]
+id = "postgres.aggregate.xml"
+function = "XMLAGG"
+dialects = ["postgres"]
+type = "XML"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content"
+reasoning = "`xmlagg` concatenates `xml` values into one `xml` value, NULL when every input is."
+
+[[function]]
+id = "postgres.aggregate.multirange"
+function = "RANGE_AGG"
+dialects = ["postgres"]
+type = "@multirange(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result is the multirange type of the argument, a range or a multirange. It is NULL when every input is."

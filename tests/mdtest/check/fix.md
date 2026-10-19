@@ -356,7 +356,7 @@ t = SQL[tuple[int]]("--sql\nselect  * from users")
 ## Star the schema cannot resolve keeps its type
 
 A subquery or CTE has no schema entry, and `USING` merges the joined `id`
-columns, so these annotations are kept.
+columns, so these stars are not expanded. Their annotations are still fixed.
 
 ```toml
 [tool.sqlty]
@@ -381,7 +381,7 @@ t = SQL[tuple[int, int, str]]("--sql\nSELECT id, * FROM users")
 # fixed:
 # fixed: q = SQL[tuple[int | None]]("--sql\nSELECT * FROM (SELECT id FROM users) s")
 # fixed: r = SQL[tuple[int | None]]("--sql\nWITH c AS (SELECT id FROM users) SELECT * FROM c")
-# fixed: s = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM users JOIN orders USING (id)")
+# fixed: s = SQL[tuple[int, str | None, int | None]]("--sql\nSELECT * FROM users JOIN orders USING (id)")
 # fixed: t = SQL[tuple[int | None, int | None, str | None]]("--sql\nSELECT id, id::INT, name::TEXT FROM users")
 ```
 

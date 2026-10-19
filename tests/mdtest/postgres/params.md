@@ -178,6 +178,18 @@ DELETE FROM orders WHERE user_id = %s AND total > %s
 -- params: 2: decimal.Decimal (DECIMAL(10, 2))
 ```
 
+### A COALESCE fallback
+
+A parameter before the last argument of `COALESCE` may be NULL: a later argument stands
+in for it. The last one is not.
+
+```sql
+UPDATE users SET name = COALESCE(%s, name), age = COALESCE(age, %s) WHERE id = %s
+-- params: 1: str (TEXT) NULL
+-- params: 2: int (INT)
+-- params: 3: int (INT)
+```
+
 ## Explicit casts
 
 ```sql
@@ -286,7 +298,8 @@ SELECT id FROM events WHERE ids @> %s AND doc @> %s AND doc ? %s AND doc ->> %s 
 
 `%s - INTERVAL '1 day'` alone could be an interval or a timestamp minus one, and
 PostgreSQL reads it as an interval. Compared with a timestamp or a date, the parameter
-is what that side is.
+is what that side is for a driver that sends parameter types, as psycopg does. asyncpg
+sends them untyped, so PostgreSQL rejects the comparison; `sqlty check` reports it.
 
 ```sql
 SELECT id FROM events WHERE at < %s - INTERVAL '3 months' AND (INTERVAL '1 day' + %s) >= at AND span > %s - INTERVAL '1 day'

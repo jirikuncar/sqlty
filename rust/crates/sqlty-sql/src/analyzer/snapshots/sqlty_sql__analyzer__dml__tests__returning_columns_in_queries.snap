@@ -3,36 +3,37 @@ source: crates/sqlty-sql/src/analyzer/dml.rs
 expression: "reports(&queries, \"postgres\", Some(ddl))"
 ---
 INSERT INTO t (name) VALUES ('a') RETURNING id, name, note
-id: int | SERIAL | NonNull
+id: int | INT | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | Nullable
 
 INSERT INTO t (name) VALUES ('a') RETURNING *
-id: int | SERIAL | NonNull
+id: int | INT | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | Nullable
 
 INSERT INTO t (name) VALUES ('a') RETURNING id AS new_id, upper(name) AS shout
-new_id: int | SERIAL | NonNull
+new_id: int | INT | NonNull
 shout: str | TEXT | NonNull
 
 UPDATE t SET note = 'x' RETURNING *
-id: int | SERIAL | NonNull
+id: int | INT | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | NonNull
 
 UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING *
-id: int | SERIAL | NonNull
+id: int | INT | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | Nullable
+id: int | INT | NonNull
+extra: int | INT | Nullable
 
 UPDATE t SET note = u.extra::text FROM u WHERE t.id = u.id RETURNING t.id, extra
-id: int | SERIAL | NonNull
-extra: ? | ? | Unknown
-[unsupported-syntax] column `extra` may come from tables joined to the target with FROM or USING, which sqlty does not read the columns of
+id: int | INT | NonNull
+extra: int | INT | Nullable
 
 DELETE FROM t USING u WHERE t.id = u.id RETURNING t.*
-id: int | SERIAL | NonNull
+id: int | INT | NonNull
 name: str | TEXT | NonNull
 note: str | TEXT | Nullable
 

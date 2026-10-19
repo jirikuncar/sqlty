@@ -1,0 +1,17 @@
+# Every dialect's mathematical functions.
+
+[[function]]
+id = "common.math.argument-type"
+function = "ABS"
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions; MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions; SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Every dialect gives the absolute value the argument's type."
+
+[[function]]
+id = "common.math.double"
+functions = ["ACOS", "ASIN", "ATAN", "ATAN2", "COS", "DEGREES", "PI", "RADIANS", "SIN", "TAN"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions, Table 9.7 Trigonometric Functions; MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions; SQLite documentation, Built-In Mathematical SQL Functions"
+reasoning = "Every dialect returns a double precision number."

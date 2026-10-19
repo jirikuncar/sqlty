@@ -2,24 +2,24 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments};
+use sqlparser::ast::{
+    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArguments,
+};
 
 use super::dialect::SqlDialect;
-use super::expr::{from_sql_type, range_element};
+use super::expr::{from_sql_type, range_element, range_kind};
 use super::inference::{function_rules, FunctionRule};
 use super::literals::{strip, value_set};
 use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
 use super::query::Analyzer;
-use super::registry::lookup;
 use super::scope::{resolve, Scope};
 use super::typed::Typed;
 use super::{decimal_type, InferError, Inferred};
 
-/// How a function's result type follows from its arguments (indexes count from 0).
-#[derive(Clone, Copy)]
-pub(super) enum Returns {
-    /// A fixed canonical SQL type.
-    Sql(&'static str),
+/// A result type a function rule computes from the arguments (`type = "@series"`, ...);
+/// positions count from 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Returns {
     /// `void`: Python `None`.
     Void,
     /// The type of an argument, whatever value it computes.
@@ -59,7 +59,8 @@ pub(super) enum Returns {
     /// `BIGINT`, a `DOUBLE` for an approximate one.
     Integral,
     /// `timezone(zone, ts)`, like `ts AT TIME ZONE zone`: a `TIMESTAMP` becomes a
-    /// `TIMESTAMPTZ` and back, a time becomes a `TIMETZ`.
+    /// `TIMESTAMPTZ` and back, a time becomes a `TIMETZ`. Without a zone (`timezone(ts)`,
+    /// `AT LOCAL`), the last argument is converted.
     AtZone(usize),
     /// `generate_series(start, stop[, step])`: the common type of the bounds, with small
     /// integers widened to `INT` and dates to `TIMESTAMPTZ`, as PostgreSQL resolves it.
@@ -70,478 +71,16 @@ pub(super) enum Returns {
     /// `random()`: `DOUBLE`; PostgreSQL 17's `random(min, max)`: the type of the bounds, as
     /// for [`Returns::Series`].
     Random,
+    /// The range type of a range or multirange argument: `range_merge`, `unnest`.
+    Range(usize),
+    /// The multirange type of a range or multirange argument: `multirange`, `range_agg`.
+    Multirange(usize),
 }
 
-use Returns::{Arg, Elem, Sql};
+use Returns::{Arg, Elem};
 
-/// Functions of every dialect, by upper-case name (COUNT, SUM, MIN, MAX and COALESCE are
-/// special-cased).
-pub(super) const COMMON_FUNCTIONS: &[(&[&str], Returns)] = &[
-    (
-        &[
-            "LENGTH",
-            "POSITION",
-            "CHAR_LENGTH",
-            "BIT_LENGTH",
-            "OCTET_LENGTH",
-            "NTILE",
-        ],
-        Sql("INT"),
-    ),
-    (&["ROW_NUMBER", "RANK", "DENSE_RANK"], Sql("BIGINT")),
-    (&["COALESCE"], Returns::FirstKnown),
-    (
-        &[
-            "STDDEV",
-            "STDDEV_POP",
-            "STDDEV_SAMP",
-            "VARIANCE",
-            "VAR_POP",
-            "VAR_SAMP",
-        ],
-        Sql("DOUBLE"),
-    ),
-    (
-        &[
-            "UPPER",
-            "LOWER",
-            "TRIM",
-            "CONCAT",
-            "REPLACE",
-            "STRING_AGG",
-            "GROUP_CONCAT",
-        ],
-        Sql("TEXT"),
-    ),
-    (&["SUBSTR", "SUBSTRING"], Returns::Text(0)),
-    (&["NOW", "CURRENT_TIMESTAMP"], Sql("TIMESTAMPTZ")),
-    (&["CURRENT_DATE"], Sql("DATE")),
-    (&["CURRENT_TIME"], Sql("TIMETZ")),
-    (
-        &[
-            "JSON_BUILD_OBJECT",
-            "TO_JSON",
-            "JSON_AGG",
-            "JSON_OBJECT_AGG",
-        ],
-        Sql("JSON"),
-    ),
-    (
-        &[
-            "JSONB_BUILD_OBJECT",
-            "TO_JSONB",
-            "JSONB_AGG",
-            "JSONB_OBJECT_AGG",
-        ],
-        Sql("JSONB"),
-    ),
-];
-
-/// PostgreSQL built-ins, from the "Functions and Operators" chapter of the manual; in
-/// PostgreSQL they take precedence over [`COMMON_FUNCTIONS`].
-pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
-    (
-        &[
-            "CURRENT_SETTING",
-            "SET_CONFIG",
-            "LEFT",
-            "RIGHT",
-            "LPAD",
-            "RPAD",
-            "INITCAP",
-            "REPEAT",
-            "REVERSE",
-            "TRANSLATE",
-            "CONCAT_WS",
-            "FORMAT",
-            "MD5",
-            "TO_CHAR",
-            "TO_HEX",
-            "TO_BIN",
-            "TO_OCT",
-            "CHR",
-            "QUOTE_IDENT",
-            "QUOTE_LITERAL",
-            "QUOTE_NULLABLE",
-            "SPLIT_PART",
-            "NORMALIZE",
-            "REGEXP_REPLACE",
-            "ENCODE",
-            "CONVERT_FROM",
-            "ARRAY_TO_STRING",
-            "PG_SIZE_PRETTY",
-            "VERSION",
-            "CURRENT_DATABASE",
-            "CURRENT_SCHEMA",
-            "CURRENT_USER",
-            "SESSION_USER",
-            "USER",
-            "PG_TYPEOF",
-            "JSONB_TYPEOF",
-            "JSON_TYPEOF",
-            "JSONB_PRETTY",
-            "JSONB_EXTRACT_PATH_TEXT",
-            "JSON_EXTRACT_PATH_TEXT",
-            "TS_HEADLINE",
-            "JSONB_ARRAY_ELEMENTS_TEXT",
-            "JSON_ARRAY_ELEMENTS_TEXT",
-            "ARRAY_DIMS",
-            "HOST",
-            "ABBREV",
-            "TEXT",
-            "TIMEOFDAY",
-            "OBJ_DESCRIPTION",
-            "COL_DESCRIPTION",
-            "FORMAT_TYPE",
-            "UNISTR",
-            "JSON_OBJECT_KEYS",
-            "JSONB_OBJECT_KEYS",
-            "REGEXP_SPLIT_TO_TABLE",
-            "STRING_TO_TABLE",
-        ],
-        Sql("TEXT"),
-    ),
-    (
-        &[
-            "ASCII",
-            "STRPOS",
-            "ARRAY_LENGTH",
-            "ARRAY_NDIMS",
-            "ARRAY_POSITION",
-            "CARDINALITY",
-            "JSONB_ARRAY_LENGTH",
-            "JSON_ARRAY_LENGTH",
-            "WIDTH_BUCKET",
-            "PG_BACKEND_PID",
-            "NUM_NONNULLS",
-            "NUM_NULLS",
-            "ARRAY_LOWER",
-            "ARRAY_UPPER",
-            "GET_BYTE",
-            "GET_BIT",
-            "MASKLEN",
-            "FAMILY",
-            "INET_CLIENT_PORT",
-            "INET_SERVER_PORT",
-            "GROUPING",
-            "PG_COLUMN_SIZE",
-            "REGEXP_COUNT",
-            "REGEXP_INSTR",
-            "SCALE",
-            "MIN_SCALE",
-        ],
-        Sql("INT"),
-    ),
-    (
-        &[
-            "NEXTVAL",
-            "REGR_COUNT",
-            "CURRVAL",
-            "LASTVAL",
-            "SETVAL",
-            "TXID_CURRENT",
-            "PG_DATABASE_SIZE",
-            "PG_TOTAL_RELATION_SIZE",
-            "PG_RELATION_SIZE",
-            "PG_TABLE_SIZE",
-            "PG_INDEXES_SIZE",
-        ],
-        Sql("BIGINT"),
-    ),
-    (&["RANDOM"], Returns::Random),
-    (
-        &[
-            "DATE_PART",
-            "ERF",
-            "ERFC",
-            "PI",
-            "DEGREES",
-            "RADIANS",
-            "SIN",
-            "COS",
-            "TAN",
-            "ASIN",
-            "ACOS",
-            "ATAN",
-            "ATAN2",
-            "PERCENT_RANK",
-            "CUME_DIST",
-            "CORR",
-            "COVAR_POP",
-            "COVAR_SAMP",
-            "REGR_SLOPE",
-            "REGR_INTERCEPT",
-            "REGR_R2",
-            "REGR_AVGX",
-            "REGR_AVGY",
-            "REGR_SXX",
-            "REGR_SYY",
-            "REGR_SXY",
-        ],
-        Sql("DOUBLE"),
-    ),
-    (&["TS_RANK", "TS_RANK_CD"], Sql("FLOAT")),
-    (&["TO_NUMBER"], Sql("DECIMAL")),
-    (
-        &[
-            "STARTS_WITH",
-            "REGEXP_LIKE",
-            "PG_TRY_ADVISORY_LOCK",
-            "PG_TRY_ADVISORY_XACT_LOCK",
-            "PG_TRY_ADVISORY_LOCK_SHARED",
-            "PG_TRY_ADVISORY_XACT_LOCK_SHARED",
-            "PG_ADVISORY_UNLOCK",
-            "PG_ADVISORY_UNLOCK_SHARED",
-            "PG_IS_IN_RECOVERY",
-            "PG_TERMINATE_BACKEND",
-            "PG_CANCEL_BACKEND",
-            "ISFINITE",
-            "BOOL_AND",
-            "BOOL_OR",
-            "EVERY",
-            "LOWER_INF",
-            "UPPER_INF",
-            "LOWER_INC",
-            "UPPER_INC",
-            "ISEMPTY",
-            "JSONB_PATH_EXISTS",
-            "JSONB_PATH_EXISTS_TZ",
-            "JSONB_PATH_MATCH",
-            "JSONB_PATH_MATCH_TZ",
-            "JSON_VALID",
-            "JSONB_EXISTS",
-            "JSONB_EXISTS_ANY",
-            "JSONB_EXISTS_ALL",
-            "HAS_TABLE_PRIVILEGE",
-            "HAS_SCHEMA_PRIVILEGE",
-            "HAS_COLUMN_PRIVILEGE",
-            "HAS_DATABASE_PRIVILEGE",
-            "HAS_FUNCTION_PRIVILEGE",
-            "HAS_SEQUENCE_PRIVILEGE",
-            "PG_HAS_ROLE",
-        ],
-        Sql("BOOLEAN"),
-    ),
-    (
-        &[
-            "PG_ADVISORY_LOCK",
-            "PG_ADVISORY_XACT_LOCK",
-            "PG_ADVISORY_LOCK_SHARED",
-            "PG_ADVISORY_XACT_LOCK_SHARED",
-            "PG_ADVISORY_UNLOCK_ALL",
-            "PG_NOTIFY",
-            "PG_SLEEP",
-            "SETSEED",
-        ],
-        Returns::Void,
-    ),
-    (
-        &[
-            "TRANSACTION_TIMESTAMP",
-            "STATEMENT_TIMESTAMP",
-            "CLOCK_TIMESTAMP",
-            "TO_TIMESTAMP",
-            "MAKE_TIMESTAMPTZ",
-        ],
-        Sql("TIMESTAMPTZ"),
-    ),
-    (&["LOCALTIMESTAMP", "MAKE_TIMESTAMP"], Sql("TIMESTAMP")),
-    (&["TO_DATE", "MAKE_DATE", "DATE"], Sql("DATE")),
-    (&["LOCALTIME", "MAKE_TIME"], Sql("TIME")),
-    (
-        &[
-            "AGE",
-            "JUSTIFY_DAYS",
-            "JUSTIFY_HOURS",
-            "JUSTIFY_INTERVAL",
-            "MAKE_INTERVAL",
-        ],
-        Sql("INTERVAL"),
-    ),
-    (
-        &["GEN_RANDOM_UUID", "UUID_GENERATE_V4", "UUID_GENERATE_V1"],
-        Sql("UUID"),
-    ),
-    (&["UUID_EXTRACT_VERSION"], Sql("SMALLINT")),
-    (
-        &["UUID_EXTRACT_TIMESTAMP", "DATE_ADD", "DATE_SUBTRACT"],
-        Sql("TIMESTAMPTZ"),
-    ),
-    (&["RANDOM_NORMAL"], Sql("DOUBLE")),
-    (
-        &[
-            "SHA224",
-            "SHA256",
-            "SHA384",
-            "SHA512",
-            "DECODE",
-            "GEN_RANDOM_BYTES",
-            "CONVERT_TO",
-            "DIGEST",
-        ],
-        Sql("VARBINARY"),
-    ),
-    (
-        &[
-            "STRING_TO_ARRAY",
-            "REGEXP_SPLIT_TO_ARRAY",
-            "REGEXP_MATCH",
-            "REGEXP_MATCHES",
-        ],
-        Sql("ARRAY<TEXT>"),
-    ),
-    (&["ARRAY_POSITIONS"], Sql("ARRAY<INT>")),
-    (&["NETWORK", "INET_MERGE"], Sql("CIDR")),
-    (
-        &[
-            "BROADCAST",
-            "HOSTMASK",
-            "NETMASK",
-            "INET_CLIENT_ADDR",
-            "INET_SERVER_ADDR",
-        ],
-        Sql("INET"),
-    ),
-    (&["SET_MASKLEN"], Arg(0)),
-    (&["DATE_BIN"], Arg(1)),
-    (&["TIMEZONE"], Returns::AtZone(1)),
-    (&["ARRAY_FILL"], Returns::ArrayOf(0)),
-    (&["BIT_AND", "BIT_OR", "BIT_XOR"], Arg(0)),
-    (
-        &[
-            "ROW_TO_JSON",
-            "JSON_BUILD_ARRAY",
-            "JSON_OBJECT",
-            "JSON_STRIP_NULLS",
-            "JSON_EXTRACT_PATH",
-            "JSON_ARRAY_ELEMENTS",
-            "JSON",
-            "JSON_ARRAY",
-            "JSON_SCALAR",
-            "JSON_ARRAYAGG",
-            "JSON_OBJECTAGG",
-        ],
-        Sql("JSON"),
-    ),
-    (&["JSON_VALUE", "JSON_SERIALIZE"], Sql("TEXT")),
-    (&["JSON_QUERY"], Sql("JSONB")),
-    (&["JSON_EXISTS"], Sql("BOOLEAN")),
-    (
-        &[
-            "JSONB_BUILD_ARRAY",
-            "JSONB_OBJECT",
-            "JSONB_STRIP_NULLS",
-            "JSONB_SET",
-            "JSONB_INSERT",
-            "JSONB_EXTRACT_PATH",
-            "JSONB_ARRAY_ELEMENTS",
-            "JSONB_PATH_QUERY",
-            "JSONB_PATH_QUERY_TZ",
-            "JSONB_PATH_QUERY_FIRST",
-            "JSONB_PATH_QUERY_FIRST_TZ",
-            "JSONB_PATH_QUERY_ARRAY",
-            "JSONB_PATH_QUERY_ARRAY_TZ",
-        ],
-        Sql("JSONB"),
-    ),
-    (&["TRIM_SCALE"], Sql("DECIMAL")),
-    (&["REGEXP_SUBSTR"], Sql("TEXT")),
-    (&["BIT_COUNT"], Sql("BIGINT")),
-    (&["SET_BYTE", "SET_BIT", "RANGE_INTERSECT_AGG"], Arg(0)),
-    (&["TO_TSVECTOR", "SETWEIGHT"], Sql("TSVECTOR")),
-    (
-        &[
-            "TO_TSQUERY",
-            "PLAINTO_TSQUERY",
-            "PHRASETO_TSQUERY",
-            "WEBSEARCH_TO_TSQUERY",
-        ],
-        Sql("TSQUERY"),
-    ),
-    (
-        &[
-            "ROW",
-            "JSON_EACH",
-            "JSONB_EACH",
-            "JSON_EACH_TEXT",
-            "JSONB_EACH_TEXT",
-        ],
-        Sql("RECORD"),
-    ),
-    (&["PG_GET_USERBYID"], Sql("NAME")),
-    (&["FACTORIAL"], Sql("DECIMAL")),
-    (
-        &[
-            "COT", "SIND", "COSD", "TAND", "COTD", "ASIND", "ACOSD", "ATAND", "ATAN2D", "SINH",
-            "COSH", "TANH", "ASINH", "ACOSH", "ATANH",
-        ],
-        Sql("DOUBLE"),
-    ),
-    (&["PARSE_IDENT"], Sql("ARRAY<TEXT>")),
-    (&["PG_POSTMASTER_START_TIME"], Sql("TIMESTAMPTZ")),
-    (&["RANGE_MERGE"], Arg(0)),
-    (&["INT4RANGE"], Sql("INT4RANGE")),
-    (&["INT8RANGE"], Sql("INT8RANGE")),
-    (&["NUMRANGE"], Sql("NUMRANGE")),
-    (&["TSRANGE"], Sql("TSRANGE")),
-    (&["TSTZRANGE"], Sql("TSTZRANGE")),
-    (&["DATERANGE"], Sql("DATERANGE")),
-    (
-        &[
-            "ABS",
-            "MOD",
-            "ARRAY_APPEND",
-            "ARRAY_CAT",
-            "ARRAY_REMOVE",
-            "ARRAY_REPLACE",
-            "TRIM_ARRAY",
-            "ARRAY_SAMPLE",
-            "ARRAY_SHUFFLE",
-        ],
-        Arg(0),
-    ),
-    (&["GENERATE_SERIES"], Returns::Series),
-    (
-        &["TRIM", "LTRIM", "RTRIM", "BTRIM", "OVERLAY"],
-        Returns::Text(0),
-    ),
-    (
-        &[
-            "NULLIF",
-            "FIRST_VALUE",
-            "LAST_VALUE",
-            "NTH_VALUE",
-            "LAG",
-            "LEAD",
-            "ANY_VALUE",
-        ],
-        Returns::Same(0),
-    ),
-    (&["GREATEST", "LEAST"], Returns::FirstKnown),
-    (&["ARRAY_PREPEND"], Arg(1)),
-    (&["UNNEST"], Elem(0)),
-    (&["ARRAY_AGG"], Returns::ArrayOf(0)),
-    (&["LOWER", "UPPER"], Returns::Bound),
-    (
-        &[
-            "STDDEV",
-            "STDDEV_POP",
-            "STDDEV_SAMP",
-            "VARIANCE",
-            "VAR_POP",
-            "VAR_SAMP",
-        ],
-        Returns::Mean,
-    ),
-    (
-        &[
-            "CEIL", "CEILING", "FLOOR", "SQRT", "CBRT", "EXP", "LN", "LOG10", "POWER", "SIGN",
-        ],
-        Returns::Real,
-    ),
-    (&["ROUND", "TRUNC", "LOG"], Returns::Scaled),
-    (&["DATE_TRUNC"], Returns::Trunc(1)),
-];
+/// The types of the first two arguments of a call, where a function rule read them.
+pub(super) type RuleArguments = [Option<Typed>; 2];
 
 /// The upper-case name of a function, without its schema.
 pub(super) fn function_name(func: &sqlparser::ast::Function) -> String {
@@ -560,7 +99,17 @@ pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
             .args
             .iter()
             .map_while(|arg| match arg {
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Some(expr),
+                // PostgreSQL's `xmlforest(x AS name)` names an element, and `xmlparse(DOCUMENT x)`
+                // sets a mode: the value is still the argument.
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Named { expr, .. })) => {
+                    Some(&**expr)
+                }
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+                | FunctionArg::Named {
+                    arg: FunctionArgExpr::Expr(expr),
+                    operator: FunctionArgOperator::Space,
+                    ..
+                } => Some(expr),
                 _ => None,
             })
             .collect(),
@@ -569,11 +118,6 @@ pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
 }
 
 impl<'a> Analyzer<'a> {
-    /// How the result type of the built-in function `name` (upper case) follows from its arguments.
-    pub(super) fn returns(&self, name: &str) -> Option<Returns> {
-        lookup(name)?.returns(self.dialect)
-    }
-
     /// Result type of a call to a function that [`Returns`] describes, given its arguments.
     pub(super) fn function_type(
         &self,
@@ -587,15 +131,18 @@ impl<'a> Analyzer<'a> {
         };
         let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
         match returns {
-            Sql(name) => sql(name),
             Returns::Void => Ok(Typed {
                 python: Some(Rc::from("None")),
                 sql: Some(Rc::from("VOID")),
                 values: None,
             }),
             Arg(i) => Ok(strip(arg(i)?, self.dialect)),
-            // `LAG(x, 1, 'default')` can also return the default.
-            Returns::Same(i) if args.len() >= 3 => Ok(strip(arg(i)?, self.dialect)),
+            // `LAG(x, 1, default)` can also return the default, of their common type.
+            Returns::Same(i) if args.len() >= 3 => {
+                let value = strip(arg(i)?, self.dialect);
+                let default = arg(args.len() - 1)?;
+                Ok(common_of([value.clone(), default], self.dialect).unwrap_or(value))
+            }
             Returns::Same(i) => arg(i),
             Returns::FirstKnown => {
                 let mut typed_args = Vec::with_capacity(args.len());
@@ -628,7 +175,7 @@ impl<'a> Analyzer<'a> {
                 },
                 _ => Typed::UNKNOWN,
             }),
-            Elem(i) => Ok(self.element_typed(arg(i)?.sql())),
+            Elem(i) => Ok(self.unnested_typed(arg(i)?.sql())),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
                 let elem = typed
@@ -638,6 +185,17 @@ impl<'a> Analyzer<'a> {
                 Ok(elem.map_or(Typed::UNKNOWN, |elem| {
                     from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
                 }))
+            }
+            Returns::Range(i) | Returns::Multirange(i) => {
+                let typed = arg(i)?;
+                let suffix = match returns {
+                    Returns::Range(_) => "RANGE",
+                    _ => "MULTIRANGE",
+                };
+                match typed.sql().filter(|ty| range_element(ty).is_some()) {
+                    Some(ty) => sql(&format!("{}{suffix}", range_kind(ty).unwrap_or_default())),
+                    None => Ok(Typed::UNKNOWN),
+                }
             }
             Returns::Bound => {
                 let typed = arg(0)?;
@@ -708,12 +266,14 @@ impl<'a> Analyzer<'a> {
                     None => Ok(Typed::UNKNOWN),
                 }
             }
-            Returns::AtZone(i) => Ok(match operand_type(&arg(i)?) {
-                Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
-                Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
-                Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
-                _ => Typed::UNKNOWN,
-            }),
+            Returns::AtZone(i) => Ok(
+                match operand_type(&arg(i.min(args.len().saturating_sub(1)))?) {
+                    Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
+                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
+                    _ => Typed::UNKNOWN,
+                },
+            ),
             Returns::Trunc(i) => {
                 let typed = arg(i)?;
                 match operand_type(&typed) {
@@ -753,27 +313,40 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The inference rule for a call of the built-in `name` (upper case), with the first
-    /// argument's type when a rule read it.
+    /// The inference rule for a call of the built-in `name` (upper case), with the types of
+    /// the first two arguments where a rule reads them.
     pub(super) fn function_rule(
         &self,
         name: &str,
-        arg: Option<&Expr>,
+        args: &[&Expr],
         scope: &Scope,
-    ) -> Inferred<Option<(&'static FunctionRule, Option<Typed>)>> {
+    ) -> Inferred<Option<(&'static FunctionRule, RuleArguments)>> {
         let rules = function_rules(name);
         if rules.is_empty() {
             return Ok(None);
         }
-        let typed = if rules.iter().any(FunctionRule::reads_argument) {
-            Some(arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope))?)
-        } else {
-            None
+        let typed = |position: usize| -> Inferred<Option<Typed>> {
+            if !rules.iter().any(|rule| rule.reads(position)) {
+                return Ok(None);
+            }
+            Ok(Some(match args.get(position) {
+                Some(arg) => self.expr(arg, scope)?,
+                None => Typed::UNKNOWN,
+            }))
         };
-        let argument = typed.as_ref().and_then(operand_type);
+        let typed = [typed(0)?, typed(1)?];
+        let [first, second] = [0, 1].map(|i| typed[i].as_ref().and_then(operand_type));
+        let all = if rules.iter().any(FunctionRule::reads_all) {
+            args.iter()
+                .map(|arg| self.expr(arg, scope))
+                .collect::<Inferred<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        let all: Vec<Option<&str>> = all.iter().map(operand_type).collect();
         let found = rules
             .iter()
-            .find(|rule| rule.applies(self.dialect, argument));
+            .find(|rule| rule.applies(self.dialect, first, second, &all));
         Ok(found.map(|rule| (rule, typed.clone())))
     }
 
@@ -850,8 +423,6 @@ fn decimal_integer_digits(sql_type: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use sqlparser::ast::Function;
 
     use super::super::test_support::{expr, reports};
@@ -891,25 +462,6 @@ mod tests {
             panic!("expected a function");
         };
         assert!(positional_args(&func.args).is_empty());
-    }
-
-    #[test]
-    fn function_tables_have_upper_case_names() {
-        for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
-            for name in table.iter().flat_map(|(names, _)| names.iter()) {
-                assert_eq!(*name, name.to_uppercase(), "{name} is not upper case");
-            }
-        }
-    }
-
-    #[test]
-    fn function_tables_list_a_name_once() {
-        for table in [COMMON_FUNCTIONS, POSTGRES_FUNCTIONS] {
-            let mut seen = HashSet::new();
-            for name in table.iter().flat_map(|(names, _)| names.iter()) {
-                assert!(seen.insert(*name), "{name} is listed twice");
-            }
-        }
     }
 
     const DDL: &str = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT NOT NULL, \

@@ -14,16 +14,18 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Select, TableFactor, TableWithJoins,
-    UnaryOperator,
+    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Query, Select, SetExpr, TableFactor,
+    TableWithJoins, UnaryOperator,
 };
 
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
-use super::nullability::{Facts, Nullability};
+use super::inference::FunctionNullability;
+use super::json::is_null_literal;
+use super::nullability::{rows_pass_where, Facts, Nullability};
 use super::query::Analyzer;
-use super::registry::lookup;
+use super::registry::{lookup, Behavior};
 use super::scope::Scope;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
@@ -69,6 +71,23 @@ impl Learned {
             columns: columns.into_iter().collect(),
             ..Learned::default()
         }
+    }
+
+    /// This, minus what it says about the `(reference, column)` pairs of `columns`, which
+    /// an UPDATE overwrites. Expressions may read them, so none is kept.
+    pub(super) fn without(mut self, columns: &[(String, String)]) -> Self {
+        if columns.is_empty() {
+            return self;
+        }
+        self.columns.retain(|pair| !columns.contains(pair));
+        self.null.retain(|pair| !columns.contains(pair));
+        self.values.retain(|(r, c, _)| {
+            !columns
+                .iter()
+                .any(|(reference, column)| r == reference && c == column)
+        });
+        self.exprs.clear();
+        self
     }
 
     /// Whether this limits the values of a column.
@@ -336,8 +355,22 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(inner, &list, scope));
                 learned
             }
+            // `x IS DISTINCT FROM NULL` is `x IS NOT NULL`; against anything else, `x` may
+            // be NULL whether it holds or not.
+            Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right)
+                if truth == matches!(cond, Expr::IsDistinctFrom(..)) =>
+            {
+                match (is_null_literal(left), is_null_literal(right)) {
+                    (false, true) => self.proven(left, scope),
+                    (true, false) => self.proven(right, scope),
+                    _ => Learned::default(),
+                }
+            }
             Expr::AllOp { .. } | Expr::IsNotDistinctFrom(..) | Expr::IsDistinctFrom(..) => {
                 Learned::default()
+            }
+            Expr::Exists { subquery, negated } if truth != *negated => {
+                self.learn_exists(subquery, scope)
             }
             Expr::Exists { .. } => Learned::default(),
             // A condition that is true, or false, is not NULL, and neither are the operands
@@ -383,6 +416,56 @@ impl<'a> Analyzer<'a> {
         } else {
             Learned::default()
         }
+    }
+
+    /// What a correlated `EXISTS (SELECT ... WHERE cond)` that holds proves about the
+    /// relations of `scope`: what `cond` proves about them, as some row satisfied it.
+    fn learn_exists(&self, query: &Query, scope: &Scope) -> Learned {
+        let SetExpr::Select(select) = query.body.as_ref() else {
+            return Learned::default();
+        };
+        let Some(selection) = select
+            .selection
+            .as_ref()
+            .filter(|_| rows_pass_where(select))
+        else {
+            return Learned::default();
+        };
+        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from) else {
+            return Learned::default();
+        };
+        let outer = |reference: &String| {
+            !sources.iter().any(|source| source.reference == *reference)
+                && scope.iter().any(|source| source.reference == *reference)
+        };
+        let learned = inner.learn(selection, true, &sources);
+        Learned {
+            columns: learned
+                .columns
+                .into_iter()
+                .filter(|(r, _)| outer(r))
+                .collect(),
+            present: learned.present.into_iter().filter(|r| outer(r)).collect(),
+            exprs: FxHashSet::default(),
+            values: learned
+                .values
+                .into_iter()
+                .filter(|(r, _, _)| outer(r))
+                .collect(),
+            null: learned.null.into_iter().filter(|(r, _)| outer(r)).collect(),
+        }
+    }
+
+    /// Whether this call is NULL for a NULL argument, as far as narrowing goes: the rule
+    /// that types it makes it NULL when an argument is, and it is no always valued aggregate.
+    fn is_strict_call(&self, name: &str, args: &[&Expr], scope: &Scope) -> bool {
+        matches!(
+            self.function_rule(name, args, scope),
+            Ok(Some((rule, _))) if matches!(
+                rule.nullability,
+                FunctionNullability::Strict | FunctionNullability::Aggregate
+            )
+        ) && lookup(name).is_none_or(|info| info.behavior != Behavior::AlwaysValued)
     }
 
     /// What is not NULL when `expr` is not NULL.
@@ -459,10 +542,9 @@ impl<'a> Analyzer<'a> {
             } => return self.proven(inner, scope).union(self.proven(pattern, scope)),
             Expr::Function(func) => {
                 learned.exprs.insert(ExprKey::of(expr));
-                if func.over.is_none()
-                    && lookup(&function_name(func)).is_some_and(|info| info.is_strict(self.dialect))
-                {
-                    for arg in positional_args(&func.args) {
+                let args = positional_args(&func.args);
+                if func.over.is_none() && self.is_strict_call(&function_name(func), &args, scope) {
+                    for arg in args {
                         learned = learned.union(self.proven(arg, scope));
                     }
                 }

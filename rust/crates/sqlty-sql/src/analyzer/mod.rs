@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 mod api;
 mod dialect;
-mod dialect_functions;
 mod dml;
 mod explain;
 mod expr;
@@ -22,6 +21,7 @@ mod inference;
 mod json;
 mod literals;
 mod memo;
+mod merged_star;
 mod names;
 mod narrowing;
 mod nullability;
@@ -32,6 +32,7 @@ mod query;
 mod references;
 mod registry;
 mod resolve;
+mod respell;
 mod scope;
 mod sql_type;
 mod star_expand;
@@ -40,6 +41,7 @@ mod table_functions;
 mod test_support;
 #[cfg(test)]
 mod tests;
+mod text_names;
 mod typed;
 
 #[cfg(test)]

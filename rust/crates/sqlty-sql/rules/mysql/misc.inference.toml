@@ -1,0 +1,100 @@
+# MySQL miscellaneous functions.
+
+[[function]]
+id = "mysql.misc.argument"
+function = "ANY_VALUE"
+dialects = ["mysql"]
+type = "@same(0)"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."
+
+[[function]]
+id = "mysql.misc.bigint"
+function = "SLEEP"
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.misc.bigint-nullable"
+function = "INET_ATON"
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning an integer. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
+
+[[function]]
+id = "mysql.misc.int"
+functions = ["IS_IPV4", "IS_IPV6", "IS_IPV4_COMPAT", "IS_IPV4_MAPPED", "IS_UUID"]
+dialects = ["mysql"]
+type = "INT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.misc.int-non-null"
+function = "GROUPING"
+dialects = ["mysql"]
+type = "INT"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning an integer. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.misc.text"
+function = "BIN_TO_UUID"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.misc.text-non-null"
+function = "UUID"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a string. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.misc.text-nullable"
+functions = ["INET_NTOA", "INET6_NTOA"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
+
+[[function]]
+id = "mysql.misc.ubigint"
+function = "UUID_SHORT"
+dialects = ["mysql"]
+type = "UBIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes the function as returning an unsigned integer."
+
+[[function]]
+id = "mysql.misc.varbinary"
+function = "UUID_TO_BIN"
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a binary string."
+
+[[function]]
+id = "mysql.misc.varbinary-nullable"
+function = "INET6_ATON"
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."

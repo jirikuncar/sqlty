@@ -1,0 +1,10 @@
+# SQLite aggregate functions.
+
+[[function]]
+id = "sqlite.aggregate.double"
+function = "TOTAL"
+dialects = ["sqlite"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "SQLite documentation, Built-in Aggregate Functions"
+reasoning = "The function returns a floating-point value."

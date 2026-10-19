@@ -1,0 +1,10 @@
+# PostgreSQL conditional expressions.
+
+[[function]]
+id = "postgres.conditional.common"
+functions = ["LEAST", "GREATEST"]
+dialects = ["postgres"]
+type = "@first-known"
+nullability = "all-arguments"
+reference = "PostgreSQL 17 documentation, 9.18.4 GREATEST and LEAST"
+reasoning = "The arguments resolve to one common type, the first known argument's. It skips NULL arguments, so it is NULL only when every argument is."

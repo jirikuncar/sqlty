@@ -154,6 +154,21 @@ SELECT SUBSTRING(data, 1, 2) AS a, TRIM(data) AS b, LEFT(data, 1) AS c, UPPER(da
 -- columns: f: bytes (VARBINARY)
 ```
 
+`CONCAT`, `CONCAT_WS`, `ELT`, `EXPORT_SET` and `MAKE_SET` return a binary string when
+any argument is one. A regular expression function does when its subject or pattern is
+one; the replacement does not count.
+
+```sql
+SELECT CONCAT('a', data) AS a, CONCAT_WS(',', 'a', data) AS b, ELT(1, 'a', data) AS c, REGEXP_REPLACE('a', data, 'b') AS d, REGEXP_SUBSTR('a', data) AS e, REGEXP_REPLACE('a', 'b', data) AS f, CONCAT('a', 'b') AS g FROM files
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes | None (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes | None (VARBINARY)
+-- columns: f: str (TEXT)
+-- columns: g: str (TEXT)
+```
+
 Hexadecimal and bit-value literals are binary strings.
 
 ```sql
@@ -172,7 +187,7 @@ SELECT ABS(price) AS a, ROUND(ratio) AS b, TRUNCATE(price, 1) AS c, FLOOR(id) AS
 -- columns: c: decimal.Decimal (DECIMAL(10, 2))
 -- columns: d: int (BIGINT)
 -- columns: e: int (INT)
--- columns: f: float (DOUBLE)
+-- columns: f: float | None (DOUBLE)
 -- columns: g: float (DOUBLE)
 -- columns: h: float (DOUBLE)
 -- columns: i: int (BIGINT)
@@ -194,6 +209,14 @@ SELECT JSON_OBJECT('id', id) AS a, JSON_ARRAY(id, name) AS b, JSON_EXTRACT(doc, 
 SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: a: typing.Any (JSON)
 -- columns: b: typing.Any (JSON)
+```
+
+`MEMBER OF` tests whether a JSON array holds a value, like `IN`:
+
+```sql
+SELECT id MEMBER OF('[1, 2]') AS a, id MEMBER OF(doc) AS b FROM events
+-- columns: a: bool (BOOLEAN)
+-- columns: b: bool | None (BOOLEAN)
 ```
 
 `JSON_VALUE` returns a string, or the type of its `RETURNING` clause.
@@ -264,6 +287,15 @@ SELECT LAG(id) OVER (ORDER BY id) AS a, LEAD(name, 1, 'x') OVER (ORDER BY id) AS
 -- columns: g: str | None (VARCHAR(50))
 ```
 
+`LAG` and `LEAD` return the common type of the value and the default: an `INT` with a
+`DECIMAL` default is a `DECIMAL`.
+
+```sql
+SELECT LAG(id, 1, price) OVER (ORDER BY id) AS a, LEAD(id, 1, 2.5) OVER (ORDER BY id) AS b FROM events
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: decimal.Decimal (DECIMAL)
+```
+
 ## JSON_TABLE
 
 `JSON_TABLE` takes its columns from its `COLUMNS` clause. A `PATH` column is NULL
@@ -301,8 +333,8 @@ SELECT id DIV 2 AS a, price DIV 2 AS b, CAST(id AS UNSIGNED) - 1 AS c, EXTRACT(Y
 -- columns: b: int (BIGINT)
 -- columns: c: int (UBIGINT)
 -- columns: d: int (BIGINT)
--- columns: e: datetime.date (DATE)
--- columns: f: datetime.datetime (DATETIME)
+-- columns: e: datetime.date | None (DATE)
+-- columns: f: datetime.datetime | None (DATETIME)
 -- columns: g: str (TEXT)
 -- columns: h: bytes (VARBINARY)
 ```
@@ -325,4 +357,19 @@ SELECT EXPORT_SET(5, 'Y', 'N') AS a, MAKE_SET(1, 'a', 'b') AS b, GET_FORMAT(DATE
 -- columns: i: int | None (INT)
 -- columns: k: int | None (BIGINT)
 -- columns: l: int (UBIGINT)
+```
+
+## Bitwise operators
+
+Bit operations on numbers give an unsigned 64-bit integer.
+
+```sql
+SELECT id & 3 AS a, id | 4 AS b, id ^ 1 AS c, ~id AS d, id << 1 AS e, id >> 1 AS f, price | 1 AS g FROM events
+-- columns: a: int (UBIGINT)
+-- columns: b: int (UBIGINT)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (UBIGINT)
+-- columns: e: int (UBIGINT)
+-- columns: f: int (UBIGINT)
+-- columns: g: int (UBIGINT)
 ```

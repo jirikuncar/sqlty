@@ -62,5 +62,5 @@ CREATE OR REPLACE FUNCTION f() RETURNS text LANGUAGE sql AS 'SELECT ''a''';
 
 ```sql
 SELECT f()
--- inferred: tuple[str]
+-- inferred: tuple[str | None]
 ```

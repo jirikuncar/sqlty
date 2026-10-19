@@ -23,7 +23,28 @@ CREATE FUNCTION touch() RETURNS void LANGUAGE sql AS 'SELECT 1';
 
 ```sql
 SELECT answer(), full_name('a'), full_name('a', 'b'), app.tags(), touch()
--- inferred: tuple[int, str, str, list[str], None]
+-- inferred: tuple[int | None, str | None, str | None, list[str] | None, None]
+```
+
+## Nullability
+
+A function may return NULL whatever its arguments, so a call is nullable. A `STRICT`
+function, also spelled `RETURNS NULL ON NULL INPUT`, returns NULL when an argument is
+NULL: a call is nullable only when an argument is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (a INTEGER, b INTEGER NOT NULL);
+CREATE FUNCTION loose(x integer) RETURNS integer LANGUAGE sql AS 'SELECT x';
+CREATE FUNCTION tight(x integer) RETURNS integer STRICT LANGUAGE sql AS 'SELECT x';
+CREATE FUNCTION spelled(x integer) RETURNS integer RETURNS NULL ON NULL INPUT LANGUAGE sql AS 'SELECT x';
+CREATE FUNCTION called(x integer) RETURNS integer CALLED ON NULL INPUT LANGUAGE sql AS 'SELECT x';
+```
+
+```sql
+SELECT loose(b), tight(a), tight(b), spelled(b), called(b) FROM t
+-- inferred: tuple[int | None, int | None, int, int, int | None]
 ```
 
 ## The call decides the overload
@@ -42,7 +63,7 @@ CREATE FUNCTION g(a text) RETURNS text LANGUAGE sql AS 'SELECT 1';
 
 ```sql
 SELECT f(1), f(1, 2)
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ```sql
@@ -66,7 +87,7 @@ CREATE OR REPLACE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';
 
 ```sql
 SELECT answer()
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## DROP FUNCTION
@@ -83,7 +104,7 @@ DROP FUNCTION gone;
 
 ```sql
 SELECT f(1)
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ```sql
@@ -104,7 +125,7 @@ CREATE FUNCTION share() RETURNS percent LANGUAGE sql AS 'SELECT 1';
 
 ```sql
 SELECT current_status(), share()
--- inferred: tuple[typing.Literal['new', 'done'], int]
+-- inferred: tuple[typing.Literal['new', 'done'] | None, int | None]
 ```
 
 ## Set-returning functions in FROM

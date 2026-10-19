@@ -94,6 +94,14 @@ SELECT lower(nick) FROM users WHERE lower(nick) IS NOT NULL
 -- inferred: tuple[str]
 ```
 
+The rule of the call decides: `upper` of a range is NULL for an infinite bound too, so
+`upper(int4range(age, 100))` proves nothing about `age`.
+
+```sql
+SELECT age FROM users WHERE upper(int4range(age, 100)) IS NOT NULL
+-- inferred: tuple[int | None]
+```
+
 ## Conditions that prove nothing
 
 `OR` proves only what both sides prove.
@@ -108,11 +116,16 @@ SELECT age FROM users WHERE age > 18 OR age < 10
 -- inferred: tuple[int]
 ```
 
-`IS NULL`, `IS DISTINCT FROM` and `COALESCE(...)` tell nothing about the column.
+`IS NULL`, `IS DISTINCT FROM` a value and `COALESCE(...)` tell nothing about the column.
 
 ```sql
 SELECT age, nick FROM users WHERE age IS NULL AND coalesce(nick, 'x') = 'x'
 -- inferred: tuple[int | None, str | None]
+```
+
+```sql
+SELECT nick FROM users WHERE nick IS DISTINCT FROM 'x'
+-- inferred: tuple[str | None]
 ```
 
 `NOT` flips what is proven: a false comparison is not NULL either.
@@ -120,6 +133,37 @@ SELECT age, nick FROM users WHERE age IS NULL AND coalesce(nick, 'x') = 'x'
 ```sql
 SELECT age, nick FROM users WHERE NOT (age > 18) AND nick IS NOT NULL
 -- inferred: tuple[int, str]
+```
+
+## IS DISTINCT FROM NULL
+
+`x IS DISTINCT FROM NULL` is `x IS NOT NULL`, and `x IS NOT DISTINCT FROM NULL` is
+`x IS NULL`.
+
+```sql
+SELECT nick, age FROM users WHERE nick IS DISTINCT FROM NULL AND NOT (age IS NOT DISTINCT FROM NULL)
+-- inferred: tuple[str, int]
+```
+
+## EXISTS
+
+A correlated `EXISTS` holds when some row passes its `WHERE`, so what that `WHERE`
+proves about the outer query holds too. `NOT EXISTS`, and an aggregate that returns a
+row when none matches, prove nothing.
+
+```sql
+SELECT u.nick FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.note = u.nick)
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT u.nick FROM users u WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.note = u.nick)
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT u.nick FROM users u WHERE EXISTS (SELECT count(*) FROM orders o WHERE o.note = u.nick)
+-- inferred: tuple[str | None]
 ```
 
 ## HAVING
@@ -260,6 +304,163 @@ LEFT JOIN LATERAL (SELECT count(*) AS n FROM orders WHERE orders.user_id = users
 SELECT c.n FROM users
 LEFT JOIN LATERAL (SELECT count(*) AS n FROM orders HAVING count(*) > 1) c ON TRUE
 -- inferred: tuple[int | None]
+```
+
+## Outer joins through a foreign key
+
+A `NOT NULL` foreign key always references a row, so a `LEFT JOIN` from the
+referencing table to the referenced one on exactly the key's columns always matches.
+The referenced table's own nullable columns stay nullable.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL, motto TEXT, region TEXT, code TEXT, UNIQUE (region, code));
+CREATE TABLE players (
+    id INTEGER PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES teams (id),
+    coach_id INTEGER REFERENCES teams (id),
+    region TEXT NOT NULL,
+    code TEXT NOT NULL,
+    FOREIGN KEY (region, code) REFERENCES teams (region, code)
+);
+CREATE TABLE fans (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL);
+ALTER TABLE fans ADD CONSTRAINT fans_team FOREIGN KEY (team_id) REFERENCES teams;
+```
+
+```sql
+SELECT t.name, t.motto FROM players p LEFT JOIN teams t ON t.id = p.team_id
+-- inferred: tuple[str, str | None]
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON p.region = t.region AND p.code = t.code
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT t.name FROM teams t RIGHT JOIN fans f ON f.team_id = t.id
+-- inferred: tuple[str]
+```
+
+### When the join can miss
+
+A nullable key column, a condition that is not exactly the key, a referenced relation
+that is not the table itself, and a referencing row that is itself null-extended can
+all leave the joined row NULL.
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON t.id = p.coach_id
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON t.id = p.team_id AND t.motto IS NOT NULL
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON p.region = t.region
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN (SELECT * FROM teams WHERE motto IS NOT NULL) t ON t.id = p.team_id
+-- inferred: tuple[str | None]
+```
+
+```sql
+WITH teams AS (SELECT * FROM teams WHERE motto IS NOT NULL)
+SELECT t.name FROM players p LEFT JOIN teams t ON t.id = p.team_id
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT t.name FROM fans f LEFT JOIN players p ON p.id = f.id LEFT JOIN teams t ON t.id = p.team_id
+-- inferred: tuple[str | None]
+```
+
+### A key that may not hold
+
+A `DEFERRABLE` key is checked at commit, so a transaction can see a row that
+references nothing yet. A key added `NOT VALID` is not checked on the rows already
+there until `VALIDATE CONSTRAINT`. A query may not see a row of a table with row-level
+security, whatever references it.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE secrets (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+ALTER TABLE secrets ENABLE ROW LEVEL SECURITY;
+CREATE TABLE players (
+    id INTEGER PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES teams (id) DEFERRABLE INITIALLY DEFERRED,
+    secret_id INTEGER NOT NULL REFERENCES secrets (id),
+    former_id INTEGER NOT NULL,
+    next_id INTEGER NOT NULL
+);
+ALTER TABLE players ADD CONSTRAINT former FOREIGN KEY (former_id) REFERENCES teams (id) NOT VALID;
+ALTER TABLE players ADD CONSTRAINT next FOREIGN KEY (next_id) REFERENCES teams (id) NOT VALID;
+ALTER TABLE players VALIDATE CONSTRAINT next;
+```
+
+```sql
+SELECT t.name, s.name, f.name, n.name FROM players p
+LEFT JOIN teams t ON t.id = p.team_id
+LEFT JOIN secrets s ON s.id = p.secret_id
+LEFT JOIN teams f ON f.id = p.former_id
+LEFT JOIN teams n ON n.id = p.next_id
+-- inferred: tuple[str | None, str | None, str | None, str]
+```
+
+### SQLite
+
+SQLite checks foreign keys only after `PRAGMA foreign_keys = ON`.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE players (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams (id));
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON t.id = p.team_id
+-- inferred: tuple[str | None]
+```
+
+### MySQL
+
+MySQL checks foreign keys in InnoDB tables, its default engine, and ignores them in
+the others.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE teams (id INT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE players (id INT PRIMARY KEY, team_id INT NOT NULL, FOREIGN KEY (team_id) REFERENCES teams (id));
+CREATE TABLE fans (id INT PRIMARY KEY, team_id INT NOT NULL, FOREIGN KEY (team_id) REFERENCES teams (id)) ENGINE = MyISAM;
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON t.id = p.team_id
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT t.name FROM fans f LEFT JOIN teams t ON t.id = f.team_id
+-- inferred: tuple[str | None]
 ```
 
 ## AND, OR and CASE read their right side under the left

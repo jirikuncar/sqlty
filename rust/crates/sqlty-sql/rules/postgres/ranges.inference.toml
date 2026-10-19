@@ -1,0 +1,82 @@
+# PostgreSQL range functions and constructors.
+
+[[function]]
+id = "postgres.range.range"
+function = "RANGE_MERGE"
+dialects = ["postgres"]
+type = "@range(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reasoning = "The result is the range type of the argument, which is a range or a multirange."
+
+[[function]]
+id = "postgres.range.boolean"
+functions = ["LOWER_INF", "UPPER_INF", "LOWER_INC", "UPPER_INC", "ISEMPTY"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.range.daterange"
+function = "DATERANGE"
+dialects = ["postgres"]
+type = "DATERANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reasoning = "The documentation gives the function a `daterange` result."
+
+[[function]]
+id = "postgres.range.int4range"
+function = "INT4RANGE"
+dialects = ["postgres"]
+type = "INT4RANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reasoning = "The documentation gives the function an `int4range` result."
+
+[[function]]
+id = "postgres.range.int8range"
+function = "INT8RANGE"
+dialects = ["postgres"]
+type = "INT8RANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reasoning = "The documentation gives the function an `int8range` result."
+
+[[function]]
+id = "postgres.range.numrange"
+function = "NUMRANGE"
+dialects = ["postgres"]
+type = "NUMRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reasoning = "The documentation gives the function a `numrange` result."
+
+[[function]]
+id = "postgres.range.tsrange"
+function = "TSRANGE"
+dialects = ["postgres"]
+type = "TSRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reasoning = "The documentation gives the function a `tsrange` result."
+
+[[function]]
+id = "postgres.range.tstzrange"
+function = "TSTZRANGE"
+dialects = ["postgres"]
+type = "TSTZRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reasoning = "The documentation gives the function a `tstzrange` result."
+
+[[function]]
+id = "postgres.range.multirange"
+function = "MULTIRANGE"
+dialects = ["postgres"]
+type = "@multirange(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.59 Multirange Functions"
+reasoning = "The result is the multirange type of the range argument."

@@ -11,11 +11,13 @@ use std::sync::Arc;
 
 use sqlparser::ast::{
     AlterTable, AlterType, ArgMode, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind,
-    CreateView, DataType, Expr, FunctionReturnType, ObjectName, ObjectType, Query, Statement,
+    CreateTableOptions, CreateView, DataType, Expr, ForeignKeyConstraint, FunctionCalledOnNull,
+    FunctionReturnType, Ident, ObjectName, ObjectType, Query, SqlOption, Statement,
     TableConstraint, Visit, Visitor,
 };
 
 use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject, SqlDialect};
+use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
@@ -23,7 +25,7 @@ use super::columns::{
     raw_column, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
-use super::{Catalog, TypeOverrides, BUILTIN_SCHEMAS};
+use super::{Catalog, ForeignKey, TypeOverrides, BUILTIN_SCHEMAS};
 
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct RawTable {
@@ -34,6 +36,22 @@ pub(super) struct RawTable {
     pub(super) unknown: bool,
     /// Groups of columns a `CHECK` keeps at least one of non-null.
     pub(super) nonnull_groups: Vec<Vec<String>>,
+    /// `BEFORE` row triggers by name, and the statements they fire for.
+    pub(super) row_triggers: Vec<(String, RowEvents)>,
+    pub(super) foreign_keys: Vec<RawForeignKey>,
+    /// `ENABLE ROW LEVEL SECURITY`: a query may not see every row.
+    pub(super) row_security: bool,
+}
+
+/// A foreign key as declared, which holds for every row only when `enforced`.
+#[derive(Clone, PartialEq)]
+pub(super) struct RawForeignKey {
+    pub(super) name: Option<String>,
+    pub(super) key: ForeignKey,
+    /// Neither `DEFERRABLE` nor `NOT ENFORCED`.
+    pub(super) immediate: bool,
+    /// Not added `NOT VALID`, or validated since.
+    pub(super) validated: bool,
 }
 
 pub(super) enum Rel {
@@ -56,6 +74,7 @@ pub(super) struct RawFunction {
     pub(super) required: usize,
     pub(super) variadic: bool,
     pub(super) returns: RawReturn,
+    pub(super) strict: bool,
 }
 
 pub(super) enum RawReturn {
@@ -73,8 +92,10 @@ pub(super) enum OpKind {
     AlterType(AlterType),
     Drop(Box<Statement>),
     Function(Box<CreateFunction>),
-    /// A `BEFORE INSERT` row trigger on the named table, which may fill any of its columns.
-    InsertTrigger(Vec<String>),
+    /// A `BEFORE` row trigger, which may change any column of the rows it fires for.
+    RowTrigger(RowTrigger),
+    /// `DROP TRIGGER name [ON table]`.
+    DropTrigger(Vec<String>, Option<Vec<String>>),
     /// A statement that changes the named relation, type or function in a way this
     /// module cannot follow.
     Taint(Taint, Vec<String>),
@@ -259,18 +280,43 @@ impl Loader {
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
-            OpKind::InsertTrigger(name) => {
-                let Some(key) = self.table_key(name, &path) else {
+            OpKind::RowTrigger(trigger) => {
+                let Some(key) = self.table_key(&trigger.table, &path) else {
                     return false;
                 };
                 let Some(Rel::Table(table)) = self.relations.get(&key) else {
                     return false;
                 };
                 let mut table = table.clone();
-                for column in &mut table.columns {
-                    column.has_default = true;
+                if trigger.events.insert {
+                    for column in &mut table.columns {
+                        column.has_default = true;
+                    }
                 }
+                let name = trigger.name.last().map(|name| name.to_lowercase());
+                let name = name.unwrap_or_default();
+                table.row_triggers.retain(|(other, _)| *other != name);
+                table.row_triggers.push((name, trigger.events));
                 self.set_relation(key, Some(Rel::Table(table)));
+                false
+            }
+            OpKind::DropTrigger(name, table) => {
+                let name = name.last().cloned().unwrap_or_default();
+                let keys: Vec<String> = match table {
+                    Some(table) => self.table_key(table, &path).into_iter().collect(),
+                    // MySQL names a trigger without its table.
+                    None => self.relations.keys().cloned().collect(),
+                };
+                for key in keys {
+                    let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                        continue;
+                    };
+                    if table.row_triggers.iter().any(|(other, _)| *other == name) {
+                        let mut table = table.clone();
+                        table.row_triggers.retain(|(other, _)| *other != name);
+                        self.set_relation(key, Some(Rel::Table(table)));
+                    }
+                }
                 false
             }
         };
@@ -421,10 +467,92 @@ impl Loader {
                 }
             }
         }
+        let column_keys = create.columns.iter().flat_map(|def| {
+            def.options
+                .iter()
+                .filter_map(move |option| match &option.option {
+                    ColumnOption::ForeignKey(fk) => Some((fk, vec![def.name.clone()])),
+                    _ => None,
+                })
+        });
+        let table_keys = create
+            .constraints
+            .iter()
+            .filter_map(|constraint| match constraint {
+                TableConstraint::ForeignKey(fk) => Some((fk, fk.columns.clone())),
+                _ => None,
+            });
+        // MySQL parses the foreign keys of a table of an engine other than InnoDB, and
+        // ignores them.
+        let other_engine = matches!(&create.table_options, CreateTableOptions::Plain(options)
+            if options.iter().any(|option| matches!(option,
+                SqlOption::NamedParenthesizedList(list)
+                    if list.key.value.eq_ignore_ascii_case("engine")
+                        && list.name.as_ref().is_some_and(|name| !name.value.eq_ignore_ascii_case("innodb")))));
+        if !other_engine {
+            let declared: Vec<RawForeignKey> = column_keys
+                .chain(table_keys)
+                .filter_map(|(fk, columns)| {
+                    self.foreign_key(fk, &columns, &key, &table, path, true)
+                })
+                .collect();
+            table.foreign_keys = declared;
+        }
         if create.query.is_none() && !table.columns.is_empty() {
             self.set_relation(key, Some(Rel::Table(table)));
         }
         true
+    }
+
+    /// A foreign key of the table `key`, which `table` is, over `columns`; `None` when the
+    /// table it references is not defined.
+    pub(super) fn foreign_key(
+        &self,
+        fk: &ForeignKeyConstraint,
+        columns: &[Ident],
+        key: &str,
+        table: &RawTable,
+        path: &[String],
+        validated: bool,
+    ) -> Option<RawForeignKey> {
+        let target = parts(&fk.foreign_table, self.dialect);
+        let (target, columns_of) = if self.new_key(&fk.foreign_table, path) == key {
+            (key.to_string(), table)
+        } else {
+            let target = self.table_key(&target, path)?;
+            let Some(Rel::Table(referenced)) = self.relations.get(&target) else {
+                return None;
+            };
+            (target, referenced)
+        };
+        let referred: Vec<String> = if fk.referred_columns.is_empty() {
+            columns_of
+                .columns
+                .iter()
+                .filter(|column| column.primary_key)
+                .map(|column| column.name.clone())
+                .collect()
+        } else {
+            fk.referred_columns
+                .iter()
+                .map(|ident| fold(ident, self.dialect))
+                .collect()
+        };
+        let characteristics = fk.characteristics.as_ref();
+        Some(RawForeignKey {
+            name: fk.name.as_ref().map(|name| fold(name, self.dialect)),
+            key: ForeignKey {
+                columns: columns
+                    .iter()
+                    .map(|ident| fold(ident, self.dialect))
+                    .collect(),
+                table: target,
+                referred,
+            },
+            immediate: characteristics.and_then(|c| c.deferrable) != Some(true)
+                && characteristics.and_then(|c| c.enforced) != Some(false),
+            validated,
+        })
     }
 
     // ---- CREATE VIEW ----------------------------------------------------------------
@@ -764,6 +892,10 @@ impl Loader {
                 .iter()
                 .any(|a| matches!(a.mode, Some(ArgMode::Variadic))),
             returns,
+            strict: matches!(
+                create.called_on_null,
+                Some(FunctionCalledOnNull::Strict | FunctionCalledOnNull::ReturnsNullOnNullInput)
+            ),
         };
         self.unknown_functions.remove(&key);
         let dialect = self.dialect;

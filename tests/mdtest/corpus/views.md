@@ -31,8 +31,6 @@ SELECT product_id, description FROM product_view
 
 ## UNION view with one nullable branch
 
-<!-- mdtest:xfail SERIAL and INTEGER branches do not unify, the row type is None -->
-
 `first_name` is NOT NULL in one branch and nullable in the other, so the view column is
 nullable.
 

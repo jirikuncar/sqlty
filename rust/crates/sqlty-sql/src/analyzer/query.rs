@@ -8,19 +8,22 @@ use sqlparser::ast::{
     SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins, Value,
 };
 
+use sqlparser::tokenizer::Location;
+
 use crate::catalog::fold;
 use crate::diagnostics::{Diagnostics, NameRule};
 use crate::json::JsonShape;
 use crate::values;
 
 use super::dialect::SqlDialect;
-use super::dml::{dml_scope, returning};
+use super::dml::{dml_scope, joined_tables, returning};
 use super::explain::Explained;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
-use super::scope::{Scope, Virtuals};
+use super::scope::{any_merging_join, Scope, Table, Virtuals};
+use super::text_names::{item_texts, line_starts, offset, returning_start, text_column_name};
 use super::typed::Typed;
 use super::{Inferred, SchemaData};
 
@@ -115,6 +118,8 @@ pub(super) struct Analyzer<'a> {
     pub(super) facts: Facts,
     /// Where the rules of projected columns go, when `--explain` asked for them.
     pub(super) explain: Option<Explained>,
+    /// The SQL as parsed, for MySQL and SQLite, which name a column by its expression's text.
+    pub(super) source: Option<Rc<str>>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -128,6 +133,7 @@ impl<'a> Analyzer<'a> {
             merged: Rc::default(),
             facts: Facts::default(),
             explain: None,
+            source: None,
         }
     }
 
@@ -139,9 +145,30 @@ impl<'a> Analyzer<'a> {
                 match returning(stmt) {
                     Some(items) => {
                         let scope = dml_scope(stmt, self.dialect);
-                        let mut analyzer = self.clone();
-                        analyzer.facts = self.written_facts(stmt, &scope);
-                        analyzer.projection(items, &scope, None).map(non_empty)
+                        // PostgreSQL's RETURNING also reads the tables of FROM and USING, which
+                        // are inner joined to the target; SQLite's reads the target only.
+                        let joined = joined_tables(stmt)
+                            .filter(|_| self.dialect == SqlDialect::Postgres)
+                            .and_then(|from| Some((from, self.scope_of(from).ok()?)));
+                        let (analyzer, scope) = match joined {
+                            Some((from, (mut analyzer, sources))) => {
+                                let targets = scope
+                                    .into_iter()
+                                    .filter(|source| source.table != Table::ExtraSources);
+                                let scope: Scope = targets.chain(sources).collect();
+                                analyzer.facts = analyzer.written_facts(stmt, &scope);
+                                analyzer.facts.join(analyzer.null_extended(from));
+                                (analyzer, scope)
+                            }
+                            None => {
+                                let mut analyzer = self.clone();
+                                analyzer.facts = self.written_facts(stmt, &scope);
+                                (analyzer, scope)
+                            }
+                        };
+                        analyzer
+                            .projection(items, &scope, None, None)
+                            .map(non_empty)
                     }
                     None => Ok(None),
                 }
@@ -341,7 +368,13 @@ impl<'a> Analyzer<'a> {
             analyzer.check_grouping(select, &scope);
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
-        analyzer.projection(&select.projection, &scope, Some(&select.from))
+        let keyword = select.select_token.0.span.start;
+        analyzer.projection(
+            &select.projection,
+            &scope,
+            Some(&select.from),
+            Some(keyword),
+        )
     }
 
     /// Columns of a SELECT or set operation. Names come from the leftmost branch; each
@@ -446,13 +479,30 @@ impl<'a> Analyzer<'a> {
     }
 
     /// One column per result column; a star may yield several, or one unknown `*`
-    /// column when the schema cannot resolve it. `from` is the SELECT's FROM clause.
+    /// column when the schema cannot resolve it. `from` is the SELECT's FROM clause, and
+    /// `keyword` where its `SELECT` is (`None` for `RETURNING`).
     pub(super) fn projection(
         &self,
         items: &[SelectItem],
         scope: &Scope,
         from: Option<&[TableWithJoins]>,
+        keyword: Option<Location>,
     ) -> Inferred<Vec<Column>> {
+        let source = self.source.clone().filter(|_| {
+            items.iter().any(|item| {
+                // MySQL keeps a column's name as written; SQLite, as declared.
+                matches!(item, SelectItem::UnnamedExpr(expr)
+                    if self.dialect == SqlDialect::MySql
+                        || !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)))
+            })
+        });
+        let texts = source.as_deref().and_then(|source| {
+            let start = match keyword {
+                Some(location) => offset(source, &line_starts(source), location)?,
+                None => returning_start(source, self.dialect)?,
+            };
+            item_texts(source, start, self.dialect).filter(|texts| texts.len() == items.len())
+        });
         let mut columns = Vec::new();
         let mut rules = self.explain.as_ref().map(|_| Vec::new());
         let mut lockstep_facts;
@@ -463,9 +513,12 @@ impl<'a> Analyzer<'a> {
         } else {
             &self.facts
         };
-        for item in items {
+        for (index, item) in items.iter().enumerate() {
             let (expr, name) = match item {
-                SelectItem::UnnamedExpr(expr) => (expr, column_name(expr)),
+                SelectItem::UnnamedExpr(expr) => match &texts {
+                    Some(texts) => (expr, text_column_name(expr, texts[index], self.dialect)),
+                    None => (expr, column_name(expr)),
+                },
                 SelectItem::ExprWithAlias { expr, alias } => {
                     (expr, alias_name(alias, self.dialect))
                 }
@@ -556,11 +609,15 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         from: Option<&[TableWithJoins]>,
     ) -> Vec<Column> {
-        let resolvable = from.is_none_or(|from| self.star_resolvable(from, reference));
-        match resolvable
-            .then(|| self.star_columns(reference, scope))
-            .flatten()
-        {
+        let merging = reference.is_none() && from.is_some_and(any_merging_join);
+        let columns = match from {
+            Some(from) if merging => self.merged_star(from, scope),
+            _ => from
+                .is_none_or(|from| self.star_resolvable(from, reference))
+                .then(|| self.star_columns(reference, scope))
+                .flatten(),
+        };
+        match columns {
             Some(columns) => {
                 if columns.iter().any(Column::is_unknown_star) {
                     self.explain_view_star(reference, scope);
@@ -569,7 +626,7 @@ impl<'a> Analyzer<'a> {
                 columns
             }
             None => {
-                self.explain_star(reference, scope, from);
+                self.explain_star(reference, scope);
                 vec![Column::unknown("*")]
             }
         }

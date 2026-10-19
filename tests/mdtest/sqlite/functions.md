@@ -47,11 +47,14 @@ SELECT date(happened) AS a, time(happened) AS b, datetime(happened, '+1 day') AS
 
 ## Strings
 
+`printf` and `format` return NULL instead of an empty string, so `printf('%s', name)` is
+NULL for an empty `name`.
+
 ```sql
 SELECT ltrim(name) AS a, hex(name) AS b, printf('%d', id) AS c, instr(name, 'a') AS d, typeof(note) AS e, concat_ws(',', name, note) AS f FROM events
 -- columns: a: str (TEXT)
 -- columns: b: str (TEXT)
--- columns: c: str (TEXT)
+-- columns: c: str | None (TEXT)
 -- columns: d: int (BIGINT)
 -- columns: e: str (TEXT)
 -- columns: f: str (TEXT)
@@ -68,7 +71,7 @@ SELECT abs(id) AS a, round(ratio) AS b, round(id) AS c, random() AS d, sqrt(id) 
 -- columns: b: float (DOUBLE)
 -- columns: c: float (DOUBLE)
 -- columns: d: int (BIGINT)
--- columns: e: float (DOUBLE)
+-- columns: e: float | None (DOUBLE)
 -- columns: f: float (DOUBLE)
 -- columns: g: float (DOUBLE)
 -- columns: h: float (DOUBLE)
@@ -85,6 +88,14 @@ SELECT json_object('id', id) AS a, json_array(id, name) AS b, json_array_length(
 -- columns: b: str (TEXT)
 -- columns: c: int (BIGINT)
 -- columns: d: int (BIGINT)
+```
+
+`json_pretty` (SQLite 3.46) indents JSON text and raises an error on text that is not JSON:
+
+```sql
+SELECT json_pretty(name) AS a, json_pretty(note, '  ') AS b FROM events
+-- columns: a: str (TEXT)
+-- columns: b: str | None (TEXT)
 ```
 
 `->` gives the element as JSON text. `->>` and `json_extract` give its SQL value,
@@ -163,6 +174,19 @@ SELECT substr(data, 1, 2) AS a, trim(data) AS b FROM files
 -- columns: b: str (TEXT)
 ```
 
+## Bitwise operators
+
+`&`, `|` and `~` convert their operands to 64-bit integers.
+
+```sql
+SELECT id & 3 AS a, id | 4 AS b, ~id AS c, name & 1 AS d, note | 1 AS e FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int (BIGINT)
+-- columns: c: int (BIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: int | None (BIGINT)
+```
+
 ## Branches of different types
 
 SQLite gives an expression no type: a `CASE` returns whichever branch's value
@@ -193,4 +217,14 @@ unqualified.
 SELECT n, upper FROM (SELECT id AS n, upper(name) AS upper FROM events)
 -- columns: n: int (INT)
 -- columns: upper: str (TEXT)
+```
+
+## Index hints
+
+`INDEXED BY` and `NOT INDEXED` only pick the index a query uses, so sqlty reads the
+query without them:
+
+```sql
+SELECT e.id FROM events AS e INDEXED BY events_name JOIN events AS f NOT INDEXED ON e.id = f.id
+-- columns: id: int (INT)
 ```

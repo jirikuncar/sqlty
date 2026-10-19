@@ -52,6 +52,7 @@ type ParamTuple = (
     Option<String>,
     Option<bool>,
     bool,
+    Option<String>,
 );
 
 /// A parsed schema and the tables and views it could not parse.
@@ -461,6 +462,7 @@ fn analyze_params(
                     param.sql_type,
                     nullable(param.nullability),
                     param.cast,
+                    param.untyped_sql_type,
                 )
             })
             .collect(),

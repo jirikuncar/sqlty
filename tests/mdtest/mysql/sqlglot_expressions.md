@@ -367,6 +367,11 @@ SELECT REGEXP_REPLACE(tbl.str_col, tbl.str_col, tbl.str_col) AS x FROM tbl
 ```
 
 ```sql
+SELECT REGEXP_REPLACE(tbl.str_col, tbl.bin_col, tbl.str_col) AS x FROM tbl
+-- columns: x: bytes | None (VARBINARY)
+```
+
+```sql
 SELECT REGEXP_REPLACE(tbl.bin_col, tbl.str_col, tbl.bin_col) AS x FROM tbl
 -- columns: x: bytes | None (VARBINARY)
 ```
@@ -418,12 +423,12 @@ SELECT COMPRESS(CAST(1.5 AS DOUBLE)) AS x FROM tbl
 
 ```sql
 SELECT COMPRESS(CAST('2024-01-01' AS DATE)) AS x FROM tbl
--- columns: x: bytes (VARBINARY)
+-- columns: x: bytes | None (VARBINARY)
 ```
 
 ```sql
 SELECT COMPRESS(CAST('2024-01-01 12:00:00' AS DATETIME)) AS x FROM tbl
--- columns: x: bytes (VARBINARY)
+-- columns: x: bytes | None (VARBINARY)
 ```
 
 ```sql

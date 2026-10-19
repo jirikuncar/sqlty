@@ -44,6 +44,7 @@ use std::sync::{Arc, LazyLock};
 use sqlparser::ast::DataType;
 
 use crate::analyzer::{Column, SqlDialect};
+use crate::ddl::RowEvents;
 
 use names::lookup_key;
 use resolve::Resolver;
@@ -114,12 +115,33 @@ pub(crate) struct Function {
     /// The types of the arguments before any `VARIADIC` one.
     pub args: Vec<Typed>,
     pub returns: FunctionReturn,
+    /// `STRICT`: NULL exactly when an argument is. Any other function may return NULL.
+    pub strict: bool,
+}
+
+/// A foreign key that holds for every row: `columns` of a table equal `referred` of
+/// the table `table` (a catalog key), or one of them is NULL.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ForeignKey {
+    pub columns: Vec<String>,
+    pub table: String,
+    pub referred: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct TableRelation {
+    columns: Vec<SchemaColumn>,
+    /// Groups of columns a `CHECK` keeps at least one of non-null.
+    nonnull_groups: Vec<Vec<String>>,
+    /// The statements a `BEFORE` row trigger fires for.
+    row_triggers: RowEvents,
+    foreign_keys: Vec<ForeignKey>,
+    row_security: bool,
 }
 
 #[derive(Clone, Debug)]
 enum Relation {
-    /// Columns, and the groups of them a `CHECK` keeps at least one of non-null.
-    Table(Vec<SchemaColumn>, Vec<Vec<String>>),
+    Table(TableRelation),
     View(Vec<Column>),
     /// Defined, but its shape is not known.
     Unknown,
@@ -258,7 +280,7 @@ impl Catalog {
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
-            Relation::Table(columns, _) => Some(columns),
+            Relation::Table(table) => Some(&table.columns),
             _ => None,
         }
     }
@@ -267,9 +289,36 @@ impl Catalog {
     /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
     pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
         match self.find(name) {
-            Some(Relation::Table(_, groups)) => groups,
+            Some(Relation::Table(table)) => &table.nonnull_groups,
             _ => &[],
         }
+    }
+
+    /// The statements a `BEFORE ... FOR EACH ROW` trigger of the table `name` fires for:
+    /// such a trigger may change any column of the row a `RETURNING` clause returns.
+    pub(crate) fn row_triggers(&self, name: &str) -> RowEvents {
+        match self.find(name) {
+            Some(Relation::Table(table)) => table.row_triggers,
+            _ => RowEvents::default(),
+        }
+    }
+
+    /// The catalog key of the table `name`, the same for every spelling of it.
+    pub(crate) fn table_id(&self, name: &str) -> Option<&str> {
+        let key = lookup_key(&self.relations, &self.search_path, self.norm(name))?;
+        matches!(self.relations.get(key), Some(Relation::Table(_))).then_some(key)
+    }
+
+    /// The foreign keys of the table `name` that hold for every row and that a query sees
+    /// hold: those referencing a table without row-level security.
+    pub(crate) fn foreign_keys(&self, name: &str) -> impl Iterator<Item = &ForeignKey> {
+        let keys = match self.find(name) {
+            Some(Relation::Table(table)) => table.foreign_keys.as_slice(),
+            _ => &[],
+        };
+        keys.iter().filter(|fk| {
+            matches!(self.relations.get(&fk.table), Some(Relation::Table(target)) if !target.row_security)
+        })
     }
 
     /// Whether the schema defines a table or view `name`, whatever is known of its shape.
@@ -332,6 +381,18 @@ impl Catalog {
         let first = fits.next()?;
         fits.all(|f| f.args == first.args)
             .then_some(first.args.as_slice())
+    }
+
+    /// Whether every overload of `name` a call with `args` arguments fits is `STRICT`;
+    /// `None` when none fits.
+    pub(crate) fn function_strict(&self, name: &str, args: usize) -> Option<bool> {
+        let key = lookup_key(&self.functions, &self.search_path, self.norm(name))?;
+        let mut fits = self.functions[key]
+            .iter()
+            .filter(|f| f.required <= args && args <= f.max)
+            .peekable();
+        fits.peek()?;
+        Some(fits.all(|f| f.strict))
     }
 
     /// Whether the schema defines a function `name`, whatever is known of what it returns.
@@ -628,11 +689,13 @@ mod tests {
         }
     }
 
+    /// Catches loading that grows quadratically, which takes far longer at these sizes; a
+    /// debug build on a shared CI runner takes up to a second.
     fn assert_fast(sql: &str) -> Catalog {
         let start = std::time::Instant::now();
         let catalog = pg(sql);
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(1),
+            start.elapsed() < std::time::Duration::from_secs(5),
             "load took {:?}",
             start.elapsed()
         );

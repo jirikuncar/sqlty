@@ -10,7 +10,7 @@ c: list[str] | ARRAY<TEXT> | NonNull
 SELECT ARRAY[i, n] AS a, ARRAY[]::INT[] AS b, ARRAY[ARRAY[1], ARRAY[2]] AS c FROM t
 a: list[int] | ARRAY<INT> | NonNull
 b: list[int] | ARRAY<INT> | NonNull
-c: list[int] | ARRAY<INT> | NonNull
+c: list[list[int]] | ARRAY<ARRAY<INT>> | NonNull
 
 SELECT ARRAY[1, 'a'] AS a
 a: list[int] | ARRAY<INT> | NonNull

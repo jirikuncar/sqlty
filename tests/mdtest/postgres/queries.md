@@ -200,6 +200,16 @@ FROM users u
 -- inferred: tuple[int, str, int]
 ```
 
+## SELECT ALL before a subquery
+
+`ALL` after `SELECT` is the set quantifier, not the `ALL` comparison, so
+`SELECT ALL(SELECT 1)` returns the subquery's integer in PostgreSQL, MySQL and SQLite.
+
+```sql
+SELECT ALL(SELECT 1)
+-- inferred: tuple[int]
+```
+
 ## Simple CTE (Common Table Expression)
 
 ```sql
@@ -437,4 +447,53 @@ SELECT
 FROM users
 WHERE id IN (SELECT user_id FROM active_sessions)
 -- inferred: tuple[int, str]
+```
+
+## The TABLE command
+
+`TABLE name` is `SELECT * FROM name`, wherever a query can start: alone, after a `WITH`
+or a set operator, and in parentheses.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE tags (id INTEGER PRIMARY KEY, label TEXT);
+```
+
+```sql
+TABLE tags ORDER BY id LIMIT 1
+-- inferred: tuple[int, str | None]
+```
+
+```sql
+WITH named AS (SELECT * FROM tags WHERE label IS NOT NULL) TABLE named
+-- inferred: tuple[int, str]
+```
+
+```sql
+SELECT t.label FROM (TABLE tags) t
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT id, label FROM tags UNION TABLE tags
+-- inferred: tuple[int, str | None]
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+TABLE tags
+-- inferred: tuple[int, str | None]
 ```

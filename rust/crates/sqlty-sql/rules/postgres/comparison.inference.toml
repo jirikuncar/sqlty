@@ -1,0 +1,20 @@
+# PostgreSQL comparison functions.
+
+[[function]]
+id = "postgres.comparison.int"
+functions = ["NUM_NONNULLS", "NUM_NULLS"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.2 Comparison Functions and Operators, Table 9.3 Comparison Functions"
+reasoning = "The documentation gives each of these an `integer` result. It never returns NULL, even for NULL arguments."
+
+[[rule]]
+id = "postgres.comparison.pattern"
+operators = ["Custom:~<~", "Custom:~<=~", "Custom:~>=~", "Custom:~>~"]
+dialects = ["postgres"]
+left = ["@text"]
+right = ["@text"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 11.10 Operator Classes and Operator Families (text_pattern_ops compares values character by character)"
+reasoning = "The pattern comparisons of `text_pattern_ops` are predicates."

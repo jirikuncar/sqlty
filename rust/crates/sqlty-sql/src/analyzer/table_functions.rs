@@ -1,8 +1,10 @@
-//! Built-in set-returning functions read as row sources in `FROM`: `generate_series`,
-//! `unnest`, the JSON `*_each` and `*_array_elements` families, SQLite's `json_each`.
+//! Built-in functions read as row sources in `FROM`: `generate_series`, `unnest`, the JSON
+//! `*_each` and `*_array_elements` families, SQLite's `json_each`, and in PostgreSQL any
+//! other function a rule types, as one column.
 
 use sqlparser::ast::{
-    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, SelectItem, TableAlias,
+    DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
+    FunctionArguments, Ident, ObjectName, SelectItem, TableAlias,
 };
 
 use crate::catalog::FunctionReturn;
@@ -10,8 +12,9 @@ use crate::catalog::FunctionReturn;
 use super::dialect::SqlDialect;
 use super::expr::from_sql_type;
 use super::functions::{function_name, positional_args, Returns};
+use super::grouping::is_aggregate_call;
 use super::names::table_key;
-use super::nullability::Nullability;
+use super::nullability::{Facts, Nullability};
 
 use super::query::{rename_columns, Analyzer, Column};
 use super::scope::Scope;
@@ -69,6 +72,7 @@ const SET_RETURNING: &[&str] = &[
     "JSON_OBJECT_KEYS",
     "JSONB_OBJECT_KEYS",
     "JSONB_PATH_QUERY",
+    "JSONB_PATH_QUERY_TZ",
 ];
 
 impl Analyzer<'_> {
@@ -171,10 +175,23 @@ impl Analyzer<'_> {
                 self.function_type(Returns::Series, args, scope)?,
                 non_null,
             ))),
+            "unnest" if args.len() == 1 && self.expr(args[0], scope)?.sql() == Some("TSVECTOR") => {
+                Some(named(vec![
+                    column("lexeme", "TEXT", non_null),
+                    column("positions", "ARRAY<SMALLINT>", nullable),
+                    column("weights", "ARRAY<TEXT>", nullable),
+                ]))
+            }
+            "pg_input_error_info" => Some(named(
+                ["message", "detail", "hint", "sql_error_code"]
+                    .into_iter()
+                    .map(|name| column(name, "TEXT", nullable))
+                    .collect(),
+            )),
             "unnest" => {
                 let mut columns = Vec::new();
                 for arg in args {
-                    let typed = self.element_typed(self.expr(arg, scope)?.sql());
+                    let typed = self.unnested_typed(self.expr(arg, scope)?.sql());
                     columns.push(Column::from_typed(name.to_string(), typed, nullable));
                 }
                 Some(FunctionRows {
@@ -184,6 +201,9 @@ impl Analyzer<'_> {
             }
             "regexp_split_to_table" | "jsonb_object_keys" | "json_object_keys" => {
                 Some(scalar(column(name, "TEXT", non_null)))
+            }
+            "jsonb_path_query" | "jsonb_path_query_tz" => {
+                Some(scalar(column(name, "JSONB", non_null)))
             }
             "jsonb_array_elements" => Some(named(vec![column("value", "JSONB", non_null)])),
             "json_array_elements" => Some(named(vec![column("value", "JSON", non_null)])),
@@ -198,11 +218,73 @@ impl Analyzer<'_> {
                 column("key", "TEXT", non_null),
                 column("value", "JSON", non_null),
             ])),
+            "jsonb_populate_record"
+            | "json_populate_record"
+            | "jsonb_populate_recordset"
+            | "json_populate_recordset" => {
+                let Some(Expr::Cast {
+                    data_type: DataType::Custom(row_type, _),
+                    ..
+                }) = args.first()
+                else {
+                    return Ok(None);
+                };
+                let key = table_key(row_type, self.dialect);
+                // A key the JSON lacks takes the base row's field, NULL in `NULL::t`.
+                self.schema
+                    .table(&key)
+                    .or_else(|| self.schema.composite(&key))
+                    .map(|fields| {
+                        named(
+                            fields
+                                .iter()
+                                .map(|field| {
+                                    Column::from_typed(
+                                        field.name.clone(),
+                                        field.typed(self.dialect),
+                                        nullable,
+                                    )
+                                })
+                                .collect(),
+                        )
+                    })
+            }
             "jsonb_each_text" | "json_each_text" => Some(named(vec![
                 column("key", "TEXT", non_null),
                 column("value", "TEXT", nullable),
             ])),
-            _ => None,
+            _ => {
+                // Any other function in `FROM` gives a column of its result, named after it.
+                let call = Expr::Function(Function {
+                    name: ObjectName::from(vec![Ident::new(name)]),
+                    uses_odbc_syntax: false,
+                    parameters: FunctionArguments::None,
+                    args: FunctionArguments::List(FunctionArgumentList {
+                        duplicate_treatment: None,
+                        args: args
+                            .iter()
+                            .map(|&arg| FunctionArg::Unnamed(FunctionArgExpr::Expr(arg.clone())))
+                            .collect(),
+                        clauses: Vec::new(),
+                    }),
+                    filter: None,
+                    null_treatment: None,
+                    over: None,
+                    within_group: Vec::new(),
+                });
+                if is_aggregate_call(&call)
+                    || self
+                        .function_rule(&name.to_uppercase(), args, scope)?
+                        .is_none()
+                {
+                    return Ok(None);
+                }
+                let typed = self.expr(&call, scope)?;
+                (typed.is_known() && typed.sql() != Some("RECORD")).then(|| {
+                    let nullability = self.nullability(&call, scope, &Facts::default());
+                    scalar(Column::from_typed(name.to_string(), typed, nullability))
+                })
+            }
         })
     }
 }

@@ -12,8 +12,6 @@ schema = "schema.sql"
 
 ## UPDATE with COALESCE parameters
 
-<!-- mdtest:xfail a parameter inside COALESCE is not marked NULL -->
-
 `COALESCE($2, name)` falls back to the stored NOT NULL name, so `$2` may be NULL and `name`
 stays non-null.
 
@@ -26,13 +24,11 @@ CREATE TABLE authors (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, bio TEXT);
 ```sql
 UPDATE authors SET name = COALESCE($2, name) WHERE id = $1 RETURNING id, name, bio
 -- inferred: tuple[int, str, str | None]
--- params: 1: int (BIGSERIAL)
+-- params: 1: int (BIGINT)
 -- params: 2: str (TEXT) NULL
 ```
 
 ## UPDATE ... RETURNING in a CTE
-
-<!-- mdtest:xfail a parameter inside COALESCE is not marked NULL -->
 
 The CTE exposes the RETURNING columns, and `$4` is typed by `CURRENT_TIMESTAMP`, a
 `timestamptz`.
@@ -59,7 +55,7 @@ WITH updated AS (
 )
 SELECT id, name, description, updated_at FROM updated
 -- inferred: tuple[int, str, str | None, datetime.datetime]
--- params: 1: int (BIGSERIAL)
+-- params: 1: int (BIGINT)
 -- params: 2: str (TEXT) NULL
 -- params: 3: str (TEXT) NULL
 -- params: 4: datetime.datetime (TIMESTAMPTZ) NULL

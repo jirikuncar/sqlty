@@ -67,6 +67,40 @@ SELECT * FROM items
 -- columns: d: decimal.Decimal | None (UDECIMAL(10, 2))
 ```
 
+## Unions of signed and unsigned integers
+
+Branches of one signedness keep it, at the wider width. A signed and an unsigned
+integer widen to a signed type that holds both, and past `BIGINT UNSIGNED` that is a
+`DECIMAL`.
+
+`schema.sql`:
+```sql
+CREATE TABLE counts (
+    ub BIGINT UNSIGNED NOT NULL,
+    b BIGINT NOT NULL,
+    ui INT UNSIGNED NOT NULL,
+    i INT NOT NULL,
+    ut TINYINT UNSIGNED NOT NULL,
+    t TINYINT NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ub AS a, ui AS b, ui AS c, ut AS d, ut AS e FROM counts
+UNION ALL SELECT i, ui, i, t, i FROM counts
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: int (UINT)
+-- columns: c: int (BIGINT)
+-- columns: d: int (SMALLINT)
+-- columns: e: int (INT)
+```
+
 ## Temporal and other columns
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
@@ -137,7 +171,7 @@ schema = "schema.sql"
 SELECT length, TIMEDIFF(NOW(), NOW()) AS d, CAST('10:00' AS TIME) AS c FROM shifts
 -- columns: length: datetime.timedelta (TIME)
 -- columns: d: datetime.timedelta (TIME)
--- columns: c: datetime.timedelta (TIME)
+-- columns: c: datetime.timedelta | None (TIME)
 ```
 
 ## Unsigned NUMERIC and FIXED are rejected
@@ -311,10 +345,10 @@ schema = "schema.sql"
 
 ```sql
 SELECT d + INTERVAL 1 DAY AS a, INTERVAL 1 MONTH + d AS b, d - INTERVAL 1 HOUR AS c, ts + INTERVAL 1 DAY AS e, d + n AS f, d - d AS g FROM events
--- columns: a: datetime.date (DATE)
--- columns: b: datetime.date (DATE)
--- columns: c: datetime.datetime (DATETIME)
--- columns: e: datetime.datetime (DATETIME)
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.date | None (DATE)
+-- columns: c: datetime.datetime | None (DATETIME)
+-- columns: e: datetime.datetime | None (DATETIME)
 -- columns: f: None (None)
 -- columns: g: None (None)
 ```

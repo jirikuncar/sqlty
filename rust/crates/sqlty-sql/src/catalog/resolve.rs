@@ -10,14 +10,15 @@ use rustc_hash::FxHashMap;
 use sqlparser::ast::{ArrayElemTypeDef, DataType, EnumMember};
 
 use crate::analyzer::{canonical_type, typed, SqlDialect};
+use crate::ddl::RowEvents;
 use crate::values::{self, Value};
 
 use super::columns::{narrowed, Checks};
 use super::loader::{Loader, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
-    Catalog, Function, FunctionReturn, Relation, SchemaColumn, TypeOverrides, UserType,
-    BUILTIN_SCHEMAS,
+    Catalog, Function, FunctionReturn, Relation, SchemaColumn, TableRelation, TypeOverrides,
+    UserType, BUILTIN_SCHEMAS,
 };
 
 #[cfg(test)]
@@ -140,7 +141,7 @@ impl Loader {
                         let rows = type_key(ty, dialect)
                             .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                             .and_then(|key| match relations.get(&key) {
-                                Some(Relation::Table(columns, _)) => Some(columns.clone()),
+                                Some(Relation::Table(table)) => Some(table.columns.clone()),
                                 _ => None,
                             });
                         match rows {
@@ -192,6 +193,7 @@ impl Loader {
                         })
                         .collect(),
                     returns,
+                    strict: f.strict,
                 });
             }
             functions.insert(key.clone(), built);
@@ -413,8 +415,8 @@ impl<'a> Resolver<'a> {
     pub(super) fn relation(&self, key: &str, rel: &Rel) -> Relation {
         match rel {
             Rel::Table(table) if table.unknown => Relation::Unknown,
-            Rel::Table(table) => Relation::Table(
-                table
+            Rel::Table(table) => Relation::Table(TableRelation {
+                columns: table
                     .columns
                     .iter()
                     .map(|c| {
@@ -438,7 +440,7 @@ impl<'a> Resolver<'a> {
                     })
                     .collect(),
                 // A group naming a dropped or renamed column no longer holds.
-                table
+                nonnull_groups: table
                     .nonnull_groups
                     .iter()
                     .filter(|group| {
@@ -448,7 +450,21 @@ impl<'a> Resolver<'a> {
                     })
                     .cloned()
                     .collect(),
-            ),
+                row_triggers: table.row_triggers.iter().fold(
+                    RowEvents::default(),
+                    |all, (_, events)| RowEvents {
+                        insert: all.insert || events.insert,
+                        update: all.update || events.update,
+                    },
+                ),
+                foreign_keys: table
+                    .foreign_keys
+                    .iter()
+                    .filter(|fk| fk.immediate && fk.validated)
+                    .map(|fk| fk.key.clone())
+                    .collect(),
+                row_security: table.row_security,
+            }),
             Rel::View(columns) => Relation::View(columns.clone()),
         }
     }

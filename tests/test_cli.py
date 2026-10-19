@@ -239,7 +239,7 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
         "from sqlty import SQL\n"
         'typed = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
         'partial = "--sql\\nSELECT id, nope FROM users"\n'
-        'broken = "--sql\\nSELECT xmlelement(name foo)"\n'
+        'broken = "--sql\\nSELECT NULL::xml IS DOCUMENT"\n'
         'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
         'ddl = "--sql\\nCREATE TABLE t (a INT)"\n'
     )
@@ -1250,6 +1250,23 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == (
         "::error file=q.py,line=2,title=sqlty unknown-column::column `nmae` does not exist in `users`\n"
     )
+
+
+def test_check_reports_in_line_order(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "q.py").write_text(
+        "import psycopg\n"
+        "def f(conn: psycopg.Connection) -> None:\n"
+        '    conn.execute("--sql\\nSELECT id FROM users WHERE id = %s", ())\n'
+        '    conn.execute("--sql\\nSELECT nmae FROM users")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "q.py"])
+    lines = [line.split(": [")[0] for line in capsys.readouterr().out.splitlines()[:-1]]
+    assert lines == ["q.py:3", "q.py:3", "q.py:4"]
 
 
 def test_json_output_stays_parseable_with_fix_and_verbose(tmp_path, monkeypatch, capsys) -> None:

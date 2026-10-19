@@ -57,3 +57,13 @@ right = ["@binary"]
 type = "@left"
 reference = "PostgreSQL 17 documentation, 9.5, Table 9.11 SQL Binary String Functions and Operators (bytea || bytea → bytea)"
 reasoning = "Two binary strings concatenate into a binary string."
+
+[[rule]]
+id = "postgres.concat.bits"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["BIT", "VARBIT"]
+right = ["BIT", "VARBIT"]
+type = "VARBIT"
+reference = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit || bit → bit)"
+reasoning = "Concatenated bit strings have the sum of their lengths, which the server describes as `bit varying`."

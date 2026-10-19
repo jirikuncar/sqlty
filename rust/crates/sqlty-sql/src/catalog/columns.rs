@@ -78,8 +78,22 @@ pub(super) fn loose_collation(name: &ObjectName) -> bool {
 }
 
 pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
-    let serial = matches!(&column.data_type, DataType::Custom(name, _)
-        if parts(name, dialect).last().is_some_and(|n| matches!(n.as_str(), "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8")));
+    // `serial` is an integer with a sequence default, which SQLite only names.
+    let serial = match &column.data_type {
+        DataType::Custom(name, _) => match parts(name, dialect).last().map(String::as_str) {
+            Some("serial" | "serial4") => Some(DataType::Integer(None)),
+            Some("bigserial" | "serial8") => Some(DataType::BigInt(None)),
+            Some("smallserial" | "serial2") => Some(DataType::SmallInt(None)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let ty = match (&serial, dialect) {
+        (_, SqlDialect::Sqlite) | (None, _) => column.data_type.clone(),
+        (Some(_), SqlDialect::MySql) => DataType::BigIntUnsigned(None),
+        (Some(integer), _) => integer.clone(),
+    };
+    let serial = serial.is_some();
     let not_null = serial
         || column.options.iter().any(|option| {
             matches!(
@@ -135,7 +149,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
             Some(_) => column.name.to_string(),
             None => column.name.value.to_lowercase(),
         },
-        ty: column.data_type.clone(),
+        ty,
         not_null,
         has_default,
         primary_key,

@@ -1,6 +1,6 @@
 # Inference rules
 
-The result type and nullability of SQL operators are declared here, in
+The result type and nullability of SQL operators and built-in functions are declared here, in
 `*.inference.toml` files, instead of in `match` arms of the analyzer. `build.rs`
 compiles them into static data and one `match` on the operator
 (`$OUT_DIR/inference_rules.rs`), so nothing is read or parsed at run time.
@@ -23,7 +23,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | Key | Required | Meaning |
 |-----|----------|---------|
 | `id` | yes | Unique name, `<directory>.<topic>.<name>` |
-| `operator` or `operators` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), or `Custom:<<=` for an operator sqlparser keeps as text; `operators` lists several that share the rule |
+| `operator` or `operators` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), `Custom:<<=` for an operator sqlparser keeps as text, or `Prefix:DoubleAt` for a sqlparser `UnaryOperator` variant; `operators` lists several that share the rule |
 | `dialects` | in a dialect directory | `postgres`, `mysql`, `sqlite`, `clickhouse`; a rule in `common/` has none and applies to every dialect |
 | `left`, `right` | no | SQL types the operand may have; absent means any operand |
 | `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...) or one of the results below |
@@ -79,8 +79,8 @@ reasoning = "`->` on a jsonb value gives jsonb; a missing member or element give
 
 ### Function rules
 
-A `[[function]]` table types a call of a built-in function by its first
-argument:
+A `[[function]]` table types a call of a built-in function by its first two
+arguments:
 
 ```toml
 [[function]]
@@ -95,13 +95,62 @@ reasoning = "Summing small integers widens to bigint so the sum fits."
 ```
 
 `function` or `functions` name upper-case built-ins, and `argument` is an
-operand predicate as above; `@known` admits any typed argument. `type` is a SQL
-type, `@any`, `@unknown`, `@code`, `@argument` (the argument's type, value set
-included, as `MIN` and `MAX` return one of the values) or `@argument-as TYPE`
-(the argument's Python type under another SQL type). `nullability` is required:
-`non-null`; `nullable`, NULL whatever the arguments; `aggregate`, the empty-group and NULL-argument behaviour of
-aggregates in `analyzer/nullability.rs`; or `strict`, a scalar function's, as the
-analyzer's function table says.
+operand predicate as above for the first argument; `@known` admits any typed
+argument. `arguments` gives one for each of the first two instead, an empty list
+admitting any: `arguments = [[], ["JSON", "JSONB"]]` matches a JSON second
+argument. `any-argument` matches when at least one argument, at any position, has one of
+its types: `any-argument = ["@binary"]` types MySQL `CONCAT('a', bytes_col)` as a
+binary string. `nullability` is required:
+
+| `nullability` | NULL when |
+|---------------|-----------|
+| `non-null` | never, even for NULL arguments (`ROW_NUMBER`, `NUM_NULLS`) |
+| `nullable` | always possible, also for non-null arguments (`NULLIF`, `JSON_EXTRACT`) |
+| `strict` | an argument is (`LOWER`) |
+| `all-arguments` | every argument is (`COALESCE`) |
+| `leading(k)` | one of the first `k` arguments is (`CONCAT_WS`, `leading(1)`) |
+| `aggregate` | an aggregate's group is empty or all NULL, in `analyzer/nullability.rs` |
+| `code` | `analyzer/nullability.rs` decides from the call (`LAG`'s default, `IF`'s branches) |
+
+A dialect that differs from `common/` overrides it with its own rule: `common/` makes
+`CONCAT` `non-null`, and `mysql/` makes it `strict`. A call whose rule is `strict` or
+`aggregate` narrows `WHERE f(col) IS NOT NULL` to `col`: `lower` of a text column does,
+`lower` of a range, which is `nullable`, does not.
+
+`type` is a SQL type (`TEXT`, `ARRAY<INT>`, ...) or a computed result. A `(k)` names
+argument `k`, counting from 0:
+
+| `type` | Result |
+|--------|--------|
+| `@any` | Any value, `typing.Any` |
+| `@unknown` | Untyped |
+| `@void` | `void`: Python `None` |
+| `@code` | `SUM` of what no rule types keeps its schema lookup |
+| `@argument`, `@argument(k)` | The type of argument 0 or `k` (0 or 1), value set included, as `MIN` and `MAX` return one of the values |
+| `@argument-as TYPE` | The first argument's Python type under another SQL type |
+| `@argument-type(k)` | The type of argument `k`, whatever value it computes (`ABS`) |
+| `@same(k)` | Argument `k`'s type and values (`NULLIF`) |
+| `@element(k)` | The element type of array argument `k` (`UNNEST`) |
+| `@array(k)` | An array of argument `k`'s type (`ARRAY_AGG`) |
+| `@first-known` | The first argument of known type, skipping `NULL` and placeholders (`COALESCE`) |
+| `@first-known(k)` | `@first-known` of the arguments from `k` on (`IF(cond, a, b)`) |
+| `@str-to-date(k)` | MySQL `STR_TO_DATE`: `DATE`, `TIME` or `DATETIME`, by the parts the literal format at `k` reads |
+| `@bound` | The element type of a range argument, else `TEXT` (PostgreSQL `lower`, `upper`) |
+| `@mean` | `DOUBLE` for floats, `INTERVAL` for intervals, else `DECIMAL` (`AVG`) |
+| `@real` | `DOUBLE` for floats and integers, `DECIMAL` for exact numbers (`SQRT`) |
+| `@scaled` | `@real`, but `DECIMAL` with a second argument (`ROUND(x, 2)`) |
+| `@trunc(k)` | A timestamp argument's type, `TIMESTAMPTZ` for a date (`DATE_TRUNC`) |
+| `@date-add` | MySQL `DATE_ADD(d, INTERVAL n unit)`, typed as `d + INTERVAL n unit` |
+| `@timestamp-add` | MySQL `TIMESTAMPADD`: a `DATE` for day units and coarser, else `DATETIME` |
+| `@integral` | MySQL `CEIL`, `FLOOR`: an integer for an exact number, `DOUBLE` for an approximate one |
+| `@at-zone(k)` | `timezone(zone, ts)`, typed as `ts AT TIME ZONE zone` |
+| `@series` | `generate_series`: the common type of the bounds, small integers widened to `INT`, dates to `TIMESTAMPTZ` |
+| `@text(k)` | `TEXT`, or argument `k`'s type when it is a binary or bit string |
+| `@random` | `DOUBLE`; `random(min, max)` gives the type of the bounds |
+
+A computed result is a variant of `Returns` (`analyzer/functions.rs`), listed in
+`FUNCTION_RESULTS` (`compile.rs`). Add one there when no SQL type fits: the rule still
+carries the reference and reasoning.
 
 ## How a rule is chosen
 
@@ -112,6 +161,23 @@ operator with no matching rule is typed by the analyzer's code
 (`analyzer/operators.rs`, `analyzer/nullability.rs`).
 
 The operands are typed only when a rule of the operator lists operand types.
+
+## Dialects that read others' rules
+
+`rules/dialects.toml` lists the dialects with no rules of their own that read the rules
+of others:
+
+```toml
+[generic]
+extends = ["postgres", "mysql", "sqlite"]
+reasoning = "Generic SQL has no vendor of its own. ..."
+```
+
+A function or operator of such a dialect takes the rules of the first dialect in
+`extends` that has any for it, then those of `common/`. `generic` reads `GREATEST` and
+`CBRT` from PostgreSQL, `RAND` from MySQL, and `IIF` from SQLite. The compiler adds the
+dialect to the rules it reads, so lookup stays a `match`. A dialect that has rules of its
+own, or an unknown dialect in `extends`, fails the build.
 
 ## What fails the build
 
@@ -130,6 +196,9 @@ The operands are typed only when a rule of the operator lists operand types.
   rule is strictly narrower (a specific case before the general one), or the
   earlier rule lists the later one in `shadows`. Otherwise file order would
   decide silently.
+- a dialect rule that repeats a `common/` rule, with the same operands, type and
+  nullability: the dialect inherits it already. It stays when another rule of the
+  dialect would catch its operands first.
 
 `tests/inference_compiler.rs` covers each case.
 
@@ -137,19 +206,25 @@ The operands are typed only when a rule of the operator lists operand types.
 
 `analyzer/operators.rs` keeps one case rules cannot express: MySQL
 `date ± INTERVAL n unit`, where the unit decides between `DATE` and `DATETIME`.
-It is typed before the rules are tried. For functions, `SUM` of what no rule
-types keeps its schema lookup (`type = "@code"` in a `[[function]]` table).
+It is typed before the rules are tried. Function results that need code are the
+computed `type`s above: each rule still names the functions it covers. A built-in no
+rule types leaves its column untyped.
 
 ## Adding a rule
 
-1. Put it in `rules/common/` when every dialect agrees, else in the dialect's
-   directory with `dialects`.
+1. Put it in `rules/common/` when PostgreSQL, MySQL and SQLite all have the
+   function or operator and agree on it: ClickHouse and the other dialects then
+   type it too. One only some of them have stays in their directories, with
+   `dialects`, so the others still report `unknown-function` for it.
 2. Check the `reference` against the vendor documentation of the version the
    tests target (PostgreSQL 17 for the fidelity tests, MySQL 8.4, SQLite 3) and
    cite the section and table. The ISO standard is not freely available, so it
    is not cited.
 3. Delete the `match` arm the rule replaces: a behaviour lives in one place.
-4. Add an mdtest for any case none covers, and run `make test` and
+4. Add a column typed by the rule, with its `-- rules:` assertion, to
+   `tests/mdtest/type_inference/rule_coverage.md`;
+   `test_every_inference_rule_is_asserted` fails until some assertion names it.
+5. Add an mdtest for any case none covers, and run `make test` and
    `make bench-rust`.
 
 ## Design notes
@@ -160,7 +235,9 @@ These settle the review of the first proposal in
 - **Operators are sqlparser variants.** `->>` is `LongArrow` and `#>>` is
   `HashLongArrow`, not `Custom("->>")`; `rustc` validates the names. Only
   operators sqlparser keeps as text (`<<=`, `>>=`) use `Custom:`, the one
-  string comparison at run time.
+  string comparison at run time. A prefix operator (`@@ box`) is `Prefix:` and
+  a `UnaryOperator` variant: it has only a `right` operand, its type is a SQL
+  type or `@right`, and it is NULL when its operand is.
 - **Types are SQL types.** The analyzer works on `Typed` values and derives the
   Python type later, so operand predicates and results are SQL types.
 - **Type and nullability are two outputs.** A rule gives both, but nullability

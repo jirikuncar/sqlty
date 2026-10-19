@@ -1,0 +1,19 @@
+# PostgreSQL event trigger functions.
+
+[[function]]
+id = "postgres.event.int"
+function = "PG_EVENT_TRIGGER_TABLE_REWRITE_REASON"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.30 Event Trigger Functions, Table 9.108 Table Rewrite Information Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.event.oid"
+function = "PG_EVENT_TRIGGER_TABLE_REWRITE_OID"
+dialects = ["postgres"]
+type = "OID"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.30 Event Trigger Functions, Table 9.108 Table Rewrite Information Functions"
+reasoning = "The documentation gives the function an `oid` result."

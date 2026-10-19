@@ -1,0 +1,10 @@
+# PostgreSQL merge support functions.
+
+[[function]]
+id = "postgres.merge.action"
+function = "MERGE_ACTION"
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.23 Merge Support Functions, Table 9.66 Merge Support Functions"
+reasoning = "The documentation gives the function a `text` result: the command run for the row, `INSERT`, `UPDATE` or `DELETE`."

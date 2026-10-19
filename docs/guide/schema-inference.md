@@ -93,7 +93,12 @@ What makes a column nullable or not:
   `CHECK (num_nonnulls(a, b) = 1)` or `CHECK (a IS NOT NULL OR b IS NOT NULL)` makes
   `COALESCE(a, b)` non-null.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
-  is nullable.
+  is nullable. A `LEFT JOIN` from a table to the one its `NOT NULL` foreign key
+  references, on exactly the key's columns, always matches. That excludes a `DEFERRABLE`
+  key, a key added `NOT VALID` and not validated, a referenced table with row-level
+  security, SQLite, and MySQL tables of an engine other than InnoDB. A database that
+  skips foreign key checks (PostgreSQL's `session_replication_role = replica`, MySQL's
+  `foreign_key_checks = 0`) can break it.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
   `IS NOT NULL`, comparisons, `IN`, `BETWEEN`, `LIKE`, a strict function such as
   `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` proves only what both sides prove,
@@ -102,9 +107,14 @@ What makes a column nullable or not:
   null-extended rows.
 - **Expressions.** Operators and most functions are NULL when an argument is.
   `COALESCE` is nullable only if every argument is. `NULLIF`, JSON accessors, array
-  subscripts and a `CASE` without `ELSE` can always be NULL.
+  subscripts and a `CASE` without `ELSE` can always be NULL. MySQL and SQLite return
+  NULL where PostgreSQL raises an error, so there a division, a math function outside its
+  domain (`sqrt(-1)`), and in MySQL a date moved out of range or a cast of a string to a
+  date can be NULL too.
 - **Aggregates.** `COUNT` is never NULL. Other aggregates are nullable without a plain
   `GROUP BY` (empty input), with `FILTER`, or when the argument is.
+- **Arrays.** The nullability of an array's elements is not tracked: a `text[]` column,
+  an `ARRAY[...]` and an `array_agg` are `list[str]`, though each can hold NULLs.
 - **Subqueries.** A scalar subquery is nullable unless it always returns one row.
 - **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
   `EXCEPT` follows its left side.
@@ -308,7 +318,8 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
 - `CREATE FUNCTION ... RETURNS` types calls to the function: a scalar, a
   `SETOF`, or the columns of `RETURNS TABLE (...)` in `FROM`. Overloads are told
   apart by their number of arguments, and a built-in function of the same name
-  wins.
+  wins. Any function can return NULL, so a call is nullable, unless the function is
+  `STRICT` (`RETURNS NULL ON NULL INPUT`): then it is nullable only when an argument is.
 - `pg_catalog` and `information_schema` relations are always known, with their
   PostgreSQL column types and `NOT NULL` columns: `pg_class`, `pg_namespace`,
   `pg_attribute`, `pg_type`, `pg_index`, `pg_constraint`, `pg_enum`, `pg_proc`,
@@ -338,7 +349,7 @@ ALTER TABLE users ADD COLUMN status status NOT NULL;
 CREATE TYPE status AS ENUM ('active', 'banned');
 ALTER TYPE status ADD VALUE 'pending' BEFORE 'active';
 
-CREATE FUNCTION user_count() RETURNS bigint LANGUAGE sql AS 'SELECT count(*) FROM users';
+CREATE FUNCTION user_count() RETURNS bigint STRICT LANGUAGE sql AS 'SELECT count(*) FROM users';
 ```
 
 The `ALTER TABLE` statements come before the enum they use, and that is fine:

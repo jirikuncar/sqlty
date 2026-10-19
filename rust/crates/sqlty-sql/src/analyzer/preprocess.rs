@@ -6,10 +6,14 @@ use std::ops::ControlFlow;
 use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
-use sqlparser::ast::{visit_expressions, DataType, Expr, Statement};
+use sqlparser::ast::{
+    visit_expressions, visit_expressions_mut, DataType, Expr, Function, FunctionArguments,
+    ObjectName, Statement,
+};
 use sqlparser::parser::Parser;
 
 use super::dialect::SqlDialect;
+use super::respell::respell;
 use super::star_expand::is_word;
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
@@ -47,11 +51,30 @@ pub(super) static POSTGRES_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|
     ]
 });
 
+/// `TABLE name`, which PostgreSQL and MySQL read as `SELECT * FROM name`, where it starts
+/// a query: sqlparser reads it only after a set operator or a `WITH`.
+static TABLE_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
+    const NAME: &str = r#"(?:"[^"]*"|`[^`]*`|\w+)(?:\s*\.\s*(?:"[^"]*"|`[^`]*`|\w+))*"#;
+    Regex::new(&format!(
+        r"(?i)(\A\s*|[()]\s*|\b(?:UNION|INTERSECT|EXCEPT)(?:\s+(?:ALL|DISTINCT))?\s+)TABLE\s+({NAME})"
+    ))
+    .unwrap()
+});
+
 /// PostgreSQL `type 'string'` literals sqlparser only reads for its built-in types, in
 /// groups 1 and 2; literals, quoted names and comments are matched to be skipped.
 pub(super) static POSTGRES_TYPED_STRING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:\b(bpchar|cidr|citext|daterange|hstore|inet|int4range|int8range|jsonpath|macaddr8?|money|name|numrange|oid|pg_lsn|tsrange|tstzrange|txid_snapshot))\s+('(?:[^']|'')*')"#,
+    )
+    .unwrap()
+});
+
+/// SQLite's `INDEXED BY name` and `NOT INDEXED`, in group 1, which only pick an index;
+/// literals, quoted names and comments are matched to be skipped.
+static SQLITE_INDEX_HINT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:(\s+(?:INDEXED\s+BY\s+(?:"(?:[^"]|"")*"|\w+\b)|NOT\s+INDEXED\b)))"#,
     )
     .unwrap()
 });
@@ -118,8 +141,45 @@ pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new
 
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
-    (!reject_unsupported(&stmts, dialect)).then_some(stmts)
+    let mut stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    if reject_unsupported(&stmts, dialect) {
+        return None;
+    }
+    if dialect == SqlDialect::Postgres {
+        let _ = visit_expressions_mut(&mut stmts, |expr| {
+            bare_function(expr);
+            ControlFlow::<()>::Continue(())
+        });
+    }
+    Some(stmts)
+}
+
+/// PostgreSQL's `CURRENT_ROLE`, `CURRENT_SCHEMA`, `CURRENT_CATALOG` and `SYSTEM_USER`, reserved
+/// words sqlparser reads as names, as the calls without parentheses they are.
+fn bare_function(expr: &mut Expr) {
+    let Expr::Identifier(ident) = expr else {
+        return;
+    };
+    let function = [
+        "current_role",
+        "current_schema",
+        "current_catalog",
+        "system_user",
+    ]
+    .iter()
+    .any(|name| ident.value.eq_ignore_ascii_case(name));
+    if function && ident.quote_style.is_none() {
+        *expr = Expr::Function(Function {
+            name: ObjectName::from(vec![ident.clone()]),
+            uses_odbc_syntax: false,
+            parameters: FunctionArguments::None,
+            args: FunctionArguments::None,
+            filter: None,
+            null_treatment: None,
+            over: None,
+            within_group: Vec::new(),
+        });
+    }
 }
 
 /// Parse schema DDL, with the MySQL column types sqlparser rejects respelled, and in
@@ -201,13 +261,21 @@ pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
 
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
-/// the query doesn't parse as written.
+/// the query doesn't parse as written, and so does the syntax [`respell`] rewrites.
 pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     let sql = parser_input(sql, dialect);
-    parse(&sql, dialect).or_else(|| {
-        (dialect == SqlDialect::Postgres && sql.contains('?'))
-            .then(|| parse(&numbered_placeholders(&sql), dialect))
+    let parse_placeholders = |sql: &str| {
+        parse(sql, dialect).or_else(|| {
+            (dialect == SqlDialect::Postgres && sql.contains('?'))
+                .then(|| parse(&numbered_placeholders(sql), dialect))
+                .flatten()
+        })
+    };
+    parse_placeholders(&sql).or_else(|| {
+        matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql)
+            .then(|| respell(&sql))
             .flatten()
+            .and_then(|sql| parse_placeholders(&sql))
     })
 }
 
@@ -237,6 +305,18 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
             .into_owned()
     } else {
         sql.into_owned()
+    };
+    let sql = match dialect {
+        SqlDialect::Postgres | SqlDialect::MySql => TABLE_COMMAND
+            .replace_all(&sql, "${1}SELECT * FROM $2")
+            .into_owned(),
+        SqlDialect::Sqlite if sql.to_ascii_uppercase().contains("INDEXED") => SQLITE_INDEX_HINT
+            .replace_all(&sql, |caps: &Captures| match caps.get(1) {
+                Some(_) => String::new(),
+                None => caps[0].to_string(),
+            })
+            .into_owned(),
+        _ => sql,
     };
     PLACEHOLDER
         .replace_all(&sql, |caps: &Captures| match &caps[0] {

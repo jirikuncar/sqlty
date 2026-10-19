@@ -1,8 +1,9 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
 use sqlparser::ast::{
-    AssignmentTarget, FromTable, ObjectName, OnConflict, OnConflictAction, OnInsert, OutputClause,
-    Query, SelectItem, SetExpr, Statement, TableObject, UpdateTableFromKind,
+    AssignmentTarget, Expr, FromTable, Ident, ObjectName, OnConflict, OnConflictAction, OnInsert,
+    OutputClause, Query, SelectItem, SetExpr, Statement, TableObject, TableWithJoins,
+    UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -13,6 +14,7 @@ use super::nullability::{Facts, Nullability};
 use super::query::Analyzer;
 use super::scope::{table_scope, Scope, Source, Table};
 use crate::catalog::fold;
+use crate::ddl::RowEvents;
 use crate::diagnostics::{Diagnostics, NameRule};
 
 pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
@@ -45,6 +47,37 @@ pub(super) fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
         _ => return None,
     };
     items.as_deref().filter(|items| !items.is_empty())
+}
+
+/// The tables of UPDATE's FROM and DELETE's USING, which the statement joins to its target.
+pub(super) fn joined_tables(stmt: &Statement) -> Option<&[TableWithJoins]> {
+    match stmt {
+        Statement::Update(update) => update.from.as_ref().map(|from| match from {
+            UpdateTableFromKind::BeforeSet(tables) | UpdateTableFromKind::AfterSet(tables) => {
+                tables.as_slice()
+            }
+        }),
+        Statement::Delete(delete) => delete.using.as_deref(),
+        _ => None,
+    }
+}
+
+/// The tables MySQL's multi-table UPDATE and DELETE join, the targets among them.
+fn multi_table(stmt: &Statement) -> Option<&[TableWithJoins]> {
+    match stmt {
+        Statement::Update(update) if !update.table.joins.is_empty() => {
+            Some(std::slice::from_ref(&update.table))
+        }
+        Statement::Delete(delete) => match &delete.from {
+            FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables)
+                if tables.len() > 1 || tables.iter().any(|table| !table.joins.is_empty()) =>
+            {
+                Some(tables)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Tables a DML statement writes to, for resolving RETURNING columns.
@@ -90,12 +123,64 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
 
 impl Analyzer<'_> {
     /// What `RETURNING` knows about the target's columns: those the statement writes with a
-    /// value that is never NULL are not NULL in the rows it returns.
+    /// value that is never NULL are not NULL in the rows it returns, and so are those the
+    /// `WHERE` of an UPDATE or DELETE proves, unless an UPDATE sets them.
     pub(super) fn written_facts(&self, stmt: &Statement, scope: &Scope) -> Facts {
         let mut quiet = self.clone();
         quiet.diag = Diagnostics::default();
         let Some(target) = scope.first().map(|source| source.reference.clone()) else {
             return self.facts.clone();
+        };
+        // A `BEFORE` row trigger may change any column of the row `RETURNING` returns.
+        let triggers = match scope.first().map(|source| &source.table) {
+            Some(Table::Named(key)) => self.schema.row_triggers(key),
+            _ => RowEvents::default(),
+        };
+        let triggered = match stmt {
+            Statement::Insert(insert) => {
+                triggers.insert
+                    || triggers.update
+                        && matches!(
+                            insert.on,
+                            Some(OnInsert::OnConflict(OnConflict {
+                                action: OnConflictAction::DoUpdate(_),
+                                ..
+                            }))
+                        )
+            }
+            Statement::Update(_) => triggers.update,
+            _ => false,
+        };
+        if triggered {
+            return self.facts.clone();
+        }
+        let selection = match stmt {
+            Statement::Update(update) => update.selection.as_ref(),
+            Statement::Delete(delete) => delete.selection.as_ref(),
+            _ => None,
+        };
+        let learned =
+            selection.map_or_else(Learned::default, |cond| quiet.learn(cond, true, scope));
+        // SET reads the row WHERE let through; RETURNING returns it as SET leaves it.
+        let seen = self.facts.with(learned.clone());
+        let kept = match stmt {
+            Statement::Update(update) => {
+                let set: Vec<(String, String)> = update
+                    .assignments
+                    .iter()
+                    .flat_map(|assignment| match &assignment.target {
+                        AssignmentTarget::ColumnName(column) => vec![column],
+                        AssignmentTarget::Tuple(columns) => columns.iter().collect(),
+                    })
+                    .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
+                    .map(|ident| {
+                        let key = quiet.column_key(&target, &ident.value, scope);
+                        (target.clone(), key)
+                    })
+                    .collect();
+                self.facts.with(learned.without(&set))
+            }
+            _ => seen.clone(),
         };
         let non_null = |nullability| nullability == Nullability::NonNull;
         let written: Vec<String> = match stmt {
@@ -184,9 +269,7 @@ impl Analyzer<'_> {
                         .0
                         .last()
                         .and_then(|part| part.as_ident())
-                        .filter(|_| {
-                            non_null(quiet.nullability(&assignment.value, scope, &self.facts))
-                        })
+                        .filter(|_| non_null(quiet.nullability(&assignment.value, scope, &seen)))
                         .map(|ident| ident.value.clone()),
                     AssignmentTarget::Tuple(_) => None,
                 })
@@ -197,7 +280,7 @@ impl Analyzer<'_> {
             .iter()
             .map(|column| (target.clone(), quiet.column_key(&target, column, scope)))
             .collect();
-        self.facts.with(Learned::columns(columns))
+        kept.with(Learned::columns(columns))
     }
 
     /// The names an INSERT, UPDATE or DELETE reads and writes: its target tables, the
@@ -210,26 +293,22 @@ impl Analyzer<'_> {
         for source in &scope {
             self.check_table(&source.table);
         }
-        // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING.
-        let from = match stmt {
-            Statement::Update(update) => update.from.as_ref().map(|from| match from {
-                UpdateTableFromKind::BeforeSet(tables) | UpdateTableFromKind::AfterSet(tables) => {
-                    tables.as_slice()
-                }
-            }),
-            Statement::Delete(delete) => delete.using.as_deref(),
-            _ => None,
-        };
-        let targets = scope
-            .iter()
-            .filter(|source| !matches!(source.table, Table::ExtraSources))
-            .cloned();
-        let (analyzer, scope) = match from {
-            Some(from) => match self.scope_of(from) {
-                Ok((analyzer, joined)) => (analyzer, targets.chain(joined).collect()),
-                Err(_) => return,
-            },
-            None => (self.clone(), scope),
+        // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING,
+        // and those MySQL's multi-table UPDATE and DELETE join, targets included.
+        let multi = multi_table(stmt);
+        let (analyzer, scope) = match (multi, joined_tables(stmt)) {
+            (None, None) => (self.clone(), scope),
+            (multi, from) => {
+                let tables: Vec<TableWithJoins> =
+                    multi.into_iter().chain(from).flatten().cloned().collect();
+                let Ok((analyzer, joined)) = self.scope_of(&tables) else {
+                    return;
+                };
+                let targets = scope.iter().filter(|source| {
+                    multi.is_none() && !matches!(source.table, Table::ExtraSources)
+                });
+                (analyzer, targets.cloned().chain(joined).collect())
+            }
         };
         let check = |expr| analyzer.check_references(expr, &scope);
         match stmt {
@@ -292,15 +371,34 @@ impl Analyzer<'_> {
                 }
             }
             Statement::Update(update) => {
-                if let sqlparser::ast::TableFactor::Table { name, .. } = &update.table.relation {
-                    let targets: Vec<ObjectName> = update
-                        .assignments
-                        .iter()
-                        .flat_map(|assignment| match &assignment.target {
-                            AssignmentTarget::ColumnName(column) => vec![column.clone()],
-                            AssignmentTarget::Tuple(columns) => columns.clone(),
-                        })
-                        .collect();
+                let targets: Vec<ObjectName> = update
+                    .assignments
+                    .iter()
+                    .flat_map(|assignment| match &assignment.target {
+                        AssignmentTarget::ColumnName(column) => vec![column.clone()],
+                        AssignmentTarget::Tuple(columns) => columns.clone(),
+                    })
+                    .collect();
+                // A target of a join is a column of any of its tables.
+                if multi.is_some() {
+                    for target in targets {
+                        let idents: Option<Vec<Ident>> = target
+                            .0
+                            .iter()
+                            .map(|part| part.as_ident().cloned())
+                            .collect();
+                        let expr = match idents {
+                            Some(mut idents) if idents.len() == 1 => {
+                                Expr::Identifier(idents.remove(0))
+                            }
+                            Some(idents) => Expr::CompoundIdentifier(idents),
+                            None => continue,
+                        };
+                        analyzer.check_references(&expr, &scope);
+                    }
+                } else if let sqlparser::ast::TableFactor::Table { name, .. } =
+                    &update.table.relation
+                {
                     self.check_target_columns(name, &targets);
                 }
                 update.assignments.iter().for_each(|a| check(&a.value));

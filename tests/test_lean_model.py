@@ -113,7 +113,9 @@ def _sqlty(spelling: str, dialect: str) -> tuple[str, str | None] | None:
     columns = core.analyze_select(query, dialect=dialect, schema_sql=_schema(dialect))
     if not columns or columns[0].sql_type is None:
         return None
-    return columns[0].sql_type, columns[0].python_type
+    # A MySQL cast of text to a date can be NULL; the model maps types, not nullability.
+    python_type = columns[0].python_type
+    return columns[0].sql_type, python_type and python_type.removesuffix(" | None")
 
 
 def _model(model: subprocess.Popen[str], dialect: str, sql_type: str) -> str | None:

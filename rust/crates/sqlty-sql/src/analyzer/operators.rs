@@ -1,11 +1,11 @@
 //! Operator typing: numeric promotion, arithmetic and common types.
 
-use sqlparser::ast::{BinaryOperator, Expr, Value};
+use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::{binary_rules, BinaryRule, RuleType};
-use super::literals::{merge, python_kind};
+use super::inference::{binary_rules, prefix_rules, BinaryRule, RuleType};
+use super::literals::{merge, python_kind, strip};
 use super::query::Analyzer;
 use super::scope::Scope;
 use super::typed::Typed;
@@ -60,6 +60,41 @@ impl Analyzer<'_> {
             RuleType::Right => r,
             RuleType::Common => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
         })
+    }
+
+    /// Result type of the prefix operator `op operand`: its inference rule's.
+    pub(super) fn prefix_op(
+        &self,
+        op: &UnaryOperator,
+        operand: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        Ok(match self.prefix_rule(op, operand, scope)? {
+            Some((rule, typed)) => match rule.result {
+                RuleType::Sql(name) => from_sql_type(name, self.dialect),
+                RuleType::Right => strip(typed, self.dialect),
+                _ => Typed::UNKNOWN,
+            },
+            None => Typed::UNKNOWN,
+        })
+    }
+
+    /// The inference rule for `op operand`, with the operand's type.
+    pub(super) fn prefix_rule(
+        &self,
+        op: &UnaryOperator,
+        operand: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Option<(&'static BinaryRule, Typed)>> {
+        let rules = prefix_rules(op);
+        if rules.is_empty() {
+            return Ok(None);
+        }
+        let typed = self.expr(operand, scope)?;
+        let found = rules
+            .iter()
+            .find(|rule| rule.applies(self.dialect, None, rule_type(&typed)));
+        Ok(found.map(|rule| (rule, typed)))
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`
@@ -319,6 +354,19 @@ fn mysql_common_type<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
     if !known(a) || !known(b) {
         return None;
     }
+    if let (Some((x, x_unsigned)), Some((y, y_unsigned))) = (mysql_integer(a), mysql_integer(b)) {
+        let (unsigned, signed) = match (x_unsigned, y_unsigned) {
+            (true, true) => return Some(MYSQL_UNSIGNED[x.max(y)]),
+            (false, false) => return Some(MYSQL_SIGNED[x.max(y)]),
+            (true, false) => (x, y),
+            (false, true) => (y, x),
+        };
+        // A signed type that holds every value of both, or DECIMAL past BIGINT UNSIGNED.
+        return Some(match MYSQL_SIGNED.get(signed.max(unsigned + 1)) {
+            Some(wider) => wider,
+            None => "DECIMAL",
+        });
+    }
     Some(match (rank(a), rank(b)) {
         (Some(x), Some(y)) => NUMERIC_RANKS[x.max(y)][0],
         _ if a == b => a,
@@ -326,6 +374,24 @@ fn mysql_common_type<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
         _ if BINARY.contains(&a) || BINARY.contains(&b) => "VARBINARY",
         _ => "TEXT",
     })
+}
+
+const MYSQL_SIGNED: [&str; 5] = ["TINYINT", "SMALLINT", "MEDIUMINT", "INT", "BIGINT"];
+const MYSQL_UNSIGNED: [&str; 5] = ["UTINYINT", "USMALLINT", "UMEDIUMINT", "UINT", "UBIGINT"];
+
+/// The width of a MySQL integer type, in [`MYSQL_SIGNED`] order, and whether it is unsigned.
+fn mysql_integer(ty: &str) -> Option<(usize, bool)> {
+    let ty = if ty == "BOOLEAN" { "TINYINT" } else { ty };
+    MYSQL_SIGNED
+        .iter()
+        .position(|name| *name == ty)
+        .map(|width| (width, false))
+        .or_else(|| {
+            MYSQL_UNSIGNED
+                .iter()
+                .position(|name| *name == ty)
+                .map(|width| (width, true))
+        })
 }
 
 /// A string literal: PostgreSQL types it `unknown` until the other inputs decide.

@@ -229,10 +229,6 @@ a = SQL[tuple[int]]("--sql\nSELECT frobnicate(id) FROM users")
 b = SQL[tuple[str]]("--sql\nSELECT name::mood FROM users")
 # error: [unknown-type] "column `users.shape` has type `GEOMETRY`"
 c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
-# error: [unsupported-syntax] "a TABLE query is not typed"
-d = SQL[tuple[int]]("--sql\nSELECT 1 UNION TABLE users")
-# error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
-e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
 # error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
 f = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
@@ -249,6 +245,38 @@ def fetch_value[T](query: Annotated[LiteralString, SQL], form: type[T]) -> T | N
 a = fetch_value("SELECT nope FROM users", int)
 # error:
 b = fetch_value("SELECT id FROM users", int)
+```
+
+#### MySQL multi-table UPDATE and DELETE
+
+MySQL's `UPDATE` and `DELETE` may join tables, with `JOIN` or a comma, and read all of
+them. A `SET` target is a column of the table it names, or of the one table that has it.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, team_id INTEGER);
+CREATE TABLE teams (id INTEGER PRIMARY KEY, title TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
+```
+
+```python
+from sqlty import SQL
+
+a = "-- sql\nUPDATE users u JOIN teams t ON t.id = u.team_id SET t.title = u.name WHERE title IS NULL"
+b = "-- sql\nUPDATE users u, teams t SET t.title = u.name WHERE t.id = u.team_id"
+c = "-- sql\nDELETE o FROM orders o JOIN users u ON u.id = o.user_id WHERE u.name = 'x'"
+d = "-- sql\nDELETE o, u FROM orders o, users u WHERE u.id = o.user_id AND total IS NULL"
+# error: [unknown-column] "column `nmae` does not exist in `t`"
+# error: [unknown-column] "column `titel` does not exist in `u`, `t`"
+e = "-- sql\nUPDATE users u JOIN teams t ON t.id = u.team_id SET t.nmae = 'x', titel = 'y'"
+# error: [unknown-column] "column `nope` does not exist in `u`"
+f = "-- sql\nDELETE o FROM orders o JOIN users u ON u.id = o.user_id WHERE u.nope"
 ```
 
 #### Suppressed inline
@@ -474,8 +502,8 @@ from sqlty import SQL
 a = SQL[tuple[int, str]]("--sql\nINSERT INTO users (id, name) VALUES (1, 'a') RETURNING id, name")
 # error:
 b = SQL[tuple[int]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING u.id")
-# error: [unsupported-syntax] "column `title` may come from tables joined to the target"
-c = SQL[tuple[str]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
+# error:
+c = SQL[tuple[str | None]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
 ```
 
 #### Known functions and types
@@ -719,13 +747,13 @@ import typing
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[int]]("--sql\nSELECT add_one(id) FROM users")
+a = SQL[tuple[int | None]]("--sql\nSELECT add_one(id) FROM users")
 # error:
 b = SQL[tuple[typing.Literal['happy', 'sad']]]("--sql\nSELECT 'happy'::mood")
 # error:
 c = SQL[tuple[int]]("--sql\nSELECT id::percent FROM users")
 # error:
-d = SQL[tuple[int]]("--sql\nSELECT user_ids()")
+d = SQL[tuple[int | None]]("--sql\nSELECT user_ids()")
 # error:
 e = SQL[tuple[object]]("--sql\nSELECT ROW('a', 'b')::address")
 # error:

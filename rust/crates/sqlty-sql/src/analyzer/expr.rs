@@ -27,17 +27,25 @@ pub(super) fn array_element(sql_type: &str) -> Option<&str> {
     Some(&inner[..inner.rfind('>')?])
 }
 
-/// The element type of a range type such as `TSTZRANGE`.
+/// The element type of a range or multirange type such as `TSTZRANGE`.
 pub(super) fn range_element(sql_type: &str) -> Option<&'static str> {
-    Some(match type_base(sql_type) {
-        "INT4RANGE" => "INT",
-        "INT8RANGE" => "BIGINT",
-        "NUMRANGE" => "DECIMAL",
-        "TSRANGE" => "TIMESTAMP",
-        "TSTZRANGE" => "TIMESTAMPTZ",
-        "DATERANGE" => "DATE",
+    Some(match range_kind(sql_type)? {
+        "INT4" => "INT",
+        "INT8" => "BIGINT",
+        "NUM" => "DECIMAL",
+        "TS" => "TIMESTAMP",
+        "TSTZ" => "TIMESTAMPTZ",
+        "DATE" => "DATE",
         _ => return None,
     })
+}
+
+/// The prefix that names a range or multirange type: `INT4` for `INT4RANGE` and
+/// `INT4MULTIRANGE`.
+pub(super) fn range_kind(sql_type: &str) -> Option<&str> {
+    let base = type_base(sql_type);
+    base.strip_suffix("MULTIRANGE")
+        .or_else(|| base.strip_suffix("RANGE"))
 }
 
 pub(super) fn known(python_type: &str) -> Inferred<Typed> {
@@ -62,6 +70,20 @@ impl<'a> Analyzer<'a> {
             ),
             _ => from_sql_type(elem, self.dialect),
         }
+    }
+
+    /// The type of the values `unnest` returns from an array of this SQL type: PostgreSQL's
+    /// flattens every dimension.
+    pub(super) fn unnested_typed(&self, mut array: Option<&str>) -> Typed {
+        if self.dialect == SqlDialect::Postgres {
+            while let Some(inner) = array
+                .and_then(array_element)
+                .filter(|e| e.starts_with("ARRAY<"))
+            {
+                array = Some(inner);
+            }
+        }
+        self.element_typed(array)
     }
 
     /// The type of `field` in the composite type `composite`, when the schema declares it;
@@ -182,22 +204,14 @@ impl<'a> Analyzer<'a> {
                 Some(negative) => Ok(constant(negative)),
                 None => Ok(strip(self.expr(inner, scope)?, self.dialect)),
             },
-            Expr::UnaryOp {
-                op: UnaryOperator::PGAbs | UnaryOperator::BitwiseNot,
-                expr: inner,
-            } if self.dialect == SqlDialect::Postgres => {
-                Ok(strip(self.expr(inner, scope)?, self.dialect))
-            }
-            Expr::UnaryOp {
-                op: UnaryOperator::PGSquareRoot | UnaryOperator::PGCubeRoot,
-                ..
-            } if self.dialect == SqlDialect::Postgres => Ok(from_sql_type("DOUBLE", self.dialect)),
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
-                // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
+                // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa; a time
+                // of day becomes a `timetz` either way.
                 let typed = self.expr(timestamp, scope)?;
                 Ok(match operand_type(&typed) {
                     Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
                     Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
                     _ => Typed::UNKNOWN,
                 })
             }
@@ -231,15 +245,11 @@ impl<'a> Analyzer<'a> {
                     self.dialect,
                 ))
             }
-            // MySQL reads a bare `CURRENT_USER`, and PostgreSQL `CURRENT_ROLE`, reserved
-            // words both, as functions without parentheses.
+            // MySQL reads a bare `CURRENT_USER`, a reserved word, as a function.
             Expr::Identifier(ident)
-                if ident.quote_style.is_none()
-                    && matches!(
-                        (self.dialect, ident.value.to_ascii_lowercase().as_str()),
-                        (SqlDialect::MySql, "current_user")
-                            | (SqlDialect::Postgres, "current_role")
-                    ) =>
+                if self.dialect == SqlDialect::MySql
+                    && ident.quote_style.is_none()
+                    && ident.value.eq_ignore_ascii_case("current_user") =>
             {
                 Ok(from_sql_type("TEXT", self.dialect))
             }
@@ -251,6 +261,7 @@ impl<'a> Analyzer<'a> {
             | Expr::InSubquery { .. }
             | Expr::InList { .. }
             | Expr::InUnnest { .. }
+            | Expr::MemberOf(_)
             | Expr::Between { .. }
             | Expr::Like { .. }
             | Expr::ILike { .. }
@@ -279,6 +290,7 @@ impl<'a> Analyzer<'a> {
                 Ok(from_sql_type("RECORD", self.dialect))
             }
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
+            Expr::UnaryOp { op, expr: inner } => self.prefix_op(op, inner, scope),
             // SQLite's trim always returns text.
             Expr::Trim { .. } if self.dialect == SqlDialect::Sqlite => {
                 Ok(from_sql_type("TEXT", self.dialect))
@@ -340,10 +352,7 @@ impl<'a> Analyzer<'a> {
             if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
                 continue;
             }
-            let mut typed = self.expr(elem, scope)?;
-            if let Some(inner) = typed.sql().and_then(array_element) {
-                typed = from_sql_type(inner, self.dialect);
-            }
+            let typed = self.expr(elem, scope)?;
             common = match common {
                 _ if typed == Typed::UNKNOWN => None,
                 Some(common) => common_type(common, typed, self.dialect),
@@ -530,16 +539,19 @@ impl<'a> Analyzer<'a> {
             return self.function_type(Returns::FirstKnown, &args, scope);
         }
         let arg = args.first().copied();
-        if let Some((rule, typed)) = self.function_rule(&name, arg, scope)? {
-            let argument = || match &typed {
-                Some(typed) => Ok(typed.clone()),
-                None => arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
+        if let Some((rule, typed)) = self.function_rule(&name, &args, scope)? {
+            let at = |position: usize| match typed.get(position) {
+                Some(Some(typed)) => Ok(typed.clone()),
+                _ => args
+                    .get(position)
+                    .map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
             };
+            let argument = || at(0);
             return Ok(match rule.result {
                 FunctionType::Sql(sql) => from_sql_type(sql, self.dialect),
                 FunctionType::Any => Typed::python_only("typing.Any"),
                 FunctionType::Unknown => Typed::UNKNOWN,
-                FunctionType::Argument => argument()?,
+                FunctionType::Argument(position) => at(position)?,
                 FunctionType::ArgumentAs(sql) => {
                     let typed = argument()?;
                     Typed::with_values(
@@ -549,13 +561,12 @@ impl<'a> Analyzer<'a> {
                     )
                 }
                 FunctionType::Code => self.sum(argument()?, arg, scope)?,
+                FunctionType::Returns(returns) => self.function_type(returns, &args, scope)?,
             });
         }
         match name.as_str() {
             // Ordered-set aggregates: the type of the `WITHIN GROUP (ORDER BY x)` value.
-            "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE"
-                if self.dialect == SqlDialect::Postgres && !func.within_group.is_empty() =>
-            {
+            "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE" if !func.within_group.is_empty() => {
                 let ordered = self.expr(&func.within_group[0].expr, scope)?;
                 let typed = match name.as_str() {
                     "PERCENTILE_CONT" if operand_type(&ordered) == Some("INTERVAL") => ordered,
@@ -571,10 +582,7 @@ impl<'a> Analyzer<'a> {
                     _ => typed,
                 })
             }
-            _ => match self.returns(&name) {
-                Some(returns) => self.function_type(returns, &args, scope),
-                None => Ok(self.user_call_typed(func)),
-            },
+            _ => Ok(self.user_call_typed(func)),
         }
     }
 
@@ -632,7 +640,10 @@ mod tests {
         assert_eq!(range_element("TSRANGE"), Some("TIMESTAMP"));
         assert_eq!(range_element("TSTZRANGE"), Some("TIMESTAMPTZ"));
         assert_eq!(range_element("DATERANGE"), Some("DATE"));
+        assert_eq!(range_element("INT4MULTIRANGE"), Some("INT"));
+        assert_eq!(range_element("DATEMULTIRANGE"), Some("DATE"));
         assert_eq!(range_element("INT"), None);
+        assert_eq!(range_element("FOORANGE"), None);
     }
 
     #[test]

@@ -48,3 +48,22 @@ right = ["@unsigned"]
 type = "UBIGINT"
 reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (If both operands are integers and any of them are unsigned, the result is an unsigned integer)"
 reasoning = "Integer arithmetic with an unsigned operand is unsigned, at BIGINT precision."
+
+[[rule]]
+id = "mysql.bitwise.numbers"
+operators = ["BitwiseAnd", "BitwiseOr", "BitwiseXor", "PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["mysql"]
+left = ["@numeric", "@unsigned"]
+right = ["@numeric", "@unsigned"]
+type = "UBIGINT"
+reference = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators (Numeric evaluation produces an unsigned 64-bit integer)"
+reasoning = "Bit operations on numbers give an unsigned 64-bit integer."
+
+[[rule]]
+id = "mysql.bitwise.not"
+operator = "Prefix:BitwiseNot"
+dialects = ["mysql"]
+right = ["@numeric", "@unsigned"]
+type = "UBIGINT"
+reference = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators (Numeric evaluation produces an unsigned 64-bit integer)"
+reasoning = "`~` on a number gives an unsigned 64-bit integer."

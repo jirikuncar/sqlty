@@ -46,8 +46,6 @@ SELECT |/ n AS root_n, |/ m AS root_m FROM test_sqrt
 
 ## User-defined function
 
-<!-- mdtest:xfail a user-defined function result is typed non-null, str instead of str | None -->
-
 A PL/pgSQL function can `RETURN NULL` for any declared return type, so its result is
 nullable.
 
@@ -70,8 +68,6 @@ SELECT mark_email_verified($1) AS result
 
 ## SERIAL in arithmetic
 
-<!-- mdtest:xfail a SERIAL operand leaves the expression untyped -->
-
 `SERIAL` is `integer` with a default, so it adds like one.
 
 `schema.sql`:
@@ -87,9 +83,8 @@ SELECT id + step AS next_id FROM counters
 
 ## Column name of a CASE
 
-<!-- mdtest:xfail the column takes the name of its ELSE branch instead of case -->
-
-An unaliased `CASE` is named `case`, whatever its branches are.
+An unaliased `CASE` takes the name of its `ELSE` branch when that is a column, as
+PostgreSQL names it, and `case` otherwise.
 
 `schema.sql`:
 
@@ -99,5 +94,10 @@ CREATE TABLE counters (id INTEGER PRIMARY KEY, step INTEGER);
 
 ```sql
 SELECT CASE WHEN id > 0 THEN id ELSE step END FROM counters
+-- columns: step: int | None (INT)
+```
+
+```sql
+SELECT CASE WHEN id > 0 THEN step ELSE 0 END FROM counters
 -- columns: case: int | None (INT)
 ```

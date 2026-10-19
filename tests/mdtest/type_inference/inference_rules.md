@@ -35,11 +35,11 @@ A column reference, a cast, a literal and a function no rule covers have none.
 A star expands to columns without rules.
 
 ```sql
-SELECT id, price::TEXT AS p, 'x' AS x, lower('A') AS l, * FROM orders
+SELECT id, price::TEXT AS p, 'x' AS x, gcd(id, 6) AS g, * FROM orders
 -- rules: id: - / -
 -- rules: p: - / -
 -- rules: x: - / -
--- rules: l: - / -
+-- rules: g: postgres.math.common-integer / postgres.math.common-integer
 -- rules: id: - / -
 -- rules: qty: - / -
 -- rules: price: - / -

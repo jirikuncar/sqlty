@@ -537,8 +537,8 @@ error.
 ```python
 from sqlty import SQL
 
-# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
-q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
+# error: [unparsed-query] "found: DOCUMENT"
+q = SQL[tuple[str]]("--sql\nSELECT NULL::xml IS DOCUMENT")
 ```
 
 Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`

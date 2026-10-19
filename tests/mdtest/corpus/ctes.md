@@ -23,12 +23,10 @@ CREATE TABLE users (id SERIAL PRIMARY KEY);
 WITH user_ids AS (SELECT id FROM users)
 SELECT * FROM user_ids WHERE user_ids.id = $1
 -- inferred: tuple[int]
--- params: 1: int (SERIAL)
+-- params: 1: int (INT)
 ```
 
 ## Recursive CTE with a LATERAL step and TABLE
-
-<!-- mdtest:xfail the TABLE name statement is not analyzed, the row type is None -->
 
 Both terms produce only NOT NULL columns, `CROSS JOIN LATERAL` never null-extends, and
 `TABLE cte` is `SELECT * FROM cte`.
