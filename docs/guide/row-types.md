@@ -290,7 +290,7 @@ the type, and `register_composite` then builds the class you give it. When a
 field of your row type is annotated with a row type (`NamedTuple`, dataclass,
 `TypedDict`, Pydantic model), `sqlty check` compares the composite's fields with
 it, as it compares query columns with a row type. Composite fields can always
-be NULL.
+be NULL. To read the fields as columns instead, select `(p).*`.
 
 ```toml
 [tool.sqlty]

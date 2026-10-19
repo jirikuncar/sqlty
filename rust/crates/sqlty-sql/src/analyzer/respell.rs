@@ -5,7 +5,8 @@
 //! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
 //! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
 //! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
-//! XMLTABLE's column options. It runs only on a query that does not parse as written.
+//! XMLTABLE's column options, and PostgreSQL's `(composite).*`, as the field `"*"` the
+//! analyzer expands. It runs only on a query that does not parse as written.
 
 use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
@@ -27,6 +28,11 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
             .is_some_and(|t| t.kind == Kind::Word && sql[t.start..t.end].eq_ignore_ascii_case(name))
     };
     let is = |i: usize, kind: Kind| tokens.get(i).is_some_and(|t| t.kind == kind);
+    let symbol = |i: usize, text: &str| {
+        tokens
+            .get(i)
+            .is_some_and(|t| t.kind == Kind::Other && &sql[t.start..t.end] == text)
+    };
     for i in 0..tokens.len() {
         let call = |name: &str| word(i, name) && is(i + 1, Kind::Open);
         if dialect != SqlDialect::MySql
@@ -55,6 +61,12 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 )),
                 _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
             }
+        } else if dialect == SqlDialect::Postgres
+            && is(i, Kind::Close)
+            && symbol(i + 1, ".")
+            && symbol(i + 2, "*")
+        {
+            edits.push((tokens[i + 2].start, tokens[i + 2].end, "\"*\"".to_string()));
         } else if dialect == SqlDialect::Sqlite && shift(sql, &tokens, i) {
             edits.push((tokens[i].start, tokens[i + 1].end, "&".to_string()));
         } else if dialect == SqlDialect::Sqlite

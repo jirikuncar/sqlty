@@ -5,7 +5,7 @@ use sqlparser::ast::{
     FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
-use crate::catalog::{fold, FunctionReturn};
+use crate::catalog::{fold, FunctionReturn, SchemaColumn};
 use crate::diagnostics::NameRule;
 
 use super::dialect::SqlDialect;
@@ -102,21 +102,29 @@ impl<'a> Analyzer<'a> {
     /// the composite's name when it declares no such field. In PostgreSQL each table is
     /// also the composite type of its rows.
     fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Result<Typed, String> {
-        let postgres = self.dialect == SqlDialect::Postgres;
-        let Some((name, fields)) = composite.map(str::to_lowercase).and_then(|name| {
-            let fields = self
-                .schema
-                .composite(&name)
-                .or_else(|| postgres.then(|| self.schema.table(&name)).flatten())?;
-            Some((name, fields))
-        }) else {
+        let Some((name, fields)) = composite.and_then(|name| self.composite_fields(name)) else {
             return Ok(Typed::UNKNOWN);
         };
+        if is_field_star(field) {
+            return Ok(Typed::UNKNOWN);
+        }
         let field = fold(field, self.dialect);
         match fields.iter().find(|col| col.name == field) {
             Some(col) => Ok(col.typed(self.dialect)),
             None => Err(format!("type `{name}` has no field `{field}`")),
         }
+    }
+
+    /// The lower-case name and the fields of the composite type `composite`, when the schema
+    /// declares it. In PostgreSQL each table is also the composite type of its rows.
+    pub(super) fn composite_fields(&self, composite: &str) -> Option<(String, &[SchemaColumn])> {
+        let name = composite.to_lowercase();
+        let fields = self.schema.composite(&name).or_else(|| {
+            (self.dialect == SqlDialect::Postgres)
+                .then(|| self.schema.table(&name))
+                .flatten()
+        })?;
+        Some((name, fields))
     }
 
     /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
@@ -649,6 +657,11 @@ impl<'a> Analyzer<'a> {
 /// Whether `CONVERT(x USING charset)` gives a binary string.
 pub(super) fn is_binary_charset(charset: &ObjectName) -> bool {
     charset.to_string().eq_ignore_ascii_case("binary")
+}
+
+/// Whether `field` is the `"*"` that respell writes for PostgreSQL's `(composite).*`.
+pub(super) fn is_field_star(field: &Ident) -> bool {
+    field.value == "*" && field.quote_style == Some('"')
 }
 
 #[cfg(test)]
