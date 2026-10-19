@@ -474,6 +474,37 @@ SELECT e.id, e.kind, e.day, h.id, d.id FROM events e, hits h, dumped d
 -- columns: id: int (INT)
 ```
 
+## A table copied with LIKE
+
+`CREATE TABLE ... LIKE`, with or without parentheses, copies the columns of the
+other table, `NOT NULL` included.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL, note TEXT);
+CREATE TABLE users_archive LIKE users;
+CREATE TABLE IF NOT EXISTS `users_copy` (LIKE `users`);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users_archive
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: note: str | None (TEXT)
+```
+
+```sql
+SELECT * FROM users_copy
+-- expanded: SELECT id, name, note FROM users_copy
+```
+
 ## A mysqldump schema
 
 `mysqldump --no-data` wraps views and newer options in executable comments
