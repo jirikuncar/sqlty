@@ -258,11 +258,12 @@ WHEN MATCHED THEN DELETE
 -- inferred: None
 ```
 
-## MERGE RETURNING * expands the target table from the schema
+## MERGE RETURNING * returns the source's columns, then the target's
 
 `schema.sql`:
 ```sql
-CREATE TABLE users (id INTEGER, name TEXT);
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT);
+CREATE TABLE staged (id INTEGER NOT NULL, note TEXT NOT NULL);
 ```
 
 ```toml
@@ -274,5 +275,42 @@ schema = "schema.sql"
 MERGE INTO users u USING staged s ON u.id = s.id
 WHEN MATCHED THEN DELETE
 RETURNING *
--- inferred: tuple[int | None, str | None]
+-- inferred: tuple[int, str, int, str | None]
+```
+
+### A source of unknown columns
+
+`RETURNING *` has the source's columns too, so they must be known.
+
+```sql
+MERGE INTO users u USING unknown_source s ON u.id = s.id
+WHEN MATCHED THEN DELETE
+RETURNING *
+-- inferred: None
+```
+
+### WHEN NOT MATCHED BY SOURCE
+
+A target row no source row matches is returned with NULL source columns.
+
+```sql
+MERGE INTO users u USING staged s ON u.id = s.id
+WHEN MATCHED THEN UPDATE SET name = s.note
+WHEN NOT MATCHED BY SOURCE THEN DELETE
+RETURNING merge_action() AS action, s.id AS staged_id, s.note, u.id
+-- columns: action: str (TEXT)
+-- columns: staged_id: int | None (INT)
+-- columns: note: str | None (TEXT)
+-- columns: id: int (INT)
+```
+
+`DO NOTHING` returns no row, so it leaves the source's columns as they are.
+
+```sql
+MERGE INTO users u USING staged s ON u.id = s.id
+WHEN MATCHED THEN DELETE
+WHEN NOT MATCHED BY SOURCE THEN DO NOTHING
+RETURNING s.id AS staged_id, u.id
+-- columns: staged_id: int (INT)
+-- columns: id: int (INT)
 ```

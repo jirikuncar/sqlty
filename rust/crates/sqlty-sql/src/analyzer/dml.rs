@@ -1,9 +1,9 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
 use sqlparser::ast::{
-    AssignmentTarget, Expr, FromTable, Ident, ObjectName, OnConflict, OnConflictAction, OnInsert,
-    OutputClause, Query, SelectItem, SetExpr, Statement, TableObject, TableWithJoins,
-    UpdateTableFromKind,
+    AssignmentTarget, Expr, FromTable, Ident, MergeAction, MergeClauseKind, ObjectName, OnConflict,
+    OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, Statement, TableObject,
+    TableWithJoins, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -47,6 +47,36 @@ pub(super) fn returning(stmt: &Statement) -> Option<&[SelectItem]> {
         _ => return None,
     };
     items.as_deref().filter(|items| !items.is_empty())
+}
+
+/// A MERGE's source, which its `RETURNING` reads before the target.
+pub(super) fn merge_source(stmt: &Statement) -> Option<Vec<TableWithJoins>> {
+    match stmt {
+        Statement::Merge(merge) => Some(vec![TableWithJoins {
+            relation: merge.source.clone(),
+            joins: Vec::new(),
+        }]),
+        _ => None,
+    }
+}
+
+/// The references of a MERGE's source when a `WHEN NOT MATCHED BY SOURCE` action returns
+/// target rows that no source row matched: the source's columns are NULL in them.
+pub(super) fn unmatched_sources(stmt: &Statement, dialect: SqlDialect) -> Vec<String> {
+    let Statement::Merge(merge) = stmt else {
+        return Vec::new();
+    };
+    let by_source = merge.clauses.iter().any(|clause| {
+        clause.clause_kind == MergeClauseKind::NotMatchedBySource
+            && !matches!(clause.action, MergeAction::DoNothing { .. })
+    });
+    if !by_source {
+        return Vec::new();
+    }
+    table_scope(&merge.source, dialect)
+        .into_iter()
+        .map(|source| source.reference)
+        .collect()
 }
 
 /// The tables of UPDATE's FROM and DELETE's USING, which the statement joins to its target.
