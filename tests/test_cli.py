@@ -239,7 +239,7 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
         "from sqlty import SQL\n"
         'typed = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
         'partial = "--sql\\nSELECT id, nope FROM users"\n'
-        'broken = "--sql\\nSELECT xmlelement(name foo)"\n'
+        'broken = "--sql\\nSELECT NULL::xml IS DOCUMENT"\n'
         'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
         'ddl = "--sql\\nCREATE TABLE t (a INT)"\n'
     )
