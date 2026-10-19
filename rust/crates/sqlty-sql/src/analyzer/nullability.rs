@@ -17,7 +17,9 @@ use sqlparser::ast::{
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
-use super::inference::{binary_rules, function_rules, FunctionNullability, RuleNullability};
+use super::inference::{
+    binary_rules, function_rules, typed_by_rule, FunctionNullability, RuleNullability,
+};
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::{split_access, table_key};
@@ -1128,9 +1130,7 @@ impl<'a> Analyzer<'a> {
             // PostgreSQL 17's `random(min, max)` is strict.
             "RANDOM" if !args.is_empty() => any_nullable(args.iter().map(|arg| of(arg))),
             _ if info.is_some_and(|info| info.never_null) => Nullability::NonNull,
-            _ if info.is_some_and(|info| info.returns(self.dialect).is_some())
-                && all_positional =>
-            {
+            _ if typed_by_rule(&name, self.dialect) && all_positional => {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }
             _ => match self

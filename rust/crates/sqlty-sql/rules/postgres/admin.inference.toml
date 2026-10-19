@@ -1,0 +1,46 @@
+# PostgreSQL system administration functions.
+
+[[function]]
+id = "postgres.admin.bigint"
+functions = ["PG_DATABASE_SIZE", "PG_TOTAL_RELATION_SIZE", "PG_RELATION_SIZE", "PG_TABLE_SIZE", "PG_INDEXES_SIZE"]
+dialects = ["postgres"]
+type = "BIGINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.100 Database Object Size Functions"
+reasoning = "The documentation gives each of these a `bigint` result."
+
+[[function]]
+id = "postgres.admin.boolean"
+functions = ["PG_TRY_ADVISORY_LOCK", "PG_TRY_ADVISORY_XACT_LOCK", "PG_TRY_ADVISORY_LOCK_SHARED", "PG_TRY_ADVISORY_XACT_LOCK_SHARED", "PG_ADVISORY_UNLOCK", "PG_ADVISORY_UNLOCK_SHARED", "PG_IS_IN_RECOVERY", "PG_TERMINATE_BACKEND", "PG_CANCEL_BACKEND"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.94 Server Signaling Functions, Table 9.96 Recovery Information Functions, Table 9.106 Advisory Lock Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.admin.int"
+function = "PG_COLUMN_SIZE"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.100 Database Object Size Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.admin.text"
+functions = ["CURRENT_SETTING", "SET_CONFIG", "PG_SIZE_PRETTY"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.93 Configuration Settings Functions, Table 9.100 Database Object Size Functions"
+reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.admin.void"
+functions = ["PG_ADVISORY_LOCK", "PG_ADVISORY_XACT_LOCK", "PG_ADVISORY_LOCK_SHARED", "PG_ADVISORY_XACT_LOCK_SHARED", "PG_ADVISORY_UNLOCK_ALL"]
+dialects = ["postgres"]
+type = "@void"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.106 Advisory Lock Functions"
+reasoning = "The function returns `void`, which the driver reads as None."

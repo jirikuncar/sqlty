@@ -1,4 +1,4 @@
-# PostgreSQL SUM, MIN and MAX.
+# PostgreSQL aggregate functions.
 
 [[function]]
 id = "postgres.aggregate.sum-integers"
@@ -59,3 +59,93 @@ type = "BYTEA"
 nullability = "aggregate"
 reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (string_agg ( value bytea, delimiter bytea ) → bytea)"
 reasoning = "Binary strings concatenate into a binary string."
+
+[[function]]
+id = "postgres.aggregate.argument-type"
+functions = ["BIT_AND", "BIT_OR", "BIT_XOR", "RANGE_INTERSECT_AGG"]
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "postgres.aggregate.array"
+function = "ARRAY_AGG"
+dialects = ["postgres"]
+type = "@array(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result is an array of the argument's type."
+
+[[function]]
+id = "postgres.aggregate.mean"
+functions = ["STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VAR_POP", "VAR_SAMP"]
+dialects = ["postgres"]
+type = "@mean"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The statistic is `double precision` for floating-point input and `numeric` otherwise, an interval's an interval."
+
+[[function]]
+id = "postgres.aggregate.argument"
+function = "ANY_VALUE"
+dialects = ["postgres"]
+type = "@same(0)"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."
+
+[[function]]
+id = "postgres.aggregate.bigint"
+function = "REGR_COUNT"
+dialects = ["postgres"]
+type = "BIGINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The documentation gives the function a `bigint` result."
+
+[[function]]
+id = "postgres.aggregate.boolean"
+functions = ["BOOL_AND", "BOOL_OR", "EVERY"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.aggregate.double"
+functions = ["PERCENT_RANK", "CUME_DIST"]
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.63 Hypothetical-Set Aggregate Functions; 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "postgres.aggregate.aggregate-double"
+functions = ["CORR", "COVAR_POP", "COVAR_SAMP", "REGR_SLOPE", "REGR_INTERCEPT", "REGR_R2", "REGR_AVGX", "REGR_AVGY", "REGR_SXX", "REGR_SYY", "REGR_SXY"]
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "postgres.aggregate.int"
+function = "GROUPING"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.64 Grouping Operations"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.aggregate.json"
+functions = ["JSON_ARRAYAGG", "JSON_OBJECTAGG"]
+dialects = ["postgres"]
+type = "JSON"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `json` result."

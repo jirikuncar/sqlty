@@ -1,4 +1,4 @@
-# System information functions whose result depends on the argument's type.
+# PostgreSQL system information functions.
 
 [[function]]
 id = "postgres.system.age-xid"
@@ -9,3 +9,93 @@ type = "INT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.27, Table 9.82 Transaction ID and Snapshot Information Functions (age ( xid ) → integer)"
 reasoning = "The age of a transaction ID is a number of transactions, not an interval."
+
+[[function]]
+id = "postgres.system.interval"
+function = "AGE"
+dialects = ["postgres"]
+type = "INTERVAL"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives the function an `interval` result."
+
+[[function]]
+id = "postgres.system.bigint"
+function = "TXID_CURRENT"
+dialects = ["postgres"]
+type = "BIGINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
+reasoning = "The documentation gives the function a `bigint` result."
+
+[[function]]
+id = "postgres.system.boolean"
+functions = ["HAS_TABLE_PRIVILEGE", "HAS_SCHEMA_PRIVILEGE", "HAS_COLUMN_PRIVILEGE", "HAS_DATABASE_PRIVILEGE", "HAS_FUNCTION_PRIVILEGE", "HAS_SEQUENCE_PRIVILEGE", "PG_HAS_ROLE"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.70 Access Privilege Inquiry Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.system.inet"
+functions = ["INET_CLIENT_ADDR", "INET_SERVER_ADDR"]
+dialects = ["postgres"]
+type = "INET"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reasoning = "The documentation gives each of these an `inet` result."
+
+[[function]]
+id = "postgres.system.int"
+functions = ["PG_BACKEND_PID", "INET_CLIENT_PORT", "INET_SERVER_PORT"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.system.name"
+functions = ["CURRENT_DATABASE", "CURRENT_SCHEMA", "CURRENT_USER", "SESSION_USER", "USER", "PG_GET_USERBYID"]
+dialects = ["postgres"]
+type = "NAME"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions"
+reasoning = "The documentation gives each of these a `name` result."
+
+[[function]]
+id = "postgres.system.regtype"
+function = "PG_TYPEOF"
+dialects = ["postgres"]
+type = "REGTYPE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reasoning = "The documentation gives the function a `regtype` result."
+
+[[function]]
+id = "postgres.system.text"
+functions = ["VERSION", "OBJ_DESCRIPTION", "COL_DESCRIPTION", "FORMAT_TYPE"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions, Table 9.80 Comment Information Functions, Table 9.91 Version Information Functions"
+reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.system.timestamptz"
+function = "PG_POSTMASTER_START_TIME"
+dialects = ["postgres"]
+type = "TIMESTAMPTZ"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reasoning = "The documentation gives the function a `timestamp with time zone` result."
+
+[[function]]
+id = "postgres.system.void"
+function = "PG_NOTIFY"
+dialects = ["postgres"]
+type = "@void"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, NOTIFY, pg_notify(text, text)"
+reasoning = "The function returns `void`, which the driver reads as None."

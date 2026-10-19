@@ -1,0 +1,28 @@
+# PostgreSQL UUID functions.
+
+[[function]]
+id = "postgres.uuid.smallint"
+function = "UUID_EXTRACT_VERSION"
+dialects = ["postgres"]
+type = "SMALLINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.14 UUID Functions"
+reasoning = "The documentation gives the function a `smallint` result."
+
+[[function]]
+id = "postgres.uuid.timestamptz"
+function = "UUID_EXTRACT_TIMESTAMP"
+dialects = ["postgres"]
+type = "TIMESTAMPTZ"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.14 UUID Functions"
+reasoning = "The documentation gives the function a `timestamp with time zone` result."
+
+[[function]]
+id = "postgres.uuid.uuid"
+function = "GEN_RANDOM_UUID"
+dialects = ["postgres"]
+type = "UUID"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.14 UUID Functions"
+reasoning = "The documentation gives the function an `uuid` result."

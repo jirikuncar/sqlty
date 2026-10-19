@@ -1,0 +1,73 @@
+# SQLite core scalar functions.
+
+[[function]]
+id = "sqlite.scalar.argument-type"
+function = "ABS"
+dialects = ["sqlite"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "sqlite.scalar.branches"
+function = "IIF"
+dialects = ["sqlite"]
+type = "@first-known(1)"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The result is one of the branches, from the second argument on, resolved to their common type."
+
+[[function]]
+id = "sqlite.scalar.common"
+function = "IFNULL"
+dialects = ["sqlite"]
+type = "@first-known"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The arguments resolve to one common type, the first known argument's."
+
+[[function]]
+id = "sqlite.scalar.argument"
+functions = ["NULLIF", "LIKELIHOOD", "LIKELY", "UNLIKELY"]
+dialects = ["sqlite"]
+type = "@same(0)"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."
+
+[[function]]
+id = "sqlite.scalar.bigint"
+functions = ["GLOB", "LIKE", "INSTR", "UNICODE", "RANDOM", "CHANGES", "TOTAL_CHANGES", "LAST_INSERT_ROWID", "SIGN"]
+dialects = ["sqlite"]
+type = "BIGINT"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns an integer."
+
+[[function]]
+id = "sqlite.scalar.blob"
+functions = ["ZEROBLOB", "RANDOMBLOB", "UNHEX"]
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns a BLOB."
+
+[[function]]
+id = "sqlite.scalar.double"
+function = "ROUND"
+dialects = ["sqlite"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The function returns a floating-point value."
+
+[[function]]
+id = "sqlite.scalar.text"
+functions = ["LTRIM", "RTRIM", "HEX", "QUOTE", "PRINTF", "FORMAT", "CHAR", "SOUNDEX", "TYPEOF", "CONCAT_WS", "SQLITE_VERSION", "SQLITE_SOURCE_ID"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns text."

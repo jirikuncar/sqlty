@@ -1,0 +1,9 @@
+# Every dialect's conditional expressions.
+
+[[function]]
+id = "common.conditional.common"
+function = "COALESCE"
+type = "@first-known"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.18.2 COALESCE"
+reasoning = "The arguments resolve to one common type, the first known argument's."

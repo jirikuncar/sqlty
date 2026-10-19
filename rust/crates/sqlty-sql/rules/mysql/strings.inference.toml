@@ -1,4 +1,4 @@
-# MySQL string functions over binary strings, and the result type of ROUND and TRUNCATE.
+# MySQL string functions, binary strings first, and the result type of ROUND and TRUNCATE.
 
 [[function]]
 id = "mysql.string.binary"
@@ -49,3 +49,57 @@ type = "DOUBLE"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any floating-point type or of any non-numeric type, the return type is always DOUBLE; TRUNCATE() follows the same rules)"
 reasoning = "Rounding a float, a string or a date gives a DOUBLE."
+
+[[function]]
+id = "mysql.string.bigint"
+functions = ["BIT_AND", "BIT_OR", "BIT_XOR"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.string.argument-type"
+functions = ["ROUND", "TRUNCATE"]
+dialects = ["mysql"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "mysql.string.bigint-2"
+functions = ["REGEXP_INSTR", "REGEXP_LIKE", "LOCATE", "INSTR", "ASCII", "ORD", "FIELD", "FIND_IN_SET", "STRCMP"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String Functions and Operators; 14.8.1 String Comparison Functions and Operators"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.string.text"
+functions = ["BIN", "OCT", "REGEXP_SUBSTR", "REGEXP_REPLACE", "CONCAT_WS", "REPEAT", "HEX", "SPACE", "FORMAT", "QUOTE", "SUBSTRING_INDEX", "INSERT", "ELT", "SOUNDEX", "TO_BASE64", "EXPORT_SET", "MAKE_SET"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
+reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.string.varbinary"
+functions = ["UNHEX", "FROM_BASE64", "WEIGHT_STRING"]
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
+reasoning = "The manual describes each of these as returning a binary string."
+
+[[function]]
+id = "mysql.string.string"
+functions = ["UPPER", "LOWER", "UCASE", "LCASE", "TRIM", "LTRIM", "RTRIM", "LEFT", "RIGHT", "LPAD", "RPAD", "REVERSE", "REPLACE"]
+dialects = ["mysql"]
+type = "@text(0)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
+reasoning = "A string function of a string gives the first argument's string type, a binary string for a binary one."

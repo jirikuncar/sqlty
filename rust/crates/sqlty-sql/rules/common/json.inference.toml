@@ -1,5 +1,5 @@
-# JSON accessors in every dialect that has them. A placeholder next to a JSON value is
-# its key or path.
+# JSON accessors and functions in every dialect that has them. A placeholder next to a
+# JSON value is its key or path.
 
 [[rule]]
 id = "common.json.arrow"
@@ -44,3 +44,19 @@ type = "TEXT"
 nullability = "nullable"
 reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json #>> text[])"
 reasoning = "`#>>` extracts the value at a path as text; a missing path or a JSON null gives NULL."
+
+[[function]]
+id = "common.json.json"
+functions = ["JSON_BUILD_OBJECT", "TO_JSON"]
+type = "JSON"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions"
+reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "common.json.jsonb"
+functions = ["JSONB_BUILD_OBJECT", "TO_JSONB"]
+type = "JSONB"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions"
+reasoning = "The documentation gives each of these a `jsonb` result."

@@ -1,0 +1,55 @@
+# MySQL miscellaneous functions.
+
+[[function]]
+id = "mysql.misc.argument"
+function = "ANY_VALUE"
+dialects = ["mysql"]
+type = "@same(0)"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."
+
+[[function]]
+id = "mysql.misc.bigint"
+functions = ["SLEEP", "INET_ATON"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.misc.int"
+functions = ["GROUPING", "IS_IPV4", "IS_IPV6", "IS_IPV4_COMPAT", "IS_IPV4_MAPPED", "IS_UUID"]
+dialects = ["mysql"]
+type = "INT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.misc.text"
+functions = ["INET_NTOA", "INET6_NTOA", "BIN_TO_UUID", "UUID"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.misc.ubigint"
+function = "UUID_SHORT"
+dialects = ["mysql"]
+type = "UBIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes the function as returning an unsigned integer."
+
+[[function]]
+id = "mysql.misc.varbinary"
+functions = ["UUID_TO_BIN", "INET6_ATON"]
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reasoning = "The manual describes each of these as returning a binary string."

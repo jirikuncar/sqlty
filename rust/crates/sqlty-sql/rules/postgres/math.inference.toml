@@ -1,0 +1,73 @@
+# PostgreSQL mathematical functions.
+
+[[function]]
+id = "postgres.math.argument-type"
+functions = ["ABS", "MOD"]
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "postgres.math.random"
+function = "RANDOM"
+dialects = ["postgres"]
+type = "@random"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.6 Random Functions"
+reasoning = "Without arguments the result is `double precision`; with bounds it has their type."
+
+[[function]]
+id = "postgres.math.real"
+functions = ["CEIL", "CEILING", "FLOOR", "SQRT", "EXP", "LN", "LOG10", "POWER", "SIGN"]
+dialects = ["postgres"]
+type = "@real"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions"
+reasoning = "Floating-point and integer input give `double precision`, and `numeric` input gives `numeric`."
+
+[[function]]
+id = "postgres.math.scaled"
+functions = ["ROUND", "TRUNC", "LOG"]
+dialects = ["postgres"]
+type = "@scaled"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions"
+reasoning = "The one-argument form follows the argument as `ceil` does, and a scale or base makes it `numeric`."
+
+[[function]]
+id = "postgres.math.decimal"
+functions = ["TRIM_SCALE", "FACTORIAL"]
+dialects = ["postgres"]
+type = "DECIMAL"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions"
+reasoning = "The documentation gives each of these a `numeric` result."
+
+[[function]]
+id = "postgres.math.double"
+functions = ["CBRT", "ERF", "ERFC", "PI", "DEGREES", "RADIANS", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATAN2", "RANDOM_NORMAL", "COT", "SIND", "COSD", "TAND", "COTD", "ASIND", "ACOSD", "ATAND", "ATAN2D", "SINH", "COSH", "TANH", "ASINH", "ACOSH", "ATANH"]
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions, Table 9.6 Random Functions, Table 9.7 Trigonometric Functions, Table 9.8 Hyperbolic Functions"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "postgres.math.int"
+functions = ["WIDTH_BUCKET", "SCALE", "MIN_SCALE"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.5 Mathematical Functions"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.math.void"
+function = "SETSEED"
+dialects = ["postgres"]
+type = "@void"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.3 Mathematical Functions and Operators, Table 9.6 Random Functions"
+reasoning = "The function returns `void`, which the driver reads as None."

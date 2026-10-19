@@ -1,4 +1,4 @@
-# SQLite's JSON accessors.
+# SQLite's JSON accessors and functions.
 
 [[rule]]
 id = "sqlite.json.arrow"
@@ -26,3 +26,39 @@ type = "@any"
 nullability = "nullable"
 reference = "SQLite documentation, JSON Functions And Operators, 4.8 The json_extract() function (https://www.sqlite.org/json1.html#jex)"
 reasoning = "With one path, `json_extract` gives the SQL value of the element (INTEGER, REAL or TEXT), and NULL for a missing path or a JSON null; with more, the text of a JSON array."
+
+[[function]]
+id = "sqlite.json.bigint"
+functions = ["JSON_ARRAY_LENGTH", "JSON_VALID", "JSON_ERROR_POSITION"]
+dialects = ["sqlite"]
+type = "BIGINT"
+nullability = "strict"
+reference = "SQLite documentation, JSON Functions And Operators"
+reasoning = "Each of these returns an integer."
+
+[[function]]
+id = "sqlite.json.blob"
+function = "JSONB"
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "strict"
+reference = "SQLite documentation, JSON Functions And Operators"
+reasoning = "The function returns a BLOB."
+
+[[function]]
+id = "sqlite.json.text"
+functions = ["JSON", "JSON_OBJECT", "JSON_ARRAY", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_QUOTE", "JSON_TYPE"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "strict"
+reference = "SQLite documentation, JSON Functions And Operators"
+reasoning = "Each of these returns text."
+
+[[function]]
+id = "sqlite.json.aggregate-text"
+functions = ["JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "aggregate"
+reference = "SQLite documentation, JSON Functions And Operators"
+reasoning = "Each of these returns text."

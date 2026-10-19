@@ -1,0 +1,17 @@
+# Every dialect's window functions.
+
+[[function]]
+id = "common.window.bigint"
+function = "ROW_NUMBER"
+type = "BIGINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
+reasoning = "The documentation gives the function a `bigint` result."
+
+[[function]]
+id = "common.window.int"
+function = "NTILE"
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
+reasoning = "The documentation gives the function an `integer` result."

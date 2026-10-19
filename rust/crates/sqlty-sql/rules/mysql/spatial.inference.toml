@@ -1,0 +1,10 @@
+# MySQL spatial functions.
+
+[[function]]
+id = "mysql.spatial.double"
+functions = ["ST_DISTANCE", "ST_DISTANCE_SPHERE", "ST_AREA", "ST_LENGTH", "ST_X", "ST_Y"]
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.16.9.1 Spatial Relation Functions That Use Object Shapes; 14.16.13 Spatial Convenience Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.3 LineString and MultiLineString Property Functions; 14.16.7.2 Point Property Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE."

@@ -1,0 +1,64 @@
+# PostgreSQL string functions.
+
+[[function]]
+id = "postgres.string.bound"
+functions = ["LOWER", "UPPER"]
+dialects = ["postgres"]
+type = "@bound"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators; 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reasoning = "A range's bound has the range's element type, and on a string the case-mapped string keeps the string type."
+
+[[function]]
+id = "postgres.string.text-array"
+functions = ["STRING_TO_ARRAY", "REGEXP_SPLIT_TO_ARRAY", "REGEXP_MATCH", "REGEXP_MATCHES", "PARSE_IDENT"]
+dialects = ["postgres"]
+type = "ARRAY<TEXT>"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives each of these a `text[]` result."
+
+[[function]]
+id = "postgres.string.boolean"
+functions = ["STARTS_WITH", "REGEXP_LIKE"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.string.int"
+functions = ["ASCII", "STRPOS", "REGEXP_COUNT", "REGEXP_INSTR"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.string.name"
+function = "PG_CLIENT_ENCODING"
+dialects = ["postgres"]
+type = "NAME"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives the function a `name` result."
+
+[[function]]
+id = "postgres.string.text"
+functions = ["LEFT", "RIGHT", "LPAD", "RPAD", "INITCAP", "REPEAT", "REVERSE", "TRANSLATE", "CONCAT_WS", "FORMAT", "MD5", "TO_HEX", "TO_BIN", "TO_OCT", "CHR", "QUOTE_IDENT", "QUOTE_LITERAL", "QUOTE_NULLABLE", "SPLIT_PART", "NORMALIZE", "REGEXP_REPLACE", "UNISTR", "REGEXP_SPLIT_TO_TABLE", "STRING_TO_TABLE", "REGEXP_SUBSTR"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
+reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.string.string"
+functions = ["TRIM", "LTRIM", "RTRIM", "BTRIM", "OVERLAY"]
+dialects = ["postgres"]
+type = "@text(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators"
+reasoning = "A string function of a string gives the first argument's string type, a binary string for a binary one."

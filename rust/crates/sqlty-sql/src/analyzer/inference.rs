@@ -9,6 +9,7 @@
 use sqlparser::ast::BinaryOperator;
 
 use super::dialect::SqlDialect;
+use super::functions::Returns;
 
 /// The result type of a rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,6 +157,8 @@ pub(crate) enum FunctionType {
     Argument(usize),
     /// The first argument's Python type and values under another SQL type.
     ArgumentAs(&'static str),
+    /// A type that follows from the arguments as the analyzer's code computes it.
+    Returns(Returns),
 }
 
 /// How a function rule's result can be NULL.
@@ -168,7 +171,7 @@ pub(crate) enum FunctionNullability {
     /// An aggregate's: NULL over no rows, unless the group is known to hold one (a plain
     /// `GROUP BY`), and as its argument is over the rows (`analyzer/nullability.rs`).
     Aggregate,
-    /// A scalar function's, as the analyzer's function table says: NULL when an argument is.
+    /// A scalar function's, as the analyzer's code decides: by default NULL when an argument is.
     Strict,
 }
 
@@ -219,6 +222,16 @@ impl FunctionRule {
             && admits(self.argument, argument)
             && admits(self.second, second)
     }
+}
+
+/// Whether a rule types every call of the function `name` (upper case) in `dialect`,
+/// whatever its arguments.
+pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
+    function_rules(name).iter().any(|rule| {
+        rule.argument.is_none()
+            && rule.second.is_none()
+            && (rule.dialects.is_empty() || rule.dialects.contains(&dialect))
+    })
 }
 
 /// Whether an operand of SQL type `operand` satisfies `types`; `@known` admits any typed one.

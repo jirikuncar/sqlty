@@ -1,6 +1,6 @@
 # Inference rules
 
-The result type and nullability of SQL operators are declared here, in
+The result type and nullability of SQL operators and built-in functions are declared here, in
 `*.inference.toml` files, instead of in `match` arms of the analyzer. `build.rs`
 compiles them into static data and one `match` on the operator
 (`$OUT_DIR/inference_rules.rs`), so nothing is read or parsed at run time.
@@ -98,13 +98,47 @@ reasoning = "Summing small integers widens to bigint so the sum fits."
 operand predicate as above for the first argument; `@known` admits any typed
 argument. `arguments` gives one for each of the first two instead, an empty list
 admitting any: `arguments = [[], ["JSON", "JSONB"]]` matches a JSON second
-argument. `type` is a SQL type, `@any`, `@unknown`, `@code`, `@argument` (the
-first argument's type, value set included, as `MIN` and `MAX` return one of the
-values), `@argument(1)` (the second argument's) or `@argument-as TYPE` (the
-first argument's Python type under another SQL type). `nullability` is required:
-`non-null`; `nullable`, NULL whatever the arguments; `aggregate`, the empty-group and NULL-argument behaviour of
-aggregates in `analyzer/nullability.rs`; or `strict`, a scalar function's, as the
-analyzer's function table says.
+argument. `nullability` is required: `non-null`; `nullable`, NULL whatever the
+arguments; `aggregate`, the empty-group and NULL-argument behaviour of aggregates in
+`analyzer/nullability.rs`; or `strict`, NULL when an argument is, unless
+`analyzer/registry.rs` lists the function as always nullable or as reading through
+NULLs (`COALESCE`, `CONCAT_WS`, ...). A function typed by a rule without `argument` or
+`arguments` is a known built-in: it narrows `WHERE f(col) IS NOT NULL` to `col`.
+
+`type` is a SQL type (`TEXT`, `ARRAY<INT>`, ...) or a computed result. A `(k)` names
+argument `k`, counting from 0:
+
+| `type` | Result |
+|--------|--------|
+| `@any` | Any value, `typing.Any` |
+| `@unknown` | Untyped |
+| `@void` | `void`: Python `None` |
+| `@code` | `SUM` of what no rule types keeps its schema lookup |
+| `@argument`, `@argument(k)` | The type of argument 0 or `k` (0 or 1), value set included, as `MIN` and `MAX` return one of the values |
+| `@argument-as TYPE` | The first argument's Python type under another SQL type |
+| `@argument-type(k)` | The type of argument `k`, whatever value it computes (`ABS`) |
+| `@same(k)` | Argument `k`'s type and values (`NULLIF`) |
+| `@element(k)` | The element type of array argument `k` (`UNNEST`) |
+| `@array(k)` | An array of argument `k`'s type (`ARRAY_AGG`) |
+| `@first-known` | The first argument of known type, skipping `NULL` and placeholders (`COALESCE`) |
+| `@first-known(k)` | `@first-known` of the arguments from `k` on (`IF(cond, a, b)`) |
+| `@str-to-date(k)` | MySQL `STR_TO_DATE`: `DATE`, `TIME` or `DATETIME`, by the parts the literal format at `k` reads |
+| `@bound` | The element type of a range argument, else `TEXT` (PostgreSQL `lower`, `upper`) |
+| `@mean` | `DOUBLE` for floats, `INTERVAL` for intervals, else `DECIMAL` (`AVG`) |
+| `@real` | `DOUBLE` for floats and integers, `DECIMAL` for exact numbers (`SQRT`) |
+| `@scaled` | `@real`, but `DECIMAL` with a second argument (`ROUND(x, 2)`) |
+| `@trunc(k)` | A timestamp argument's type, `TIMESTAMPTZ` for a date (`DATE_TRUNC`) |
+| `@date-add` | MySQL `DATE_ADD(d, INTERVAL n unit)`, typed as `d + INTERVAL n unit` |
+| `@timestamp-add` | MySQL `TIMESTAMPADD`: a `DATE` for day units and coarser, else `DATETIME` |
+| `@integral` | MySQL `CEIL`, `FLOOR`: an integer for an exact number, `DOUBLE` for an approximate one |
+| `@at-zone(k)` | `timezone(zone, ts)`, typed as `ts AT TIME ZONE zone` |
+| `@series` | `generate_series`: the common type of the bounds, small integers widened to `INT`, dates to `TIMESTAMPTZ` |
+| `@text(k)` | `TEXT`, or argument `k`'s type when it is a binary or bit string |
+| `@random` | `DOUBLE`; `random(min, max)` gives the type of the bounds |
+
+A computed result is a variant of `Returns` (`analyzer/functions.rs`), listed in
+`FUNCTION_RESULTS` (`compile.rs`). Add one there when no SQL type fits: the rule still
+carries the reference and reasoning.
 
 ## How a rule is chosen
 
@@ -140,8 +174,9 @@ The operands are typed only when a rule of the operator lists operand types.
 
 `analyzer/operators.rs` keeps one case rules cannot express: MySQL
 `date ± INTERVAL n unit`, where the unit decides between `DATE` and `DATETIME`.
-It is typed before the rules are tried. For functions, `SUM` of what no rule
-types keeps its schema lookup (`type = "@code"` in a `[[function]]` table).
+It is typed before the rules are tried. Function results that need code are the
+computed `type`s above: each rule still names the functions it covers. A built-in no
+rule types leaves its column untyped.
 
 ## Adding a rule
 

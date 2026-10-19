@@ -1,7 +1,7 @@
 //! What the analyzer knows about each built-in function, in one place.
 //!
-//! A function's result type ([`Returns`]), how it behaves with NULLs, and the types its
-//! parameters take used to live in separate lists searched by name. They are folded once
+//! How a function behaves with NULLs and the types its parameters take used to live in
+//! separate lists searched by name; its result type is an inference rule (`rules/`). They are folded once
 //! into a table of [`FunctionInfo`], so a call is classified with a single lookup of its
 //! upper-case name, and a new function is a row in the list that describes it.
 //!
@@ -11,10 +11,8 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use super::dialect_functions::{
-    MYSQL_ALWAYS_NULLABLE, MYSQL_FUNCTIONS, SQLITE_ALWAYS_NULLABLE, SQLITE_FUNCTIONS,
-};
-use super::functions::{Returns, COMMON_FUNCTIONS, POSTGRES_FUNCTIONS};
+use super::dialect_functions::{MYSQL_ALWAYS_NULLABLE, SQLITE_ALWAYS_NULLABLE};
+use super::inference::typed_by_rule;
 use super::SqlDialect;
 
 /// How a function treats NULLs and rows, apart from its result type.
@@ -34,13 +32,6 @@ pub(super) enum Behavior {
 /// Everything known about one function name.
 #[derive(Clone, Copy, Default)]
 pub(super) struct FunctionInfo {
-    returns: Option<Returns>,
-    /// PostgreSQL's own definition, which takes precedence over `returns` there.
-    postgres_returns: Option<Returns>,
-    /// MySQL's, likewise.
-    mysql_returns: Option<Returns>,
-    /// SQLite's, likewise.
-    sqlite_returns: Option<Returns>,
     pub(super) behavior: Behavior,
     /// Can be NULL for non-null arguments.
     always_nullable: bool,
@@ -59,16 +50,6 @@ pub(super) struct FunctionInfo {
 }
 
 impl FunctionInfo {
-    /// The result type rule in `dialect`, when the analyzer has one.
-    pub(super) fn returns(&self, dialect: SqlDialect) -> Option<Returns> {
-        match dialect {
-            SqlDialect::Postgres => self.postgres_returns.or(self.returns),
-            SqlDialect::MySql => self.mysql_returns.or(self.returns),
-            SqlDialect::Sqlite => self.sqlite_returns.or(self.returns),
-            _ => self.returns,
-        }
-    }
-
     /// Whether the result can be NULL for non-null arguments in `dialect`.
     pub(super) fn always_nullable(&self, dialect: SqlDialect) -> bool {
         self.always_nullable
@@ -77,11 +58,12 @@ impl FunctionInfo {
     }
 
     /// Whether the result is NULL for a NULL argument, as far as narrowing goes: a function
-    /// with a known result type, other than the ones that look through NULLs.
-    pub(super) fn is_strict(&self, dialect: SqlDialect) -> bool {
-        self.returns(dialect).is_some()
-            && self.behavior != Behavior::AlwaysValued
-            && !self.looks_through_nulls
+    /// a rule types whatever its arguments, other than the ones that look through NULLs.
+    pub(super) fn is_strict(name: &str, dialect: SqlDialect) -> bool {
+        typed_by_rule(name, dialect)
+            && lookup(name).is_none_or(|info| {
+                info.behavior != Behavior::AlwaysValued && !info.looks_through_nulls
+            })
     }
 
     pub(super) fn is_aggregate(&self) -> bool {
@@ -101,27 +83,6 @@ static REGISTRY: LazyLock<HashMap<&'static str, FunctionInfo>> = LazyLock::new(|
         name: &'static str,
     ) -> &'m mut FunctionInfo {
         registry.entry(name).or_default()
-    }
-    // Later rows of a list replace earlier ones.
-    for (names, returns) in COMMON_FUNCTIONS {
-        for name in *names {
-            entry(&mut registry, name).returns = Some(*returns);
-        }
-    }
-    for (names, returns) in POSTGRES_FUNCTIONS {
-        for name in *names {
-            entry(&mut registry, name).postgres_returns = Some(*returns);
-        }
-    }
-    for (names, returns) in MYSQL_FUNCTIONS {
-        for name in *names {
-            entry(&mut registry, name).mysql_returns = Some(*returns);
-        }
-    }
-    for (names, returns) in SQLITE_FUNCTIONS {
-        for name in *names {
-            entry(&mut registry, name).sqlite_returns = Some(*returns);
-        }
     }
     for name in MYSQL_ALWAYS_NULLABLE {
         entry(&mut registry, name).mysql_nullable = true;
@@ -420,19 +381,6 @@ mod tests {
         for name in ALWAYS_VALUED_AGGREGATES {
             assert!(!NULL_ON_FEW_ROWS.contains(name), "{name} is in both lists");
         }
-    }
-
-    #[test]
-    fn postgres_definitions_take_precedence() {
-        let info = lookup("STDDEV").expect("STDDEV is known");
-        assert!(matches!(
-            info.returns(SqlDialect::MySql),
-            Some(Returns::Sql("DOUBLE"))
-        ));
-        assert!(matches!(
-            info.returns(SqlDialect::Postgres),
-            Some(Returns::Mean)
-        ));
     }
 
     #[test]

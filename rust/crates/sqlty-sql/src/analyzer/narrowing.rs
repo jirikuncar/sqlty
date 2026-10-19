@@ -24,7 +24,7 @@ use super::hashing::ExprKey;
 use super::json::is_null_literal;
 use super::nullability::{rows_pass_where, Facts, Nullability};
 use super::query::Analyzer;
-use super::registry::lookup;
+use super::registry::FunctionInfo;
 use super::scope::Scope;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
@@ -530,7 +530,7 @@ impl<'a> Analyzer<'a> {
             Expr::Function(func) => {
                 learned.exprs.insert(ExprKey::of(expr));
                 if func.over.is_none()
-                    && lookup(&function_name(func)).is_some_and(|info| info.is_strict(self.dialect))
+                    && FunctionInfo::is_strict(&function_name(func), self.dialect)
                 {
                     for arg in positional_args(&func.args) {
                         learned = learned.union(self.proven(arg, scope));

@@ -1,0 +1,28 @@
+# SQLite date and time functions.
+
+[[function]]
+id = "sqlite.datetime.bigint"
+function = "UNIXEPOCH"
+dialects = ["sqlite"]
+type = "BIGINT"
+nullability = "strict"
+reference = "SQLite documentation, Date And Time Functions"
+reasoning = "The function returns an integer."
+
+[[function]]
+id = "sqlite.datetime.double"
+function = "JULIANDAY"
+dialects = ["sqlite"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "SQLite documentation, Date And Time Functions"
+reasoning = "The function returns a floating-point value."
+
+[[function]]
+id = "sqlite.datetime.text"
+functions = ["DATE", "TIME", "DATETIME", "STRFTIME", "TIMEDIFF"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "strict"
+reference = "SQLite documentation, Date And Time Functions"
+reasoning = "Each of these returns text."

@@ -1,0 +1,10 @@
+# PostgreSQL comparison functions.
+
+[[function]]
+id = "postgres.comparison.int"
+functions = ["NUM_NONNULLS", "NUM_NULLS"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.2 Comparison Functions and Operators, Table 9.3 Comparison Functions"
+reasoning = "The documentation gives each of these an `integer` result."
