@@ -24,9 +24,21 @@ pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
             | SetExpr::Update(inner)
             | SetExpr::Delete(inner)
             | SetExpr::Merge(inner) => statement_returns_rows(inner),
-            _ => true,
+            body => !selects_into(body),
         },
         _ => returning(stmt).is_some(),
+    }
+}
+
+/// Whether a query stores its rows instead of returning them: PostgreSQL's
+/// `SELECT ... INTO table`, MySQL's `SELECT ... INTO @variable`. Only the first `SELECT` of
+/// a set operation may have `INTO`.
+pub(super) fn selects_into(body: &SetExpr) -> bool {
+    match body {
+        SetExpr::Select(select) => select.into.is_some(),
+        SetExpr::SetOperation { left, .. } => selects_into(left),
+        SetExpr::Query(query) => selects_into(&query.body),
+        _ => false,
     }
 }
 
