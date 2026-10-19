@@ -191,6 +191,27 @@ SELECT * FROM regexp_matches('abc', '(b)(c)', 'g') AS m, string_to_table('a,,b',
 -- columns: piece: str | None (TEXT)
 ```
 
+## Functions with OUT parameters
+
+A built-in function that returns `record` through OUT parameters, such as
+`ts_stat` or `pg_stat_file`, has those as its columns. Each can be NULL:
+
+```sql
+SELECT s.word, s.ndoc FROM ts_stat('SELECT to_tsvector(''a b'')') AS s
+-- columns: word: str | None (TEXT)
+-- columns: ndoc: int | None (INT)
+```
+
+```sql
+SELECT * FROM pg_stat_file('postmaster.pid')
+-- columns: size: int | None (BIGINT)
+-- columns: access: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: modification: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: change: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: creation: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: isdir: bool | None (BOOLEAN)
+```
+
 ## Other functions
 
 Any other function in `FROM` is one row source with one column of its result, as

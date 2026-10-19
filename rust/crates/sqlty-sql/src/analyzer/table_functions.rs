@@ -1,6 +1,7 @@
 //! Built-in functions read as row sources in `FROM`: `generate_series`, `unnest`, the JSON
-//! `*_each` and `*_array_elements` families, SQLite's `json_each`, and in PostgreSQL any
-//! other function a rule types, as one column.
+//! `*_each` and `*_array_elements` families, SQLite's `json_each`, the PostgreSQL functions
+//! that return `record` through OUT parameters, and in PostgreSQL any other function a rule
+//! types, as one column.
 
 use sqlparser::ast::{
     DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
@@ -15,6 +16,7 @@ use super::functions::{function_name, positional_args, Returns};
 use super::grouping::is_aggregate_call;
 use super::names::table_key;
 use super::nullability::{Facts, Nullability};
+use super::pg_record_functions::record_columns;
 
 use super::query::{rename_columns, Analyzer, Column};
 use super::scope::Scope;
@@ -253,6 +255,12 @@ impl Analyzer<'_> {
                 column("key", "TEXT", non_null),
                 column("value", "TEXT", nullable),
             ])),
+            _ if let Some(columns) = record_columns(name) => Some(named(
+                columns
+                    .iter()
+                    .map(|&(column_name, sql)| column(column_name, sql, nullable))
+                    .collect(),
+            )),
             _ => {
                 // Any other function in `FROM` gives a column of its result, named after it.
                 let call = Expr::Function(Function {
