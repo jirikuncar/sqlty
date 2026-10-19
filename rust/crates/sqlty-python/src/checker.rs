@@ -466,9 +466,10 @@ impl Checker<'_> {
             .infer(sql_content)
             .map(|current| self.spelling.respell(current))
         {
-            if !refines_tuple(annotated, &current) {
+            let spelled = spell_unions(annotated);
+            if !refines_tuple(&spelled, &current) {
                 self.report_fix(
-                    if admits_tuple(annotated, &current) {
+                    if admits_tuple(&spelled, &current) {
                         Rule::StaleType
                     } else {
                         Rule::NarrowType
@@ -482,7 +483,7 @@ impl Checker<'_> {
                     vec![Edit::new(call.annotation.clone(), current.clone())],
                 );
             }
-            for (rule, message) in literal_findings(annotated, &current) {
+            for (rule, message) in literal_findings(&spelled, &current) {
                 self.report(rule, message, line);
             }
         }
@@ -803,6 +804,69 @@ fn split_top(text: &str, sep: char) -> Vec<&str> {
     parts
 }
 
+/// The members of a tuple item, with `Optional[X]`, `Union[A, B]` and a quoted annotation
+/// spelled out: `Optional[str]` and `"str | None"` are `["str", "None"]`.
+fn union_members(item: &str) -> Vec<&str> {
+    let parts = split_top(item, '|');
+    if parts.len() > 1 {
+        return parts.into_iter().flat_map(union_members).collect();
+    }
+    let item = item.trim();
+    let quoted = ['"', '\''].iter().find_map(|&quote| {
+        item.strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+    });
+    if let Some(inner) = quoted {
+        return union_members(inner);
+    }
+    let bare = item.strip_prefix("typing.").unwrap_or(item);
+    if let Some(inner) = bare
+        .strip_prefix("Optional[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        let mut members = union_members(inner);
+        members.push("None");
+        return members;
+    }
+    if let Some(inner) = bare
+        .strip_prefix("Union[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        return split_top(inner, ',')
+            .into_iter()
+            .flat_map(union_members)
+            .collect();
+    }
+    vec![item]
+}
+
+/// `annotated` with each `Optional[X]`, `Union[A, B]` or quoted item spelled `A | B | None`,
+/// as sqlty writes it.
+fn spell_unions(annotated: &str) -> String {
+    let Some(items) = tuple_items(annotated) else {
+        return annotated.to_string();
+    };
+    let items: Vec<String> = items
+        .iter()
+        .map(|item| {
+            let members = union_members(item);
+            let mut spelled: Vec<&str> = members.iter().copied().filter(|m| *m != "None").collect();
+            if spelled.len() < members.len() {
+                spelled.push("None");
+            }
+            spelled.join(" | ")
+        })
+        .collect();
+    format!("tuple[{}]", items.join(", "))
+}
+
+/// Whether two tuple items are the same union, in any order and spelling.
+fn same_union(annotated: &str, inferred: &str) -> bool {
+    let (ours, theirs) = (union_members(annotated), union_members(inferred));
+    ours.iter().all(|member| theirs.contains(member))
+        && theirs.iter().all(|member| ours.contains(member))
+}
+
 fn literal_member(text: &str) -> Option<Lit> {
     let Some(quote) = text.chars().next().filter(|c| matches!(c, '\'' | '"')) else {
         return text.parse().ok().map(Lit::Int);
@@ -977,6 +1041,7 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
             ours.iter().zip(&theirs).all(|(a, i)| {
                 let base = i.split('[').next().unwrap_or(i);
                 a == i
+                    || same_union(a, i)
                     || covers_literal(a, i)
                     || literal_pair(a, i).is_some_and(|pair| pair.same_nullability)
                     || *i == "typing.Any"
@@ -1012,7 +1077,7 @@ fn admits_tuple(annotated: &str, inferred: &str) -> bool {
         }
     }
     fn admits(annotated: &str, inferred: &str) -> bool {
-        let members = split_top(annotated, '|');
+        let members = union_members(annotated);
         members
             .iter()
             .any(|m| matches!(*m, "typing.Any" | "Any" | "object"))
@@ -1022,9 +1087,10 @@ fn admits_tuple(annotated: &str, inferred: &str) -> bool {
             })
     }
     match (tuple_items(annotated), tuple_items(inferred)) {
-        (Some(ours), Some(theirs)) => {
-            ours.len() == theirs.len() && ours.iter().zip(&theirs).all(|(a, i)| admits(a, i))
-        }
+        (Some(ours), Some(theirs)) => match ours.as_slice() {
+            [each, "..."] => theirs.iter().all(|i| admits(each, i)),
+            _ => ours.len() == theirs.len() && ours.iter().zip(&theirs).all(|(a, i)| admits(a, i)),
+        },
         _ => false,
     }
 }
