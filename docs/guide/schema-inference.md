@@ -312,6 +312,7 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
 - `ALTER TABLE`: add, drop and rename columns, change a column type, set or drop
   `NOT NULL`, rename the table. A change to a table reaches the tables that
   inherit from it or are its partitions.
+- MySQL's `RENAME TABLE a TO b, c TO d` renames each table in turn.
 - `ALTER TYPE ... ADD VALUE` and `RENAME VALUE` change an enum's `Literal`.
 - `DROP TABLE`, `VIEW`, `TYPE`, `DOMAIN`, `FUNCTION` and `SCHEMA`.
 - `PARTITION OF`, `INHERITS` and `LIKE` give a table its parent's columns.

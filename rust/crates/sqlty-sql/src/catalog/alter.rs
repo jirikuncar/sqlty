@@ -392,7 +392,7 @@ pub(super) fn changes_columns(action: &[String], mentions_type: bool) -> bool {
             word(1),
             "constraint" | "primary" | "unique" | "check" | "foreign" | "exclude"
         ),
-        "rename" => word(1) != "constraint",
+        "rename" => !matches!(word(1), "constraint" | "index" | "key"),
         "alter" => mentions_type,
         "set" => word(1) == "schema",
         "of" => true,
