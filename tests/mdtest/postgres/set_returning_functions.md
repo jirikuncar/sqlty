@@ -88,7 +88,21 @@ SELECT p.id, t FROM posts p CROSS JOIN LATERAL unnest(p.tags) WITH ORDINALITY AS
 -- columns: t: str | None (TEXT)
 ```
 
+A text search vector unnests into its lexemes, with their positions and weights:
+
+```sql
+SELECT * FROM unnest('cat:3 fat:2,4 rat:5A'::tsvector)
+-- columns: lexeme: str (TEXT)
+-- columns: positions: list[int] | None (ARRAY<SMALLINT>)
+-- columns: weights: list[str] | None (ARRAY<TEXT>)
+```
+
 ## JSON
+
+```sql
+SELECT * FROM jsonb_path_query('{"a": [1, 2]}', '$.a[*]')
+-- columns: jsonb_path_query: typing.Any (JSONB)
+```
 
 ```sql
 SELECT * FROM jsonb_array_elements('[1, 2]')
@@ -202,4 +216,14 @@ SELECT p.id, jt.* FROM posts p, JSON_TABLE(p.doc, '$.items[*]' COLUMNS (n FOR OR
 -- columns: id: int (INT)
 -- columns: n: int (INT)
 -- columns: name: str | None (TEXT)
+```
+
+## Input validation
+
+```sql
+SELECT * FROM pg_input_error_info('42000000000', 'integer')
+-- columns: message: str | None (TEXT)
+-- columns: detail: str | None (TEXT)
+-- columns: hint: str | None (TEXT)
+-- columns: sql_error_code: str | None (TEXT)
 ```

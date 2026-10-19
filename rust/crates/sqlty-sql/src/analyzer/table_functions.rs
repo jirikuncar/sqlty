@@ -172,6 +172,19 @@ impl Analyzer<'_> {
                 self.function_type(Returns::Series, args, scope)?,
                 non_null,
             ))),
+            "unnest" if args.len() == 1 && self.expr(args[0], scope)?.sql() == Some("TSVECTOR") => {
+                Some(named(vec![
+                    column("lexeme", "TEXT", non_null),
+                    column("positions", "ARRAY<SMALLINT>", nullable),
+                    column("weights", "ARRAY<TEXT>", nullable),
+                ]))
+            }
+            "pg_input_error_info" => Some(named(
+                ["message", "detail", "hint", "sql_error_code"]
+                    .into_iter()
+                    .map(|name| column(name, "TEXT", nullable))
+                    .collect(),
+            )),
             "unnest" => {
                 let mut columns = Vec::new();
                 for arg in args {
