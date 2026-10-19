@@ -101,7 +101,9 @@ know, and an expression it cannot type, such as arithmetic or `NULL`, make the
 row type unknown: the string is left as it is (`SQL[UNTYPED]` with
 [`untyped = "sentinel"`](untyped.md)) and `sqlty check` skips the column.
 Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
-wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
+wider type. MySQL converts each operand to a number first, as the server does:
+unsigned, `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles,
+so `text_col + 0` is `float`. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
 `greatest`, `unnest` and the advisory locks are typed too. In PostgreSQL, `CASE`,
 `COALESCE`, `GREATEST`, `LEAST`, `VALUES`, `ARRAY[...]` and `UNION` resolve one type
 for their inputs as the server does: string literals and `NULL` take the type of

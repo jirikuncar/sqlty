@@ -198,10 +198,13 @@ impl<'a> Analyzer<'a> {
                 self.access_typed(root, access_chain, scope)
             }
             Expr::UnaryOp {
-                op: UnaryOperator::Minus | UnaryOperator::Plus,
+                op: op @ (UnaryOperator::Minus | UnaryOperator::Plus),
                 expr: inner,
             } => match crate::values::constant(expr) {
                 Some(negative) => Ok(constant(negative)),
+                None if self.prefix_rule(op, inner, scope)?.is_some() => {
+                    self.prefix_op(op, inner, scope)
+                }
                 None => Ok(strip(self.expr(inner, scope)?, self.dialect)),
             },
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
