@@ -24,6 +24,7 @@ use super::inference::{
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::{split_access, table_key};
+use super::narrowing::Learned;
 use super::operators::operand_type;
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
@@ -908,12 +909,17 @@ impl<'a> Analyzer<'a> {
                 RuleNullability::NonNull => Nullability::NonNull,
                 // The right side is read where the left one is true (AND) or not true (OR).
                 RuleNullability::ShortCircuit => {
-                    let known = if *op == And {
-                        self.learn(left, true, scope)
-                    } else {
-                        self.learn_not_true(left, scope, facts)
+                    let left_nullability = of(left);
+                    let known = match op {
+                        And => self.learn(left, true, scope),
+                        // A left side that is never NULL is false where it is not true.
+                        _ if left_nullability == Nullability::NonNull => {
+                            self.learn(left, false, scope)
+                        }
+                        _ => Learned::default(),
                     };
-                    any_nullable([of(left), self.nullability(right, scope, &facts.with(known))])
+                    let right_nullability = self.nullability(right, scope, &facts.with(known));
+                    any_nullable([left_nullability, right_nullability])
                 }
                 RuleNullability::NonzeroDivisor if !is_nonzero_number(right) => {
                     Nullability::Nullable

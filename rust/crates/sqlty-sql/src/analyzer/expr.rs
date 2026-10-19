@@ -235,10 +235,13 @@ impl<'a> Analyzer<'a> {
                 expr: inner,
             } => match crate::values::constant(expr) {
                 Some(negative) => Ok(constant(negative)),
-                None if self.prefix_rule(op, inner, scope)?.is_some() => {
-                    self.prefix_op(op, inner, scope)
+                None => {
+                    let typed = self.expr(inner, scope)?;
+                    Ok(match self.prefix_rule_of(op, &typed) {
+                        Some(rule) => self.prefixed(rule, typed),
+                        None => strip(typed, self.dialect),
+                    })
                 }
-                None => Ok(strip(self.expr(inner, scope)?, self.dialect)),
             },
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa; a time
@@ -252,17 +255,14 @@ impl<'a> Analyzer<'a> {
                 })
             }
             Expr::Ceil { expr: inner, .. } | Expr::Floor { expr: inner, .. } => {
+                let typed = self.expr(inner, scope)?;
                 let returns = match self.dialect {
                     SqlDialect::MySql => Returns::Integral,
                     // SQLite returns an integer argument as it is.
-                    SqlDialect::Sqlite
-                        if self.expr(inner, scope)?.python.as_deref() == Some("int") =>
-                    {
-                        Returns::Arg(0)
-                    }
+                    SqlDialect::Sqlite if typed.python.as_deref() == Some("int") => Returns::Arg(0),
                     _ => Returns::Real,
                 };
-                self.function_type(returns, &[inner], scope)
+                self.function_type_of(returns, &[inner], &[Some(typed), None], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
                 Ok(from_sql_type("DECIMAL", self.dialect))
@@ -593,7 +593,9 @@ impl<'a> Analyzer<'a> {
                     )
                 }
                 FunctionType::Code => self.sum(argument()?, arg, scope)?,
-                FunctionType::Returns(returns) => self.function_type(returns, &args, scope)?,
+                FunctionType::Returns(returns) => {
+                    self.function_type_of(returns, &args, &typed, scope)?
+                }
             });
         }
         match name.as_str() {
