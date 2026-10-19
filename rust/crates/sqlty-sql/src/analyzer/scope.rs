@@ -259,7 +259,7 @@ pub(super) fn merges_columns(join: &Join) -> bool {
 }
 
 /// The constraint of a join, when its operator has one.
-fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
+pub(super) fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
     use JoinOperator::*;
     match &join.join_operator {
         Join(c)

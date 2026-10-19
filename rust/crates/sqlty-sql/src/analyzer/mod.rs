@@ -21,6 +21,7 @@ mod inference;
 mod json;
 mod literals;
 mod memo;
+mod merged_star;
 mod names;
 mod narrowing;
 mod nullability;

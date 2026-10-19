@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{Expr, Ident, TableWithJoins};
+use sqlparser::ast::{Expr, Ident};
 
 use crate::catalog::fold;
 use crate::diagnostics::NameRule;
@@ -16,7 +16,7 @@ use super::dialect::SqlDialect;
 use super::literals::value_set;
 use super::nullability::Nullability;
 use super::query::{Analyzer, Column};
-use super::scope::{any_merging_join, resolve, Scope, Source, Table};
+use super::scope::{resolve, Scope, Source, Table};
 use super::typed::Typed;
 use super::SchemaColumn;
 
@@ -532,12 +532,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Records why a `*` or `t.*` stayed unresolved.
-    pub(super) fn explain_star(
-        &self,
-        reference: Option<&str>,
-        scope: &Scope,
-        from: Option<&[TableWithJoins]>,
-    ) {
+    pub(super) fn explain_star(&self, reference: Option<&str>, scope: &Scope) {
         if !self.diag.enabled() {
             return;
         }
@@ -559,11 +554,6 @@ impl<'a> Analyzer<'a> {
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
                 );
             }
-        } else if from.is_some_and(any_merging_join) {
-            return self.diag.record(
-                NameRule::UnsupportedSyntax,
-                "`*` over a USING or NATURAL join merges columns, so it is not expanded",
-            );
         }
         if tables
             .iter()
