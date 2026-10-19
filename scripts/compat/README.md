@@ -71,6 +71,11 @@ It exits with status 1 on a type that differs, and lists the queries sqlty
 leaves untyped or can't parse. Run it against a new PostgreSQL release to
 find what sqlty doesn't know yet.
 
+`pg_record_functions.py` is not a comparison: it reads the columns of the built-in
+functions that return `record` through OUT parameters from `pg_proc`, and writes them to
+`rust/crates/sqlty-sql/src/analyzer/pg_record_functions.rs`. Run it against a new
+PostgreSQL release to pick up new functions, such as `pg_stat_file` or `ts_stat`.
+
 Every DDL spelling the ORMs write parses and has a type. Their remaining mismatches are
 converters above the driver, listed in `docs/guide/drivers-and-orms.md`: SQLite dates,
 booleans, decimals and UUIDs; UUIDs stored as `CHAR(32)`, `CHAR(36)` or `BINARY(16)`;

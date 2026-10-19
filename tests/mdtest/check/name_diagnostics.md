@@ -392,8 +392,9 @@ d = SQL[tuple[int]]("--sql\nSELECT id FROM (SELECT 1::INTEGER AS id) AS s")
 #### Table functions
 
 The built-in set-returning functions (`generate_series`, `unnest`, the JSON
-`*_each` and `*_array_elements` families) have known columns. The columns of
-another table function are not read, so a column taken from one is reported
+`*_each` and `*_array_elements` families, and the ones with OUT parameters such
+as `pg_get_keywords`) have known columns. The columns of another table function,
+such as PostGIS's `ST_Dump`, are not read, so a column taken from one is reported
 as unsupported, never as an unknown column or table.
 
 ```python
@@ -403,8 +404,10 @@ a = SQL[tuple[int]]("--sql\nSELECT g FROM generate_series(1, 3) AS g")
 b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
 # error:
 c = SQL[tuple[int | None]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
-# error: [unsupported-syntax] "column `word` may come from table function pg_get_keywords, which sqlty does not read the columns of"
-e = SQL[tuple[str]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error:
+e = SQL[tuple[str | None]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error: [unsupported-syntax] "column `path` may come from table function st_dump, which sqlty does not read the columns of"
+f = SQL[tuple[list[int]]]("--sql\nSELECT d.path FROM ST_Dump('POINT(0 0)') AS d")
 # error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger, which sqlty does not read the columns of"
 d = SQL[tuple[int]]("--sql\nSELECT tgrelid FROM pg_trigger")
 ```
@@ -710,8 +713,8 @@ x = SQL[tuple[int, str]]("--sql\nSELECT * FROM a")
 y = SQL[tuple[int, str]]("--sql\nSELECT a.* FROM a, generate_series(1, 3) AS g(x)")
 # error: [unsupported-syntax] "view column `opaque.day` is not typed by the view's query"
 z = SQL[tuple[int, object]]("--sql\nSELECT * FROM opaque")
-# error: [unsupported-syntax] "`*` reads table function pg_get_keywords, which sqlty does not read the columns of"
-w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, pg_get_keywords() AS k")
+# error: [unsupported-syntax] "`*` reads table function st_dump, which sqlty does not read the columns of"
+w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, ST_Dump(a.g) AS k")
 ```
 
 ## Functions and types the schema defines

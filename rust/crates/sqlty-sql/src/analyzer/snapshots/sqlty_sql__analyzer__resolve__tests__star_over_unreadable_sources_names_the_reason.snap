@@ -18,9 +18,9 @@ name: str | TEXT | NonNull
 note: str | TEXT | Nullable
 g: int | INT | NonNull
 
-SELECT * FROM users, pg_get_keywords() AS k
+SELECT * FROM users, ST_Dump(NULL) AS d
 *: ? | ? | Unknown
-[unsupported-syntax] `*` reads table function pg_get_keywords, which sqlty does not read the columns of
+[unsupported-syntax] `*` reads table function st_dump, which sqlty does not read the columns of
 
 SELECT nope.* FROM users
 *: ? | ? | Unknown

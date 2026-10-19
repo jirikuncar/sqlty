@@ -393,7 +393,7 @@ fn test_name_diagnostics_stay_quiet() {
     }
     // A table function's columns are not read, which is reported, not guessed.
     assert_eq!(
-        rules("SELECT word FROM pg_get_keywords() AS k"),
+        rules("SELECT path FROM ST_Dump(NULL) AS d"),
         ["unsupported-syntax"]
     );
 }
