@@ -1,10 +1,10 @@
 # Breaking: rule configuration
 
 `sqlty breaking` reports the diagnostics a query gets against the other schema but not
-against its own. It turns on the name rules (`unknown-table`, `unknown-column`,
-`ambiguous-column`, `unknown-function`, `unknown-type`, `insert-missing-column`) when
-the project leaves them unset, so a dropped name is reported even where `check` would
-not look. A rule the project configures keeps its configuration: a project ignores a
+against its own, with the rules `check` uses. The name rules (`unknown-table`,
+`unknown-column`, `ambiguous-column`, `unknown-function`, `unknown-type`,
+`insert-missing-column`) are on by default, so a dropped name is reported. A rule the
+project configures keeps its configuration: a project ignores a
 rule for a reason, such as functions of an extension the schema does not declare, and
 `breaking` must not overrule it. Severities in the CLI output and exit code are covered
 by `tests/e2e/test_breaking_e2e.py`.
@@ -38,8 +38,6 @@ slugs = "--sql\nSELECT slug(id) FROM users"
 
 ## A rule the project ignores stays ignored
 
-<!-- mdtest:xfail breaking forces an ignored name rule back to error -->
-
 The project ignores `unknown-function`; `breaking` reports nothing for it.
 
 ```toml
@@ -62,8 +60,6 @@ slugs = "--sql\nSELECT slug(id) FROM users"
 ```
 
 ## An ignored rule does not hide other rules
-
-<!-- mdtest:xfail breaking forces an ignored name rule back to error -->
 
 Ignoring `unknown-function` leaves `unknown-column` on.
 

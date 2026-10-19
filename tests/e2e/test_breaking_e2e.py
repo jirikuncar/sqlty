@@ -213,7 +213,6 @@ def drop_function(repo: Path, config: str = "") -> None:
 BACKWARD_GITHUB = ["--direction", "backward", "--output-format", "github"]
 
 
-@pytest.mark.xfail(reason="breaking forces unset name rules to error", strict=True)
 def test_unset_warn_rule_does_not_fail(cli: Cli, repo: Path) -> None:
     drop_function(repo)
 
@@ -222,7 +221,6 @@ def test_unset_warn_rule_does_not_fail(cli: Cli, repo: Path) -> None:
     assert (result.returncode, result.stdout) == (0, SLUG_WARNING), result.stderr
 
 
-@pytest.mark.xfail(reason="breaking exits 1 and annotates as error at any severity", strict=True)
 def test_configured_warn_rule_does_not_fail(cli: Cli, repo: Path) -> None:
     drop_function(repo, '\n[tool.sqlty.rules]\nunknown-function = "warn"\n')
 
@@ -231,7 +229,6 @@ def test_configured_warn_rule_does_not_fail(cli: Cli, repo: Path) -> None:
     assert (result.returncode, result.stdout) == (0, SLUG_WARNING), result.stderr
 
 
-@pytest.mark.xfail(reason="breaking forces an ignored name rule back to error", strict=True)
 def test_configured_ignore_holds(cli: Cli, repo: Path) -> None:
     drop_function(repo, '\n[tool.sqlty.rules]\nunknown-function = "ignore"\n')
 
@@ -240,9 +237,6 @@ def test_configured_ignore_holds(cli: Cli, repo: Path) -> None:
     assert (result.returncode, result.stdout) == (0, ""), result.stderr
 
 
-@pytest.mark.xfail(
-    reason="breaking forces a rule ignored by an override back to error", strict=True
-)
 def test_override_ignore_holds_for_its_paths(cli: Cli, repo: Path) -> None:
     (repo / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "schema.sql"\n\n'

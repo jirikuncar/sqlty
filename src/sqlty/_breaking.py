@@ -81,7 +81,7 @@ def report(
     output_format: Literal["text", "json", "github"] = "text",
 ) -> None:
     """Print each finding: ``path:line: [rule] message (direction)``, a JSON array with a
-    ``direction`` per finding, or GitHub Actions annotations, all errors."""
+    ``direction`` per finding, or GitHub Actions annotations at each finding's severity."""
     import json
 
     from sqlty._cli import github_annotation
@@ -101,7 +101,7 @@ def report(
         d = finding.diagnostic
         message = f"{d['message']} ({finding.direction}: {titles[finding.direction]})"
         if output_format == "github":
-            print(github_annotation(finding.path, {**d, "message": message, "severity": "error"}))
+            print(github_annotation(finding.path, {**d, "message": message}))
         else:
             print(f"{finding.path}:{d.get('line', '')}: [{d['rule']}] {message}")
     if findings and output_format == "text":
@@ -200,5 +200,5 @@ def main(args: argparse.Namespace) -> None:
     except GitError as exc:
         raise ConfigError(str(exc)) from exc
     report(findings, args.against, args.head, args.quiet, args.output_format)
-    if findings:
+    if any(f.diagnostic["severity"] == "error" for f in findings):
         sys.exit(EXIT_FOUND)

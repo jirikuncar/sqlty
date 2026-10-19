@@ -227,8 +227,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json", "github"],
         default="text",
         help="How findings are printed: text (the default), json (an array of objects with "
-        "file, line, rule, severity, message and direction) or github (GitHub Actions error "
-        "annotations)",
+        "file, line, rule, severity, message and direction) or github (GitHub Actions "
+        "annotations, each at its severity)",
     )
 
     # --- rule ---

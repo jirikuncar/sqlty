@@ -435,16 +435,6 @@ def check_source(
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 
-# The name rules `breaking` turns on: a schema change shows up as a name that no longer
-# resolves, or an INSERT that no longer sets every required column.
-BREAKING_RULES = (
-    "unknown-table",
-    "unknown-column",
-    "ambiguous-column",
-    "unknown-function",
-    "unknown-type",
-    "insert-missing-column",
-)
 CODE_RULES = ("stale-rewrite", "unused-ignore")
 
 
@@ -464,9 +454,10 @@ def breaking_source(
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
 
-    Both checks enable the name rules of ``BREAKING_RULES`` on top of ``rules``, so a
+    Both checks apply ``rules`` as ``check_source`` does, so with the default severities a
     dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
-    leaves out, are reported, besides the row type checks. An annotation wider than the
+    leaves out, are reported, besides the row type checks; a rule set to ``"ignore"``
+    stays off. An annotation wider than the
     other schema's rows (``str | None`` for a ``NOT NULL`` column) still reads them, so it
     is not reported. Nor are ``CODE_RULES``, which judge the code rather than the schema.
 
@@ -476,9 +467,6 @@ def breaking_source(
         >>> [d["message"] for d in breaking_source('q = "--sql\\\\nSELECT bio FROM users"', schema_sql=old, against_sql=new)]
         ['column `bio` does not exist in `users`']
     """
-    rules = (rules or {}) | {
-        name: "error" for name in BREAKING_RULES if (rules or {}).get(name, "ignore") == "ignore"
-    }
     parsed = ParsedSource.of(source, module)
 
     def check(schema: str | Schema | None) -> list[Diagnostic]:
