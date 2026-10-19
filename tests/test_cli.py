@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+import contextlib
 import json
 import logging
 import os
@@ -1291,6 +1293,26 @@ def test_a_file_that_is_not_utf8_is_skipped(tmp_path, monkeypatch, caplog, comma
     assert "latin1.py: not UTF-8" in caplog.text
     if command == "rewrite":
         assert (tmp_path / "ok.py").read_text().startswith("from sqlty import SQL")
+
+
+@pytest.mark.parametrize("command", ["rewrite", "strip", "check --fix"])
+def test_a_byte_order_mark_and_crlf_line_endings_are_kept(tmp_path, monkeypatch, command) -> None:
+    source = 'q = "--sql\\nSELECT id::INTEGER FROM users"\r\nr = 1\r\n'
+    if command == "strip":
+        source = 'from sqlty import SQL\r\nq = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")\r\n'
+    elif command == "check --fix":
+        source = 'q = "--sql SELECT id::INTEGER FROM users"\r\nr = 1\r\n'
+    path = tmp_path / "q.py"
+    path.write_bytes(codecs.BOM_UTF8 + source.encode())
+    monkeypatch.chdir(tmp_path)
+
+    with contextlib.suppress(SystemExit):
+        main([*command.split(), "q.py"])
+    written = path.read_bytes()
+    assert written != codecs.BOM_UTF8 + source.encode()
+    assert written.startswith(codecs.BOM_UTF8)
+    assert written.count(b"\r\n") == written.count(b"\n")
+    assert codecs.BOM_UTF8 not in written[3:]
 
 
 def test_skill_prints_lists_and_installs(tmp_path, capsys, caplog) -> None:
