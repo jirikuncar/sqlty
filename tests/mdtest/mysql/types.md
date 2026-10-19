@@ -473,3 +473,49 @@ SELECT e.id, e.kind, e.day, h.id, d.id FROM events e, hits h, dumped d
 -- columns: id: int (INT)
 -- columns: id: int (INT)
 ```
+
+## A mysqldump schema
+
+`mysqldump --no-data` wraps views and newer options in executable comments
+(`/*!50001 ... */`), which MySQL runs and other servers skip. They are read as
+MySQL reads them: a view is first created as a placeholder of literal columns,
+then replaced with its query, after its `ALGORITHM`, `DEFINER` and `SQL SECURITY`
+options and with its `WITH CHECK OPTION`.
+
+`schema.sql`:
+
+```sql
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+DROP TABLE IF EXISTS `users`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `users` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `home` point NOT NULL /*!80003 SRID 4326 */,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+DROP TABLE IF EXISTS `named`;
+/*!50001 DROP VIEW IF EXISTS `named`*/;
+/*!50001 CREATE VIEW `named` AS SELECT
+ 1 AS `id`,
+ 1 AS `name`*/;
+/*!50001 DROP VIEW IF EXISTS `named`*/;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `named` AS select `users`.`id` AS `id`,`users`.`name` AS `name` from `users` */
+/*!50002 WITH CASCADED CHECK OPTION */;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT n.id, n.name, u.home FROM named n JOIN users u ON u.id = n.id
+-- columns: id: int (UBIGINT)
+-- columns: name: str (VARCHAR(100))
+-- columns: home: bytes (POINT)
+```

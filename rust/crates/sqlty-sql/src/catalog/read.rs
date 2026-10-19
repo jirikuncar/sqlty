@@ -121,7 +121,9 @@ pub(super) fn read_statements(
                 push(OpKind::Type(name, def));
             }
         } else if stmt.creates("view") {
-            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
+            let parsed = parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_ddl(&stmt.without_check_option()?, dialect));
+            match parsed.and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view))),
                 _ => {
                     skipped.push(("view", stmt.view_name()));
