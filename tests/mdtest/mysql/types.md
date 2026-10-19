@@ -436,3 +436,40 @@ SELECT v.a, v.b FROM (VALUES ROW((SELECT max(id) FROM t), (SELECT name FROM t LI
 -- columns: a: int | None (INT)
 -- columns: b: str | None (VARCHAR(10))
 ```
+
+## Partitioned tables
+
+The `PARTITION BY` clause after the column list is read past, with or without the
+`/*!50100 ... */` that `SHOW CREATE TABLE` and `mysqldump` wrap it in.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (
+    id INT NOT NULL,
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('a', 'b')),
+    day DATE NOT NULL
+) ENGINE=InnoDB
+PARTITION BY RANGE COLUMNS(day) (
+    PARTITION p0 VALUES LESS THAN ('2025-01-01'),
+    PARTITION p1 VALUES LESS THAN MAXVALUE
+);
+CREATE TABLE hits (id INT NOT NULL) PARTITION BY HASH(id) PARTITIONS 4;
+CREATE TABLE dumped (id INT NOT NULL)
+/*!50100 PARTITION BY KEY (id) PARTITIONS 2 */;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT e.id, e.kind, e.day, h.id, d.id FROM events e, hits h, dumped d
+-- columns: id: int (INT)
+-- columns: kind: str (VARCHAR(10))
+-- columns: day: datetime.date (DATE)
+-- columns: id: int (INT)
+-- columns: id: int (INT)
+```

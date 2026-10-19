@@ -495,6 +495,22 @@ impl Statement<'_> {
         })
     }
 
+    /// The statement without the `PARTITION BY ...` that follows its column list, which
+    /// sqlparser does not read for MySQL; `None` when it has none.
+    pub(crate) fn without_partitioning(&self) -> Option<String> {
+        let pieces = &self.0;
+        let open = pieces.iter().position(|p| is_punct(p, "("))?;
+        let close = matching_paren(pieces, open)?;
+        let sig: Vec<usize> = (close + 1..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let at = sig.windows(2).find_map(|pair| {
+            (is_word(&pieces[pair[0]], "partition") && is_word(&pieces[pair[1]], "by"))
+                .then_some(pair[0])
+        })?;
+        Some(render(&pieces[..at]).trim_end().to_string())
+    }
+
     /// The statement without table constraints and column `CHECK` / `REFERENCES`
     /// clauses, or `None` when it has none to drop.
     pub(crate) fn without_constraints(&self) -> Option<String> {
@@ -819,6 +835,20 @@ mod tests {
             .as_deref(),
             Some("CREATE TABLE t (a INT DEFAULT 1)")
         );
+    }
+
+    #[test]
+    fn test_without_partitioning() {
+        let sql = "CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB \
+                   PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10))";
+        assert_eq!(
+            split_statements(sql, true)[0]
+                .without_partitioning()
+                .as_deref(),
+            Some("CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB")
+        );
+        let sql = "CREATE TABLE t (id INT)";
+        assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
     }
 
     fn first(sql: &str) -> Statement<'_> {
