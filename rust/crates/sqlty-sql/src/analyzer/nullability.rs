@@ -1116,6 +1116,10 @@ impl<'a> Analyzer<'a> {
         if name == "CURRENT_SETTING" && args.len() == 2 {
             return Nullability::Nullable;
         }
+        // `string_to_table`'s `null_string` makes the pieces equal to it NULL.
+        if name == "STRING_TO_TABLE" && args.len() == 3 {
+            return Nullability::Nullable;
+        }
         match name.as_str() {
             "NVL" if self.coalesces_checked_group(&args, scope, facts) => Nullability::NonNull,
             "NVL" => all_nullable(args.iter().map(|arg| of(arg))),
