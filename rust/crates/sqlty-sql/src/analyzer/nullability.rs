@@ -1087,8 +1087,17 @@ impl<'a> Analyzer<'a> {
         {
             return Nullability::NonNull;
         }
-        // SQLite's `total` is 0.0 over no rows.
-        if name == "TOTAL" && self.dialect == SqlDialect::Sqlite {
+        // SQLite's `total` is 0.0 over no rows, its JSON aggregates an empty array or object.
+        if self.dialect == SqlDialect::Sqlite
+            && matches!(
+                name.as_str(),
+                "TOTAL"
+                    | "JSON_GROUP_ARRAY"
+                    | "JSON_GROUP_OBJECT"
+                    | "JSONB_GROUP_ARRAY"
+                    | "JSONB_GROUP_OBJECT"
+            )
+        {
             return Nullability::NonNull;
         }
         // SQLite's two-argument MIN and MAX are scalar functions.
