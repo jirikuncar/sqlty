@@ -185,7 +185,7 @@ diagnostic and a summary:
 
 ```text
 queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
-Found 1 warning(s)
+Found 1 error(s)
 ```
 
 <!-- generated:cli-usage-check -->

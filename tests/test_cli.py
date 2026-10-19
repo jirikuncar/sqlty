@@ -187,9 +187,10 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
     )
     monkeypatch.chdir(tmp_path)
 
-    main(["check", "--explain", "q.py"])
-    out = capsys.readouterr().out.splitlines()
+    code, out, _ = _run(["check", "--explain", "q.py"], capsys)
+    out = out.splitlines()
 
+    assert code == 1
     assert out[:4] == [
         "q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
         "  total: type and nullability by inference rule postgres.aggregate.sum-integers",
@@ -198,10 +199,9 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
         "(sum ( smallint ) → bigint, sum ( integer ) → bigint)",
     ]
     assert out[4].startswith("q.py:3: [stale-type]")
-    assert out[5] == "Found 2 warning(s)"
+    assert out[5] == "Found 2 error(s)"
 
-    main(["check", "q.py"])
-    assert "inference rule" not in capsys.readouterr().out
+    assert "inference rule" not in _run(["check", "q.py"], capsys)[1]
 
 
 def test_check_reads_type_overrides(tmp_path, monkeypatch, capsys) -> None:
@@ -444,13 +444,19 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "bad.py").write_text(
         'from sqlty import SQL\nq = SQL[tuple[int, int]]("--sql\\nSELECT 1::INTEGER AS n")\n'
     )
+    (tmp_path / "wide.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int | None]]("--sql\\nSELECT 1::INTEGER AS n")\n'
+    )
     monkeypatch.chdir(tmp_path)
 
     assert _run(["check", "ok.py"], capsys)[0] == 0
-    # stale-type is a warning by default: reported, exit 0.
+    # stale-type is an error by default, a warning when the annotation admits every row.
+    assert _run(["check", "bad.py"], capsys)[0] == 1
+    assert _run(["check", "wide.py"], capsys)[0] == 0
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "warn"\n')
     assert _run(["check", "bad.py"], capsys)[0] == 0
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "error"\n')
-    assert _run(["check", "bad.py"], capsys)[0] == 1
+    assert _run(["check", "wide.py"], capsys)[0] == 1
 
 
 def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:

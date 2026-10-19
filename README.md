@@ -83,8 +83,9 @@ query = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
 ```
 
 `sqlty check --fix .` updates the type, and your type checker finds every
-caller that now needs a `None` check. `stale-type` is a warning by default; set
-`stale-type = "error"` under `[tool.sqlty.rules]` to fail CI on it
+caller that now needs a `None` check. `stale-type` is an error when the code
+can get rows its annotation doesn't admit, as here, and a warning when the
+annotation is only wider than it needs to be
 ([CI](https://jirikuncar.github.io/sqlty/recipes/ci/)). For rolling deploys,
 `sqlty breaking --against origin/main` exits 1 when old code breaks on the new
 schema or new code on the old one

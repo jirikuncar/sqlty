@@ -21,7 +21,7 @@ Configuration via pyproject.toml:
     select-star = "warn"                # default
     select-star-no-schema = "error"     # default
     stale-rewrite = "warn"              # default
-    stale-type = "warn"                 # default
+    stale-type = "error"                # default; "warn" for a wider annotation
     inline-sql-comment = "warn"         # default
     fstring-skipped = "warn"            # default
     tstring-skipped = "warn"            # default
@@ -158,7 +158,7 @@ RULES: dict[str, LintRule] = {
     ),
     "stale-type": LintRule(
         name="stale-type",
-        default_severity=Severity.WARN,
+        default_severity=Severity.ERROR,
         fixable=True,
         description="SQL[tuple[...]] type doesn't match current schema (drift)",
     ),
