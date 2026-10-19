@@ -82,6 +82,20 @@ impl SchemaColumn {
             None => from_sql_type(&self.sql_type, dialect),
         }
     }
+
+    /// The column's name as a result column: its spelling in the schema, without quotes.
+    /// MySQL and SQLite keep the declared case; PostgreSQL folds an unquoted name.
+    fn output_name(&self) -> String {
+        let ident = self.ident.as_str();
+        let unquoted =
+            [('"', '"'), ('`', '`'), ('[', ']')]
+                .into_iter()
+                .find_map(|(open, close)| {
+                    let inner = ident.strip_prefix(open)?.strip_suffix(close)?;
+                    Some(inner.replace(&format!("{close}{close}"), &close.to_string()))
+                });
+        unquoted.unwrap_or_else(|| ident.to_string())
+    }
 }
 
 /// `(kind, name)` of a schema table or view that could not be parsed.

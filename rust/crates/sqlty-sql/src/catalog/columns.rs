@@ -149,7 +149,8 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         name,
         ident: match column.name.quote_style {
             Some(_) => column.name.to_string(),
-            None => column.name.value.to_lowercase(),
+            None if dialect == SqlDialect::Postgres => column.name.value.to_lowercase(),
+            None => column.name.value.clone(),
         },
         ty,
         not_null,

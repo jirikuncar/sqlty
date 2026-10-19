@@ -525,10 +525,31 @@ impl<'a> Analyzer<'a> {
         };
         for (index, item) in items.iter().enumerate() {
             let (expr, name) = match item {
-                SelectItem::UnnamedExpr(expr) => match &texts {
-                    Some(texts) => (expr, text_column_name(expr, texts[index], self.dialect)),
-                    None => (expr, column_name(expr)),
-                },
+                SelectItem::UnnamedExpr(expr) => {
+                    let mut column = expr;
+                    while let Expr::Nested(inner) = column {
+                        column = inner;
+                    }
+                    // SQLite names a column reference as the source it reads names the column.
+                    let declared = match column {
+                        Expr::Identifier(ident) if self.dialect == SqlDialect::Sqlite => Some(
+                            self.source_column_name(column, scope)
+                                .unwrap_or_else(|| ident.value.clone()),
+                        ),
+                        Expr::CompoundIdentifier(parts) if self.dialect == SqlDialect::Sqlite => {
+                            self.source_column_name(column, scope)
+                                .or_else(|| parts.last().map(|ident| ident.value.clone()))
+                        }
+                        _ => None,
+                    };
+                    match (declared, &texts) {
+                        (Some(name), _) => (expr, name),
+                        (None, Some(texts)) => {
+                            (expr, text_column_name(expr, texts[index], self.dialect))
+                        }
+                        (None, None) => (expr, column_name(expr)),
+                    }
+                }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     (expr, alias_name(alias, self.dialect))
                 }
