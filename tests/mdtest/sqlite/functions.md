@@ -187,6 +187,18 @@ SELECT id & 3 AS a, id | 4 AS b, ~id AS c, name & 1 AS d, note | 1 AS e FROM eve
 -- columns: e: int | None (BIGINT)
 ```
 
+So do the shifts `<<` and `>>`.
+
+```sql
+SELECT id << 2 AS a, note >> 1 AS b, id << 1 | 1 AS c FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int | None (BIGINT)
+-- columns: c: int (BIGINT)
+-- rules: a: sqlite.bitwise / sqlite.bitwise
+-- rules: b: sqlite.bitwise / sqlite.bitwise
+-- rules: c: sqlite.bitwise / sqlite.bitwise
+```
+
 ## Branches of different types
 
 SQLite gives an expression no type: a `CASE` returns whichever branch's value
@@ -240,6 +252,14 @@ SELECT note IS name AS a, note IS NOT 'x' AS b, note IS NULL AS c FROM events
 -- columns: a: int (BOOLEAN)
 -- columns: b: int (BOOLEAN)
 -- columns: c: int (BOOLEAN)
+```
+
+`x ISNULL` is `x IS NULL`, and `x NOTNULL` is `x IS NOT NULL`.
+
+```sql
+SELECT note ISNULL AS a, note NOTNULL AS b FROM events WHERE name ISNULL
+-- columns: a: int (BOOLEAN)
+-- columns: b: int (BOOLEAN)
 ```
 
 ## Window frames with EXCLUDE
