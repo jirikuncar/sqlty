@@ -3,8 +3,8 @@
 //! SQLite's `a IS b`, MySQL's infix `MOD` and the comma-separated tables of its `UPDATE`,
 //! and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both from x, chars)`,
 //! `substring(x similar p escape e)`, the SQL/JSON clauses after a path, `json_array(SELECT
-//! ...)` and the XML functions' keywords. It runs only on a query that does not parse as
-//! written.
+//! ...)`, the XML functions' keywords and the order of XMLTABLE's column options. It runs
+//! only on a query that does not parse as written.
 
 use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
@@ -155,6 +155,8 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                     edits.push((tokens[j].start, end, String::new()));
                 }
             }
+        } else if call("XMLTABLE") {
+            edits.extend(xmltable_options(sql, &tokens, i + 1));
         } else if call("XMLEXISTS") {
             for j in arguments(&tokens, i + 1) {
                 if word(j, "PASSING") {
@@ -328,6 +330,59 @@ fn arguments(tokens: &[Token], open: usize) -> Vec<usize> {
         }
     }
     inside
+}
+
+/// The options of XMLTABLE's columns in the order sqlparser reads them, `PATH`, `DEFAULT`
+/// then `NOT NULL`, where PostgreSQL takes any order; a bare `NULL` is the default.
+fn xmltable_options(sql: &str, tokens: &[Token], open: usize) -> Vec<(usize, usize, String)> {
+    let word = |j: usize, name: &str| {
+        let token = &tokens[j];
+        token.kind == Kind::Word && sql[token.start..token.end].eq_ignore_ascii_case(name)
+    };
+    let inside = arguments(tokens, open);
+    let Some(columns) = inside.iter().position(|&j| word(j, "COLUMNS")) else {
+        return Vec::new();
+    };
+    let end = closing(tokens, open).map_or(sql.len(), |close| tokens[close].start);
+    let mut edits = Vec::new();
+    let mut rest = &inside[columns + 1..];
+    while !rest.is_empty() {
+        let comma = rest.iter().position(|&j| tokens[j].kind == Kind::Comma);
+        let (column, column_end) = match comma {
+            Some(k) => (&rest[..k], tokens[rest[k]].start),
+            None => (rest, end),
+        };
+        rest = comma.map_or(&[][..], |k| &rest[k + 1..]);
+        let mut options: Vec<(u8, usize)> = Vec::new();
+        for (k, &j) in column.iter().enumerate() {
+            let after = |name: &str| k > 0 && word(column[k - 1], name);
+            if word(j, "PATH") {
+                options.push((0, tokens[j].start));
+            } else if word(j, "DEFAULT") {
+                options.push((1, tokens[j].start));
+            } else if word(j, "NOT") && column.get(k + 1).is_some_and(|&n| word(n, "NULL")) {
+                options.push((2, tokens[j].start));
+            } else if word(j, "NULL") && !(after("PATH") || after("DEFAULT") || after("NOT")) {
+                options.push((3, tokens[j].start));
+            }
+        }
+        if options.is_sorted_by_key(|&(rank, _)| rank) && options.iter().all(|o| o.0 < 3) {
+            continue;
+        }
+        let mut clauses: Vec<(u8, &str)> = options
+            .iter()
+            .enumerate()
+            .map(|(k, &(rank, start))| {
+                let stop = options.get(k + 1).map_or(column_end, |&(_, next)| next);
+                (rank, sql[start..stop].trim())
+            })
+            .filter(|&(rank, _)| rank < 3)
+            .collect();
+        clauses.sort_by_key(|&(rank, _)| rank);
+        let text: Vec<&str> = clauses.into_iter().map(|(_, text)| text).collect();
+        edits.push((options[0].1, column_end, text.join(" ")));
+    }
+    edits
 }
 
 /// The token that closes the parenthesis opening at token `open`.
