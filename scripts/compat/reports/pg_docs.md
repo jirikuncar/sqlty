@@ -1,6 +1,6 @@
 # PostgreSQL 17 functions and operators
 
-2553 queries, `scripts/compat/pg_docs.py`: the examples of the documentation's function and operator tables, each `pg_proc` overload of a documented function, and each `pg_operator` operator. 2488 columns agree with the server.
+2553 queries, `scripts/compat/pg_docs.py`: the examples of the documentation's function and operator tables, each `pg_proc` overload of a documented function, and each `pg_operator` operator. 2514 columns agree with the server.
 
 ## Typed differently
 
@@ -22,29 +22,7 @@ None.
 
 ## Not parsed
 
-| Source | Query |
-|---|---|
-| functions-binarystring.html | `SELECT trim(both from '\x1234567890'::bytea, '\x9012'::bytea)` |
-| functions-comparison.html | `SELECT 2 BETWEEN SYMMETRIC 3 AND 1` |
-| functions-comparison.html | `SELECT 2 NOT BETWEEN SYMMETRIC 3 AND 1` |
-| functions-datetime.html | `SELECT timestamp '2001-02-16 20:38:40' at local` |
-| functions-datetime.html | `SELECT timestamp with time zone '2001-02-16 20:38:40-05' at local` |
-| functions-datetime.html | `SELECT time with time zone '05:34:17-05' at local` |
-| functions-info.html | `SELECT collation for ('foo'::text)` |
-| functions-info.html | `SELECT collation for ('foo' COLLATE "de_DE")` |
-| functions-info.html | `SELECT * FROM pg_input_error_info('42000000000', 'integer')` |
-| functions-json.html | `SELECT json_array(SELECT * FROM (VALUES(1),(2)) t)` |
-| functions-json.html | `SELECT JSON_EXISTS(jsonb '{"key1": [1,2,3]}', 'strict $.key1[*] ? (@ > $x)' PASSING 2 AS x)` |
-| functions-json.html | `SELECT JSON_EXISTS(jsonb '{"a": [1,2,3]}', 'lax $.a[5]' ERROR ON ERROR)` |
-| functions-json.html | `SELECT JSON_EXISTS(jsonb '{"a": [1,2,3]}', 'strict $.a[5]' ERROR ON ERROR)` |
-| functions-json.html | `SELECT JSON_QUERY(jsonb '[1,[2,3],null]', 'lax $[*][$off]' PASSING 1 AS off WITH CONDITIONAL WRAPPER)` |
-| functions-json.html | `SELECT JSON_QUERY(jsonb '{"a": "[1, 2]"}', 'lax $.a' OMIT QUOTES)` |
-| functions-json.html | `SELECT JSON_QUERY(jsonb '{"a": "[1, 2]"}', 'lax $.a' RETURNING int[] OMIT QUOTES ERROR ON ERROR)` |
-| functions-json.html | `SELECT JSON_VALUE(jsonb '[1,2]', 'strict $[$off]' PASSING 1 as off)` |
-| functions-json.html | `SELECT JSON_VALUE(jsonb '[1,2]', 'strict $[*]' DEFAULT 9 ON ERROR)` |
-| functions-string.html | `SELECT substring('Thomas' similar '%#"o_a#"_' escape '#')` |
-| functions-string.html | `SELECT trim(both from 'yxTomxx', 'xyz')` |
-| functions-textsearch.html | `select * from unnest('cat:3 fat:2,4 rat:5A'::tsvector)` |
+None.
 
 ## Examples rejected by the server
 

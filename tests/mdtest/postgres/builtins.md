@@ -363,3 +363,47 @@ SELECT box '(2,2),(0,0)' + point '(1,1)' AS moved, point '(0,0)' <-> point '(3,4
 -- columns: xor: str (BIT)
 -- columns: bits: str (VARBIT)
 ```
+
+## Syntax sqlparser does not read
+
+sqlparser rejects some PostgreSQL syntax. When a query does not parse, sqlty respells that
+syntax as an equivalent it does read, so the query is typed as PostgreSQL types it:
+
+| Syntax | Read as |
+|---|---|
+| `x BETWEEN SYMMETRIC a AND b` | `x BETWEEN a AND b` |
+| `ts AT LOCAL` | `ts AT TIME ZONE current_setting('TimeZone')` |
+| `COLLATION FOR (x)` | `pg_collation_for(x)` |
+| `trim(both from x, chars)` | `btrim(x, chars)` |
+| `substring(x similar p escape e)` | `substring(x from p for e)` |
+| `JSON_VALUE(x, path PASSING ... DEFAULT ... ON ERROR)` | `JSON_VALUE(x, path)`, keeping `RETURNING` |
+| `json_array(SELECT ...)` | `json_array((SELECT ...))` |
+
+```sql
+SELECT 2 BETWEEN SYMMETRIC 3 AND 1 AS swapped, timestamp '2001-02-16 20:38:40' at local AS local, collation for ('foo'::text) AS collation, trim(both from 'yxTomxx', 'xyz') AS trimmed, substring('Thomas' similar '%#"o_a#"_' escape '#') AS matched, JSON_VALUE(jsonb '[1,2]', 'strict $[$off]' PASSING 1 AS off RETURNING int DEFAULT 9 ON ERROR) AS value, json_array(SELECT 1) AS arr
+-- columns: swapped: bool (BOOLEAN)
+-- columns: local: datetime.datetime (TIMESTAMPTZ)
+-- columns: collation: str | None (TEXT)
+-- columns: trimmed: str (TEXT)
+-- columns: matched: str | None (TEXT)
+-- columns: value: int | None (INT)
+-- columns: arr: typing.Any (JSON)
+```
+
+```sql
+SELECT 2 NOT BETWEEN ASYMMETRIC 1 AND 3 AS outside, trim(leading from 'xxa', 'x') AS lead, trim(trailing from 'axx', 'x') AS trail, JSON_QUERY(jsonb '[1,[2,3],null]', 'lax $[*][$off]' PASSING 1 AS off WITH CONDITIONAL WRAPPER) AS wrapped, JSON_QUERY(jsonb '{"a": "[1, 2]"}', 'lax $.a' RETURNING int[] OMIT QUOTES ERROR ON ERROR) AS unquoted, JSON_EXISTS(jsonb '{"a": [1,2,3]}', 'lax $.a[5]' ERROR ON ERROR) AS found, 'at local' AS text -- at local
+-- columns: outside: bool (BOOLEAN)
+-- columns: lead: str (TEXT)
+-- columns: trail: str (TEXT)
+-- columns: wrapped: typing.Any (JSONB)
+-- columns: unquoted: list[int] | None (ARRAY<INT>)
+-- columns: found: bool (BOOLEAN)
+-- columns: text: typing.Literal['at local'] (None)
+```
+
+`UNKNOWN ON ERROR` makes `JSON_EXISTS` NULL on an error, so sqlty leaves that call to sqlparser:
+
+```python
+# error: [unparsed-query] "query does not parse: Expected: ), found: UNKNOWN at Line: 1, Column: 47"
+q = "--sql\nSELECT JSON_EXISTS(jsonb '[1]', 'strict $[5]' UNKNOWN ON ERROR)"
+```
