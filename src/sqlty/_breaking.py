@@ -273,12 +273,14 @@ def _worktree(root: Path, ref: str) -> Generator[Path]:
     """``ref`` checked out into a temporary worktree, removed on exit."""
     _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
     directory = Path(tempfile.mkdtemp(prefix="sqlty-breaking-"))
+    # Named like the repository, so its files have the module names they have there.
+    checkout = directory / root.name
     try:
-        _git(root, "worktree", "add", "--detach", "--quiet", str(directory), ref)
-        yield directory.resolve()
+        _git(root, "worktree", "add", "--detach", "--quiet", str(checkout), ref)
+        yield checkout.resolve()
     finally:
         with contextlib.suppress(GitError):
-            _git(root, "worktree", "remove", "--force", str(directory))
+            _git(root, "worktree", "remove", "--force", str(checkout))
         shutil.rmtree(directory, ignore_errors=True)
         with contextlib.suppress(GitError):
             _git(root, "worktree", "prune")
