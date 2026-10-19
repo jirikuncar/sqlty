@@ -1,7 +1,8 @@
-"""End-to-end tests for ``sqlty breaking``: two git revisions, checked across.
+"""End-to-end tests for ``sqlty breaking``: two revisions, checked across.
 
 The diagnostics themselves are specified by ``docs/guide/breaking-changes.md``; these
-cover the git side: revisions, worktree cleanup, directions, paths and exit codes."""
+cover the baselines (git revisions, snapshots, schema files), worktree cleanup,
+directions, paths and exit codes."""
 
 import json
 import subprocess
@@ -150,6 +151,7 @@ def test_output_formats(cli: Cli, repo: Path) -> None:
             "severity": "error",
             "line": 1,
             "direction": "forward",
+            "against": "HEAD~1",
         }
     ]
 
@@ -254,3 +256,91 @@ def test_override_ignore_holds_for_its_paths(cli: Cli, repo: Path) -> None:
     assert lines(result)[:-1] == [
         f"{BACKWARD}the queries of HEAD against the schema of the working tree)"
     ]
+
+
+def test_snapshot_gives_what_its_revision_gives(cli: Cli, repo: Path) -> None:
+    saved = cli(["breaking", "--head", "HEAD~1", "--save", "../v1.json"], {"cwd": repo})
+    assert (saved.returncode, saved.stdout) == (0, ""), saved.stderr
+    json_args = ["breaking", "--output-format", "json", "--against"]
+
+    from_ref = cli([*json_args, "HEAD~1"], {"cwd": repo})
+    from_snapshot = cli([*json_args, "../v1.json"], {"cwd": repo})
+
+    assert (from_ref.returncode, from_snapshot.returncode) == (1, 1), from_snapshot.stderr
+    assert [{**f, "against": "v1"} for f in json.loads(from_ref.stdout)] == [
+        {**f, "against": "v1"} for f in json.loads(from_snapshot.stdout)
+    ]
+    assert [f["direction"] for f in json.loads(from_snapshot.stdout)] == ["backward", "forward"]
+
+
+def test_directory_of_snapshots_checks_each_version(cli: Cli, repo: Path) -> None:
+    releases = repo.parent / "releases"
+    cli(["breaking", "--head", "HEAD~1", "--save", str(releases / "v1.json")], {"cwd": repo})
+    cli(["breaking", "--save", str(releases / "v2.json")], {"cwd": repo})
+
+    result = cli(["breaking", "--against", str(releases)], {"cwd": repo})
+
+    assert result.returncode == 1, result.stderr
+    assert lines(result) == [
+        f"{BACKWARD}the queries of v1 against the schema of the working tree)",
+        f"{FORWARD}the queries of the working tree against the schema of v1)",
+        "Found 2 breaking change(s)",
+    ]
+
+
+def test_snapshot_reads_the_schema_of_a_new_file_from_its_directory(cli: Cli, repo: Path) -> None:
+    cli(["breaking", "--head", "HEAD~1", "--save", "../v1.json"], {"cwd": repo})
+    (repo / "app" / "new.py").write_text(NEW_CODE)
+
+    result = cli(["breaking", "--against", "../v1.json", "--direction", "forward"], {"cwd": repo})
+
+    assert result.returncode == 1, result.stderr
+    assert lines(result)[:-1] == [
+        f"{FORWARD.replace('q.py', 'new.py')}the queries of the working tree against the schema of ../v1.json)",
+        f"{FORWARD}the queries of the working tree against the schema of ../v1.json)",
+    ]
+
+
+@pytest.mark.parametrize("schema", ["old.sql", "old"])
+def test_schema_files_are_checked_forward(cli: Cli, repo: Path, schema: str) -> None:
+    path = repo.parent / "old.sql" if schema == "old.sql" else repo.parent / "old" / "1.sql"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(OLD_SCHEMA)
+
+    result = cli(["breaking", "--against", f"../{schema}"], {"cwd": repo})
+
+    assert result.returncode == 1, result.stderr
+    assert lines(result)[:-1] == [
+        f"{FORWARD}the queries of the working tree against the schema of ../{schema})"
+    ]
+    assert result.stderr == f"sqlty: ../{schema} has no queries; skipping the backward check\n"
+
+
+def test_snapshot_baselines_need_no_repository(cli: Cli, repo: Path, tmp_path: Path) -> None:
+    cli(["breaking", "--head", "HEAD~1", "--save", "../v1.json"], {"cwd": repo})
+    project = tmp_path / "project"
+    (project / "app").mkdir(parents=True)
+    (project / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (project / "schema.sql").write_text(NEW_SCHEMA)
+    (project / "app" / "q.py").write_text(NEW_CODE)
+
+    result = cli(["breaking", "--against", str(repo.parent / "v1.json")], {"cwd": project})
+
+    assert result.returncode == 1, result.stderr
+    assert lines(result)[-1] == "Found 2 breaking change(s)"
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ([], "sqlty: error: sqlty breaking needs --against, --save or both"),
+        (["--against", "bad.json"], "sqlty: error: bad.json is not a sqlty snapshot of format 1"),
+        (["--against", "app"], "sqlty: error: app has no schema .sql files"),
+    ],
+)
+def test_baseline_errors(cli: Cli, repo: Path, args: list[str], message: str) -> None:
+    (repo / "bad.json").write_text("{}")
+
+    result = cli(["breaking", *args], {"cwd": repo})
+
+    assert (result.returncode, result.stderr.strip()) == (2, message)
