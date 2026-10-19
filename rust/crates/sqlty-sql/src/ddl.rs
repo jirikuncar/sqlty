@@ -337,6 +337,46 @@ impl Statement<'_> {
 
     /// Whether this is a `CREATE ... TABLE` with or without a column list, such as
     /// `CREATE TABLE p PARTITION OF parent DEFAULT`.
+    /// The name, module and arguments of SQLite's `CREATE VIRTUAL TABLE name USING module(...)`,
+    /// each argument as its significant tokens: `("docs", "fts5", [["title"], ["tokenize", "=", "'porter'"]])`.
+    pub(crate) fn virtual_table(&self) -> Option<(String, String, Vec<Vec<String>>)> {
+        let pieces = &self.0;
+        let sig: Vec<usize> = (0..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let word = |n: usize, w: &str| sig.get(n).is_some_and(|&at| is_word(&pieces[at], w));
+        if !(word(0, "create") && word(1, "virtual") && word(2, "table")) {
+            return None;
+        }
+        let first = if word(3, "if") { 6 } else { 3 };
+        let using = (first..sig.len()).find(|&n| word(n, "using"))?;
+        let name = render(&pieces[sig[first]..sig[using]]).trim().to_string();
+        let module = pieces.get(*sig.get(using + 1)?)?.1.to_string();
+        let Some(&open) = sig.get(using + 2).filter(|&&at| is_punct(&pieces[at], "(")) else {
+            return Some((name, module, Vec::new()));
+        };
+        let close = matching_paren(pieces, open)?;
+        let mut args = vec![Vec::new()];
+        let mut at = open + 1;
+        while at < close {
+            let piece = &pieces[at];
+            if is_punct(piece, ",") {
+                args.push(Vec::new());
+            } else if significant(piece) {
+                let end = if is_punct(piece, "(") {
+                    matching_paren(pieces, at)?
+                } else {
+                    at
+                };
+                args.last_mut()?.push(piece.1.to_string());
+                at = end;
+            }
+            at += 1;
+        }
+        args.retain(|arg| !arg.is_empty());
+        Some((name, module, args))
+    }
+
     pub(crate) fn is_create_table(&self) -> bool {
         let mut sig = self.0.iter().filter(|p| significant(p));
         sig.next().is_some_and(|p| is_word(p, "create"))

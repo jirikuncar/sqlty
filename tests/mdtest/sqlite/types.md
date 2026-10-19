@@ -164,3 +164,54 @@ SELECT * FROM users_backup
 -- columns: age: int | None (INT)
 -- columns: version: str | None (TEXT)
 ```
+
+## Virtual tables
+
+The `fts3`, `fts4`, `fts5`, `rtree` and `rtree_i32` modules declare their
+columns in `CREATE VIRTUAL TABLE`. An FTS column takes any value, so it has no
+type, like a column without one. The hidden `rank` of `fts5` is a REAL, the
+`docid` of `fts3` and `fts4` is the rowid; neither is part of `*`. An `rtree`
+table has an integer id, then coordinates that are never NULL (REAL, or INTEGER
+for `rtree_i32`), and `+` auxiliary columns without a type.
+
+`schema.sql`:
+
+```sql
+CREATE VIRTUAL TABLE docs USING fts5(title, body UNINDEXED, tokenize='porter unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS notes USING fts4(text, tokenize=porter);
+CREATE VIRTUAL TABLE boxes USING rtree(id, min_x, max_x, +label);
+CREATE VIRTUAL TABLE cells USING rtree_i32(id, x0, x1);
+```
+
+```sql
+SELECT * FROM docs
+-- columns: title: None ()
+-- columns: body: None ()
+```
+
+```sql
+SELECT rowid, rank FROM docs WHERE docs MATCH 'sqlite' ORDER BY rank
+-- columns: rowid: int (INT)
+-- columns: rank: float | None (FLOAT)
+```
+
+```sql
+SELECT docid, * FROM notes
+-- columns: docid: int (INT)
+-- columns: text: None ()
+```
+
+```sql
+SELECT * FROM boxes
+-- columns: id: int (INT)
+-- columns: min_x: float (FLOAT)
+-- columns: max_x: float (FLOAT)
+-- columns: label: None ()
+```
+
+```sql
+SELECT * FROM cells
+-- columns: id: int (INT)
+-- columns: x0: int (INT)
+-- columns: x1: int (INT)
+```

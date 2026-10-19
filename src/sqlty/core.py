@@ -245,6 +245,8 @@ def schema_skipped_objects(
     Example:
         >>> schema_skipped_objects("CREATE TABLE ok (id INT); CREATE VIEW v AS SELECT id FROM (")
         [('view', 'v')]
+        >>> schema_skipped_objects("CREATE VIRTUAL TABLE words USING spellfix1", dialect="sqlite")
+        [('table', 'words')]
     """
     return _schema_skipped_objects(schema_sql, dialect=dialect)
 
