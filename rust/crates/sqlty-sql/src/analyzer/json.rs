@@ -189,6 +189,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The shape of a JSON expression; `Any` when it is not known.
+    #[recursive::recursive]
     fn json_shape(&self, expr: &Expr, scope: &Scope) -> Inferred<JsonShape> {
         match expr {
             Expr::Nested(inner) => self.json_shape(inner, scope),

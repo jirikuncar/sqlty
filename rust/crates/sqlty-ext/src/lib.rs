@@ -187,7 +187,7 @@ fn load_schema(
     let dialect = dialect.0;
     let overrides = analyzer::TypeOverrides::new(&types.unwrap_or_default(), dialect)
         .map_err(PyValueError::new_err)?;
-    let loaded = py.detach(|| {
+    let loaded = detach(py, || {
         let (schema, skipped) = if overrides.is_empty() {
             analyzer::load_schema_with_skipped(schema_sql, dialect)
         } else {
@@ -294,7 +294,20 @@ fn infer_type(
     schema_sql: Option<SchemaArg>,
 ) -> Result<Option<String>, Error> {
     let dialect = dialect.0;
-    Ok(py.detach(|| analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref()))?)
+    Ok(detach(py, || {
+        analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref())
+    })?)
+}
+
+/// The stack the analyzer's recursion keeps free: it moves to a new stack of
+/// [`STACK_SEGMENT`] when less is left, so an expression nested `MAX_DEPTH` (1000) levels
+/// deep fits whatever thread calls it.
+const STACK_RED_ZONE: usize = 2 << 20;
+const STACK_SEGMENT: usize = 16 << 20;
+
+/// Runs `f` without the GIL, with at least [`STACK_RED_ZONE`] of stack.
+fn detach<T: Send, F: Send + FnOnce() -> T>(py: Python<'_>, f: F) -> T {
+    py.detach(|| stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, f))
 }
 
 include!(concat!(env!("OUT_DIR"), "/skills.rs"));
@@ -320,7 +333,7 @@ fn analyze_select(
     schema_sql: Option<SchemaArg>,
 ) -> Result<Option<Vec<ColumnTuple>>, Error> {
     let dialect = dialect.0;
-    let columns = py.detach(|| {
+    let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
     Ok(columns.map(|columns| {
@@ -349,7 +362,7 @@ fn explain_select(
     schema_sql: Option<SchemaArg>,
 ) -> Option<Vec<ColumnRulesTuple>> {
     let dialect = dialect.0;
-    let columns = py.detach(|| {
+    let columns = detach(py, || {
         analyzer::explain_select(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
     let tuple = |rule: analyzer::RuleRef| (rule.id, rule.reference, rule.reasoning);
@@ -385,7 +398,7 @@ fn analyze_columns(
     schema_sql: Option<SchemaArg>,
 ) -> Result<Option<Vec<NullableColumnTuple>>, Error> {
     let dialect = dialect.0;
-    let columns = py.detach(|| {
+    let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
     Ok(columns.map(|columns| {
@@ -448,7 +461,7 @@ fn analyze_params(
     schema_sql: Option<SchemaArg>,
 ) -> Option<Vec<ParamTuple>> {
     let dialect = dialect.0;
-    let params = py.detach(|| {
+    let params = detach(py, || {
         analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
     Some(
@@ -509,7 +522,7 @@ fn query_diagnostics(
     schema_sql: Option<SchemaArg>,
 ) -> Vec<(String, String)> {
     let dialect = dialect.0;
-    py.detach(|| {
+    detach(py, || {
         analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
             .1
             .into_iter()
@@ -528,7 +541,7 @@ fn schema_skipped_tables(
     dialect: DialectArg,
 ) -> Vec<String> {
     let dialect = dialect.0;
-    py.detach(|| skipped_objects(schema_sql, dialect, Some("table")))
+    detach(py, || skipped_objects(schema_sql, dialect, Some("table")))
         .into_iter()
         .map(|(_, name)| name)
         .collect()
@@ -544,7 +557,7 @@ fn schema_skipped_objects(
     dialect: DialectArg,
 ) -> Vec<(String, String)> {
     let dialect = dialect.0;
-    py.detach(|| skipped_objects(schema_sql, dialect, None))
+    detach(py, || skipped_objects(schema_sql, dialect, None))
 }
 
 fn skipped_objects<S: AsRef<str>>(
@@ -569,7 +582,7 @@ fn skipped_objects<S: AsRef<str>>(
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
 fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String> {
     let dialect = dialect.0;
-    py.detach(|| analyzer::parse_error(sql, dialect))
+    detach(py, || analyzer::parse_error(sql, dialect))
 }
 
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -579,7 +592,7 @@ fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String>
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
 fn returns_rows(py: Python<'_>, sql: &str, dialect: DialectArg) -> bool {
     let dialect = dialect.0;
-    py.detach(|| analyzer::returns_rows(sql, dialect))
+    detach(py, || analyzer::returns_rows(sql, dialect))
 }
 
 /// Rewrite Python source: "--sql\n..." -> SQL[T]("--sql\n...").
@@ -603,7 +616,7 @@ fn rewrite_source(
     keep_lines: bool,
 ) -> Result<String, Error> {
     let dialect = dialect.0;
-    py.detach(|| {
+    detach(py, || {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         Ok(rewriter::rewrite_source_with(source, &options, keep_lines))
@@ -619,7 +632,7 @@ fn rewrite_source(
 #[pyfunction]
 #[pyo3(signature = (source, *, import_style = None))]
 fn strip_source(py: Python<'_>, source: &str, import_style: Option<&str>) -> Result<String, Error> {
-    py.detach(|| {
+    detach(py, || {
         let style = ImportStyle::parse(import_style)?;
         Ok(rewriter::strip_source(source, &style))
     })
@@ -649,7 +662,7 @@ fn fix_source(
     suppressed: Option<rewriter::Suppressed>,
 ) -> Result<String, Error> {
     let dialect = dialect.0;
-    py.detach(|| {
+    detach(py, || {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
@@ -675,7 +688,9 @@ fn expand_star(
     schema_sql: Option<SchemaArg>,
 ) -> Option<String> {
     let dialect = dialect.0;
-    py.detach(|| analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref()))
+    detach(py, || {
+        analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref())
+    })
 }
 
 /// `(rule, message)` of `select-star` or `select-star-no-schema` for a query whose
@@ -693,8 +708,10 @@ fn select_star_finding(
     has_schema: bool,
 ) -> Option<(&'static str, String)> {
     let dialect = dialect.0;
-    py.detach(|| checker::select_star_finding(sql, dialect, has_schema))
-        .map(|(rule, message)| (rule.name(), message))
+    detach(py, || {
+        checker::select_star_finding(sql, dialect, has_schema)
+    })
+    .map(|(rule, message)| (rule.name(), message))
 }
 
 /// A finding of `check_source`, which Python reads as a dict.
@@ -737,7 +754,7 @@ fn check_source(
     any_calls: Vec<usize>,
 ) -> Result<Vec<DiagnosticOut>, Error> {
     let dialect = dialect.0;
-    py.detach(|| {
+    detach(py, || {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
@@ -767,7 +784,7 @@ fn wrapped_queries(
     source: &str,
     import_style: Option<&str>,
 ) -> Result<Vec<(usize, String, Option<String>)>, Error> {
-    py.detach(|| {
+    detach(py, || {
         let style = ImportStyle::parse(import_style)?;
         Ok(checker::wrapped_queries(source, &style))
     })
@@ -795,7 +812,7 @@ fn query_sites(
     import_style: Option<&str>,
     any_calls: Vec<usize>,
 ) -> Result<Vec<(usize, String, String)>, Error> {
-    py.detach(|| {
+    detach(py, || {
         let style = ImportStyle::parse(import_style)?;
         Ok(checker::query_sites(source, &style, &any_calls)
             .into_iter()
@@ -808,6 +825,8 @@ fn query_sites(
 /// module runs without the GIL on free-threaded builds.
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    recursive::set_minimum_stack_size(STACK_RED_ZONE);
+    recursive::set_stack_allocation_size(STACK_SEGMENT);
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(load_schema, m)?)?;
     m.add_class::<SchemaHandle>()?;

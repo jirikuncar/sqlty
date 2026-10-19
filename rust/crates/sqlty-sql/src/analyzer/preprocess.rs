@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, visit_expressions_mut, DataType, Expr, Function, FunctionArguments,
-    ObjectName, Statement,
+    ObjectName, Statement, Visit, Visitor,
 };
 use sqlparser::parser::Parser;
 
@@ -142,7 +142,7 @@ pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     let mut stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
-    if reject_unsupported(&stmts, dialect) {
+    if reject_unsupported(&stmts, dialect) || too_deep(&stmts) {
         return None;
     }
     if dialect == SqlDialect::Postgres {
@@ -434,6 +434,34 @@ pub(super) fn numbered_placeholders(sql: &str) -> String {
             None => caps[0].to_string(),
         })
         .into_owned()
+}
+
+/// How deep expressions may nest. sqlparser reads a chain such as `a OR b OR ...` without
+/// limit, and its depth bounds the stack and time the analysis takes.
+pub(super) const MAX_DEPTH: usize = 1000;
+
+/// Whether an expression of `stmts` nests deeper than [`MAX_DEPTH`].
+pub(super) fn too_deep(stmts: &[Statement]) -> bool {
+    struct Depth(usize);
+    impl Visitor for Depth {
+        type Break = ();
+
+        fn pre_visit_expr(&mut self, _expr: &Expr) -> ControlFlow<()> {
+            self.0 += 1;
+            if self.0 > MAX_DEPTH {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+
+        fn post_visit_expr(&mut self, _expr: &Expr) -> ControlFlow<()> {
+            self.0 -= 1;
+            ControlFlow::Continue(())
+        }
+    }
+    let mut depth = Depth(0);
+    stmts.iter().any(|stmt| stmt.visit(&mut depth).is_break())
 }
 
 /// Whether `stmts` use what sqlparser accepts but the dialect does not:

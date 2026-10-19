@@ -31,6 +31,7 @@ the Python packages sqlty depends on at runtime:
 | [PyO3](https://pyo3.rs) | The Python bindings of the Rust engine | MIT or Apache-2.0 |
 | [regex](https://github.com/rust-lang/regex) | Patterns in the source scanner and the SQL preprocessor | MIT or Apache-2.0 |
 | [rustc-hash](https://github.com/rust-lang/rustc-hash) | Hash maps of the schema catalog | MIT or Apache-2.0 |
+| [stacker](https://github.com/rust-lang/stacker), [recursive](https://github.com/orlp/recursive) | Stack for deeply nested expressions | MIT or Apache-2.0, MIT |
 | [thiserror](https://github.com/dtolnay/thiserror) | Error types | MIT or Apache-2.0 |
 | [serde](https://serde.rs), [toml](https://github.com/toml-rs/toml) | Reading the inference rules at build time | MIT or Apache-2.0 |
 | [pathspec](https://github.com/cpburnz/python-pathspec) | `.gitignore` and exclude patterns | MPL-2.0 |
