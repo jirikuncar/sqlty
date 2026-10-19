@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 85] = [
+const SQL_TYPES: [&str; 88] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -101,11 +101,14 @@ const SQL_TYPES: [&str; 85] = [
     "REGROLE",
     "BIT",
     "VARBIT",
+    "YEAR",
+    "ENUM",
+    "SET",
     "ARRAY",
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.
-const CLASSES: [(&str, &[&str]); 10] = [
+const CLASSES: [(&str, &[&str]); 11] = [
     (
         "@integer",
         &["SMALLINT", "TINYINT", "MEDIUMINT", "INT", "BIGINT"],
@@ -130,6 +133,10 @@ const CLASSES: [(&str, &[&str]); 10] = [
         &["UTINYINT", "USMALLINT", "UMEDIUMINT", "UINT", "UBIGINT"],
     ),
     ("@text", &["TEXT", "VARCHAR", "CHAR"]),
+    (
+        "@temporal",
+        &["DATE", "TIME", "DATETIME", "TIMESTAMP", "TIMESTAMPTZ"],
+    ),
     ("@json", &["JSON", "JSONB"]),
     ("@address", &["INET", "CIDR"]),
     ("@array", &["ARRAY"]),

@@ -1,6 +1,26 @@
 # MySQL mathematical functions.
 
 [[function]]
+id = "mysql.math.abs-integer"
+function = "ABS"
+dialects = ["mysql"]
+argument = ["BIT", "BOOLEAN"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ABS(X) Returns the absolute value of X); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer)"
+reasoning = "The absolute value of a `BIT` or `BOOLEAN` value is an integer."
+
+[[function]]
+id = "mysql.math.abs-double"
+function = "ABS"
+dialects = ["mysql"]
+argument = ["@temporal", "@text", "ENUM", "SET"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ABS(X) Returns the absolute value of X); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary)"
+reasoning = "The absolute value of a temporal value or a string is a double."
+
+[[function]]
 id = "mysql.math.argument-type"
 function = "MOD"
 dialects = ["mysql"]

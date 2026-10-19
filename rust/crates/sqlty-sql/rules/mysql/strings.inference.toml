@@ -84,11 +84,11 @@ reasoning = "Over binary strings the bit aggregates work bytewise and give a bin
 id = "mysql.numeric.round-integer"
 functions = ["ROUND", "TRUNCATE"]
 dialects = ["mysql"]
-argument = ["@integer"]
+argument = ["@integer", "@unsigned", "YEAR", "BIT", "BOOLEAN"]
 type = "BIGINT"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any integer type, the return type is always BIGINT; TRUNCATE() follows the same rules)"
-reasoning = "Rounding an integer gives a BIGINT."
+reasoning = "Rounding an integer, including an unsigned, `YEAR`, `BIT` or `BOOLEAN` value, gives a BIGINT."
 
 [[function]]
 id = "mysql.numeric.round-decimal"
