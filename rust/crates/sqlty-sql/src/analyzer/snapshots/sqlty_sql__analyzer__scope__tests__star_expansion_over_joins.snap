@@ -16,12 +16,17 @@ y: str | TEXT | Nullable
 shared: str | TEXT | NonNull
 
 SELECT * FROM a JOIN b USING (id)
-*: ? | ? | Unknown
-[unsupported-syntax] `*` over a USING or NATURAL join merges columns, so it is not expanded
+id: int | INT | NonNull
+x: str | TEXT | NonNull
+shared: str | TEXT | Nullable
+y: str | TEXT | Nullable
+shared: str | TEXT | NonNull
 
 SELECT * FROM a NATURAL JOIN b
-*: ? | ? | Unknown
-[unsupported-syntax] `*` over a USING or NATURAL join merges columns, so it is not expanded
+id: int | INT | NonNull
+shared: str | TEXT | NonNull
+x: str | TEXT | NonNull
+y: str | TEXT | Nullable
 
 SELECT a.*, b.y FROM a, b
 id: int | INT | NonNull
@@ -45,5 +50,9 @@ id: int | INT | Nullable
 z: str | TEXT | NonNull
 
 SELECT * FROM (a JOIN b USING (id)) JOIN c USING (id)
-*: ? | ? | Unknown
-[unsupported-syntax] `*` over a USING or NATURAL join merges columns, so it is not expanded
+id: int | INT | NonNull
+x: str | TEXT | NonNull
+shared: str | TEXT | Nullable
+y: str | TEXT | Nullable
+shared: str | TEXT | NonNull
+z: str | TEXT | NonNull
