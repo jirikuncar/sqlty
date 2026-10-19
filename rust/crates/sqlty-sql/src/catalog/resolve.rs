@@ -408,6 +408,7 @@ impl<'a> Resolver<'a> {
             has_default,
             primary_key: false,
             allowed_values: resolved.allowed_values.cloned(),
+            invisible: false,
         }
     }
 
@@ -422,6 +423,7 @@ impl<'a> Resolver<'a> {
                     .map(|c| {
                         let mut column = SchemaColumn {
                             primary_key: c.primary_key,
+                            invisible: c.invisible,
                             ..self.column(
                                 &c.name,
                                 &c.ident,

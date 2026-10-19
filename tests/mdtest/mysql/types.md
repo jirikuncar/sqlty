@@ -519,3 +519,43 @@ SELECT n.id, n.name, u.home FROM named n JOIN users u ON u.id = n.id
 -- columns: name: str (VARCHAR(100))
 -- columns: home: bytes (POINT)
 ```
+
+## Invisible columns
+
+An `INVISIBLE` column is read by name only: `SELECT *` and a view over it leave it out.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (
+    id INT NOT NULL,
+    secret VARCHAR(64) NOT NULL INVISIBLE,
+    note TEXT /*!80023 INVISIBLE */,
+    name TEXT NOT NULL
+);
+CREATE VIEW everything AS SELECT * FROM accounts;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM accounts
+-- expanded: SELECT id, name FROM accounts
+```
+
+```sql
+SELECT * FROM everything
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+```
+
+```sql
+SELECT a.*, a.secret FROM accounts a
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: secret: str (VARCHAR(64))
+```
