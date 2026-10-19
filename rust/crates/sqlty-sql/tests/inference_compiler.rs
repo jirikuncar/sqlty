@@ -387,3 +387,76 @@ fn parameter_types_are_generated_and_checked() {
         "{message}"
     );
 }
+
+fn function(id: &str, dialect: &str, name: &str) -> String {
+    format!(
+        "[[function]]\nid = {id:?}\nfunction = {name:?}\ndialects = [{dialect:?}]\ntype = \"TEXT\"\nnullability = \"strict\"\n\
+         reference = \"Reference\"\nreasoning = \"Reason.\"\n"
+    )
+}
+
+fn extended(dialects: &str, files: &[(&str, String)]) -> Result<String, String> {
+    let mut files: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, text)| (path.to_string(), text.clone()))
+        .collect();
+    files.push(("rules/dialects.toml".to_string(), dialects.to_string()));
+    compile(&files)
+}
+
+#[test]
+fn an_extending_dialect_reads_the_first_dialect_with_rules_for_a_name() {
+    let dialects = "[generic]\nextends = [\"postgres\", \"mysql\"]\nreasoning = \"Reason.\"\n";
+    let code = extended(
+        dialects,
+        &[
+            (
+                "rules/postgres/a.inference.toml",
+                function("pg.both", "postgres", "BOTH"),
+            ),
+            (
+                "rules/mysql/a.inference.toml",
+                function("my.both", "mysql", "BOTH") + &function("my.only", "mysql", "ONLY"),
+            ),
+        ],
+    )
+    .unwrap();
+    let dialects_of = |id: &str| {
+        let at = code.find(&format!("id: {id:?}")).unwrap();
+        let line = code[at..]
+            .lines()
+            .find(|l| l.contains("dialects:"))
+            .unwrap();
+        line.trim().to_string()
+    };
+    assert_eq!(
+        dialects_of("pg.both"),
+        r#"dialects: &[SqlDialect::Postgres, SqlDialect::Other("generic")],"#
+    );
+    assert_eq!(dialects_of("my.both"), "dialects: &[SqlDialect::MySql],");
+    assert_eq!(
+        dialects_of("my.only"),
+        r#"dialects: &[SqlDialect::MySql, SqlDialect::Other("generic")],"#
+    );
+    assert!(code.contains(r#"EXTENDING_DIALECTS: &[&str] = &["generic"];"#));
+}
+
+#[test]
+fn only_a_dialect_without_rules_extends_known_dialects() {
+    let message = extended(
+        "[postgres]\nextends = [\"mysql\"]\nreasoning = \"R.\"\n",
+        &[],
+    );
+    assert!(message
+        .unwrap_err()
+        .contains("[postgres] has rules of its own"));
+    let message = extended(
+        "[generic]\nextends = [\"oracle\"]\nreasoning = \"R.\"\n",
+        &[],
+    );
+    assert!(message
+        .unwrap_err()
+        .contains("extends unknown dialect \"oracle\""));
+    let message = extended("[generic]\nextends = []\nreasoning = \"R.\"\n", &[]);
+    assert!(message.unwrap_err().contains("must not be empty"));
+}

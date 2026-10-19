@@ -58,3 +58,12 @@ right = ["@numeric", "@unsigned"]
 type = "UBIGINT"
 reference = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators (Numeric evaluation produces an unsigned 64-bit integer)"
 reasoning = "Bit operations on numbers give an unsigned 64-bit integer."
+
+[[rule]]
+id = "mysql.bitwise.not"
+operator = "Prefix:BitwiseNot"
+dialects = ["mysql"]
+right = ["@numeric", "@unsigned"]
+type = "UBIGINT"
+reference = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators (Numeric evaluation produces an unsigned 64-bit integer)"
+reasoning = "`~` on a number gives an unsigned 64-bit integer."

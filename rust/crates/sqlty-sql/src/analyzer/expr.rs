@@ -204,25 +204,6 @@ impl<'a> Analyzer<'a> {
                 Some(negative) => Ok(constant(negative)),
                 None => Ok(strip(self.expr(inner, scope)?, self.dialect)),
             },
-            Expr::UnaryOp {
-                op: UnaryOperator::PGAbs | UnaryOperator::BitwiseNot,
-                expr: inner,
-            } if self.dialect == SqlDialect::Postgres => {
-                Ok(strip(self.expr(inner, scope)?, self.dialect))
-            }
-            Expr::UnaryOp {
-                op: UnaryOperator::BitwiseNot,
-                expr: inner,
-            } => {
-                let typed = self.expr(inner, scope)?;
-                Ok(match self.dialect {
-                    SqlDialect::Sqlite => from_sql_type("BIGINT", self.dialect),
-                    _ if typed.python.as_deref() == Some("int") => {
-                        from_sql_type("UBIGINT", self.dialect)
-                    }
-                    _ => Typed::UNKNOWN,
-                })
-            }
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa; a time
                 // of day becomes a `timetz` either way.
@@ -584,9 +565,7 @@ impl<'a> Analyzer<'a> {
         }
         match name.as_str() {
             // Ordered-set aggregates: the type of the `WITHIN GROUP (ORDER BY x)` value.
-            "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE"
-                if self.dialect == SqlDialect::Postgres && !func.within_group.is_empty() =>
-            {
+            "PERCENTILE_CONT" | "PERCENTILE_DISC" | "MODE" if !func.within_group.is_empty() => {
                 let ordered = self.expr(&func.within_group[0].expr, scope)?;
                 let typed = match name.as_str() {
                     "PERCENTILE_CONT" if operand_type(&ordered) == Some("INTERVAL") => ordered,

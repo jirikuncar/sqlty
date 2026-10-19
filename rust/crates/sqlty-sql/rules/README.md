@@ -162,6 +162,23 @@ operator with no matching rule is typed by the analyzer's code
 
 The operands are typed only when a rule of the operator lists operand types.
 
+## Dialects that read others' rules
+
+`rules/dialects.toml` lists the dialects with no rules of their own that read the rules
+of others:
+
+```toml
+[generic]
+extends = ["postgres", "mysql", "sqlite"]
+reasoning = "Generic SQL has no vendor of its own. ..."
+```
+
+A function or operator of such a dialect takes the rules of the first dialect in
+`extends` that has any for it, then those of `common/`. `generic` reads `GREATEST` and
+`CBRT` from PostgreSQL, `RAND` from MySQL, and `IIF` from SQLite. The compiler adds the
+dialect to the rules it reads, so lookup stays a `match`. A dialect that has rules of its
+own, or an unknown dialect in `extends`, fails the build.
+
 ## What fails the build
 
 `cargo build` fails, naming the rule id and its file, for:
@@ -196,7 +213,7 @@ rule types leaves its column untyped.
 ## Adding a rule
 
 1. Put it in `rules/common/` when PostgreSQL, MySQL and SQLite all have the
-   function or operator and agree on it: the generic dialect and ClickHouse then
+   function or operator and agree on it: ClickHouse and the other dialects then
    type it too. One only some of them have stays in their directories, with
    `dialects`, so the others still report `unknown-function` for it.
 2. Check the `reference` against the vendor documentation of the version the
