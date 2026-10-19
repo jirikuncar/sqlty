@@ -66,7 +66,8 @@ them, so the order of fields and columns does not matter:
 A field with a default, and a `NotRequired` key, may be missing from the
 query. A `ClassVar`, a dataclass's `KW_ONLY` marker and `field(init=False)`
 fields, and a Pydantic model's private `_attributes` are not fields: the
-constructor takes no argument for them. A column without a field is an error: a TypedDict and a dataclass
+constructor takes no argument for them. A dataclass or model that extends one
+of the same module inherits its fields, and a model its `extra` setting. A column without a field is an error: a TypedDict and a dataclass
 reject it, and a Pydantic model drops it by default (`extra="ignore"`), so it is
 fetched for nothing. Only a model with `extra="allow"` keeps it.
 

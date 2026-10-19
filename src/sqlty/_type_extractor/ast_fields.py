@@ -59,10 +59,11 @@ def _classify_class(
     node: ast.ClassDef,
     aliases: dict[str, str] | None = None,
     typeddicts: typing.Container[str] = (),
+    models: typing.Container[str] = (),
 ) -> str | None:
     """Classify a class as TypedDict, NamedTuple, dataclass, BaseModel or Protocol.
 
-    Subclasses of the names in ``typeddicts`` are TypedDicts too.
+    Subclasses of the names in ``typeddicts`` are TypedDicts too, and of ``models`` models.
     """
     aliases = aliases or {}
     for base in node.bases:
@@ -72,7 +73,7 @@ def _classify_class(
             return "TypedDict"
         if base_name == "NamedTuple":
             return "NamedTuple"
-        if base_name == "BaseModel":
+        if base_name == "BaseModel" or (isinstance(base, ast.Name) and base.id in models):
             return "BaseModel"
         if base_name == "Protocol":
             return "Protocol"
@@ -716,12 +717,14 @@ def _lax_fields(
     return frozenset(lax)
 
 
-def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
+def _allows_extra(
+    node: ast.ClassDef, options: dict[str, ast.expr], models: typing.Container[str] = ()
+) -> bool:
     """Whether a Pydantic model keeps undeclared columns: ``extra="allow"``, or a config not read.
 
     ``extra="ignore"`` (the default) drops them and ``extra="forbid"`` rejects them. A config
     sqlty cannot read from source (a ``model_config`` that is not a literal, ``**`` options, a
-    base other than ``BaseModel`` and ``Generic``) may allow them.
+    base other than ``BaseModel``, ``Generic`` and the ``models`` read from source) may allow them.
 
     Example:
         >>> cls = lambda src: ast.parse(src).body[0]
@@ -743,7 +746,9 @@ def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
         return True
     for base in node.bases:
         root = base.value if isinstance(base, ast.Subscript) else base
-        if _get_name(root) not in ("BaseModel", "Generic"):
+        if _get_name(root) not in ("BaseModel", "Generic") and not (
+            isinstance(root, ast.Name) and root.id in models
+        ):
             return True
     names = ("model_config", "__pydantic_config__")
     for item in node.body:
@@ -768,7 +773,7 @@ def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
     return False
 
 
-def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef, aliases: dict[str, str]) -> None:
+def _set_pydantic_names(info: TypeInfo, nodes: list[ast.ClassDef], aliases: dict[str, str]) -> None:
     """Read validation aliases and the ``extra`` setting from the class source.
 
     A field is matched by its ``alias`` / ``validation_alias`` string (either
@@ -776,8 +781,9 @@ def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef, aliases: dict[str, s
     ``AliasPath``, non-literal aliases and ``alias_generator`` leave the
     field's names unknown (``opaque``).
     """
-    options = _config_options(node)
-    info.allows_extra = _allows_extra(node, options)
+    options = {key: value for node in nodes for key, value in _config_options(node).items()}
+    models = {node.name for node in nodes}
+    info.allows_extra = any(_allows_extra(node, options, models) for node in nodes)
     by_name = _is_true(options.get("populate_by_name")) or _is_true(options.get("validate_by_name"))
     generated = "alias_generator" in options and not (
         isinstance(options["alias_generator"], ast.Constant)
@@ -785,7 +791,7 @@ def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef, aliases: dict[str, s
     )
     columns: dict[str, str] = {}
     opaque: set[str] = set()
-    for item in node.body:
+    for item in (item for node in nodes for item in node.body):
         if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
             continue
         name = item.target.id
