@@ -171,7 +171,7 @@ schema = "schema.sql"
 SELECT length, TIMEDIFF(NOW(), NOW()) AS d, CAST('10:00' AS TIME) AS c FROM shifts
 -- columns: length: datetime.timedelta (TIME)
 -- columns: d: datetime.timedelta (TIME)
--- columns: c: datetime.timedelta (TIME)
+-- columns: c: datetime.timedelta | None (TIME)
 ```
 
 ## Unsigned NUMERIC and FIXED are rejected
@@ -345,10 +345,10 @@ schema = "schema.sql"
 
 ```sql
 SELECT d + INTERVAL 1 DAY AS a, INTERVAL 1 MONTH + d AS b, d - INTERVAL 1 HOUR AS c, ts + INTERVAL 1 DAY AS e, d + n AS f, d - d AS g FROM events
--- columns: a: datetime.date (DATE)
--- columns: b: datetime.date (DATE)
--- columns: c: datetime.datetime (DATETIME)
--- columns: e: datetime.datetime (DATETIME)
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.date | None (DATE)
+-- columns: c: datetime.datetime | None (DATETIME)
+-- columns: e: datetime.datetime | None (DATETIME)
 -- columns: f: None (None)
 -- columns: g: None (None)
 ```

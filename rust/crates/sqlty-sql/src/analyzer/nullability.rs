@@ -9,9 +9,9 @@
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    AccessExpr, BinaryOperator, CastKind, Expr, FunctionArguments, Ident, Join, JoinConstraint,
-    JoinOperator, Query, Select, SelectItem, SetExpr, Subscript, TableFactor, TableWithJoins,
-    Value,
+    AccessExpr, BinaryOperator, CastKind, DataType, Expr, FunctionArguments, Ident, Join,
+    JoinConstraint, JoinOperator, Query, Select, SelectItem, SetExpr, Subscript, TableFactor,
+    TableWithJoins, Value,
 };
 
 use super::dialect::SqlDialect;
@@ -21,6 +21,7 @@ use super::inference::{binary_rules, function_rules, FunctionNullability, RuleNu
 use super::literals::python_kind;
 use super::memo::Reporting;
 use super::names::{split_access, table_key};
+use super::operators::operand_type;
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::{table_scope, Scope};
@@ -577,12 +578,22 @@ impl<'a> Analyzer<'a> {
             Expr::Convert {
                 expr: inner,
                 is_try: false,
+                data_type,
                 ..
-            } => of(inner),
+            } => match data_type {
+                Some(data_type) if self.mysql_cast_can_fail(inner, data_type, scope) => {
+                    Nullability::Nullable
+                }
+                _ => of(inner),
+            },
             Expr::Cast {
-                expr: inner, kind, ..
+                expr: inner,
+                kind,
+                data_type,
+                ..
             } => match kind {
                 CastKind::TryCast | CastKind::SafeCast => Nullability::Nullable,
+                _ if self.mysql_cast_can_fail(inner, data_type, scope) => Nullability::Nullable,
                 _ => of(inner),
             },
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
@@ -800,6 +811,21 @@ impl<'a> Analyzer<'a> {
         })
     }
 
+    /// MySQL casts a value that is not a date or time to one as NULL when it does not read
+    /// as one, such as `CAST('abc' AS DATE)`. A value of unknown type keeps its nullability.
+    fn mysql_cast_can_fail(&self, inner: &Expr, data_type: &DataType, scope: &Scope) -> bool {
+        let target = data_type.to_string().to_uppercase();
+        self.dialect == SqlDialect::MySql
+            && (target.starts_with("DATE") || target.starts_with("TIME") || target == "YEAR")
+            && self.expr(inner, scope).is_ok_and(|typed| {
+                typed.is_known()
+                    && !matches!(
+                        operand_type(&typed),
+                        Some("DATE" | "DATETIME" | "TIMESTAMP" | "TIME")
+                    )
+            })
+    }
+
     /// A row is never NULL, but compared to another it is NULL when one of its fields is.
     fn operand_nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
         match expr {
@@ -823,6 +849,15 @@ impl<'a> Analyzer<'a> {
     ) -> Nullability {
         use BinaryOperator::*;
         let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
+        // MySQL gives NULL for a date moved out of its range.
+        if self.dialect == SqlDialect::MySql
+            && matches!(op, Plus | Minus)
+            && [left, right]
+                .iter()
+                .any(|side| matches!(side, Expr::Interval(_)))
+        {
+            return Nullability::Nullable;
+        }
         let mut rules = binary_rules(op)
             .iter()
             .filter(|rule| rule.in_dialect(self.dialect));
