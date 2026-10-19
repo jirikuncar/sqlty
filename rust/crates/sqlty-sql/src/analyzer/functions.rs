@@ -2,7 +2,9 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments};
+use sqlparser::ast::{
+    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArguments,
+};
 
 use super::dialect::SqlDialect;
 use super::expr::{from_sql_type, range_element, range_kind};
@@ -97,7 +99,17 @@ pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
             .args
             .iter()
             .map_while(|arg| match arg {
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Some(expr),
+                // PostgreSQL's `xmlforest(x AS name)` names an element, and `xmlparse(DOCUMENT x)`
+                // sets a mode: the value is still the argument.
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Named { expr, .. })) => {
+                    Some(&**expr)
+                }
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+                | FunctionArg::Named {
+                    arg: FunctionArgExpr::Expr(expr),
+                    operator: FunctionArgOperator::Space,
+                    ..
+                } => Some(expr),
                 _ => None,
             })
             .collect(),

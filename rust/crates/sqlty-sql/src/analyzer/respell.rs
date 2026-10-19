@@ -1,8 +1,9 @@
 //! PostgreSQL and MySQL syntax sqlparser does not read, respelled as the closest syntax it
 //! does and typed the same: `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both
 //! from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses after a path,
-//! `json_array(SELECT ...)`, and the comma-separated tables of MySQL's `UPDATE`. It runs
-//! only on a query that does not parse as written.
+//! `json_array(SELECT ...)`, the XML functions' keywords, a window frame's `EXCLUDE`, and
+//! the comma-separated tables of MySQL's `UPDATE`. It runs only on a query that does not
+//! parse as written.
 
 use super::preprocess::quoted_end;
 use super::star_expand::is_word;
@@ -68,6 +69,80 @@ pub(super) fn respell(sql: &str) -> Option<String> {
             edits.extend(json_clauses(sql, &tokens, i + 1, word(i, "JSON_EXISTS")));
         } else if word(i, "UPDATE") && !word(i.wrapping_sub(1), "KEY") {
             edits.extend(update_tables(sql, &tokens, i));
+        } else if (call("XMLELEMENT") || call("XMLPI")) && word(i + 2, "NAME") {
+            edits.push((tokens[i + 2].start, tokens[i + 3].end, "''".to_string()));
+        } else if call("XMLATTRIBUTES") {
+            edits.push((tokens[i].start, tokens[i].end, "ROW".to_string()));
+            for j in arguments(&tokens, i + 1) {
+                if word(j, "AS") {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                }
+            }
+        } else if call("XMLPARSE") {
+            for j in arguments(&tokens, i + 1) {
+                if (word(j, "PRESERVE") || word(j, "STRIP")) && word(j + 1, "WHITESPACE") {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                }
+            }
+        } else if call("XMLSERIALIZE") && (word(i + 2, "DOCUMENT") || word(i + 2, "CONTENT")) {
+            edits.push((tokens[i].start, tokens[i + 2].end, "CAST(".to_string()));
+            for j in arguments(&tokens, i + 1) {
+                if word(j, "NO") && word(j + 1, "INDENT") {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                } else if word(j, "INDENT") {
+                    edits.push((tokens[j].start, tokens[j].end, String::new()));
+                }
+            }
+        } else if call("XMLROOT") {
+            let inside = arguments(&tokens, i + 1);
+            for &j in &inside {
+                if word(j, "VERSION") {
+                    edits.push((tokens[j].start, tokens[j].end, String::new()));
+                } else if word(j, "NO")
+                    && word(j + 1, "VALUE")
+                    && word(j.wrapping_sub(1), "VERSION")
+                {
+                    edits.push((tokens[j].start, tokens[j + 1].end, "NULL".to_string()));
+                } else if tokens[j].kind == Kind::Comma && word(j + 1, "STANDALONE") {
+                    let end =
+                        closing(&tokens, i + 1).map_or(sql.len(), |close| tokens[close].start);
+                    edits.push((tokens[j].start, end, String::new()));
+                }
+            }
+        } else if call("XMLEXISTS") {
+            for j in arguments(&tokens, i + 1) {
+                if word(j, "PASSING") {
+                    edits.push((tokens[j].start, tokens[j].end, ",".to_string()));
+                }
+                if word(j, "BY") && (word(j + 1, "REF") || word(j + 1, "VALUE")) {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                }
+            }
+        } else if word(i, "EXCLUDE")
+            && (word(i + 1, "GROUP")
+                || word(i + 1, "TIES")
+                || (word(i + 1, "CURRENT") && word(i + 2, "ROW"))
+                || (word(i + 1, "NO") && word(i + 2, "OTHERS")))
+        {
+            let last = if word(i + 1, "GROUP") || word(i + 1, "TIES") {
+                i + 1
+            } else {
+                i + 2
+            };
+            // Without the current row or its peers a frame may be empty, as one that only
+            // follows the row may be; `TIES` and `NO OTHERS` keep the current row.
+            let frame = (0..i)
+                .rev()
+                .take_while(|&j| !matches!(tokens[j].kind, Kind::Open | Kind::Close))
+                .find(|&j| word(j, "ROWS") || word(j, "RANGE") || word(j, "GROUPS"));
+            match frame {
+                Some(start) if word(i + 1, "GROUP") || word(i + 1, "CURRENT") => edits.push((
+                    tokens[start].start,
+                    tokens[last].end,
+                    "ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING".to_string(),
+                )),
+                _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
+            }
         } else if call("JSON_ARRAY") && word(i + 2, "SELECT") {
             if let Some(close) = closing(&tokens, i + 1) {
                 edits.push((tokens[i + 2].start, tokens[i + 2].start, "(".to_string()));

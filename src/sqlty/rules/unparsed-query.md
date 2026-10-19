@@ -17,8 +17,8 @@ unparsed-query = "warn"
 ```python
 from sqlty import SQL
 
-# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
-q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
+# error: [unparsed-query] "found: DOCUMENT"
+q = SQL[tuple[str]]("--sql\nSELECT NULL::xml IS DOCUMENT")
 ```
 
 ## Why is this bad?

@@ -822,6 +822,22 @@ SELECT
 -- rules: xml_xml: postgres.xml.xml / postgres.xml.xml
 ```
 
+```sql
+SELECT
+    xmlelement(name e, vc) AS xml_element,
+    xmlforest(vc, i4) AS xml_any_argument,
+    xmlroot(xmlparse(document vc), version '1.0') AS xml_root
+FROM t
+-- rules: xml_element: postgres.xml.element / postgres.xml.element
+-- rules: xml_any_argument: postgres.xml.any-argument / postgres.xml.any-argument
+-- rules: xml_root: postgres.xml.root / postgres.xml.root
+```
+
+```sql
+MERGE INTO t USING t AS s ON t.i4 = s.i4 WHEN MATCHED THEN DELETE RETURNING merge_action() AS merge_action
+-- rules: merge_action: postgres.merge.action / postgres.merge.action
+```
+
 ## MySQL
 
 `schema.sql`:
