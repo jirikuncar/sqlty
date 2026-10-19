@@ -129,7 +129,11 @@ fn name_strength(expr: &Expr) -> (String, Strength) {
             Some(TrimWhereField::Trailing) => "rtrim",
             _ => "btrim",
         }),
+        Expr::Substring {
+            shorthand: true, ..
+        } => named("substr"),
         Expr::Substring { .. } => named("substring"),
+        Expr::IsNormalized { negated: false, .. } => named("is_normalized"),
         Expr::Position { .. } => named("position"),
         Expr::Overlay { .. } => named("overlay"),
         Expr::AtTimeZone { .. } => named("timezone"),

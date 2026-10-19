@@ -42,6 +42,7 @@ mdtest, or a converter difference, to document.
 | SQLObject | `sqlobject` | `reports/sqlobject.md` | none |
 | PostgreSQL nullability | `pg_nullability.py`, a server | `reports/pg_nullability.md` | none |
 | MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587), date arithmetic and casts (#590) |
+| PostgreSQL documentation | `pg_docs.py`, a server | `reports/pg_docs.md` | `pg_typeof`, `cbrt`, `length` of a path, text search operators (#558) |
 
 `pg_nullability.py` is not a harness source: it runs the PostgreSQL queries of the Markdown tests
 on seeded rows (`tests/_pg_seed.py`) and lists the columns sqlty types as nullable that no
@@ -53,6 +54,12 @@ Markdown tests on MySQL and compares sqlty's nullability with the one MySQL deri
 `CREATE TABLE ... AS` the query. MySQL marks many expressions nullable that cannot be
 NULL, so the report is a list of leads, not of defects. `tests/test_server_describe.py`
 fails on a name or type that differs.
+
+`pg_docs.py` reads the examples of the function and operator tables of the PostgreSQL
+documentation, for the server's major version, and compares the type the server describes
+for each with sqlty's. It exits with status 1 on a type that differs, and lists the
+examples sqlty leaves untyped or can't parse. Run it against a new PostgreSQL release to
+find what sqlty doesn't know yet.
 
 Every DDL spelling the ORMs write parses and has a type. Their remaining mismatches are
 converters above the driver, listed in `docs/guide/drivers-and-orms.md`: SQLite dates,

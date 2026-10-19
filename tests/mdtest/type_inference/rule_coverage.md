@@ -15,7 +15,8 @@ CREATE TABLE t (
     b BOOLEAN NOT NULL, j JSON NOT NULL, jb JSONB NOT NULL, dt DATE NOT NULL,
     ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ NOT NULL, tm TIME NOT NULL, ttz TIMETZ NOT NULL,
     iv INTERVAL NOT NULL, bt BYTEA NOT NULL, ia INT[] NOT NULL, ip INET NOT NULL,
-    cn CIDR NOT NULL, rg INT4RANGE NOT NULL
+    cn CIDR NOT NULL, rg INT4RANGE NOT NULL, tq TSQUERY NOT NULL, tv TSVECTOR NOT NULL,
+    pt PATH NOT NULL
 );
 ```
 
@@ -167,6 +168,20 @@ FROM t
 -- rules: key_exists: postgres.json.key-exists / postgres.json.key-exists
 -- rules: keys_exist: postgres.json.keys-exist / postgres.json.keys-exist
 -- rules: contains: postgres.json.contains / postgres.json.contains
+```
+
+### Text search and geometry
+
+```sql
+SELECT tq && tq AS tq_and, tq || tq AS tq_or, tv || tv AS tv_concat, tq <-> tq AS tq_phrase,
+    length(pt) AS path_length, ts_headline(jb, tq) AS headline
+FROM t
+-- rules: tq_and: postgres.textsearch.and / postgres.textsearch.and
+-- rules: tq_or: postgres.textsearch.or / postgres.textsearch.or
+-- rules: tv_concat: postgres.textsearch.concat-vectors / postgres.textsearch.concat-vectors
+-- rules: tq_phrase: postgres.textsearch.followed-by / postgres.textsearch.followed-by
+-- rules: path_length: postgres.geometry.length / postgres.geometry.length
+-- rules: headline: postgres.textsearch.headline-json / postgres.textsearch.headline-json
 ```
 
 ## MySQL

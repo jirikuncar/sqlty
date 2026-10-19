@@ -176,7 +176,6 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "CURRENT_USER",
             "SESSION_USER",
             "USER",
-            "PG_TYPEOF",
             "JSONB_TYPEOF",
             "JSON_TYPEOF",
             "JSONB_PRETTY",
@@ -252,6 +251,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     (
         &[
             "DATE_PART",
+            "CBRT",
             "ERF",
             "ERFC",
             "PI",
@@ -281,6 +281,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
         Sql("DOUBLE"),
     ),
     (&["TS_RANK", "TS_RANK_CD"], Sql("FLOAT")),
+    (&["PG_TYPEOF"], Sql("REGTYPE")),
     (&["TO_NUMBER"], Sql("DECIMAL")),
     (
         &[
@@ -535,7 +536,7 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     ),
     (
         &[
-            "CEIL", "CEILING", "FLOOR", "SQRT", "CBRT", "EXP", "LN", "LOG10", "POWER", "SIGN",
+            "CEIL", "CEILING", "FLOOR", "SQRT", "EXP", "LN", "LOG10", "POWER", "SIGN",
         ],
         Returns::Real,
     ),

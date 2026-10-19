@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 48] = [
+const SQL_TYPES: [&str; 50] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -57,6 +57,8 @@ const SQL_TYPES: [&str; 48] = [
     "MACADDR",
     "TSVECTOR",
     "TSQUERY",
+    "PATH",
+    "LSEG",
     "MONEY",
     "INT4RANGE",
     "INT8RANGE",
