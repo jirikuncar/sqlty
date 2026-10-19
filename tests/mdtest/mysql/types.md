@@ -326,6 +326,60 @@ SELECT SUM(a) AS a, SUM(b) AS b, SUM(c) AS c, SUM(d) AS d, SUM(e) AS e, SUM(f) A
 -- columns: f: float | None (DOUBLE)
 ```
 
+## Arithmetic converts operands to numbers
+
+MySQL computes with each operand converted to a number: unsigned, `YEAR`, `BIT` and
+`BOOLEAN` values become integers, strings become doubles. `SUM`, `AVG`, `ABS`, `ROUND`
+and the bit operators convert them the same way. `SUM` of dates is a `DECIMAL`, and a
+negated date a `DOUBLE`; other arithmetic on dates stays untyped (see below).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (
+    ui INT UNSIGNED NOT NULL, yr YEAR NOT NULL, bt BIT(8) NOT NULL, bo BOOLEAN NOT NULL,
+    dt DATE NOT NULL, tx TEXT NOT NULL, n DECIMAL(10, 2) NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ui + 1.5 AS a, ui / 2 AS b, yr + 1 AS c, bt % 3 AS d, bo * 2 AS e, tx * 2 AS f, n - ui AS g FROM t
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: decimal.Decimal (DECIMAL)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: int (BIGINT)
+-- columns: f: float (DOUBLE)
+-- columns: g: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT -bt AS a, -dt AS b, ABS(bo) AS c, ABS(tx) AS d, ROUND(ui) AS e, TRUNCATE(yr, 0) AS f, bt & 1 AS g, ~yr AS h FROM t
+-- columns: a: int (BIGINT)
+-- columns: b: float (DOUBLE)
+-- columns: c: int (BIGINT)
+-- columns: d: float (DOUBLE)
+-- columns: e: int (BIGINT)
+-- columns: f: int (BIGINT)
+-- columns: g: int (UBIGINT)
+-- columns: h: int (UBIGINT)
+```
+
+```sql
+SELECT SUM(bt) AS a, SUM(bo) AS b, SUM(dt) AS c, SUM(tx) AS d, AVG(tx) AS e FROM t
+-- columns: a: decimal.Decimal | None (DECIMAL)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: decimal.Decimal | None (DECIMAL)
+-- columns: d: float | None (DOUBLE)
+-- columns: e: float | None (DOUBLE)
+```
+
 ## Date arithmetic
 
 `date ± INTERVAL n unit` is a `DATE` for day units and coarser, and a

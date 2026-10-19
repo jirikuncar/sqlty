@@ -859,16 +859,20 @@ schema = "schema.sql"
 ### Aggregates
 
 ```sql
-SELECT SUM(i) AS sum_exact, SUM(d) AS sum_approximate, BIT_AND(vb) AS bit_binary FROM t
+SELECT SUM(i) AS sum_exact, SUM(d) AS sum_approximate, BIT_AND(vb) AS bit_binary, AVG(tx) AS avg_approximate FROM t
 -- rules: sum_exact: mysql.aggregate.sum-exact / mysql.aggregate.sum-exact
 -- rules: sum_approximate: mysql.aggregate.sum-approximate / mysql.aggregate.sum-approximate
 -- rules: bit_binary: mysql.aggregate.bit-binary / mysql.aggregate.bit-binary
+-- rules: avg_approximate: mysql.aggregate.avg-approximate / mysql.aggregate.avg-approximate
 ```
 
 ### Operators and functions
 
 ```sql
-SELECT i / n AS division, tx / 1 AS division_other, i % tx AS modulo_other,
+SELECT i / n AS division, vb / 1 AS division_other, i % vb AS modulo_other,
+    ui + n AS converted, n + ui AS converted_right, ui % 2 AS modulo_converted,
+    i % ui AS modulo_converted_right, -ui AS negate_integer, -tx AS negate_double,
+    ABS(b) AS abs_integer, ABS(tx) AS abs_double,
     i DIV 2 AS integer_division, ui + i AS unsigned, i + ui AS unsigned_right,
     i & i AS bitwise, i <=> i AS null_safe_equal, b XOR b AS xor, tx || tx AS "or",
     j -> '$.a' AS arrow_json, tx -> '$.a' AS arrow, UPPER(vb) AS binary_string,
@@ -878,6 +882,14 @@ FROM t
 -- rules: division: mysql.arithmetic.division / mysql.arithmetic.division
 -- rules: division_other: mysql.arithmetic.division-other / mysql.arithmetic.division-other
 -- rules: modulo_other: common.arithmetic.division-other / common.arithmetic.division-other
+-- rules: converted: mysql.arithmetic.converted / mysql.arithmetic.converted
+-- rules: converted_right: mysql.arithmetic.converted-right / mysql.arithmetic.converted-right
+-- rules: modulo_converted: mysql.arithmetic.modulo-converted / mysql.arithmetic.modulo-converted
+-- rules: modulo_converted_right: mysql.arithmetic.modulo-converted-right / mysql.arithmetic.modulo-converted-right
+-- rules: negate_integer: mysql.arithmetic.negate-integer / mysql.arithmetic.negate-integer
+-- rules: negate_double: mysql.arithmetic.negate-double / mysql.arithmetic.negate-double
+-- rules: abs_integer: mysql.math.abs-integer / mysql.math.abs-integer
+-- rules: abs_double: mysql.math.abs-double / mysql.math.abs-double
 -- rules: integer_division: mysql.arithmetic.integer-division / mysql.arithmetic.integer-division
 -- rules: unsigned: mysql.arithmetic.unsigned / mysql.arithmetic.unsigned
 -- rules: unsigned_right: mysql.arithmetic.unsigned-right / mysql.arithmetic.unsigned-right
