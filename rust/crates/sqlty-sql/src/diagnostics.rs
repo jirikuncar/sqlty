@@ -24,13 +24,15 @@ pub enum NameRule {
     UnsupportedSyntax,
     /// An INSERT that leaves out a `NOT NULL` column without a default.
     InsertMissingColumn,
+    /// An INSERT whose rows have a different number of values than the columns it writes.
+    InsertValueCount,
     /// A column a grouped query selects without grouping by it or aggregating it.
     UngroupedColumn,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 8] = [
+    pub const ALL: [NameRule; 9] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -38,6 +40,7 @@ impl NameRule {
         NameRule::UnknownType,
         NameRule::UnsupportedSyntax,
         NameRule::InsertMissingColumn,
+        NameRule::InsertValueCount,
         NameRule::UngroupedColumn,
     ];
 
@@ -51,6 +54,7 @@ impl NameRule {
             NameRule::UnknownType => "unknown-type",
             NameRule::UnsupportedSyntax => "unsupported-syntax",
             NameRule::InsertMissingColumn => "insert-missing-column",
+            NameRule::InsertValueCount => "insert-value-count",
             NameRule::UngroupedColumn => "ungrouped-column",
         }
     }
@@ -262,6 +266,7 @@ mod tests {
                 "unknown-type",
                 "unsupported-syntax",
                 "insert-missing-column",
+                "insert-value-count",
                 "ungrouped-column",
             ]
         );
