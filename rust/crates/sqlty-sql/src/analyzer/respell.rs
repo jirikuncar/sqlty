@@ -1,12 +1,13 @@
-//! PostgreSQL syntax sqlparser does not read, respelled as the closest syntax it does and
-//! typed the same: `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both from x,
-//! chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses after a path, and
-//! `json_array(SELECT ...)`. It runs only on a query that does not parse as written.
+//! PostgreSQL and MySQL syntax sqlparser does not read, respelled as the closest syntax it
+//! does and typed the same: `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both
+//! from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses after a path,
+//! `json_array(SELECT ...)`, and the comma-separated tables of MySQL's `UPDATE`. It runs
+//! only on a query that does not parse as written.
 
 use super::preprocess::quoted_end;
 use super::star_expand::is_word;
 
-/// `sql` with the PostgreSQL syntax sqlparser rejects respelled; `None` when it has none.
+/// `sql` with the syntax sqlparser rejects respelled; `None` when it has none.
 pub(super) fn respell(sql: &str) -> Option<String> {
     let tokens = tokens(sql);
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
@@ -65,6 +66,8 @@ pub(super) fn respell(sql: &str) -> Option<String> {
             }
         } else if call("JSON_EXISTS") || call("JSON_QUERY") || call("JSON_VALUE") {
             edits.extend(json_clauses(sql, &tokens, i + 1, word(i, "JSON_EXISTS")));
+        } else if word(i, "UPDATE") && !word(i.wrapping_sub(1), "KEY") {
+            edits.extend(update_tables(sql, &tokens, i));
         } else if call("JSON_ARRAY") && word(i + 2, "SELECT") {
             if let Some(close) = closing(&tokens, i + 1) {
                 edits.push((tokens[i + 2].start, tokens[i + 2].start, "(".to_string()));
@@ -136,6 +139,28 @@ fn json_clauses(
 }
 
 /// The tokens directly inside the parenthesis that opens at token `open`.
+/// The commas between the tables of the `UPDATE` at token `update`, as cross joins.
+fn update_tables(sql: &str, tokens: &[Token], update: usize) -> Vec<(usize, usize, String)> {
+    let mut depth = 0;
+    let mut commas = Vec::new();
+    for token in &tokens[update + 1..] {
+        match token.kind {
+            Kind::Open => depth += 1,
+            Kind::Close if depth == 0 => break,
+            Kind::Close => depth -= 1,
+            Kind::Comma if depth == 0 => {
+                commas.push((token.start, token.end, " CROSS JOIN".to_string()));
+            }
+            Kind::Word if depth == 0 && sql[token.start..token.end].eq_ignore_ascii_case("SET") => {
+                return commas;
+            }
+            Kind::Other if &sql[token.start..token.end] == ";" => break,
+            _ => {}
+        }
+    }
+    Vec::new()
+}
+
 fn arguments(tokens: &[Token], open: usize) -> Vec<usize> {
     let mut depth = 0;
     let mut inside = Vec::new();
@@ -200,7 +225,7 @@ fn tokens(sql: &str) -> Vec<Token> {
                 i = sql[i + 2..].find("*/").map_or(bytes.len(), |n| i + n + 4);
                 continue;
             }
-            b'\'' | b'"' => {
+            b'\'' | b'"' | b'`' => {
                 i = quoted_end(bytes, i);
                 Kind::Other
             }
