@@ -22,7 +22,8 @@ impl Analyzer<'_> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
-        if self.dialect == SqlDialect::MySql && matches!(op, Plus | Minus) {
+        let interval = matches!(left, Expr::Interval(_)) || matches!(right, Expr::Interval(_));
+        if self.dialect == SqlDialect::MySql && matches!(op, Plus | Minus) && interval {
             let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
             if let Some(typed) = mysql_date_add(op, (left, &l), (right, &r)) {
                 return Ok(from_sql_type(typed, self.dialect));
@@ -74,13 +75,18 @@ impl Analyzer<'_> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         Ok(match self.prefix_rule(op, operand, scope)? {
-            Some((rule, typed)) => match rule.result {
-                RuleType::Sql(name) => from_sql_type(name, self.dialect),
-                RuleType::Right => strip(typed, self.dialect),
-                _ => Typed::UNKNOWN,
-            },
+            Some((rule, typed)) => self.prefixed(rule, typed),
             None => Typed::UNKNOWN,
         })
+    }
+
+    /// Result type of a prefix operator's `rule` on an operand of type `typed`.
+    pub(super) fn prefixed(&self, rule: &BinaryRule, typed: Typed) -> Typed {
+        match rule.result {
+            RuleType::Sql(name) => from_sql_type(name, self.dialect),
+            RuleType::Right => strip(typed, self.dialect),
+            _ => Typed::UNKNOWN,
+        }
     }
 
     /// The inference rule for `op operand`, with the operand's type.
@@ -95,10 +101,18 @@ impl Analyzer<'_> {
             return Ok(None);
         }
         let typed = self.expr(operand, scope)?;
-        let found = rules
+        Ok(self.prefix_rule_of(op, &typed).map(|rule| (rule, typed)))
+    }
+
+    /// The inference rule for the prefix operator `op` on an operand of type `typed`.
+    pub(super) fn prefix_rule_of(
+        &self,
+        op: &UnaryOperator,
+        typed: &Typed,
+    ) -> Option<&'static BinaryRule> {
+        prefix_rules(op)
             .iter()
-            .find(|rule| rule.applies(self.dialect, None, rule_type(&typed)));
-        Ok(found.map(|rule| (rule, typed)))
+            .find(|rule| rule.applies(self.dialect, None, rule_type(typed)))
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`

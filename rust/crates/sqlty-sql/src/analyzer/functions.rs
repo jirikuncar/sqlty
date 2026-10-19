@@ -125,9 +125,22 @@ impl<'a> Analyzer<'a> {
         args: &[&Expr],
         scope: &Scope,
     ) -> Inferred<Typed> {
-        let arg = |i: usize| match args.get(i) {
-            Some(arg) => self.expr(arg, scope),
-            None => Ok(Typed::UNKNOWN),
+        self.function_type_of(returns, args, &[None, None], scope)
+    }
+
+    /// [`Self::function_type`] given the types of the first two arguments already inferred,
+    /// which are not inferred again.
+    pub(super) fn function_type_of(
+        &self,
+        returns: Returns,
+        args: &[&Expr],
+        known: &RuleArguments,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        let arg = |i: usize| match (known.get(i), args.get(i)) {
+            (Some(Some(typed)), _) => Ok(typed.clone()),
+            (_, Some(arg)) => self.expr(arg, scope),
+            (_, None) => Ok(Typed::UNKNOWN),
         };
         let sql = |name: &str| Ok(from_sql_type(name, self.dialect));
         match returns {
