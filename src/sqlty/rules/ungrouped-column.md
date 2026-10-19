@@ -42,6 +42,9 @@ by_id = SQL[tuple[int, str, int]]("--sql\nSELECT id, status, count(*) FROM order
 by_position = SQL[tuple[str, int]]("--sql\nSELECT status, count(*) FROM orders GROUP BY 1")
 ```
 
+`*`, `t.*` and a whole-row reference such as `row_to_json(o)` read every column
+of their table, so each column must be grouped, or the table's primary key.
+
 ## Why is this bad?
 
 PostgreSQL rejects the query: `column "orders.total" must appear in the GROUP BY
