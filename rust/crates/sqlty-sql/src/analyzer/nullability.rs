@@ -73,6 +73,9 @@ pub(super) struct Facts {
     pub(super) non_null_exprs: Rc<FxHashSet<ExprKey>>,
     /// Whether the SELECT has a plain GROUP BY, so every group holds at least one row.
     pub(super) grouped: bool,
+    /// Whether the SELECT aggregates without GROUP BY: all its rows are one group, which
+    /// may be empty.
+    pub(super) one_group: bool,
     /// Whether the select list runs several set-returning functions, which PostgreSQL
     /// runs in lockstep, padding the shorter ones with NULL.
     pub(super) lockstep: bool,
@@ -183,7 +186,7 @@ impl Analyzer<'_> {
             let right = self.factor_references(&join.relation, extended);
             match &join.join_operator {
                 JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::OuterApply
-                    if !always_matches(join)
+                    if !always_matches(join, self.dialect)
                         && !self.joins_a_reference(&left, &right, join, extended) =>
                 {
                     extended.extend(right.iter().map(|(reference, _)| reference.clone()));
@@ -358,7 +361,7 @@ fn conjuncts(expr: &Expr) -> Vec<&Expr> {
 
 /// Whether an outer join always finds its one row, so it never null-extends it: a derived
 /// table that returns exactly one row (an ungrouped aggregate), joined `ON TRUE` or applied.
-fn always_matches(join: &Join) -> bool {
+fn always_matches(join: &Join, dialect: SqlDialect) -> bool {
     let unconditional = match &join.join_operator {
         JoinOperator::Left(constraint) | JoinOperator::LeftOuter(constraint) => {
             matches!(constraint, JoinConstraint::On(on) if is_true(on))
@@ -367,7 +370,7 @@ fn always_matches(join: &Join) -> bool {
         _ => false,
     };
     unconditional
-        && matches!(&join.relation, TableFactor::Derived { subquery, .. } if returns_one_row(subquery))
+        && matches!(&join.relation, TableFactor::Derived { subquery, .. } if returns_one_row(subquery, dialect))
 }
 
 fn is_true(expr: &Expr) -> bool {
@@ -419,47 +422,54 @@ fn frame_holds_current_row(over: Option<&sqlparser::ast::WindowType>) -> bool {
 
 /// Whether every row of `select` comes from rows its WHERE lets through: not so for an
 /// aggregate without GROUP BY, which returns a row when none match, or a HAVING.
-pub(super) fn rows_pass_where(select: &Select) -> bool {
-    select.having.is_none()
-        && (is_grouped(select)
-            || !select.projection.iter().any(|item| match item {
-                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                    contains_aggregate(expr)
-                }
-                _ => false,
-            }))
+pub(super) fn rows_pass_where(select: &Select, dialect: SqlDialect) -> bool {
+    select.having.is_none() && (is_grouped(select) || !aggregates(select, dialect))
+}
+
+/// Whether the select list of `select` calls an aggregate.
+fn aggregates(select: &Select, dialect: SqlDialect) -> bool {
+    select.projection.iter().any(|item| match item {
+        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+            contains_aggregate(expr, dialect)
+        }
+        _ => false,
+    })
 }
 
 /// Whether `expr` holds an aggregate call outside any window or subquery.
-fn contains_aggregate(expr: &Expr) -> bool {
+/// MySQL's `ANY_VALUE` is not an aggregate: it only exempts its argument from grouping.
+fn contains_aggregate(expr: &Expr, dialect: SqlDialect) -> bool {
+    let within = |inner: &Expr| contains_aggregate(inner, dialect);
     match expr {
         Expr::Function(func) => {
             let name = function_name(func);
             let args = positional_args(&func.args);
             let scalar_min_max = matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2;
+            let mysql_any_value = dialect == SqlDialect::MySql && name == "ANY_VALUE";
             (func.over.is_none()
                 && !scalar_min_max
+                && !mysql_any_value
                 && (matches!(name.as_str(), "COUNT" | "REGR_COUNT")
                     || lookup(&name).is_some_and(super::registry::FunctionInfo::is_aggregate)))
-                || args.into_iter().any(contains_aggregate)
+                || args.into_iter().any(within)
         }
         Expr::Nested(inner)
         | Expr::UnaryOp { expr: inner, .. }
         | Expr::Cast { expr: inner, .. }
         | Expr::IsNull(inner)
-        | Expr::IsNotNull(inner) => contains_aggregate(inner),
-        Expr::BinaryOp { left, right, .. } => contains_aggregate(left) || contains_aggregate(right),
+        | Expr::IsNotNull(inner) => within(inner),
+        Expr::BinaryOp { left, right, .. } => within(left) || within(right),
         Expr::Case {
             operand,
             conditions,
             else_result,
             ..
         } => {
-            operand.as_deref().is_some_and(contains_aggregate)
-                || conditions.iter().any(|when| {
-                    contains_aggregate(&when.condition) || contains_aggregate(&when.result)
-                })
-                || else_result.as_deref().is_some_and(contains_aggregate)
+            operand.as_deref().is_some_and(within)
+                || conditions
+                    .iter()
+                    .any(|when| within(&when.condition) || within(&when.result))
+                || else_result.as_deref().is_some_and(within)
         }
         _ => false,
     }
@@ -516,7 +526,7 @@ fn is_grouped(select: &Select) -> bool {
 }
 
 /// Whether the query always returns exactly one row: no FROM, or an aggregate without GROUP BY.
-fn returns_one_row(query: &Query) -> bool {
+fn returns_one_row(query: &Query, dialect: SqlDialect) -> bool {
     let SetExpr::Select(select) = query.body.as_ref() else {
         return false;
     };
@@ -524,13 +534,8 @@ fn returns_one_row(query: &Query) -> bool {
         return false;
     }
     let ungrouped = !is_grouped(select);
-    let aggregated = select.projection.iter().any(|item| match item {
-        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-            contains_aggregate(expr)
-        }
-        _ => false,
-    });
-    ungrouped && (aggregated || (select.from.is_empty() && select.selection.is_none()))
+    ungrouped
+        && (aggregates(select, dialect) || (select.from.is_empty() && select.selection.is_none()))
 }
 
 impl<'a> Analyzer<'a> {
@@ -541,6 +546,7 @@ impl<'a> Analyzer<'a> {
         facts.without(scope);
         facts.join(self.null_extended(&select.from));
         facts.grouped = is_grouped(select);
+        facts.one_group = !facts.grouped && aggregates(select, self.dialect);
         for expr in rolled_up(select) {
             match self.locate_column(expr, scope) {
                 Some((reference, _, column)) => {
@@ -741,7 +747,7 @@ impl<'a> Analyzer<'a> {
                     .chain(trim_characters.iter().flatten().map(of)),
             ),
             Expr::Subquery(query) => {
-                if returns_one_row(query) {
+                if returns_one_row(query, self.dialect) {
                     self.subquery_column(query, scope)
                 } else {
                     // No row at all reads as NULL.
@@ -1116,6 +1122,12 @@ impl<'a> Analyzer<'a> {
         // SQLite's two-argument MIN and MAX are scalar functions.
         if matches!(name.as_str(), "MIN" | "MAX") && args.len() >= 2 {
             return any_nullable(args.iter().map(|arg| of(arg)));
+        }
+        if self.dialect == SqlDialect::MySql && name == "ANY_VALUE" && !facts.one_group {
+            let rows = facts.ungrouped_rows();
+            return args.first().map_or(Nullability::Unknown, |arg| {
+                self.nullability(arg, scope, &rows)
+            });
         }
         let behavior = info.map_or(Behavior::Scalar, |info| info.behavior);
         if behavior != Behavior::Scalar {
