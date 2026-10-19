@@ -42,6 +42,9 @@ d = SQL[UserModel]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 `# error:` lines sit above the line `sqlty check` reports on, warnings
 included; a bare `# error:` means it reports nothing.
 
+A row type defined later in the module can be named by a string, as a
+forward reference: `SQL["User"](...)` is checked as `SQL[User](...)`.
+
 !!! warning "Do not strip files with row types"
     `sqlty strip` turns `SQL[User](...)` back into a plain string, and the
     next `rewrite` writes `SQL[tuple[...]]`. Edit such files in place; see

@@ -251,19 +251,16 @@ def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
 def string_constants(source: str) -> list[str]:
     """Every string value in ``source``, implicit concatenation applied, sorted.
 
-    The labels of a ``Literal[...]`` inside the subscript of a called wrapper
-    (``SQL[...](...)``) are left out: rewrite writes an enum column's type as
-    ``typing.Literal[...]`` into that annotation, and nowhere else.
+    Strings inside the subscript of a called wrapper (``SQL[...](...)``) are left out:
+    they are part of the row type, which rewrite writes (an enum column's
+    ``typing.Literal[...]``) and strip removes (a forward reference, ``SQL["User"]``).
     """
     tree = ast.parse(source)
     labels = {
         id(node)
         for call in ast.walk(tree)
         if isinstance(call, ast.Call) and isinstance(call.func, ast.Subscript)
-        for sub in ast.walk(call.func.slice)
-        if isinstance(sub, ast.Subscript)
-        and ast.unparse(sub.value) in ("Literal", "typing.Literal")
-        for node in ast.walk(sub.slice)
+        for node in ast.walk(call.func.slice)
     }
     return sorted(
         node.value

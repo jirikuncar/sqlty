@@ -251,3 +251,26 @@ c = SQL[Named]("--sql\nSELECT 1::INTEGER AS id")
 # error: [typeddict-key-mismatch] "Named.name is required but missing from query"
 d = SQL[Named]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS title")
 ```
+
+## Forward references
+
+A row type spelled as a string, as a forward reference to a class defined
+later, is checked as the type it names.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
+users = SQL["User"]("--sql\nSELECT 1::INTEGER AS id")
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+counts = SQL["tuple[str]"]("--sql\nSELECT 1::INTEGER")
+
+class User(TypedDict):
+    id: str
+```
