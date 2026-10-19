@@ -382,6 +382,19 @@ impl Call {
         any_calls.binary_search(&self.span.start).is_ok()
     }
 
+    /// `T` as a type: the content of a string literal (a forward reference, `SQL["User"]`),
+    /// else its source.
+    pub(crate) fn row_type<'a>(&self, source: &'a str) -> &'a str {
+        let written = source[self.annotation.clone()].trim();
+        ['"', '\'']
+            .into_iter()
+            .find_map(|quote| {
+                let inner = written.strip_prefix(quote)?.strip_suffix(quote)?;
+                (!inner.contains([quote, '\\'])).then_some(inner.trim())
+            })
+            .unwrap_or(written)
+    }
+
     /// The source of the argument's literals, from the first to the last.
     pub(crate) fn argument<'a>(&self, source: &'a str) -> &'a str {
         &source[self.strings[0].start..self.strings[self.strings.len() - 1].end]
