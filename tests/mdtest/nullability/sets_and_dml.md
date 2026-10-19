@@ -148,6 +148,52 @@ INSERT INTO users (id, name, nick) VALUES (1, 'a', 'b') ON CONFLICT DO NOTHING R
 -- inferred: tuple[str]
 ```
 
+## RETURNING a column's DEFAULT
+
+A column an `INSERT` leaves out gets its `DEFAULT`, so it is not NULL in the rows
+returned when the default never is. `VALUES` shorter than the table leaves out its
+last columns, and `DEFAULT VALUES` all of them.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE posts (
+    id SERIAL PRIMARY KEY,
+    title TEXT,
+    status TEXT DEFAULT 'draft',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    edited_at TIMESTAMPTZ DEFAULT NULL,
+    score INTEGER
+);
+ALTER TABLE posts ALTER COLUMN score SET DEFAULT 0;
+ALTER TABLE posts ALTER COLUMN status DROP DEFAULT;
+```
+
+```sql
+INSERT INTO posts (title) VALUES (%(title)s) RETURNING id, title, status, created_at, edited_at, score
+-- columns: id: int (INT)
+-- columns: title: str | None (TEXT)
+-- columns: status: str | None (TEXT)
+-- columns: created_at: datetime.datetime (TIMESTAMPTZ)
+-- columns: edited_at: datetime.datetime | None (TIMESTAMPTZ)
+-- columns: score: int (INT)
+```
+
+```sql
+INSERT INTO posts VALUES (1, 'a') RETURNING created_at, score
+-- inferred: tuple[datetime.datetime, int]
+```
+
+```sql
+INSERT INTO posts (title, score) VALUES ('a', NULL) RETURNING created_at, score
+-- inferred: tuple[datetime.datetime, int | None]
+```
+
+```sql
+INSERT INTO posts DEFAULT VALUES RETURNING created_at
+-- inferred: tuple[datetime.datetime]
+```
+
 ## RETURNING after WHERE
 
 `DELETE` returns the rows its `WHERE` let through. `UPDATE` returns them as `SET`

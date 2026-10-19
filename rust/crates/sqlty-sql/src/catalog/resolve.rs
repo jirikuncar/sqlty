@@ -406,6 +406,7 @@ impl<'a> Resolver<'a> {
             python_type,
             not_null,
             has_default,
+            default: None,
             primary_key: false,
             allowed_values: resolved.allowed_values.cloned(),
             invisible: false,
@@ -424,6 +425,7 @@ impl<'a> Resolver<'a> {
                         let mut column = SchemaColumn {
                             primary_key: c.primary_key,
                             invisible: c.invisible,
+                            default: c.default.clone(),
                             ..self.column(
                                 &c.name,
                                 &c.ident,

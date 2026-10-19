@@ -41,7 +41,7 @@ pub(crate) use read::{load, load_with};
 use rustc_hash::FxHashMap;
 use std::sync::{Arc, LazyLock};
 
-use sqlparser::ast::DataType;
+use sqlparser::ast::{DataType, Expr};
 
 use crate::analyzer::{Column, SqlDialect};
 use crate::ddl::RowEvents;
@@ -70,6 +70,8 @@ pub struct SchemaColumn {
     /// Whether an INSERT that leaves the column out still gives it a value: a `DEFAULT`,
     /// `serial`, identity, generated or auto-increment column, or SQLite's rowid.
     pub has_default: bool,
+    /// The `DEFAULT` an INSERT that leaves the column out writes.
+    pub default: Option<Expr>,
     /// Part of the table's primary key, which PostgreSQL lets a grouped query select
     /// the table's other columns by.
     pub primary_key: bool,
