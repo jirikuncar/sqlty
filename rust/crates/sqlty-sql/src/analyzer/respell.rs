@@ -1,6 +1,6 @@
 //! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
 //! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
-//! SQLite's `a IS b`, `<<`, `>>` and postfix `ISNULL`, MySQL's infix `MOD`, `SOUNDS LIKE`,
+//! SQLite's `a IS b`, `<<`, `>>` and postfix `ISNULL`, MySQL's `!x`, infix `MOD`, `SOUNDS LIKE`,
 //! `INTERVAL(n, n1, ...)`, `LOCK IN SHARE MODE`, its `CHAR(n USING charset)` and the
 //! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
 //! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
@@ -200,6 +200,12 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 .any(|&j| tokens[j].kind == Kind::Comma)
         {
             edits.push((tokens[i].start, tokens[i].end, "`INTERVAL`".to_string()));
+        } else if dialect == SqlDialect::MySql && bang(sql, &tokens, i) {
+            // `!` binds tighter than any infix operator: `!a + 1` is `(NOT a) + 1`.
+            if let Some(end) = operand_end(sql, &tokens, i + 1) {
+                edits.push((tokens[i].start, tokens[i].end, "(NOT ".to_string()));
+                edits.push((tokens[end].end, tokens[end].end, ")".to_string()));
+            }
         } else if dialect == SqlDialect::MySql
             && word(i, "MOD")
             && i > 0
@@ -433,6 +439,39 @@ fn xmltable_options(sql: &str, tokens: &[Token], open: usize) -> Vec<(usize, usi
 }
 
 /// The token that closes the parenthesis opening at token `open`.
+/// Whether token `i` is MySQL's prefix `!`, not the start of `!=`.
+fn bang(sql: &str, tokens: &[Token], i: usize) -> bool {
+    let text = |j: usize| tokens.get(j).map(|t| &sql[t.start..t.end]);
+    text(i) == Some("!") && !(text(i + 1) == Some("=") && tokens[i + 1].start == tokens[i].end)
+}
+
+/// The last token of the operand starting at token `j`: a name, number or string (dotted
+/// parts included), a call, a parenthesized expression, or another `!` and its operand.
+fn operand_end(sql: &str, tokens: &[Token], j: usize) -> Option<usize> {
+    let token = tokens.get(j)?;
+    let text = |k: usize| tokens.get(k).map(|t| &sql[t.start..t.end]);
+    if bang(sql, tokens, j) {
+        return operand_end(sql, tokens, j + 1);
+    }
+    let mut end = match token.kind {
+        Kind::Open => return closing(tokens, j),
+        Kind::Word => j,
+        Kind::Other if text(j)?.starts_with(['\'', '"', '`']) => j,
+        _ => return None,
+    };
+    while text(end + 1) == Some(".")
+        && tokens.get(end + 2).is_some_and(|t| {
+            t.kind == Kind::Word || text(end + 2).is_some_and(|s| s.starts_with('`'))
+        })
+    {
+        end += 2;
+    }
+    if tokens.get(end + 1).is_some_and(|t| t.kind == Kind::Open) {
+        return closing(tokens, end + 1);
+    }
+    Some(end)
+}
+
 fn closing(tokens: &[Token], open: usize) -> Option<usize> {
     let mut depth = 0;
     tokens.iter().enumerate().skip(open).find_map(|(j, token)| {
