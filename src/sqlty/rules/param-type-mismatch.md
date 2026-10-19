@@ -21,6 +21,10 @@ as a driver call's parameters, `execute(query, user_id)`, is reported too: the
 driver raises `TypeError` and wants a sequence, `(user_id,)`. sqlite3 reads a
 `str` or `bytes` as a sequence, so those are left alone there.
 
+The fields of a `--sql` t-string are checked as well: psycopg sends each
+`{value}` as a parameter. A t-string with a field that changes the SQL, such as
+`{part:q}`, is not.
+
 An argument is judged only where the source states its type: a literal, a
 variable annotated or assigned a class, a call of a known class (`date(...)`,
 `UUID(...)`). An argument of unknown type is never reported, and neither is a

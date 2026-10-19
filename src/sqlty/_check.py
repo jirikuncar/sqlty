@@ -20,7 +20,7 @@ from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import wrapped_queries as _wrapped_queries
-from sqlty._drivers import find_driver_calls
+from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import mismatch
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from sqlty.core import ParamInfo
 
 # The `--sql` marker that opens a query string, as the engine reads it.
-MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
 def is_any_row(call: HelperCall) -> bool:
@@ -422,7 +421,7 @@ def diagnostics(
     diagnostics = [
         d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
     ]
-    driver_calls = find_driver_calls(parsed)
+    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     queries = [
         (line, name, query)
         for line, name, query in (
