@@ -358,8 +358,8 @@ impl Analyzer<'_> {
                     }
                 }
                 // Its diagnostics are recorded; the columns are not needed. Nothing reads the
-                // types of a plain VALUES source, so outside PostgreSQL, where they are not
-                // inferred, that is not reported.
+                // types of a plain VALUES source, and outside PostgreSQL it is not analyzed:
+                // MySQL's may name the columns set before them.
                 let untyped_values = |source: &Query| {
                     self.dialect != SqlDialect::Postgres
                         && insert.returning.is_none()
