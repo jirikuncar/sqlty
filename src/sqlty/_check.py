@@ -442,6 +442,7 @@ def diagnostics(
     ctx.row_usage = row_usage or RowUsage()
     for check_pass in _CHECK_PASSES:
         check_pass(ctx)
+    diagnostics.sort(key=lambda diagnostic: diagnostic["line"])
     return diagnostics
 
 
