@@ -12,7 +12,8 @@ another. `sqlty breaking` checks both mixes before you deploy:
 | backward | the queries of `--against` on the schema of `--head` | migrate first: old code, new schema |
 | forward | the queries of `--head` on the schema of `--against` | deploy first: new code, old schema |
 
-`--against` is the baseline revision: a branch, tag, SHA or `HEAD~1`. `--head`
+`--against` is the baseline revision: a branch, tag, SHA or `HEAD~1`, or a
+file ([Baselines without git history](#baselines-without-git-history)). `--head`
 is the new one, the working tree by default (uncommitted changes included).
 `--direction backward` or `forward` runs one check; both run by default.
 
@@ -24,8 +25,8 @@ never touched.
 `sqlty breaking` exits 0 when both mixes are compatible, 1 when a change breaks
 one of them with an `error` diagnostic, and 2 on an error such as an unknown
 revision. A `warn` finding is printed but does not fail the run. `--output-format json`
-prints the findings as a JSON array, each with its `direction`, and `github` as
-GitHub Actions annotations.
+prints the findings as a JSON array, each with its `direction` and the baseline it
+was checked `against`, and `github` as GitHub Actions annotations.
 
 ## What it reports
 
@@ -217,6 +218,45 @@ from sqlty import SQL
 # error:
 emails = SQL[tuple[str | None]]("--sql\nSELECT email FROM users")
 ```
+
+## Baselines without git history
+
+```bash
+# At release time
+sqlty breaking --save .sqlty/releases/v1.4.json
+
+# In every pull request
+sqlty breaking --against .sqlty/releases/
+```
+
+`--save PATH` writes a snapshot of `--head`: its Python files, the settings each
+is checked with, and its schema. `--against` reads a snapshot as it reads the
+revision it was saved from, so the release stays a baseline after its history is
+rewritten, in a shallow clone, or when it was never a commit.
+
+`--against` takes a path that exists instead of a revision:
+
+| Baseline | Backward | Forward |
+|----------|----------|---------|
+| a git revision | yes | yes |
+| a snapshot (`.json`) | yes | yes |
+| a directory of snapshots | each snapshot | each snapshot |
+| a schema `.sql` file, or a directory of them | no, it has no queries | yes |
+
+A directory of snapshots checks every version in it, named after its file. Keep a
+snapshot for each version that may still run, during a rolling or on-premises
+deploy or a rollback window, and remove it when that version is gone:
+
+```text
+app/q.py:2: [unknown-column] column `bio` does not exist in `users` (backward: the queries of v1.3 against the schema of the working tree)
+```
+
+A schema file, such as the output of `pg_dump --schema-only` in CI, has no
+queries, so it is only checked forward: the new queries against that schema.
+
+!!! note "A snapshot holds source code"
+    A snapshot holds the full text of every checked Python file. Commit it where the
+    code may be read, or store it as a CI artifact.
 
 ## Expand and contract
 
