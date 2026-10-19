@@ -28,6 +28,15 @@ reference = "SQLite documentation, JSON Functions And Operators, 4.8 The json_ex
 reasoning = "With one path, `json_extract` gives the SQL value of the element (INTEGER, REAL or TEXT), and NULL for a missing path or a JSON null; with more, the text of a JSON array."
 
 [[function]]
+id = "sqlite.json.jsonb-extract"
+function = "JSONB_EXTRACT"
+dialects = ["sqlite"]
+type = "@any"
+nullability = "nullable"
+reference = "SQLite documentation, JSON Functions And Operators, 4.9 The jsonb_extract() function (https://www.sqlite.org/json1.html#jbex)"
+reasoning = "`jsonb_extract` gives what `json_extract` does, but an array or object as a JSONB blob; a missing path or a JSON null gives NULL."
+
+[[function]]
 id = "sqlite.json.bigint"
 functions = ["JSON_ARRAY_LENGTH", "JSON_VALID", "JSON_ERROR_POSITION"]
 dialects = ["sqlite"]
@@ -38,16 +47,25 @@ reasoning = "Each of these returns an integer."
 
 [[function]]
 id = "sqlite.json.blob"
-function = "JSONB"
+functions = ["JSONB", "JSONB_SET", "JSONB_INSERT", "JSONB_REPLACE", "JSONB_REMOVE", "JSONB_PATCH", "JSONB_ARRAY_INSERT"]
 dialects = ["sqlite"]
 type = "BLOB"
 nullability = "strict"
-reference = "SQLite documentation, JSON Functions And Operators"
-reasoning = "The function returns a BLOB."
+reference = "SQLite documentation, JSON Functions And Operators, 4.2 The jsonb() function; 4.12 The jsonb_insert(), jsonb_replace, and jsonb_set() functions; 4.16 The jsonb_patch() function (https://www.sqlite.org/json1.html)"
+reasoning = "The `jsonb` variants work as their `json` ones, returning the result in the binary JSONB format, a BLOB, and NULL for a NULL document."
+
+[[function]]
+id = "sqlite.json.blob-non-null"
+functions = ["JSONB_ARRAY", "JSONB_OBJECT"]
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "non-null"
+reference = "SQLite documentation, JSON Functions And Operators, 4.4 The jsonb_array() function; 4.14 The jsonb_object() function (https://www.sqlite.org/json1.html)"
+reasoning = "Each builds a JSONB array or object, a BLOB; a NULL argument becomes a JSON null in it."
 
 [[function]]
 id = "sqlite.json.text"
-functions = ["JSON", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_PRETTY", "JSON_QUOTE", "JSON_TYPE"]
+functions = ["JSON", "JSON_SET", "JSON_INSERT", "JSON_ARRAY_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_PRETTY", "JSON_QUOTE", "JSON_TYPE"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "strict"
@@ -69,5 +87,14 @@ functions = ["JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "aggregate"
-reference = "SQLite documentation, JSON Functions And Operators"
-reasoning = "Each of these returns text."
+reference = "SQLite documentation, JSON Functions And Operators, 4.23 Array and object aggregate functions (https://www.sqlite.org/json1.html#jgrouparray)"
+reasoning = "Each of these returns text, an empty array or object over no rows."
+
+[[function]]
+id = "sqlite.json.aggregate-blob"
+functions = ["JSONB_GROUP_ARRAY", "JSONB_GROUP_OBJECT"]
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "aggregate"
+reference = "SQLite documentation, JSON Functions And Operators, 4.23 Array and object aggregate functions (https://www.sqlite.org/json1.html#jgrouparray)"
+reasoning = "The `jsonb_` variants return the array or object in the binary JSONB format, a BLOB, an empty one over no rows."

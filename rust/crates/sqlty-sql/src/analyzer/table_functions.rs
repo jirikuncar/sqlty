@@ -155,7 +155,7 @@ impl Analyzer<'_> {
         let (non_null, nullable) = (Nullability::NonNull, Nullability::Nullable);
         if self.dialect == SqlDialect::Sqlite {
             return Ok(match name {
-                "json_each" | "json_tree" => Some(named(vec![
+                "json_each" | "json_tree" | "jsonb_each" | "jsonb_tree" => Some(named(vec![
                     Column::unknown("key"),
                     Column::unknown("value"),
                     column("type", "TEXT", non_null),
