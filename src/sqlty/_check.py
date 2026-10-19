@@ -201,6 +201,14 @@ def _check_params(ctx: _Check) -> None:
         or ctx.rule_config.is_enabled("param-count-mismatch")
     ):
         return
+    singles = {(call.line, call.single, call.driver) for call in ctx.driver_calls if call.single}
+    if ctx.rule_config.is_enabled("param-type-mismatch"):
+        for line, single, driver in sorted(singles):
+            ctx.report(
+                "param-type-mismatch",
+                f"parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`",
+                line,
+            )
     for call in [*ctx.calls, *ctx.driver_calls]:
         if call.params is not None:
             for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql):

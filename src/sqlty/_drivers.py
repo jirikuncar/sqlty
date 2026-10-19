@@ -25,7 +25,7 @@ import ast
 from collections import defaultdict
 
 from sqlty._helpers import HelperCall
-from sqlty._params import ParamArg, arg_type, literal_params
+from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
 from sqlty._source import ParsedSource
 
 # Driver factories and classes, by the dotted name they are imported as, to the driver.
@@ -53,6 +53,8 @@ _METHODS = {
     "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany"},
 }
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
+# sqlite3 reads a str or bytes as a sequence, one parameter per item.
+_SEQUENCE_SCALARS = {"psycopg": frozenset(), "sqlite3": frozenset({"str", "bytes"})}
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -256,19 +258,17 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             arg = next((k.value for k in call.keywords if k.arg == keyword), None)
             if arg is None and any(k.arg is None for k in call.keywords):
                 continue
-        if func.attr == "executemany":
-            if isinstance(arg, (ast.List, ast.Tuple)):
-                for row in arg.elts:
-                    if (params := literal_params(row, parsed, stack)) is not None:
-                        found.append(HelperCall(call.lineno, query, None, aliases, params))
+        many = func.attr == "executemany"
+        if many and not isinstance(arg, (ast.List, ast.Tuple)):
             continue
-        found.append(
-            HelperCall(
-                call.lineno,
-                query,
-                None,
-                aliases,
-                () if arg is None else literal_params(arg, parsed, stack),
-            )
-        )
+        for row in arg.elts if many and isinstance(arg, (ast.List, ast.Tuple)) else [arg]:
+            params = () if row is None else literal_params(row, parsed, stack)
+            kind = arg_type(row, parsed, stack) if row is not None and params is None else None
+            single = kind if kind in SCALARS - _SEQUENCE_SCALARS[driver] else None
+            if not many or params is not None or single is not None:
+                found.append(
+                    HelperCall(
+                        call.lineno, query, None, aliases, params, driver=driver, single=single
+                    )
+                )
     return found

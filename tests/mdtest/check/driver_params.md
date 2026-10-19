@@ -53,6 +53,28 @@ cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2, "
 cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2.5, "b")])
 ```
 
+## A single value is not a sequence of parameters
+
+psycopg takes a sequence or a mapping of parameters, and raises `TypeError` for
+a single value.
+
+```python
+import psycopg
+from decimal import Decimal
+
+def find(cur: psycopg.Cursor, user_id: int, name: str) -> None:
+    cur.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+    cur.execute("SELECT id FROM users", None)
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.execute("SELECT id FROM users WHERE id = %s", user_id)
+    # error: [param-type-mismatch] "parameters are a single str, which psycopg rejects"
+    cur.execute("SELECT id FROM users WHERE name = %s", name)
+    # error: [param-type-mismatch] "parameters are a single decimal.Decimal, which psycopg rejects"
+    cur.execute("SELECT id FROM users WHERE age = %s", params=Decimal(1))
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.executemany("DELETE FROM users WHERE id = %s", [1, 2])
+```
+
 ## A query bound to a name or wrapped in SQL
 
 ```python
