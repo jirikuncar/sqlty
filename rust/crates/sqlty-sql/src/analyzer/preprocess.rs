@@ -67,6 +67,15 @@ pub(super) static POSTGRES_TYPED_STRING: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// SQLite's `INDEXED BY name` and `NOT INDEXED`, in group 1, which only pick an index;
+/// literals, quoted names and comments are matched to be skipped.
+static SQLITE_INDEX_HINT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:(\s+(?:INDEXED\s+BY\s+(?:"(?:[^"]|"")*"|\w+\b)|NOT\s+INDEXED\b)))"#,
+    )
+    .unwrap()
+});
+
 /// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
 pub(super) static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
@@ -260,6 +269,12 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
     let sql = match dialect {
         SqlDialect::Postgres | SqlDialect::MySql => TABLE_COMMAND
             .replace_all(&sql, "${1}SELECT * FROM $2")
+            .into_owned(),
+        SqlDialect::Sqlite if sql.to_ascii_uppercase().contains("INDEXED") => SQLITE_INDEX_HINT
+            .replace_all(&sql, |caps: &Captures| match caps.get(1) {
+                Some(_) => String::new(),
+                None => caps[0].to_string(),
+            })
             .into_owned(),
         _ => sql,
     };

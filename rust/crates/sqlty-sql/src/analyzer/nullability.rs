@@ -644,6 +644,7 @@ impl<'a> Analyzer<'a> {
                 let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
                 any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of)))
             }
+            Expr::MemberOf(member) => any_nullable([of(&member.value), of(&member.array)]),
             Expr::InSubquery {
                 expr: inner,
                 subquery,

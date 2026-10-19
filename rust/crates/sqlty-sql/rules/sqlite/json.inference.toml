@@ -47,7 +47,7 @@ reasoning = "The function returns a BLOB."
 
 [[function]]
 id = "sqlite.json.text"
-functions = ["JSON", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_QUOTE", "JSON_TYPE"]
+functions = ["JSON", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_PRETTY", "JSON_QUOTE", "JSON_TYPE"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "strict"
