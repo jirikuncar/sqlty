@@ -1,10 +1,11 @@
 //! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
 //! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
-//! SQLite's `a IS b`, MySQL's infix `MOD`, its `CHAR(n USING charset)` and the
-//! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
-//! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
-//! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
-//! XMLTABLE's column options. It runs only on a query that does not parse as written.
+//! SQLite's `a IS b`, MySQL's infix `MOD`, `SOUNDS LIKE`, `INTERVAL(n, n1, ...)`, `LOCK IN
+//! SHARE MODE`, its `CHAR(n USING charset)` and the comma-separated tables of its `UPDATE`,
+//! and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both from x, chars)`,
+//! `substring(x similar p escape e)`, the SQL/JSON clauses after a path, `json_array(SELECT
+//! ...)`, the XML functions' keywords and the order of XMLTABLE's column options. It runs
+//! only on a query that does not parse as written.
 
 use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
@@ -174,6 +175,22 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 edits.push((tokens[i].start, tokens[i].start, "CONVERT(".to_string()));
                 edits.push((tokens[using].start, tokens[using].start, ") ".to_string()));
             }
+        } else if dialect == SqlDialect::MySql && word(i, "SOUNDS") && word(i + 1, "LIKE") {
+            edits.push((tokens[i].start, tokens[i + 1].end, "=".to_string()));
+        } else if dialect == SqlDialect::MySql
+            && word(i, "LOCK")
+            && word(i + 1, "IN")
+            && word(i + 2, "SHARE")
+            && word(i + 3, "MODE")
+        {
+            edits.push((tokens[i].start, tokens[i + 3].end, "FOR SHARE".to_string()));
+        } else if dialect == SqlDialect::MySql
+            && call("INTERVAL")
+            && arguments(&tokens, i + 1)
+                .iter()
+                .any(|&j| tokens[j].kind == Kind::Comma)
+        {
+            edits.push((tokens[i].start, tokens[i].end, "`INTERVAL`".to_string()));
         } else if dialect == SqlDialect::MySql
             && word(i, "MOD")
             && i > 0
