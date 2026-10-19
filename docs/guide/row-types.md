@@ -72,8 +72,9 @@ list, while PostgreSQL folds an unquoted name to lower case.
 A field with a default, and a `NotRequired` key, may be missing from the
 query. A `ClassVar`, a dataclass's `KW_ONLY` marker and `field(init=False)`
 fields, and a Pydantic model's private `_attributes` are not fields: the
-constructor takes no argument for them. A dataclass or model that extends one
-of the same module inherits its fields, and a model its `extra` setting. A column without a field is an error: a TypedDict and a dataclass
+constructor takes no argument for them. A row type that extends one defined
+earlier in the module, or imported from a checked module, inherits its fields,
+and a model its `extra` setting. A column without a field is an error: a TypedDict and a dataclass
 reject it, and a Pydantic model drops it by default (`extra="ignore"`), so it is
 fetched for nothing. Only a model with `extra="allow"` keeps it.
 
@@ -510,8 +511,8 @@ c = SQL[Bad]("--sql\nSELECT id::INTEGER, clicks::INTEGER FROM pages")
 ```
 
 A rejected override keeps the base's openness, so the subclass's keys are
-still matched against the query. Only bases defined in the same file and
-spelled as bare names are checked, and types are compared only when the
+still matched against the query. Only bases spelled as bare names, defined in
+the same file or imported from a checked module, are checked, and types are compared only when the
 answer is certain (plain classes and unions of them, with `int` to `float`
 to `complex` promotion).
 

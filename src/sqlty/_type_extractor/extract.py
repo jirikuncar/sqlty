@@ -84,7 +84,7 @@ def extract_type_definitions(
     newtypes: dict[str, ast.Assign | typing.Any] = dict(_newtype_assignments(tree, aliases))
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
-    # are recognized when their base is a TypedDict defined earlier
+    # are recognized when their base is a TypedDict defined earlier or imported
     recognized: list[tuple[ast.ClassDef, str]] = []  # (node, kind)
     typeddict_nodes: dict[str, ast.ClassDef] = {}
     model_nodes: dict[str, ast.ClassDef] = {}
@@ -92,8 +92,24 @@ def extract_type_definitions(
     classes = parsed.classes
     if functional := _functional_classes(tree, aliases):
         classes = sorted([*classes, *functional], key=lambda node: node.lineno)
+    extra = frozenset(type_modules or ())
+    imported_bases: dict[str, TypeInfo] = {}
+    if helpers is not None:
+        local = {node.name for node in classes}
+        for name in {name for node in classes for name in _base_names(node)} - local:
+            if (found := helpers.row_type(parsed, name, extra)) is not None:
+                imported_bases[name] = found[0]
+    imported_of = {
+        kind: {name for name, info in imported_bases.items() if info.kind == kind}
+        for kind in ("TypedDict", "BaseModel")
+    }
     for node in classes:
-        kind = _classify_class(node, aliases, typeddict_nodes, model_nodes)
+        kind = _classify_class(
+            node,
+            aliases,
+            typeddict_nodes.keys() | imported_of["TypedDict"],
+            model_nodes.keys() | imported_of["BaseModel"],
+        )
         if kind == "TypedDict":
             typeddict_nodes[node.name] = node
         elif kind == "BaseModel":
@@ -107,7 +123,6 @@ def extract_type_definitions(
         return {}
 
     # Phase 2: Collect the guarded imports and aliases needed for the namespace
-    extra = frozenset(type_modules or ())
     if helpers is not None and helpers.type_modules != extra:
         helpers.type_modules = extra
         helpers.namespaces.clear()
@@ -123,9 +138,9 @@ def extract_type_definitions(
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
-    typeddicts: dict[str, TypeInfo] = {}
-    # Dataclasses and Pydantic models of this module, whose fields their subclasses inherit.
-    bases: dict[str, TypeInfo] = {}
+    typeddicts = {name: info for name, info in imported_bases.items() if info.kind == "TypedDict"}
+    # Dataclasses and Pydantic models, whose fields their subclasses inherit.
+    bases = {name: info for name, info in imported_bases.items() if info.kind != "TypedDict"}
     for node, kind in recognized:
         keywords = {k.arg: k.value for k in node.keywords if k.arg}
         total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
@@ -168,6 +183,14 @@ def extract_type_definitions(
             info.lax = frozenset().union(*(_lax_fields(n, config, aliases, imports) for n in nodes))
         info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
         info.annotations = _ast_annotations(nodes, aliases)
+        for parent in (p for p in parents if p.module != module):
+            info.field_types = parent.field_types | info.field_types
+            info.annotations = parent.annotations | info.annotations
+            info.lax |= parent.lax
+            if kind == "BaseModel":
+                info.columns = parent.columns | info.columns
+                info.opaque |= parent.opaque
+                info.allows_extra |= parent.allows_extra
         info.aliases = aliases
         hints = None
         if (fields or is_typeddict) and (

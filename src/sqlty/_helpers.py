@@ -377,6 +377,8 @@ class HelperIndex:
         if (defs := self._row_types.get((module, type_modules))) is None:
             from sqlty._type_extractor import extract_type_definitions
 
+            # Modules that import each other's row types see none while either is read.
+            self._row_types[module, type_modules] = {}
             defs = extract_type_definitions(parsed, self, module, type_modules)
             self._row_types[module, type_modules] = defs
         if name in defs:
