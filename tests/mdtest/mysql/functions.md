@@ -211,6 +211,14 @@ SELECT JSON_ARRAYAGG(id) AS a, JSON_OBJECTAGG(name, id) AS b FROM events
 -- columns: b: typing.Any (JSON)
 ```
 
+`MEMBER OF` tests whether a JSON array holds a value, like `IN`:
+
+```sql
+SELECT id MEMBER OF('[1, 2]') AS a, id MEMBER OF(doc) AS b FROM events
+-- columns: a: bool (BOOLEAN)
+-- columns: b: bool | None (BOOLEAN)
+```
+
 `JSON_VALUE` returns a string, or the type of its `RETURNING` clause.
 
 ```sql

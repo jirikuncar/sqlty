@@ -2,7 +2,7 @@
 
 A query that does not parse gets no row type, so nothing checks its annotation.
 The `unparsed-query` rule (default: ignore) reports it and quotes sqlparser's
-error. `xmlelement(name foo)` is valid PostgreSQL that sqlparser does not read.
+error. `NULL::xml IS DOCUMENT` is valid PostgreSQL that sqlparser does not read.
 
 ```toml
 [tool.sqlty]
@@ -20,14 +20,14 @@ unparsed-query = "ignore"
 ```
 
 ```python
-q = "--sql\nSELECT xmlelement(name foo)"
+q = "--sql\nSELECT NULL::xml IS DOCUMENT"
 ```
 
 ## A marked string that does not parse
 
 ```python
-# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
-q = "--sql\nSELECT xmlelement(name foo)"
+# error: [unparsed-query] "found: DOCUMENT"
+q = "--sql\nSELECT NULL::xml IS DOCUMENT"
 ```
 
 ## A wrapped query that does not parse
@@ -35,8 +35,8 @@ q = "--sql\nSELECT xmlelement(name foo)"
 ```python
 from sqlty import SQL
 
-# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
-q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
+# error: [unparsed-query] "found: DOCUMENT"
+q = SQL[tuple[str]]("--sql\nSELECT NULL::xml IS DOCUMENT")
 ```
 
 ## A query passed to an annotated helper
@@ -47,8 +47,8 @@ from sqlty import SQL
 
 def fetch_value[T](query: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
 
-# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
-n = fetch_value("SELECT xmlelement(name foo)", str)
+# error: [unparsed-query] "found: DOCUMENT"
+n = fetch_value("SELECT NULL::xml IS DOCUMENT", str)
 ```
 
 ## Queries that parse are not reported

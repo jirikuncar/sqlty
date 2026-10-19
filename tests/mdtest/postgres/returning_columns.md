@@ -139,6 +139,20 @@ RETURNING id::INTEGER, name::TEXT, email::TEXT
 -- columns: email: str (TEXT)
 ```
 
+## MERGE with RETURNING merge_action()
+
+`merge_action()` is the command run for the row: `INSERT`, `UPDATE` or `DELETE`.
+
+```sql
+MERGE INTO users
+USING updates ON users.id = updates.id
+WHEN MATCHED THEN DELETE
+WHEN NOT MATCHED THEN INSERT (name) VALUES (updates.name)
+RETURNING merge_action() AS action, id::INTEGER
+-- columns: action: str (TEXT)
+-- columns: id: int (INT)
+```
+
 ## Generate_return_type for MERGE with RETURNING
 
 ```sql

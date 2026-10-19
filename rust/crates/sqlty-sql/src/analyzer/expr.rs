@@ -261,6 +261,7 @@ impl<'a> Analyzer<'a> {
             | Expr::InSubquery { .. }
             | Expr::InList { .. }
             | Expr::InUnnest { .. }
+            | Expr::MemberOf(_)
             | Expr::Between { .. }
             | Expr::Like { .. }
             | Expr::ILike { .. }

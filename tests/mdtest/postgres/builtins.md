@@ -378,6 +378,12 @@ syntax as an equivalent it does read, so the query is typed as PostgreSQL types 
 | `substring(x similar p escape e)` | `substring(x from p for e)` |
 | `JSON_VALUE(x, path PASSING ... DEFAULT ... ON ERROR)` | `JSON_VALUE(x, path)`, keeping `RETURNING` |
 | `json_array(SELECT ...)` | `json_array((SELECT ...))` |
+| `xmlelement(name n, xmlattributes(x AS a), ...)`, `xmlpi(name n, ...)` | `xmlelement('', ROW(x), ...)`, `xmlpi('', ...)` |
+| `xmlroot(x, version v, standalone yes)` | `xmlroot(x, v)` |
+| `xmlserialize(document x AS type indent)` | `CAST(x AS type)` |
+| `xmlparse(content x strip whitespace)`, `xmlexists(path PASSING BY REF x)` | `xmlparse(content x)`, `xmlexists(path, x)` |
+| a window frame's `EXCLUDE CURRENT ROW` or `EXCLUDE GROUP` | a frame that may be empty |
+| a window frame's `EXCLUDE TIES` or `EXCLUDE NO OTHERS` | the frame |
 
 ```sql
 SELECT 2 BETWEEN SYMMETRIC 3 AND 1 AS swapped, timestamp '2001-02-16 20:38:40' at local AS local, collation for ('foo'::text) AS collation, trim(both from 'yxTomxx', 'xyz') AS trimmed, substring('Thomas' similar '%#"o_a#"_' escape '#') AS matched, JSON_VALUE(jsonb '[1,2]', 'strict $[$off]' PASSING 1 AS off RETURNING int DEFAULT 9 ON ERROR) AS value, json_array(SELECT 1) AS arr
@@ -399,6 +405,31 @@ SELECT 2 NOT BETWEEN ASYMMETRIC 1 AND 3 AS outside, trim(leading from 'xxa', 'x'
 -- columns: unquoted: list[int] | None (ARRAY<INT>)
 -- columns: found: bool (BOOLEAN)
 -- columns: text: typing.Literal['at local'] (None)
+```
+
+The XML functions are NULL when their content is: `xmlelement` never is, `xmlforest` and
+`xmlconcat` only when every argument is, and `xmlroot` when its first is.
+
+```sql
+SELECT xmlelement(name foo, xmlattributes(1 AS bar), NULL) AS element, xmlpi(name php, NULL) AS pi, xmlroot(xmlparse(document '<a/>'), version '1.0', standalone yes) AS root, xmlserialize(content '<a/>'::xml AS varchar(20) indent) AS text, xmlforest(1 AS a, NULL AS b) AS forest, xmlconcat(NULL, NULL) AS concat, xmlparse(content 'x' strip whitespace) AS parsed, xmlexists('/a' PASSING BY REF '<a/>') AS found
+-- columns: element: str (XML)
+-- columns: pi: str | None (XML)
+-- columns: root: str (XML)
+-- columns: text: str (VARCHAR(20))
+-- columns: forest: str (XML)
+-- columns: concat: str | None (XML)
+-- columns: parsed: str (XML)
+-- columns: found: bool (BOOLEAN)
+```
+
+Without the current row a window frame may be empty, and so may its aggregates and
+values:
+
+```sql
+SELECT max(x) OVER (ORDER BY x ROWS CURRENT ROW EXCLUDE CURRENT ROW) AS alone, first_value(x) OVER (ORDER BY x RANGE UNBOUNDED PRECEDING EXCLUDE TIES) AS first, count(*) OVER (ORDER BY x GROUPS UNBOUNDED PRECEDING EXCLUDE GROUP) AS n FROM generate_series(1, 3) AS x
+-- columns: alone: int | None (INT)
+-- columns: first: int (INT)
+-- columns: n: int (BIGINT)
 ```
 
 `UNKNOWN ON ERROR` makes `JSON_EXISTS` NULL on an error, so sqlty leaves that call to sqlparser:

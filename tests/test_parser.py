@@ -46,7 +46,7 @@ class TestParser:
                 "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE "
                 "RETURNING merge_action(), t.id::INT",
                 "postgres",
-                None,
+                "tuple[str, int]",
             ),
             ("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "postgres", None),
         ],
