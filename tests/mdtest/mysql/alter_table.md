@@ -163,3 +163,27 @@ SELECT * FROM accounts
 SELECT * FROM accounts_old
 -- columns: id: int (INT)
 ```
+
+## RENAME into another database
+
+A table renamed into another database keeps its columns.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (id INT NOT NULL, kind VARCHAR(20));
+CREATE TABLE logs (id INT NOT NULL);
+RENAME TABLE events TO archive.events;
+ALTER TABLE logs RENAME TO archive.logs;
+```
+
+```sql
+SELECT * FROM archive.events
+-- columns: id: int (INT)
+-- columns: kind: str | None (VARCHAR(20))
+```
+
+```sql
+SELECT * FROM archive.logs
+-- columns: id: int (INT)
+```

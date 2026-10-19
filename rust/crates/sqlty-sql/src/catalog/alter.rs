@@ -13,7 +13,7 @@ use crate::analyzer::SqlDialect;
 
 use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column};
 use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef};
-use super::names::{fold, key_of, parts};
+use super::names::{fold, parts};
 
 impl Loader {
     /// Returns `false` when the table (or a column it changes) is not defined yet.
@@ -104,7 +104,7 @@ impl Loader {
             let (schema, _) = key.split_once('.').unwrap_or(("public", ""));
             let new_key = match parts(&new_name, self.dialect).as_slice() {
                 [only] => format!("{schema}.{only}"),
-                other => key_of(other, self.dialect),
+                _ => self.new_key(&new_name, path),
             };
             self.cache = None;
             if let Some(table) = self.relations.remove(&key) {
