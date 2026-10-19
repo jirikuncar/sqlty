@@ -79,8 +79,8 @@ reasoning = "`->` on a jsonb value gives jsonb; a missing member or element give
 
 ### Function rules
 
-A `[[function]]` table types a call of a built-in function by its first
-argument:
+A `[[function]]` table types a call of a built-in function by its first two
+arguments:
 
 ```toml
 [[function]]
@@ -95,10 +95,13 @@ reasoning = "Summing small integers widens to bigint so the sum fits."
 ```
 
 `function` or `functions` name upper-case built-ins, and `argument` is an
-operand predicate as above; `@known` admits any typed argument. `type` is a SQL
-type, `@any`, `@unknown`, `@code`, `@argument` (the argument's type, value set
-included, as `MIN` and `MAX` return one of the values) or `@argument-as TYPE`
-(the argument's Python type under another SQL type). `nullability` is required:
+operand predicate as above for the first argument; `@known` admits any typed
+argument. `arguments` gives one for each of the first two instead, an empty list
+admitting any: `arguments = [[], ["JSON", "JSONB"]]` matches a JSON second
+argument. `type` is a SQL type, `@any`, `@unknown`, `@code`, `@argument` (the
+first argument's type, value set included, as `MIN` and `MAX` return one of the
+values), `@argument(1)` (the second argument's) or `@argument-as TYPE` (the
+first argument's Python type under another SQL type). `nullability` is required:
 `non-null`; `nullable`, NULL whatever the arguments; `aggregate`, the empty-group and NULL-argument behaviour of
 aggregates in `analyzer/nullability.rs`; or `strict`, a scalar function's, as the
 analyzer's function table says.

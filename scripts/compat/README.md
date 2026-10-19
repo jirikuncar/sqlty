@@ -42,7 +42,7 @@ mdtest, or a converter difference, to document.
 | SQLObject | `sqlobject` | `reports/sqlobject.md` | none |
 | PostgreSQL nullability | `pg_nullability.py`, a server | `reports/pg_nullability.md` | none |
 | MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587), date arithmetic and casts (#590) |
-| PostgreSQL documentation | `pg_docs.py`, a server | `reports/pg_docs.md` | `pg_typeof`, `cbrt`, `length` of a path, text search operators (#558) |
+| PostgreSQL documentation | `pg_docs.py`, a server | `reports/pg_docs.md` | `pg_typeof`, `cbrt`, `length` of a path, text search operators, `ts_headline` after a configuration, `string_agg` of `bytea`, `age` of a transaction ID, session names, arrays of arrays (#558) |
 
 `pg_nullability.py` is not a harness source: it runs the PostgreSQL queries of the Markdown tests
 on seeded rows (`tests/_pg_seed.py`) and lists the columns sqlty types as nullable that no
@@ -57,8 +57,10 @@ fails on a name or type that differs.
 
 `pg_docs.py` reads the examples of the function and operator tables of the PostgreSQL
 documentation, for the server's major version, and compares the type the server describes
-for each with sqlty's. It exits with status 1 on a type that differs, and lists the
-examples sqlty leaves untyped or can't parse. Run it against a new PostgreSQL release to
+for each with sqlty's. It does the same for every overload of a documented function in
+`pg_proc`, called with a typed `NULL` per argument, and for every operator of
+`pg_operator`. It exits with status 1 on a type that differs, and lists the queries sqlty
+leaves untyped or can't parse. Run it against a new PostgreSQL release to
 find what sqlty doesn't know yet.
 
 Every DDL spelling the ORMs write parses and has a type. Their remaining mismatches are

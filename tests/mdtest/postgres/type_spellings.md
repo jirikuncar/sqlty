@@ -38,9 +38,9 @@ SELECT CAST(x AS BLOB) AS a, CAST(x AS DATETIME) AS b, CAST(x AS NVARCHAR(5)) AS
 
 ```sql
 SELECT CURRENT_USER, CURRENT_ROLE, SESSION_USER
--- columns: current_user: str (TEXT)
--- columns: current_role: str (TEXT)
--- columns: session_user: str (TEXT)
+-- columns: current_user: str (NAME)
+-- columns: current_role: str (NAME)
+-- columns: session_user: str (NAME)
 ```
 
 ## Geometric types

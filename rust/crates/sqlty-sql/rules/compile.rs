@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 50] = [
+const SQL_TYPES: [&str; 51] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -59,6 +59,7 @@ const SQL_TYPES: [&str; 50] = [
     "TSQUERY",
     "PATH",
     "LSEG",
+    "XID",
     "MONEY",
     "INT4RANGE",
     "INT8RANGE",
@@ -134,12 +135,14 @@ const NULLABILITIES: [(&str, &str); 5] = [
 ];
 
 /// Result types of a function rule other than a SQL type name; `@argument-as <TYPE>` keeps
-/// the argument's Python type and values under another SQL type.
-const FUNCTION_RESULTS: [(&str, &str); 4] = [
+/// the first argument's Python type and values under another SQL type.
+const FUNCTION_RESULTS: [(&str, &str); 6] = [
     ("@any", "FunctionType::Any"),
     ("@unknown", "FunctionType::Unknown"),
     ("@code", "FunctionType::Code"),
-    ("@argument", "FunctionType::Argument"),
+    ("@argument", "FunctionType::Argument(0)"),
+    ("@argument(0)", "FunctionType::Argument(0)"),
+    ("@argument(1)", "FunctionType::Argument(1)"),
 ];
 
 /// How a function rule's result can be NULL.
@@ -173,6 +176,9 @@ struct FunctionDef {
     dialects: Vec<String>,
     #[serde(default)]
     argument: Vec<String>,
+    /// The types of the first two arguments; an empty list admits any.
+    #[serde(default)]
+    arguments: Vec<Vec<String>>,
     #[serde(rename = "type")]
     result: String,
     nullability: String,
@@ -180,23 +186,38 @@ struct FunctionDef {
     shadows: Vec<String>,
 }
 
-impl From<FunctionDef> for RuleDef {
-    fn from(def: FunctionDef) -> Self {
-        RuleDef {
-            id: def.id,
-            reference: def.reference,
-            reasoning: def.reasoning,
-            operator: def.function,
-            operators: def.functions,
-            dialects: def.dialects,
-            left: def.argument,
-            right: Vec::new(),
-            result: def.result,
-            nullability: def.nullability,
-            shadows: def.shadows,
+impl FunctionDef {
+    /// The rule, with the first argument's types as `left` and the second's as `right`.
+    fn into_rule(self, file: &str) -> Result<RuleDef, String> {
+        if !self.argument.is_empty() && !self.arguments.is_empty() {
+            return Err(format!(
+                "rule {} ({file}): give `argument` or `arguments`, not both",
+                self.id
+            ));
+        }
+        if self.arguments.len() > 2 {
+            return Err(format!(
+                "rule {} ({file}): `arguments` reads the first two arguments only",
+                self.id
+            ));
+        }
+        let mut arguments = self.arguments.into_iter();
+        let left = arguments.next().unwrap_or(self.argument);
+        Ok(RuleDef {
+            id: self.id,
+            reference: self.reference,
+            reasoning: self.reasoning,
+            operator: self.function,
+            operators: self.functions,
+            dialects: self.dialects,
+            left,
+            right: arguments.next().unwrap_or_default(),
+            result: self.result,
+            nullability: self.nullability,
+            shadows: self.shadows,
             left_parameter: None,
             right_parameter: None,
-        }
+        })
     }
 }
 
@@ -284,8 +305,15 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
             .rule
             .into_iter()
             .map(|def| (def, false))
-            .chain(parsed.function.into_iter().map(|def| (def.into(), true)));
-        for (def, function) in defs {
+            .map(Ok)
+            .chain(
+                parsed
+                    .function
+                    .into_iter()
+                    .map(|def| def.into_rule(file).map(|def| (def, true))),
+            );
+        for def in defs {
+            let (def, function) = def?;
             let rule = check(def, function, file, tier)?;
             if let Some(other) = rules.iter().find(|r| r.def.id == rule.def.id) {
                 return Err(format!(
@@ -639,7 +667,8 @@ fn generate_functions(rules: &[&Rule]) -> String {
             out,
             "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \
              reference: {:?},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
-             argument: {},\n        result: {result},\n        nullability: {nullability},\n    }},",
+             argument: {},\n        second: {},\n        result: {result},\n        \
+             nullability: {nullability},\n    }},",
             def.id,
             rule.file,
             def.id,
@@ -647,6 +676,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
             def.reasoning.trim(),
             rule.dialects.join(", "),
             operand(&rule.left),
+            operand(&rule.right),
         );
     }
     out.push_str("];\n\n");

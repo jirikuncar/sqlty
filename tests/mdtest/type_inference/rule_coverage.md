@@ -16,7 +16,7 @@ CREATE TABLE t (
     ts TIMESTAMP NOT NULL, tz TIMESTAMPTZ NOT NULL, tm TIME NOT NULL, ttz TIMETZ NOT NULL,
     iv INTERVAL NOT NULL, bt BYTEA NOT NULL, ia INT[] NOT NULL, ip INET NOT NULL,
     cn CIDR NOT NULL, rg INT4RANGE NOT NULL, tq TSQUERY NOT NULL, tv TSVECTOR NOT NULL,
-    pt PATH NOT NULL
+    pt PATH NOT NULL, x XID NOT NULL
 );
 ```
 
@@ -182,6 +182,16 @@ FROM t
 -- rules: tq_phrase: postgres.textsearch.followed-by / postgres.textsearch.followed-by
 -- rules: path_length: postgres.geometry.length / postgres.geometry.length
 -- rules: headline: postgres.textsearch.headline-json / postgres.textsearch.headline-json
+```
+
+### Argument types
+
+```sql
+SELECT ts_headline('english', jb, tq) AS headline, string_agg(bt, bt) AS bytes, age(x) AS xid_age
+FROM t
+-- rules: headline: postgres.textsearch.headline-json-config / postgres.textsearch.headline-json-config
+-- rules: bytes: postgres.aggregate.string-agg-bytea / postgres.aggregate.string-agg-bytea
+-- rules: xid_age: postgres.system.age-xid / postgres.system.age-xid
 ```
 
 ## MySQL

@@ -115,7 +115,7 @@ impl Analyzer<'_> {
             Expr::Function(func) => {
                 let name = self.builtin_name(&func.name);
                 let args = positional_args(&func.args);
-                match self.function_rule(&name, args.first().copied(), scope) {
+                match self.function_rule(&name, &args, scope) {
                     Ok(Some((rule, _))) => Some(rule.explained()),
                     _ => None,
                 }

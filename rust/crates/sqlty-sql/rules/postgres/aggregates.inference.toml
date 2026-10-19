@@ -49,3 +49,13 @@ type = "@argument-as TEXT"
 nullability = "aggregate"
 reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ): available for any numeric, string, ... type); the text operators read varchar as text"
 reasoning = "PostgreSQL has no min or max for varchar: it reads the values as text, so the result is text."
+
+[[function]]
+id = "postgres.aggregate.string-agg-bytea"
+function = "STRING_AGG"
+dialects = ["postgres"]
+argument = ["@binary"]
+type = "BYTEA"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (string_agg ( value bytea, delimiter bytea ) → bytea)"
+reasoning = "Binary strings concatenate into a binary string."

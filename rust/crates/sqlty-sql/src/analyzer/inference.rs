@@ -151,9 +151,10 @@ pub(crate) enum FunctionType {
     Unknown,
     /// Typed by the analyzer's code: the rule gives the nullability only.
     Code,
-    /// The argument's type, values included: `MIN` and `MAX` return one of them.
-    Argument,
-    /// The argument's Python type and values under another SQL type.
+    /// The type of the argument at this position, values included: `MIN` and `MAX` return
+    /// one of them.
+    Argument(usize),
+    /// The first argument's Python type and values under another SQL type.
     ArgumentAs(&'static str),
 }
 
@@ -171,7 +172,7 @@ pub(crate) enum FunctionNullability {
     Strict,
 }
 
-/// An inference rule for a function call, by its first argument.
+/// An inference rule for a function call, by its first two arguments.
 #[derive(Debug)]
 pub(crate) struct FunctionRule {
     pub(crate) id: &'static str,
@@ -180,6 +181,8 @@ pub(crate) struct FunctionRule {
     dialects: &'static [SqlDialect],
     /// The SQL types the first argument may have; `None` for any.
     argument: Option<&'static [&'static str]>,
+    /// The SQL types the second argument may have; `None` for any.
+    second: Option<&'static [&'static str]>,
     pub(crate) result: FunctionType,
     pub(crate) nullability: FunctionNullability,
 }
@@ -194,15 +197,27 @@ impl FunctionRule {
         }
     }
 
-    /// Whether the rule needs the argument's type to decide whether it applies.
-    pub(crate) fn reads_argument(&self) -> bool {
-        self.argument.is_some()
+    /// Whether the rule needs the type of the argument at `position` (0 or 1) to decide
+    /// whether it applies, or to give its result.
+    pub(crate) fn reads(&self, position: usize) -> bool {
+        let predicate = if position == 0 {
+            self.argument
+        } else {
+            self.second
+        };
+        predicate.is_some() || self.result == FunctionType::Argument(position)
     }
 
-    /// Whether the rule applies in `dialect` to an argument of this SQL type.
-    pub(crate) fn applies(&self, dialect: SqlDialect, argument: Option<&str>) -> bool {
+    /// Whether the rule applies in `dialect` to arguments of these SQL types.
+    pub(crate) fn applies(
+        &self,
+        dialect: SqlDialect,
+        argument: Option<&str>,
+        second: Option<&str>,
+    ) -> bool {
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.argument, argument)
+            && admits(self.second, second)
     }
 }
 
@@ -292,7 +307,8 @@ mod tests {
         }
         for name in ["COUNT", "SUM", "AVG", "MIN", "UNKNOWN"] {
             for rule in function_rules(name) {
-                matched += usize::from(rule.applies(SqlDialect::Postgres, Some("SMALLINT")));
+                matched +=
+                    usize::from(rule.applies(SqlDialect::Postgres, Some("SMALLINT"), Some("TEXT")));
             }
         }
         COUNTING.with(|counting| counting.set(false));

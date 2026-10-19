@@ -1036,7 +1036,7 @@ impl<'a> Analyzer<'a> {
         };
         let rules = function_rules(&name);
         if rules.iter().any(|rule| fixed(rule.nullability).is_some()) {
-            if let Ok(Some((rule, _))) = self.function_rule(&name, args.first().copied(), scope) {
+            if let Ok(Some((rule, _))) = self.function_rule(&name, &args, scope) {
                 if let Some(nullability) = fixed(rule.nullability) {
                     return nullability;
                 }
