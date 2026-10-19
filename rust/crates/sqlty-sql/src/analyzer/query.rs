@@ -4,8 +4,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use sqlparser::ast::{
-    Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderByKind, Query, Select, SelectItem,
-    SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins, Value,
+    AccessExpr, Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderByKind, Query, Select,
+    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins,
+    Value,
 };
 
 use sqlparser::tokenizer::Location;
@@ -20,6 +21,7 @@ use super::dml::{
     dml_scope, joined_tables, merge_source, returning, selects_into, unmatched_sources,
 };
 use super::explain::Explained;
+use super::expr::is_field_star;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
@@ -534,6 +536,16 @@ impl<'a> Analyzer<'a> {
         };
         for (index, item) in items.iter().enumerate() {
             let (expr, name) = match item {
+                SelectItem::UnnamedExpr(Expr::CompoundFieldAccess { root, access_chain })
+                    if matches!(access_chain.as_slice(),
+                        [AccessExpr::Dot(Expr::Identifier(field))] if is_field_star(field)) =>
+                {
+                    columns.extend(self.field_star(root, scope, from)?);
+                    if let Some(rules) = &mut rules {
+                        rules.resize(columns.len(), (None, None));
+                    }
+                    continue;
+                }
                 SelectItem::UnnamedExpr(expr) => {
                     let mut column = expr;
                     while let Expr::Nested(inner) = column {
@@ -643,6 +655,47 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Columns of a star from the schema, or a single unknown `*` column.
+    /// The columns of PostgreSQL's `(value).*`: a whole row's are its table's, as `t.*`; a
+    /// composite value's are its fields, each NULL when the value is.
+    fn field_star(
+        &self,
+        root: &Expr,
+        scope: &Scope,
+        from: Option<&[TableWithJoins]>,
+    ) -> Inferred<Vec<Column>> {
+        let mut value = root;
+        while let Expr::Nested(inner) = value {
+            value = inner;
+        }
+        if let (Some(_), Expr::Identifier(ident)) = (self.whole_row_table(value, scope), value) {
+            return Ok(self.star(Some(&fold(ident, self.dialect)), scope, from));
+        }
+        let mark = self.diag.mark();
+        let typed = self.expr(root, scope)?;
+        let fields = typed
+            .sql
+            .as_deref()
+            .and_then(|name| self.composite_fields(name));
+        Ok(match fields {
+            Some((_, fields)) => {
+                // The composite itself needs no Python type, only its fields.
+                self.diag.rewind(mark);
+                fields
+                    .iter()
+                    .filter(|field| !field.invisible)
+                    .map(|field| {
+                        Column::from_typed(
+                            field.name.clone(),
+                            field.typed(self.dialect),
+                            Nullability::Nullable,
+                        )
+                    })
+                    .collect()
+            }
+            None => vec![Column::unknown("*")],
+        })
+    }
+
     pub(super) fn star(
         &self,
         reference: Option<&str>,
