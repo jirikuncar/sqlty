@@ -45,8 +45,23 @@ _IMPORTED = frozenset(
 )
 _SEQUENCES = frozenset({"list", "tuple", "set", "frozenset"})
 
+# asyncpg encodes an argument as the parameter's type, and these encoders reject a ``str``.
+_ASYNCPG_NOT_TEXT = frozenset(
+    {
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "datetime.date",
+        "datetime.datetime",
+        "datetime.time",
+        "datetime.timedelta",
+    }
+)
+
 # What a parameter of a given type takes. Any ``str`` is taken for any type: the server
-# coerces text (psycopg sends it untyped), so only the other types are judged.
+# coerces text (psycopg sends it untyped), so only the other types are judged; asyncpg
+# does not, see ``_ASYNCPG_NOT_TEXT``.
 _NUMBERS = frozenset({"int", "float", "bool", "decimal.Decimal"})
 _ACCEPTS: dict[str, frozenset[str]] = {
     "int": _NUMBERS,
@@ -117,13 +132,20 @@ def _class(name: str | None, parsed: ParsedSource) -> str | None:
 
 
 def mismatch(
-    expected: str | None, nullable: bool | None, actual: str | None, *, postgres: bool = False
+    expected: str | None,
+    nullable: bool | None,
+    actual: str | None,
+    *,
+    postgres: bool = False,
+    asyncpg: bool = False,
 ) -> str | None:
     """Why a value of type ``actual`` can't be passed for a parameter of type ``expected``, else ``None``.
 
     PostgreSQL has no implicit cast between ``boolean`` and the number types, and the
     drivers send a ``bool`` as a ``boolean`` and an ``int`` as an integer, so with
-    ``postgres`` neither is taken for the other.
+    ``postgres`` neither is taken for the other. ``asyncpg`` encodes each argument as its
+    parameter's type instead: a ``bool`` is a number then, but a ``str`` is not a number,
+    date, time or list.
 
     Example:
         >>> mismatch("int", None, "datetime.date")
@@ -136,21 +158,30 @@ def mismatch(
         [None, None, None, None]
         >>> mismatch("int", None, "bool", postgres=True), mismatch("bool", None, "int", postgres=True)
         ('expects int, got bool', 'expects bool, got int')
+        >>> mismatch("int", None, "str", asyncpg=True), mismatch("int", None, "bool", postgres=True, asyncpg=True)
+        ('expects int, got str', None)
     """
     if actual is None:
         return None
     if actual == "None":
         return "is not nullable, got None" if nullable is False else None
-    if expected is None or actual == "str":
+    if expected is None:
+        return None
+    if actual == "str" and not (
+        asyncpg and (expected in _ASYNCPG_NOT_TEXT or expected.startswith("list["))
+    ):
         return None
     if expected.startswith("list["):
         if actual.startswith("list["):
-            inner = mismatch(expected[5:-1], None, actual[5:-1], postgres=postgres)
+            inner = mismatch(expected[5:-1], None, actual[5:-1], postgres=postgres, asyncpg=asyncpg)
             return None if inner is None else f"expects {expected}, got {actual}"
         return None if actual == "list" else f"expects {expected}, got {actual}"
     accepted = _ACCEPTS.get(expected)
     if postgres and accepted is not None:
-        accepted = accepted - ({"int"} if expected == "bool" else {"bool"})
+        if expected == "bool":
+            accepted = accepted - {"int"}
+        elif not asyncpg:
+            accepted = accepted - {"bool"}
     if accepted is None or actual in accepted:
         return None
     return f"expects {expected}, got {actual}"

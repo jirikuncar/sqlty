@@ -488,7 +488,13 @@ def _param_diagnostics(
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
         if arg.type == "None" or (typed and not param.cast):
-            if problem := mismatch(param.python_type, param.nullable, arg.type, postgres=postgres):
+            if problem := mismatch(
+                param.python_type,
+                param.nullable,
+                arg.type,
+                postgres=postgres,
+                asyncpg=call.driver == "asyncpg",
+            ):
                 found.append(("param-type-mismatch", f"{label} {problem}"))
     if call.driver == "asyncpg":
         for param in params:
