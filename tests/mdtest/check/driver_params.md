@@ -108,6 +108,25 @@ async def main() -> None:
     await conn.execute("DELETE FROM users WHERE id = $1 AND age = $2", 1)
 ```
 
+### asyncpg does not convert text
+
+psycopg sends a `str` untyped, and the server converts it to the parameter's type.
+asyncpg encodes each argument as its parameter's type instead: it rejects a `str` for
+a number, a date or time, or an array, and takes a `bool` for a number.
+
+```python
+import asyncpg
+
+async def main() -> None:
+    conn = await asyncpg.connect("postgres://x")
+    # error: [param-type-mismatch] "parameter 1 expects int, got str"
+    await conn.fetch("SELECT id FROM users WHERE id = $1", "1")
+    # error: [param-type-mismatch] "parameter 1 expects list[int], got str"
+    await conn.fetch("SELECT id FROM users WHERE id = ANY($1)", "{1}")
+    await conn.fetch("SELECT id FROM users WHERE name = $1 AND age = $2", "a", True)
+    await conn.fetch("SELECT id FROM users WHERE id = $1::text::int", "1")
+```
+
 ### A parameter shifted by an interval
 
 PostgreSQL resolves `$1 - INTERVAL '3 months'` before the comparison around it: an
