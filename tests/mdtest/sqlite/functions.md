@@ -203,6 +203,17 @@ SELECT zeroblob(4) AS a, randomblob(4) AS b, unhex(name) AS c, sqlite_version() 
 -- columns: h: int (BIGINT)
 ```
 
+`unistr` reads backslash escapes, and `unistr_quote` quotes any value, `NULL`
+included. `sqlite_compileoption_get(N)` is `NULL` past the last option.
+
+```sql
+SELECT unistr(note) AS a, unistr_quote(note) AS b, sqlite_compileoption_get(id) AS c, sqlite_compileoption_used(name) AS d FROM events
+-- columns: a: str | None (TEXT)
+-- columns: b: str (TEXT)
+-- columns: c: str | None (TEXT)
+-- columns: d: int (BIGINT)
+```
+
 A blob literal is a blob.
 
 ```sql
