@@ -257,7 +257,8 @@ Per dialect, with the driver each follows and why some types differ, see
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
 | `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]`, `INT MULTISET` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
-| Anything else (`SET`, `POINT`, ranges, custom types, ...) | unknown: the row type is unknown |
+| `POINT`, `POLYGON` and the other geometric types | `str` (psycopg); `bytes` in MySQL |
+| Anything else (`SET`, ranges, custom types, ...) | unknown: the row type is unknown |
 
 ### Dialect notes
 

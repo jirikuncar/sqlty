@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 84] = [
+const SQL_TYPES: [&str; 85] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -84,6 +84,7 @@ const SQL_TYPES: [&str; 84] = [
     "BOX",
     "CIRCLE",
     "POLYGON",
+    "GEOMETRY",
     "MACADDR8",
     "PG_LSN",
     "PG_SNAPSHOT",
