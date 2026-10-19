@@ -16,7 +16,9 @@ use crate::json::JsonShape;
 use crate::values;
 
 use super::dialect::SqlDialect;
-use super::dml::{dml_scope, joined_tables, merge_source, returning, unmatched_sources};
+use super::dml::{
+    dml_scope, joined_tables, merge_source, returning, selects_into, unmatched_sources,
+};
 use super::explain::Explained;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
@@ -139,6 +141,7 @@ impl<'a> Analyzer<'a> {
 
     pub(super) fn statement_columns(&self, stmt: &Statement) -> Inferred<Option<Vec<Column>>> {
         match stmt {
+            Statement::Query(query) if selects_into(&query.body) => Ok(None),
             Statement::Query(query) => self.query_columns(query),
             _ => {
                 self.dml_names(stmt);

@@ -172,6 +172,27 @@ CREATE TABLE x AS SELECT a::INTEGER FROM t
 -- inferred: None
 ```
 
+### `SELECT a::INTEGER INTO x FROM t`
+
+```sql
+SELECT a::INTEGER INTO x FROM t
+-- inferred: None
+```
+
+### `SELECT a::INTEGER INTO TEMP x FROM t UNION SELECT 2`
+
+```sql
+SELECT a::INTEGER INTO TEMP x FROM t UNION SELECT 2
+-- inferred: None
+```
+
+### `WITH c AS (SELECT 1 AS a) SELECT a::INTEGER INTO x FROM c`
+
+```sql
+WITH c AS (SELECT 1 AS a) SELECT a::INTEGER INTO x FROM c
+-- inferred: None
+```
+
 ### `SELECT a::INTEGER FROM t UNION SELECT b FROM u UNION SELECT c FROM v`
 
 ```sql

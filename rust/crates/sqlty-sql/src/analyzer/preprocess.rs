@@ -13,6 +13,7 @@ use sqlparser::ast::{
 use sqlparser::parser::Parser;
 
 use super::dialect::SqlDialect;
+use super::dml::selects_into;
 use super::respell::respell;
 use super::star_expand::is_word;
 
@@ -492,6 +493,8 @@ pub(super) fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bo
         visit_expressions(stmt, bad_expr).is_break()
             || matches!(stmt, Statement::CreateTable(create)
                 if create.columns.iter().any(|col| foreign(&col.data_type)))
+            || matches!(stmt, Statement::Query(query)
+                if dialect == SqlDialect::Sqlite && selects_into(&query.body))
     })
 }
 

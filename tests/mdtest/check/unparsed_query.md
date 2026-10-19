@@ -80,3 +80,17 @@ a = "--sql\nSELECT 5 MOD 2"
 # error: [unparsed-query] "found: 2"
 b = "--sql\nSELECT 5 IS 2"
 ```
+
+## Syntax the dialect lacks
+
+SQLite has no `SELECT ... INTO`; sqlparser reads it in every dialect.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+```python
+# error: [unparsed-query] "query does not parse: unsupported in this dialect"
+q = "--sql\nSELECT id INTO backup FROM users"
+```

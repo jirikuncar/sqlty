@@ -115,6 +115,30 @@ q = "--sql\nDELETE FROM users"
 # rewritten-file: q = "--sql\nDELETE FROM users"
 ```
 
+### Select into a table not wrapped
+
+PostgreSQL's `SELECT ... INTO` creates a table from the rows and returns none.
+
+```python
+q = "--sql\nSELECT id::INTEGER INTO TEMP backup FROM users"
+# rewritten-file: q = "--sql\nSELECT id::INTEGER INTO TEMP backup FROM users"
+```
+
+### Select into variables not wrapped
+
+MySQL's `SELECT ... INTO @variable` stores the row in the variables and returns
+none.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+q = "--sql\nSELECT id INTO @last_id FROM users ORDER BY id DESC LIMIT 1"
+# rewritten-file: q = "--sql\nSELECT id INTO @last_id FROM users ORDER BY id DESC LIMIT 1"
+```
+
 ### Create table not wrapped
 
 ```python
