@@ -57,6 +57,18 @@ pub(super) fn from_sql_type(sql_type: &str, dialect: SqlDialect) -> Typed {
 }
 
 impl<'a> Analyzer<'a> {
+    /// The array of SQL type `elem`; an array of enums lists their `Literal`.
+    pub(super) fn array_of(&self, elem: &str) -> Typed {
+        let sql = format!("ARRAY<{elem}>");
+        let typed = from_sql_type(&sql, self.dialect);
+        match self.element_typed(Some(&sql)).python {
+            Some(python) if typed.python.as_deref() == Some("list") => {
+                Typed::new(Some(format!("list[{python}]")), Some(sql))
+            }
+            _ => typed,
+        }
+    }
+
     /// The element type of an array type; an enum element keeps its `Literal`.
     pub(super) fn element_typed(&self, array: Option<&str>) -> Typed {
         let Some(elem) = array.and_then(array_element) else {
@@ -388,9 +400,7 @@ impl<'a> Analyzer<'a> {
         }
         let elem =
             common.and_then(|typed| typed.sql().or_else(|| category(&typed)).map(String::from));
-        Ok(elem.map_or(Typed::UNKNOWN, |elem| {
-            from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
-        }))
+        Ok(elem.map_or(Typed::UNKNOWN, |elem| self.array_of(&elem)))
     }
 
     /// `col[1].field`: element and field types of the root's type, as the schema declares them.
@@ -539,9 +549,7 @@ impl<'a> Analyzer<'a> {
             let elem = first_column(&columns)?
                 .map(Column::typed)
                 .and_then(|typed| typed.sql().or_else(|| category(&typed)).map(String::from));
-            return Ok(elem.map_or(Typed::UNKNOWN, |elem| {
-                from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
-            }));
+            return Ok(elem.map_or(Typed::UNKNOWN, |elem| self.array_of(&elem)));
         }
         if let FunctionArguments::List(list) = &func.args {
             let returning = list.clauses.iter().find_map(|clause| match clause {
