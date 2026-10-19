@@ -24,7 +24,8 @@ variable annotated or assigned a class, a call of a known class (`date(...)`,
 `str`, which the server coerces to any type. `int`, `float` and `Decimal` are
 interchangeable. On PostgreSQL a `bool` is not a number and an `int` is not a
 `boolean`, since the server has no implicit cast between them; MySQL takes
-either. A parameter with an explicit cast (`%s::text`) takes
+either. asyncpg encodes each argument as its parameter's type: it takes a
+`bool` for a number, but not a `str` for a number, a date or time, `bytes` or a list. A parameter with an explicit cast (`%s::text`) takes
 anything. `None` is reported only for a parameter stored in a `NOT NULL`
 column. SQLite is dynamically typed: with `dialect = "sqlite"` only `None` is
 checked.
