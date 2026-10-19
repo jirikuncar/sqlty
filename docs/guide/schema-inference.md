@@ -118,7 +118,9 @@ What makes a column nullable or not:
 - **Subqueries.** A scalar subquery is nullable unless it always returns one row.
 - **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
   `EXCEPT` follows its left side.
-- **DML.** `RETURNING` reads the schema like a `SELECT`.
+- **DML.** `RETURNING` reads the schema like a `SELECT`. A column the statement writes
+  with a value that is never NULL is not NULL, and so is one an `INSERT` leaves out for a
+  `DEFAULT` that never is, unless a `BEFORE` row trigger can change the row.
 - **Parameters.** A placeholder echoed into a column (`SELECT %(key)s::text`) can be NULL,
   since a caller may bind `None`. In a call to a [marked helper](helpers.md) whose argument
   for it has a known type other than `None` (a literal, an annotated variable), it is not:

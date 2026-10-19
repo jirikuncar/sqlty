@@ -230,17 +230,16 @@ impl Analyzer<'_> {
                 let TableObject::TableName(name) = &insert.table else {
                     return self.facts.clone();
                 };
+                let table = self
+                    .schema
+                    .table(&table_key(name, self.dialect))
+                    .unwrap_or_default();
                 let columns: Vec<String> = if insert.columns.is_empty() {
-                    self.schema
-                        .table(&table_key(name, self.dialect))
-                        .map(|columns| {
-                            columns
-                                .iter()
-                                .filter(|c| !c.invisible)
-                                .map(|c| c.ident.clone())
-                                .collect()
-                        })
-                        .unwrap_or_default()
+                    table
+                        .iter()
+                        .filter(|c| !c.invisible)
+                        .map(|c| c.ident.clone())
+                        .collect()
                 } else {
                     insert
                         .columns
@@ -249,16 +248,57 @@ impl Analyzer<'_> {
                         .map(|ident| ident.value.clone())
                         .collect()
                 };
+                // `None` for `DEFAULT VALUES`, which writes no column.
                 let values = insert
                     .source
                     .as_deref()
-                    .and_then(|source| quiet.query_columns(source).ok().flatten())
-                    .unwrap_or_default();
+                    .map(|source| quiet.query_columns(source).ok().flatten());
+                let written = match &values {
+                    None => Some(0),
+                    Some(values) => values.as_ref().map(Vec::len),
+                };
+                // A column the INSERT leaves out gets its DEFAULT; `VALUES` shorter than the
+                // table leaves out the last columns.
+                let listed: Option<Vec<String>> = if insert.columns.is_empty() {
+                    written.map(|count| {
+                        table
+                            .iter()
+                            .filter(|c| !c.invisible)
+                            .take(count)
+                            .map(|c| c.name.clone())
+                            .collect()
+                    })
+                } else {
+                    Some(
+                        insert
+                            .columns
+                            .iter()
+                            .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
+                            .map(|ident| fold(ident, self.dialect))
+                            .collect(),
+                    )
+                };
+                let defaulted = listed.into_iter().flat_map(|listed| {
+                    table
+                        .iter()
+                        .filter(move |c| !listed.contains(&c.name))
+                        .filter(|c| {
+                            c.default.as_ref().is_some_and(|default| {
+                                non_null(quiet.nullability(
+                                    default,
+                                    &Scope::new(),
+                                    &Facts::default(),
+                                ))
+                            })
+                        })
+                        .map(|c| c.name.clone())
+                });
                 let inserted: Vec<String> = columns
                     .into_iter()
-                    .zip(&values)
+                    .zip(values.flatten().unwrap_or_default())
                     .filter(|(_, value)| non_null(value.nullability))
                     .map(|(column, _)| column)
+                    .chain(defaulted)
                     .collect();
                 match &insert.on {
                     None

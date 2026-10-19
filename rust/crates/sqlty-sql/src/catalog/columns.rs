@@ -23,6 +23,8 @@ pub(super) struct RawColumn {
     /// An INSERT that leaves it out still gives it a value: a `DEFAULT`, `serial`,
     /// identity, generated or auto-increment column, or SQLite's rowid.
     pub(super) has_default: bool,
+    /// The `DEFAULT` an INSERT that leaves the column out writes.
+    pub(super) default: Option<Expr>,
     /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
     pub(super) primary_key: bool,
     /// The values a `CHECK` constraint limits the column to, when it lists them.
@@ -155,6 +157,13 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         ty,
         not_null,
         has_default,
+        default: column
+            .options
+            .iter()
+            .find_map(|option| match &option.option {
+                ColumnOption::Default(expr) => Some(expr.clone()),
+                _ => None,
+            }),
         primary_key,
         values,
         collated,

@@ -312,11 +312,17 @@ pub(super) fn alter_op(
                     table.columns[at].ty = data_type.clone();
                     table.columns[at].values = None;
                 }
-                AlterColumnOperation::SetDefault { .. }
-                | AlterColumnOperation::AddGenerated { .. } => {
+                AlterColumnOperation::SetDefault { value } => {
+                    table.columns[at].has_default = true;
+                    table.columns[at].default = Some(value.clone());
+                }
+                AlterColumnOperation::AddGenerated { .. } => {
                     table.columns[at].has_default = true;
                 }
-                AlterColumnOperation::DropDefault => table.columns[at].has_default = false,
+                AlterColumnOperation::DropDefault => {
+                    table.columns[at].has_default = false;
+                    table.columns[at].default = None;
+                }
             }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {
