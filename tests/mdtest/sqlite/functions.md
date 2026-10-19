@@ -90,6 +90,14 @@ SELECT json_object('id', id) AS a, json_array(id, name) AS b, json_array_length(
 -- columns: d: int (BIGINT)
 ```
 
+`json_pretty` (SQLite 3.46) indents JSON text and raises an error on text that is not JSON:
+
+```sql
+SELECT json_pretty(name) AS a, json_pretty(note, '  ') AS b FROM events
+-- columns: a: str (TEXT)
+-- columns: b: str | None (TEXT)
+```
+
 `->` gives the element as JSON text. `->>` and `json_extract` give its SQL value,
 an integer, a real or text, so its type is not known.
 
@@ -209,4 +217,14 @@ unqualified.
 SELECT n, upper FROM (SELECT id AS n, upper(name) AS upper FROM events)
 -- columns: n: int (INT)
 -- columns: upper: str (TEXT)
+```
+
+## Index hints
+
+`INDEXED BY` and `NOT INDEXED` only pick the index a query uses, so sqlty reads the
+query without them:
+
+```sql
+SELECT e.id FROM events AS e INDEXED BY events_name JOIN events AS f NOT INDEXED ON e.id = f.id
+-- columns: id: int (INT)
 ```
