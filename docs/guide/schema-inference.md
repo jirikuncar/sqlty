@@ -488,6 +488,15 @@ legacy = "--sql\nSELECT id, code, price FROM legacy"
 # rewritten: legacy = SQL[tuple[int, str | None, float | None]]("--sql\nSELECT id, code, price FROM legacy")
 ```
 
+#### Virtual tables
+
+`CREATE VIRTUAL TABLE` is read for the `fts3`, `fts4`, `fts5`, `rtree` and
+`rtree_i32` modules. An FTS column can hold any value and is not typed; the
+`rank` of `fts5` is a `float | None` left out of `*`. The id and coordinates of an
+`rtree` table are never NULL: the id is `int`, the coordinates `float` (`int`
+for `rtree_i32`). The columns of a table of another module are unknown, and
+`sqlty check` says so.
+
 ### MySQL
 
 MySQL schemas may quote identifiers with backticks and use `UNSIGNED`,

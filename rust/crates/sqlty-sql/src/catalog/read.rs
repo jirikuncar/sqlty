@@ -3,7 +3,10 @@
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
-use sqlparser::ast::{CreateView, Statement, UserDefinedTypeRepresentation};
+use sqlparser::ast::{
+    ColumnOption, ColumnOptionDef, CreateTable, CreateView, Statement,
+    UserDefinedTypeRepresentation,
+};
 use sqlparser::parser::Parser;
 
 use crate::analyzer::{parse_ddl, SkippedObject, SqlDialect};
@@ -47,7 +50,15 @@ pub(super) fn read_statements(
         };
         // PostgreSQL and MySQL copy a table's columns with `LIKE`.
         let reads_like = postgres || dialect == SqlDialect::MySql;
-        if stmt.is_create_table() {
+        if let Some((name, module, args)) = (dialect == SqlDialect::Sqlite)
+            .then(|| stmt.virtual_table())
+            .flatten()
+        {
+            match virtual_table(&name, &module, &args) {
+                Some(create) => push(OpKind::Table(Box::new(create), Vec::new())),
+                None => skipped.push(("table", name)),
+            }
+        } else if stmt.is_create_table() {
             let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
                 Some((text, likes)) => (likes, Some(text)),
                 None => (Vec::new(), None),
@@ -287,4 +298,65 @@ pub(crate) fn load_with(
         catalog.search_path.push("public".to_string());
     }
     (catalog, skipped)
+}
+
+/// The table an SQLite FTS3, FTS4, FTS5 or R*Tree module declares, `None` for another module.
+/// An FTS column takes any value; FTS5's hidden `rank` is a REAL and FTS3/4's `docid` the rowid.
+/// An R*Tree has an integer id, coordinates that are never NULL, and `+` auxiliary columns.
+fn virtual_table(name: &str, module: &str, args: &[Vec<String>]) -> Option<CreateTable> {
+    let module = module.to_ascii_lowercase();
+    let column = |arg: &[String]| arg.iter().find(|token| *token != "+").cloned();
+    let (columns, hidden) = match module.as_str() {
+        "fts3" | "fts4" | "fts5" => {
+            let mut columns: Vec<String> = args
+                .iter()
+                .filter(|arg| {
+                    !arg.iter().any(|token| token == "=")
+                        && !arg[0].eq_ignore_ascii_case("tokenize")
+                })
+                .filter_map(|arg| column(arg))
+                .collect();
+            let hidden = if module == "fts5" {
+                "rank REAL"
+            } else {
+                "docid INTEGER NOT NULL"
+            };
+            columns.push(hidden.to_string());
+            (columns, hidden.split(' ').next())
+        }
+        "rtree" | "rtree_i32" => {
+            let coordinate = if module == "rtree" { "REAL" } else { "INTEGER" };
+            let columns = args
+                .iter()
+                .enumerate()
+                .map(|(at, arg)| {
+                    let name = column(arg)?;
+                    Some(if at == 0 {
+                        format!("{name} INTEGER NOT NULL")
+                    } else if arg[0] == "+" {
+                        name
+                    } else {
+                        format!("{name} {coordinate} NOT NULL")
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            (columns, None)
+        }
+        _ => return None,
+    };
+    let sql = format!("CREATE TABLE {name} ({})", columns.join(", "));
+    let Statement::CreateTable(mut create) =
+        parse_ddl(&sql, SqlDialect::Sqlite)?.into_iter().next()?
+    else {
+        return None;
+    };
+    for column in &mut create.columns {
+        if hidden.is_some_and(|hidden| column.name.value.eq_ignore_ascii_case(hidden)) {
+            column.options.push(ColumnOptionDef {
+                name: None,
+                option: ColumnOption::Invisible,
+            });
+        }
+    }
+    Some(create)
 }
