@@ -572,6 +572,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Whether `expr` can be NULL under `facts`.
+    #[recursive::recursive]
     pub(super) fn nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
         if !facts.non_null_exprs.is_empty() || !facts.rolled_up_exprs.is_empty() {
             let key = ExprKey::of(expr);

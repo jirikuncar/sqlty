@@ -196,6 +196,7 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    #[recursive::recursive]
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),

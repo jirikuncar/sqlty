@@ -626,8 +626,10 @@ name = "sqlty-core"
 version = "0.2.0"
 dependencies = [
  "pyo3",
+ "recursive",
  "sqlty-python",
  "sqlty-sql",
+ "stacker",
  "thiserror",
 ]
 
@@ -645,6 +647,7 @@ name = "sqlty-sql"
 version = "0.2.0"
 dependencies = [
  "insta",
+ "recursive",
  "regex",
  "rustc-hash",
  "serde",

@@ -19,4 +19,6 @@ crate-type = ["cdylib"]
 pyo3.workspace = true
 sqlty-sql.workspace = true
 sqlty-python.workspace = true
+recursive.workspace = true
+stacker = "0.1"
 thiserror.workspace = true
