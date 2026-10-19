@@ -410,7 +410,7 @@ impl Checker<'_> {
 
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
-        let annotated = &self.scan.source()[call.annotation.clone()];
+        let annotated = call.row_type(self.scan.source());
         let wrapper = if call.template {
             self.options.style.template_name()
         } else {
@@ -706,7 +706,7 @@ pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String,
             });
             (
                 scan.lines.line_at(call.span.start),
-                source[call.annotation.clone()].to_string(),
+                call.row_type(source).to_string(),
                 query,
             )
         })
