@@ -657,7 +657,8 @@ generics; see also
 Default: error. The SQL type is wider than the `T` in `SQL[tuple[...]]`: the
 query returns rows the annotation doesn't admit, for example after a column was
 made nullable, added to the query, or retyped. The code gets a `None`, a value or
-a column it doesn't expect, and the type checker can't tell. Named row types are
+a column it doesn't expect, and the type checker can't tell. A single value such
+as `SQL[int]` is flagged too, since a row is never one. Named row types are
 covered by the row type rules instead.
 
 ```python
@@ -665,6 +666,8 @@ from sqlty import SQL
 
 # error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [narrow-type] "SQL[int] should be SQL[tuple[int]]"
+count = SQL[int]("--sql\nSELECT count(*)::INTEGER FROM users")
 ```
 
 Fix: `sqlty check --fix` writes the inferred `T`; your type checker then finds
