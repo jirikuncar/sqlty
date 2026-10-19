@@ -134,7 +134,9 @@ be evident in the file: bound to `psycopg.connect(...)`, `sqlite3.connect(...)`,
 `asyncpg.connect(...)`, `<connection>.cursor()` (also as `with ... as name`), or
 annotated with a driver class. The query is a literal, `SQL[T]("...")` of one,
 or a name assigned once to one. A call with no parameters is a
-`param-count-mismatch` when the query has placeholders.
+`param-count-mismatch` when the query has placeholders, and a single value
+passed as the parameters, `execute(query, user_id)`, is a `param-type-mismatch`:
+the driver wants a sequence, `(user_id,)`.
 
 ```python
 import sqlite3

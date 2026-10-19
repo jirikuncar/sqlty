@@ -44,6 +44,8 @@ _IMPORTED = frozenset(
     }
 )
 _SEQUENCES = frozenset({"list", "tuple", "set", "frozenset"})
+# Types of a single value, which is neither a sequence nor a mapping of parameters.
+SCALARS = _BUILTINS | _IMPORTED
 
 # asyncpg encodes an argument as the parameter's type, and these encoders reject a ``str``.
 _ASYNCPG_NOT_TEXT = frozenset(
