@@ -16,7 +16,10 @@ psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
 `fetchval` on an asyncpg connection, when the file binds the receiver to
 `psycopg.connect(...)`, `sqlite3.connect(...)`, `asyncpg.connect(...)`,
 `<connection>.cursor()` or a driver class annotation. The query is a literal,
-`SQL[T]("...")` of one, or a name assigned once to one.
+`SQL[T]("...")` of one, or a name assigned once to one. A single value passed
+as a driver call's parameters, `execute(query, user_id)`, is reported too: the
+driver raises `TypeError` and wants a sequence, `(user_id,)`. sqlite3 reads a
+`str` or `bytes` as a sequence, so those are left alone there.
 
 An argument is judged only where the source states its type: a literal, a
 variable annotated or assigned a class, a call of a known class (`date(...)`,

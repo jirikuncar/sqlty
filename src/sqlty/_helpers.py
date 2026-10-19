@@ -62,7 +62,8 @@ class HelperCall(NamedTuple):
     ``params`` holds the arguments the call passes for the query's placeholders, with the
     type of each where the source states it, or ``None`` when the helper takes no parameters
     or the call does not spell them out. ``driver`` names the driver of a recognised
-    ``execute``-like call.
+    ``execute``-like call, and ``single`` the type of a single value it passes where the
+    driver takes a sequence or a mapping of parameters.
     """
 
     line: int
@@ -72,6 +73,7 @@ class HelperCall(NamedTuple):
     params: tuple[ParamArg, ...] | None = None
     end_line: int | None = None
     driver: str | None = None
+    single: str | None = None
 
     @property
     def typed_lines(self) -> range:
