@@ -192,7 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- breaking ---
     breaking_parser = subparsers.add_parser(
         "breaking",
-        help="Check the queries and schema of two git revisions across, as during a rolling "
+        help="Check the queries and schema of two revisions across, as during a rolling "
         "deploy: sqlty breaking --against origin/main",
     )
     breaking_parser.add_argument(
@@ -203,9 +203,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     breaking_parser.add_argument(
         "--against",
-        required=True,
-        metavar="REF",
-        help="The baseline revision: a branch, tag, SHA or HEAD~1",
+        metavar="BASELINE",
+        help="The baseline: a revision (a branch, tag, SHA or HEAD~1), a snapshot written by "
+        "--save, a directory of snapshots (each checked), or a schema .sql file or directory "
+        "(forward only, as it has no queries)",
+    )
+    breaking_parser.add_argument(
+        "--save",
+        metavar="PATH",
+        type=Path,
+        help="Write a snapshot of --head (its settings, schema and Python files) to PATH, a "
+        "baseline for a later --against",
     )
     breaking_parser.add_argument(
         "--head",
@@ -227,7 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json", "github"],
         default="text",
         help="How findings are printed: text (the default), json (an array of objects with "
-        "file, line, rule, severity, message and direction) or github (GitHub Actions error "
+        "file, line, rule, severity, message, direction and against) or github (GitHub Actions error "
         "annotations)",
     )
 
@@ -1091,6 +1099,8 @@ class Settings:
 
     dialect: str = "postgres"
     schema: Schema | None = None
+    schema_sql: str | None = None
+    types: dict[str, str] | None = None
     import_style: str | None = None
     untyped: bool = False
     json_types: str = "typing.Any"
@@ -1198,6 +1208,8 @@ class SettingsResolver:
             schema=None
             if schema_sql is None
             else self._schema(schema_sql, dialect, config.get("types")),
+            schema_sql=schema_sql,
+            types=config.get("types"),
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,

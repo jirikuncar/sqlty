@@ -112,6 +112,16 @@ The base branch must be in the clone:
 
 See `sqlty-ci` for the whole job.
 
+When the baseline is not in git history, save a snapshot at release time and
+check against it, or against a directory holding one snapshot per version still
+deployed. A schema `.sql` file (a dump) is a baseline for the forward check only:
+
+```bash
+sqlty breaking --save .sqlty/releases/v1.4.json
+sqlty breaking --against .sqlty/releases/
+sqlty breaking --against dump.sql
+```
+
 ## Reference
 
 - [Breaking schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)

@@ -234,10 +234,12 @@ a `warn` diagnostic, and `--exit-zero-on-warning` keeps the default; combining
 
 ## `sqlty breaking`
 
-Check the queries and schema of two git revisions across, as during a rolling
+Check the queries and schema of two revisions across, as during a rolling
 deploy: the queries of `--against` on the schema of `--head` (backward), and the
 queries of `--head` on the schema of `--against` (forward). Prints what the other
-schema breaks:
+schema breaks. `--against` is a git revision, a snapshot that `--save` wrote, a
+directory of snapshots, or a schema file (see
+[Baselines without git history](../guide/breaking-changes.md#baselines-without-git-history)):
 
 ```text
 app/q.py:2: [unknown-column] column `bio` does not exist in `users` (backward: the queries of origin/main against the schema of the working tree)
@@ -246,7 +248,7 @@ Found 1 breaking change(s)
 
 <!-- generated:cli-usage-breaking -->
 ```text
-sqlty breaking [-h] --against REF [--head REF]
+sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
                [--direction {backward,forward,both}] [-q]
                [--output-format {text,json,github}]
                [paths ...]
@@ -256,10 +258,11 @@ sqlty breaking [-h] --against REF [--head REF]
 <!-- generated:cli-options-breaking -->
 | Option | Description |
 |--------|-------------|
-| `--against REF` | The baseline revision: a branch, tag, SHA or HEAD~1 |
+| `--against BASELINE` | The baseline: a revision (a branch, tag, SHA or HEAD~1), a snapshot written by --save, a directory of snapshots (each checked), or a schema .sql file or directory (forward only, as it has no queries) |
+| `--save PATH` | Write a snapshot of --head (its settings, schema and Python files) to PATH, a baseline for a later --against |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
-| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message and direction) or github (GitHub Actions error annotations) |
+| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against) or github (GitHub Actions error annotations) |
 <!-- /generated:cli-options-breaking -->
 
 Exit code: 1 when a change breaks either direction, 2 for an unknown revision or
