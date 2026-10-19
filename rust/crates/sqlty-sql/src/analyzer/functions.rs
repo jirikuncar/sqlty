@@ -74,6 +74,9 @@ pub(super) enum Returns {
 
 use Returns::{Arg, Elem, Sql};
 
+/// The types of the first two arguments of a call, where a function rule read them.
+pub(super) type RuleArguments = [Option<Typed>; 2];
+
 /// Functions of every dialect, by upper-case name (COUNT, SUM, MIN, MAX and COALESCE are
 /// special-cased).
 pub(super) const COMMON_FUNCTIONS: &[(&[&str], Returns)] = &[
@@ -171,11 +174,6 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
             "ARRAY_TO_STRING",
             "PG_SIZE_PRETTY",
             "VERSION",
-            "CURRENT_DATABASE",
-            "CURRENT_SCHEMA",
-            "CURRENT_USER",
-            "SESSION_USER",
-            "USER",
             "JSONB_TYPEOF",
             "JSON_TYPEOF",
             "JSONB_PRETTY",
@@ -282,6 +280,17 @@ pub(super) const POSTGRES_FUNCTIONS: &[(&[&str], Returns)] = &[
     ),
     (&["TS_RANK", "TS_RANK_CD"], Sql("FLOAT")),
     (&["PG_TYPEOF"], Sql("REGTYPE")),
+    (
+        &[
+            "CURRENT_DATABASE",
+            "CURRENT_SCHEMA",
+            "CURRENT_USER",
+            "SESSION_USER",
+            "USER",
+            "PG_CLIENT_ENCODING",
+        ],
+        Sql("NAME"),
+    ),
     (&["TO_NUMBER"], Sql("DECIMAL")),
     (
         &[
@@ -629,7 +638,7 @@ impl<'a> Analyzer<'a> {
                 },
                 _ => Typed::UNKNOWN,
             }),
-            Elem(i) => Ok(self.element_typed(arg(i)?.sql())),
+            Elem(i) => Ok(self.unnested_typed(arg(i)?.sql())),
             Returns::ArrayOf(i) => {
                 let typed = arg(i)?;
                 let elem = typed
@@ -754,27 +763,32 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The inference rule for a call of the built-in `name` (upper case), with the first
-    /// argument's type when a rule read it.
+    /// The inference rule for a call of the built-in `name` (upper case), with the types of
+    /// the first two arguments where a rule reads them.
     pub(super) fn function_rule(
         &self,
         name: &str,
-        arg: Option<&Expr>,
+        args: &[&Expr],
         scope: &Scope,
-    ) -> Inferred<Option<(&'static FunctionRule, Option<Typed>)>> {
+    ) -> Inferred<Option<(&'static FunctionRule, RuleArguments)>> {
         let rules = function_rules(name);
         if rules.is_empty() {
             return Ok(None);
         }
-        let typed = if rules.iter().any(FunctionRule::reads_argument) {
-            Some(arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope))?)
-        } else {
-            None
+        let typed = |position: usize| -> Inferred<Option<Typed>> {
+            if !rules.iter().any(|rule| rule.reads(position)) {
+                return Ok(None);
+            }
+            Ok(Some(match args.get(position) {
+                Some(arg) => self.expr(arg, scope)?,
+                None => Typed::UNKNOWN,
+            }))
         };
-        let argument = typed.as_ref().and_then(operand_type);
+        let typed = [typed(0)?, typed(1)?];
+        let [first, second] = [0, 1].map(|i| typed[i].as_ref().and_then(operand_type));
         let found = rules
             .iter()
-            .find(|rule| rule.applies(self.dialect, argument));
+            .find(|rule| rule.applies(self.dialect, first, second));
         Ok(found.map(|rule| (rule, typed.clone())))
     }
 

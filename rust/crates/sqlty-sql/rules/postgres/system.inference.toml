@@ -1,0 +1,11 @@
+# System information functions whose result depends on the argument's type.
+
+[[function]]
+id = "postgres.system.age-xid"
+function = "AGE"
+dialects = ["postgres"]
+argument = ["XID"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.27, Table 9.82 Transaction ID and Snapshot Information Functions (age ( xid ) → integer)"
+reasoning = "The age of a transaction ID is a number of transactions, not an interval."

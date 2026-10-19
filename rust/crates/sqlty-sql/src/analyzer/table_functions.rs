@@ -174,7 +174,7 @@ impl Analyzer<'_> {
             "unnest" => {
                 let mut columns = Vec::new();
                 for arg in args {
-                    let typed = self.element_typed(self.expr(arg, scope)?.sql());
+                    let typed = self.unnested_typed(self.expr(arg, scope)?.sql());
                     columns.push(Column::from_typed(name.to_string(), typed, nullable));
                 }
                 Some(FunctionRows {

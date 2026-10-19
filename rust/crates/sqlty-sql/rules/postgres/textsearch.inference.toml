@@ -57,5 +57,16 @@ dialects = ["postgres"]
 argument = ["JSON", "JSONB"]
 type = "@argument"
 nullability = "strict"
+shadows = ["postgres.textsearch.headline-json-config"]
 reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
 reasoning = "A headline of a JSON document is the document with its strings marked, of the same JSON type."
+
+[[function]]
+id = "postgres.textsearch.headline-json-config"
+function = "TS_HEADLINE"
+dialects = ["postgres"]
+arguments = [[], ["JSON", "JSONB"]]
+type = "@argument(1)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
+reasoning = "With a text search configuration first, the document is the second argument, and the headline keeps its JSON type."

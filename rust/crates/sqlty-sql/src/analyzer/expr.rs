@@ -64,6 +64,20 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The type of the values `unnest` returns from an array of this SQL type: PostgreSQL's
+    /// flattens every dimension.
+    pub(super) fn unnested_typed(&self, mut array: Option<&str>) -> Typed {
+        if self.dialect == SqlDialect::Postgres {
+            while let Some(inner) = array
+                .and_then(array_element)
+                .filter(|e| e.starts_with("ARRAY<"))
+            {
+                array = Some(inner);
+            }
+        }
+        self.element_typed(array)
+    }
+
     /// The type of `field` in the composite type `composite`, when the schema declares it;
     /// the composite's name when it declares no such field.
     fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Result<Typed, String> {
@@ -244,8 +258,8 @@ impl<'a> Analyzer<'a> {
                     self.dialect,
                 ))
             }
-            // MySQL reads a bare `CURRENT_USER`, and PostgreSQL `CURRENT_ROLE`, reserved
-            // words both, as functions without parentheses.
+            // MySQL reads a bare `CURRENT_USER`, and PostgreSQL `CURRENT_ROLE` (a `name`),
+            // reserved words both, as functions without parentheses.
             Expr::Identifier(ident)
                 if ident.quote_style.is_none()
                     && matches!(
@@ -254,7 +268,12 @@ impl<'a> Analyzer<'a> {
                             | (SqlDialect::Postgres, "current_role")
                     ) =>
             {
-                Ok(from_sql_type("TEXT", self.dialect))
+                let sql = if self.dialect == SqlDialect::Postgres {
+                    "NAME"
+                } else {
+                    "TEXT"
+                };
+                Ok(from_sql_type(sql, self.dialect))
             }
             // MySQL full-text relevance is a floating-point number.
             Expr::MatchAgainst { .. } => Ok(from_sql_type("DOUBLE", self.dialect)),
@@ -353,10 +372,7 @@ impl<'a> Analyzer<'a> {
             if matches!(elem, Expr::Value(value) if matches!(value.value, Value::Null)) {
                 continue;
             }
-            let mut typed = self.expr(elem, scope)?;
-            if let Some(inner) = typed.sql().and_then(array_element) {
-                typed = from_sql_type(inner, self.dialect);
-            }
+            let typed = self.expr(elem, scope)?;
             common = match common {
                 _ if typed == Typed::UNKNOWN => None,
                 Some(common) => common_type(common, typed, self.dialect),
@@ -543,16 +559,19 @@ impl<'a> Analyzer<'a> {
             return self.function_type(Returns::FirstKnown, &args, scope);
         }
         let arg = args.first().copied();
-        if let Some((rule, typed)) = self.function_rule(&name, arg, scope)? {
-            let argument = || match &typed {
+        if let Some((rule, typed)) = self.function_rule(&name, &args, scope)? {
+            let at = |position: usize| match &typed[position] {
                 Some(typed) => Ok(typed.clone()),
-                None => arg.map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
+                None => args
+                    .get(position)
+                    .map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
             };
+            let argument = || at(0);
             return Ok(match rule.result {
                 FunctionType::Sql(sql) => from_sql_type(sql, self.dialect),
                 FunctionType::Any => Typed::python_only("typing.Any"),
                 FunctionType::Unknown => Typed::UNKNOWN,
-                FunctionType::Argument => argument()?,
+                FunctionType::Argument(position) => at(position)?,
                 FunctionType::ArgumentAs(sql) => {
                     let typed = argument()?;
                     Typed::with_values(

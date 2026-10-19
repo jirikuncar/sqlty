@@ -233,6 +233,30 @@ fn function_rules_become_their_own_table() {
 }
 
 #[test]
+fn function_rules_read_the_first_two_arguments() {
+    let second = FUNCTION
+        .replace("argument = [\"@integer\"]", "arguments = [[], [\"JSON\"]]")
+        .replace("\"BIGINT\"", "\"@argument(1)\"");
+    let code = compile_one("rules/common/a.inference.toml", &second).unwrap();
+    assert!(code.contains("argument: None,\n        second: Some(&[\"JSON\"])"));
+    assert!(code.contains("result: FunctionType::Argument(1)"));
+    let cases = [
+        (
+            FUNCTION.replace("argument =", "arguments = [[], []]\nargument ="),
+            "give `argument` or `arguments`, not both",
+        ),
+        (
+            FUNCTION.replace("argument = [\"@integer\"]", "arguments = [[], [], []]"),
+            "`arguments` reads the first two arguments only",
+        ),
+    ];
+    for (text, expected) in cases {
+        let message = error("rules/common/a.inference.toml", &text);
+        assert!(message.contains(expected), "{message}");
+    }
+}
+
+#[test]
 fn function_rules_name_functions_and_their_own_results() {
     let cases = [
         (

@@ -284,3 +284,27 @@ SELECT substr('alphabet', 3), U&'\0061\0308bc' IS NFD NORMALIZED, 'a' IS NOT NOR
 -- columns: is_normalized: bool (BOOLEAN)
 -- columns: ?column?: bool (BOOLEAN)
 ```
+
+## Signatures of the server
+
+`scripts/compat/pg_docs.py` also calls every overload of the documented functions and every
+operator. `ts_headline` keeps the JSON type of its document after a configuration,
+`string_agg` of `bytea` is `bytea`, and `age` of a transaction ID counts transactions. The
+session functions return `name`. PostgreSQL has one array type per element type, so
+`array_agg` of arrays, the `ARRAY` of arrays and `unnest` of a two-dimensional array follow
+the dimensions, and `unnest` returns the elements.
+
+```sql
+SELECT ts_headline('english', '{"a": "cats"}'::jsonb, 'cat') AS headline,
+    string_agg('\x01'::bytea, '\x00'::bytea) AS bytes, age('5'::xid) AS xid_age,
+    current_database() AS db, current_user AS usr, array_agg(ARRAY[1, 2]) AS grid,
+    ARRAY[ARRAY[1, 2], ARRAY[3, 4]] AS matrix, unnest(ARRAY[[1, 2], [3, 4]]) AS element
+-- columns: headline: typing.Any (JSONB)
+-- columns: bytes: bytes | None (BYTEA)
+-- columns: xid_age: int (INT)
+-- columns: db: str (NAME)
+-- columns: usr: str (NAME)
+-- columns: grid: list[list[int]] | None (ARRAY<ARRAY<INT>>)
+-- columns: matrix: list[list[int]] (ARRAY<ARRAY<INT>>)
+-- columns: element: int | None (INT)
+```

@@ -183,10 +183,13 @@ def run(conn: Any, query: str) -> list[tuple[Any, ...]] | None:
 
 
 def _normalise(sql_type: str) -> str:
-    """``DECIMAL(10, 2)`` -> ``numeric``, ``ARRAY<INT>`` -> ``int4[]``."""
+    """``DECIMAL(10, 2)`` -> ``numeric``, ``ARRAY<INT>`` and ``ARRAY<ARRAY<INT>>`` -> ``int4[]``.
+
+    PostgreSQL has one array type per element type, whatever the dimensions.
+    """
     sql_type = sql_type.strip().upper()
     if sql_type.startswith("ARRAY<") and sql_type.endswith(">"):
-        return _normalise(sql_type[len("ARRAY<") : -1]) + "[]"
+        return _normalise(sql_type[len("ARRAY<") : -1]).removesuffix("[]") + "[]"
     base = re.split(r"[(<\[]", sql_type, maxsplit=1)[0].strip()
     return SQL_TO_PG.get(base, base.lower())
 
