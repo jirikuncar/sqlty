@@ -10,6 +10,7 @@ Commands:
 
 from __future__ import annotations
 
+import codecs
 import fnmatch
 import functools
 import gc
@@ -461,7 +462,7 @@ def _transform_files(
         elif args.diff:
             _print_diff(path, original, result)
         else:
-            path.write_text(result, encoding="utf-8")
+            write_source(path, result)
             if verb == "rewrite":
                 _format(path, resolver.for_file(path).format_command)
             if args.verbose:
@@ -482,13 +483,24 @@ def read_source(path: Path) -> str | None:
     """The text of the Python file ``path``, or ``None``, logged, when it is not UTF-8.
 
     sqlty reads and writes sources as UTF-8, Python's default; a file in another
-    encoding is skipped rather than stopping the run.
+    encoding is skipped rather than stopping the run. A byte order mark is left out and
+    line endings read as ``\n``; `write_source` restores both.
     """
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         logger.error("%s: not UTF-8 (%s at byte %d); skipped", path, exc.reason, exc.start)
         return None
+
+
+def write_source(path: Path, text: str) -> None:
+    """Write ``text`` over the Python file ``path`` with its byte order mark and line endings."""
+    raw = path.read_bytes()
+    path.write_text(
+        text,
+        encoding="utf-8-sig" if raw.startswith(codecs.BOM_UTF8) else "utf-8",
+        newline="\r\n" if raw.split(b"\n", 1)[0].endswith(b"\r") else "\n",
+    )
 
 
 def _format(path: Path, command: tuple[str, ...]) -> bool:
@@ -582,9 +594,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 helpers=file_helpers,
             )
             if fixed != parsed.text:
-                path.write_text(fixed, encoding="utf-8")
+                write_source(path, fixed)
                 if _format(path, settings.format_command):
-                    fixed = path.read_text(encoding="utf-8")
+                    fixed = path.read_text(encoding="utf-8-sig")
                 parsed = ParsedSource(fixed, parsed.module)
                 total_fixed += 1
                 if args.verbose:
