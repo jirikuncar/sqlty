@@ -182,9 +182,7 @@ impl<'a> Analyzer<'a> {
                     .sql()
                     .or_else(|| operand_type(&typed))
                     .map(String::from);
-                Ok(elem.map_or(Typed::UNKNOWN, |elem| {
-                    from_sql_type(&format!("ARRAY<{elem}>"), self.dialect)
-                }))
+                Ok(elem.map_or(Typed::UNKNOWN, |elem| self.array_of(&elem)))
             }
             Returns::Range(i) | Returns::Multirange(i) => {
                 let typed = arg(i)?;

@@ -1,0 +1,19 @@
+# PostgreSQL enum support functions.
+
+[[function]]
+id = "postgres.enum.bound"
+functions = ["ENUM_FIRST", "ENUM_LAST"]
+dialects = ["postgres"]
+type = "@same(0)"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.10 Enum Support Functions, Table 9.35 Enum Support Functions"
+reasoning = "The result is the first or last value of the argument's enum type, whose value is ignored, so a NULL argument still gives a value."
+
+[[function]]
+id = "postgres.enum.range"
+function = "ENUM_RANGE"
+dialects = ["postgres"]
+type = "@array(0)"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.10 Enum Support Functions, Table 9.35 Enum Support Functions"
+reasoning = "The result is an array of the argument's enum type; a NULL bound stands for the first or last value of the type."
