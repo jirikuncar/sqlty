@@ -21,7 +21,7 @@ d: float | DOUBLE | Nullable
 
 postgres:
 SELECT ifnull(i, 0) AS a, concat_ws(',', txt, txt) AS b, if(i > 1, 1, 0) AS c FROM t
-a: ? | ? | NonNull
+a: ? | ? | Unknown
 b: str | TEXT | NonNull
 c: ? | ? | NonNull
 

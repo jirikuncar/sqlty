@@ -1,0 +1,10 @@
+# SQLite's overrides of `common/strings.inference.toml`.
+
+[[function]]
+id = "sqlite.string.format"
+function = "FORMAT"
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "nullable"
+reference = "SQLite documentation, Built-In Scalar SQL Functions (concat_ws(), format())"
+reasoning = "Every dialect returns text. SQLite returns NULL for an empty result, such as `format('%s', '')`."

@@ -40,7 +40,7 @@ reasoning = "The manual describes the function as returning an integer."
 
 [[function]]
 id = "mysql.json.json"
-functions = ["JSON_OBJECT", "JSON_ARRAY", "JSON_EXTRACT", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_MERGE_PATCH", "JSON_MERGE_PRESERVE", "JSON_KEYS", "JSON_ARRAY_APPEND", "JSON_ARRAY_INSERT", "JSON_SEARCH"]
+functions = ["JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_MERGE_PATCH", "JSON_MERGE_PRESERVE", "JSON_KEYS", "JSON_ARRAY_APPEND", "JSON_ARRAY_INSERT"]
 dialects = ["mysql"]
 type = "JSON"
 nullability = "strict"
@@ -48,10 +48,37 @@ reference = "MySQL 8.4 Reference Manual, 14.17.2 Functions That Create JSON Valu
 reasoning = "The manual describes each of these as returning a JSON value."
 
 [[function]]
+id = "mysql.json.json-non-null"
+functions = ["JSON_OBJECT", "JSON_ARRAY"]
+dialects = ["mysql"]
+type = "JSON"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.17.2 Functions That Create JSON Values; 14.17.3 Functions That Search JSON Values; 14.17.4 Functions That Modify JSON Values"
+reasoning = "The manual describes each of these as returning a JSON value. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.json.json-nullable"
+functions = ["JSON_EXTRACT", "JSON_SEARCH"]
+dialects = ["mysql"]
+type = "JSON"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.17.2 Functions That Create JSON Values; 14.17.3 Functions That Search JSON Values; 14.17.4 Functions That Modify JSON Values"
+reasoning = "The manual describes each of these as returning a JSON value. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
 id = "mysql.json.text"
-functions = ["JSON_UNQUOTE", "JSON_TYPE", "JSON_QUOTE", "JSON_PRETTY", "JSON_VALUE"]
+functions = ["JSON_UNQUOTE", "JSON_TYPE", "JSON_QUOTE", "JSON_PRETTY"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values; 14.17.5 Functions That Return JSON Value Attributes; 14.17.2 Functions That Create JSON Values; 14.17.8 JSON Utility Functions; 14.17.3 Functions That Search JSON Values"
 reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.json.text-nullable"
+function = "JSON_VALUE"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values; 14.17.5 Functions That Return JSON Value Attributes; 14.17.2 Functions That Create JSON Values; 14.17.8 JSON Utility Functions; 14.17.3 Functions That Search JSON Values"
+reasoning = "The manual describes each of these as returning a string. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."

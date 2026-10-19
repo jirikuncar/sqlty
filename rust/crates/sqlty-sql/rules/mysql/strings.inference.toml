@@ -2,7 +2,7 @@
 
 [[function]]
 id = "mysql.string.binary"
-functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE", "REGEXP_SUBSTR"]
+functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE"]
 dialects = ["mysql"]
 argument = ["@binary"]
 type = "VARBINARY"
@@ -11,8 +11,18 @@ reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CO
 reasoning = "A string function of a binary string gives a binary string, which MySQL drivers return as bytes."
 
 [[function]]
+id = "mysql.string.binary-nullable"
+function = "REGEXP_SUBSTR"
+dialects = ["mysql"]
+argument = ["@binary"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reasoning = "A string function of a binary string gives a binary string, which MySQL drivers return as bytes. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
 id = "mysql.string.binary-any-argument"
-functions = ["CONCAT", "CONCAT_WS", "ELT", "EXPORT_SET", "MAKE_SET"]
+functions = ["CONCAT", "EXPORT_SET", "MAKE_SET"]
 dialects = ["mysql"]
 any-argument = ["@binary"]
 type = "VARBINARY"
@@ -21,14 +31,44 @@ reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CO
 reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string."
 
 [[function]]
+id = "mysql.string.binary-any-argument-leading"
+function = "CONCAT_WS"
+dialects = ["mysql"]
+any-argument = ["@binary"]
+type = "VARBINARY"
+nullability = "leading(1)"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string. Only a NULL first argument makes it NULL: it skips NULLs among the others."
+
+[[function]]
+id = "mysql.string.binary-any-argument-nullable"
+function = "ELT"
+dialects = ["mysql"]
+any-argument = ["@binary"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
+
+[[function]]
 id = "mysql.string.binary-pattern"
-functions = ["REGEXP_REPLACE", "REGEXP_SUBSTR"]
+function = "REGEXP_REPLACE"
 dialects = ["mysql"]
 arguments = [[], ["@binary"]]
 type = "VARBINARY"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
 reasoning = "A binary pattern makes the match bytewise and the result a binary string, as a binary subject does."
+
+[[function]]
+id = "mysql.string.binary-pattern-nullable"
+function = "REGEXP_SUBSTR"
+dialects = ["mysql"]
+arguments = [[], ["@binary"]]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
+reasoning = "A binary pattern makes the match bytewise and the result a binary string, as a binary subject does. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
 id = "mysql.aggregate.bit-binary"
@@ -90,7 +130,7 @@ reasoning = "The result has the type of the first argument."
 
 [[function]]
 id = "mysql.string.bigint-2"
-functions = ["REGEXP_INSTR", "REGEXP_LIKE", "LOCATE", "INSTR", "ASCII", "ORD", "FIELD", "FIND_IN_SET", "STRCMP"]
+functions = ["REGEXP_INSTR", "REGEXP_LIKE", "LOCATE", "INSTR", "ASCII", "ORD", "FIND_IN_SET", "STRCMP"]
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "strict"
@@ -98,8 +138,17 @@ reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
+id = "mysql.string.bigint-2-non-null"
+function = "FIELD"
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String Functions and Operators; 14.8.1 String Comparison Functions and Operators"
+reasoning = "The manual describes each of these as returning an integer. It never returns NULL, even for NULL arguments."
+
+[[function]]
 id = "mysql.string.text"
-functions = ["BIN", "OCT", "REGEXP_SUBSTR", "REGEXP_REPLACE", "REPEAT", "HEX", "SPACE", "QUOTE", "SUBSTRING_INDEX", "INSERT", "ELT", "SOUNDEX", "TO_BASE64", "EXPORT_SET", "MAKE_SET"]
+functions = ["BIN", "OCT", "REGEXP_REPLACE", "REPEAT", "HEX", "SPACE", "SUBSTRING_INDEX", "INSERT", "SOUNDEX", "TO_BASE64", "EXPORT_SET", "MAKE_SET", "FORMAT", "CONCAT"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
@@ -107,13 +156,40 @@ reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14
 reasoning = "The manual describes each of these as returning a string."
 
 [[function]]
+id = "mysql.string.text-non-null"
+function = "QUOTE"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
+reasoning = "The manual describes each of these as returning a string. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.string.text-nullable"
+functions = ["REGEXP_SUBSTR", "ELT"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
+reasoning = "The manual describes each of these as returning a string. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
 id = "mysql.string.varbinary"
-functions = ["UNHEX", "FROM_BASE64", "WEIGHT_STRING"]
+functions = ["UNHEX", "WEIGHT_STRING"]
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
 reasoning = "The manual describes each of these as returning a binary string."
+
+[[function]]
+id = "mysql.string.varbinary-nullable"
+function = "FROM_BASE64"
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
+reasoning = "The manual describes each of these as returning a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
 id = "mysql.string.string"

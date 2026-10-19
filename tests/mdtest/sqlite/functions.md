@@ -47,11 +47,14 @@ SELECT date(happened) AS a, time(happened) AS b, datetime(happened, '+1 day') AS
 
 ## Strings
 
+`printf` and `format` return NULL instead of an empty string, so `printf('%s', name)` is
+NULL for an empty `name`.
+
 ```sql
 SELECT ltrim(name) AS a, hex(name) AS b, printf('%d', id) AS c, instr(name, 'a') AS d, typeof(note) AS e, concat_ws(',', name, note) AS f FROM events
 -- columns: a: str (TEXT)
 -- columns: b: str (TEXT)
--- columns: c: str (TEXT)
+-- columns: c: str | None (TEXT)
 -- columns: d: int (BIGINT)
 -- columns: e: str (TEXT)
 -- columns: f: str (TEXT)

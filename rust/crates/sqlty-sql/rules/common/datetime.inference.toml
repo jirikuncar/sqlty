@@ -4,22 +4,22 @@
 id = "common.datetime.date"
 function = "CURRENT_DATE"
 type = "DATE"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
-reasoning = "The documentation gives the function a `date` result."
+reasoning = "The documentation gives the function a `date` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "common.datetime.timestamptz"
-functions = ["NOW", "CURRENT_TIMESTAMP"]
+functions = ["CURRENT_TIMESTAMP", "NOW"]
 type = "TIMESTAMPTZ"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
-reasoning = "The documentation gives each of these a `timestamp with time zone` result."
+reasoning = "The documentation gives each of these a `timestamp with time zone` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "common.datetime.timetz"
 function = "CURRENT_TIME"
 type = "TIMETZ"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
-reasoning = "The documentation gives the function a `time with time zone` result."
+reasoning = "The documentation gives the function a `time with time zone` result. It never returns NULL, even for NULL arguments."

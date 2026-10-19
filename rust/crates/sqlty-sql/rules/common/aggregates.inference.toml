@@ -62,11 +62,11 @@ reasoning = "MIN and MAX return one of the values, so they keep the argument's t
 
 [[function]]
 id = "common.aggregate.bigint"
-functions = ["RANK", "DENSE_RANK"]
+functions = ["DENSE_RANK", "RANK"]
 type = "BIGINT"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.63 Hypothetical-Set Aggregate Functions; 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
-reasoning = "The documentation gives each of these a `bigint` result."
+reasoning = "The documentation gives each of these a `bigint` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "common.aggregate.double"

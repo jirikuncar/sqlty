@@ -47,16 +47,32 @@ reasoning = "`#>>` extracts the value at a path as text; a missing path or a JSO
 
 [[function]]
 id = "common.json.json"
-functions = ["JSON_BUILD_OBJECT", "TO_JSON"]
+function = "TO_JSON"
 type = "JSON"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions"
 reasoning = "The documentation gives each of these a `json` result."
 
 [[function]]
+id = "common.json.json-non-null"
+function = "JSON_BUILD_OBJECT"
+type = "JSON"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions"
+reasoning = "The documentation gives each of these a `json` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
 id = "common.json.jsonb"
-functions = ["JSONB_BUILD_OBJECT", "TO_JSONB"]
+function = "TO_JSONB"
 type = "JSONB"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions"
 reasoning = "The documentation gives each of these a `jsonb` result."
+
+[[function]]
+id = "common.json.jsonb-non-null"
+function = "JSONB_BUILD_OBJECT"
+type = "JSONB"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions"
+reasoning = "The documentation gives each of these a `jsonb` result. It never returns NULL, even for NULL arguments."

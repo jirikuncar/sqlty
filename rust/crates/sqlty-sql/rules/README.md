@@ -100,12 +100,22 @@ argument. `arguments` gives one for each of the first two instead, an empty list
 admitting any: `arguments = [[], ["JSON", "JSONB"]]` matches a JSON second
 argument. `any-argument` matches when at least one argument, at any position, has one of
 its types: `any-argument = ["@binary"]` types MySQL `CONCAT('a', bytes_col)` as a
-binary string. `nullability` is required: `non-null`; `nullable`, NULL whatever the
-arguments; `aggregate`, the empty-group and NULL-argument behaviour of aggregates in
-`analyzer/nullability.rs`; or `strict`, NULL when an argument is, unless
-`analyzer/registry.rs` lists the function as always nullable or as reading through
-NULLs (`COALESCE`, `CONCAT_WS`, ...). A function typed by a rule without `argument` or
-`arguments` is a known built-in: it narrows `WHERE f(col) IS NOT NULL` to `col`.
+binary string. `nullability` is required:
+
+| `nullability` | NULL when |
+|---------------|-----------|
+| `non-null` | never, even for NULL arguments (`ROW_NUMBER`, `NUM_NULLS`) |
+| `nullable` | always possible, also for non-null arguments (`NULLIF`, `JSON_EXTRACT`) |
+| `strict` | an argument is (`LOWER`) |
+| `all-arguments` | every argument is (`COALESCE`) |
+| `leading(k)` | one of the first `k` arguments is (`CONCAT_WS`, `leading(1)`) |
+| `aggregate` | an aggregate's group is empty or all NULL, in `analyzer/nullability.rs` |
+| `code` | `analyzer/nullability.rs` decides from the call (`LAG`'s default, `IF`'s branches) |
+
+A dialect that differs from `common/` overrides it with its own rule: `common/` makes
+`CONCAT` `non-null`, and `mysql/` makes it `strict`. A `strict` or `aggregate` function
+typed by a rule without `argument`, `arguments` or `any-argument` narrows
+`WHERE f(col) IS NOT NULL` to `col`.
 
 `type` is a SQL type (`TEXT`, `ARRAY<INT>`, ...) or a computed result. A `(k)` names
 argument `k`, counting from 0:

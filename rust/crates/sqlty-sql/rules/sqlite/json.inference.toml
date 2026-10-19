@@ -47,12 +47,21 @@ reasoning = "The function returns a BLOB."
 
 [[function]]
 id = "sqlite.json.text"
-functions = ["JSON", "JSON_OBJECT", "JSON_ARRAY", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_QUOTE", "JSON_TYPE"]
+functions = ["JSON", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_PATCH", "JSON_QUOTE", "JSON_TYPE"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "strict"
 reference = "SQLite documentation, JSON Functions And Operators"
 reasoning = "Each of these returns text."
+
+[[function]]
+id = "sqlite.json.text-non-null"
+functions = ["JSON_OBJECT", "JSON_ARRAY"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "non-null"
+reference = "SQLite documentation, JSON Functions And Operators"
+reasoning = "Each of these returns text. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "sqlite.json.aggregate-text"

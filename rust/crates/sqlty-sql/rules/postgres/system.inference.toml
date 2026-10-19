@@ -39,21 +39,30 @@ reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
 id = "postgres.system.inet"
-functions = ["INET_CLIENT_ADDR", "INET_SERVER_ADDR"]
+functions = ["INET_SERVER_ADDR", "INET_CLIENT_ADDR"]
 dialects = ["postgres"]
 type = "INET"
-nullability = "strict"
+nullability = "nullable"
 reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
-reasoning = "The documentation gives each of these an `inet` result."
+reasoning = "The documentation gives each of these an `inet` result. They are NULL over a Unix-domain socket."
 
 [[function]]
 id = "postgres.system.int"
-functions = ["PG_BACKEND_PID", "INET_CLIENT_PORT", "INET_SERVER_PORT"]
+function = "PG_BACKEND_PID"
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.system.int-nullable"
+functions = ["INET_CLIENT_PORT", "INET_SERVER_PORT"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reasoning = "The documentation gives each of these an `integer` result. They are NULL over a Unix-domain socket."
 
 [[function]]
 id = "postgres.system.name"

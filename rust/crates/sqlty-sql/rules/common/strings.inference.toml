@@ -10,16 +10,24 @@ reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
 id = "common.string.text"
-functions = ["UPPER", "LOWER", "TRIM", "CONCAT", "REPLACE"]
+functions = ["UPPER", "LOWER", "TRIM", "REPLACE"]
 type = "TEXT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
-id = "common.string.formatted"
-functions = ["CONCAT_WS", "FORMAT"]
+id = "common.string.text-non-null"
+function = "CONCAT"
 type = "TEXT"
-nullability = "strict"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives each of these a `text` result. It skips NULL arguments, except in MySQL."
+
+[[function]]
+id = "common.string.formatted"
+functions = ["FORMAT", "CONCAT_WS"]
+type = "TEXT"
+nullability = "leading(1)"
 reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators (concat_ws, format); MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT_WS(), FORMAT()); SQLite documentation, Built-In Scalar SQL Functions (concat_ws(), format())"
-reasoning = "Every dialect returns text."
+reasoning = "Every dialect returns text. Only a NULL first argument makes it NULL: it skips NULLs among the others."

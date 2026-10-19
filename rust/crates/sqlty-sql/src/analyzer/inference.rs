@@ -171,8 +171,14 @@ pub(crate) enum FunctionNullability {
     /// An aggregate's: NULL over no rows, unless the group is known to hold one (a plain
     /// `GROUP BY`), and as its argument is over the rows (`analyzer/nullability.rs`).
     Aggregate,
-    /// A scalar function's, as the analyzer's code decides: by default NULL when an argument is.
+    /// NULL when an argument is, such as `lower`.
     Strict,
+    /// NULL only when every argument is: `COALESCE` skips NULLs.
+    AllArguments,
+    /// NULL when one of the first k arguments is: `CONCAT_WS` skips NULLs after its separator.
+    Leading(usize),
+    /// As `analyzer/nullability.rs` decides from the call: `LAG`'s default, `IF`'s branches.
+    Code,
 }
 
 /// An inference rule for a function call, by its first two arguments.
@@ -245,6 +251,21 @@ pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
             && rule.any.is_none()
             && (rule.dialects.is_empty() || rule.dialects.contains(&dialect))
     })
+}
+
+/// Whether a rule types every call of `name` in `dialect` and every rule there makes it NULL
+/// when an argument is NULL, so `WHERE f(col) IS NOT NULL` proves `col` is not.
+pub(crate) fn strict_by_rule(name: &str, dialect: SqlDialect) -> bool {
+    typed_by_rule(name, dialect)
+        && function_rules(name)
+            .iter()
+            .filter(|rule| rule.dialects.is_empty() || rule.dialects.contains(&dialect))
+            .all(|rule| {
+                matches!(
+                    rule.nullability,
+                    FunctionNullability::Strict | FunctionNullability::Aggregate
+                )
+            })
 }
 
 /// Whether an operand of SQL type `operand` satisfies `types`; `@known` admits any typed one.

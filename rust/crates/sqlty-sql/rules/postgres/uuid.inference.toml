@@ -5,24 +5,24 @@ id = "postgres.uuid.smallint"
 function = "UUID_EXTRACT_VERSION"
 dialects = ["postgres"]
 type = "SMALLINT"
-nullability = "strict"
+nullability = "nullable"
 reference = "PostgreSQL 17 documentation, 9.14 UUID Functions"
-reasoning = "The documentation gives the function a `smallint` result."
+reasoning = "The documentation gives the function a `smallint` result. It is NULL for a UUID that is not RFC 9562 variant."
 
 [[function]]
 id = "postgres.uuid.timestamptz"
 function = "UUID_EXTRACT_TIMESTAMP"
 dialects = ["postgres"]
 type = "TIMESTAMPTZ"
-nullability = "strict"
+nullability = "nullable"
 reference = "PostgreSQL 17 documentation, 9.14 UUID Functions"
-reasoning = "The documentation gives the function a `timestamp with time zone` result."
+reasoning = "The documentation gives the function a `timestamp with time zone` result. It is NULL for a UUID version other than 1 and 7."
 
 [[function]]
 id = "postgres.uuid.uuid"
 function = "GEN_RANDOM_UUID"
 dialects = ["postgres"]
 type = "UUID"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.14 UUID Functions"
-reasoning = "The documentation gives the function an `uuid` result."
+reasoning = "The documentation gives the function an `uuid` result. It never returns NULL, even for NULL arguments."
