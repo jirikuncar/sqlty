@@ -1190,6 +1190,20 @@ FROM t
 -- rules: not: sqlite.bitwise.not / sqlite.bitwise.not
 ```
 
+```sql
+SELECT tx + 1 AS converted, i * tx AS converted_right, tx / 2 AS division_converted,
+    i % tx AS division_converted_right, -tx AS negate_converted, abs(tx) AS abs_converted,
+    sum(tx) AS sum_converted
+FROM t
+-- rules: converted: sqlite.arithmetic.converted / sqlite.arithmetic.converted
+-- rules: converted_right: sqlite.arithmetic.converted-right / sqlite.arithmetic.converted-right
+-- rules: division_converted: sqlite.arithmetic.division-converted / sqlite.arithmetic.division-converted
+-- rules: division_converted_right: sqlite.arithmetic.division-converted-right / sqlite.arithmetic.division-converted-right
+-- rules: negate_converted: sqlite.arithmetic.negate-converted / sqlite.arithmetic.negate-converted
+-- rules: abs_converted: sqlite.math.abs-converted / sqlite.math.abs-converted
+-- rules: sum_converted: sqlite.aggregate.sum-converted / sqlite.aggregate.sum-converted
+```
+
 ### Built-in functions
 
 Each built-in function a rule types, one call per rule.
