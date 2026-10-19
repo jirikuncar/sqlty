@@ -3,17 +3,18 @@
 //! `Loader::build` resolves everything; `schema_column` and `resolve_rel` resolve
 //! one relation when the loader updates the cached catalog in place.
 
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
-use sqlparser::ast::{ArrayElemTypeDef, DataType, EnumMember};
+use sqlparser::ast::{visit_expressions, ArrayElemTypeDef, DataType, EnumMember, Expr, Ident};
 
 use crate::analyzer::{canonical_type, typed, SqlDialect};
 use crate::ddl::RowEvents;
 use crate::values::{self, Value};
 
-use super::columns::{narrowed, Checks};
+use super::columns::{narrowed, Checks, RawColumn};
 use super::loader::{Loader, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
@@ -407,6 +408,7 @@ impl<'a> Resolver<'a> {
             not_null,
             has_default,
             default: None,
+            generated: None,
             primary_key: false,
             allowed_values: resolved.allowed_values.cloned(),
             invisible: false,
@@ -426,6 +428,10 @@ impl<'a> Resolver<'a> {
                             primary_key: c.primary_key,
                             invisible: c.invisible,
                             default: c.default.clone(),
+                            generated: c
+                                .generated
+                                .clone()
+                                .filter(|expr| !reads_generated(expr, &table.columns)),
                             ..self.column(
                                 &c.name,
                                 &c.ident,
@@ -472,6 +478,23 @@ impl<'a> Resolver<'a> {
             Rel::View(columns) => Relation::View(columns.clone()),
         }
     }
+}
+
+/// Whether a generated column's expression reads a generated column of `columns`.
+fn reads_generated(expr: &Expr, columns: &[RawColumn]) -> bool {
+    let generated = |ident: &Ident| {
+        columns
+            .iter()
+            .any(|c| c.generated.is_some() && c.name.eq_ignore_ascii_case(&ident.value))
+    };
+    visit_expressions(expr, |expr| match expr {
+        Expr::Identifier(ident) if generated(ident) => ControlFlow::Break(()),
+        Expr::CompoundIdentifier(parts) if parts.last().is_some_and(generated) => {
+            ControlFlow::Break(())
+        }
+        _ => ControlFlow::Continue(()),
+    })
+    .is_break()
 }
 
 /// The values of a `Literal` Python type, read once when the catalog is built so the

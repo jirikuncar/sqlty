@@ -23,6 +23,9 @@ use super::TypeOverrides;
 pub(super) static COLLATE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
+static DROP_EXPRESSION: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
+
 pub(super) fn read_statements(
     statements: &[ddl::Statement],
     dialect: SqlDialect,
@@ -216,6 +219,8 @@ pub(super) fn read_alter_or_drop(
         let sql = stmt.sql();
         parse_ddl(&sql, dialect)
             .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
+            // `DROP EXPRESSION` leaves a column with neither expression nor default.
+            .or_else(|| parse_ddl(&DROP_EXPRESSION.replace_all(&sql, "DROP DEFAULT"), dialect))
             .or_else(|| {
                 let listed = stmt
                     .respelled_mysql_alter()
