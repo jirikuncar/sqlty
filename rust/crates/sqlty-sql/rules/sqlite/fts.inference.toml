@@ -1,0 +1,37 @@
+# Auxiliary functions of the FTS3, FTS4 and FTS5 full-text search modules.
+
+[[function]]
+id = "sqlite.fts.rank"
+function = "BM25"
+dialects = ["sqlite"]
+type = "DOUBLE"
+nullability = "non-null"
+reference = "SQLite documentation, SQLite FTS5 Extension, 5.1.1 The bm25() function (https://www.sqlite.org/fts5.html#the_bm25_function: The built-in auxiliary function bm25() returns a real value indicating how well the current row matches the full-text query)"
+reasoning = "It scores the current match, a real number for every row it is called on."
+
+[[function]]
+id = "sqlite.fts.markup"
+functions = ["HIGHLIGHT", "SNIPPET", "FTS5_GET_LOCALE"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "nullable"
+reference = "SQLite documentation, SQLite FTS5 Extension, 5.1 Built-in Auxiliary Functions (https://www.sqlite.org/fts5.html#built_in_auxiliary_functions: The highlight() auxiliary function returns a copy of the text from one of the columns of the current match)"
+reasoning = "Each returns text taken from a column, or its locale, and NULL when the column or locale is NULL."
+
+[[function]]
+id = "sqlite.fts.offsets"
+function = "OFFSETS"
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "non-null"
+reference = "SQLite documentation, SQLite FTS3 and FTS4 Extensions, 4.1 The Offsets Function (https://www.sqlite.org/fts3.html#offsets: returns a text value containing a series of space-separated integers)"
+reasoning = "It lists the positions of the matched terms as text, an empty string outside a full-text query."
+
+[[function]]
+id = "sqlite.fts.matchinfo"
+function = "MATCHINFO"
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "non-null"
+reference = "SQLite documentation, SQLite FTS3 and FTS4 Extensions, 4.3 The Matchinfo Function (https://www.sqlite.org/fts3.html#matchinfo: The matchinfo function returns a blob value)"
+reasoning = "It returns a blob of 32-bit unsigned integers, or a zero-length blob outside a full-text query."
