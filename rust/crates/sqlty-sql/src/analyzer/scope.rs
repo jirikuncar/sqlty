@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use sqlparser::ast::{
     DataType, Expr, Join, JoinConstraint, JoinOperator, JsonTableColumn, ObjectName, TableFactor,
-    TableWithJoins,
+    TableWithJoins, Value, XmlTableColumnOption,
 };
 
 use crate::catalog::{fold, FunctionReturn};
@@ -210,6 +210,12 @@ pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
         TableFactor::UNNEST { alias, .. } => {
             return Some(alias.as_ref().map_or_else(
                 || "unnest".to_string(),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::XmlTable { alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || "xmltable".to_string(),
                 |alias| alias.name.value.to_lowercase(),
             ))
         }
@@ -548,6 +554,44 @@ impl<'a> Analyzer<'a> {
                 .collect::<Option<Vec<Column>>>()?;
             return Some((alias.name.value.to_lowercase(), columns));
         }
+        if let TableFactor::XmlTable { columns, alias, .. } = factor {
+            let mut columns: Vec<Column> = columns
+                .iter()
+                .map(|column| match &column.option {
+                    XmlTableColumnOption::NamedInfo {
+                        r#type,
+                        path,
+                        default,
+                        nullable,
+                    } => {
+                        // PostgreSQL's postfix `NOT NULL` makes the parser read `PATH 'p' NOT
+                        // NULL` as the path `'p' IS NOT NULL`.
+                        let not_null = !nullable
+                            || [path, default]
+                                .into_iter()
+                                .any(|option| matches!(option, Some(Expr::IsNotNull(_))));
+                        let constant_default = matches!(
+                            default,
+                            Some(Expr::Value(value)) if value.value != Value::Null
+                        );
+                        Column::from_typed(
+                            alias_name(&column.name, self.dialect),
+                            self.cast_typed(r#type),
+                            Nullability::declared(not_null || constant_default),
+                        )
+                    }
+                    XmlTableColumnOption::ForOrdinality => Column::from_typed(
+                        alias_name(&column.name, self.dialect),
+                        self.cast_typed(&DataType::Int(None)),
+                        Nullability::NonNull,
+                    ),
+                })
+                .collect();
+            if let Some(alias) = alias {
+                rename_columns(&mut columns, alias, self.dialect);
+            }
+            return Some((relation_name(factor)?, columns));
+        }
         let (TableFactor::Table {
             alias: Some(alias),
             args: Some(_),
@@ -600,7 +644,8 @@ impl<'a> Analyzer<'a> {
                     .is_some_and(|columns| !columns.iter().any(Column::is_unknown_star)),
                 TableFactor::UNNEST { .. }
                 | TableFactor::Function { .. }
-                | TableFactor::JsonTable { .. } => relation_name(factor)
+                | TableFactor::JsonTable { .. }
+                | TableFactor::XmlTable { .. } => relation_name(factor)
                     .is_some_and(|name| self.virtuals.contains_key(&format!("({name})"))),
                 _ => false,
             })
