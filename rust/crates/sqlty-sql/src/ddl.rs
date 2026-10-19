@@ -614,6 +614,65 @@ impl Statement<'_> {
         Some(render(&pieces[..at]).trim_end().to_string())
     }
 
+    /// The MySQL `ALTER TABLE` clauses sqlparser does not read respelled: `ADD [COLUMN]
+    /// (a INT, b INT)` as `ADD COLUMN a INT, ADD COLUMN b INT`, and a `RENAME INDEX | KEY`
+    /// next to other clauses dropped. `None` when it has neither.
+    pub(crate) fn respelled_mysql_alter(&self) -> Option<String> {
+        let pieces = &self.0;
+        let sig: Vec<usize> = (0..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let word = |i: usize, w: &str| sig.get(i).is_some_and(|&at| is_word(&pieces[at], w));
+        let comma = |i: usize| sig.get(i).is_some_and(|&at| is_punct(&pieces[at], ","));
+        let mut edits: Vec<(usize, usize, String)> = Vec::new();
+        for (i, &at) in sig.iter().enumerate() {
+            if word(i, "add") {
+                let open = sig[i + usize::from(word(i + 1, "column")) + 1..]
+                    .first()
+                    .copied();
+                let Some(open) = open.filter(|&open| is_punct(&pieces[open], "(")) else {
+                    continue;
+                };
+                let Some(close) = matching_paren(pieces, open) else {
+                    continue;
+                };
+                let columns: Vec<String> = split_top_level(&pieces[open + 1..close], ",")
+                    .iter()
+                    .map(|item| format!("ADD COLUMN {}", render(item).trim()))
+                    .collect();
+                edits.push((at, close + 1, columns.join(", ")));
+            } else if word(i, "rename")
+                && (word(i + 1, "index") || word(i + 1, "key"))
+                && word(i + 3, "to")
+            {
+                let Some(&name) = sig.get(i + 4) else {
+                    continue;
+                };
+                if i > 0 && comma(i - 1) {
+                    edits.push((sig[i - 1], name + 1, String::new()));
+                } else if comma(i + 5) {
+                    edits.push((
+                        at,
+                        sig.get(i + 6).copied().unwrap_or(sig[i + 5] + 1),
+                        String::new(),
+                    ));
+                }
+            }
+        }
+        if edits.is_empty() {
+            return None;
+        }
+        let (mut out, mut from) = (String::new(), 0);
+        for (start, end, text) in edits {
+            if start >= from {
+                out.push_str(&render(&pieces[from..start]));
+                out.push_str(&text);
+                from = end;
+            }
+        }
+        Some(out + &render(&pieces[from..]))
+    }
+
     /// The statement without table constraints and column `CHECK` / `REFERENCES`
     /// clauses, or `None` when it has none to drop.
     pub(crate) fn without_constraints(&self) -> Option<String> {
@@ -985,6 +1044,33 @@ mod tests {
         );
         let sql = "CREATE TABLE t (id INT)";
         assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
+    }
+
+    #[test]
+    fn test_respelled_mysql_alter() {
+        assert_eq!(
+            first("ALTER TABLE t ADD (a INT, b DECIMAL(5, 2) NOT NULL), ADD COLUMN (c INT)")
+                .respelled_mysql_alter()
+                .as_deref(),
+            Some(
+                "ALTER TABLE t ADD COLUMN a INT, ADD COLUMN b DECIMAL(5, 2) NOT NULL, \
+                 ADD COLUMN c INT"
+            )
+        );
+        assert_eq!(
+            first("ALTER TABLE t RENAME INDEX a TO b, RENAME COLUMN x TO y, RENAME KEY c TO d")
+                .respelled_mysql_alter()
+                .as_deref(),
+            Some("ALTER TABLE t RENAME COLUMN x TO y")
+        );
+        assert_eq!(
+            first("ALTER TABLE t ADD a INT").respelled_mysql_alter(),
+            None
+        );
+        assert_eq!(
+            first("ALTER TABLE t ADD PRIMARY KEY (a)").respelled_mysql_alter(),
+            None
+        );
     }
 
     fn first(sql: &str) -> Statement<'_> {

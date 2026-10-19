@@ -216,8 +216,31 @@ pub(super) fn read_alter_or_drop(
         let sql = stmt.sql();
         parse_ddl(&sql, dialect)
             .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
+            .or_else(|| {
+                let listed = stmt
+                    .respelled_mysql_alter()
+                    .filter(|_| dialect == SqlDialect::MySql);
+                listed.and_then(|sql| parse_ddl(&sql, dialect))
+            })
             .and_then(|stmts| stmts.into_iter().next())
     };
+    // MySQL's `RENAME TABLE a TO b, c TO d` renames each table in turn.
+    if let (SqlDialect::MySql, Some(_)) = (dialect, stmt.target("rename")) {
+        if let Some(Statement::RenameTable(renames)) = parsed() {
+            for rename in renames {
+                let sql = format!(
+                    "ALTER TABLE {} RENAME TO {}",
+                    rename.old_name, rename.new_name
+                );
+                if let Some(Statement::AlterTable(alter)) =
+                    parse_ddl(&sql, dialect).and_then(|stmts| stmts.into_iter().next())
+                {
+                    push(OpKind::AlterTable(Box::new(alter)));
+                }
+            }
+        }
+        return;
+    }
     if let Some((kind, name, action)) = stmt.target_and_action("alter") {
         match (kind.as_str(), parsed()) {
             ("table", Some(Statement::AlterTable(alter))) => {
