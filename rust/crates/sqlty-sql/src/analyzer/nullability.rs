@@ -15,6 +15,7 @@ use sqlparser::ast::{
 };
 
 use super::dialect::SqlDialect;
+use super::expr::is_binary_charset;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
 use super::inference::{
@@ -577,6 +578,19 @@ impl<'a> Analyzer<'a> {
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
             Expr::Nested(inner) | Expr::Collate { expr: inner, .. } => of(inner),
+            // Bytes invalid in the character set convert to NULL.
+            Expr::Convert {
+                expr: inner,
+                data_type: None,
+                charset: Some(charset),
+                ..
+            } if !is_binary_charset(charset)
+                && self
+                    .expr(inner, scope)
+                    .is_ok_and(|typed| python_kind(&typed) == Some("bytes")) =>
+            {
+                Nullability::Nullable
+            }
             Expr::Convert {
                 expr: inner,
                 is_try: false,
