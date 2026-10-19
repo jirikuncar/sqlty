@@ -2,7 +2,7 @@
 
 [[function]]
 id = "mysql.math.argument-type"
-functions = ["ABS", "MOD"]
+function = "MOD"
 dialects = ["mysql"]
 type = "@argument-type(0)"
 nullability = "strict"
@@ -29,7 +29,7 @@ reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
 id = "mysql.math.double"
-functions = ["SQRT", "EXP", "LN", "LOG", "LOG2", "LOG10", "POW", "POWER", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATAN2", "COT", "DEGREES", "RADIANS", "PI", "RAND"]
+functions = ["SQRT", "EXP", "LN", "LOG", "LOG2", "LOG10", "POW", "POWER", "COT", "RAND"]
 dialects = ["mysql"]
 type = "DOUBLE"
 nullability = "strict"

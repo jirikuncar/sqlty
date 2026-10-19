@@ -2,7 +2,7 @@
 
 [[function]]
 id = "postgres.math.argument-type"
-functions = ["ABS", "MOD"]
+function = "MOD"
 dialects = ["postgres"]
 type = "@argument-type(0)"
 nullability = "strict"
@@ -47,7 +47,7 @@ reasoning = "The documentation gives each of these a `numeric` result."
 
 [[function]]
 id = "postgres.math.double"
-functions = ["CBRT", "ERF", "ERFC", "PI", "DEGREES", "RADIANS", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATAN2", "RANDOM_NORMAL", "COT", "SIND", "COSD", "TAND", "COTD", "ASIND", "ACOSD", "ATAND", "ATAN2D", "SINH", "COSH", "TANH", "ASINH", "ACOSH", "ATANH"]
+functions = ["CBRT", "ERF", "ERFC", "RANDOM_NORMAL", "COT", "SIND", "COSD", "TAND", "COTD", "ASIND", "ACOSD", "ATAND", "ATAN2D", "SINH", "COSH", "TANH", "ASINH", "ACOSH", "ATANH"]
 dialects = ["postgres"]
 type = "DOUBLE"
 nullability = "strict"

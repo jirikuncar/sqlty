@@ -1,15 +1,6 @@
 # SQLite core scalar functions.
 
 [[function]]
-id = "sqlite.scalar.argument-type"
-function = "ABS"
-dialects = ["sqlite"]
-type = "@argument-type(0)"
-nullability = "strict"
-reference = "SQLite documentation, Built-In Scalar SQL Functions"
-reasoning = "The result has the type of the first argument."
-
-[[function]]
 id = "sqlite.scalar.branches"
 function = "IIF"
 dialects = ["sqlite"]
@@ -29,7 +20,7 @@ reasoning = "The arguments resolve to one common type, the first known argument'
 
 [[function]]
 id = "sqlite.scalar.argument"
-functions = ["NULLIF", "LIKELIHOOD", "LIKELY", "UNLIKELY"]
+functions = ["LIKELIHOOD", "LIKELY", "UNLIKELY"]
 dialects = ["sqlite"]
 type = "@same(0)"
 nullability = "strict"
@@ -65,7 +56,7 @@ reasoning = "The function returns a floating-point value."
 
 [[function]]
 id = "sqlite.scalar.text"
-functions = ["LTRIM", "RTRIM", "HEX", "QUOTE", "PRINTF", "FORMAT", "CHAR", "SOUNDEX", "TYPEOF", "CONCAT_WS", "SQLITE_VERSION", "SQLITE_SOURCE_ID"]
+functions = ["LTRIM", "RTRIM", "HEX", "QUOTE", "PRINTF", "CHAR", "SOUNDEX", "TYPEOF", "SQLITE_VERSION", "SQLITE_SOURCE_ID"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "strict"

@@ -120,8 +120,12 @@ impl<'a> Analyzer<'a> {
                 values: None,
             }),
             Arg(i) => Ok(strip(arg(i)?, self.dialect)),
-            // `LAG(x, 1, 'default')` can also return the default.
-            Returns::Same(i) if args.len() >= 3 => Ok(strip(arg(i)?, self.dialect)),
+            // `LAG(x, 1, default)` can also return the default, of their common type.
+            Returns::Same(i) if args.len() >= 3 => {
+                let value = strip(arg(i)?, self.dialect);
+                let default = arg(args.len() - 1)?;
+                Ok(common_of([value.clone(), default], self.dialect).unwrap_or(value))
+            }
             Returns::Same(i) => arg(i),
             Returns::FirstKnown => {
                 let mut typed_args = Vec::with_capacity(args.len());

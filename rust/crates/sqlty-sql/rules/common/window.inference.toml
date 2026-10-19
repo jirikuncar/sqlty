@@ -15,3 +15,19 @@ type = "INT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
 reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "common.window.distribution"
+functions = ["CUME_DIST", "PERCENT_RANK"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions; MySQL 8.4 Reference Manual, 14.20.1 Window Function Descriptions; SQLite documentation, Window Functions"
+reasoning = "Every dialect returns the relative rank as a double precision number."
+
+[[function]]
+id = "common.window.value"
+functions = ["FIRST_VALUE", "LAST_VALUE", "LAG", "LEAD", "NTH_VALUE"]
+type = "@same(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions; MySQL 8.4 Reference Manual, 14.20.1 Window Function Descriptions; SQLite documentation, Window Functions"
+reasoning = "The result is one of the first argument's values or, for `LAG` and `LEAD`, the default."

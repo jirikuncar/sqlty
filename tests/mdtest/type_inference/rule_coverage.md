@@ -228,7 +228,7 @@ SELECT
 -- rules: aggregate_argument: postgres.aggregate.argument / postgres.aggregate.argument
 -- rules: aggregate_bigint: postgres.aggregate.bigint / postgres.aggregate.bigint
 -- rules: aggregate_boolean: postgres.aggregate.boolean / postgres.aggregate.boolean
--- rules: aggregate_double: postgres.aggregate.double / postgres.aggregate.double
+-- rules: aggregate_double: common.window.distribution / common.window.distribution
 -- rules: aggregate_aggregate_double: postgres.aggregate.aggregate-double / postgres.aggregate.aggregate-double
 ```
 
@@ -314,7 +314,7 @@ SELECT num_nonnulls(1, NULL, 2) AS comparison_int
 ```sql
 SELECT greatest(1) AS conditional_common, nullif('a', 'b') AS conditional_argument
 -- rules: conditional_common: postgres.conditional.common / postgres.conditional.common
--- rules: conditional_argument: postgres.conditional.argument / postgres.conditional.argument
+-- rules: conditional_argument: common.conditional.nullif / common.conditional.nullif
 ```
 
 ```sql
@@ -391,7 +391,7 @@ SELECT
     cbrt(64.0) AS math_double,
     width_bucket(9, 10, 0, 10) AS math_int,
     setseed(NULL::double precision) AS math_void
--- rules: math_argument_type: postgres.math.argument-type / postgres.math.argument-type
+-- rules: math_argument_type: common.math.argument-type / common.math.argument-type
 -- rules: math_random: postgres.math.random / postgres.math.random
 -- rules: math_real: postgres.math.real / postgres.math.real
 -- rules: math_scaled: postgres.math.scaled / postgres.math.scaled
@@ -516,7 +516,13 @@ SELECT
 
 ```sql
 SELECT first_value(NULL::int4) OVER () AS window_argument
--- rules: window_argument: postgres.window.argument / postgres.window.argument
+-- rules: window_argument: common.window.value / common.window.value
+```
+
+```sql
+SELECT mod(7, 3) AS math_argument_type, sin(1.0) AS math_double
+-- rules: math_argument_type: postgres.math.argument-type / postgres.math.argument-type
+-- rules: math_double: common.math.double / common.math.double
 ```
 
 ## MySQL
@@ -609,7 +615,7 @@ SELECT
     NULLIF(1,2) AS conditional_argument
 -- rules: conditional_branches: mysql.conditional.branches / mysql.conditional.branches
 -- rules: conditional_common: mysql.conditional.common / mysql.conditional.common
--- rules: conditional_argument: mysql.conditional.argument / mysql.conditional.argument
+-- rules: conditional_argument: common.conditional.nullif / common.conditional.nullif
 ```
 
 ```sql
@@ -659,7 +665,7 @@ SELECT
     CRC32('mysql') AS math_bigint,
     SQRT(4) AS math_double,
     CONV('a',16,2) AS math_text
--- rules: math_argument_type: mysql.math.argument-type / mysql.math.argument-type
+-- rules: math_argument_type: common.math.argument-type / common.math.argument-type
 -- rules: math_integral: mysql.math.integral / mysql.math.integral
 -- rules: math_bigint: mysql.math.bigint / mysql.math.bigint
 -- rules: math_double: mysql.math.double / mysql.math.double
@@ -715,8 +721,13 @@ SELECT
 
 ```sql
 SELECT first_value(1) OVER () AS window_argument, percent_rank() OVER () AS window_double
--- rules: window_argument: mysql.window.argument / mysql.window.argument
--- rules: window_double: mysql.window.double / mysql.window.double
+-- rules: window_argument: common.window.value / common.window.value
+-- rules: window_double: common.window.distribution / common.window.distribution
+```
+
+```sql
+SELECT MOD(7, 3) AS math_argument_type
+-- rules: math_argument_type: mysql.math.argument-type / mysql.math.argument-type
 ```
 
 ## SQLite
@@ -798,10 +809,10 @@ SELECT
     zeroblob(1) AS scalar_blob,
     round(1) AS scalar_double,
     ltrim(1) AS scalar_text
--- rules: scalar_argument_type: sqlite.scalar.argument-type / sqlite.scalar.argument-type
+-- rules: scalar_argument_type: common.math.argument-type / common.math.argument-type
 -- rules: scalar_branches: sqlite.scalar.branches / sqlite.scalar.branches
 -- rules: scalar_common: sqlite.scalar.common / sqlite.scalar.common
--- rules: scalar_argument: sqlite.scalar.argument / sqlite.scalar.argument
+-- rules: scalar_argument: common.conditional.nullif / common.conditional.nullif
 -- rules: scalar_bigint: sqlite.scalar.bigint / sqlite.scalar.bigint
 -- rules: scalar_blob: sqlite.scalar.blob / sqlite.scalar.blob
 -- rules: scalar_double: sqlite.scalar.double / sqlite.scalar.double
@@ -810,8 +821,14 @@ SELECT
 
 ```sql
 SELECT first_value(1) OVER () AS window_argument, percent_rank() OVER () AS window_double
--- rules: window_argument: sqlite.window.argument / sqlite.window.argument
--- rules: window_double: sqlite.window.double / sqlite.window.double
+-- rules: window_argument: common.window.value / common.window.value
+-- rules: window_double: common.window.distribution / common.window.distribution
+```
+
+```sql
+SELECT likely(1) AS scalar_argument, concat_ws(',', 'a', 'b') AS string_formatted
+-- rules: scalar_argument: sqlite.scalar.argument / sqlite.scalar.argument
+-- rules: string_formatted: common.string.formatted / common.string.formatted
 ```
 
 ## Other dialects

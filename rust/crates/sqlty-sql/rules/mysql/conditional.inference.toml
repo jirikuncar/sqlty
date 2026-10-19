@@ -17,12 +17,3 @@ type = "@first-known"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
 reasoning = "The arguments resolve to one common type, the first known argument's."
-
-[[function]]
-id = "mysql.conditional.argument"
-function = "NULLIF"
-dialects = ["mysql"]
-type = "@same(0)"
-nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
-reasoning = "The result is one of the first argument's values, so it keeps its type and values."

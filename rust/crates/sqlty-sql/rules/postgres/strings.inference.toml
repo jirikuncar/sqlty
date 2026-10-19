@@ -47,7 +47,7 @@ reasoning = "The documentation gives the function a `name` result."
 
 [[function]]
 id = "postgres.string.text"
-functions = ["LEFT", "RIGHT", "LPAD", "RPAD", "INITCAP", "REPEAT", "REVERSE", "TRANSLATE", "CONCAT_WS", "FORMAT", "MD5", "TO_HEX", "TO_BIN", "TO_OCT", "CHR", "QUOTE_IDENT", "QUOTE_LITERAL", "QUOTE_NULLABLE", "SPLIT_PART", "NORMALIZE", "REGEXP_REPLACE", "UNISTR", "REGEXP_SPLIT_TO_TABLE", "STRING_TO_TABLE", "REGEXP_SUBSTR"]
+functions = ["LEFT", "RIGHT", "LPAD", "RPAD", "INITCAP", "REPEAT", "REVERSE", "TRANSLATE", "MD5", "TO_HEX", "TO_BIN", "TO_OCT", "CHR", "QUOTE_IDENT", "QUOTE_LITERAL", "QUOTE_NULLABLE", "SPLIT_PART", "NORMALIZE", "REGEXP_REPLACE", "UNISTR", "REGEXP_SPLIT_TO_TABLE", "STRING_TO_TABLE", "REGEXP_SUBSTR"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"

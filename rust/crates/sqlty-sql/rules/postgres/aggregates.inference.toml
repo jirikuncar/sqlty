@@ -115,15 +115,6 @@ reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 G
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
-id = "postgres.aggregate.double"
-functions = ["PERCENT_RANK", "CUME_DIST"]
-dialects = ["postgres"]
-type = "DOUBLE"
-nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.63 Hypothetical-Set Aggregate Functions; 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
-reasoning = "The documentation gives each of these a `double precision` result."
-
-[[function]]
 id = "postgres.aggregate.aggregate-double"
 functions = ["CORR", "COVAR_POP", "COVAR_SAMP", "REGR_SLOPE", "REGR_INTERCEPT", "REGR_R2", "REGR_AVGX", "REGR_AVGY", "REGR_SXX", "REGR_SYY", "REGR_SXY"]
 dialects = ["postgres"]
