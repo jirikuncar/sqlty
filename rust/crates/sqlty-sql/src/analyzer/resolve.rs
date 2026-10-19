@@ -222,6 +222,16 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The name the source a column reference reads gives that column; `None` for a
+    /// system column or an unresolved reference.
+    pub(super) fn source_column_name(&self, expr: &Expr, scope: &Scope) -> Option<String> {
+        match self.resolve_reference(expr, scope)?.found {
+            ColumnRef::Virtual { column, .. } => Some(column.name.clone()),
+            ColumnRef::Schema(column) => Some(column.output_name()),
+            ColumnRef::System(_) => None,
+        }
+    }
+
     /// `(reference, table, column)` of the source a column reference reads, found as
     /// [`Self::resolve_column`] finds it.
     pub(super) fn locate_column(

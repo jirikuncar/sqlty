@@ -57,7 +57,8 @@ pub(crate) type Typed = (Option<String>, Option<String>);
 pub struct SchemaColumn {
     /// Lowercased name, for lookups and result column names.
     pub name: String,
-    /// The name as SQL spells it, quotes kept, for `SELECT *` expansion.
+    /// The name as SQL spells it, quotes kept, for `SELECT *` expansion. MySQL and SQLite
+    /// keep the case of an unquoted name as declared, which their result columns show.
     pub ident: String,
     /// The canonical SQL type of the column.
     pub sql_type: String,
