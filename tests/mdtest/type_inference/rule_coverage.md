@@ -482,6 +482,22 @@ SELECT
 ```
 
 ```sql
+SELECT int4multirange(int4range(1, 2)) AS range_int4multirange, int8multirange() AS range_int8multirange, nummultirange() AS range_nummultirange, datemultirange() AS range_datemultirange, tsmultirange() AS range_tsmultirange, tstzmultirange() AS range_tstzmultirange
+-- columns: range_int4multirange: None (INT4MULTIRANGE)
+-- columns: range_int8multirange: None (INT8MULTIRANGE)
+-- columns: range_nummultirange: None (NUMMULTIRANGE)
+-- columns: range_datemultirange: None (DATEMULTIRANGE)
+-- columns: range_tsmultirange: None (TSMULTIRANGE)
+-- columns: range_tstzmultirange: None (TSTZMULTIRANGE)
+-- rules: range_int4multirange: postgres.range.int4multirange / postgres.range.int4multirange
+-- rules: range_int8multirange: postgres.range.int8multirange / postgres.range.int8multirange
+-- rules: range_nummultirange: postgres.range.nummultirange / postgres.range.nummultirange
+-- rules: range_datemultirange: postgres.range.datemultirange / postgres.range.datemultirange
+-- rules: range_tsmultirange: postgres.range.tsmultirange / postgres.range.tsmultirange
+-- rules: range_tstzmultirange: postgres.range.tstzmultirange / postgres.range.tstzmultirange
+```
+
+```sql
 SELECT row() AS row_record
 -- rules: row_record: postgres.row.record / postgres.row.record
 ```

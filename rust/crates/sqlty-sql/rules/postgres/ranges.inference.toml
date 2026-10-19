@@ -80,3 +80,57 @@ type = "@multirange(0)"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.59 Multirange Functions"
 reasoning = "The result is the multirange type of the range argument."
+
+[[function]]
+id = "postgres.range.datemultirange"
+function = "DATEMULTIRANGE"
+dialects = ["postgres"]
+type = "DATEMULTIRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reasoning = "The constructor gives a `datemultirange` from zero or more ranges; it is strict, and a NULL member is an error."
+
+[[function]]
+id = "postgres.range.int4multirange"
+function = "INT4MULTIRANGE"
+dialects = ["postgres"]
+type = "INT4MULTIRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reasoning = "The constructor gives an `int4multirange` from zero or more ranges; it is strict, and a NULL member is an error."
+
+[[function]]
+id = "postgres.range.int8multirange"
+function = "INT8MULTIRANGE"
+dialects = ["postgres"]
+type = "INT8MULTIRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reasoning = "The constructor gives an `int8multirange` from zero or more ranges; it is strict, and a NULL member is an error."
+
+[[function]]
+id = "postgres.range.nummultirange"
+function = "NUMMULTIRANGE"
+dialects = ["postgres"]
+type = "NUMMULTIRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reasoning = "The constructor gives a `nummultirange` from zero or more ranges; it is strict, and a NULL member is an error."
+
+[[function]]
+id = "postgres.range.tsmultirange"
+function = "TSMULTIRANGE"
+dialects = ["postgres"]
+type = "TSMULTIRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reasoning = "The constructor gives a `tsmultirange` from zero or more ranges; it is strict, and a NULL member is an error."
+
+[[function]]
+id = "postgres.range.tstzmultirange"
+function = "TSTZMULTIRANGE"
+dialects = ["postgres"]
+type = "TSTZMULTIRANGE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reasoning = "The constructor gives a `tstzmultirange` from zero or more ranges; it is strict, and a NULL member is an error."
