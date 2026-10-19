@@ -2,7 +2,9 @@
 
 import time
 
-from sqlty import _core
+import pytest
+
+from sqlty import _core, core
 
 STRINGS = 20_000
 BOUND_SECONDS = 0.5
@@ -41,3 +43,23 @@ def test_wrapped_and_unwrapped_queries_scale_linearly() -> None:
     small, large = _queries(500), _queries(4000)
     for fn in (_core.check_source, _core.rewrite_source, _core.query_sites):
         assert _best_of(fn, large) < 24 * _best_of(fn, small) + 0.005, fn.__name__
+
+
+DEPTH = 20
+NESTED = {
+    "mysql a + b": ("mysql", " + ".join(["id"] * DEPTH)),
+    "minus": ("postgres", "-(" * DEPTH + "id" + ")" * DEPTH),
+    "abs": ("postgres", "abs(" * DEPTH + "id" + ")" * DEPTH),
+    "or": ("postgres", " OR ".join(["id = 1"] * DEPTH)),
+    "sqlite ceil": ("sqlite", "ceil(" * DEPTH + "id" + ")" * DEPTH),
+}
+
+
+@pytest.mark.parametrize(("dialect", "expr"), NESTED.values(), ids=NESTED.keys())
+def test_nested_expressions_scale_linearly(dialect: str, expr: str) -> None:
+    sql = f"SELECT {expr} AS x FROM users"
+    start = time.perf_counter()
+    core.analyze_select(
+        sql, dialect=dialect, schema_sql="CREATE TABLE users (id INTEGER NOT NULL);"
+    )
+    assert time.perf_counter() - start < BOUND_SECONDS
