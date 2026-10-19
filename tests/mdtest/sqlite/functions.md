@@ -228,3 +228,26 @@ query without them:
 SELECT e.id FROM events AS e INDEXED BY events_name JOIN events AS f NOT INDEXED ON e.id = f.id
 -- columns: id: int (INT)
 ```
+
+## IS and IS NOT
+
+SQLite's `a IS b` compares any two values, `NULL` included: it is
+`a IS NOT DISTINCT FROM b`, and `a IS NOT b` is `a IS DISTINCT FROM b`. Both are
+never `NULL`.
+
+```sql
+SELECT note IS name AS a, note IS NOT 'x' AS b, note IS NULL AS c FROM events
+-- columns: a: int (BOOLEAN)
+-- columns: b: int (BOOLEAN)
+-- columns: c: int (BOOLEAN)
+```
+
+## Window frames with EXCLUDE
+
+A frame that excludes the current row may be empty, so `sum` over it is `NULL`
+for a row with no neighbours.
+
+```sql
+SELECT sum(id) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING EXCLUDE CURRENT ROW) AS a FROM events
+-- columns: a: int | None (INT)
+```

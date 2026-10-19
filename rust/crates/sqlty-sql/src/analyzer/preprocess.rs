@@ -271,12 +271,8 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
                 .flatten()
         })
     };
-    parse_placeholders(&sql).or_else(|| {
-        matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql)
-            .then(|| respell(&sql))
-            .flatten()
-            .and_then(|sql| parse_placeholders(&sql))
-    })
+    parse_placeholders(&sql)
+        .or_else(|| respell(&sql, dialect).and_then(|sql| parse_placeholders(&sql)))
 }
 
 /// `sql` as sqlparser should read it, in every dialect: the `--sql` marker line is
