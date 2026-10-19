@@ -427,7 +427,7 @@ impl<'a> Analyzer<'a> {
         let Some(selection) = select
             .selection
             .as_ref()
-            .filter(|_| rows_pass_where(select))
+            .filter(|_| rows_pass_where(select, self.dialect))
         else {
             return Learned::default();
         };
