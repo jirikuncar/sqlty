@@ -339,3 +339,27 @@ SELECT area(box '(2,2),(0,0)') AS area, center(box '(1,2),(0,0)') AS center,
 -- columns: low: decimal.Decimal | None (DECIMAL)
 -- columns: local_time: datetime.datetime (TIMESTAMP)
 ```
+
+## Operators on shapes, money, log locations and bit strings
+
+Every operator of `pg_operator` has a type. Shape operators give a shape, a point, a
+distance or a predicate. `#` and `##` are NULL when the shapes do not meet. An amount
+divided by an amount is a `double precision`, and the distance between two log locations
+is a `numeric`.
+
+```sql
+SELECT box '(2,2),(0,0)' + point '(1,1)' AS moved, point '(0,0)' <-> point '(3,4)' AS distance,
+    lseg '[(0,0),(1,1)]' # lseg '[(0,1),(1,0)]' AS crossing, @@ circle '<(1,1),2>' AS center,
+    # path '[(0,0),(1,1)]' AS points, 10::money / 4::money AS ratio,
+    '1/0'::pg_lsn - '0/1'::pg_lsn AS distance_bytes, B'1010' # B'0110' AS xor,
+    B'10' || B'01' AS bits
+-- columns: moved: str (BOX)
+-- columns: distance: float (DOUBLE)
+-- columns: crossing: str | None (POINT)
+-- columns: center: str (POINT)
+-- columns: points: int (INT)
+-- columns: ratio: float (DOUBLE)
+-- columns: distance_bytes: decimal.Decimal (DECIMAL)
+-- columns: xor: str (BIT)
+-- columns: bits: str (VARBIT)
+```

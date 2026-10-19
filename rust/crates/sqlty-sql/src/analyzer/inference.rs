@@ -6,7 +6,7 @@
 //! ones in `rules/common/`, each in file order, and the first that applies is used. An
 //! operator no rule covers is typed by the analyzer's code, as before rules existed.
 
-use sqlparser::ast::BinaryOperator;
+use sqlparser::ast::{BinaryOperator, UnaryOperator};
 
 use super::dialect::SqlDialect;
 use super::functions::Returns;
@@ -283,6 +283,26 @@ mod tests {
                 !rule.reasoning.trim().is_empty(),
                 "{} has no reasoning",
                 rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_result_type_has_a_python_type() {
+        use crate::analyzer::expr::from_sql_type;
+        let binary = BINARY_RULES.iter().filter_map(|rule| match rule.result {
+            RuleType::Sql(name) => Some((rule.id, rule.dialects, name)),
+            _ => None,
+        });
+        let functions = FUNCTION_RULES.iter().filter_map(|rule| match rule.result {
+            FunctionType::Sql(name) => Some((rule.id, rule.dialects, name)),
+            _ => None,
+        });
+        for (id, dialects, name) in binary.chain(functions) {
+            let dialect = dialects.first().copied().unwrap_or(SqlDialect::Postgres);
+            assert!(
+                name.ends_with("RANGE") || from_sql_type(name, dialect).python.is_some(),
+                "{id} returns {name}, which has no Python type"
             );
         }
     }

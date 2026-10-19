@@ -1,6 +1,6 @@
 # PostgreSQL nullability against seeded rows
 
-855 columns of queries that return rows, `scripts/compat/pg_nullability.py`.
+877 columns of queries that return rows, `scripts/compat/pg_nullability.py`.
 
 ## NULL in a column sqlty types as non-null
 
@@ -42,24 +42,24 @@ None.
 | `tests/mdtest/nullability/narrowing.md:40` | `age` | `int \| None` |
 | `tests/mdtest/nullability/narrowing.md:47` | `nick` | `str \| None` |
 | `tests/mdtest/nullability/narrowing.md:47` | `prefs` | `typing.Any` |
-| `tests/mdtest/nullability/narrowing.md:193` | `id` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:217` | `id` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:235` | `id` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:256` | `id` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:256` | `id` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:285` | `n` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:290` | `n` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:296` | `n` | `int \| None` |
-| `tests/mdtest/nullability/narrowing.md:324` | `motto` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:345` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:350` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:355` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:360` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:365` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:401` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:401` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:401` | `name` | `str \| None` |
-| `tests/mdtest/nullability/narrowing.md:461` | `?column?` | `bool \| None` |
+| `tests/mdtest/nullability/narrowing.md:201` | `id` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:225` | `id` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:243` | `id` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:264` | `id` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:264` | `id` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:293` | `n` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:298` | `n` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:304` | `n` | `int \| None` |
+| `tests/mdtest/nullability/narrowing.md:332` | `motto` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:353` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:358` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:363` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:368` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:373` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:409` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:409` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:409` | `name` | `str \| None` |
+| `tests/mdtest/nullability/narrowing.md:469` | `?column?` | `bool \| None` |
 | `tests/mdtest/nullability/postgres.md:66` | `nullif` | `int \| None` |
 | `tests/mdtest/nullability/postgres.md:66` | `nullif` | `str \| None` |
 | `tests/mdtest/nullability/postgres.md:104` | `case` | `str \| None` |
@@ -104,6 +104,11 @@ None.
 | `tests/mdtest/postgres/builtins.md:298` | `bytes` | `bytes \| None` |
 | `tests/mdtest/postgres/builtins.md:298` | `grid` | `list[list[int]] \| None` |
 | `tests/mdtest/postgres/builtins.md:298` | `element` | `int \| None` |
+| `tests/mdtest/postgres/builtins.md:322` | `lsn` | `str \| None` |
+| `tests/mdtest/postgres/builtins.md:322` | `merged` | `None` |
+| `tests/mdtest/postgres/builtins.md:322` | `multi` | `None` |
+| `tests/mdtest/postgres/builtins.md:322` | `low` | `decimal.Decimal \| None` |
+| `tests/mdtest/postgres/builtins.md:351` | `crossing` | `str \| None` |
 | `tests/mdtest/postgres/check_literals.md:261` | `status` | `None` |
 | `tests/mdtest/postgres/column_names.md:23` | `max` | `int \| None` |
 | `tests/mdtest/postgres/column_names.md:72` | `extract` | `decimal.Decimal \| None` |

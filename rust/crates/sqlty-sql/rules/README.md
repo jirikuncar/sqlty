@@ -23,7 +23,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | Key | Required | Meaning |
 |-----|----------|---------|
 | `id` | yes | Unique name, `<directory>.<topic>.<name>` |
-| `operator` or `operators` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), or `Custom:<<=` for an operator sqlparser keeps as text; `operators` lists several that share the rule |
+| `operator` or `operators` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), `Custom:<<=` for an operator sqlparser keeps as text, or `Prefix:DoubleAt` for a sqlparser `UnaryOperator` variant; `operators` lists several that share the rule |
 | `dialects` | in a dialect directory | `postgres`, `mysql`, `sqlite`, `clickhouse`; a rule in `common/` has none and applies to every dialect |
 | `left`, `right` | no | SQL types the operand may have; absent means any operand |
 | `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...) or one of the results below |
@@ -218,7 +218,9 @@ These settle the review of the first proposal in
 - **Operators are sqlparser variants.** `->>` is `LongArrow` and `#>>` is
   `HashLongArrow`, not `Custom("->>")`; `rustc` validates the names. Only
   operators sqlparser keeps as text (`<<=`, `>>=`) use `Custom:`, the one
-  string comparison at run time.
+  string comparison at run time. A prefix operator (`@@ box`) is `Prefix:` and
+  a `UnaryOperator` variant: it has only a `right` operand, its type is a SQL
+  type or `@right`, and it is NULL when its operand is.
 - **Types are SQL types.** The analyzer works on `Typed` values and derives the
   Python type later, so operand predicates and results are SQL types.
 - **Type and nullability are two outputs.** A rule gives both, but nullability

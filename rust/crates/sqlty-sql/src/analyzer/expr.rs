@@ -223,16 +223,14 @@ impl<'a> Analyzer<'a> {
                     _ => Typed::UNKNOWN,
                 })
             }
-            Expr::UnaryOp {
-                op: UnaryOperator::PGSquareRoot | UnaryOperator::PGCubeRoot,
-                ..
-            } if self.dialect == SqlDialect::Postgres => Ok(from_sql_type("DOUBLE", self.dialect)),
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
-                // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa.
+                // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa; a time
+                // of day becomes a `timetz` either way.
                 let typed = self.expr(timestamp, scope)?;
                 Ok(match operand_type(&typed) {
                     Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
                     Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
                     _ => Typed::UNKNOWN,
                 })
             }
@@ -319,6 +317,7 @@ impl<'a> Analyzer<'a> {
                 Ok(from_sql_type("RECORD", self.dialect))
             }
             Expr::BinaryOp { left, op, right } => self.binary_op(left, op, right, scope),
+            Expr::UnaryOp { op, expr: inner } => self.prefix_op(op, inner, scope),
             // SQLite's trim always returns text.
             Expr::Trim { .. } if self.dialect == SqlDialect::Sqlite => {
                 Ok(from_sql_type("TEXT", self.dialect))
