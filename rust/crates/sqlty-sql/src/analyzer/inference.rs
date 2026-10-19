@@ -270,6 +270,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn extending_dialects_are_sqlparser_dialects() {
+        for &name in EXTENDING_DIALECTS {
+            assert_eq!(
+                SqlDialect::from_name(name),
+                SqlDialect::Other(name),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn every_rule_is_documented() {
         let binary = BINARY_RULES.iter().map(BinaryRule::explained);
         let functions = FUNCTION_RULES.iter().map(FunctionRule::explained);

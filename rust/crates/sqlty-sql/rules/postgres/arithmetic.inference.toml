@@ -509,3 +509,19 @@ right = ["@range"]
 type = "@left"
 reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange + anyrange → anyrange, anyrange * anyrange → anyrange, anyrange - anyrange → anyrange)"
 reasoning = "The union, intersection and difference of two ranges are a range of their type."
+
+[[rule]]
+id = "postgres.bitwise.not"
+operator = "Prefix:BitwiseNot"
+dialects = ["postgres"]
+type = "@right"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (~ integral_type → integral_type), 9.6, Table 9.14 Bit String Operators (~ bit → bit), 9.12, Table 9.39 IP Address Operators (~ inet → inet)"
+reasoning = "`~` inverts the bits of an integer, a bit string or an address and keeps its type."
+
+[[rule]]
+id = "postgres.math.absolute"
+operator = "Prefix:PGAbs"
+dialects = ["postgres"]
+type = "@right"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (@ numeric_type → numeric_type)"
+reasoning = "`@` is the absolute value, of the operand's type."

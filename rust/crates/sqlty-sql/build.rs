@@ -38,7 +38,9 @@ fn collect(dir: &Path, files: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect(&path, files);
-        } else if path.to_string_lossy().ends_with(".inference.toml") {
+        } else if path.to_string_lossy().ends_with(".inference.toml")
+            || path.ends_with("rules/dialects.toml")
+        {
             files.push(path);
         }
     }

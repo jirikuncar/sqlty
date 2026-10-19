@@ -40,9 +40,9 @@
    "provenance": "annotate_functions.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "typing.Literal[1, 2, 3]",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -55,9 +55,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -70,9 +70,9 @@
    "provenance": "annotate_functions.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "typing.Literal[1, 2, 3]",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -85,9 +85,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "decimal.Decimal",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -115,9 +115,9 @@
    "provenance": "annotate_functions.sql: sqlglot TIME",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "datetime.time",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -295,9 +295,9 @@
    "provenance": "annotate_functions.sql: sqlglot BINARY",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "bytes",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -310,9 +310,9 @@
    "provenance": "annotate_functions.sql: sqlglot BOOLEAN",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "bool",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -325,9 +325,9 @@
    "provenance": "annotate_functions.sql: sqlglot BIGINT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -340,9 +340,9 @@
    "provenance": "annotate_functions.sql: sqlglot DATE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "datetime.date",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -355,9 +355,9 @@
    "provenance": "annotate_functions.sql: sqlglot STRING",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -370,9 +370,9 @@
    "provenance": "annotate_functions.sql: sqlglot ARRAY<STRING>",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "list[str]",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -385,9 +385,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -400,9 +400,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -415,9 +415,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -505,9 +505,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -535,9 +535,9 @@
    "provenance": "annotate_functions.sql: sqlglot BOOLEAN",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "bool",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -565,9 +565,9 @@
    "provenance": "annotate_functions.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -580,9 +580,9 @@
    "provenance": "annotate_functions.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -625,9 +625,9 @@
    "provenance": "annotate_functions.sql: sqlglot DATE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "datetime.date",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -640,9 +640,9 @@
    "provenance": "annotate_functions.sql: sqlglot INTERVAL",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -655,9 +655,9 @@
    "provenance": "annotate_functions.sql: sqlglot INTERVAL",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -670,9 +670,9 @@
    "provenance": "annotate_functions.sql: sqlglot INTERVAL",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "datetime.timedelta",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -775,9 +775,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -790,9 +790,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -805,9 +805,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -895,9 +895,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -940,9 +940,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -955,9 +955,9 @@
    "provenance": "annotate_functions.sql: sqlglot VARCHAR",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4570,9 +4570,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4585,9 +4585,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4600,9 +4600,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4615,9 +4615,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4630,9 +4630,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4645,9 +4645,9 @@
    "provenance": "annotate_functions.sql: sqlglot DOUBLE",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "float",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4660,9 +4660,9 @@
    "provenance": "annotate_functions.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4675,9 +4675,9 @@
    "provenance": "annotate_functions.sql: sqlglot BIGINT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "int",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4720,9 +4720,9 @@
    "provenance": "annotate_types.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4975,9 +4975,9 @@
    "provenance": "annotate_types.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "typing.Literal[1]",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {
@@ -4990,9 +4990,9 @@
    "provenance": "annotate_types.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "typing.Literal[1]",
+  "nullable": true,
+  "outcome": "match"
  },
  {
   "row": {

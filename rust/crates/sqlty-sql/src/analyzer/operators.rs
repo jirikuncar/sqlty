@@ -5,7 +5,7 @@ use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
 use super::inference::{binary_rules, prefix_rules, BinaryRule, RuleType};
-use super::literals::{merge, python_kind};
+use super::literals::{merge, python_kind, strip};
 use super::query::Analyzer;
 use super::scope::Scope;
 use super::typed::Typed;
@@ -72,7 +72,7 @@ impl Analyzer<'_> {
         Ok(match self.prefix_rule(op, operand, scope)? {
             Some((rule, typed)) => match rule.result {
                 RuleType::Sql(name) => from_sql_type(name, self.dialect),
-                RuleType::Right => typed,
+                RuleType::Right => strip(typed, self.dialect),
                 _ => Typed::UNKNOWN,
             },
             None => Typed::UNKNOWN,
