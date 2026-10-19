@@ -953,16 +953,29 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         facts: &Facts,
     ) -> Nullability {
-        let (root, chain) = split_access(root, access_chain);
+        let mut bare = root;
+        while let Expr::Nested(inner) = bare {
+            bare = inner;
+        }
+        // A field of a whole-row reference is the column: `(u).name` reads `u.name`.
+        let whole_row = match (bare, access_chain) {
+            (Expr::Identifier(_), [AccessExpr::Dot(Expr::Identifier(_)), ..])
+                if self.locate_column(bare, scope).is_none()
+                    && self.whole_row_table(bare, scope).is_some() =>
+            {
+                split_access(bare, access_chain)
+            }
+            _ => split_access(root, access_chain),
+        };
+        let (root, chain) = whole_row;
         let mut result = self.nullability(&root, scope, facts);
         for access in chain {
             result = match access {
                 // An index past the end reads as NULL.
                 AccessExpr::Subscript(Subscript::Index { .. }) => Nullability::Nullable,
                 AccessExpr::Subscript(Subscript::Slice { .. }) => result,
-                // A field of a row can hold NULL; a NULL row has only NULL fields.
-                AccessExpr::Dot(_) if result == Nullability::Nullable => result,
-                AccessExpr::Dot(_) => Nullability::Unknown,
+                // A field of a composite value can hold NULL.
+                AccessExpr::Dot(_) => Nullability::Nullable,
             };
         }
         result
