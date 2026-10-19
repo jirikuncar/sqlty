@@ -60,22 +60,6 @@ SELECT a FROM t
 -- inferred: None
 ```
 
-## CREATE TABLE AS
-
-A table built from a query is not in the catalog.
-
-`schema.sql`:
-
-```sql
-CREATE TABLE base (a INTEGER);
-CREATE TABLE copy AS SELECT a FROM base;
-```
-
-```sql
-SELECT a FROM copy
--- inferred: None
-```
-
 ## Other dialects keep reading CREATE statements only
 
 Dialects other than PostgreSQL, MySQL and SQLite do not follow `ALTER TABLE`

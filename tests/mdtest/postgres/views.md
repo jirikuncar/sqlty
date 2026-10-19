@@ -141,3 +141,37 @@ SELECT id, name, next_id, missing_column FROM mixed
 SELECT * FROM opaque
 -- columns: *: None (None)
 ```
+
+## CREATE TABLE ... AS
+
+A table created from a query has the query's column names and types. It has no
+constraints, so every column can be NULL and a value a `CHECK` limited may now be
+any text. An `ALTER TABLE` that changes its columns makes them unknown.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL CHECK (name <> ''), role TEXT NOT NULL CHECK (role IN ('admin', 'member')));
+CREATE TABLE users_backup AS SELECT id, name, role, 'v1' AS version FROM users;
+CREATE TABLE IF NOT EXISTS user_ids AS SELECT id FROM users WITH NO DATA;
+CREATE TABLE altered AS SELECT id FROM users;
+ALTER TABLE altered ADD COLUMN note TEXT;
+```
+
+```sql
+SELECT * FROM users_backup
+-- columns: id: int | None (INT)
+-- columns: name: str | None (TEXT)
+-- columns: role: str | None (TEXT)
+-- columns: version: str | None (TEXT)
+```
+
+```sql
+SELECT * FROM user_ids
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT id, note FROM altered
+-- inferred: None
+```

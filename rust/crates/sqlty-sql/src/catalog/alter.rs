@@ -12,14 +12,34 @@ use sqlparser::ast::{
 use crate::analyzer::SqlDialect;
 
 use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column};
-use super::loader::{AlterFail, Loader, RawTable, Rel, TypeDef};
+use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef};
 use super::names::{fold, key_of, parts};
 
 impl Loader {
     /// Returns `false` when the table (or a column it changes) is not defined yet.
     pub(super) fn alter_table(&mut self, alter: &AlterTable, path: &[String]) -> bool {
-        let Some(key) = self.table_key(&parts(&alter.name, self.dialect), path) else {
-            return alter.if_exists;
+        let name = parts(&alter.name, self.dialect);
+        let Some(key) = self.table_key(&name, path) else {
+            if self.lookup(&self.relations, &name, path).is_none() {
+                return alter.if_exists;
+            }
+            // A `CREATE TABLE ... AS` table holds its query's columns, not a column list.
+            let reshapes = alter.operations.iter().any(|op| {
+                matches!(
+                    op,
+                    AlterTableOperation::AddColumn { .. }
+                        | AlterTableOperation::DropColumn { .. }
+                        | AlterTableOperation::RenameColumn { .. }
+                        | AlterTableOperation::ChangeColumn { .. }
+                        | AlterTableOperation::ModifyColumn { .. }
+                        | AlterTableOperation::AlterColumn { .. }
+                        | AlterTableOperation::RenameTable { .. }
+                )
+            });
+            if reshapes {
+                self.taint(Taint::Relation, &name, path);
+            }
+            return true;
         };
         let Some(Rel::Table(root)) = self.relations.get(&key) else {
             return true;
