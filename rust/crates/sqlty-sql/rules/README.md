@@ -98,7 +98,9 @@ reasoning = "Summing small integers widens to bigint so the sum fits."
 operand predicate as above for the first argument; `@known` admits any typed
 argument. `arguments` gives one for each of the first two instead, an empty list
 admitting any: `arguments = [[], ["JSON", "JSONB"]]` matches a JSON second
-argument. `nullability` is required: `non-null`; `nullable`, NULL whatever the
+argument. `any-argument` matches when at least one argument, at any position, has one of
+its types: `any-argument = ["@binary"]` types MySQL `CONCAT('a', bytes_col)` as a
+binary string. `nullability` is required: `non-null`; `nullable`, NULL whatever the
 arguments; `aggregate`, the empty-group and NULL-argument behaviour of aggregates in
 `analyzer/nullability.rs`; or `strict`, NULL when an argument is, unless
 `analyzer/registry.rs` lists the function as always nullable or as reading through

@@ -236,6 +236,9 @@ struct FunctionDef {
     /// The types of the first two arguments; an empty list admits any.
     #[serde(default)]
     arguments: Vec<Vec<String>>,
+    /// Types one argument at least, at any position, must have.
+    #[serde(default, rename = "any-argument")]
+    any_argument: Vec<String>,
     #[serde(rename = "type")]
     result: String,
     nullability: String,
@@ -269,6 +272,7 @@ impl FunctionDef {
             dialects: self.dialects,
             left,
             right: arguments.next().unwrap_or_default(),
+            any: self.any_argument,
             result: self.result,
             nullability: self.nullability,
             shadows: self.shadows,
@@ -294,6 +298,9 @@ struct RuleDef {
     left: Vec<String>,
     #[serde(default)]
     right: Vec<String>,
+    /// A function rule's `any-argument`.
+    #[serde(skip)]
+    any: Vec<String>,
     #[serde(rename = "type")]
     result: String,
     #[serde(default = "operands")]
@@ -335,6 +342,7 @@ struct Rule {
     dialects: Vec<&'static str>,
     left: Types,
     right: Types,
+    any: Types,
 }
 
 impl Rule {
@@ -447,6 +455,7 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     }
     let left = operand_types(&def.left).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let right = operand_types(&def.right).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
+    let any = operand_types(&def.any).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let known = if function {
         function_result(&def.result).is_some()
     } else {
@@ -479,6 +488,7 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
         dialects,
         left,
         right,
+        any,
     })
 }
 
@@ -536,6 +546,7 @@ struct Region<'r> {
     dialects: Vec<&'r str>,
     left: Types,
     right: Types,
+    any: Types,
 }
 
 fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
@@ -569,6 +580,7 @@ fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
         dialects,
         left: both(&a.left, &b.left)?,
         right: both(&a.right, &b.right)?,
+        any: both(&a.any, &b.any)?,
     })
 }
 
@@ -576,6 +588,7 @@ fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
 fn covers(rule: &Rule, region: &Region<'_>) -> bool {
     within(&region.left, &rule.left)
         && within(&region.right, &rule.right)
+        && within(&region.any, &rule.any)
         && (rule.dialects.is_empty()
             || (!region.dialects.is_empty()
                 && region.dialects.iter().all(|d| rule.dialects.contains(d))))
@@ -590,6 +603,7 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
             dialects: later.dialects.clone(),
             left: later.left.clone(),
             right: later.right.clone(),
+            any: later.any.clone(),
         };
         for operator in &later.operators {
             let shadowing = rules[..i].iter().find(|earlier| {
@@ -633,6 +647,7 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                         dialects: earlier.dialects.clone(),
                         left: earlier.left.clone(),
                         right: earlier.right.clone(),
+                        any: earlier.any.clone(),
                     },
                 ) && !covers(
                     earlier,
@@ -640,6 +655,7 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                         dialects: later.dialects.clone(),
                         left: later.left.clone(),
                         right: later.right.clone(),
+                        any: later.any.clone(),
                     },
                 );
                 let intended = earlier.def.shadows.contains(&later.def.id);
@@ -707,7 +723,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
             out,
             "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \
              reference: {:?},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
-             argument: {},\n        second: {},\n        result: {result},\n        \
+             argument: {},\n        second: {},\n        any: {},\n        result: {result},\n        \
              nullability: {nullability},\n    }},",
             def.id,
             rule.file,
@@ -717,6 +733,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
             rule.dialects.join(", "),
             operand(&rule.left),
             operand(&rule.right),
+            operand(&rule.any),
         );
     }
     out.push_str("];\n\n");

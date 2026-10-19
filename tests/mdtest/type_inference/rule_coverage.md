@@ -553,6 +553,7 @@ SELECT i / n AS division, tx / 1 AS division_other, i % tx AS modulo_other,
     i DIV 2 AS integer_division, ui + i AS unsigned, i + ui AS unsigned_right,
     i & i AS bitwise, i <=> i AS null_safe_equal, b XOR b AS xor, tx || tx AS "or",
     j -> '$.a' AS arrow_json, tx -> '$.a' AS arrow, UPPER(vb) AS binary_string,
+    CONCAT(tx, vb) AS binary_any_argument, REGEXP_SUBSTR(tx, vb) AS binary_pattern,
     ROUND(i) AS round_integer, ROUND(n) AS round_decimal, ROUND(d) AS round_other
 FROM t
 -- rules: division: mysql.arithmetic.division / mysql.arithmetic.division
@@ -568,6 +569,8 @@ FROM t
 -- rules: arrow_json: mysql.json.arrow-json / mysql.json.arrow-json
 -- rules: arrow: mysql.json.arrow / mysql.json.arrow
 -- rules: binary_string: mysql.string.binary / mysql.string.binary
+-- rules: binary_any_argument: mysql.string.binary-any-argument / mysql.string.binary-any-argument
+-- rules: binary_pattern: mysql.string.binary-pattern / mysql.string.binary-pattern
 -- rules: round_integer: mysql.numeric.round-integer / mysql.numeric.round-integer
 -- rules: round_decimal: mysql.numeric.round-decimal / mysql.numeric.round-decimal
 -- rules: round_other: mysql.numeric.round-other / mysql.numeric.round-other
