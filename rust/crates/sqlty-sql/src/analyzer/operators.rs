@@ -42,6 +42,7 @@ impl Analyzer<'_> {
         };
         let rank = |t: &Typed| match self.dialect {
             SqlDialect::MySql => mysql_numeric_rank(t),
+            SqlDialect::Sqlite => sqlite_numeric_rank(t),
             _ => operand_type(t).and_then(numeric_rank),
         };
         let promoted = |least: usize| match (rank(&l), rank(&r)) {
@@ -211,6 +212,17 @@ fn mysql_numeric_rank(typed: &Typed) -> Option<usize> {
         | "BOOLEAN" => Some(2),
         "UDECIMAL" => Some(3),
         "UDOUBLE" | "TEXT" | "VARCHAR" | "CHAR" | "ENUM" | "SET" => Some(5),
+        _ => None,
+    })
+}
+
+/// The rank of the number SQLite converts an operand to in arithmetic: a `BOOLEAN` is the
+/// integer it is stored as, and a string or blob an integer or a real, ranked as a real.
+fn sqlite_numeric_rank(typed: &Typed) -> Option<usize> {
+    let ty = rule_type(typed)?;
+    numeric_rank(ty).or(match ty {
+        "BOOLEAN" => Some(2),
+        "TEXT" | "VARCHAR" | "CHAR" | "BLOB" | "VARBINARY" | "BINARY" => Some(5),
         _ => None,
     })
 }
