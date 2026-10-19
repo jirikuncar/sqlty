@@ -1,4 +1,4 @@
-# COUNT, SUM, AVG, MIN and MAX. Their nullability over empty groups and NULL-only
+# Every dialect's aggregate functions. Their nullability over empty groups and NULL-only
 # arguments is the aggregate one of analyzer/nullability.rs, except COUNT's.
 
 [[function]]
@@ -59,3 +59,43 @@ type = "@argument"
 nullability = "aggregate"
 reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ) → same as input type); MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (MIN, MAX); SQLite documentation, Built-in Aggregate Functions (max(X), min(X))"
 reasoning = "MIN and MAX return one of the values, so they keep the argument's type and value set."
+
+[[function]]
+id = "common.aggregate.bigint"
+functions = ["RANK", "DENSE_RANK"]
+type = "BIGINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.63 Hypothetical-Set Aggregate Functions; 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
+reasoning = "The documentation gives each of these a `bigint` result."
+
+[[function]]
+id = "common.aggregate.double"
+functions = ["STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VAR_POP", "VAR_SAMP"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "common.aggregate.json"
+functions = ["JSON_AGG", "JSON_OBJECT_AGG"]
+type = "JSON"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "common.aggregate.jsonb"
+functions = ["JSONB_AGG", "JSONB_OBJECT_AGG"]
+type = "JSONB"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reasoning = "The documentation gives each of these a `jsonb` result."
+
+[[function]]
+id = "common.aggregate.text"
+functions = ["STRING_AGG", "GROUP_CONCAT"]
+type = "TEXT"
+nullability = "aggregate"
+reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions; MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions; SQLite documentation, Built-in Aggregate Functions"
+reasoning = "The documentation gives each of these a `text` result."

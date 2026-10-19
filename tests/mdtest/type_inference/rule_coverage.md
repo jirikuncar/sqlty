@@ -194,6 +194,331 @@ FROM t
 -- rules: xid_age: postgres.system.age-xid / postgres.system.age-xid
 ```
 
+### Built-in functions
+
+Each built-in function a rule types, one call per rule.
+
+```sql
+SELECT
+    pg_database_size(NULL::oid) AS admin_bigint,
+    pg_try_advisory_lock(NULL::bigint) AS admin_boolean,
+    pg_column_size(NULL::int4) AS admin_int,
+    current_setting('datestyle') AS admin_text,
+    pg_advisory_lock(NULL::bigint) AS admin_void
+-- rules: admin_bigint: postgres.admin.bigint / postgres.admin.bigint
+-- rules: admin_boolean: postgres.admin.boolean / postgres.admin.boolean
+-- rules: admin_int: postgres.admin.int / postgres.admin.int
+-- rules: admin_text: postgres.admin.text / postgres.admin.text
+-- rules: admin_void: postgres.admin.void / postgres.admin.void
+```
+
+```sql
+SELECT
+    bit_and(NULL::bit) AS aggregate_argument_type,
+    array_agg(NULL::int4) AS aggregate_array,
+    stddev(NULL::real) AS aggregate_mean,
+    any_value(NULL::int4) AS aggregate_argument,
+    regr_count(NULL::double precision, NULL::double precision) AS aggregate_bigint,
+    bool_and(NULL::boolean) AS aggregate_boolean,
+    percent_rank() OVER () AS aggregate_double,
+    corr(NULL::double precision, NULL::double precision) AS aggregate_aggregate_double
+-- rules: aggregate_argument_type: postgres.aggregate.argument-type / postgres.aggregate.argument-type
+-- rules: aggregate_array: postgres.aggregate.array / postgres.aggregate.array
+-- rules: aggregate_mean: postgres.aggregate.mean / postgres.aggregate.mean
+-- rules: aggregate_argument: postgres.aggregate.argument / postgres.aggregate.argument
+-- rules: aggregate_bigint: postgres.aggregate.bigint / postgres.aggregate.bigint
+-- rules: aggregate_boolean: postgres.aggregate.boolean / postgres.aggregate.boolean
+-- rules: aggregate_double: postgres.aggregate.double / postgres.aggregate.double
+-- rules: aggregate_aggregate_double: postgres.aggregate.aggregate-double / postgres.aggregate.aggregate-double
+```
+
+```sql
+SELECT json_arrayagg(v) AS aggregate_json FROM (VALUES(2),(1)) t(v)
+-- rules: aggregate_json: postgres.aggregate.json / postgres.aggregate.json
+```
+
+```sql
+SELECT grouping(i4) AS aggregate_int FROM t GROUP BY i4
+-- rules: aggregate_int: postgres.aggregate.int / postgres.aggregate.int
+```
+
+```sql
+SELECT
+    array_append(ARRAY[1,2], 3) AS array_argument_type,
+    array_prepend(1, ARRAY[2,3]) AS array_argument_type_1,
+    array_fill(11, ARRAY[2,3]) AS array_array,
+    unnest(ARRAY[1,2]) AS array_element,
+    array_positions(ARRAY['A','A','B','A'], 'A') AS array_int_array,
+    array_length(array[1,2,3], 1) AS array_int,
+    array_to_string(ARRAY[1, 2, 3, NULL, 5], ',', '*') AS array_text
+-- rules: array_argument_type: postgres.array.argument-type / postgres.array.argument-type
+-- rules: array_argument_type_1: postgres.array.argument-type-1 / postgres.array.argument-type-1
+-- rules: array_array: postgres.array.array / postgres.array.array
+-- rules: array_element: postgres.array.element / postgres.array.element
+-- rules: array_int_array: postgres.array.int-array / postgres.array.int-array
+-- rules: array_int: postgres.array.int / postgres.array.int
+-- rules: array_text: postgres.array.text / postgres.array.text
+```
+
+```sql
+SELECT
+    set_byte('\x1234567890'::bytea, 4, 64) AS binary_argument_type,
+    bit_count(B'10111') AS binary_bigint,
+    get_byte('\x1234567890'::bytea, 4) AS binary_int,
+    encode('123\000\001', 'base64') AS binary_text,
+    sha224('abc'::bytea) AS binary_varbinary
+-- rules: binary_argument_type: postgres.binary.argument-type / postgres.binary.argument-type
+-- rules: binary_bigint: postgres.binary.bigint / postgres.binary.bigint
+-- rules: binary_int: postgres.binary.int / postgres.binary.int
+-- rules: binary_text: postgres.binary.text / postgres.binary.text
+-- rules: binary_varbinary: postgres.binary.varbinary / postgres.binary.varbinary
+```
+
+```sql
+SELECT
+    rank() OVER () AS aggregate_bigint,
+    json_agg(NULL::int4) AS aggregate_json,
+    jsonb_agg(NULL::int4) AS aggregate_jsonb,
+    string_agg(NULL::text, NULL::text) AS aggregate_text,
+    coalesce(1) AS conditional_common,
+    current_date AS datetime_date,
+    now() AS datetime_timestamptz,
+    current_time(2) AS datetime_timetz,
+    json_build_object('foo', 1, 2, row(3,'bar')) AS json_json,
+    jsonb_build_object() AS json_jsonb,
+    length('jose') AS string_int,
+    concat('abcde', 2, NULL, 22) AS string_text,
+    row_number() OVER () AS window_bigint,
+    ntile(NULL::integer) OVER () AS window_int
+-- rules: aggregate_bigint: common.aggregate.bigint / common.aggregate.bigint
+-- rules: aggregate_json: common.aggregate.json / common.aggregate.json
+-- rules: aggregate_jsonb: common.aggregate.jsonb / common.aggregate.jsonb
+-- rules: aggregate_text: common.aggregate.text / common.aggregate.text
+-- rules: conditional_common: common.conditional.common / common.conditional.common
+-- rules: datetime_date: common.datetime.date / common.datetime.date
+-- rules: datetime_timestamptz: common.datetime.timestamptz / common.datetime.timestamptz
+-- rules: datetime_timetz: common.datetime.timetz / common.datetime.timetz
+-- rules: json_json: common.json.json / common.json.json
+-- rules: json_jsonb: common.json.jsonb / common.json.jsonb
+-- rules: string_int: common.string.int / common.string.int
+-- rules: string_text: common.string.text / common.string.text
+-- rules: window_bigint: common.window.bigint / common.window.bigint
+-- rules: window_int: common.window.int / common.window.int
+```
+
+```sql
+SELECT num_nonnulls(1, NULL, 2) AS comparison_int
+-- rules: comparison_int: postgres.comparison.int / postgres.comparison.int
+```
+
+```sql
+SELECT greatest(1) AS conditional_common, nullif('a', 'b') AS conditional_argument
+-- rules: conditional_common: postgres.conditional.common / postgres.conditional.common
+-- rules: conditional_argument: postgres.conditional.argument / postgres.conditional.argument
+```
+
+```sql
+SELECT
+    date_bin('15 minutes', timestamp '2001-02-16 20:38:40', timestamp '2001-02-16 20:05:00') AS datetime_argument_type_1,
+    timezone(NULL::time with time zone) AS datetime_at_zone,
+    isfinite(date '2001-02-16') AS datetime_boolean,
+    make_date(2013, 7, 15) AS datetime_date,
+    date_part('month', interval '2 years 3 months') AS datetime_double,
+    justify_days(interval '1 year 65 days') AS datetime_interval,
+    timeofday() AS datetime_text,
+    localtime(0) AS datetime_time,
+    localtimestamp(2) AS datetime_timestamp,
+    transaction_timestamp() AS datetime_timestamptz,
+    date_trunc('hour', timestamp '2001-02-16 20:38:40') AS datetime_truncated,
+    pg_sleep(NULL::double precision) AS datetime_void
+-- rules: datetime_argument_type_1: postgres.datetime.argument-type-1 / postgres.datetime.argument-type-1
+-- rules: datetime_at_zone: postgres.datetime.at-zone / postgres.datetime.at-zone
+-- rules: datetime_boolean: postgres.datetime.boolean / postgres.datetime.boolean
+-- rules: datetime_date: postgres.datetime.date / postgres.datetime.date
+-- rules: datetime_double: postgres.datetime.double / postgres.datetime.double
+-- rules: datetime_interval: postgres.datetime.interval / postgres.datetime.interval
+-- rules: datetime_text: postgres.datetime.text / postgres.datetime.text
+-- rules: datetime_time: postgres.datetime.time / postgres.datetime.time
+-- rules: datetime_timestamp: postgres.datetime.timestamp / postgres.datetime.timestamp
+-- rules: datetime_timestamptz: postgres.datetime.timestamptz / postgres.datetime.timestamptz
+-- rules: datetime_truncated: postgres.datetime.truncated / postgres.datetime.truncated
+-- rules: datetime_void: postgres.datetime.void / postgres.datetime.void
+```
+
+```sql
+SELECT uuid_generate_v4() AS extension_uuid
+-- rules: extension_uuid: postgres.extension.uuid / postgres.extension.uuid
+```
+
+```sql
+SELECT digest('abc', 'sha256') AS extension_varbinary
+-- rules: extension_varbinary: postgres.extension.varbinary / postgres.extension.varbinary
+```
+
+```sql
+SELECT
+    to_date('05 Dec 2000', 'DD Mon YYYY') AS formatting_date,
+    to_number('12,454.8-', '99G999D9S') AS formatting_decimal,
+    to_char(125, '999') AS formatting_text
+-- rules: formatting_date: postgres.formatting.date / postgres.formatting.date
+-- rules: formatting_decimal: postgres.formatting.decimal / postgres.formatting.decimal
+-- rules: formatting_text: postgres.formatting.text / postgres.formatting.text
+```
+
+```sql
+SELECT
+    jsonb_path_exists('{"a":[1,2,3,4,5]}', '$.a[*] ? (@ >= $min && @ <= $max)', '{"min":2, "max":4}') AS json_boolean,
+    jsonb_array_length('[]') AS json_int,
+    row_to_json(row(1,'foo')) AS json_json,
+    json_query('{"a": 1}', '$.a') AS json_jsonb,
+    json_each(NULL::json) AS json_record,
+    jsonb_typeof(NULL::jsonb) AS json_text
+-- rules: json_boolean: postgres.json.boolean / postgres.json.boolean
+-- rules: json_int: postgres.json.int / postgres.json.int
+-- rules: json_json: postgres.json.json / postgres.json.json
+-- rules: json_jsonb: postgres.json.jsonb / postgres.json.jsonb
+-- rules: json_record: postgres.json.record / postgres.json.record
+-- rules: json_text: postgres.json.text / postgres.json.text
+```
+
+```sql
+SELECT
+    abs(-17.4) AS math_argument_type,
+    random() AS math_random,
+    ceiling(95.3) AS math_real,
+    round(42.4) AS math_scaled,
+    trim_scale(8.4100) AS math_decimal,
+    cbrt(64.0) AS math_double,
+    width_bucket(9, 10, 0, 10) AS math_int,
+    setseed(NULL::double precision) AS math_void
+-- rules: math_argument_type: postgres.math.argument-type / postgres.math.argument-type
+-- rules: math_random: postgres.math.random / postgres.math.random
+-- rules: math_real: postgres.math.real / postgres.math.real
+-- rules: math_scaled: postgres.math.scaled / postgres.math.scaled
+-- rules: math_decimal: postgres.math.decimal / postgres.math.decimal
+-- rules: math_double: postgres.math.double / postgres.math.double
+-- rules: math_int: postgres.math.int / postgres.math.int
+-- rules: math_void: postgres.math.void / postgres.math.void
+```
+
+```sql
+SELECT
+    set_masklen(cidr '192.168.1.0/24', 16) AS network_argument_type,
+    network(inet '192.168.1.5/24') AS network_cidr,
+    broadcast(inet '192.168.1.5/24') AS network_inet,
+    masklen(inet '192.168.1.5/24') AS network_int,
+    host(inet '192.168.1.0/24') AS network_text
+-- rules: network_argument_type: postgres.network.argument-type / postgres.network.argument-type
+-- rules: network_cidr: postgres.network.cidr / postgres.network.cidr
+-- rules: network_inet: postgres.network.inet / postgres.network.inet
+-- rules: network_int: postgres.network.int / postgres.network.int
+-- rules: network_text: postgres.network.text / postgres.network.text
+```
+
+```sql
+SELECT
+    range_merge('{[1,2), [3,4)}'::int4multirange) AS range_argument_type,
+    lower_inf('(,)'::daterange) AS range_boolean,
+    int4range(1, 2) AS range_int4range,
+    int8range(1, 2) AS range_int8range,
+    numrange(1, 2) AS range_numrange,
+    daterange('2024-01-01'::date, '2024-02-01'::date) AS range_daterange,
+    tsrange('2024-01-01'::timestamp, '2024-02-01'::timestamp) AS range_tsrange,
+    tstzrange('2024-01-01'::timestamptz, '2024-02-01'::timestamptz) AS range_tstzrange
+-- rules: range_argument_type: postgres.range.argument-type / postgres.range.argument-type
+-- rules: range_boolean: postgres.range.boolean / postgres.range.boolean
+-- rules: range_int4range: postgres.range.int4range / postgres.range.int4range
+-- rules: range_int8range: postgres.range.int8range / postgres.range.int8range
+-- rules: range_numrange: postgres.range.numrange / postgres.range.numrange
+-- rules: range_daterange: postgres.range.daterange / postgres.range.daterange
+-- rules: range_tsrange: postgres.range.tsrange / postgres.range.tsrange
+-- rules: range_tstzrange: postgres.range.tstzrange / postgres.range.tstzrange
+```
+
+```sql
+SELECT row() AS row_record
+-- rules: row_record: postgres.row.record / postgres.row.record
+```
+
+```sql
+SELECT nextval(NULL::regclass) AS sequence_bigint
+-- rules: sequence_bigint: postgres.sequence.bigint / postgres.sequence.bigint
+```
+
+```sql
+SELECT generate_series(NULL::bigint, NULL::bigint) AS series_series
+-- rules: series_series: postgres.series.series / postgres.series.series
+```
+
+```sql
+SELECT
+    lower('TOM') AS string_bound,
+    string_to_array('xx~~yy~~zz', '~~', 'yy') AS string_text_array,
+    starts_with('alphabet', 'alph') AS string_boolean,
+    ascii('x') AS string_int,
+    pg_client_encoding() AS string_name,
+    left('abcde', 2) AS string_text,
+    ltrim('zzzytest', 'xyz') AS string_string
+-- rules: string_bound: postgres.string.bound / postgres.string.bound
+-- rules: string_text_array: postgres.string.text-array / postgres.string.text-array
+-- rules: string_boolean: postgres.string.boolean / postgres.string.boolean
+-- rules: string_int: postgres.string.int / postgres.string.int
+-- rules: string_name: postgres.string.name / postgres.string.name
+-- rules: string_text: postgres.string.text / postgres.string.text
+-- rules: string_string: postgres.string.string / postgres.string.string
+```
+
+```sql
+SELECT
+    age(timestamp '1957-06-13') AS system_interval,
+    txid_current() AS system_bigint,
+    has_table_privilege(NULL::oid, NULL::text) AS system_boolean,
+    inet_client_addr() AS system_inet,
+    pg_backend_pid() AS system_int,
+    current_database() AS system_name,
+    pg_typeof(33) AS system_regtype,
+    version() AS system_text,
+    pg_postmaster_start_time() AS system_timestamptz,
+    pg_notify('a', 'b') AS system_void
+-- rules: system_interval: postgres.system.interval / postgres.system.interval
+-- rules: system_bigint: postgres.system.bigint / postgres.system.bigint
+-- rules: system_boolean: postgres.system.boolean / postgres.system.boolean
+-- rules: system_inet: postgres.system.inet / postgres.system.inet
+-- rules: system_int: postgres.system.int / postgres.system.int
+-- rules: system_name: postgres.system.name / postgres.system.name
+-- rules: system_regtype: postgres.system.regtype / postgres.system.regtype
+-- rules: system_text: postgres.system.text / postgres.system.text
+-- rules: system_timestamptz: postgres.system.timestamptz / postgres.system.timestamptz
+-- rules: system_void: postgres.system.void / postgres.system.void
+```
+
+```sql
+SELECT
+    ts_rank(to_tsvector('raining cats and dogs'), 'cat') AS textsearch_float,
+    ts_headline('The fat cat ate the rat.', 'cat') AS textsearch_text,
+    to_tsquery('english', 'The & Fat & Rats') AS textsearch_tsquery,
+    to_tsvector('english', 'The Fat Rats') AS textsearch_tsvector
+-- rules: textsearch_float: postgres.textsearch.float / postgres.textsearch.float
+-- rules: textsearch_text: postgres.textsearch.text / postgres.textsearch.text
+-- rules: textsearch_tsquery: postgres.textsearch.tsquery / postgres.textsearch.tsquery
+-- rules: textsearch_tsvector: postgres.textsearch.tsvector / postgres.textsearch.tsvector
+```
+
+```sql
+SELECT
+    uuid_extract_version(NULL::uuid) AS uuid_smallint,
+    uuid_extract_timestamp(NULL::uuid) AS uuid_timestamptz,
+    gen_random_uuid() AS uuid_uuid
+-- rules: uuid_smallint: postgres.uuid.smallint / postgres.uuid.smallint
+-- rules: uuid_timestamptz: postgres.uuid.timestamptz / postgres.uuid.timestamptz
+-- rules: uuid_uuid: postgres.uuid.uuid / postgres.uuid.uuid
+```
+
+```sql
+SELECT first_value(NULL::int4) OVER () AS window_argument
+-- rules: window_argument: postgres.window.argument / postgres.window.argument
+```
+
 ## MySQL
 
 `schema.sql`:
@@ -248,6 +573,149 @@ FROM t
 -- rules: round_other: mysql.numeric.round-other / mysql.numeric.round-other
 ```
 
+### Built-in functions
+
+Each built-in function a rule types, one call per rule.
+
+```sql
+SELECT std(1) AS aggregate_double, json_arrayagg(1) AS aggregate_json
+-- rules: aggregate_double: mysql.aggregate.double / mysql.aggregate.double
+-- rules: aggregate_json: mysql.aggregate.json / mysql.aggregate.json
+```
+
+```sql
+SELECT BIT_COUNT(127) AS bits_bigint
+-- rules: bits_bigint: mysql.bits.bigint / mysql.bits.bigint
+```
+
+```sql
+SELECT stddev(1) AS aggregate_double
+-- rules: aggregate_double: common.aggregate.double / common.aggregate.double
+```
+
+```sql
+SELECT GREATEST(2,0) AS comparison_common, ISNULL(1+1) AS comparison_bigint
+-- rules: comparison_common: mysql.comparison.common / mysql.comparison.common
+-- rules: comparison_bigint: mysql.comparison.bigint / mysql.comparison.bigint
+```
+
+```sql
+SELECT
+    IF(1>2,2,3) AS conditional_branches,
+    IFNULL(1,0) AS conditional_common,
+    NULLIF(1,2) AS conditional_argument
+-- rules: conditional_branches: mysql.conditional.branches / mysql.conditional.branches
+-- rules: conditional_common: mysql.conditional.common / mysql.conditional.common
+-- rules: conditional_argument: mysql.conditional.argument / mysql.conditional.argument
+```
+
+```sql
+SELECT
+    ADDTIME('01:00:00.999999', '02:00:00.999998') AS datetime_argument_type,
+    DATE_ADD('2006-05-00',INTERVAL 1 DAY) AS datetime_date_add,
+    UNIX_TIMESTAMP() AS datetime_bigint,
+    CURDATE() AS datetime_date,
+    NOW() AS datetime_datetime,
+    DATE_FORMAT('2006-06-00', '%d') AS datetime_text,
+    CURTIME() AS datetime_time,
+    STR_TO_DATE('9','%m') AS datetime_format,
+    TIMESTAMPADD(WEEK,1,'2003-01-02') AS datetime_timestamp_add
+-- rules: datetime_argument_type: mysql.datetime.argument-type / mysql.datetime.argument-type
+-- rules: datetime_date_add: mysql.datetime.date-add / mysql.datetime.date-add
+-- rules: datetime_bigint: mysql.datetime.bigint / mysql.datetime.bigint
+-- rules: datetime_date: mysql.datetime.date / mysql.datetime.date
+-- rules: datetime_datetime: mysql.datetime.datetime / mysql.datetime.datetime
+-- rules: datetime_text: mysql.datetime.text / mysql.datetime.text
+-- rules: datetime_time: mysql.datetime.time / mysql.datetime.time
+-- rules: datetime_format: mysql.datetime.format / mysql.datetime.format
+-- rules: datetime_timestamp_add: mysql.datetime.timestamp-add / mysql.datetime.timestamp-add
+```
+
+```sql
+SELECT MD5('testing') AS encryption_text, compress(1) AS encryption_varbinary
+-- rules: encryption_text: mysql.encryption.text / mysql.encryption.text
+-- rules: encryption_varbinary: mysql.encryption.varbinary / mysql.encryption.varbinary
+```
+
+```sql
+SELECT
+    JSON_LENGTH('[1, 2, {"a": 3}]') AS json_bigint,
+    JSON_SCHEMA_VALID('{"type":"string","pattern":"("}', '"abc"') AS json_int,
+    JSON_OBJECT('id', 87, 'name', 'carrot') AS json_json,
+    JSON_UNQUOTE('"abc"') AS json_text
+-- rules: json_bigint: mysql.json.bigint / mysql.json.bigint
+-- rules: json_int: mysql.json.int / mysql.json.int
+-- rules: json_json: mysql.json.json / mysql.json.json
+-- rules: json_text: mysql.json.text / mysql.json.text
+```
+
+```sql
+SELECT
+    ABS(2) AS math_argument_type,
+    CEILING(1.23) AS math_integral,
+    CRC32('mysql') AS math_bigint,
+    SQRT(4) AS math_double,
+    CONV('a',16,2) AS math_text
+-- rules: math_argument_type: mysql.math.argument-type / mysql.math.argument-type
+-- rules: math_integral: mysql.math.integral / mysql.math.integral
+-- rules: math_bigint: mysql.math.bigint / mysql.math.bigint
+-- rules: math_double: mysql.math.double / mysql.math.double
+-- rules: math_text: mysql.math.text / mysql.math.text
+```
+
+```sql
+SELECT
+    any_value(1) AS misc_argument,
+    SLEEP(0) AS misc_bigint,
+    is_ipv4(1) AS misc_int,
+    INET_NTOA(167773449) AS misc_text,
+    UUID_SHORT() AS misc_ubigint,
+    uuid_to_bin(UUID()) AS misc_varbinary
+-- rules: misc_argument: mysql.misc.argument / mysql.misc.argument
+-- rules: misc_bigint: mysql.misc.bigint / mysql.misc.bigint
+-- rules: misc_int: mysql.misc.int / mysql.misc.int
+-- rules: misc_text: mysql.misc.text / mysql.misc.text
+-- rules: misc_ubigint: mysql.misc.ubigint / mysql.misc.ubigint
+-- rules: misc_varbinary: mysql.misc.varbinary / mysql.misc.varbinary
+```
+
+```sql
+SELECT ST_Distance(ST_GeomFromText('POINT(1 1)'), ST_GeomFromText('POINT(2 2)')) AS spatial_double
+-- rules: spatial_double: mysql.spatial.double / mysql.spatial.double
+```
+
+```sql
+SELECT
+    bit_and(1) AS string_bigint,
+    round('a') AS string_argument_type,
+    REGEXP_INSTR('dog cat dog', 'dog') AS string_bigint_2,
+    BIN(12) AS string_text,
+    UNHEX(NULL) AS string_varbinary,
+    UPPER('Hej') AS string_string
+-- rules: string_bigint: mysql.string.bigint / mysql.string.bigint
+-- rules: string_argument_type: mysql.string.argument-type / mysql.string.argument-type
+-- rules: string_bigint_2: mysql.string.bigint-2 / mysql.string.bigint-2
+-- rules: string_text: mysql.string.text / mysql.string.text
+-- rules: string_varbinary: mysql.string.varbinary / mysql.string.varbinary
+-- rules: string_string: mysql.string.string / mysql.string.string
+```
+
+```sql
+SELECT
+    LAST_INSERT_ID() AS system_bigint,
+    COERCIBILITY(1000) AS system_int,
+    DATABASE() AS system_text
+-- rules: system_bigint: mysql.system.bigint / mysql.system.bigint
+-- rules: system_int: mysql.system.int / mysql.system.int
+-- rules: system_text: mysql.system.text / mysql.system.text
+```
+
+```sql
+SELECT first_value(1) OVER () AS window_argument, percent_rank() OVER () AS window_double
+-- rules: window_argument: mysql.window.argument / mysql.window.argument
+-- rules: window_double: mysql.window.double / mysql.window.double
+```
+
 ## SQLite
 
 `schema.sql`:
@@ -281,6 +749,66 @@ FROM t
 -- rules: long_arrow: sqlite.json.long-arrow / sqlite.json.long-arrow
 -- rules: extract: sqlite.json.extract / sqlite.json.extract
 -- rules: glob: common.pattern / common.pattern
+```
+
+### Built-in functions
+
+Each built-in function a rule types, one call per rule.
+
+```sql
+SELECT total(1) AS aggregate_double
+-- rules: aggregate_double: sqlite.aggregate.double / sqlite.aggregate.double
+```
+
+```sql
+SELECT unixepoch() AS datetime_bigint, julianday() AS datetime_double, date() AS datetime_text
+-- rules: datetime_bigint: sqlite.datetime.bigint / sqlite.datetime.bigint
+-- rules: datetime_double: sqlite.datetime.double / sqlite.datetime.double
+-- rules: datetime_text: sqlite.datetime.text / sqlite.datetime.text
+```
+
+```sql
+SELECT
+    json_array_length(1) AS json_bigint,
+    jsonb(1) AS json_blob,
+    json(1) AS json_text,
+    json_group_array(1) AS json_aggregate_text
+-- rules: json_bigint: sqlite.json.bigint / sqlite.json.bigint
+-- rules: json_blob: sqlite.json.blob / sqlite.json.blob
+-- rules: json_text: sqlite.json.text / sqlite.json.text
+-- rules: json_aggregate_text: sqlite.json.aggregate-text / sqlite.json.aggregate-text
+```
+
+```sql
+SELECT ceiling(1) AS math_argument_type, sqrt(1) AS math_double
+-- rules: math_argument_type: sqlite.math.argument-type / sqlite.math.argument-type
+-- rules: math_double: sqlite.math.double / sqlite.math.double
+```
+
+```sql
+SELECT
+    abs(1) AS scalar_argument_type,
+    iif('a', 'b') AS scalar_branches,
+    ifnull('a', 'b') AS scalar_common,
+    nullif('a', 'b') AS scalar_argument,
+    glob('a', 'b') AS scalar_bigint,
+    zeroblob(1) AS scalar_blob,
+    round(1) AS scalar_double,
+    ltrim(1) AS scalar_text
+-- rules: scalar_argument_type: sqlite.scalar.argument-type / sqlite.scalar.argument-type
+-- rules: scalar_branches: sqlite.scalar.branches / sqlite.scalar.branches
+-- rules: scalar_common: sqlite.scalar.common / sqlite.scalar.common
+-- rules: scalar_argument: sqlite.scalar.argument / sqlite.scalar.argument
+-- rules: scalar_bigint: sqlite.scalar.bigint / sqlite.scalar.bigint
+-- rules: scalar_blob: sqlite.scalar.blob / sqlite.scalar.blob
+-- rules: scalar_double: sqlite.scalar.double / sqlite.scalar.double
+-- rules: scalar_text: sqlite.scalar.text / sqlite.scalar.text
+```
+
+```sql
+SELECT first_value(1) OVER () AS window_argument, percent_rank() OVER () AS window_double
+-- rules: window_argument: sqlite.window.argument / sqlite.window.argument
+-- rules: window_double: sqlite.window.double / sqlite.window.double
 ```
 
 ## Other dialects

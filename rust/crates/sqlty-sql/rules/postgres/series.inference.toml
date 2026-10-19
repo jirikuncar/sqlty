@@ -1,0 +1,10 @@
+# PostgreSQL set returning functions.
+
+[[function]]
+id = "postgres.series.series"
+function = "GENERATE_SERIES"
+dialects = ["postgres"]
+type = "@series"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.26 Set Returning Functions, Table 9.67 Series Generating Functions"
+reasoning = "The series has the type of its bounds: integers, numerics or timestamps."

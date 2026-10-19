@@ -1,0 +1,19 @@
+# PostgreSQL conditional expressions.
+
+[[function]]
+id = "postgres.conditional.common"
+functions = ["GREATEST", "LEAST"]
+dialects = ["postgres"]
+type = "@first-known"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.18.4 GREATEST and LEAST"
+reasoning = "The arguments resolve to one common type, the first known argument's."
+
+[[function]]
+id = "postgres.conditional.argument"
+function = "NULLIF"
+dialects = ["postgres"]
+type = "@same(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.18.3 NULLIF"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."

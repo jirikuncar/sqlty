@@ -560,9 +560,9 @@ impl<'a> Analyzer<'a> {
         }
         let arg = args.first().copied();
         if let Some((rule, typed)) = self.function_rule(&name, &args, scope)? {
-            let at = |position: usize| match &typed[position] {
-                Some(typed) => Ok(typed.clone()),
-                None => args
+            let at = |position: usize| match typed.get(position) {
+                Some(Some(typed)) => Ok(typed.clone()),
+                _ => args
                     .get(position)
                     .map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
             };
@@ -581,6 +581,7 @@ impl<'a> Analyzer<'a> {
                     )
                 }
                 FunctionType::Code => self.sum(argument()?, arg, scope)?,
+                FunctionType::Returns(returns) => self.function_type(returns, &args, scope)?,
             });
         }
         match name.as_str() {
@@ -603,10 +604,7 @@ impl<'a> Analyzer<'a> {
                     _ => typed,
                 })
             }
-            _ => match self.returns(&name) {
-                Some(returns) => self.function_type(returns, &args, scope),
-                None => Ok(self.user_call_typed(func)),
-            },
+            _ => Ok(self.user_call_typed(func)),
         }
     }
 

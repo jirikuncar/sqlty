@@ -1,0 +1,82 @@
+# MySQL date and time functions.
+
+[[function]]
+id = "mysql.datetime.argument-type"
+functions = ["ADDTIME", "SUBTIME"]
+dialects = ["mysql"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "mysql.datetime.date-add"
+functions = ["DATE_ADD", "DATE_SUB", "ADDDATE", "SUBDATE"]
+dialects = ["mysql"]
+type = "@date-add"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "Adding to a DATE gives a DATE for day units and a DATETIME for time units; a DATETIME stays one."
+
+[[function]]
+id = "mysql.datetime.bigint"
+functions = ["UNIX_TIMESTAMP", "YEAR", "MONTH", "DAY", "DAYOFMONTH", "DAYOFWEEK", "DAYOFYEAR", "HOUR", "MINUTE", "SECOND", "MICROSECOND", "QUARTER", "WEEK", "WEEKDAY", "WEEKOFYEAR", "YEARWEEK", "DATEDIFF", "TIMESTAMPDIFF", "TO_DAYS", "TO_SECONDS", "TIME_TO_SEC", "PERIOD_ADD", "PERIOD_DIFF"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.datetime.date"
+functions = ["CURDATE", "CURRENT_DATE", "UTC_DATE", "DATE", "LAST_DAY", "MAKEDATE", "FROM_DAYS"]
+dialects = ["mysql"]
+type = "DATE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "The manual describes each of these as returning a DATE value."
+
+[[function]]
+id = "mysql.datetime.datetime"
+functions = ["NOW", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "SYSDATE", "UTC_TIMESTAMP", "TIMESTAMP", "FROM_UNIXTIME", "CONVERT_TZ"]
+dialects = ["mysql"]
+type = "DATETIME"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "The manual describes each of these as returning a DATETIME value."
+
+[[function]]
+id = "mysql.datetime.text"
+functions = ["DATE_FORMAT", "TIME_FORMAT", "DAYNAME", "MONTHNAME", "GET_FORMAT"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.datetime.time"
+functions = ["CURTIME", "CURRENT_TIME", "UTC_TIME", "TIME", "MAKETIME", "SEC_TO_TIME", "TIMEDIFF"]
+dialects = ["mysql"]
+type = "TIME"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "The manual describes each of these as returning a TIME value."
+
+[[function]]
+id = "mysql.datetime.format"
+function = "STR_TO_DATE"
+dialects = ["mysql"]
+type = "@str-to-date(1)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "A literal format decides between DATE, TIME and DATETIME by the parts it reads."
+
+[[function]]
+id = "mysql.datetime.timestamp-add"
+function = "TIMESTAMPADD"
+dialects = ["mysql"]
+type = "@timestamp-add"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reasoning = "As DATE_ADD: the unit decides between DATE and DATETIME for a DATE argument."

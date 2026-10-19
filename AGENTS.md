@@ -49,8 +49,11 @@ make typecheck       # mypy + ty on src and examples
 
 ## Inference rules
 
-Operators, aggregates and JSON accessors are typed by `*.inference.toml` files in
-`rust/crates/sqlty-sql/rules/`, compiled by `build.rs` into static match arms.
+Operators, functions, aggregates and JSON accessors are typed by `*.inference.toml`
+files in `rust/crates/sqlty-sql/rules/`, compiled by `build.rs` into static match arms.
+Type a new function or operator with a rule, not in Rust: a rule carries its reference
+and reasoning, and `--explain` shows it. When a result needs code (it depends on an
+argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 [`rules/README.md`](rust/crates/sqlty-sql/rules/README.md) has the format, the
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target (PostgreSQL 17, MySQL 8.4,

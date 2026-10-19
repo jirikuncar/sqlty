@@ -1,0 +1,19 @@
+# MySQL encryption and compression functions.
+
+[[function]]
+id = "mysql.encryption.text"
+functions = ["MD5", "SHA", "SHA1", "SHA2"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.13 Encryption and Compression Functions"
+reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.encryption.varbinary"
+functions = ["COMPRESS", "UNCOMPRESS", "AES_ENCRYPT", "AES_DECRYPT", "RANDOM_BYTES"]
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.13 Encryption and Compression Functions"
+reasoning = "The manual describes each of these as returning a binary string."

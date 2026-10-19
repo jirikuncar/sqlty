@@ -108,8 +108,8 @@ dialect; an unknown function leaves its column untyped (see
 
 The functions common to every dialect (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
 `COALESCE`, `LENGTH`, `UPPER`, `LOWER`, `SUBSTR`, `REPLACE`, ...) are typed
-everywhere. The full lists are in `rust/crates/sqlty-sql/src/analyzer/dialect_functions.rs`;
-`tests/mdtest/mysql/functions.md` and `tests/mdtest/sqlite/functions.md` show
+everywhere. Every function's rule is in `rust/crates/sqlty-sql/rules/`, one file per
+dialect and topic; `tests/mdtest/mysql/functions.md` and `tests/mdtest/sqlite/functions.md` show
 each group.
 
 ## Placeholders

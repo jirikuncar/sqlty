@@ -1,0 +1,46 @@
+# PostgreSQL network address functions.
+
+[[function]]
+id = "postgres.network.argument-type"
+function = "SET_MASKLEN"
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "postgres.network.cidr"
+functions = ["NETWORK", "INET_MERGE"]
+dialects = ["postgres"]
+type = "CIDR"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reasoning = "The documentation gives each of these a `cidr` result."
+
+[[function]]
+id = "postgres.network.inet"
+functions = ["BROADCAST", "HOSTMASK", "NETMASK"]
+dialects = ["postgres"]
+type = "INET"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reasoning = "The documentation gives each of these an `inet` result."
+
+[[function]]
+id = "postgres.network.int"
+functions = ["MASKLEN", "FAMILY"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.network.text"
+functions = ["HOST", "ABBREV", "TEXT"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reasoning = "The documentation gives each of these a `text` result."

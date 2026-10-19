@@ -1,0 +1,25 @@
+# Every dialect's date and time functions.
+
+[[function]]
+id = "common.datetime.date"
+function = "CURRENT_DATE"
+type = "DATE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives the function a `date` result."
+
+[[function]]
+id = "common.datetime.timestamptz"
+functions = ["NOW", "CURRENT_TIMESTAMP"]
+type = "TIMESTAMPTZ"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `timestamp with time zone` result."
+
+[[function]]
+id = "common.datetime.timetz"
+function = "CURRENT_TIME"
+type = "TIMETZ"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives the function a `time with time zone` result."

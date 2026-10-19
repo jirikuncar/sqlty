@@ -1,0 +1,10 @@
+# MySQL bit functions.
+
+[[function]]
+id = "mysql.bits.bigint"
+function = "BIT_COUNT"
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators"
+reasoning = "The manual describes the function as returning an integer."

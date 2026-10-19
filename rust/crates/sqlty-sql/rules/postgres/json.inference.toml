@@ -1,5 +1,5 @@
-# PostgreSQL's json and jsonb operators. A placeholder next to a JSON value gets the
-# type the operator's other form takes: text for a key, text[] for a path.
+# PostgreSQL's json and jsonb operators and functions. A placeholder next to a JSON
+# value gets the type the operator's other form takes: text for a key, text[] for a path.
 
 [[rule]]
 id = "postgres.json.arrow-json"
@@ -121,3 +121,57 @@ left-parameter = "JSONB"
 right-parameter = "JSONB"
 reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb @> jsonb → boolean, jsonb <@ jsonb → boolean)"
 reasoning = "`@>` and `<@` test containment between two jsonb values, so a placeholder next to one is jsonb."
+
+[[function]]
+id = "postgres.json.boolean"
+functions = ["JSONB_PATH_EXISTS", "JSONB_PATH_EXISTS_TZ", "JSONB_PATH_MATCH", "JSONB_PATH_MATCH_TZ", "JSONB_EXISTS", "JSONB_EXISTS_ANY", "JSONB_EXISTS_ALL", "JSON_EXISTS"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16.1 Processing and Creating JSON Data, Table 9.46 Additional jsonb Operators (jsonb ? text → boolean), Table 9.46 Additional jsonb Operators (jsonb ?| text[] → boolean), Table 9.46 Additional jsonb Operators (jsonb ?& text[] → boolean); 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.json.int"
+functions = ["JSONB_ARRAY_LENGTH", "JSON_ARRAY_LENGTH"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.json.json"
+functions = ["ROW_TO_JSON", "JSON_BUILD_ARRAY", "JSON_OBJECT", "JSON_STRIP_NULLS", "JSON_EXTRACT_PATH", "JSON_ARRAY_ELEMENTS", "JSON", "JSON_ARRAY", "JSON_SCALAR"]
+dialects = ["postgres"]
+type = "JSON"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives each of these a `json` result."
+
+[[function]]
+id = "postgres.json.jsonb"
+functions = ["JSON_QUERY", "JSONB_BUILD_ARRAY", "JSONB_OBJECT", "JSONB_STRIP_NULLS", "JSONB_SET", "JSONB_INSERT", "JSONB_EXTRACT_PATH", "JSONB_ARRAY_ELEMENTS", "JSONB_PATH_QUERY", "JSONB_PATH_QUERY_TZ", "JSONB_PATH_QUERY_FIRST", "JSONB_PATH_QUERY_FIRST_TZ", "JSONB_PATH_QUERY_ARRAY", "JSONB_PATH_QUERY_ARRAY_TZ"]
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `jsonb` result."
+
+[[function]]
+id = "postgres.json.record"
+functions = ["JSON_EACH", "JSONB_EACH", "JSON_EACH_TEXT", "JSONB_EACH_TEXT"]
+dialects = ["postgres"]
+type = "RECORD"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives each of these a `record` result."
+
+[[function]]
+id = "postgres.json.text"
+functions = ["JSONB_TYPEOF", "JSON_TYPEOF", "JSONB_PRETTY", "JSONB_EXTRACT_PATH_TEXT", "JSON_EXTRACT_PATH_TEXT", "JSONB_ARRAY_ELEMENTS_TEXT", "JSON_ARRAY_ELEMENTS_TEXT", "JSON_OBJECT_KEYS", "JSONB_OBJECT_KEYS", "JSON_VALUE", "JSON_SERIALIZE"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `text` result."

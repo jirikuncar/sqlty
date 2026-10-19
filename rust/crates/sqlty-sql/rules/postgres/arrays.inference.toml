@@ -1,0 +1,64 @@
+# PostgreSQL array functions.
+
+[[function]]
+id = "postgres.array.argument-type"
+functions = ["ARRAY_APPEND", "ARRAY_CAT", "ARRAY_REMOVE", "ARRAY_REPLACE", "TRIM_ARRAY", "ARRAY_SAMPLE", "ARRAY_SHUFFLE"]
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "postgres.array.argument-type-1"
+function = "ARRAY_PREPEND"
+dialects = ["postgres"]
+type = "@argument-type(1)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The result has the type of the second argument."
+
+[[function]]
+id = "postgres.array.array"
+function = "ARRAY_FILL"
+dialects = ["postgres"]
+type = "@array(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The result is an array of the argument's type."
+
+[[function]]
+id = "postgres.array.element"
+function = "UNNEST"
+dialects = ["postgres"]
+type = "@element(0)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The result is an element of the array argument, every dimension unnested."
+
+[[function]]
+id = "postgres.array.int-array"
+function = "ARRAY_POSITIONS"
+dialects = ["postgres"]
+type = "ARRAY<INT>"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The documentation gives the function an `integer[]` result."
+
+[[function]]
+id = "postgres.array.int"
+functions = ["ARRAY_LENGTH", "ARRAY_NDIMS", "ARRAY_POSITION", "CARDINALITY", "ARRAY_LOWER", "ARRAY_UPPER"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "postgres.array.text"
+functions = ["ARRAY_TO_STRING", "ARRAY_DIMS"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The documentation gives each of these a `text` result."

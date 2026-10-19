@@ -1,0 +1,28 @@
+# MySQL conditional expressions.
+
+[[function]]
+id = "mysql.conditional.branches"
+function = "IF"
+dialects = ["mysql"]
+type = "@first-known(1)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
+reasoning = "The result is one of the branches, from the second argument on, resolved to their common type."
+
+[[function]]
+id = "mysql.conditional.common"
+function = "IFNULL"
+dialects = ["mysql"]
+type = "@first-known"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
+reasoning = "The arguments resolve to one common type, the first known argument's."
+
+[[function]]
+id = "mysql.conditional.argument"
+function = "NULLIF"
+dialects = ["mysql"]
+type = "@same(0)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."

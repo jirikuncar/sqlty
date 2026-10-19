@@ -1,0 +1,46 @@
+# MySQL mathematical functions.
+
+[[function]]
+id = "mysql.math.argument-type"
+functions = ["ABS", "MOD"]
+dialects = ["mysql"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "mysql.math.integral"
+functions = ["CEIL", "CEILING", "FLOOR"]
+dialects = ["mysql"]
+type = "@integral"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "An exact-value number gives an integer, an approximate one a DOUBLE."
+
+[[function]]
+id = "mysql.math.bigint"
+functions = ["CRC32", "SIGN"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.math.double"
+functions = ["SQRT", "EXP", "LN", "LOG", "LOG2", "LOG10", "POW", "POWER", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATAN2", "COT", "DEGREES", "RADIANS", "PI", "RAND"]
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE."
+
+[[function]]
+id = "mysql.math.text"
+function = "CONV"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes the function as returning a string."

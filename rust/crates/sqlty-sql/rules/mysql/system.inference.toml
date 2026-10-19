@@ -1,0 +1,28 @@
+# MySQL system information functions.
+
+[[function]]
+id = "mysql.system.bigint"
+functions = ["LAST_INSERT_ID", "ROW_COUNT", "FOUND_ROWS", "CONNECTION_ID", "BENCHMARK"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.system.int"
+function = "COERCIBILITY"
+dialects = ["mysql"]
+type = "INT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reasoning = "The manual describes the function as returning an integer."
+
+[[function]]
+id = "mysql.system.text"
+functions = ["DATABASE", "SCHEMA", "USER", "CURRENT_USER", "SESSION_USER", "SYSTEM_USER", "CURRENT_ROLE", "VERSION", "COLLATION", "CHARSET", "ICU_VERSION"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reasoning = "The manual describes each of these as returning a string."

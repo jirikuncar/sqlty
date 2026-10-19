@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 51] = [
+const SQL_TYPES: [&str; 54] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -60,6 +60,9 @@ const SQL_TYPES: [&str; 51] = [
     "PATH",
     "LSEG",
     "XID",
+    "NAME",
+    "REGTYPE",
+    "RECORD",
     "MONEY",
     "INT4RANGE",
     "INT8RANGE",
@@ -134,16 +137,70 @@ const NULLABILITIES: [(&str, &str); 5] = [
     ("nonzero-divisor", "RuleNullability::NonzeroDivisor"),
 ];
 
-/// Result types of a function rule other than a SQL type name; `@argument-as <TYPE>` keeps
-/// the first argument's Python type and values under another SQL type.
-const FUNCTION_RESULTS: [(&str, &str); 6] = [
+/// Result types of a function rule other than a SQL type name, as `FunctionType` spells
+/// them; `(k)` takes an argument position, `{}` in the path. `@argument-as <TYPE>` keeps the
+/// first argument's Python type and values under another SQL type.
+const FUNCTION_RESULTS: [(&str, &str); 25] = [
     ("@any", "FunctionType::Any"),
     ("@unknown", "FunctionType::Unknown"),
     ("@code", "FunctionType::Code"),
     ("@argument", "FunctionType::Argument(0)"),
-    ("@argument(0)", "FunctionType::Argument(0)"),
-    ("@argument(1)", "FunctionType::Argument(1)"),
+    ("@argument(k)", "FunctionType::Argument({})"),
+    ("@void", "FunctionType::Returns(Returns::Void)"),
+    (
+        "@argument-type(k)",
+        "FunctionType::Returns(Returns::Arg({}))",
+    ),
+    ("@same(k)", "FunctionType::Returns(Returns::Same({}))"),
+    ("@element(k)", "FunctionType::Returns(Returns::Elem({}))"),
+    ("@array(k)", "FunctionType::Returns(Returns::ArrayOf({}))"),
+    ("@first-known", "FunctionType::Returns(Returns::FirstKnown)"),
+    (
+        "@first-known(k)",
+        "FunctionType::Returns(Returns::Branches({}))",
+    ),
+    (
+        "@str-to-date(k)",
+        "FunctionType::Returns(Returns::StrToDate({}))",
+    ),
+    ("@bound", "FunctionType::Returns(Returns::Bound)"),
+    ("@mean", "FunctionType::Returns(Returns::Mean)"),
+    ("@real", "FunctionType::Returns(Returns::Real)"),
+    ("@scaled", "FunctionType::Returns(Returns::Scaled)"),
+    ("@trunc(k)", "FunctionType::Returns(Returns::Trunc({}))"),
+    ("@date-add", "FunctionType::Returns(Returns::DateAdd)"),
+    (
+        "@timestamp-add",
+        "FunctionType::Returns(Returns::TimestampAdd)",
+    ),
+    ("@integral", "FunctionType::Returns(Returns::Integral)"),
+    ("@at-zone(k)", "FunctionType::Returns(Returns::AtZone({}))"),
+    ("@series", "FunctionType::Returns(Returns::Series)"),
+    ("@text(k)", "FunctionType::Returns(Returns::Text({}))"),
+    ("@random", "FunctionType::Returns(Returns::Random)"),
 ];
+
+/// The Rust path of a function rule's result, when `result` names one: a SQL type, a type of
+/// [`FUNCTION_RESULTS`] or `@argument-as <TYPE>`.
+fn function_result(result: &str) -> Option<String> {
+    if let Some(sql) = result.strip_prefix("@argument-as ") {
+        return is_sql_type(sql).then(|| format!("FunctionType::ArgumentAs({sql:?})"));
+    }
+    if is_parameter_type(result) {
+        return Some(format!("FunctionType::Sql({result:?})"));
+    }
+    let (name, position) = match result.strip_suffix(')').and_then(|r| r.split_once('(')) {
+        Some((name, k)) if !k.is_empty() && k.chars().all(|c| c.is_ascii_digit()) => {
+            (format!("{name}(k)"), Some(k))
+        }
+        _ => (result.to_string(), None),
+    };
+    let (_, path) = FUNCTION_RESULTS.iter().find(|(known, _)| *known == name)?;
+    Some(match position {
+        Some(k) => path.replace("{}", k),
+        None => (*path).to_string(),
+    })
+}
 
 /// How a function rule's result can be NULL.
 const FUNCTION_NULLABILITIES: [(&str, &str); 4] = [
@@ -390,20 +447,12 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     }
     let left = operand_types(&def.left).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let right = operand_types(&def.right).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
-    let results: &[(&str, &str)] = if function {
-        &FUNCTION_RESULTS
+    let known = if function {
+        function_result(&def.result).is_some()
     } else {
-        &RESULTS
+        RESULTS.iter().any(|(name, _)| *name == def.result) || is_sql_type(&def.result)
     };
-    let argument_as = function
-        && def
-            .result
-            .strip_prefix("@argument-as ")
-            .is_some_and(is_sql_type);
-    if !(results.iter().any(|(name, _)| *name == def.result)
-        || is_sql_type(&def.result)
-        || argument_as)
-    {
+    if !known {
         return fail(format!("unknown result type {:?}", def.result));
     }
     let mut parameters = def.left_parameter.iter().chain(&def.right_parameter);
@@ -648,16 +697,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
             _ => ranges.push((name, i, i + 1)),
         }
         let def = &rule.def;
-        let result = match def.result.strip_prefix("@argument-as ") {
-            Some(sql) => format!("FunctionType::ArgumentAs({sql:?})"),
-            None => FUNCTION_RESULTS
-                .iter()
-                .find(|(known, _)| *known == def.result)
-                .map_or_else(
-                    || format!("FunctionType::Sql({:?})", def.result),
-                    |(_, path)| (*path).to_string(),
-                ),
-        };
+        let result = function_result(&def.result).unwrap();
         let nullability = FUNCTION_NULLABILITIES
             .iter()
             .find(|(known, _)| *known == def.nullability)

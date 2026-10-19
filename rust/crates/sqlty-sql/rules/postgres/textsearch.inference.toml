@@ -1,4 +1,4 @@
-# Text search and geometric operators and functions whose result is not the generic one.
+# PostgreSQL text search and geometric operators and functions.
 
 [[rule]]
 id = "postgres.textsearch.and"
@@ -70,3 +70,39 @@ type = "@argument(1)"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
 reasoning = "With a text search configuration first, the document is the second argument, and the headline keeps its JSON type."
+
+[[function]]
+id = "postgres.textsearch.float"
+functions = ["TS_RANK", "TS_RANK_CD"]
+dialects = ["postgres"]
+type = "FLOAT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `real` result."
+
+[[function]]
+id = "postgres.textsearch.text"
+function = "TS_HEADLINE"
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function a `text` result."
+
+[[function]]
+id = "postgres.textsearch.tsquery"
+functions = ["TO_TSQUERY", "PLAINTO_TSQUERY", "PHRASETO_TSQUERY", "WEBSEARCH_TO_TSQUERY"]
+dialects = ["postgres"]
+type = "TSQUERY"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `tsquery` result."
+
+[[function]]
+id = "postgres.textsearch.tsvector"
+functions = ["TO_TSVECTOR", "SETWEIGHT"]
+dialects = ["postgres"]
+type = "TSVECTOR"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `tsvector` result."
