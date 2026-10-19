@@ -505,6 +505,38 @@ SELECT * FROM users_copy
 -- expanded: SELECT id, name, note FROM users_copy
 ```
 
+## CREATE TABLE ... AS SELECT
+
+A table created from a query has the query's column names and types, and keeps
+`NOT NULL` where the query cannot return NULL.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL, note TEXT);
+CREATE TABLE users_backup AS SELECT id, name, note, 'v1' AS version FROM users;
+CREATE TABLE user_ids SELECT id FROM users;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users_backup
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: note: str | None (TEXT)
+-- columns: version: str (TEXT)
+```
+
+```sql
+SELECT * FROM user_ids
+-- columns: id: int (INT)
+```
+
 ## A mysqldump schema
 
 `mysqldump --no-data` wraps views and newer options in executable comments

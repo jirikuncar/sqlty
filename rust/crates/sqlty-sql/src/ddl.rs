@@ -181,16 +181,6 @@ impl Statement<'_> {
         render(&self.0).trim().to_string()
     }
 
-    /// Whether this is a `CREATE ... TABLE` with a column list.
-    pub(crate) fn is_create_table(&self) -> bool {
-        let mut sig = self.0.iter().filter(|p| significant(p));
-        sig.next().is_some_and(|p| is_word(p, "create"))
-            && sig
-                .take_while(|p| p.0 == Kind::Word)
-                .any(|p| is_word(p, "table"))
-            && self.0.iter().any(|p| is_punct(p, "("))
-    }
-
     /// Whether this is `CREATE [OR REPLACE] [TEMP | MATERIALIZED | ...] <object>`, e.g. `view`.
     pub(crate) fn creates(&self, object: &str) -> bool {
         const MODIFIERS: [&str; 7] = [
@@ -347,7 +337,7 @@ impl Statement<'_> {
 
     /// Whether this is a `CREATE ... TABLE` with or without a column list, such as
     /// `CREATE TABLE p PARTITION OF parent DEFAULT`.
-    pub(crate) fn is_create_table_any(&self) -> bool {
+    pub(crate) fn is_create_table(&self) -> bool {
         let mut sig = self.0.iter().filter(|p| significant(p));
         sig.next().is_some_and(|p| is_word(p, "create"))
             && sig
@@ -1024,9 +1014,8 @@ mod tests {
 
     #[test]
     fn test_create_table_any_and_lead_words() {
-        assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table_any());
-        assert!(!first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
-        assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table_any());
+        assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
+        assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table());
         assert_eq!(
             first("create or replace function f()").lead_words(3),
             ["create", "or", "replace"]

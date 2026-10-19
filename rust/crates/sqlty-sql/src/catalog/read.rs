@@ -3,7 +3,7 @@
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
-use sqlparser::ast::{Statement, UserDefinedTypeRepresentation};
+use sqlparser::ast::{CreateView, Statement, UserDefinedTypeRepresentation};
 use sqlparser::parser::Parser;
 
 use crate::analyzer::{parse_ddl, SkippedObject, SqlDialect};
@@ -47,7 +47,7 @@ pub(super) fn read_statements(
         };
         // PostgreSQL and MySQL copy a table's columns with `LIKE`.
         let reads_like = postgres || dialect == SqlDialect::MySql;
-        if stmt.is_create_table() || (reads_like && stmt.is_create_table_any()) {
+        if stmt.is_create_table() {
             let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
                 Some((text, likes)) => (likes, Some(text)),
                 None => (Vec::new(), None),
@@ -74,6 +74,29 @@ pub(super) fn read_statements(
                 }),
             };
             match parsed.and_then(|stmts| stmts.into_iter().next()) {
+                Some(Statement::CreateTable(create))
+                    if create.columns.is_empty()
+                        && create.like.is_none()
+                        && create.query.is_some() =>
+                {
+                    let view = create.query.as_ref().and_then(|query| {
+                        let sql = format!("CREATE VIEW {} AS {query}", create.name);
+                        match parse_ddl(&sql, dialect)?.into_iter().next()? {
+                            Statement::CreateView(view) => Some(view),
+                            _ => None,
+                        }
+                    });
+                    match view {
+                        Some(view) => push(OpKind::View(
+                            Box::new(CreateView {
+                                if_not_exists: create.if_not_exists,
+                                ..view
+                            }),
+                            true,
+                        )),
+                        None => skipped.push(("table", stmt.table_name())),
+                    }
+                }
                 Some(Statement::CreateTable(create)) => {
                     if !create.columns.is_empty()
                         || postgres
@@ -136,7 +159,7 @@ pub(super) fn read_statements(
             let parsed = parse_ddl(&stmt.sql(), dialect)
                 .or_else(|| parse_ddl(&stmt.without_check_option()?, dialect));
             match parsed.and_then(|stmts| stmts.into_iter().next()) {
-                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view))),
+                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), false)),
                 _ => {
                     skipped.push(("view", stmt.view_name()));
                     if postgres {

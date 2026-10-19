@@ -144,3 +144,23 @@ SELECT column1 FROM (VALUES (1), (2.5)) AS v
 SELECT column1 AS a FROM (VALUES ((SELECT name FROM t LIMIT 1)))
 -- columns: a: str | None (TEXT)
 ```
+
+## CREATE TABLE ... AS SELECT
+
+A table created from a query has the query's column names and types. It has no
+constraints, so every column can be NULL.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL CHECK (name IN ('a', 'b')), age INTEGER);
+CREATE TABLE users_backup AS SELECT id, name, age, 'v1' AS version FROM users;
+```
+
+```sql
+SELECT * FROM users_backup
+-- columns: id: int | None (INT)
+-- columns: name: str | None (TEXT)
+-- columns: age: int | None (INT)
+-- columns: version: str | None (TEXT)
+```
