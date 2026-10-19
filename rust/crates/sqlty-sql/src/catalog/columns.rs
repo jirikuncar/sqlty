@@ -30,6 +30,8 @@ pub(super) struct RawColumn {
     /// Compared with a collation that may equate different strings (`NOCASE`, `_ci`):
     /// the stored values are not the ones a `CHECK` or a domain lists.
     pub(super) collated: bool,
+    /// MySQL's `INVISIBLE`: left out of `SELECT *`.
+    pub(super) invisible: bool,
 }
 
 impl RawColumn {
@@ -155,6 +157,10 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         primary_key,
         values,
         collated,
+        invisible: column
+            .options
+            .iter()
+            .any(|option| matches!(option.option, ColumnOption::Invisible)),
     }
 }
 
