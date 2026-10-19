@@ -287,11 +287,38 @@ impl<'a> Analyzer<'a> {
                 }
                 typed
             }
-            None => {
-                self.explain_unresolved(expr, scope);
-                Typed::UNKNOWN
-            }
+            None => match self.whole_row_table(expr, scope) {
+                Some(table) => {
+                    self.diag.explain_silently();
+                    Typed {
+                        sql: Some(table.to_uppercase().into()),
+                        ..Typed::UNKNOWN
+                    }
+                }
+                None => {
+                    self.explain_unresolved(expr, scope);
+                    Typed::UNKNOWN
+                }
+            },
         }
+    }
+
+    /// The schema table of a PostgreSQL whole-row reference (`SELECT u FROM users u`),
+    /// whose type is the table's row type.
+    pub(super) fn whole_row_table<'s>(&self, expr: &Expr, scope: &'s Scope) -> Option<&'s str> {
+        let Expr::Identifier(ident) = expr else {
+            return None;
+        };
+        if self.dialect != SqlDialect::Postgres || ident.quote_style.is_some() {
+            return None;
+        }
+        let name = fold(ident, self.dialect);
+        let key = scope
+            .iter()
+            .find(|source| source.reference == name)?
+            .table
+            .named()?;
+        self.schema.table(key).map(|_| key)
     }
 
     /// `typed` limited to the values the conditions in force leave the column `expr`

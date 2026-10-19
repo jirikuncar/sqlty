@@ -87,12 +87,17 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The type of `field` in the composite type `composite`, when the schema declares it;
-    /// the composite's name when it declares no such field.
+    /// the composite's name when it declares no such field. In PostgreSQL each table is
+    /// also the composite type of its rows.
     fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Result<Typed, String> {
-        let Some((name, fields)) = composite
-            .map(str::to_lowercase)
-            .and_then(|name| Some((name.clone(), self.schema.composite(&name)?)))
-        else {
+        let postgres = self.dialect == SqlDialect::Postgres;
+        let Some((name, fields)) = composite.map(str::to_lowercase).and_then(|name| {
+            let fields = self
+                .schema
+                .composite(&name)
+                .or_else(|| postgres.then(|| self.schema.table(&name)).flatten())?;
+            Some((name, fields))
+        }) else {
             return Ok(Typed::UNKNOWN);
         };
         let field = fold(field, self.dialect);

@@ -799,3 +799,14 @@ b = SQL[tuple[int | None]]("--sql\nSELECT (shapes.p).y AS y FROM shapes")
 # error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 c = SQL[tuple[object]]("--sql\nSELECT p FROM shapes")
 ```
+
+A field of a whole-row reference, `(s).id`, has the column's type. The row
+itself is not reported, like `NULL` and placeholders.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, int | None]]("--sql\nSELECT (s).id AS id, ((s).p).x AS x FROM shapes s")
+b = SQL[tuple[object]]("--sql\nSELECT s FROM shapes s")
+```
