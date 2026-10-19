@@ -189,13 +189,18 @@ fn function_result(result: &str) -> Option<String> {
     if is_parameter_type(result) {
         return Some(format!("FunctionType::Sql({result:?})"));
     }
-    let (name, position) = match result.strip_suffix(')').and_then(|r| r.split_once('(')) {
+    positional(&FUNCTION_RESULTS, result)
+}
+
+/// The Rust path `table` gives `value`, with a `(k)` position filled in.
+fn positional(table: &[(&str, &str)], value: &str) -> Option<String> {
+    let (name, position) = match value.strip_suffix(')').and_then(|r| r.split_once('(')) {
         Some((name, k)) if !k.is_empty() && k.chars().all(|c| c.is_ascii_digit()) => {
             (format!("{name}(k)"), Some(k))
         }
-        _ => (result.to_string(), None),
+        _ => (value.to_string(), None),
     };
-    let (_, path) = FUNCTION_RESULTS.iter().find(|(known, _)| *known == name)?;
+    let (_, path) = table.iter().find(|(known, _)| *known == name)?;
     Some(match position {
         Some(k) => path.replace("{}", k),
         None => (*path).to_string(),
@@ -203,11 +208,14 @@ fn function_result(result: &str) -> Option<String> {
 }
 
 /// How a function rule's result can be NULL.
-const FUNCTION_NULLABILITIES: [(&str, &str); 4] = [
+const FUNCTION_NULLABILITIES: [(&str, &str); 7] = [
     ("non-null", "FunctionNullability::NonNull"),
     ("nullable", "FunctionNullability::Nullable"),
     ("aggregate", "FunctionNullability::Aggregate"),
     ("strict", "FunctionNullability::Strict"),
+    ("all-arguments", "FunctionNullability::AllArguments"),
+    ("leading(k)", "FunctionNullability::Leading({})"),
+    ("code", "FunctionNullability::Code"),
 ];
 
 #[derive(Deserialize)]
@@ -473,10 +481,7 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     } else {
         &NULLABILITIES
     };
-    if !nullabilities
-        .iter()
-        .any(|(name, _)| *name == def.nullability)
-    {
+    if positional(nullabilities, &def.nullability).is_none() {
         return fail(format!("unknown nullability {:?}", def.nullability));
     }
     Ok(Rule {
@@ -714,11 +719,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
         }
         let def = &rule.def;
         let result = function_result(&def.result).unwrap();
-        let nullability = FUNCTION_NULLABILITIES
-            .iter()
-            .find(|(known, _)| *known == def.nullability)
-            .unwrap()
-            .1;
+        let nullability = positional(&FUNCTION_NULLABILITIES, &def.nullability).unwrap();
         let _ = writeln!(
             out,
             "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \

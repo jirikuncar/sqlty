@@ -1,6 +1,6 @@
 # PostgreSQL nullability against seeded rows
 
-822 columns of queries that return rows, `scripts/compat/pg_nullability.py`.
+855 columns of queries that return rows, `scripts/compat/pg_nullability.py`.
 
 ## NULL in a column sqlty types as non-null
 
@@ -13,11 +13,11 @@ None.
 | `tests/mdtest/corpus/aggregates.md:50` | `names` | `str \| None` |
 | `tests/mdtest/corpus/aggregates.md:65` | `total` | `float \| None` |
 | `tests/mdtest/corpus/aggregates.md:97` | `col1` | `list[int] \| None` |
-| `tests/mdtest/corpus/ctes.md:107` | `list` | `list[int] \| None` |
+| `tests/mdtest/corpus/ctes.md:105` | `list` | `list[int] \| None` |
 | `tests/mdtest/corpus/expressions.md:24` | `delta` | `decimal.Decimal \| None` |
 | `tests/mdtest/corpus/expressions.md:24` | `delta_f` | `float \| None` |
 | `tests/mdtest/corpus/expressions.md:24` | `delta_cast` | `float \| None` |
-| `tests/mdtest/corpus/expressions.md:98` | `step` | `int \| None` |
+| `tests/mdtest/corpus/expressions.md:96` | `step` | `int \| None` |
 | `tests/mdtest/corpus/json.md:72` | `teams` | `str \| None` |
 | `tests/mdtest/corpus/outer_joins.md:157` | `bio` | `str \| None` |
 | `tests/mdtest/corpus/outer_joins.md:165` | `bio` | `str \| None` |
@@ -76,8 +76,8 @@ None.
 | `tests/mdtest/nullability/soundness.md:96` | `max` | `int \| None` |
 | `tests/mdtest/nullability/soundness.md:117` | `a` | `int \| None` |
 | `tests/mdtest/nullability/soundness.md:169` | `last_value` | `int \| None` |
-| `tests/mdtest/nullability/soundness.md:207` | `?column?` | `bool \| None` |
-| `tests/mdtest/nullability/soundness.md:335` | `Email` | `str \| None` |
+| `tests/mdtest/nullability/soundness.md:225` | `?column?` | `bool \| None` |
+| `tests/mdtest/nullability/soundness.md:353` | `Email` | `str \| None` |
 | `tests/mdtest/postgres/aggregates.md:89` | `max` | `str \| None` |
 | `tests/mdtest/postgres/aggregates.md:89` | `min` | `str \| None` |
 | `tests/mdtest/postgres/aggregates.md:89` | `max` | `str \| None` |
@@ -99,6 +99,11 @@ None.
 | `tests/mdtest/postgres/builtins.md:251` | `g` | `None` |
 | `tests/mdtest/postgres/builtins.md:251` | `h` | `None` |
 | `tests/mdtest/postgres/builtins.md:251` | `k` | `None` |
+| `tests/mdtest/postgres/builtins.md:271` | `headline` | `typing.Any` |
+| `tests/mdtest/postgres/builtins.md:298` | `headline` | `typing.Any` |
+| `tests/mdtest/postgres/builtins.md:298` | `bytes` | `bytes \| None` |
+| `tests/mdtest/postgres/builtins.md:298` | `grid` | `list[list[int]] \| None` |
+| `tests/mdtest/postgres/builtins.md:298` | `element` | `int \| None` |
 | `tests/mdtest/postgres/check_literals.md:261` | `status` | `None` |
 | `tests/mdtest/postgres/column_names.md:23` | `max` | `int \| None` |
 | `tests/mdtest/postgres/column_names.md:72` | `extract` | `decimal.Decimal \| None` |
@@ -122,18 +127,28 @@ None.
 | `tests/mdtest/postgres/schema/builtin_catalog.md:68` | `ordinal_position` | `int \| None` |
 | `tests/mdtest/postgres/schema/builtin_catalog.md:68` | `is_nullable` | `str \| None` |
 | `tests/mdtest/postgres/schema/builtin_catalog.md:68` | `data_type` | `str \| None` |
+| `tests/mdtest/postgres/schema/catalog_refresh.md:28` | `x` | `int \| None` |
 | `tests/mdtest/postgres/schema/catalog_refresh.md:33` | `x` | `None` |
-| `tests/mdtest/postgres/schema/functions.md:54` | `g` | `None` |
-| `tests/mdtest/postgres/schema/functions.md:131` | `id` | `int \| None` |
-| `tests/mdtest/postgres/schema/functions.md:131` | `name` | `str \| None` |
-| `tests/mdtest/postgres/schema/functions.md:131` | `seen` | `datetime.datetime \| None` |
-| `tests/mdtest/postgres/schema/functions.md:136` | `id` | `int \| None` |
-| `tests/mdtest/postgres/schema/functions.md:136` | `seen` | `datetime.datetime \| None` |
-| `tests/mdtest/postgres/schema/functions.md:151` | `id` | `int \| None` |
-| `tests/mdtest/postgres/schema/functions.md:156` | `id` | `int \| None` |
-| `tests/mdtest/postgres/schema/functions.md:161` | `lo` | `int \| None` |
-| `tests/mdtest/postgres/schema/functions.md:161` | `hi` | `int \| None` |
-| `tests/mdtest/postgres/schema/functions.md:178` | `f` | `None` |
+| `tests/mdtest/postgres/schema/create_if_not_exists.md:64` | `f` | `str \| None` |
+| `tests/mdtest/postgres/schema/functions.md:46` | `loose` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:46` | `called` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:65` | `f` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:65` | `f` | `str \| None` |
+| `tests/mdtest/postgres/schema/functions.md:75` | `g` | `None` |
+| `tests/mdtest/postgres/schema/functions.md:89` | `answer` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:106` | `f` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:127` | `current_status` | `typing.Literal['new', 'done'] \| None` |
+| `tests/mdtest/postgres/schema/functions.md:127` | `share` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:152` | `id` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:152` | `name` | `str \| None` |
+| `tests/mdtest/postgres/schema/functions.md:152` | `seen` | `datetime.datetime \| None` |
+| `tests/mdtest/postgres/schema/functions.md:157` | `id` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:157` | `seen` | `datetime.datetime \| None` |
+| `tests/mdtest/postgres/schema/functions.md:172` | `id` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:177` | `id` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:182` | `lo` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:182` | `hi` | `int \| None` |
+| `tests/mdtest/postgres/schema/functions.md:199` | `f` | `None` |
 | `tests/mdtest/postgres/set_returning_functions.md:69` | `unnest` | `str \| None` |
 | `tests/mdtest/postgres/set_returning_functions.md:74` | `n` | `int \| None` |
 | `tests/mdtest/postgres/set_returning_functions.md:74` | `s` | `str \| None` |

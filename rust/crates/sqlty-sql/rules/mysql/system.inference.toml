@@ -20,9 +20,18 @@ reasoning = "The manual describes the function as returning an integer."
 
 [[function]]
 id = "mysql.system.text"
-functions = ["DATABASE", "SCHEMA", "USER", "CURRENT_USER", "SESSION_USER", "SYSTEM_USER", "CURRENT_ROLE", "VERSION", "COLLATION", "CHARSET", "ICU_VERSION"]
+functions = ["USER", "CURRENT_USER", "SESSION_USER", "SYSTEM_USER", "CURRENT_ROLE", "VERSION", "COLLATION", "CHARSET", "ICU_VERSION"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
 reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.system.text-nullable"
+functions = ["DATABASE", "SCHEMA"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reasoning = "The manual describes each of these as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."

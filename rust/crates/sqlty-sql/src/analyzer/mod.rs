@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 mod api;
 mod dialect;
-mod dialect_functions;
 mod dml;
 mod explain;
 mod expr;

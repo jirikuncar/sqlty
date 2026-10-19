@@ -251,12 +251,12 @@ SELECT
     array_positions(ARRAY['A','A','B','A'], 'A') AS array_int_array,
     array_length(array[1,2,3], 1) AS array_int,
     array_to_string(ARRAY[1, 2, 3, NULL, 5], ',', '*') AS array_text
--- rules: array_argument_type: postgres.array.argument-type / postgres.array.argument-type
+-- rules: array_argument_type: postgres.array.argument-type-non-null / postgres.array.argument-type-non-null
 -- rules: array_argument_type_1: postgres.array.argument-type-1 / postgres.array.argument-type-1
 -- rules: array_array: postgres.array.array / postgres.array.array
 -- rules: array_element: postgres.array.element / postgres.array.element
 -- rules: array_int_array: postgres.array.int-array / postgres.array.int-array
--- rules: array_int: postgres.array.int / postgres.array.int
+-- rules: array_int: postgres.array.int-nullable / postgres.array.int-nullable
 -- rules: array_text: postgres.array.text / postgres.array.text
 ```
 
@@ -298,10 +298,10 @@ SELECT
 -- rules: datetime_date: common.datetime.date / common.datetime.date
 -- rules: datetime_timestamptz: common.datetime.timestamptz / common.datetime.timestamptz
 -- rules: datetime_timetz: common.datetime.timetz / common.datetime.timetz
--- rules: json_json: common.json.json / common.json.json
--- rules: json_jsonb: common.json.jsonb / common.json.jsonb
+-- rules: json_json: common.json.json-non-null / common.json.json-non-null
+-- rules: json_jsonb: common.json.jsonb-non-null / common.json.jsonb-non-null
 -- rules: string_int: common.string.int / common.string.int
--- rules: string_text: common.string.text / common.string.text
+-- rules: string_text: common.string.text-non-null / common.string.text-non-null
 -- rules: window_bigint: common.window.bigint / common.window.bigint
 -- rules: window_int: common.window.int / common.window.int
 ```
@@ -338,8 +338,8 @@ SELECT
 -- rules: datetime_double: postgres.datetime.double / postgres.datetime.double
 -- rules: datetime_interval: postgres.datetime.interval / postgres.datetime.interval
 -- rules: datetime_text: postgres.datetime.text / postgres.datetime.text
--- rules: datetime_time: postgres.datetime.time / postgres.datetime.time
--- rules: datetime_timestamp: postgres.datetime.timestamp / postgres.datetime.timestamp
+-- rules: datetime_time: postgres.datetime.time-non-null / postgres.datetime.time-non-null
+-- rules: datetime_timestamp: postgres.datetime.timestamp-non-null / postgres.datetime.timestamp-non-null
 -- rules: datetime_timestamptz: postgres.datetime.timestamptz / postgres.datetime.timestamptz
 -- rules: datetime_truncated: postgres.datetime.truncated / postgres.datetime.truncated
 -- rules: datetime_void: postgres.datetime.void / postgres.datetime.void
@@ -347,7 +347,7 @@ SELECT
 
 ```sql
 SELECT uuid_generate_v4() AS extension_uuid
--- rules: extension_uuid: postgres.extension.uuid / postgres.extension.uuid
+-- rules: extension_uuid: postgres.extension.uuid-non-null / postgres.extension.uuid-non-null
 ```
 
 ```sql
@@ -376,7 +376,7 @@ SELECT
 -- rules: json_boolean: postgres.json.boolean / postgres.json.boolean
 -- rules: json_int: postgres.json.int / postgres.json.int
 -- rules: json_json: postgres.json.json / postgres.json.json
--- rules: json_jsonb: postgres.json.jsonb / postgres.json.jsonb
+-- rules: json_jsonb: postgres.json.jsonb-nullable / postgres.json.jsonb-nullable
 -- rules: json_record: postgres.json.record / postgres.json.record
 -- rules: json_text: postgres.json.text / postgres.json.text
 ```
@@ -525,6 +525,74 @@ SELECT mod(7, 3) AS math_argument_type, sin(1.0) AS math_double
 -- rules: math_double: common.math.double / common.math.double
 ```
 
+```sql
+SELECT
+    array_remove(ARRAY[1,2,3,2], 2) AS array_argument_type,
+    array_cat(ARRAY[1,2,3], ARRAY[4,5]) AS array_argument_type_all_arguments,
+    array_ndims(ARRAY[[1,2,3], [4,5,6]]) AS array_int,
+    array_dims(ARRAY[[1,2,3], [4,5,6]]) AS array_text_nullable
+-- rules: array_argument_type: postgres.array.argument-type / postgres.array.argument-type
+-- rules: array_argument_type_all_arguments: postgres.array.argument-type-all-arguments / postgres.array.argument-type-all-arguments
+-- rules: array_int: postgres.array.int / postgres.array.int
+-- rules: array_text_nullable: postgres.array.text-nullable / postgres.array.text-nullable
+```
+
+```sql
+SELECT
+    to_json('Fred said "Hi."'::text) AS json_json,
+    to_jsonb(row(42, 'Fred said "Hi."'::text)) AS json_jsonb,
+    replace('abcdefabcdef', 'cd', 'XX') AS string_text,
+    nth_value(NULL::int4, NULL::integer) OVER () AS window_value_nullable
+-- rules: json_json: common.json.json / common.json.json
+-- rules: json_jsonb: common.json.jsonb / common.json.jsonb
+-- rules: string_text: common.string.text / common.string.text
+-- rules: window_value_nullable: common.window.value-nullable / common.window.value-nullable
+```
+
+```sql
+SELECT
+    make_time(8, 15, 23.5) AS datetime_time,
+    make_timestamp(2013, 7, 15, 8, 15, 23.5) AS datetime_timestamp
+-- rules: datetime_time: postgres.datetime.time / postgres.datetime.time
+-- rules: datetime_timestamp: postgres.datetime.timestamp / postgres.datetime.timestamp
+```
+
+```sql
+SELECT uuid_generate_v1() AS extension_uuid
+-- rules: extension_uuid: postgres.extension.uuid / postgres.extension.uuid
+```
+
+```sql
+SELECT
+    jsonb_path_match('{"a":[1,2,3,4,5]}', 'exists($.a[*] ? (@ >= $min && @ <= $max))', '{"min":2, "max":4}') AS json_boolean_nullable,
+    json_build_array(1, 2, 'foo', 4, 5) AS json_json_non_null,
+    json_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"foo"}}', 'f4', 'f6') AS json_json_nullable,
+    jsonb_object(NULL::text[]) AS json_jsonb,
+    jsonb_build_array() AS json_jsonb_non_null,
+    json_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"foo"}}', 'f4', 'f6') AS json_text_nullable
+-- rules: json_boolean_nullable: postgres.json.boolean-nullable / postgres.json.boolean-nullable
+-- rules: json_json_non_null: postgres.json.json-non-null / postgres.json.json-non-null
+-- rules: json_json_nullable: postgres.json.json-nullable / postgres.json.json-nullable
+-- rules: json_jsonb: postgres.json.jsonb / postgres.json.jsonb
+-- rules: json_jsonb_non_null: postgres.json.jsonb-non-null / postgres.json.jsonb-non-null
+-- rules: json_text_nullable: postgres.json.text-nullable / postgres.json.text-nullable
+```
+
+```sql
+SELECT
+    regexp_match('foobarbequebaz', '(bar)(beque)') AS string_text_array_nullable,
+    quote_nullable(NULL) AS string_text_non_null,
+    regexp_substr('ABCDEF', 'c(.)(..)', 1, 1, 'i') AS string_text_nullable
+-- rules: string_text_array_nullable: postgres.string.text-array-nullable / postgres.string.text-array-nullable
+-- rules: string_text_non_null: postgres.string.text-non-null / postgres.string.text-non-null
+-- rules: string_text_nullable: postgres.string.text-nullable / postgres.string.text-nullable
+```
+
+```sql
+SELECT inet_client_port() AS system_int_nullable
+-- rules: system_int_nullable: postgres.system.int-nullable / postgres.system.int-nullable
+```
+
 ## MySQL
 
 `schema.sql`:
@@ -576,7 +644,7 @@ FROM t
 -- rules: arrow: mysql.json.arrow / mysql.json.arrow
 -- rules: binary_string: mysql.string.binary / mysql.string.binary
 -- rules: binary_any_argument: mysql.string.binary-any-argument / mysql.string.binary-any-argument
--- rules: binary_pattern: mysql.string.binary-pattern / mysql.string.binary-pattern
+-- rules: binary_pattern: mysql.string.binary-pattern-nullable / mysql.string.binary-pattern-nullable
 -- rules: round_integer: mysql.numeric.round-integer / mysql.numeric.round-integer
 -- rules: round_decimal: mysql.numeric.round-decimal / mysql.numeric.round-decimal
 -- rules: round_other: mysql.numeric.round-other / mysql.numeric.round-other
@@ -633,7 +701,7 @@ SELECT
 -- rules: datetime_date_add: mysql.datetime.date-add / mysql.datetime.date-add
 -- rules: datetime_bigint: mysql.datetime.bigint / mysql.datetime.bigint
 -- rules: datetime_date: mysql.datetime.date / mysql.datetime.date
--- rules: datetime_datetime: mysql.datetime.datetime / mysql.datetime.datetime
+-- rules: datetime_datetime: mysql.datetime.datetime-non-null / mysql.datetime.datetime-non-null
 -- rules: datetime_text: mysql.datetime.text / mysql.datetime.text
 -- rules: datetime_time: mysql.datetime.time / mysql.datetime.time
 -- rules: datetime_format: mysql.datetime.format / mysql.datetime.format
@@ -654,7 +722,7 @@ SELECT
     JSON_UNQUOTE('"abc"') AS json_text
 -- rules: json_bigint: mysql.json.bigint / mysql.json.bigint
 -- rules: json_int: mysql.json.int / mysql.json.int
--- rules: json_json: mysql.json.json / mysql.json.json
+-- rules: json_json: mysql.json.json-non-null / mysql.json.json-non-null
 -- rules: json_text: mysql.json.text / mysql.json.text
 ```
 
@@ -668,7 +736,7 @@ SELECT
 -- rules: math_argument_type: common.math.argument-type / common.math.argument-type
 -- rules: math_integral: mysql.math.integral / mysql.math.integral
 -- rules: math_bigint: mysql.math.bigint / mysql.math.bigint
--- rules: math_double: mysql.math.double / mysql.math.double
+-- rules: math_double: mysql.math.double-nullable / mysql.math.double-nullable
 -- rules: math_text: mysql.math.text / mysql.math.text
 ```
 
@@ -683,7 +751,7 @@ SELECT
 -- rules: misc_argument: mysql.misc.argument / mysql.misc.argument
 -- rules: misc_bigint: mysql.misc.bigint / mysql.misc.bigint
 -- rules: misc_int: mysql.misc.int / mysql.misc.int
--- rules: misc_text: mysql.misc.text / mysql.misc.text
+-- rules: misc_text: mysql.misc.text-nullable / mysql.misc.text-nullable
 -- rules: misc_ubigint: mysql.misc.ubigint / mysql.misc.ubigint
 -- rules: misc_varbinary: mysql.misc.varbinary / mysql.misc.varbinary
 ```
@@ -716,7 +784,7 @@ SELECT
     DATABASE() AS system_text
 -- rules: system_bigint: mysql.system.bigint / mysql.system.bigint
 -- rules: system_int: mysql.system.int / mysql.system.int
--- rules: system_text: mysql.system.text / mysql.system.text
+-- rules: system_text: mysql.system.text-nullable / mysql.system.text-nullable
 ```
 
 ```sql
@@ -728,6 +796,106 @@ SELECT first_value(1) OVER () AS window_argument, percent_rank() OVER () AS wind
 ```sql
 SELECT MOD(7, 3) AS math_argument_type
 -- rules: math_argument_type: mysql.math.argument-type / mysql.math.argument-type
+```
+
+```sql
+SELECT
+    current_date AS datetime_date_non_null,
+    DATE('2003-12-31 01:02:03') AS datetime_date_nullable,
+    sysdate() AS datetime_datetime,
+    TIMESTAMP('2003-12-31') AS datetime_datetime_nullable,
+    current_time AS datetime_time_non_null,
+    TIME('2003-12-31 01:02:03') AS datetime_time_nullable,
+    GET_FORMAT(DATE, 'USA') AS datetime_text_nullable
+-- rules: datetime_date_non_null: mysql.datetime.date-non-null / mysql.datetime.date-non-null
+-- rules: datetime_date_nullable: mysql.datetime.date-nullable / mysql.datetime.date-nullable
+-- rules: datetime_datetime: mysql.datetime.datetime / mysql.datetime.datetime
+-- rules: datetime_datetime_nullable: mysql.datetime.datetime-nullable / mysql.datetime.datetime-nullable
+-- rules: datetime_time_non_null: mysql.datetime.time-non-null / mysql.datetime.time-non-null
+-- rules: datetime_time_nullable: mysql.datetime.time-nullable / mysql.datetime.time-nullable
+-- rules: datetime_text_nullable: mysql.datetime.text-nullable / mysql.datetime.text-nullable
+```
+
+```sql
+SELECT aes_decrypt('a', 'b') AS encryption_varbinary_nullable
+-- rules: encryption_varbinary_nullable: mysql.encryption.varbinary-nullable / mysql.encryption.varbinary-nullable
+```
+
+```sql
+SELECT JSON_SET('{"a": 1}', '$.a', 2) AS json_json
+-- rules: json_json: mysql.json.json / mysql.json.json
+```
+
+```sql
+SELECT JSON_EXTRACT('[10, 20, [30, 40]]', '$[1]') AS json_json_nullable
+-- rules: json_json_nullable: mysql.json.json-nullable / mysql.json.json-nullable
+```
+
+```sql
+SELECT JSON_VALUE('{"fname": "Joe", "lname": "Palmer"}', '$.fname') AS json_text_nullable
+-- rules: json_text_nullable: mysql.json.text-nullable / mysql.json.text-nullable
+```
+
+```sql
+SELECT EXP(0) AS math_double, rand() AS math_double_non_null
+-- rules: math_double: mysql.math.double / mysql.math.double
+-- rules: math_double_non_null: mysql.math.double-non-null / mysql.math.double-non-null
+```
+
+```sql
+SELECT INET_ATON('10.0.5.9') AS misc_bigint_nullable
+-- rules: misc_bigint_nullable: mysql.misc.bigint-nullable / mysql.misc.bigint-nullable
+```
+
+```sql
+SELECT bin_to_uuid(1) AS misc_text
+-- rules: misc_text: mysql.misc.text / mysql.misc.text
+```
+
+```sql
+SELECT UUID() AS misc_text_non_null
+-- rules: misc_text_non_null: mysql.misc.text-non-null / mysql.misc.text-non-null
+```
+
+```sql
+SELECT inet6_aton(1) AS misc_varbinary_nullable
+-- rules: misc_varbinary_nullable: mysql.misc.varbinary-nullable / mysql.misc.varbinary-nullable
+```
+
+```sql
+SELECT GROUPING(i) AS misc_int_non_null FROM t GROUP BY i WITH ROLLUP
+-- rules: misc_int_non_null: mysql.misc.int-non-null / mysql.misc.int-non-null
+```
+
+```sql
+SELECT
+    FIELD('Gg', 'Aa', 'Bb', 'Cc', 'Dd', 'Ff') AS string_bigint_2_non_null,
+    QUOTE(NULL) AS string_text_non_null,
+    REGEXP_SUBSTR('abc def ghi', '[a-z]+') AS string_text_nullable,
+    from_base64(1) AS string_varbinary_nullable,
+    CONCAT_WS(',', x'61') AS string_binary_any_argument_leading,
+    ELT(1, x'61') AS string_binary_any_argument_nullable
+-- rules: string_bigint_2_non_null: mysql.string.bigint-2-non-null / mysql.string.bigint-2-non-null
+-- rules: string_text_non_null: mysql.string.text-non-null / mysql.string.text-non-null
+-- rules: string_text_nullable: mysql.string.text-nullable / mysql.string.text-nullable
+-- rules: string_varbinary_nullable: mysql.string.varbinary-nullable / mysql.string.varbinary-nullable
+-- rules: string_binary_any_argument_leading: mysql.string.binary-any-argument-leading / mysql.string.binary-any-argument-leading
+-- rules: string_binary_any_argument_nullable: mysql.string.binary-any-argument-nullable / mysql.string.binary-any-argument-nullable
+```
+
+```sql
+SELECT REGEXP_SUBSTR(vb, tx) AS string_binary_nullable FROM t
+-- rules: string_binary_nullable: mysql.string.binary-nullable / mysql.string.binary-nullable
+```
+
+```sql
+SELECT REGEXP_REPLACE(tx, vb, tx) AS string_binary_pattern FROM t
+-- rules: string_binary_pattern: mysql.string.binary-pattern / mysql.string.binary-pattern
+```
+
+```sql
+SELECT USER() AS system_text
+-- rules: system_text: mysql.system.text / mysql.system.text
 ```
 
 ## SQLite
@@ -796,7 +964,7 @@ SELECT
 ```sql
 SELECT ceiling(1) AS math_argument_type, sqrt(1) AS math_double
 -- rules: math_argument_type: sqlite.math.argument-type / sqlite.math.argument-type
--- rules: math_double: sqlite.math.double / sqlite.math.double
+-- rules: math_double: sqlite.math.double-nullable / sqlite.math.double-nullable
 ```
 
 ```sql
@@ -829,6 +997,31 @@ SELECT first_value(1) OVER () AS window_argument, percent_rank() OVER () AS wind
 SELECT likely(1) AS scalar_argument, concat_ws(',', 'a', 'b') AS string_formatted
 -- rules: scalar_argument: sqlite.scalar.argument / sqlite.scalar.argument
 -- rules: string_formatted: common.string.formatted / common.string.formatted
+```
+
+```sql
+SELECT json_object() AS json_text_non_null
+-- rules: json_text_non_null: sqlite.json.text-non-null / sqlite.json.text-non-null
+```
+
+```sql
+SELECT exp(1) AS math_double
+-- rules: math_double: sqlite.math.double / sqlite.math.double
+```
+
+```sql
+SELECT
+    unhex(1) AS scalar_blob_nullable,
+    printf() AS scalar_text_nullable,
+    typeof(1) AS scalar_text_non_null
+-- rules: scalar_blob_nullable: sqlite.scalar.blob-nullable / sqlite.scalar.blob-nullable
+-- rules: scalar_text_nullable: sqlite.scalar.text-nullable / sqlite.scalar.text-nullable
+-- rules: scalar_text_non_null: sqlite.scalar.text-non-null / sqlite.scalar.text-non-null
+```
+
+```sql
+SELECT format() AS string_format
+-- rules: string_format: sqlite.string.format / sqlite.string.format
 ```
 
 ## Other dialects

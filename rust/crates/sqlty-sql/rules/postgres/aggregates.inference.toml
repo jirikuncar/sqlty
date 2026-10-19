@@ -101,9 +101,9 @@ id = "postgres.aggregate.bigint"
 function = "REGR_COUNT"
 dialects = ["postgres"]
 type = "BIGINT"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
-reasoning = "The documentation gives the function a `bigint` result."
+reasoning = "The documentation gives the function a `bigint` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "postgres.aggregate.boolean"
@@ -128,9 +128,9 @@ id = "postgres.aggregate.int"
 function = "GROUPING"
 dialects = ["postgres"]
 type = "INT"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.64 Grouping Operations"
-reasoning = "The documentation gives the function an `integer` result."
+reasoning = "The documentation gives the function an `integer` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "postgres.aggregate.json"

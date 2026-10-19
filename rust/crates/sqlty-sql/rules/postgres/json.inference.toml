@@ -124,12 +124,21 @@ reasoning = "`@>` and `<@` test containment between two jsonb values, so a place
 
 [[function]]
 id = "postgres.json.boolean"
-functions = ["JSONB_PATH_EXISTS", "JSONB_PATH_EXISTS_TZ", "JSONB_PATH_MATCH", "JSONB_PATH_MATCH_TZ", "JSONB_EXISTS", "JSONB_EXISTS_ANY", "JSONB_EXISTS_ALL", "JSON_EXISTS"]
+functions = ["JSONB_PATH_EXISTS", "JSONB_PATH_EXISTS_TZ", "JSONB_EXISTS", "JSONB_EXISTS_ANY", "JSONB_EXISTS_ALL", "JSON_EXISTS"]
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.16.1 Processing and Creating JSON Data, Table 9.46 Additional jsonb Operators (jsonb ? text → boolean), Table 9.46 Additional jsonb Operators (jsonb ?| text[] → boolean), Table 9.46 Additional jsonb Operators (jsonb ?& text[] → boolean); 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
 reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.json.boolean-nullable"
+functions = ["JSONB_PATH_MATCH", "JSONB_PATH_MATCH_TZ"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16.1 Processing and Creating JSON Data, Table 9.46 Additional jsonb Operators (jsonb ? text → boolean), Table 9.46 Additional jsonb Operators (jsonb ?| text[] → boolean), Table 9.46 Additional jsonb Operators (jsonb ?& text[] → boolean); 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `boolean` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
 id = "postgres.json.int"
@@ -142,7 +151,7 @@ reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
 id = "postgres.json.json"
-functions = ["ROW_TO_JSON", "JSON_BUILD_ARRAY", "JSON_OBJECT", "JSON_STRIP_NULLS", "JSON_EXTRACT_PATH", "JSON_ARRAY_ELEMENTS", "JSON", "JSON_ARRAY", "JSON_SCALAR"]
+functions = ["ROW_TO_JSON", "JSON_STRIP_NULLS", "JSON_ARRAY_ELEMENTS", "JSON", "JSON_SCALAR"]
 dialects = ["postgres"]
 type = "JSON"
 nullability = "strict"
@@ -150,13 +159,49 @@ reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Tab
 reasoning = "The documentation gives each of these a `json` result."
 
 [[function]]
+id = "postgres.json.json-non-null"
+functions = ["JSON_BUILD_ARRAY", "JSON_OBJECT", "JSON_ARRAY"]
+dialects = ["postgres"]
+type = "JSON"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives each of these a `json` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "postgres.json.json-nullable"
+function = "JSON_EXTRACT_PATH"
+dialects = ["postgres"]
+type = "JSON"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions"
+reasoning = "The documentation gives each of these a `json` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
 id = "postgres.json.jsonb"
-functions = ["JSON_QUERY", "JSONB_BUILD_ARRAY", "JSONB_OBJECT", "JSONB_STRIP_NULLS", "JSONB_SET", "JSONB_INSERT", "JSONB_EXTRACT_PATH", "JSONB_ARRAY_ELEMENTS", "JSONB_PATH_QUERY", "JSONB_PATH_QUERY_TZ", "JSONB_PATH_QUERY_FIRST", "JSONB_PATH_QUERY_FIRST_TZ", "JSONB_PATH_QUERY_ARRAY", "JSONB_PATH_QUERY_ARRAY_TZ"]
+functions = ["JSONB_OBJECT", "JSONB_STRIP_NULLS", "JSONB_SET", "JSONB_INSERT", "JSONB_ARRAY_ELEMENTS", "JSONB_PATH_QUERY", "JSONB_PATH_QUERY_TZ", "JSONB_PATH_QUERY_ARRAY", "JSONB_PATH_QUERY_ARRAY_TZ"]
 dialects = ["postgres"]
 type = "JSONB"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
 reasoning = "The documentation gives each of these a `jsonb` result."
+
+[[function]]
+id = "postgres.json.jsonb-non-null"
+function = "JSONB_BUILD_ARRAY"
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `jsonb` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "postgres.json.jsonb-nullable"
+functions = ["JSONB_EXTRACT_PATH", "JSONB_PATH_QUERY_FIRST", "JSONB_PATH_QUERY_FIRST_TZ", "JSON_QUERY"]
+dialects = ["postgres"]
+type = "JSONB"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.47 JSON Creation Functions, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `jsonb` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
 id = "postgres.json.record"
@@ -169,9 +214,18 @@ reasoning = "The documentation gives each of these a `record` result."
 
 [[function]]
 id = "postgres.json.text"
-functions = ["JSONB_TYPEOF", "JSON_TYPEOF", "JSONB_PRETTY", "JSONB_EXTRACT_PATH_TEXT", "JSON_EXTRACT_PATH_TEXT", "JSONB_ARRAY_ELEMENTS_TEXT", "JSON_ARRAY_ELEMENTS_TEXT", "JSON_OBJECT_KEYS", "JSONB_OBJECT_KEYS", "JSON_VALUE", "JSON_SERIALIZE"]
+functions = ["JSONB_TYPEOF", "JSON_TYPEOF", "JSONB_PRETTY", "JSONB_ARRAY_ELEMENTS_TEXT", "JSON_ARRAY_ELEMENTS_TEXT", "JSON_OBJECT_KEYS", "JSONB_OBJECT_KEYS", "JSON_SERIALIZE"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
 reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.json.text-nullable"
+functions = ["JSON_EXTRACT_PATH_TEXT", "JSONB_EXTRACT_PATH_TEXT", "JSON_VALUE"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.16 JSON Functions and Operators, Table 9.49 JSON Processing Functions; 9.16.3 SQL/JSON Query Functions, Table 9.52 SQL/JSON Query Functions"
+reasoning = "The documentation gives each of these a `text` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."

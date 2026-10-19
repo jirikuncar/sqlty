@@ -29,7 +29,7 @@ reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
 id = "mysql.math.double"
-functions = ["SQRT", "EXP", "LN", "LOG", "LOG2", "LOG10", "POW", "POWER", "COT", "RAND"]
+functions = ["EXP", "POW", "POWER", "COT"]
 dialects = ["mysql"]
 type = "DOUBLE"
 nullability = "strict"
@@ -37,10 +37,28 @@ reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
 reasoning = "The manual describes each of these as returning a DOUBLE."
 
 [[function]]
+id = "mysql.math.double-non-null"
+function = "RAND"
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.math.double-nullable"
+functions = ["SQRT", "LN", "LOG", "LOG2", "LOG10", "ACOS", "ASIN"]
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
+
+[[function]]
 id = "mysql.math.text"
 function = "CONV"
 dialects = ["mysql"]
 type = "TEXT"
-nullability = "strict"
+nullability = "nullable"
 reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
-reasoning = "The manual describes the function as returning a string."
+reasoning = "The manual describes the function as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."

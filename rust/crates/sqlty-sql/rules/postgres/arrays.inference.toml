@@ -2,7 +2,7 @@
 
 [[function]]
 id = "postgres.array.argument-type"
-functions = ["ARRAY_APPEND", "ARRAY_CAT", "ARRAY_REMOVE", "ARRAY_REPLACE", "TRIM_ARRAY", "ARRAY_SAMPLE", "ARRAY_SHUFFLE"]
+functions = ["ARRAY_REMOVE", "ARRAY_REPLACE", "TRIM_ARRAY", "ARRAY_SAMPLE", "ARRAY_SHUFFLE"]
 dialects = ["postgres"]
 type = "@argument-type(0)"
 nullability = "strict"
@@ -10,13 +10,31 @@ reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Ta
 reasoning = "The result has the type of the first argument."
 
 [[function]]
+id = "postgres.array.argument-type-all-arguments"
+function = "ARRAY_CAT"
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "all-arguments"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The result has the type of the first argument. It skips NULL arguments, so it is NULL only when every argument is."
+
+[[function]]
+id = "postgres.array.argument-type-non-null"
+function = "ARRAY_APPEND"
+dialects = ["postgres"]
+type = "@argument-type(0)"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The result has the type of the first argument. It never returns NULL, even for NULL arguments."
+
+[[function]]
 id = "postgres.array.argument-type-1"
 function = "ARRAY_PREPEND"
 dialects = ["postgres"]
 type = "@argument-type(1)"
-nullability = "strict"
+nullability = "non-null"
 reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
-reasoning = "The result has the type of the second argument."
+reasoning = "The result has the type of the second argument. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "postgres.array.array"
@@ -32,9 +50,9 @@ id = "postgres.array.element"
 function = "UNNEST"
 dialects = ["postgres"]
 type = "@element(0)"
-nullability = "strict"
+nullability = "nullable"
 reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
-reasoning = "The result is an element of the array argument, every dimension unnested."
+reasoning = "The result is an element of the array argument, every dimension unnested. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
 id = "postgres.array.int-array"
@@ -47,7 +65,7 @@ reasoning = "The documentation gives the function an `integer[]` result."
 
 [[function]]
 id = "postgres.array.int"
-functions = ["ARRAY_LENGTH", "ARRAY_NDIMS", "ARRAY_POSITION", "CARDINALITY", "ARRAY_LOWER", "ARRAY_UPPER"]
+functions = ["ARRAY_NDIMS", "CARDINALITY"]
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
@@ -55,10 +73,28 @@ reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Ta
 reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
+id = "postgres.array.int-nullable"
+functions = ["ARRAY_LOWER", "ARRAY_UPPER", "ARRAY_LENGTH", "ARRAY_POSITION"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The documentation gives each of these an `integer` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
 id = "postgres.array.text"
-functions = ["ARRAY_TO_STRING", "ARRAY_DIMS"]
+function = "ARRAY_TO_STRING"
 dialects = ["postgres"]
 type = "TEXT"
-nullability = "strict"
+nullability = "leading(2)"
 reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
-reasoning = "The documentation gives each of these a `text` result."
+reasoning = "The documentation gives each of these a `text` result. Only a NULL array or separator makes it NULL: it skips NULL elements."
+
+[[function]]
+id = "postgres.array.text-nullable"
+function = "ARRAY_DIMS"
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.19 Array Functions and Operators, Table 9.55 Array Functions"
+reasoning = "The documentation gives each of these a `text` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."

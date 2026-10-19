@@ -11,9 +11,18 @@ reasoning = "The manual describes each of these as returning a string."
 
 [[function]]
 id = "mysql.encryption.varbinary"
-functions = ["COMPRESS", "UNCOMPRESS", "AES_ENCRYPT", "AES_DECRYPT", "RANDOM_BYTES"]
+functions = ["COMPRESS", "UNCOMPRESS", "AES_ENCRYPT", "RANDOM_BYTES"]
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.13 Encryption and Compression Functions"
 reasoning = "The manual describes each of these as returning a binary string."
+
+[[function]]
+id = "mysql.encryption.varbinary-nullable"
+function = "AES_DECRYPT"
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.13 Encryption and Compression Functions"
+reasoning = "The manual describes each of these as returning a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."

@@ -65,7 +65,7 @@ reasoning = "The documentation gives the function a `text` result."
 
 [[function]]
 id = "postgres.datetime.time"
-functions = ["LOCALTIME", "MAKE_TIME"]
+function = "MAKE_TIME"
 dialects = ["postgres"]
 type = "TIME"
 nullability = "strict"
@@ -73,13 +73,31 @@ reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators,
 reasoning = "The documentation gives each of these a `time without time zone` result."
 
 [[function]]
+id = "postgres.datetime.time-non-null"
+function = "LOCALTIME"
+dialects = ["postgres"]
+type = "TIME"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `time without time zone` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
 id = "postgres.datetime.timestamp"
-functions = ["LOCALTIMESTAMP", "MAKE_TIMESTAMP"]
+function = "MAKE_TIMESTAMP"
 dialects = ["postgres"]
 type = "TIMESTAMP"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
 reasoning = "The documentation gives each of these a `timestamp without time zone` result."
+
+[[function]]
+id = "postgres.datetime.timestamp-non-null"
+function = "LOCALTIMESTAMP"
+dialects = ["postgres"]
+type = "TIMESTAMP"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `timestamp without time zone` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
 id = "postgres.datetime.timestamptz"

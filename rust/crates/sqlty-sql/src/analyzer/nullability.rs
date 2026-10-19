@@ -1031,23 +1031,39 @@ impl<'a> Analyzer<'a> {
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
 
-        let fixed = |nullability| match nullability {
-            FunctionNullability::NonNull => Some(Nullability::NonNull),
-            FunctionNullability::Nullable => Some(Nullability::Nullable),
-            FunctionNullability::Aggregate | FunctionNullability::Strict => None,
+        let declared = |nullability| {
+            !matches!(
+                nullability,
+                FunctionNullability::Aggregate
+                    | FunctionNullability::Strict
+                    | FunctionNullability::Code
+            )
         };
-        let rules = function_rules(&name);
-        if rules.iter().any(|rule| fixed(rule.nullability).is_some()) {
+        if function_rules(&name)
+            .iter()
+            .any(|rule| declared(rule.nullability))
+        {
             if let Ok(Some((rule, _))) = self.function_rule(&name, &args, scope) {
-                if let Some(nullability) = fixed(rule.nullability) {
-                    return nullability;
+                match rule.nullability {
+                    FunctionNullability::NonNull => return Nullability::NonNull,
+                    FunctionNullability::Nullable => return Nullability::Nullable,
+                    FunctionNullability::AllArguments
+                        if self.coalesces_checked_group(&args, scope, facts) =>
+                    {
+                        return Nullability::NonNull;
+                    }
+                    FunctionNullability::AllArguments => {
+                        return all_nullable(args.iter().map(|arg| of(arg)));
+                    }
+                    FunctionNullability::Leading(k) => {
+                        return any_nullable(args.iter().take(k).map(|arg| of(arg)));
+                    }
+                    _ => {}
                 }
             }
         }
         // `ARRAY(SELECT ...)` over no rows is an empty array.
-        if name == "REGR_COUNT"
-            || (name == "ARRAY" && matches!(func.args, FunctionArguments::Subquery(_)))
-        {
+        if name == "ARRAY" && matches!(func.args, FunctionArguments::Subquery(_)) {
             return Nullability::NonNull;
         }
         // Over no rows MySQL's BIT_AND has every bit set, BIT_OR and BIT_XOR none.
@@ -1099,16 +1115,9 @@ impl<'a> Analyzer<'a> {
         if name == "CURRENT_SETTING" && args.len() == 2 {
             return Nullability::Nullable;
         }
-        if info.is_some_and(|info| info.always_nullable(self.dialect)) {
-            return Nullability::Nullable;
-        }
         match name.as_str() {
-            "COALESCE" | "IFNULL" | "NVL" if self.coalesces_checked_group(&args, scope, facts) => {
-                Nullability::NonNull
-            }
-            "COALESCE" | "IFNULL" | "NVL" => all_nullable(args.iter().map(|arg| of(arg))),
-            "GREATEST" | "LEAST" if postgres => all_nullable(args.iter().map(|arg| of(arg))),
-            "GREATEST" | "LEAST" => any_nullable(args.iter().map(|arg| of(arg))),
+            "NVL" if self.coalesces_checked_group(&args, scope, facts) => Nullability::NonNull,
+            "NVL" => all_nullable(args.iter().map(|arg| of(arg))),
             "IF" | "IIF" if args.len() == 3 => any_nullable([of(args[1]), of(args[2])]),
             "LAG" | "LEAD" => match args.as_slice() {
                 [value, _, default] => any_nullable([of(value), of(default)]),
@@ -1122,14 +1131,6 @@ impl<'a> Analyzer<'a> {
             "MOD" if !postgres => Nullability::Nullable,
             "FIRST_VALUE" | "LAST_VALUE" if frame_holds_current_row(func.over.as_ref()) => first(),
             "FIRST_VALUE" | "LAST_VALUE" => Nullability::Nullable,
-            // PostgreSQL's and SQLite's concat skip NULLs.
-            "CONCAT" if self.dialect != SqlDialect::MySql => Nullability::NonNull,
-            "CONCAT" => any_nullable(args.iter().map(|arg| of(arg))),
-            // Only a NULL separator gives NULL.
-            "CONCAT_WS" => first(),
-            // PostgreSQL 17's `random(min, max)` is strict.
-            "RANDOM" if !args.is_empty() => any_nullable(args.iter().map(|arg| of(arg))),
-            _ if info.is_some_and(|info| info.never_null) => Nullability::NonNull,
             _ if typed_by_rule(&name, self.dialect) && all_positional => {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }

@@ -1,18 +1,15 @@
-//! What the analyzer knows about each built-in function, in one place.
+//! What the analyzer knows about each built-in function besides its rules: whether it is an
+//! aggregate and the types its parameters take, folded into one table of [`FunctionInfo`]
+//! so a call is classified with a single lookup of its upper-case name.
 //!
-//! How a function behaves with NULLs and the types its parameters take used to live in
-//! separate lists searched by name; its result type is an inference rule (`rules/`). They are folded once
-//! into a table of [`FunctionInfo`], so a call is classified with a single lookup of its
-//! upper-case name, and a new function is a row in the list that describes it.
-//!
-//! Dialect-specific behaviour that depends on the arguments (`MOD` by zero, `CONCAT` under
-//! MySQL, ...) stays in code, in `Analyzer::function_nullability`.
+//! A function's result type and nullability are inference rules (`rules/`); behaviour that
+//! depends on the arguments (`MOD` by zero, `LAG`'s default) stays in
+//! `Analyzer::function_nullability`.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use super::dialect_functions::{MYSQL_ALWAYS_NULLABLE, SQLITE_ALWAYS_NULLABLE};
-use super::inference::typed_by_rule;
+use super::inference::strict_by_rule;
 use super::SqlDialect;
 
 /// How a function treats NULLs and rows, apart from its result type.
@@ -33,16 +30,6 @@ pub(super) enum Behavior {
 #[derive(Clone, Copy, Default)]
 pub(super) struct FunctionInfo {
     pub(super) behavior: Behavior,
-    /// Can be NULL for non-null arguments.
-    always_nullable: bool,
-    /// Can be NULL for non-null arguments in MySQL.
-    mysql_nullable: bool,
-    /// Can be NULL for non-null arguments in SQLite.
-    sqlite_nullable: bool,
-    /// Never NULL.
-    pub(super) never_null: bool,
-    /// Looks through NULL arguments (see [`LOOKS_THROUGH_NULLS`]).
-    looks_through_nulls: bool,
     /// All arguments share one type, so a placeholder takes the type of its siblings.
     pub(super) same_type: bool,
     /// The SQL type of each leading argument; an empty name leaves it untyped.
@@ -50,20 +37,11 @@ pub(super) struct FunctionInfo {
 }
 
 impl FunctionInfo {
-    /// Whether the result can be NULL for non-null arguments in `dialect`.
-    pub(super) fn always_nullable(&self, dialect: SqlDialect) -> bool {
-        self.always_nullable
-            || (dialect == SqlDialect::MySql && self.mysql_nullable)
-            || (dialect == SqlDialect::Sqlite && self.sqlite_nullable)
-    }
-
     /// Whether the result is NULL for a NULL argument, as far as narrowing goes: a function
-    /// a rule types whatever its arguments, other than the ones that look through NULLs.
+    /// whose rules make it NULL when an argument is, other than an always valued aggregate.
     pub(super) fn is_strict(name: &str, dialect: SqlDialect) -> bool {
-        typed_by_rule(name, dialect)
-            && lookup(name).is_none_or(|info| {
-                info.behavior != Behavior::AlwaysValued && !info.looks_through_nulls
-            })
+        strict_by_rule(name, dialect)
+            && lookup(name).is_none_or(|info| info.behavior != Behavior::AlwaysValued)
     }
 
     pub(super) fn is_aggregate(&self) -> bool {
@@ -84,12 +62,6 @@ static REGISTRY: LazyLock<HashMap<&'static str, FunctionInfo>> = LazyLock::new(|
     ) -> &'m mut FunctionInfo {
         registry.entry(name).or_default()
     }
-    for name in MYSQL_ALWAYS_NULLABLE {
-        entry(&mut registry, name).mysql_nullable = true;
-    }
-    for name in SQLITE_ALWAYS_NULLABLE {
-        entry(&mut registry, name).sqlite_nullable = true;
-    }
     for name in AGGREGATES {
         entry(&mut registry, name).behavior = Behavior::Aggregate;
     }
@@ -98,15 +70,6 @@ static REGISTRY: LazyLock<HashMap<&'static str, FunctionInfo>> = LazyLock::new(|
     }
     for name in ALWAYS_VALUED_AGGREGATES {
         entry(&mut registry, name).behavior = Behavior::AlwaysValued;
-    }
-    for name in ALWAYS_NULLABLE {
-        entry(&mut registry, name).always_nullable = true;
-    }
-    for name in NEVER_NULL {
-        entry(&mut registry, name).never_null = true;
-    }
-    for name in LOOKS_THROUGH_NULLS {
-        entry(&mut registry, name).looks_through_nulls = true;
     }
     for name in SAME_TYPE {
         entry(&mut registry, name).same_type = true;
@@ -206,115 +169,6 @@ const ALWAYS_VALUED_AGGREGATES: &[&str] = &[
     "TOTAL",
     "JSON_GROUP_ARRAY",
     "JSON_GROUP_OBJECT",
-];
-
-/// Functions that can return NULL for non-null arguments.
-const ALWAYS_NULLABLE: &[&str] = &[
-    "NULLIF",
-    "ARRAY_DIMS",
-    "ARRAY_LOWER",
-    "ARRAY_UPPER",
-    "INET_CLIENT_ADDR",
-    "INET_CLIENT_PORT",
-    "INET_SERVER_ADDR",
-    "INET_SERVER_PORT",
-    "REGEXP_MATCH",
-    "REGEXP_SUBSTR",
-    "ARRAY_LENGTH",
-    "ARRAY_UPPER",
-    "ARRAY_LOWER",
-    "ARRAY_POSITION",
-    "JSON_EXTRACT",
-    "JSON_EXTRACT_PATH",
-    "JSON_EXTRACT_PATH_TEXT",
-    "JSONB_EXTRACT_PATH",
-    "JSONB_EXTRACT_PATH_TEXT",
-    "JSONB_PATH_QUERY_FIRST",
-    "JSONB_PATH_QUERY_FIRST_TZ",
-    // NULL when the path's first result is not a boolean.
-    "JSONB_PATH_MATCH",
-    "JSONB_PATH_MATCH_TZ",
-    "JSON_VALUE",
-    "JSON_QUERY",
-    "NTH_VALUE",
-    // An array can hold NULL elements.
-    "UNNEST",
-    // NULL for a UUID of another variant, or a version without a timestamp.
-    "UUID_EXTRACT_VERSION",
-    "UUID_EXTRACT_TIMESTAMP",
-];
-
-/// Functions that look through NULL arguments, so a condition on their result says nothing
-/// about the arguments: a known built-in other than these is NULL for a NULL argument.
-const LOOKS_THROUGH_NULLS: &[&str] = &[
-    "COALESCE",
-    "IFNULL",
-    "NVL",
-    "CONCAT",
-    "CONCAT_WS",
-    "GREATEST",
-    "LEAST",
-    "IF",
-    "IIF",
-    "COUNT",
-    "REGR_COUNT",
-    "NULLIF",
-    "NVL2",
-    "ISNULL",
-    "TYPEOF",
-    "FIELD",
-    "QUOTE",
-    "QUOTE_NULLABLE",
-    "FORMAT",
-    "NUM_NULLS",
-    "NUM_NONNULLS",
-    "JSON_BUILD_OBJECT",
-    "JSONB_BUILD_OBJECT",
-    "JSON_BUILD_ARRAY",
-    "JSONB_BUILD_ARRAY",
-    "JSON_OBJECT",
-    "JSON_ARRAY",
-    "ROW",
-    "ARRAY_APPEND",
-    "ARRAY_PREPEND",
-    "ARRAY_CAT",
-    "ARRAY_TO_STRING",
-];
-
-/// Window and other functions that never return NULL.
-const NEVER_NULL: &[&str] = &[
-    "GROUPING",
-    "ROW_NUMBER",
-    "RANK",
-    "DENSE_RANK",
-    "NTILE",
-    "PERCENT_RANK",
-    "CUME_DIST",
-    "NOW",
-    "CURRENT_TIMESTAMP",
-    "CURRENT_DATE",
-    "CURRENT_TIME",
-    "LOCALTIME",
-    "LOCALTIMESTAMP",
-    "RANDOM",
-    "RAND",
-    "GEN_RANDOM_UUID",
-    "UUID",
-    "UUID_GENERATE_V4",
-    "JSON_BUILD_OBJECT",
-    "JSONB_BUILD_OBJECT",
-    "JSON_BUILD_ARRAY",
-    "JSONB_BUILD_ARRAY",
-    "NUM_NULLS",
-    "NUM_NONNULLS",
-    "ISNULL",
-    "JSON_OBJECT",
-    "JSON_ARRAY",
-    "ROW",
-    // `typeof(NULL)` is `'null'`, `quote(NULL)` is `'NULL'`, `FIELD(NULL, ...)` is 0.
-    "TYPEOF",
-    "QUOTE",
-    "FIELD",
 ];
 
 /// Positions of text and integer arguments of functions with a known signature.
