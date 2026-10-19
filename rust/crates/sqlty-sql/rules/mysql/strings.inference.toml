@@ -2,7 +2,7 @@
 
 [[function]]
 id = "mysql.string.binary"
-functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE"]
+functions = ["LPAD", "RPAD", "LEFT", "RIGHT", "MID", "REVERSE", "REPEAT", "UPPER", "LOWER", "UCASE", "LCASE", "INSERT", "LTRIM", "RTRIM", "REPLACE", "REGEXP_REPLACE"]
 dialects = ["mysql"]
 argument = ["@binary"]
 type = "VARBINARY"
@@ -193,9 +193,36 @@ reasoning = "The manual describes each of these as returning a binary string. My
 
 [[function]]
 id = "mysql.string.string"
-functions = ["UPPER", "LOWER", "UCASE", "LCASE", "TRIM", "LTRIM", "RTRIM", "LEFT", "RIGHT", "LPAD", "RPAD", "REVERSE", "REPLACE"]
+functions = ["UPPER", "LOWER", "UCASE", "LCASE", "TRIM", "LTRIM", "RTRIM", "LEFT", "RIGHT", "MID", "LPAD", "RPAD", "REVERSE", "REPLACE"]
 dialects = ["mysql"]
 type = "@text(0)"
 nullability = "strict"
 reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
 reasoning = "A string function of a string gives the first argument's string type, a binary string for a binary one."
+
+[[function]]
+id = "mysql.string.char"
+function = "CHAR"
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CHAR(N,... [USING charset_name]): NULL values are skipped. By default, CHAR() returns a binary string)"
+reasoning = "Without USING, the function returns the characters of its codes as a binary string, skipping NULL codes."
+
+[[function]]
+id = "mysql.string.character-length"
+function = "CHARACTER_LENGTH"
+dialects = ["mysql"]
+type = "INT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CHARACTER_LENGTH() is a synonym for CHAR_LENGTH())"
+reasoning = "The function counts characters, as CHAR_LENGTH does."
+
+[[function]]
+id = "mysql.string.load-file"
+function = "LOAD_FILE"
+dialects = ["mysql"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (LOAD_FILE(): If the file does not exist or cannot be read, the function returns NULL)"
+reasoning = "The function returns a file's contents as a binary string, and NULL for a file it cannot read."

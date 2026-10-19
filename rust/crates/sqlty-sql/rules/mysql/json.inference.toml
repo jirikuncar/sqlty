@@ -82,3 +82,21 @@ type = "TEXT"
 nullability = "nullable"
 reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values; 14.17.5 Functions That Return JSON Value Attributes; 14.17.2 Functions That Create JSON Values; 14.17.8 JSON Utility Functions; 14.17.3 Functions That Search JSON Values"
 reasoning = "The manual describes each of these as returning a string. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
+id = "mysql.json.merge"
+function = "JSON_MERGE"
+dialects = ["mysql"]
+type = "JSON"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values (JSON_MERGE(): Deprecated synonym for JSON_MERGE_PRESERVE())"
+reasoning = "The function is JSON_MERGE_PRESERVE, which returns NULL only for a NULL argument."
+
+[[function]]
+id = "mysql.json.validation-report"
+function = "JSON_SCHEMA_VALIDATION_REPORT"
+dialects = ["mysql"]
+type = "JSON"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.7 JSON Schema Validation Functions"
+reasoning = "The function returns a JSON report of the validation, and NULL for a NULL argument."
