@@ -26,7 +26,9 @@ error that lists the valid ones: a typo such as `postgress` would otherwise read
 queries as generic SQL. Type names are
 spelled the PostgreSQL way, so `INT64` expands to `BIGINT` and `NUMBER` to
 `DECIMAL`. PostgreSQL, MySQL and SQLite are specified by the test suite; the
-others work on a best-effort basis. The `--dialect` CLI flag accepts the
+others work on a best-effort basis. `generic` types functions and operators as
+PostgreSQL does, and the ones PostgreSQL lacks, such as `IF` and `IIF`, as MySQL
+or SQLite does. The `--dialect` CLI flag accepts the
 first three; set others with `dialect` in `pyproject.toml`.
 
 ## PostgreSQL type resolution

@@ -1,7 +1,7 @@
 //! The inference rule compiler: `rules/**/*.inference.toml` to Rust source. `build.rs`
 //! runs it; `tests/inference_compiler.rs` tests it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use serde::Deserialize;
@@ -412,9 +412,16 @@ impl Rule {
 
 /// The Rust source of the rules in `files`, `(path, contents)` pairs with paths relative to
 /// the crate (`rules/postgres/json.inference.toml`); a rule in a `common/` directory applies
-/// to every dialect. Errors name the rule and its file.
+/// to every dialect. `rules/dialects.toml` names the dialects that read others' rules.
+/// Errors name the rule and its file.
 pub fn compile(files: &[(String, String)]) -> Result<String, String> {
-    let mut sorted: Vec<&(String, String)> = files.iter().collect();
+    let (extension_files, mut sorted): (Vec<_>, Vec<_>) = files
+        .iter()
+        .partition(|(file, _)| file.ends_with(DIALECTS_FILE));
+    let extensions = match extension_files.first() {
+        Some((_, text)) => extensions(text)?,
+        None => Vec::new(),
+    };
     sorted.sort();
     let mut rules: Vec<Rule> = Vec::new();
     for (file, text) in sorted {
@@ -459,7 +466,66 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
     rules.sort_by_key(|rule| rule.tier);
     check_overlaps(&rules)?;
     check_inherited(&rules)?;
-    Ok(generate(&rules))
+    Ok(generate(&rules, &extensions))
+}
+
+const DIALECTS_FILE: &str = "rules/dialects.toml";
+
+/// A dialect of `rules/dialects.toml`, with no rules of its own, that reads the rules of the
+/// dialects it `extends`: a function or operator takes the rules of the first that has any.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExtensionDef {
+    extends: Vec<String>,
+    reasoning: String,
+}
+
+/// A dialect's `SqlDialect` path and the paths of the dialects it extends, in order.
+type Extension = (String, Vec<&'static str>);
+
+fn extensions(text: &str) -> Result<Vec<Extension>, String> {
+    let parsed: BTreeMap<String, ExtensionDef> =
+        toml::from_str(text).map_err(|e| format!("{DIALECTS_FILE}: {e}"))?;
+    parsed
+        .into_iter()
+        .map(|(name, def)| {
+            let fail = |message: &str| Err(format!("{DIALECTS_FILE}: [{name}] {message}"));
+            if DIALECTS.iter().any(|(known, _)| *known == name) {
+                return fail("has rules of its own, so it extends no dialect");
+            }
+            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase()) {
+                return fail("is not a lower-case dialect name");
+            }
+            if def.reasoning.trim().is_empty() || def.extends.is_empty() {
+                return fail("`extends` and `reasoning` must not be empty");
+            }
+            let mut extends = Vec::new();
+            for dialect in &def.extends {
+                match DIALECTS.iter().find(|(known, _)| known == dialect) {
+                    Some((_, path)) => extends.push(*path),
+                    None => return fail(&format!("extends unknown dialect {dialect:?}")),
+                }
+            }
+            Ok((format!("SqlDialect::Other({name:?})"), extends))
+        })
+        .collect()
+}
+
+/// The dialects `rule` applies to for the function or operator `name`: its own, and each
+/// dialect whose first extended dialect with a rule for `name` is one of them.
+fn applies_to(name: &str, rule: &Rule, rules: &[&Rule], extensions: &[Extension]) -> String {
+    let mut dialects: Vec<&str> = rule.dialects.clone();
+    for (dialect, extends) in extensions {
+        let first = extends.iter().find(|extended| {
+            rules.iter().any(|other| {
+                other.dialects.contains(extended) && other.operators.iter().any(|n| n == name)
+            })
+        });
+        if first.is_some_and(|extended| rule.dialects.contains(extended)) {
+            dialects.push(dialect);
+        }
+    }
+    dialects.join(", ")
 }
 
 /// Validate one rule: everything it names must exist.
@@ -793,16 +859,28 @@ fn within(a: &Types, b: &Types) -> bool {
     }
 }
 
-fn generate(rules: &[Rule]) -> String {
+fn generate(rules: &[Rule], extensions: &[Extension]) -> String {
     let binary: Vec<&Rule> = rules.iter().filter(|rule| !rule.function).collect();
     let functions: Vec<&Rule> = rules.iter().filter(|rule| rule.function).collect();
-    let mut out = generate_binary(&binary);
+    let mut out = generate_binary(&binary, extensions);
     out.push('\n');
-    out.push_str(&generate_functions(&functions));
+    out.push_str(&generate_functions(&functions, extensions));
+    out.push_str(
+        "\n/// The dialects of `rules/dialects.toml`, which read other dialects' rules.\n",
+    );
+    let names: Vec<&str> = extensions
+        .iter()
+        .map(|(path, _)| &path["SqlDialect::Other(".len()..path.len() - 1])
+        .collect();
+    let _ = writeln!(
+        out,
+        "#[cfg(test)]\npub(crate) const EXTENDING_DIALECTS: &[&str] = &[{}];",
+        names.join(", ")
+    );
     out
 }
 
-fn generate_functions(rules: &[&Rule]) -> String {
+fn generate_functions(rules: &[&Rule], extensions: &[Extension]) -> String {
     let mut entries: Vec<(&str, &Rule)> = rules
         .iter()
         .flat_map(|rule| {
@@ -836,7 +914,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
             def.id,
             def.reference.trim(),
             def.reasoning.trim(),
-            rule.dialects.join(", "),
+            applies_to(name, rule, rules, extensions),
             operand(&rule.left),
             operand(&rule.right),
             operand(&rule.any),
@@ -855,7 +933,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
     out
 }
 
-fn generate_binary(rules: &[&Rule]) -> String {
+fn generate_binary(rules: &[&Rule], extensions: &[Extension]) -> String {
     let mut entries: Vec<(&str, &Rule)> = rules
         .iter()
         .flat_map(|rule| rule.operators.iter().map(move |op| (op.as_str(), *rule)))
@@ -896,7 +974,7 @@ fn generate_binary(rules: &[&Rule]) -> String {
             def.id,
             def.reference.trim(),
             def.reasoning.trim(),
-            rule.dialects.join(", "),
+            applies_to(op, rule, rules, extensions),
             operand(&rule.left),
             operand(&rule.right),
             def.left_parameter,

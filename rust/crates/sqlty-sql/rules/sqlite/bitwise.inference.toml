@@ -7,3 +7,11 @@ dialects = ["sqlite"]
 type = "BIGINT"
 reference = "SQLite documentation, SQL Language Expressions, 2 Operators (The result of any binary operator is either a numeric value or NULL)"
 reasoning = "`&` and `|` convert their operands to 64-bit integers, so the result is an integer."
+
+[[rule]]
+id = "sqlite.bitwise.not"
+operator = "Prefix:BitwiseNot"
+dialects = ["sqlite"]
+type = "BIGINT"
+reference = "SQLite documentation, SQL Language Expressions, 2 Operators, and Parse-Affecting Attributes (~ [expr])"
+reasoning = "`~` inverts the bits of its operand read as a 64-bit integer, so the result is an integer for any operand but NULL."

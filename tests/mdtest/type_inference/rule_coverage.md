@@ -100,7 +100,7 @@ SELECT ip - ip AS difference, ip + 1 AS "offset", 1 + ip AS offset_left,
     ip << cn AS address_shift, '10.0.0.0/8' >> ip AS address_shift_right,
     ip & ip AS address_mask, '255.0.0.0' & ip AS address_mask_right, i4 & i8 AS integers,
     i4 << 2 AS shift, ip <<= cn AS contained_or_equal, rg -|- rg AS adjacency,
-    rg + rg AS set_operations
+    rg + rg AS set_operations, ~i4 AS "not", @ i4 AS absolute
 FROM t
 -- rules: difference: postgres.network.difference / postgres.network.difference
 -- rules: offset: postgres.network.offset / postgres.network.offset
@@ -114,6 +114,8 @@ FROM t
 -- rules: contained_or_equal: postgres.network.contained-or-equal / postgres.network.contained-or-equal
 -- rules: adjacency: postgres.range.adjacency / postgres.range.adjacency
 -- rules: set_operations: postgres.range.set-operations / postgres.range.set-operations
+-- rules: not: postgres.bitwise.not / postgres.bitwise.not
+-- rules: absolute: postgres.math.absolute / postgres.math.absolute
 ```
 
 ### Comparison, logic and patterns
@@ -855,7 +857,7 @@ SELECT i / n AS division, tx / 1 AS division_other, i % tx AS modulo_other,
     i & i AS bitwise, i <=> i AS null_safe_equal, b XOR b AS xor, tx || tx AS "or",
     j -> '$.a' AS arrow_json, tx -> '$.a' AS arrow, UPPER(vb) AS binary_string,
     CONCAT(tx, vb) AS binary_any_argument, REGEXP_SUBSTR(tx, vb) AS binary_pattern,
-    ROUND(i) AS round_integer, ROUND(n) AS round_decimal, ROUND(d) AS round_other
+    ROUND(i) AS round_integer, ROUND(n) AS round_decimal, ROUND(d) AS round_other, ~i AS "not"
 FROM t
 -- rules: division: mysql.arithmetic.division / mysql.arithmetic.division
 -- rules: division_other: mysql.arithmetic.division-other / mysql.arithmetic.division-other
@@ -875,6 +877,7 @@ FROM t
 -- rules: round_integer: mysql.numeric.round-integer / mysql.numeric.round-integer
 -- rules: round_decimal: mysql.numeric.round-decimal / mysql.numeric.round-decimal
 -- rules: round_other: mysql.numeric.round-other / mysql.numeric.round-other
+-- rules: not: mysql.bitwise.not / mysql.bitwise.not
 ```
 
 ### Built-in functions
@@ -1148,7 +1151,7 @@ SELECT SUM(i) AS sum FROM t
 
 ```sql
 SELECT i & i AS bitwise, i / i AS division, tx -> '$.a' AS arrow, tx ->> '$.a' AS long_arrow,
-    json_extract(tx, '$.a') AS extract, tx GLOB 'a*' AS glob
+    json_extract(tx, '$.a') AS extract, tx GLOB 'a*' AS glob, ~i AS "not"
 FROM t
 -- rules: bitwise: sqlite.bitwise / sqlite.bitwise
 -- rules: division: common.arithmetic.division / common.arithmetic.division
@@ -1156,6 +1159,7 @@ FROM t
 -- rules: long_arrow: sqlite.json.long-arrow / sqlite.json.long-arrow
 -- rules: extract: sqlite.json.extract / sqlite.json.extract
 -- rules: glob: common.pattern / common.pattern
+-- rules: not: sqlite.bitwise.not / sqlite.bitwise.not
 ```
 
 ### Built-in functions
@@ -1251,7 +1255,8 @@ SELECT format() AS string_format
 
 ## Other dialects
 
-The rules of `common/` that every dialect above overrides apply in the others.
+The rules of `common/` that every dialect above overrides apply in the others, except
+those of `rules/dialects.toml`, such as `generic`, which read PostgreSQL's.
 
 `schema.sql`:
 
@@ -1261,7 +1266,7 @@ CREATE TABLE t (j JSON NOT NULL, jb JSONB NOT NULL);
 
 ```toml
 [tool.sqlty]
-dialect = "generic"
+dialect = "ansi"
 schema = "schema.sql"
 ```
 
@@ -1270,4 +1275,30 @@ SELECT j -> 'a' AS arrow, jb || jb AS jsonb, '{}' || jb AS jsonb_right FROM t
 -- rules: arrow: common.json.arrow / common.json.arrow
 -- rules: jsonb: common.concat.jsonb / common.concat.jsonb
 -- rules: jsonb_right: common.concat.jsonb-right-operand / common.concat.jsonb-right-operand
+```
+
+## Generic SQL
+
+`rules/dialects.toml` makes the `generic` dialect read PostgreSQL's rules, then MySQL's and
+SQLite's for what PostgreSQL does not have, then `common/`.
+
+```toml
+[tool.sqlty]
+dialect = "generic"
+```
+
+```sql
+SELECT GREATEST(1, 2) AS greatest, CBRT(8) AS cbrt, RAND() AS rand, MONTHNAME(CURRENT_DATE) AS month, IIF(TRUE, 1, 2) AS iif, ~5 AS "not"
+-- rules: greatest: postgres.conditional.common / postgres.conditional.common
+-- rules: cbrt: postgres.math.double / postgres.math.double
+-- rules: rand: mysql.math.double-non-null / mysql.math.double-non-null
+-- rules: month: mysql.datetime.text / mysql.datetime.text
+-- rules: iif: sqlite.scalar.branches / sqlite.scalar.branches
+-- rules: not: postgres.bitwise.not / postgres.bitwise.not
+-- columns: greatest: typing.Literal[1, 2] (None)
+-- columns: cbrt: float (DOUBLE)
+-- columns: rand: float (DOUBLE)
+-- columns: month: str (TEXT)
+-- columns: iif: typing.Literal[1, 2] (None)
+-- columns: not: int (None)
 ```

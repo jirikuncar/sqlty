@@ -31,7 +31,7 @@ mdtest, or a converter difference, to document.
 |--------|-------|--------|---------------------|
 | SQLAlchemy | `sqlalchemy` | `reports/sqlalchemy.md` | 7, fixed in #412 |
 | Drivers (live) | `drivers`, a server | `reports/drivers.md` | PostgreSQL geometric types (#411) |
-| sqlglot | `sqlglot`, a server | `reports/sqlglot.md` | MySQL binary strings, `ROUND`/`TRUNCATE`, functions; PostgreSQL range operators (#413) |
+| sqlglot | `sqlglot`, a server | `reports/sqlglot.md` | MySQL binary strings, `ROUND`/`TRUNCATE`, functions; PostgreSQL range operators (#413); generic SQL functions (#598) |
 | Django | `django` | `reports/django.md` | none |
 | Tortoise | `tortoise` | `reports/tortoise.md` | none |
 | SQLModel | `sqlmodel` | `reports/sqlmodel.md` | none |
@@ -43,6 +43,13 @@ mdtest, or a converter difference, to document.
 | PostgreSQL nullability | `pg_nullability.py`, a server | `reports/pg_nullability.md` | none |
 | MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587), date arithmetic and casts (#590) |
 | PostgreSQL documentation | `pg_docs.py`, a server | `reports/pg_docs.md` | `pg_typeof`, `cbrt`, `length` of a path, text search operators, `ts_headline` after a configuration, `string_agg` of `bytea`, `age` of a transaction ID, session names, arrays of arrays, the functions of every documented table, multiranges (#558) |
+
+sqlglot's `generic` rows follow `rules/dialects.toml`: `generic` reads PostgreSQL's rules,
+then MySQL's and SQLite's (#598). What it leaves untyped, such as `COUNTIF`,
+`UNIX_SECONDS`, `TO_BASE32`, `SORT_ARRAY` and `STRUCT`, none of the three has, and is out
+of scope, as are `CURRENT_USER()`, `SESSION_USER()` and `CURRENT_CATALOG()`, which only
+parse without parentheses. Its mismatches are decimal literals, which sqlglot reads as `DOUBLE` and
+PostgreSQL as `numeric`, and `SELECT ALL(SELECT 1)`, where `ALL` is the set quantifier.
 
 `pg_nullability.py` is not a harness source: it runs the PostgreSQL queries of the Markdown tests
 on seeded rows (`tests/_pg_seed.py`) and lists the columns sqlty types as nullable that no
