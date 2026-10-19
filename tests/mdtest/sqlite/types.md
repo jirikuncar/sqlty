@@ -91,3 +91,30 @@ from sqlty import SQL
 # error: [unknown-type] "column `t.payload` has no declared type, so it has no Python type"
 q = SQL[tuple[int, object, object]]("--sql\nSELECT id, payload, extra FROM t")
 ```
+
+## VALUES lists
+
+A `VALUES` list has the columns `column1`, `column2`, ..., each typed by the types of its
+rows and nullable when a row's value is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INTEGER NOT NULL, name TEXT);
+```
+
+```sql
+SELECT * FROM (VALUES (1, 'a'), (2, NULL))
+-- columns: column1: typing.Literal[1, 2] (None)
+-- columns: column2: typing.Literal['a'] | None (None)
+```
+
+```sql
+SELECT column1 FROM (VALUES (1), (2.5)) AS v
+-- columns: column1: float (DOUBLE)
+```
+
+```sql
+SELECT column1 AS a FROM (VALUES ((SELECT name FROM t LIMIT 1)))
+-- columns: a: str | None (TEXT)
+```

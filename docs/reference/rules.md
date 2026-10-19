@@ -587,8 +587,9 @@ Default: warn. A cast target or schema column type with no Python type.
 ### unsupported-syntax
 
 Default: warn. A construct that parses but that sqlty does not type: an
-expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
-of a table function. `NULL` and placeholders are not reported.
+expression without a typing rule, `VALUES` outside PostgreSQL, MySQL and SQLite,
+`*` over a `USING` join, a column of a table function. `NULL` and placeholders
+are not reported.
 
 ### insert-missing-column
 
