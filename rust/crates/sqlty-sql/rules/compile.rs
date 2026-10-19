@@ -412,6 +412,7 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
     }
     rules.sort_by_key(|rule| rule.tier);
     check_overlaps(&rules)?;
+    check_inherited(&rules)?;
     Ok(generate(&rules))
 }
 
@@ -672,6 +673,50 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                         later.def.id, later.file, earlier.def.id, earlier.file
                     ));
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A dialect rule that repeats a `common/` rule, with the same operands and outcome, is an
+/// error: the dialect inherits it already, unless another of its rules would catch the
+/// operands first.
+fn check_inherited(rules: &[Rule]) -> Result<(), String> {
+    let same = |a: &Rule, b: &Rule| {
+        a.function == b.function
+            && a.left == b.left
+            && a.right == b.right
+            && a.any == b.any
+            && a.outcome() == b.outcome()
+    };
+    for rule in rules
+        .iter()
+        .filter(|rule| rule.tier == 0 && !rule.dialects.is_empty())
+    {
+        for operator in &rule.operators {
+            let Some(common) = rules.iter().find(|common| {
+                common.tier == 1
+                    && common.operators.contains(operator)
+                    && same(rule, common)
+                    && (common.dialects.is_empty()
+                        || rule.dialects.iter().all(|d| common.dialects.contains(d)))
+            }) else {
+                continue;
+            };
+            let caught = rules.iter().any(|other| {
+                other.tier == 0
+                    && !std::ptr::eq(other, rule)
+                    && other.function == rule.function
+                    && other.operators.contains(operator)
+                    && intersect(rule, other).is_some()
+            });
+            if !caught {
+                return Err(format!(
+                    "rule {} ({}) repeats rule {} ({}) for {operator}, which its dialects \
+                     inherit; remove it",
+                    rule.def.id, rule.file, common.def.id, common.file
+                ));
             }
         }
     }

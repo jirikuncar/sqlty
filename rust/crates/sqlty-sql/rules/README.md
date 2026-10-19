@@ -179,6 +179,9 @@ The operands are typed only when a rule of the operator lists operand types.
   rule is strictly narrower (a specific case before the general one), or the
   earlier rule lists the later one in `shadows`. Otherwise file order would
   decide silently.
+- a dialect rule that repeats a `common/` rule, with the same operands, type and
+  nullability: the dialect inherits it already. It stays when another rule of the
+  dialect would catch its operands first.
 
 `tests/inference_compiler.rs` covers each case.
 
