@@ -108,9 +108,12 @@ SELECT note -> '$.a' AS a, note ->> '$.a' AS b, json_extract(note, '$.a') AS c F
 -- columns: c: typing.Any (None)
 ```
 
+`json_group_array` and `json_group_object` are an empty array or object over no rows.
+
 ```sql
-SELECT json_group_array(id) AS a FROM events
--- columns: a: str | None (TEXT)
+SELECT json_group_array(id) AS a, json_group_object(name, note) AS b FROM events WHERE id < 0
+-- columns: a: str (TEXT)
+-- columns: b: str (TEXT)
 ```
 
 `jsonb` stores JSON as a blob; `json_error_position` is where the text stops being JSON.
@@ -119,6 +122,55 @@ SELECT json_group_array(id) AS a FROM events
 SELECT jsonb(note) AS a, json_error_position(note) AS b FROM events
 -- columns: a: bytes | None (BLOB)
 -- columns: b: int | None (BIGINT)
+```
+
+Each `jsonb_` function works as its `json_` one, but returns JSONB, a blob.
+`jsonb_extract` returns a scalar element as its SQL value.
+
+```sql
+SELECT jsonb_array(id, note) AS a, jsonb_object('n', note) AS b, jsonb_set(note, '$.a', 1) AS c, jsonb_insert(note, '$.a', 1) AS d, jsonb_replace(note, '$.a', 1) AS e, jsonb_remove(note, '$.a') AS f, jsonb_patch(note, '{}') AS g, jsonb_array_insert(note, '$[0]', 1) AS h, json_array_insert(note, '$[0]', 1) AS i, jsonb_extract(note, '$.a') AS k, jsonb_group_array(id) AS l, jsonb_group_object(name, note) AS m FROM events
+-- columns: a: bytes (BLOB)
+-- columns: b: bytes (BLOB)
+-- columns: c: bytes | None (BLOB)
+-- columns: d: bytes | None (BLOB)
+-- columns: e: bytes | None (BLOB)
+-- columns: f: bytes | None (BLOB)
+-- columns: g: bytes | None (BLOB)
+-- columns: h: bytes | None (BLOB)
+-- columns: i: str | None (TEXT)
+-- columns: k: typing.Any (None)
+-- columns: l: bytes (BLOB)
+-- columns: m: bytes (BLOB)
+-- rules: a: sqlite.json.blob-non-null / sqlite.json.blob-non-null
+-- rules: b: sqlite.json.blob-non-null / sqlite.json.blob-non-null
+-- rules: c: sqlite.json.blob / sqlite.json.blob
+-- rules: d: sqlite.json.blob / sqlite.json.blob
+-- rules: e: sqlite.json.blob / sqlite.json.blob
+-- rules: f: sqlite.json.blob / sqlite.json.blob
+-- rules: g: sqlite.json.blob / sqlite.json.blob
+-- rules: h: sqlite.json.blob / sqlite.json.blob
+-- rules: i: sqlite.json.text / sqlite.json.text
+-- rules: k: sqlite.json.jsonb-extract / sqlite.json.jsonb-extract
+-- rules: l: sqlite.json.aggregate-blob / sqlite.json.aggregate-blob
+-- rules: m: sqlite.json.aggregate-blob / sqlite.json.aggregate-blob
+```
+
+## Percentiles
+
+The [percentile extension](https://www.sqlite.org/percentile.html) adds `median`,
+`percentile`, `percentile_cont` and `percentile_disc`. Each returns a real, and `NULL`
+when every input is `NULL`, even within a group.
+
+```sql
+SELECT median(ratio) AS a, percentile(id, 90) AS b, percentile_cont(ratio, 0.5) AS c, percentile_disc(id, 0.5) AS d FROM events GROUP BY name
+-- columns: a: float | None (DOUBLE)
+-- columns: b: float | None (DOUBLE)
+-- columns: c: float | None (DOUBLE)
+-- columns: d: float | None (DOUBLE)
+-- rules: a: sqlite.aggregate.percentile / sqlite.aggregate.percentile
+-- rules: b: sqlite.aggregate.percentile / sqlite.aggregate.percentile
+-- rules: c: sqlite.aggregate.percentile / sqlite.aggregate.percentile
+-- rules: d: sqlite.aggregate.percentile / sqlite.aggregate.percentile
 ```
 
 ## Window functions and NULLIF
@@ -187,6 +239,18 @@ SELECT id & 3 AS a, id | 4 AS b, ~id AS c, name & 1 AS d, note | 1 AS e FROM eve
 -- columns: e: int | None (BIGINT)
 ```
 
+So do the shifts `<<` and `>>`.
+
+```sql
+SELECT id << 2 AS a, note >> 1 AS b, id << 1 | 1 AS c FROM events
+-- columns: a: int (BIGINT)
+-- columns: b: int | None (BIGINT)
+-- columns: c: int (BIGINT)
+-- rules: a: sqlite.bitwise / sqlite.bitwise
+-- rules: b: sqlite.bitwise / sqlite.bitwise
+-- rules: c: sqlite.bitwise / sqlite.bitwise
+```
+
 ## Branches of different types
 
 SQLite gives an expression no type: a `CASE` returns whichever branch's value
@@ -240,6 +304,14 @@ SELECT note IS name AS a, note IS NOT 'x' AS b, note IS NULL AS c FROM events
 -- columns: a: int (BOOLEAN)
 -- columns: b: int (BOOLEAN)
 -- columns: c: int (BOOLEAN)
+```
+
+`x ISNULL` is `x IS NULL`, and `x NOTNULL` is `x IS NOT NULL`.
+
+```sql
+SELECT note ISNULL AS a, note NOTNULL AS b FROM events WHERE name ISNULL
+-- columns: a: int (BOOLEAN)
+-- columns: b: int (BOOLEAN)
 ```
 
 ## Window frames with EXCLUDE

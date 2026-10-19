@@ -98,3 +98,12 @@ type = "VARBINARY"
 nullability = "nullable"
 reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
+
+[[function]]
+id = "mysql.misc.interval"
+function = "INTERVAL"
+dialects = ["mysql"]
+type = "INT"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators (INTERVAL(N,N1,N2,N3,...) Returns 0 if N ≤ N1, 1 if N ≤ N2 and so on, or -1 if N is NULL)"
+reasoning = "The function returns the index of the interval `N` falls in, and -1 rather than NULL for a NULL `N`."

@@ -39,7 +39,7 @@ stale-type = "error"
 | [`insert-missing-column`](#insert-missing-column) | Names | error | no | INSERT that leaves out a `NOT NULL` column without a default |
 | [`ungrouped-column`](#ungrouped-column) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
-| [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
+| [`stale-type`](#stale-type) | Rewrite | error | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` and a field that changes the SQL |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
@@ -587,8 +587,10 @@ Default: warn. A cast target or schema column type with no Python type.
 ### unsupported-syntax
 
 Default: warn. A construct that parses but that sqlty does not type: an
-expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
-of a table function. `NULL` and placeholders are not reported.
+expression without a typing rule, `VALUES` outside PostgreSQL, MySQL and SQLite,
+`*` over a `USING` join, a column of a table function whose columns sqlty does
+not read. `NULL` and placeholders
+are not reported.
 
 ### insert-missing-column
 
@@ -624,7 +626,8 @@ the `"--sql SELECT"` form, and strings that are not plain literals
 
 ### stale-type
 
-Default: warn. The `T` in `SQL[tuple[...]]` differs from the type sqlty infers
+Default: error, or warn when the annotation admits every row the query
+returns. The `T` in `SQL[tuple[...]]` differs from the type sqlty infers
 now, for example after the query or the schema changed. An item that only
 parametrises an inferred bare generic (`list[str]` for `list`) is not stale.
 Named row types are covered by the row type rules instead.
@@ -634,7 +637,15 @@ from sqlty import SQL
 
 # error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [stale-type] "SQL[tuple[int | None]] should be SQL[tuple[int]]"
+r = SQL[tuple[int | None]]("--sql\nSELECT id::INTEGER FROM users")
 ```
+
+The first annotation is wrong for every row, so it is an error. The second is
+only wider than it needs to be: the code handles `None` that never comes, and
+still works. It is a warning, so a migration that makes a column `NOT NULL`
+doesn't fail `sqlty check`, while one that makes it nullable does. Setting
+`stale-type` in `[tool.sqlty.rules]` gives both that severity.
 
 Fix: `sqlty check --fix` writes the inferred `T`, keeping parametrised
 generics; see also

@@ -11,7 +11,7 @@ use crate::diagnostics::NameRule;
 use super::dialect::SqlDialect;
 use super::functions::{positional_args, Returns};
 use super::inference::FunctionType;
-use super::literals::{constant, strip, value_set};
+use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
 use super::operators::{category, common_of, common_type, operand_type, type_base};
@@ -87,12 +87,17 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The type of `field` in the composite type `composite`, when the schema declares it;
-    /// the composite's name when it declares no such field.
+    /// the composite's name when it declares no such field. In PostgreSQL each table is
+    /// also the composite type of its rows.
     fn field_typed(&self, composite: Option<&str>, field: &Ident) -> Result<Typed, String> {
-        let Some((name, fields)) = composite
-            .map(str::to_lowercase)
-            .and_then(|name| Some((name.clone(), self.schema.composite(&name)?)))
-        else {
+        let postgres = self.dialect == SqlDialect::Postgres;
+        let Some((name, fields)) = composite.map(str::to_lowercase).and_then(|name| {
+            let fields = self
+                .schema
+                .composite(&name)
+                .or_else(|| postgres.then(|| self.schema.table(&name)).flatten())?;
+            Some((name, fields))
+        }) else {
             return Ok(Typed::UNKNOWN);
         };
         let field = fold(field, self.dialect);
@@ -119,12 +124,15 @@ impl<'a> Analyzer<'a> {
 
     /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a
     /// `pg_catalog.` qualifier names the same built-in, and a quoted name that is not lower
-    /// case (`"LOWER"`) is no built-in at all.
+    /// case (`"LOWER"`) is no built-in at all. Elsewhere a quoted name is the built-in's.
     pub(super) fn builtin_name(&self, name: &ObjectName) -> String {
-        if self.dialect != SqlDialect::Postgres {
-            return name.to_string().to_uppercase();
-        }
         let idents: Vec<&Ident> = name.0.iter().filter_map(|part| part.as_ident()).collect();
+        if self.dialect != SqlDialect::Postgres {
+            return match idents.as_slice() {
+                [only] => only.value.to_uppercase(),
+                _ => name.to_string().to_uppercase(),
+            };
+        }
         let bare = match idents.as_slice() {
             [only] => only,
             [schema, last] if fold(schema, self.dialect) == "pg_catalog" => last,
@@ -179,7 +187,8 @@ impl<'a> Analyzer<'a> {
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
-            // MySQL's `CONVERT(x, type)`; `CONVERT(x USING charset)` keeps a string a string.
+            // MySQL's `CONVERT(x, type)`; `CONVERT(x USING charset)` is a binary string for
+            // `binary`, else text.
             Expr::Convert {
                 data_type: Some(data_type),
                 is_try: false,
@@ -188,9 +197,21 @@ impl<'a> Analyzer<'a> {
             Expr::Convert {
                 expr: inner,
                 data_type: None,
-                charset: Some(_),
+                charset: Some(charset),
                 ..
-            } => self.expr(inner, scope),
+            } => {
+                let typed = self.expr(inner, scope)?;
+                let (kind, sql_type) = if is_binary_charset(charset) {
+                    ("bytes", "VARBINARY")
+                } else {
+                    ("str", "TEXT")
+                };
+                Ok(if python_kind(&typed) == Some(kind) {
+                    typed
+                } else {
+                    from_sql_type(sql_type, self.dialect)
+                })
+            }
             Expr::TypedString(typed) => Ok(self.cast_typed(&typed.data_type)),
             Expr::Nested(inner) => self.expr(inner, scope),
             Expr::Array(array) => self.array_typed(&array.elem, scope),
@@ -198,10 +219,13 @@ impl<'a> Analyzer<'a> {
                 self.access_typed(root, access_chain, scope)
             }
             Expr::UnaryOp {
-                op: UnaryOperator::Minus | UnaryOperator::Plus,
+                op: op @ (UnaryOperator::Minus | UnaryOperator::Plus),
                 expr: inner,
             } => match crate::values::constant(expr) {
                 Some(negative) => Ok(constant(negative)),
+                None if self.prefix_rule(op, inner, scope)?.is_some() => {
+                    self.prefix_op(op, inner, scope)
+                }
                 None => Ok(strip(self.expr(inner, scope)?, self.dialect)),
             },
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
@@ -609,6 +633,11 @@ impl<'a> Analyzer<'a> {
         }
         typed
     }
+}
+
+/// Whether `CONVERT(x USING charset)` gives a binary string.
+pub(super) fn is_binary_charset(charset: &ObjectName) -> bool {
+    charset.to_string().eq_ignore_ascii_case("binary")
 }
 
 #[cfg(test)]

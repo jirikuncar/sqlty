@@ -15,6 +15,7 @@ use sqlparser::ast::{
 };
 
 use super::dialect::SqlDialect;
+use super::expr::is_binary_charset;
 use super::functions::{function_name, positional_args};
 use super::hashing::ExprKey;
 use super::inference::{
@@ -577,6 +578,19 @@ impl<'a> Analyzer<'a> {
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         match expr {
             Expr::Nested(inner) | Expr::Collate { expr: inner, .. } => of(inner),
+            // Bytes invalid in the character set convert to NULL.
+            Expr::Convert {
+                expr: inner,
+                data_type: None,
+                charset: Some(charset),
+                ..
+            } if !is_binary_charset(charset)
+                && self
+                    .expr(inner, scope)
+                    .is_ok_and(|typed| python_kind(&typed) == Some("bytes")) =>
+            {
+                Nullability::Nullable
+            }
             Expr::Convert {
                 expr: inner,
                 is_try: false,
@@ -939,16 +953,29 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         facts: &Facts,
     ) -> Nullability {
-        let (root, chain) = split_access(root, access_chain);
+        let mut bare = root;
+        while let Expr::Nested(inner) = bare {
+            bare = inner;
+        }
+        // A field of a whole-row reference is the column: `(u).name` reads `u.name`.
+        let whole_row = match (bare, access_chain) {
+            (Expr::Identifier(_), [AccessExpr::Dot(Expr::Identifier(_)), ..])
+                if self.locate_column(bare, scope).is_none()
+                    && self.whole_row_table(bare, scope).is_some() =>
+            {
+                split_access(bare, access_chain)
+            }
+            _ => split_access(root, access_chain),
+        };
+        let (root, chain) = whole_row;
         let mut result = self.nullability(&root, scope, facts);
         for access in chain {
             result = match access {
                 // An index past the end reads as NULL.
                 AccessExpr::Subscript(Subscript::Index { .. }) => Nullability::Nullable,
                 AccessExpr::Subscript(Subscript::Slice { .. }) => result,
-                // A field of a row can hold NULL; a NULL row has only NULL fields.
-                AccessExpr::Dot(_) if result == Nullability::Nullable => result,
-                AccessExpr::Dot(_) => Nullability::Unknown,
+                // A field of a composite value can hold NULL.
+                AccessExpr::Dot(_) => Nullability::Nullable,
             };
         }
         result
@@ -1073,8 +1100,17 @@ impl<'a> Analyzer<'a> {
         {
             return Nullability::NonNull;
         }
-        // SQLite's `total` is 0.0 over no rows.
-        if name == "TOTAL" && self.dialect == SqlDialect::Sqlite {
+        // SQLite's `total` is 0.0 over no rows, its JSON aggregates an empty array or object.
+        if self.dialect == SqlDialect::Sqlite
+            && matches!(
+                name.as_str(),
+                "TOTAL"
+                    | "JSON_GROUP_ARRAY"
+                    | "JSON_GROUP_OBJECT"
+                    | "JSONB_GROUP_ARRAY"
+                    | "JSONB_GROUP_OBJECT"
+            )
+        {
             return Nullability::NonNull;
         }
         // SQLite's two-argument MIN and MAX are scalar functions.

@@ -111,6 +111,9 @@ tool such as pre-commit passes file names.
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
 
+sqlty reads Python files as UTF-8. A file it changes keeps its byte order mark
+and its line endings, `\n` or `\r\n`, as the first line has them.
+
 ## `sqlty rewrite`
 
 Wrap `--sql` strings in `SQL[T](...)` with the inferred row type and add the
@@ -182,7 +185,7 @@ diagnostic and a summary:
 
 ```text
 queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
-Found 1 warning(s)
+Found 1 error(s)
 ```
 
 <!-- generated:cli-usage-check -->

@@ -347,9 +347,9 @@ d = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT c.id FROM c"
 e = SQL[tuple[int]]("--sql\nWITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r")
 ```
 
-#### A recursive CTE over VALUES outside PostgreSQL
+#### A recursive CTE over VALUES in SQLite
 
-The anchor's `VALUES` list is untyped there, but the CTE is still a table.
+The anchor's `VALUES` list types the CTE's column.
 
 ```toml
 [tool.sqlty]
@@ -357,8 +357,10 @@ dialect = "sqlite"
 ```
 
 ```python
-# error: [unsupported-syntax] "a VALUES list is not typed"
-q = "--sql\nWITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r"
+from sqlty import SQL
+
+# error:
+q = SQL[tuple[int]]("--sql\nWITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r")
 ```
 
 #### Aliases
@@ -796,4 +798,15 @@ a = SQL[tuple[int | None]]("--sql\nSELECT (p).x AS x FROM shapes")
 b = SQL[tuple[int | None]]("--sql\nSELECT (shapes.p).y AS y FROM shapes")
 # error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 c = SQL[tuple[object]]("--sql\nSELECT p FROM shapes")
+```
+
+A field of a whole-row reference, `(s).id`, has the column's type. The row
+itself is not reported, like `NULL` and placeholders.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, int | None]]("--sql\nSELECT (s).id AS id, ((s).p).x AS x FROM shapes s")
+b = SQL[tuple[object]]("--sql\nSELECT s FROM shapes s")
 ```

@@ -326,6 +326,60 @@ SELECT SUM(a) AS a, SUM(b) AS b, SUM(c) AS c, SUM(d) AS d, SUM(e) AS e, SUM(f) A
 -- columns: f: float | None (DOUBLE)
 ```
 
+## Arithmetic converts operands to numbers
+
+MySQL computes with each operand converted to a number: unsigned, `YEAR`, `BIT` and
+`BOOLEAN` values become integers, strings become doubles. `SUM`, `AVG`, `ABS`, `ROUND`
+and the bit operators convert them the same way. `SUM` of dates is a `DECIMAL`, and a
+negated date a `DOUBLE`; other arithmetic on dates stays untyped (see below).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (
+    ui INT UNSIGNED NOT NULL, yr YEAR NOT NULL, bt BIT(8) NOT NULL, bo BOOLEAN NOT NULL,
+    dt DATE NOT NULL, tx TEXT NOT NULL, n DECIMAL(10, 2) NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ui + 1.5 AS a, ui / 2 AS b, yr + 1 AS c, bt % 3 AS d, bo * 2 AS e, tx * 2 AS f, n - ui AS g FROM t
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: decimal.Decimal (DECIMAL)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: int (BIGINT)
+-- columns: f: float (DOUBLE)
+-- columns: g: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT -bt AS a, -dt AS b, ABS(bo) AS c, ABS(tx) AS d, ROUND(ui) AS e, TRUNCATE(yr, 0) AS f, bt & 1 AS g, ~yr AS h FROM t
+-- columns: a: int (BIGINT)
+-- columns: b: float (DOUBLE)
+-- columns: c: int (BIGINT)
+-- columns: d: float (DOUBLE)
+-- columns: e: int (BIGINT)
+-- columns: f: int (BIGINT)
+-- columns: g: int (UBIGINT)
+-- columns: h: int (UBIGINT)
+```
+
+```sql
+SELECT SUM(bt) AS a, SUM(bo) AS b, SUM(dt) AS c, SUM(tx) AS d, AVG(tx) AS e FROM t
+-- columns: a: decimal.Decimal | None (DECIMAL)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: decimal.Decimal | None (DECIMAL)
+-- columns: d: float | None (DOUBLE)
+-- columns: e: float | None (DOUBLE)
+```
+
 ## Date arithmetic
 
 `date ± INTERVAL n unit` is a `DATE` for day units and coarser, and a
@@ -351,4 +405,34 @@ SELECT d + INTERVAL 1 DAY AS a, INTERVAL 1 MONTH + d AS b, d - INTERVAL 1 HOUR A
 -- columns: e: datetime.datetime | None (DATETIME)
 -- columns: f: None (None)
 -- columns: g: None (None)
+```
+
+## VALUES lists
+
+A `VALUES` list has the columns `column_0`, `column_1`, ..., each typed by the common
+type of its rows and nullable when a row's value is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INT NOT NULL, name VARCHAR(10));
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM (VALUES ROW(1, 'a', 1.5), ROW(2, NULL, 2)) AS v
+-- columns: column_0: typing.Literal[1, 2] (None)
+-- columns: column_1: typing.Literal['a'] | None (None)
+-- columns: column_2: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT v.a, v.b FROM (VALUES ROW((SELECT max(id) FROM t), (SELECT name FROM t LIMIT 1))) AS v(a, b)
+-- columns: a: int | None (INT)
+-- columns: b: str | None (VARCHAR(10))
 ```

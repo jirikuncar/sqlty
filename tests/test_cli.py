@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+import contextlib
 import json
 import logging
 import os
@@ -185,9 +187,10 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
     )
     monkeypatch.chdir(tmp_path)
 
-    main(["check", "--explain", "q.py"])
-    out = capsys.readouterr().out.splitlines()
+    code, out, _ = _run(["check", "--explain", "q.py"], capsys)
+    out = out.splitlines()
 
+    assert code == 1
     assert out[:4] == [
         "q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
         "  total: type and nullability by inference rule postgres.aggregate.sum-integers",
@@ -196,10 +199,9 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
         "(sum ( smallint ) → bigint, sum ( integer ) → bigint)",
     ]
     assert out[4].startswith("q.py:3: [stale-type]")
-    assert out[5] == "Found 2 warning(s)"
+    assert out[5] == "Found 2 error(s)"
 
-    main(["check", "q.py"])
-    assert "inference rule" not in capsys.readouterr().out
+    assert "inference rule" not in _run(["check", "q.py"], capsys)[1]
 
 
 def test_check_reads_type_overrides(tmp_path, monkeypatch, capsys) -> None:
@@ -442,13 +444,19 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "bad.py").write_text(
         'from sqlty import SQL\nq = SQL[tuple[int, int]]("--sql\\nSELECT 1::INTEGER AS n")\n'
     )
+    (tmp_path / "wide.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int | None]]("--sql\\nSELECT 1::INTEGER AS n")\n'
+    )
     monkeypatch.chdir(tmp_path)
 
     assert _run(["check", "ok.py"], capsys)[0] == 0
-    # stale-type is a warning by default: reported, exit 0.
+    # stale-type is an error by default, a warning when the annotation admits every row.
+    assert _run(["check", "bad.py"], capsys)[0] == 1
+    assert _run(["check", "wide.py"], capsys)[0] == 0
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "warn"\n')
     assert _run(["check", "bad.py"], capsys)[0] == 0
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "error"\n')
-    assert _run(["check", "bad.py"], capsys)[0] == 1
+    assert _run(["check", "wide.py"], capsys)[0] == 1
 
 
 def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
@@ -1291,6 +1299,26 @@ def test_a_file_that_is_not_utf8_is_skipped(tmp_path, monkeypatch, caplog, comma
     assert "latin1.py: not UTF-8" in caplog.text
     if command == "rewrite":
         assert (tmp_path / "ok.py").read_text().startswith("from sqlty import SQL")
+
+
+@pytest.mark.parametrize("command", ["rewrite", "strip", "check --fix"])
+def test_a_byte_order_mark_and_crlf_line_endings_are_kept(tmp_path, monkeypatch, command) -> None:
+    source = 'q = "--sql\\nSELECT id::INTEGER FROM users"\r\nr = 1\r\n'
+    if command == "strip":
+        source = 'from sqlty import SQL\r\nq = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")\r\n'
+    elif command == "check --fix":
+        source = 'q = "--sql SELECT id::INTEGER FROM users"\r\nr = 1\r\n'
+    path = tmp_path / "q.py"
+    path.write_bytes(codecs.BOM_UTF8 + source.encode())
+    monkeypatch.chdir(tmp_path)
+
+    with contextlib.suppress(SystemExit):
+        main([*command.split(), "q.py"])
+    written = path.read_bytes()
+    assert written != codecs.BOM_UTF8 + source.encode()
+    assert written.startswith(codecs.BOM_UTF8)
+    assert written.count(b"\r\n") == written.count(b"\n")
+    assert codecs.BOM_UTF8 not in written[3:]
 
 
 def test_skill_prints_lists_and_installs(tmp_path, capsys, caplog) -> None:

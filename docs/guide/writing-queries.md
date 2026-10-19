@@ -101,7 +101,10 @@ know, and an expression it cannot type, such as arithmetic or `NULL`, make the
 row type unknown: the string is left as it is (`SQL[UNTYPED]` with
 [`untyped = "sentinel"`](untyped.md)) and `sqlty check` skips the column.
 Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
-wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
+wider type. MySQL converts each operand to a number first, as the server does:
+unsigned, `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles,
+so `text_col + 0` is `float`. SQLite converts a string or blob to an integer or a real,
+typed `float`, and reads a `BOOLEAN` as an integer. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
 `greatest`, `unnest` and the advisory locks are typed too. In PostgreSQL, `CASE`,
 `COALESCE`, `GREATEST`, `LEAST`, `VALUES`, `ARRAY[...]` and `UNION` resolve one type
 for their inputs as the server does: string literals and `NULL` take the type of
@@ -122,7 +125,7 @@ is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, th
 target of a cast of an unnamed value (`1::int` is `int4`, `'a'::text` is `text`,
 `true::bool` is `bool`), else `?column?` (a plain `true` too). A `CASE` takes the name of its `ELSE`
 expression, if it has one. A `VALUES` list has the columns `column1`,
-`column2`, .... MySQL and SQLite name an unaliased expression by its text instead
+`column2`, ... (`column_0`, `column_1`, ... in MySQL). MySQL and SQLite name an unaliased expression by its text instead
 (`max(id)`, `1 + 1`), a column by its name, and MySQL a string literal by its value.
 Alias columns that a row type matches by name.
 
@@ -145,7 +148,7 @@ broken = "--sql\nSELEC id FROM users"
 # rewritten: broken = "--sql\nSELEC id FROM users"
 ```
 
-Queries that return rows of an unknown type (`VALUES`, unparseable `SELECT`)
+Queries that return rows of an unknown type, such as a `SELECT` that does not parse,
 are also left alone by default; see [Untyped queries](untyped.md) to mark them
 explicitly.
 

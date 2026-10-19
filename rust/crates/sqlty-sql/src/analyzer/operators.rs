@@ -40,7 +40,11 @@ impl Analyzer<'_> {
             None if reads => self.rule_operands(left, op, right, scope)?,
             None => (Typed::UNKNOWN, Typed::UNKNOWN),
         };
-        let rank = |t: &Typed| operand_type(t).and_then(numeric_rank);
+        let rank = |t: &Typed| match self.dialect {
+            SqlDialect::MySql => mysql_numeric_rank(t),
+            SqlDialect::Sqlite => sqlite_numeric_rank(t),
+            _ => operand_type(t).and_then(numeric_rank),
+        };
         let promoted = |least: usize| match (rank(&l), rank(&r)) {
             (Some(a), Some(b)) => {
                 from_sql_type(NUMERIC_RANKS[a.max(b).max(least)][0], self.dialect)
@@ -197,6 +201,30 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
     NUMERIC_RANKS
         .iter()
         .position(|names| names.contains(&sql_type))
+}
+
+/// The rank of the number MySQL converts an operand to in arithmetic: unsigned integers,
+/// `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles.
+fn mysql_numeric_rank(typed: &Typed) -> Option<usize> {
+    let ty = rule_type(typed)?;
+    numeric_rank(ty).or(match ty {
+        "UTINYINT" | "USMALLINT" | "UMEDIUMINT" | "UINT" | "UBIGINT" | "YEAR" | "BIT"
+        | "BOOLEAN" => Some(2),
+        "UDECIMAL" => Some(3),
+        "UDOUBLE" | "TEXT" | "VARCHAR" | "CHAR" | "ENUM" | "SET" => Some(5),
+        _ => None,
+    })
+}
+
+/// The rank of the number SQLite converts an operand to in arithmetic: a `BOOLEAN` is the
+/// integer it is stored as, and a string or blob an integer or a real, ranked as a real.
+fn sqlite_numeric_rank(typed: &Typed) -> Option<usize> {
+    let ty = rule_type(typed)?;
+    numeric_rank(ty).or(match ty {
+        "BOOLEAN" => Some(2),
+        "TEXT" | "VARCHAR" | "CHAR" | "BLOB" | "VARBINARY" | "BINARY" => Some(5),
+        _ => None,
+    })
 }
 
 /// MySQL `date ± INTERVAL n unit` (or `INTERVAL n unit + date`): a `DATE` stays a date for

@@ -310,7 +310,20 @@ SELECT jt.n, jt.x, jt.has FROM JSON_TABLE('[{"x": "a"}, {"y": 1}]', '$[*]' COLUM
 
 ## CONVERT and more JSON functions
 
-`CONVERT(x, type)` is a cast; `CONVERT(x USING charset)` keeps the string's type.
+`CONVERT(x, type)` is a cast.
+
+`CONVERT(x USING charset)` and `CHAR(n, ... USING charset)` are text, or a binary string for
+`USING binary`. Bytes that are not valid in the character set convert to `NULL`, so text
+converted from a binary string is nullable.
+
+```sql
+SELECT CONVERT(id USING utf8mb4) AS a, CONVERT(name USING binary) AS b, CONVERT(CHAR(65) USING utf8mb4) AS c, CHAR(65, 66 USING utf8mb4) AS d, CHAR(65 USING binary) AS e FROM events
+-- columns: a: str (TEXT)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: str | None (TEXT)
+-- columns: d: str | None (TEXT)
+-- columns: e: bytes (VARBINARY)
+```
 
 ```sql
 SELECT CONVERT(name, CHAR) AS a, CONVERT(id, SIGNED) AS b, CONVERT(name USING utf8mb4) AS c, ANY_VALUE(name) AS d, JSON_SEARCH(doc, 'one', 'a') AS e, JSON_PRETTY(doc) AS f FROM events
@@ -368,6 +381,24 @@ SELECT EXPORT_SET(5, 'Y', 'N') AS a, MAKE_SET(1, 'a', 'b') AS b, GET_FORMAT(DATE
 -- columns: i: int | None (INT)
 -- columns: k: int | None (BIGINT)
 -- columns: l: int (UBIGINT)
+```
+
+## SOUNDS LIKE, INTERVAL() and LOCK IN SHARE MODE
+
+`a SOUNDS LIKE b` compares `SOUNDEX(a) = SOUNDEX(b)`. `INTERVAL(n, n1, n2, ...)` is the
+index of the first bound above `n`, and -1 when `n` is `NULL`. `LOCK IN SHARE MODE` is
+the older spelling of `FOR SHARE`. A built-in function's name may be quoted.
+
+```sql
+SELECT name SOUNDS LIKE 'Robert' AS a, note SOUNDS LIKE name AS b, INTERVAL(id, 1, 10, 100) AS c, `CONCAT`(name, note) AS d FROM events LOCK IN SHARE MODE
+-- columns: a: bool (BOOLEAN)
+-- columns: b: bool | None (BOOLEAN)
+-- columns: c: int (INT)
+-- columns: d: str | None (TEXT)
+-- rules: a: common.comparison / common.comparison
+-- rules: b: common.comparison / common.comparison
+-- rules: c: mysql.misc.interval / mysql.misc.interval
+-- rules: d: mysql.string.text / mysql.string.text
 ```
 
 ## Bitwise operators

@@ -25,6 +25,7 @@ from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import mismatch
 from sqlty._source import ParsedSource, is_any
+from sqlty._widening import widens
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -409,6 +410,10 @@ def diagnostics(
                 any_calls=parsed.any_calls(import_style),
             ),
         )
+        if "stale-type" not in (rules or {}):
+            for d in diagnostics:
+                if d["rule"] == "stale-type" and widens(d):
+                    d["severity"] = "warn"
     found = find_helper_calls(parsed, helpers, module)
     typed = {line for call in found for line in call.typed_lines}
     diagnostics = [
