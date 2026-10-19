@@ -69,6 +69,7 @@ const SET_RETURNING: &[&str] = &[
     "JSON_OBJECT_KEYS",
     "JSONB_OBJECT_KEYS",
     "JSONB_PATH_QUERY",
+    "JSONB_PATH_QUERY_TZ",
 ];
 
 impl Analyzer<'_> {
@@ -184,6 +185,9 @@ impl Analyzer<'_> {
             }
             "regexp_split_to_table" | "jsonb_object_keys" | "json_object_keys" => {
                 Some(scalar(column(name, "TEXT", non_null)))
+            }
+            "jsonb_path_query" | "jsonb_path_query_tz" => {
+                Some(scalar(column(name, "JSONB", non_null)))
             }
             "jsonb_array_elements" => Some(named(vec![column("value", "JSONB", non_null)])),
             "json_array_elements" => Some(named(vec![column("value", "JSON", non_null)])),

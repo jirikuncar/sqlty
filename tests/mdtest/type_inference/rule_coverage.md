@@ -184,6 +184,44 @@ FROM t
 -- rules: headline: postgres.textsearch.headline-json / postgres.textsearch.headline-json
 ```
 
+### Money, log locations, bit strings and shapes
+
+```sql
+SELECT 1::money + 2::money AS amount, 1::money / 2::money AS ratio, 1::money * 2 AS scaled, 2 * 1::money AS scaled_right, '1/0'::pg_lsn - '0/1'::pg_lsn AS lsn_difference, '1/0'::pg_lsn + 1 AS lsn_offset, 1 + '1/0'::pg_lsn AS lsn_offset_left, B'10' & B'01' AS bits, B'10' << 1 AS bits_shift, B'10' || B'01' AS bits_concat, '08:00:2b:01:02:03'::macaddr & '08:00:2b:01:02:03'::macaddr AS mac, rg << rg AS strictly_left, '{[1,2)}'::int4multirange + '{[3,4)}'::int4multirange AS multirange_set, |/ d AS roots, !! tq AS tq_negate, 'a' ~<~ tx AS pattern FROM t
+-- rules: amount: postgres.money.amount / postgres.money.amount
+-- rules: ratio: postgres.money.ratio / postgres.money.ratio
+-- rules: scaled: postgres.money.scaled / postgres.money.scaled
+-- rules: scaled_right: postgres.money.scaled-right / postgres.money.scaled-right
+-- rules: lsn_difference: postgres.lsn.difference / postgres.lsn.difference
+-- rules: lsn_offset: postgres.lsn.offset / postgres.lsn.offset
+-- rules: lsn_offset_left: postgres.lsn.offset-left / postgres.lsn.offset-left
+-- rules: bits: postgres.bitwise.bits / postgres.bitwise.bits
+-- rules: bits_shift: postgres.bitwise.bits-shift / postgres.bitwise.bits-shift
+-- rules: bits_concat: postgres.concat.bits / postgres.concat.bits
+-- rules: mac: postgres.bitwise.mac-addresses / postgres.bitwise.mac-addresses
+-- rules: strictly_left: postgres.range.strictly-left-right / postgres.range.strictly-left-right
+-- rules: multirange_set: postgres.range.multirange-set-operations / postgres.range.multirange-set-operations
+-- rules: roots: postgres.math.roots / postgres.math.roots
+-- rules: tq_negate: postgres.textsearch.negate / postgres.textsearch.negate
+-- rules: pattern: postgres.comparison.pattern / postgres.comparison.pattern
+```
+
+```sql
+SELECT pt + pt AS path_concat, '(1,1)'::point + '(1,1)'::point AS translate, '(1,1),(0,0)'::box << '(3,3),(2,2)'::box AS side, '(1,1)'::point <-> '(2,2)'::point AS distance, '(1,1)'::point ~= '(1,1)'::point AS predicates, '(1,1),(0,0)'::box # '(2,2),(0,0)'::box AS box_intersection, '[(0,0),(1,1)]'::lseg # '[(0,1),(1,0)]'::lseg AS intersection_point, '(1,1)'::point ## '[(0,0),(1,0)]'::lseg AS closest_point, @@ '(1,1),(0,0)'::box AS center, @-@ pt AS path_length_operator, # pt AS point_count, ?- '[(0,0),(1,0)]'::lseg AS orientation FROM t
+-- rules: path_concat: postgres.geometry.path-concatenation / postgres.geometry.path-concatenation
+-- rules: translate: postgres.geometry.translate / postgres.geometry.translate
+-- rules: side: postgres.geometry.side / postgres.geometry.side
+-- rules: distance: postgres.geometry.distance / postgres.geometry.distance
+-- rules: predicates: postgres.geometry.predicates / postgres.geometry.predicates
+-- rules: box_intersection: postgres.geometry.box-intersection / postgres.geometry.box-intersection
+-- rules: intersection_point: postgres.geometry.intersection-point / postgres.geometry.intersection-point
+-- rules: closest_point: postgres.geometry.closest-point / postgres.geometry.closest-point
+-- rules: center: postgres.geometry.center / postgres.geometry.center
+-- rules: path_length_operator: postgres.geometry.length-operator / postgres.geometry.length-operator
+-- rules: point_count: postgres.geometry.point-count / postgres.geometry.point-count
+-- rules: orientation: postgres.geometry.orientation / postgres.geometry.orientation
+```
+
 ### Argument types
 
 ```sql

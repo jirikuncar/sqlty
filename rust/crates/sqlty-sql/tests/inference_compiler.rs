@@ -48,6 +48,35 @@ fn custom_operators_match_their_text() {
 }
 
 #[test]
+fn prefix_operators_get_their_own_match() {
+    let rule = VALID
+        .replace(r#""LongArrow""#, r#""Prefix:DoubleAt""#)
+        .replace("left = ", "right = ")
+        .replace("nullability = \"nullable\"\n", "");
+    let code = compile_one("rules/common/a.inference.toml", &rule).unwrap();
+    assert!(code.contains("UnaryOperator::DoubleAt { .. } => &BINARY_RULES[0..1]"));
+    assert!(!code.contains("BinaryOperator::DoubleAt"));
+}
+
+#[test]
+fn prefix_operators_have_one_operand_and_its_nullability() {
+    let prefix = VALID.replace(r#""LongArrow""#, r#""Prefix:DoubleAt""#);
+    let message = error("rules/common/a.inference.toml", &prefix);
+    assert!(
+        message.ends_with("a prefix operator has no left operand"),
+        "{message}"
+    );
+    let nullable = prefix.replace("left = ", "right = ");
+    let message = error("rules/common/a.inference.toml", &nullable);
+    assert!(message.contains("drop `nullability`"), "{message}");
+    let common = nullable
+        .replace("nullability = \"nullable\"\n", "")
+        .replace(r#"type = "TEXT""#, r#"type = "@common""#);
+    let message = error("rules/common/a.inference.toml", &common);
+    assert!(message.ends_with("a SQL type or `@right`"), "{message}");
+}
+
+#[test]
 fn malformed_toml_names_the_file() {
     let message = error("rules/common/bad.inference.toml", "[[rule]\nid = ");
     assert!(

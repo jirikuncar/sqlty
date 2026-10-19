@@ -1,10 +1,10 @@
 //! Operator typing: numeric promotion, arithmetic and common types.
 
-use sqlparser::ast::{BinaryOperator, Expr, Value};
+use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::{binary_rules, BinaryRule, RuleType};
+use super::inference::{binary_rules, prefix_rules, BinaryRule, RuleType};
 use super::literals::{merge, python_kind};
 use super::query::Analyzer;
 use super::scope::Scope;
@@ -60,6 +60,41 @@ impl Analyzer<'_> {
             RuleType::Right => r,
             RuleType::Common => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
         })
+    }
+
+    /// Result type of the prefix operator `op operand`: its inference rule's.
+    pub(super) fn prefix_op(
+        &self,
+        op: &UnaryOperator,
+        operand: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        Ok(match self.prefix_rule(op, operand, scope)? {
+            Some((rule, typed)) => match rule.result {
+                RuleType::Sql(name) => from_sql_type(name, self.dialect),
+                RuleType::Right => typed,
+                _ => Typed::UNKNOWN,
+            },
+            None => Typed::UNKNOWN,
+        })
+    }
+
+    /// The inference rule for `op operand`, with the operand's type.
+    pub(super) fn prefix_rule(
+        &self,
+        op: &UnaryOperator,
+        operand: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Option<(&'static BinaryRule, Typed)>> {
+        let rules = prefix_rules(op);
+        if rules.is_empty() {
+            return Ok(None);
+        }
+        let typed = self.expr(operand, scope)?;
+        let found = rules
+            .iter()
+            .find(|rule| rule.applies(self.dialect, None, rule_type(&typed)));
+        Ok(found.map(|rule| (rule, typed)))
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`

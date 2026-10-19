@@ -151,3 +151,12 @@ type = "REGCONFIG"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives the function a `regconfig` result."
+
+[[rule]]
+id = "postgres.textsearch.negate"
+operator = "Prefix:PGPrefixFactorial"
+dialects = ["postgres"]
+right = ["TSQUERY"]
+type = "TSQUERY"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (!! tsquery → tsquery)"
+reasoning = "`!!` negates a query into a query."

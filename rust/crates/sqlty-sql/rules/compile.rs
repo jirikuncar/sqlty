@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 82] = [
+const SQL_TYPES: [&str; 84] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -98,6 +98,8 @@ const SQL_TYPES: [&str; 82] = [
     "REGPROC",
     "REGPROCEDURE",
     "REGROLE",
+    "BIT",
+    "VARBIT",
     "ARRAY",
 ];
 
@@ -490,8 +492,21 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
         }
     } else if let Some(name) = operators.iter().find(|name| !is_operator(name)) {
         return fail(format!(
-            "operator {name:?} is neither a sqlparser `BinaryOperator` variant nor `Custom:<text>`"
+            "operator {name:?} is neither a sqlparser `BinaryOperator` variant, `Custom:<text>` \
+             nor `Prefix:<UnaryOperator variant>`"
         ));
+    } else if operators.iter().any(|name| name.starts_with("Prefix:")) {
+        if !def.left.is_empty() || def.left_parameter.is_some() {
+            return fail("a prefix operator has no left operand".to_string());
+        }
+        if def.nullability != "operands" {
+            return fail(
+                "a prefix operator is NULL when its operand is: drop `nullability`".to_string(),
+            );
+        }
+        if def.result.starts_with('@') && def.result != "@right" {
+            return fail("a prefix operator's type is a SQL type or `@right`".to_string());
+        }
     }
     let mut dialects = Vec::new();
     for name in &def.dialects {
@@ -542,8 +557,9 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     })
 }
 
-/// A sqlparser variant name (rustc checks it exists) or `Custom:<<=`.
+/// A sqlparser variant name (rustc checks it exists), `Custom:<<=` or `Prefix:DoubleAt`.
 fn is_operator(name: &str) -> bool {
+    let name = name.strip_prefix("Prefix:").unwrap_or(name);
     match name.strip_prefix("Custom:") {
         Some(text) => !text.is_empty() && !text.contains(['"', '\\']),
         None => {
@@ -894,7 +910,12 @@ fn generate_binary(rules: &[&Rule]) -> String {
     out.push_str("pub(crate) fn binary_rules(op: &BinaryOperator) -> &'static [BinaryRule] {\n");
     out.push_str("    match op {\n");
     let mut custom = Vec::new();
+    let mut prefix = Vec::new();
     for (op, start, end) in &ranges {
+        if let Some(variant) = op.strip_prefix("Prefix:") {
+            prefix.push((variant, *start, *end));
+            continue;
+        }
         match op.strip_prefix("Custom:") {
             Some(text) => custom.push((text, *start, *end)),
             None => {
@@ -915,6 +936,17 @@ fn generate_binary(rules: &[&Rule]) -> String {
             );
         }
         out.push_str("            _ => &[],\n        },\n");
+    }
+    out.push_str("        _ => &[],\n    }\n}\n\n");
+    out.push_str("/// The rules of the prefix operator `op`, in the order they are tried.\n");
+    out.push_str("#[allow(clippy::unneeded_struct_pattern)]\n");
+    out.push_str("pub(crate) fn prefix_rules(op: &UnaryOperator) -> &'static [BinaryRule] {\n");
+    out.push_str("    match op {\n");
+    for (variant, start, end) in prefix {
+        let _ = writeln!(
+            out,
+            "        UnaryOperator::{variant} {{ .. }} => &BINARY_RULES[{start}..{end}],"
+        );
     }
     out.push_str("        _ => &[],\n    }\n}\n");
     out

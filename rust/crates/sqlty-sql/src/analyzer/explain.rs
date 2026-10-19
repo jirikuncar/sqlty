@@ -112,6 +112,10 @@ impl Analyzer<'_> {
                     _ => None,
                 }
             }
+            Expr::UnaryOp { op, expr: inner } => match self.prefix_rule(op, inner, scope) {
+                Ok(Some((rule, _))) => Some(rule.explained()),
+                _ => None,
+            },
             Expr::Function(func) => {
                 let name = self.builtin_name(&func.name);
                 let args = positional_args(&func.args);
