@@ -215,3 +215,25 @@ SELECT * FROM cells
 -- columns: x0: int (INT)
 -- columns: x1: int (INT)
 ```
+
+The auxiliary functions of a full-text query are typed: `bm25` is a REAL,
+`highlight` and `snippet` are text that is NULL for a NULL column, `offsets`
+text and `matchinfo` a blob.
+
+```sql
+SELECT bm25(docs) AS score, highlight(docs, 0, '[', ']') AS marked, snippet(docs, 0, '[', ']', '...', 8) AS excerpt FROM docs WHERE docs MATCH 'sqlite'
+-- columns: score: float (DOUBLE)
+-- columns: marked: str | None (TEXT)
+-- columns: excerpt: str | None (TEXT)
+-- rules: score: sqlite.fts.rank / sqlite.fts.rank
+-- rules: marked: sqlite.fts.markup / sqlite.fts.markup
+-- rules: excerpt: sqlite.fts.markup / sqlite.fts.markup
+```
+
+```sql
+SELECT offsets(notes) AS positions, matchinfo(notes) AS info FROM notes WHERE notes MATCH 'sqlite'
+-- columns: positions: str (TEXT)
+-- columns: info: bytes (BLOB)
+-- rules: positions: sqlite.fts.offsets / sqlite.fts.offsets
+-- rules: info: sqlite.fts.matchinfo / sqlite.fts.matchinfo
+```
