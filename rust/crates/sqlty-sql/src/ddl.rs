@@ -557,6 +557,17 @@ impl Statement<'_> {
         })
     }
 
+    /// The statement with only the first of the table options after its column list,
+    /// such as SQLite's `STRICT, WITHOUT ROWID`, which sqlparser reads only one at a
+    /// time; `None` when there is no second.
+    pub(crate) fn with_first_table_option(&self) -> Option<String> {
+        let pieces = &self.0;
+        let open = pieces.iter().position(|p| is_punct(p, "("))?;
+        let close = matching_paren(pieces, open)?;
+        let comma = (close + 1..pieces.len()).find(|&at| is_punct(&pieces[at], ","))?;
+        Some(render(&pieces[..comma]).trim_end().to_string())
+    }
+
     /// The statement without the `PARTITION BY ...` that follows its column list, which
     /// sqlparser does not read for MySQL; `None` when it has none.
     pub(crate) fn without_partitioning(&self) -> Option<String> {
@@ -916,6 +927,20 @@ mod tests {
         assert!(stmt.creates("view"));
         assert_eq!(stmt.without_check_option(), None);
         assert!(split_statements("/* CREATE VIEW v AS SELECT 1 */", true).is_empty());
+    }
+
+    #[test]
+    fn test_with_first_table_option() {
+        assert_eq!(
+            first("CREATE TABLE t (a INT, b INT) STRICT, WITHOUT ROWID")
+                .with_first_table_option()
+                .as_deref(),
+            Some("CREATE TABLE t (a INT, b INT) STRICT")
+        );
+        assert_eq!(
+            first("CREATE TABLE t (a INT, b INT) STRICT").with_first_table_option(),
+            None
+        );
     }
 
     #[test]

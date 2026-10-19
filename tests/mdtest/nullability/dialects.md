@@ -249,6 +249,7 @@ CREATE TABLE table_key (a INTEGER, b INTEGER, c INTEGER, PRIMARY KEY (a, b));
 CREATE TABLE single_key (a INTEGER, PRIMARY KEY (a));
 CREATE TABLE no_rowid (code TEXT PRIMARY KEY) WITHOUT ROWID;
 CREATE TABLE strict_key (code TEXT PRIMARY KEY) STRICT;
+CREATE TABLE both_options (code TEXT PRIMARY KEY, note TEXT) STRICT, WITHOUT ROWID;
 ```
 
 ```sql
@@ -286,6 +287,13 @@ SELECT a FROM single_key
 ```sql
 SELECT code FROM no_rowid
 -- inferred: tuple[str]
+```
+
+Both options may be given, separated by a comma.
+
+```sql
+SELECT * FROM both_options
+-- inferred: tuple[str, str | None]
 ```
 
 ```sql
