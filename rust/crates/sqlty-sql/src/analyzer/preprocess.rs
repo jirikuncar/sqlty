@@ -13,6 +13,7 @@ use sqlparser::ast::{
 use sqlparser::parser::Parser;
 
 use super::dialect::SqlDialect;
+use super::pg_syntax::respell;
 use super::star_expand::is_word;
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
@@ -251,13 +252,21 @@ pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
 
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
-/// the query doesn't parse as written.
+/// the query doesn't parse as written, and so does the syntax [`respell`] rewrites.
 pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     let sql = parser_input(sql, dialect);
-    parse(&sql, dialect).or_else(|| {
-        (dialect == SqlDialect::Postgres && sql.contains('?'))
-            .then(|| parse(&numbered_placeholders(&sql), dialect))
+    let parse_placeholders = |sql: &str| {
+        parse(sql, dialect).or_else(|| {
+            (dialect == SqlDialect::Postgres && sql.contains('?'))
+                .then(|| parse(&numbered_placeholders(sql), dialect))
+                .flatten()
+        })
+    };
+    parse_placeholders(&sql).or_else(|| {
+        (dialect == SqlDialect::Postgres)
+            .then(|| respell(&sql))
             .flatten()
+            .and_then(|sql| parse_placeholders(&sql))
     })
 }
 

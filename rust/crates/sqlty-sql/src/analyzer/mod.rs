@@ -26,6 +26,7 @@ mod narrowing;
 mod nullability;
 mod operators;
 mod params;
+mod pg_syntax;
 mod preprocess;
 mod query;
 mod references;
