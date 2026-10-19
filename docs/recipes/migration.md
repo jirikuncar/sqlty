@@ -120,7 +120,8 @@ with the queries whose rows are passed around the most.
 
 Run `sqlty rewrite --check` and `sqlty check` in [CI](ci.md), and promote
 [`stale-type`](../reference/rules.md#stale-type) to an error once the codebase
-is clean.
+is clean: by default it warns when an annotation is only wider than the rows
+the query returns.
 
 ## Editing typed queries
 

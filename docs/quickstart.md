@@ -49,11 +49,11 @@ to select `email::TEXT` as well, and it reports the drift:
 
 ```text
 queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
-Found 1 warning(s)
+Found 1 error(s)
 ```
 
-Warnings leave the exit code at 0; errors such as a
-[row type](guide/row-types.md) mismatch exit with 1. The
+Errors, such as this drift or a [row type](guide/row-types.md) mismatch, exit
+with 1; warnings leave the exit code at 0. The
 [rules reference](reference/rules.md) lists every diagnostic.
 
 `sqlty check --fix .` updates the stale type in place, then reports anything

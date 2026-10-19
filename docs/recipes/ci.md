@@ -36,8 +36,9 @@ compiles the Rust extension, so the first run needs a Rust toolchain
 `args: [--dialect, sqlite]`.
 
 `sqlty-check` fails the commit only for rules with severity `error`; drift
-such as [`stale-type`](../reference/rules.md#stale-type) is a warning unless
-you promote it (see [below](#fail-on-drift-and-mismatches)). The `sqlty` hook
+that can break the code, such as a column made nullable under
+[`stale-type`](../reference/rules.md#stale-type), is one by default (see
+[below](#fail-on-drift-and-mismatches)). The `sqlty` hook
 id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files.
 
 To skip the build or reuse the `sqlty` already installed in your
@@ -90,9 +91,11 @@ whose row type is unknown; see [Untyped queries](../guide/untyped.md).
 ## Fail on drift and mismatches
 
 `sqlty check` exits with 1 only when a rule with severity `error` fires.
-By default that covers row type mismatches, names the schema doesn't have, and
-`SELECT *` without a schema;
-drift ([`stale-type`](../reference/rules.md#stale-type)) and unwrapped strings
+By default that covers row type mismatches, names the schema doesn't have,
+`SELECT *` without a schema, and drift
+([`stale-type`](../reference/rules.md#stale-type)) whose annotation doesn't admit
+the rows the query now returns. A `stale-type` whose annotation is only wider
+(`str | None` for a column made `NOT NULL`) and unwrapped strings
 ([`stale-rewrite`](../reference/rules.md#stale-rewrite)) are warnings. Promote
 the rules you want to enforce:
 
@@ -104,6 +107,8 @@ schema = "schema.sql"
 stale-type = "error"
 untyped-query = "error"
 ```
+
+Setting `stale-type` gives every `stale-type` that severity, the wider ones too.
 
 `stale-rewrite` reports exactly the strings `rewrite` would wrap, so promoting
 it to `error` is equivalent to `rewrite --check`.
@@ -138,13 +143,14 @@ Each step catches something the others don't:
 | Step | Fails when |
 |------|------------|
 | `sqlty rewrite --check` | a `--sql` string is not wrapped yet |
-| `sqlty check` | a rule with severity `error` fires: a row type mismatch or an unknown table or column by default, and drift such as [`stale-type`](../reference/rules.md#stale-type) once you [promote it](#fail-on-drift-and-mismatches) |
+| `sqlty check` | a rule with severity `error` fires: a row type mismatch, an unknown table or column, or drift such as a column made nullable ([`stale-type`](../reference/rules.md#stale-type)) by default; see [Fail on drift and mismatches](#fail-on-drift-and-mismatches) |
 | `sqlty breaking` | the pull request's schema breaks the base branch's queries, or its queries break on the base branch's schema: a dropped column, a column made nullable |
 
-!!! warning "`stale-type` is a warning by default"
-    A migration that makes a column nullable leaves `SQL[tuple[str]]` stale:
-    `sqlty check` reports it but exits 0. `sqlty breaking` fails on it, and so does
-    `sqlty check` with `stale-type = "error"`.
+!!! note "`stale-type` is a warning only for a wider annotation"
+    A migration that makes a column nullable leaves `SQL[tuple[str]]` stale, and
+    the code can now get `None`: `sqlty check` fails on it. A migration that makes
+    a column `NOT NULL` leaves `SQL[tuple[str | None]]` wider than it needs to be:
+    `sqlty check` warns and exits 0.
 
 `--output-format github` prints each diagnostic, and each breaking change, as a GitHub
 Actions annotation, so it shows on its line in the pull request's diff. See [Schema changes in CI](migration.md#schema-changes-in-ci)
