@@ -16,7 +16,7 @@ use crate::json::JsonShape;
 use crate::values;
 
 use super::dialect::SqlDialect;
-use super::dml::{dml_scope, joined_tables, returning};
+use super::dml::{dml_scope, joined_tables, merge_source, returning, unmatched_sources};
 use super::explain::Explained;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
@@ -147,7 +147,9 @@ impl<'a> Analyzer<'a> {
                         let scope = dml_scope(stmt, self.dialect);
                         // PostgreSQL's RETURNING also reads the tables of FROM and USING, which
                         // are inner joined to the target; SQLite's reads the target only.
+                        let merged = merge_source(stmt);
                         let joined = joined_tables(stmt)
+                            .or(merged.as_deref())
                             .filter(|_| self.dialect == SqlDialect::Postgres)
                             .and_then(|from| Some((from, self.scope_of(from).ok()?)));
                         let (analyzer, scope) = match joined {
@@ -155,9 +157,13 @@ impl<'a> Analyzer<'a> {
                                 let targets = scope
                                     .into_iter()
                                     .filter(|source| source.table != Table::ExtraSources);
-                                let scope: Scope = targets.chain(sources).collect();
+                                let mut scope: Scope = targets.chain(sources).collect();
                                 analyzer.facts = analyzer.written_facts(stmt, &scope);
                                 analyzer.facts.join(analyzer.null_extended(from));
+                                analyzer.facts.join(unmatched_sources(stmt, self.dialect));
+                                if merged.is_some() {
+                                    scope.rotate_left(1);
+                                }
                                 (analyzer, scope)
                             }
                             None => {
