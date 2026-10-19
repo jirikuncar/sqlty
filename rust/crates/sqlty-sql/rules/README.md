@@ -182,8 +182,10 @@ rule types leaves its column untyped.
 
 ## Adding a rule
 
-1. Put it in `rules/common/` when every dialect agrees, else in the dialect's
-   directory with `dialects`.
+1. Put it in `rules/common/` when PostgreSQL, MySQL and SQLite all have the
+   function or operator and agree on it: the generic dialect and ClickHouse then
+   type it too. One only some of them have stays in their directories, with
+   `dialects`, so the others still report `unknown-function` for it.
 2. Check the `reference` against the vendor documentation of the version the
    tests target (PostgreSQL 17 for the fidelity tests, MySQL 8.4, SQLite 3) and
    cite the section and table. The ISO standard is not freely available, so it

@@ -15,3 +15,11 @@ type = "TEXT"
 nullability = "strict"
 reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "common.string.formatted"
+functions = ["CONCAT_WS", "FORMAT"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators (concat_ws, format); MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT_WS(), FORMAT()); SQLite documentation, Built-In Scalar SQL Functions (concat_ws(), format())"
+reasoning = "Every dialect returns text."

@@ -2,15 +2,16 @@
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|
-| generic | expression | 27 | 3 | 85 | 2 |
+| generic | expression | 41 | 4 | 70 | 2 |
 | mysql | expression | 97 | 0 | 0 | 78 |
 | postgres | expression | 46 | 0 | 0 | 6 |
-| **all** | | **170** | **3** | **85** | **86** |
+| **all** | | **184** | **4** | **70** | **86** |
 
 ## mismatch
 
 | Dialect | SQL | Expected | sqlty | Provenance |
 |---------|-----|----------|-------|------------|
+| generic | `ABS(1.5)` | `float` | `decimal.Decimal` | annotate_functions.sql: sqlglot DOUBLE |
 | generic | `5.3` | `float` | `decimal.Decimal` | annotate_types.sql: sqlglot DOUBLE |
 | generic | `ALL(SELECT 1)` | `bool` | `int` | annotate_types.sql: sqlglot bool |
 | generic | `1 + (SELECT 2.5 AS c)` | `float` | `decimal.Decimal` | annotate_types.sql: sqlglot DOUBLE |
@@ -19,8 +20,6 @@
 
 | Dialect | SQL | Expected | sqlty | Provenance |
 |---------|-----|----------|-------|------------|
-| generic | `ABS(1)` | `int` | `None` | annotate_functions.sql: sqlglot INT |
-| generic | `ABS(1.5)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
 | generic | `GREATEST(1, 2, 3)` | `int` | `None` | annotate_functions.sql: sqlglot INT |
 | generic | `GREATEST(1, 2.5, 3)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
 | generic | `LEAST(1, 2, 3)` | `int` | `None` | annotate_functions.sql: sqlglot INT |
@@ -45,9 +44,6 @@
 | generic | `MONTHNAME(tbl.date_col)` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `CHR(65)` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `COUNTIF(tbl.bigint_col > 1)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
-| generic | `LAST_VALUE(tbl.bigint_col) OVER (ORDER BY tbl.bigint_col)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
-| generic | `FIRST_VALUE(tbl.bigint_col) OVER (ORDER BY tbl.bigint_col)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
-| generic | `FIRST_VALUE(tbl.str_col) OVER (ORDER BY tbl.str_col)` | `str` | `None` | annotate_functions.sql: sqlglot TEXT |
 | generic | `TO_BASE32(tbl.bytes_col)` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `TO_BASE64(tbl.bytes_col)` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `UNIX_SECONDS(tbl.timestamp_col)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
@@ -72,19 +68,9 @@
 | generic | `CURRENT_USER()` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `SESSION_USER()` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `RAND()` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `DEGREES(tbl.double_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
 | generic | `ARRAY_CONTAINS(tbl.array_col, '1')` | `bool` | `None` | annotate_functions.sql: sqlglot BOOLEAN |
 | generic | `REPEAT(tbl.str_col, tbl.int_col)` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `TYPEOF(foo)` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
-| generic | `PERCENT_RANK() OVER (ORDER BY 1)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `CUME_DIST() OVER (ORDER BY 1)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `LAG(tbl.bigint_col) OVER (ORDER BY tbl.int_col)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
-| generic | `LAG(tbl.bigint_col, 1, tbl.double_col) OVER (ORDER BY tbl.int_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `LAG(tbl.double_col, 1, tbl.bigint_col) OVER (ORDER BY tbl.int_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `LEAD(tbl.bigint_col) OVER (ORDER BY tbl.int_col)` | `int` | `None` | annotate_functions.sql: sqlglot BIGINT |
-| generic | `LEAD(tbl.bigint_col, 1, tbl.double_col) OVER (ORDER BY tbl.int_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `LEAD(tbl.double_col, 1, tbl.bigint_col) OVER (ORDER BY tbl.int_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
-| generic | `NTH_VALUE(tbl.str_col, 2) OVER (ORDER BY tbl.int_col)` | `str` | `None` | annotate_functions.sql: sqlglot TEXT |
 | generic | `COVAR_POP(tbl.double_col, tbl.double_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
 | generic | `COVAR_POP(tbl.int_col, tbl.int_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |
 | generic | `COVAR_SAMP(tbl.double_col, tbl.double_col)` | `float` | `None` | annotate_functions.sql: sqlglot DOUBLE |

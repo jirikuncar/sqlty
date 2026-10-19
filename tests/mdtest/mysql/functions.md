@@ -279,6 +279,15 @@ SELECT LAG(id) OVER (ORDER BY id) AS a, LEAD(name, 1, 'x') OVER (ORDER BY id) AS
 -- columns: g: str | None (VARCHAR(50))
 ```
 
+`LAG` and `LEAD` return the common type of the value and the default: an `INT` with a
+`DECIMAL` default is a `DECIMAL`.
+
+```sql
+SELECT LAG(id, 1, price) OVER (ORDER BY id) AS a, LEAD(id, 1, 2.5) OVER (ORDER BY id) AS b FROM events
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: decimal.Decimal (DECIMAL)
+```
+
 ## JSON_TABLE
 
 `JSON_TABLE` takes its columns from its `COLUMNS` clause. A `PATH` column is NULL

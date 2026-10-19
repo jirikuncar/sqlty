@@ -99,7 +99,7 @@ reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
 id = "mysql.string.text"
-functions = ["BIN", "OCT", "REGEXP_SUBSTR", "REGEXP_REPLACE", "CONCAT_WS", "REPEAT", "HEX", "SPACE", "FORMAT", "QUOTE", "SUBSTRING_INDEX", "INSERT", "ELT", "SOUNDEX", "TO_BASE64", "EXPORT_SET", "MAKE_SET"]
+functions = ["BIN", "OCT", "REGEXP_SUBSTR", "REGEXP_REPLACE", "REPEAT", "HEX", "SPACE", "QUOTE", "SUBSTRING_INDEX", "INSERT", "ELT", "SOUNDEX", "TO_BASE64", "EXPORT_SET", "MAKE_SET"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
