@@ -47,6 +47,7 @@ SOURCES = [ROOT / "tests" / "mdtest", ROOT / "docs"]
 # Understood mismatches, by "<dialect>:<file>:<line>" of the query, with the reason.
 KNOWN_DIFFERENCES: dict[str, str] = {
     "mysql:tests/mdtest/mysql/functions.md:217": "MySQL predicates are `int`; sqlty types `MEMBER OF` like `IN`",
+    "mysql:tests/mdtest/mysql/functions.md:393": "MySQL predicates are `int`; sqlty types `SOUNDS LIKE` like `=`",
 }
 
 # MySQL column type, without its length or attributes -> Python types sqlty may give it
