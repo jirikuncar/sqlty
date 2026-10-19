@@ -3,8 +3,8 @@
 //! other function a rule types, as one column.
 
 use sqlparser::ast::{
-    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments, Ident,
-    ObjectName, SelectItem, TableAlias,
+    DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
+    FunctionArguments, Ident, ObjectName, SelectItem, TableAlias,
 };
 
 use crate::catalog::FunctionReturn;
@@ -218,6 +218,37 @@ impl Analyzer<'_> {
                 column("key", "TEXT", non_null),
                 column("value", "JSON", non_null),
             ])),
+            "jsonb_populate_record"
+            | "json_populate_record"
+            | "jsonb_populate_recordset"
+            | "json_populate_recordset" => {
+                let Some(Expr::Cast {
+                    data_type: DataType::Custom(row_type, _),
+                    ..
+                }) = args.first()
+                else {
+                    return Ok(None);
+                };
+                let key = table_key(row_type, self.dialect);
+                // A key the JSON lacks takes the base row's field, NULL in `NULL::t`.
+                self.schema
+                    .table(&key)
+                    .or_else(|| self.schema.composite(&key))
+                    .map(|fields| {
+                        named(
+                            fields
+                                .iter()
+                                .map(|field| {
+                                    Column::from_typed(
+                                        field.name.clone(),
+                                        field.typed(self.dialect),
+                                        nullable,
+                                    )
+                                })
+                                .collect(),
+                        )
+                    })
+            }
             "jsonb_each_text" | "json_each_text" => Some(named(vec![
                 column("key", "TEXT", non_null),
                 column("value", "TEXT", nullable),

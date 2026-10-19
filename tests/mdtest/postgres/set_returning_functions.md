@@ -132,6 +132,31 @@ SELECT * FROM jsonb_object_keys('{"a": 1}')
 -- columns: jsonb_object_keys: str (TEXT)
 ```
 
+### A row type
+
+`jsonb_populate_record` and `jsonb_populate_recordset` return rows of the table or
+composite type their first argument is cast to. Each column can be NULL: a key the
+JSON lacks takes the field of the base row, NULL in `NULL::posts`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE posts (id INTEGER PRIMARY KEY, tags TEXT[] NOT NULL, doc JSONB NOT NULL, published TIMESTAMPTZ NOT NULL);
+CREATE TYPE point2 AS (x INTEGER, label TEXT);
+```
+
+```sql
+SELECT p.id, p.tags FROM jsonb_populate_recordset(NULL::posts, '[{"id": 1}]') AS p
+-- columns: id: int | None (INT)
+-- columns: tags: list[str] | None (ARRAY<TEXT>)
+```
+
+```sql
+SELECT * FROM json_populate_record(NULL::point2, '{"x": 1}') AS r(a, b)
+-- columns: a: int | None (INT)
+-- columns: b: str | None (TEXT)
+```
+
 ### A column definition list
 
 A function that returns `record`, such as `jsonb_to_recordset`, takes its columns
