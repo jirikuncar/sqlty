@@ -36,6 +36,7 @@ Configuration via pyproject.toml:
     unknown-type = "warn"               # default
     unsupported-syntax = "warn"         # default
     insert-missing-column = "error"     # default
+    insert-value-count = "error"        # default
     ungrouped-column = "error"          # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
@@ -252,6 +253,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="INSERT leaves out a NOT NULL column that has no default",
+    ),
+    "insert-value-count": LintRule(
+        name="insert-value-count",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="INSERT gives a different number of values than the columns it writes",
     ),
     "ungrouped-column": LintRule(
         name="ungrouped-column",

@@ -319,6 +319,20 @@ impl Analyzer<'_> {
         let check = |expr| analyzer.check_references(expr, &scope);
         match stmt {
             Statement::Insert(insert) => {
+                // Its diagnostics are recorded; the columns give the width of a query source.
+                // Nothing reads the types of a plain VALUES source, and outside PostgreSQL it
+                // is not analyzed: MySQL's may name the columns set before them.
+                let untyped_values = |source: &Query| {
+                    self.dialect != SqlDialect::Postgres
+                        && insert.returning.is_none()
+                        && source.with.is_none()
+                        && matches!(source.body.as_ref(), SetExpr::Values(_))
+                };
+                let source_columns = insert
+                    .source
+                    .as_deref()
+                    .filter(|s| !untyped_values(s))
+                    .map(|source| self.query_columns(source));
                 if let TableObject::TableName(name) = &insert.table {
                     let assigned: Vec<ObjectName> = insert
                         .assignments
@@ -334,8 +348,19 @@ impl Analyzer<'_> {
                         &insert.columns
                     };
                     self.check_target_columns(name, columns);
-                    if !columns.is_empty() {
-                        self.check_missing_columns(name, columns);
+                    let widths = insert_widths(insert, source_columns.as_ref());
+                    if insert.columns.is_empty() && insert.assignments.is_empty() {
+                        self.check_implicit_columns(name, widths.as_deref());
+                    } else {
+                        let set: Vec<String> = columns
+                            .iter()
+                            .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
+                            .map(|ident| fold(ident, self.dialect))
+                            .collect();
+                        self.check_missing_columns(name, &set);
+                        if !insert.columns.is_empty() {
+                            self.check_value_count(name, columns.len(), widths.as_deref());
+                        }
                     }
                     // PostgreSQL's `ON CONFLICT DO UPDATE` reads the target and `EXCLUDED`, the
                     // row that was not inserted. SQLite reads a bare name as the target's.
@@ -362,18 +387,6 @@ impl Analyzer<'_> {
                             update.selection.iter().for_each(check);
                         }
                     }
-                }
-                // Its diagnostics are recorded; the columns are not needed. Nothing reads the
-                // types of a plain VALUES source, and outside PostgreSQL it is not analyzed:
-                // MySQL's may name the columns set before them.
-                let untyped_values = |source: &Query| {
-                    self.dialect != SqlDialect::Postgres
-                        && insert.returning.is_none()
-                        && source.with.is_none()
-                        && matches!(source.body.as_ref(), SetExpr::Values(_))
-                };
-                if let Some(source) = insert.source.as_deref().filter(|s| !untyped_values(s)) {
-                    let _ = self.query_columns(source);
                 }
             }
             Statement::Update(update) => {
@@ -417,20 +430,67 @@ impl Analyzer<'_> {
         }
     }
 
+    /// Records `insert-value-count` for a row of `widths` values that doesn't match the
+    /// `count` columns an INSERT names.
+    fn check_value_count(&self, table: &ObjectName, count: usize, widths: Option<&[usize]>) {
+        if !self.judges_names() {
+            return;
+        }
+        if let Some(&width) = widths.into_iter().flatten().find(|&&width| width != count) {
+            self.record_value_count(table, width, count);
+        }
+    }
+
+    /// The checks of an INSERT without a column list, which writes the visible columns of
+    /// `table` in order. PostgreSQL fills the columns past the values with their defaults;
+    /// MySQL and SQLite want a value for each, or none at all (`VALUES ()`, `DEFAULT VALUES`).
+    fn check_implicit_columns(&self, table: &ObjectName, widths: Option<&[usize]>) {
+        if !self.judges_names() {
+            return;
+        }
+        let (Some(known), Some(widths)) =
+            (self.schema.table(&table_key(table, self.dialect)), widths)
+        else {
+            return;
+        };
+        let visible: Vec<String> = known
+            .iter()
+            .filter(|column| !column.invisible)
+            .map(|column| column.name.clone())
+            .collect();
+        let fits = |width: usize| {
+            width == visible.len()
+                || width == 0
+                || (self.dialect == SqlDialect::Postgres && width < visible.len())
+        };
+        if let Some(&width) = widths.iter().find(|&&width| !fits(width)) {
+            self.record_value_count(table, width, visible.len());
+        } else if let Some(&width) = widths.iter().min() {
+            self.check_missing_columns(table, &visible[..width]);
+        }
+    }
+
+    fn record_value_count(&self, table: &ObjectName, width: usize, count: usize) {
+        self.diag.record(
+            NameRule::InsertValueCount,
+            format!(
+                "INSERT into `{}` gives {width} value{} for {count} column{}",
+                object_name(table),
+                if width == 1 { "" } else { "s" },
+                if count == 1 { "" } else { "s" },
+            ),
+        );
+    }
+
     /// Records `insert-missing-column` for each `NOT NULL` column of the schema table
-    /// `table` without a default that `columns` leave out.
-    fn check_missing_columns(&self, table: &ObjectName, columns: &[ObjectName]) {
+    /// `table` without a default that the folded column names `set` leave out.
+    fn check_missing_columns(&self, table: &ObjectName, set: &[String]) {
         if !self.judges_names() {
             return;
         }
         let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
             return;
         };
-        let set: Vec<String> = columns
-            .iter()
-            .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
-            .map(|ident| fold(ident, self.dialect))
-            .collect();
         for column in known {
             if column.not_null && !column.has_default && !set.contains(&column.name) {
                 self.diag.record(
@@ -479,6 +539,26 @@ fn other_sources() -> Source {
     Source {
         reference: String::new(),
         table: Table::ExtraSources,
+    }
+}
+
+/// The number of values in each row an INSERT writes: those of its VALUES rows, the columns
+/// of its query, or none for `DEFAULT VALUES`. `None` when unknown.
+fn insert_widths(
+    insert: &sqlparser::ast::Insert,
+    columns: Option<&super::Inferred<Option<Vec<super::query::Column>>>>,
+) -> Option<Vec<usize>> {
+    let Some(source) = insert.source.as_deref() else {
+        return insert.assignments.is_empty().then(|| vec![0]);
+    };
+    if let SetExpr::Values(values) = source.body.as_ref() {
+        return Some(values.rows.iter().map(|row| row.len()).collect());
+    }
+    match columns {
+        Some(Ok(Some(columns))) if !columns.iter().any(super::query::Column::is_unknown_star) => {
+            Some(vec![columns.len()])
+        }
+        _ => None,
     }
 }
 

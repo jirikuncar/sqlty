@@ -4,8 +4,10 @@ Default severity: **error**
 
 ## What it does
 
-Reports an `INSERT` with a column list, or MySQL's `INSERT ... SET`, that leaves
-out a schema column declared `NOT NULL` without a default. A `DEFAULT`,
+Reports an `INSERT` that leaves out a schema column declared `NOT NULL` without
+a default. Without a column list, the values fill the table's columns in order:
+PostgreSQL gives the columns past them their defaults, and so do `DEFAULT VALUES`
+and MySQL's `VALUES ()`. A `DEFAULT`,
 `serial`, identity, generated or auto-increment column, and SQLite's
 `INTEGER PRIMARY KEY`, get a value anyway. So does every column of a PostgreSQL
 or MySQL table with a `BEFORE INSERT ... FOR EACH ROW` trigger, which may set it.
@@ -33,6 +35,8 @@ CREATE TABLE users (
 ```python
 # error: [insert-missing-column] "INSERT into `users` leaves out `name`, which is NOT NULL and has no default"
 q = "--sql\nINSERT INTO users (email) VALUES (%s)"
+# error: [insert-missing-column] "INSERT into `users` leaves out `name`, which is NOT NULL and has no default"
+r = "--sql\nINSERT INTO users VALUES (DEFAULT, %s)"
 ```
 
 ## Why is this bad?
@@ -56,4 +60,4 @@ insert-missing-column = "warn"
 
 Needs a [schema](../../../docs/guide/schema-inference.md), and is judged in the
 `postgres`, `mysql` and `sqlite` dialects. An `INSERT` without a column list
-is not checked.
+from a query whose columns sqlty can't count is not checked.

@@ -37,6 +37,7 @@ stale-type = "error"
 | [`unknown-type`](#unknown-type) | Names | warn | no | Cast or column type without a Python type |
 | [`unsupported-syntax`](#unsupported-syntax) | Names | warn | no | Construct that parses but is not typed |
 | [`insert-missing-column`](#insert-missing-column) | Names | error | no | INSERT that leaves out a `NOT NULL` column without a default |
+| [`insert-value-count`](#insert-value-count) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
 | [`ungrouped-column`](#ungrouped-column) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` wider than the inferred row type |
@@ -549,10 +550,10 @@ counts such queries as unparsed whether or not the rule is enabled.
 
 The first six rules explain why a result column is untyped: with all of them
 enabled and a schema configured, no column is left untyped without a diagnostic.
-`insert-missing-column` checks what an `INSERT` writes, and `ungrouped-column`
-what a grouped query selects. The rules for SQL the database rejects (unknown
-tables and columns, ambiguous columns, an `INSERT` missing a column, an ungrouped
-column) are errors; those for valid SQL sqlty cannot type are warnings. The
+`insert-missing-column` and `insert-value-count` check what an `INSERT` writes,
+and `ungrouped-column` what a grouped query selects. The rules for SQL the
+database rejects (unknown tables and columns, ambiguous columns, an `INSERT`
+missing a column or a value, an ungrouped column) are errors; those for valid SQL sqlty cannot type are warnings. The
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to change them. All but `unsupported-syntax` are only judged when a
 [schema](../guide/schema-inference.md) is configured, because without one every
 table, column, function and type is unknown. Tables, columns and ambiguity are
@@ -595,10 +596,17 @@ are not reported.
 
 ### insert-missing-column
 
-Default: error. An `INSERT` with a column list (or MySQL's `INSERT ... SET`)
-that leaves out a schema column declared `NOT NULL` without a default. A
-`DEFAULT`, `serial`, identity, generated or auto-increment column, and SQLite's
-`INTEGER PRIMARY KEY`, get a value anyway.
+Default: error. An `INSERT` that leaves out a schema column declared `NOT NULL`
+without a default. A `DEFAULT`, `serial`, identity, generated or auto-increment
+column, and SQLite's `INTEGER PRIMARY KEY`, get a value anyway. Without a
+column list, the values fill the table's columns in order, and PostgreSQL gives
+the columns past them their defaults.
+
+### insert-value-count
+
+Default: error. An `INSERT` whose `VALUES` rows or query have a different
+number of values than the columns it writes. Without a column list, MySQL and
+SQLite want a value for every column, and PostgreSQL at most one.
 
 ### ungrouped-column
 
