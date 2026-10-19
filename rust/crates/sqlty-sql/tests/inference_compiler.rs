@@ -206,6 +206,36 @@ fn rules_of_different_dialects_do_not_overlap() {
     assert!(compile_one("rules/dialects/a.inference.toml", &text).is_ok());
 }
 
+#[test]
+fn a_dialect_rule_repeating_a_common_one_is_an_error() {
+    let sqlite = VALID
+        .replace("operator =", "dialects = [\"sqlite\"]\noperator =")
+        .replace("test.long-arrow", "test.sqlite");
+    let files = [
+        (
+            "rules/common/a.inference.toml".to_string(),
+            VALID.to_string(),
+        ),
+        ("rules/sqlite/a.inference.toml".to_string(), sqlite.clone()),
+    ];
+    let message = compile(&files).unwrap_err();
+    assert!(
+        message.contains(
+            "rule test.sqlite (rules/sqlite/a.inference.toml) repeats rule test.long-arrow"
+        ),
+        "{message}"
+    );
+    let other = sqlite.replace("\"TEXT\"", "\"JSON\"");
+    let files = [
+        (
+            "rules/common/a.inference.toml".to_string(),
+            VALID.to_string(),
+        ),
+        ("rules/sqlite/a.inference.toml".to_string(), other),
+    ];
+    assert!(compile(&files).is_ok());
+}
+
 const FUNCTION: &str = r#"
 [[function]]
 id = "test.sum"

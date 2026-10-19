@@ -989,14 +989,12 @@ SELECT MOD(7, 3) AS math_argument_type
 
 ```sql
 SELECT
-    current_date AS datetime_date_non_null,
     DATE('2003-12-31 01:02:03') AS datetime_date_nullable,
     sysdate() AS datetime_datetime,
     TIMESTAMP('2003-12-31') AS datetime_datetime_nullable,
     current_time AS datetime_time_non_null,
     TIME('2003-12-31 01:02:03') AS datetime_time_nullable,
     GET_FORMAT(DATE, 'USA') AS datetime_text_nullable
--- rules: datetime_date_non_null: mysql.datetime.date-non-null / mysql.datetime.date-non-null
 -- rules: datetime_date_nullable: mysql.datetime.date-nullable / mysql.datetime.date-nullable
 -- rules: datetime_datetime: mysql.datetime.datetime / mysql.datetime.datetime
 -- rules: datetime_datetime_nullable: mysql.datetime.datetime-nullable / mysql.datetime.datetime-nullable

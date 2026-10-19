@@ -37,15 +37,6 @@ reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATE value."
 
 [[function]]
-id = "mysql.datetime.date-non-null"
-function = "CURRENT_DATE"
-dialects = ["mysql"]
-type = "DATE"
-nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
-reasoning = "The manual describes each of these as returning a DATE value. It never returns NULL, even for NULL arguments."
-
-[[function]]
 id = "mysql.datetime.date-nullable"
 functions = ["DATE", "MAKEDATE", "LAST_DAY"]
 dialects = ["mysql"]
