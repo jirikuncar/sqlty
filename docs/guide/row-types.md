@@ -51,7 +51,10 @@ included; a bare `# error:` means it reports nothing.
 
 `TypedDict`, `@dataclass` and Pydantic `BaseModel` fields are matched to
 columns by name, as psycopg's `dict_row`, `class_row` and `kwargs_row` pass
-them, so the order of fields and columns does not matter:
+them, so the order of fields and columns does not matter. A column's name is
+the one the database returns: MySQL and SQLite keep the case a column is
+declared with in `SELECT *`, and SQLite also for a column named in the select
+list, while PostgreSQL folds an unquoted name to lower case.
 
 1. Field count
    ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),

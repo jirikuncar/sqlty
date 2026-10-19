@@ -698,7 +698,7 @@ impl<'a> Analyzer<'a> {
                                 .filter(|col| !col.invisible)
                                 .map(|col| {
                                     Column::from_typed(
-                                        col.name.clone(),
+                                        col.output_name(),
                                         col.typed(self.dialect),
                                         Nullability::declared(col.not_null),
                                     )

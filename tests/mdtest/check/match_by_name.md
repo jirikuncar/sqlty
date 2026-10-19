@@ -321,3 +321,115 @@ class User(NamedTuple):
 # error: [column-type-mismatch] "User.name is str but query column 'id' infers int"
 query = SQL[User]("--sql\nSELECT id, name FROM users")
 ```
+
+## Declared case of column names
+
+MySQL and SQLite keep the case a column is declared with: `SELECT *` returns
+`userId`, not `userid`. SQLite also names a column reference after its
+declaration; MySQL names it as written. PostgreSQL folds an unquoted name to
+lower case.
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+select-star = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (userId INT PRIMARY KEY, createdAt TEXT NOT NULL);
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: userId: int (INT)
+-- columns: createdAt: str (TEXT)
+```
+
+```sql
+SELECT userid, accounts.CREATEDAT FROM accounts
+-- columns: userid: int (INT)
+-- columns: CREATEDAT: str (TEXT)
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Account(TypedDict):
+    userId: int
+    createdAt: str
+
+# error:
+q = SQL[Account]("-- sql\nSELECT * FROM accounts")
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (userId INTEGER PRIMARY KEY, createdAt TEXT NOT NULL);
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: userId: int (INT)
+-- columns: createdAt: str (TEXT)
+```
+
+```sql
+SELECT userid, accounts.CREATEDAT, (createdat) FROM accounts
+-- columns: userId: int (INT)
+-- columns: createdAt: str (TEXT)
+-- columns: createdAt: str (TEXT)
+```
+
+```sql
+SELECT userid FROM (SELECT userId AS UserID FROM accounts)
+-- columns: UserID: int (INT)
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Account(TypedDict):
+    userId: int
+    createdAt: str
+
+# error:
+q = SQL[Account]("--sql\nSELECT userid, createdat FROM accounts")
+```
+
+### PostgreSQL
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (userId INT PRIMARY KEY, "createdAt" TEXT NOT NULL);
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: userid: int (INT)
+-- columns: createdAt: str (TEXT)
+```

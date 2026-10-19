@@ -289,7 +289,8 @@ pub(super) fn alter_op(
                 column.name = fold(new_column_name, dialect);
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
-                    None => column.name.clone(),
+                    None if dialect == SqlDialect::Postgres => column.name.clone(),
+                    None => new_column_name.value.clone(),
                 };
             }
             None => missing()?,
