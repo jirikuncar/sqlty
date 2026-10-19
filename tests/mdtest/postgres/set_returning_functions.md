@@ -244,6 +244,32 @@ SELECT jt.x, jt.n FROM JSON_TABLE('[1, {}]'::jsonb, '$[*]' COLUMNS (n FOR ORDINA
 -- columns: n: int (INT)
 ```
 
+## XMLTABLE
+
+`XMLTABLE` takes its columns from its `COLUMNS` clause too. A column is NULL where
+its path matches nothing, unless it is `NOT NULL` or has a constant `DEFAULT`:
+
+```sql
+SELECT * FROM XMLTABLE('/r/i' PASSING ('<r><i a="1">x</i></r>'::xml) COLUMNS n FOR ORDINALITY, a int PATH '@a', v text PATH '.' NOT NULL, d text PATH 'd' DEFAULT '-') AS x
+-- columns: n: int (INT)
+-- columns: a: int | None (INT)
+-- columns: v: str (TEXT)
+-- columns: d: str (TEXT)
+```
+
+Without an alias, its name is `xmltable`, and a column list renames it:
+
+```sql
+SELECT xmltable.a FROM XMLTABLE('/r' PASSING (XMLPARSE(DOCUMENT '<r a="1"/>')) COLUMNS a int PATH '@a')
+-- columns: a: int | None (INT)
+```
+
+```sql
+SELECT * FROM XMLTABLE('/r' PASSING ('<r/>'::xml) COLUMNS a int, b numeric(5, 2)) AS x(p, q)
+-- columns: p: int | None (INT)
+-- columns: q: decimal.Decimal | None (DECIMAL(5, 2))
+```
+
 ## Stars
 
 `*` and `t.*` expand to the columns of a function in `FROM`, with or without
