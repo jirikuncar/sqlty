@@ -1,11 +1,11 @@
 //! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
 //! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
-//! SQLite's `a IS b`, MySQL's infix `MOD`, `SOUNDS LIKE`, `INTERVAL(n, n1, ...)`, `LOCK IN
-//! SHARE MODE`, its `CHAR(n USING charset)` and the comma-separated tables of its `UPDATE`,
-//! and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `trim(both from x, chars)`,
-//! `substring(x similar p escape e)`, the SQL/JSON clauses after a path, `json_array(SELECT
-//! ...)`, the XML functions' keywords and the order of XMLTABLE's column options. It runs
-//! only on a query that does not parse as written.
+//! SQLite's `a IS b`, `<<`, `>>` and postfix `ISNULL`, MySQL's infix `MOD`, `SOUNDS LIKE`,
+//! `INTERVAL(n, n1, ...)`, `LOCK IN SHARE MODE`, its `CHAR(n USING charset)` and the
+//! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
+//! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
+//! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
+//! XMLTABLE's column options. It runs only on a query that does not parse as written.
 
 use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
@@ -55,6 +55,15 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 )),
                 _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
             }
+        } else if dialect == SqlDialect::Sqlite && shift(sql, &tokens, i) {
+            edits.push((tokens[i].start, tokens[i + 1].end, "&".to_string()));
+        } else if dialect == SqlDialect::Sqlite
+            && word(i, "ISNULL")
+            && !is(i + 1, Kind::Open)
+            && i > 0
+            && ends_operand(sql, &tokens[i - 1])
+        {
+            edits.push((tokens[i].start, tokens[i].end, "IS NULL".to_string()));
         } else if dialect == SqlDialect::Sqlite {
             let not = word(i + 1, "NOT");
             let operand = if not { i + 2 } else { i + 1 };
@@ -242,6 +251,19 @@ fn is_predicate(sql: &str, token: &Token) -> bool {
 }
 
 /// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
+/// Whether `tokens[i]` starts SQLite's `<<` or `>>`, which sqlparser reads only in other
+/// dialects. They are respelled as `&`, which is typed the same.
+fn shift(sql: &str, tokens: &[Token], i: usize) -> bool {
+    let text = |j: usize| tokens.get(j).map_or("", |t| &sql[t.start..t.end]);
+    let adjacent = |j: usize| tokens[j].end == tokens[j + 1].start;
+    let first = text(i);
+    (first == "<" || first == ">")
+        && text(i + 1) == first
+        && adjacent(i)
+        && !(i > 0 && adjacent(i - 1) && matches!(text(i - 1), "<" | ">" | "-"))
+        && !(i + 2 < tokens.len() && adjacent(i + 1) && matches!(text(i + 2), "<" | ">" | "="))
+}
+
 fn ends_operand(sql: &str, token: &Token) -> bool {
     const KEYWORDS: [&str; 19] = [
         "SELECT",
