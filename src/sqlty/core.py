@@ -14,7 +14,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
-from sqlty._check import MARKER, RowUsage, apply_suppressions, is_any_row
+from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
     Schema,
@@ -35,6 +35,7 @@ from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
+from sqlty._drivers import MARKER
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource

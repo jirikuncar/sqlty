@@ -76,3 +76,35 @@ d = t"--sql\nSELECT id::INTEGER FROM users WHERE {looped:q}"
 # error: [tstring-skipped] "the field {plain:q} changes the SQL"
 e = t"--sql\nSELECT id::INTEGER FROM users WHERE {plain:q}"
 ```
+
+## Field values
+
+psycopg sends each field's value as a parameter, so a value of the wrong type
+is reported like one passed to a driver call.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, born DATE);
+```
+
+```python
+from datetime import date
+
+from sqlty import SQLTemplate
+
+
+def find(user_id: int, born: date) -> None:
+    a = SQLTemplate[tuple[str]](t"--sql\nSELECT name FROM users WHERE name LIKE 'a%' AND id = {user_id} AND born > {born:b}")
+    # error: [param-type-mismatch] "parameter 1 expects int, got datetime.date"
+    b = SQLTemplate[tuple[str]](t"--sql\nSELECT name FROM users WHERE id = {born}")
+    # error: [param-type-mismatch] "parameter 2 is not nullable, got None"
+    c = t"--sql\nINSERT INTO users (id, name) VALUES ({user_id}, {None})"
+    # error: [tstring-skipped] "the field {user_id!r} changes the SQL"
+    d = SQLTemplate[tuple[str]](t"--sql\nSELECT name FROM users WHERE id = {user_id!r}")
+```

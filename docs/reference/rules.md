@@ -396,7 +396,7 @@ Default: error. An argument whose type, stated in the source, can't be the type
 the query gives its parameter, or `None` for a parameter stored in a `NOT NULL`
 column. A `str`, a number for a numeric parameter, an argument of a cast
 parameter and any argument of unknown type are never reported. Not checked for
-SQLite, except `None`.
+SQLite, except `None`. The fields of a `--sql` t-string are arguments too.
 
 ```python
 from typing import Annotated, LiteralString

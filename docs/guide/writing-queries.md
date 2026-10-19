@@ -185,7 +185,9 @@ query = t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
 template in `.template`: pass that to psycopg, or pass the query to the
 [psycopg helpers](psycopg.md), which run the template and type the rows as `T`.
 `sqlty check` checks it like `SQL[T]`: `narrow-type` and `stale-type`, and the
-row type checks of a named row type.
+row type checks of a named row type. Each field's value is a parameter, so it is
+checked against its placeholder like a driver call's
+([`param-type-mismatch`](../reference/rules.md#param-type-mismatch)).
 
 ### Format specs
 
