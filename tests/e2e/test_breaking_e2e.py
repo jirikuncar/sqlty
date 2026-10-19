@@ -273,6 +273,13 @@ def test_snapshot_gives_what_its_revision_gives(cli: Cli, repo: Path) -> None:
     assert [f["direction"] for f in json.loads(from_snapshot.stdout)] == ["backward", "forward"]
 
 
+def test_snapshot_of_a_revision_is_the_snapshot_of_its_checkout(cli: Cli, repo: Path) -> None:
+    cli(["breaking", "--head", "HEAD", "--save", "../ref.json"], {"cwd": repo})
+    cli(["breaking", "--save", "../tree.json"], {"cwd": repo})
+
+    assert (repo.parent / "ref.json").read_text() == (repo.parent / "tree.json").read_text()
+
+
 def test_directory_of_snapshots_checks_each_version(cli: Cli, repo: Path) -> None:
     releases = repo.parent / "releases"
     cli(["breaking", "--head", "HEAD~1", "--save", str(releases / "v1.json")], {"cwd": repo})
