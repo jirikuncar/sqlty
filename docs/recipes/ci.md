@@ -21,7 +21,7 @@ default_language_version:
   python: python3.14  # sqlty requires Python >= 3.14
 repos:
   - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.2.0
+    rev: v0.2.1
     hooks:
       - id: sqlty-rewrite
       - id: sqlty-check
