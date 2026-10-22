@@ -1230,10 +1230,11 @@ SELECT total(1) AS aggregate_double
 ```
 
 ```sql
-SELECT unixepoch() AS datetime_bigint, julianday() AS datetime_double, date() AS datetime_text
+SELECT unixepoch() AS datetime_bigint, julianday() AS datetime_double, date() AS datetime_text, strftime('%Y') AS datetime_formatted
 -- rules: datetime_bigint: sqlite.datetime.bigint / sqlite.datetime.bigint
 -- rules: datetime_double: sqlite.datetime.double / sqlite.datetime.double
 -- rules: datetime_text: sqlite.datetime.text / sqlite.datetime.text
+-- rules: datetime_formatted: sqlite.datetime.formatted / sqlite.datetime.formatted
 ```
 
 ```sql

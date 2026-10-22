@@ -45,6 +45,24 @@ SELECT date(happened) AS a, time(happened) AS b, datetime(happened, '+1 day') AS
 -- columns: f: int | None (BIGINT)
 ```
 
+### The current time
+
+With no argument, or `'now'` alone, `date`, `time`, `datetime`, `julianday` and
+`unixepoch` read the current time, which is always a date. A modifier can be one
+SQLite does not read, and `strftime` a format it does not, so those stay nullable.
+
+```sql
+SELECT date() AS a, time('now') AS b, datetime('NOW') AS c, julianday() AS d, unixepoch('now') AS e, datetime('now', 'localtime') AS f, strftime('%Y', 'now') AS g, date('now ') AS h
+-- columns: a: str (TEXT)
+-- columns: b: str (TEXT)
+-- columns: c: str (TEXT)
+-- columns: d: float (DOUBLE)
+-- columns: e: int (BIGINT)
+-- columns: f: str | None (TEXT)
+-- columns: g: str | None (TEXT)
+-- columns: h: str | None (TEXT)
+```
+
 ## Strings
 
 `printf` and `format` return NULL instead of an empty string, so `printf('%s', name)` is
