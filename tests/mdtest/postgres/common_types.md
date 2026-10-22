@@ -209,11 +209,23 @@ SELECT 1 + dt, dt + '10:00'::time, '10:00'::time + INTERVAL '1 hour', '10:00'::t
 -- columns: ?column?: datetime.timedelta (INTERVAL)
 ```
 
-`AT TIME ZONE` flips between `timestamp` and `timestamptz`; `1e3` is a `numeric`.
+`AT TIME ZONE` flips between `timestamp` and `timestamptz`, and is NULL when either
+side is; `1e3` is a `numeric`.
 
 ```sql
-SELECT ts AT TIME ZONE 'UTC', tz AT TIME ZONE 'UTC', 1e3 FROM t
+SELECT ts AT TIME ZONE 'UTC', tz AT TIME ZONE 'UTC', 1e3, ts AT TIME ZONE NULL FROM t
 -- columns: timezone: datetime.datetime (TIMESTAMPTZ)
 -- columns: timezone: datetime.datetime (TIMESTAMP)
 -- columns: ?column?: decimal.Decimal (None)
+-- columns: timezone: datetime.datetime | None (TIMESTAMPTZ)
+```
+
+A date, a string literal and `NULL` have no `AT TIME ZONE` of their own: PostgreSQL
+reads them as a `timestamptz`, so the result is a `timestamp`.
+
+```sql
+SELECT dt AT TIME ZONE 'UTC', '2024-01-01 10:00' AT TIME ZONE 'UTC', NULL AT TIME ZONE 'UTC' FROM t
+-- columns: timezone: datetime.datetime (TIMESTAMP)
+-- columns: timezone: datetime.datetime (TIMESTAMP)
+-- columns: timezone: datetime.datetime | None (TIMESTAMP)
 ```

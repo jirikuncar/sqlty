@@ -681,6 +681,10 @@ impl<'a> Analyzer<'a> {
                 any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of)))
             }
             Expr::MemberOf(member) => any_nullable([of(&member.value), of(&member.array)]),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => any_nullable([of(timestamp), of(time_zone)]),
             Expr::InSubquery {
                 expr: inner,
                 subquery,
