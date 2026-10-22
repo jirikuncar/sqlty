@@ -107,6 +107,7 @@ tool such as pre-commit passes file names.
 | `--respect-gitignore`, `--no-respect-gitignore` | Skip the files .gitignore ignores while walking directories (default: [tool.sqlty] respect-gitignore, else true) |
 | `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes |
 | `-q`, `--quiet` | Suppress non-error output |
+| `-j`, `--jobs N` | Files to work on at once; 1 works on one at a time. Output is the same in any case (default: the number of processors) |
 <!-- /generated:cli-options-common -->
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
@@ -132,7 +133,7 @@ sqlty rewrite [-h] [--dialect DIALECT] [--schema SCHEMA]
               [--exclude GLOB] [--extend-exclude GLOB]
               [--force-exclude]
               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-              [--check] [--diff] [--untyped {skip,sentinel}]
+              [-j N] [--check] [--diff] [--untyped {skip,sentinel}]
               [paths ...]
 ```
 <!-- /generated:cli-usage-rewrite -->
@@ -164,7 +165,7 @@ sqlty strip [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [--check] [--diff]
+            [-j N] [--check] [--diff]
             [paths ...]
 ```
 <!-- /generated:cli-usage-strip -->
@@ -195,7 +196,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [--fix] [--exit-zero] [--exit-zero-on-warning]
+            [-j N] [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics] [--explain]
             [--output-format {text,json,github}]
             [paths ...]
