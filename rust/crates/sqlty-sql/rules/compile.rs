@@ -885,6 +885,15 @@ fn generate(rules: &[Rule], extensions: &[Extension]) -> String {
         "#[cfg(test)]\npub(crate) const EXTENDING_DIALECTS: &[&str] = &[{}];",
         names.join(", ")
     );
+    out.push_str("\n/// The bit of the SQL type `sql` in an operand predicate; none for a type no rule can name.\n");
+    out.push_str("fn type_bit(sql: &str) -> u128 {\n    match sql {\n");
+    for name in SQL_TYPES {
+        let _ = writeln!(out, "        {name:?} => {:#x},", type_bit(name));
+    }
+    let _ = writeln!(
+        out,
+        "        _ => 0,\n    }}\n}}\n\nconst KNOWN: u128 = {KNOWN:#x};"
+    );
     out
 }
 
@@ -1042,14 +1051,27 @@ fn operand(types: &Types) -> String {
     match types {
         None => "None".to_string(),
         Some(pred) => format!(
-            "Some(&[{}])",
+            "Some({:#x} /* {} */)",
+            pred.types
+                .iter()
+                .map(|name| type_bit(name))
+                .fold(if pred.known { KNOWN } else { 0 }, |mask, bit| mask | bit),
             pred.known
                 .then_some("@known")
                 .into_iter()
                 .chain(pred.types.iter().copied())
-                .map(|t| format!("{t:?}"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(" | ")
         ),
     }
+}
+
+/// The bit `@known` sets in an operand predicate; [`SQL_TYPES`] take the bits below it.
+const KNOWN: u128 = 1 << 127;
+const _: () = assert!(SQL_TYPES.len() < 127);
+
+/// The bit of the SQL type `name` in an operand predicate.
+fn type_bit(name: &str) -> u128 {
+    let at = SQL_TYPES.iter().position(|known| *known == name).unwrap();
+    1 << at
 }

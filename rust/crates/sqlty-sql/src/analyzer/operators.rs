@@ -4,7 +4,7 @@ use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::{binary_rules, prefix_rules, BinaryRule, RuleType};
+use super::inference::{binary_rules, operand, prefix_rules, BinaryRule, RuleType};
 use super::literals::{merge, python_kind, strip};
 use super::query::Analyzer;
 use super::scope::Scope;
@@ -112,7 +112,7 @@ impl Analyzer<'_> {
     ) -> Option<&'static BinaryRule> {
         prefix_rules(op)
             .iter()
-            .find(|rule| rule.applies(self.dialect, None, rule_type(typed)))
+            .find(|rule| rule.applies(self.dialect, None, operand(rule_type(typed))))
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`
@@ -153,7 +153,7 @@ impl Analyzer<'_> {
         // Arithmetic reads both sides: a placeholder takes the other operand's type.
         if reads_left && reads_right || (reads_left || reads_right) && is_arithmetic(op) {
             let typed = self.rule_operands(left, op, right, scope)?;
-            let (l, r) = (rule_type(&typed.0), rule_type(&typed.1));
+            let (l, r) = (operand(rule_type(&typed.0)), operand(rule_type(&typed.1)));
             let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
             return Ok(found.map(|rule| (rule, Some(typed.clone()))));
         }
@@ -162,8 +162,8 @@ impl Analyzer<'_> {
         };
         let (l, r) = (side(reads_left, left)?, side(reads_right, right)?);
         let (l, r) = (
-            l.as_ref().and_then(rule_type),
-            r.as_ref().and_then(rule_type),
+            operand(l.as_ref().and_then(rule_type)),
+            operand(r.as_ref().and_then(rule_type)),
         );
         let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
         Ok(found.map(|rule| (rule, None)))
