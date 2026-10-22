@@ -1,12 +1,13 @@
 # Benchmarks
 
-Two scripts; both need the release extension:
+Three scripts; all need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
 |--------|------------------|-------------|
 | `bench_core.py` | `sqlty.core` calls on small inputs (µs per call) | `make bench` |
 | `bench_project.py` | A generated large project: CLI wall time and peak RSS | `make bench-project`, `make bench-ci`, `make bench-baseline` |
+| `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source` and `check_source`, through CodSpeed | `make bench-codspeed` |
 
 ## The synthetic project
 
@@ -69,3 +70,28 @@ make bench-baseline   # rewrites this platform's entry in benchmarks/baseline.js
 
 Commit `baseline.json` with the change that moved the numbers. To add the
 `Linux-ci` entry, put the `bench-result` artifact's JSON under that key.
+
+## CodSpeed
+
+The `codspeed` job in `.github/workflows/tests.yml` runs `test_benchmarks.py` under
+[CodSpeed](https://codspeed.io) on every push to `main` and every pull request, and
+comments the change per benchmark on the pull request.
+
+The upload needs the repository enabled on codspeed.io, and the job only measures
+once the repository variable `CODSPEED` is `true`. Until then it runs each benchmark
+once, unmeasured, so a broken benchmark still fails the pull request.
+
+- It runs in simulation mode, which counts instructions instead of timing them. The
+  engine is CPU-bound, so the count follows its speed, and it does not move with the
+  load of a shared runner the way wall time does.
+- The benchmarks reuse `synth.py`: the query kinds of the CI budget against its
+  400-table schema, loaded once with `core.load_schema`, plus that schema's load and
+  a module of every kind through `rewrite_source` and `check_source`.
+- Locally, `make bench-codspeed` times them as plain pytest. Do not compare rows by
+  the `Time (best)` column: pytest-codspeed 5.0.3 divides it by the iteration count
+  twice. Use `make bench-rust` to compare a branch locally.
+
+```bash
+make bench-codspeed
+uv run pytest benchmarks/ --codspeed -p no:randomly --no-cov -k check_source  # one benchmark
+```

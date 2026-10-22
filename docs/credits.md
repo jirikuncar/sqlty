@@ -52,6 +52,7 @@ the Python packages sqlty depends on at runtime:
 | [inline-snapshot](https://github.com/15r10nk/inline-snapshot) | Python snapshot tests | MIT |
 | [insta](https://insta.rs) | Rust snapshot tests | Apache-2.0 |
 | [Criterion.rs](https://github.com/bheisler/criterion.rs) | Engine benchmarks | MIT or Apache-2.0 |
+| [pytest-codspeed](https://github.com/CodSpeedHQ/pytest-codspeed) | Benchmarks CodSpeed measures on every commit | MIT |
 | [DuckDB](https://duckdb.org) | Checking DuckDB's value types | MIT |
 | [PyYAML](https://github.com/yaml/pyyaml) | Reading hook and workflow files in tests | MIT |
 | [Lean 4](https://lean-lang.org), [elan](https://github.com/leanprover/elan) | Proofs about the type mapping | Apache-2.0; elan MIT or Apache-2.0 |

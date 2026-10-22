@@ -33,6 +33,7 @@ help:
 	@echo "  bench-project     - Benchmark a synthetic 10k-file project"
 	@echo "  bench-ci          - CI performance budget check against benchmarks/baseline.json"
 	@echo "  bench-baseline    - Re-record the benchmark baseline"
+	@echo "  bench-codspeed    - The CodSpeed benchmarks (benchmarks/test_benchmarks.py), timed locally"
 	@echo "  bench-rust        - Criterion benchmarks of the Rust engine (rust/crates/sqlty-bench)"
 	@echo ""
 	@echo "Docs:"
@@ -126,6 +127,10 @@ bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseli
 .PHONY: bench-baseline
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
+
+.PHONY: bench-codspeed
+bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
+	uv run --group bench pytest benchmarks/ --codspeed -p no:randomly --no-cov
 
 .PHONY: bench-rust
 bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=
