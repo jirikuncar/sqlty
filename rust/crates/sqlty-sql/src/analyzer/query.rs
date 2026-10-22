@@ -627,6 +627,7 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
+            self.check_references(expr, scope);
             let mut nullability = self.nullability(expr, scope, facts);
             // psycopg loads a JSON `null` as `None`, and it passes `IS NOT NULL`.
             if self

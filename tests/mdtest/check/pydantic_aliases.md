@@ -57,7 +57,7 @@ class User(BaseModel):
 
 # error: [typeddict-key-mismatch] "User has no field for query column 'user_id'"
 # error: [typeddict-key-mismatch] "User.id is required but missing from query"
-query = SQL[User]("--sql\nSELECT user_id::INTEGER, name FROM users")
+query = SQL[User]("--sql\nSELECT id::INTEGER AS user_id, name FROM users")
 ```
 
 ## validation_alias and Annotated metadata
