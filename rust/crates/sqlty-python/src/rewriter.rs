@@ -133,7 +133,10 @@ pub(crate) fn rewrite_scan(
     keep_lines: bool,
     skip: &dyn Fn(usize) -> bool,
 ) -> Option<String> {
-    let replacements = wraps(scan, options, skip);
+    let (dialect, schema) = (options.dialect.name(), options.schema);
+    let replacements = wraps(scan, options, skip, &|content| {
+        infer_sql_content(content, dialect, schema)
+    });
     if replacements.is_empty() {
         return None;
     }
@@ -280,9 +283,15 @@ pub(crate) fn line_ending(source: &str, at: usize) -> &'static str {
 /// a wrapper call (`mod.SQL[...]` included), the argument of a psycopg `SQL(...)`,
 /// groups with a prefixed string, and
 /// every group on a line that holds an f- or t-string `--sql` group.
-pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool) -> Vec<Edit> {
+/// `infer` gives the row type of a group's content.
+pub(crate) fn wraps(
+    scan: &Scan,
+    options: &Options,
+    skip: &dyn Fn(usize) -> bool,
+    infer: &dyn Fn(&str) -> Option<String>,
+) -> Vec<Edit> {
     let source = scan.source();
-    let (dialect, schema) = (options.dialect.name(), options.schema);
+    let dialect = options.dialect.name();
     let (istyle, untyped) = (&options.style, options.untyped);
     let interpolated: Vec<usize> = scan
         .groups()
@@ -315,13 +324,12 @@ pub(crate) fn wraps(scan: &Scan, options: &Options, skip: &dyn Fn(usize) -> bool
             continue;
         }
         let content = scan.content(group);
-        let content = content.trim();
-        if after_marker(content).is_none() {
+        if after_marker(content.trim()).is_none() {
             continue;
         }
-        let type_str = match infer_sql_content(content, dialect, schema) {
+        let type_str = match infer(&content) {
             Some(inferred) => spelling.respell(inferred),
-            None if untyped && is_untyped(content, dialect) => istyle.untyped_name(),
+            None if untyped && is_untyped(&content, dialect) => istyle.untyped_name(),
             // Don't wrap when inference fails — SQL[Any] is never useful.
             None => continue,
         };
