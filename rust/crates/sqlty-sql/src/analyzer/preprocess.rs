@@ -23,8 +23,8 @@ pub(super) static SQL_MARKER: LazyLock<Regex> =
 
 /// PostgreSQL syntax sqlparser cannot read, respelled as the closest it can. Of row-lock
 /// clauses, `NO KEY UPDATE` becomes `UPDATE`, `KEY SHARE` becomes `SHARE`, and `OF` keeps only
-/// its first table. `SET CONSTRAINTS ... DEFERRED`, which returns no rows, becomes a `SET`.
-pub(super) static POSTGRES_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
+/// its first table.
+pub(super) static POSTGRES_FIXES: LazyLock<[(Regex, &str); 3]> = LazyLock::new(|| {
     const NAME: &str = r#"(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))*"#;
     [
         (
@@ -41,13 +41,6 @@ pub(super) static POSTGRES_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|
             ))
             .unwrap(),
             "$1 OF $2",
-        ),
-        (
-            Regex::new(&format!(
-                r"(?i)^(\s*)SET\s+CONSTRAINTS\s+(?:ALL|{NAME}(?:\s*,\s*{NAME})*)\s+(?:DEFERRED|IMMEDIATE)\b"
-            ))
-            .unwrap(),
-            "${1}SET CONSTRAINTS TO DEFAULT",
         ),
     ]
 });

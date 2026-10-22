@@ -5,8 +5,9 @@
 //! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
 //! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
 //! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
-//! XMLTABLE's column options, and PostgreSQL's `(composite).*`, as the field `"*"` the
-//! analyzer expands. It runs only on a query that does not parse as written.
+//! XMLTABLE's column options, PostgreSQL's `(composite).*`, as the field `"*"` the
+//! analyzer expands, and its `SET CONSTRAINTS` and `DO` statements, as statements that return
+//! no rows. It runs only on a query that does not parse as written.
 
 use super::dialect::SqlDialect;
 use super::preprocess::quoted_end;
@@ -35,6 +36,14 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
     };
     for i in 0..tokens.len() {
         let call = |name: &str| word(i, name) && is(i + 1, Kind::Open);
+        let starts_statement = i == 0 || symbol(i - 1, ";");
+        if dialect == SqlDialect::Postgres && starts_statement {
+            if let Some(edit) =
+                set_constraints(sql, &tokens, i).or_else(|| do_block(sql, &tokens, i))
+            {
+                edits.push(edit);
+            }
+        }
         if dialect != SqlDialect::MySql
             && word(i, "EXCLUDE")
             && (word(i + 1, "GROUP")
@@ -246,6 +255,60 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
     }
     out.push_str(&sql[last..]);
     Some(out)
+}
+
+/// `SET CONSTRAINTS ... DEFERRED` or `IMMEDIATE` starting at token `i`, as a `SET`: neither
+/// returns rows.
+fn set_constraints(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, String)> {
+    let word = |j: usize, name: &str| {
+        tokens
+            .get(j)
+            .is_some_and(|t| t.kind == Kind::Word && sql[t.start..t.end].eq_ignore_ascii_case(name))
+    };
+    if !word(i, "SET") || !word(i + 1, "CONSTRAINTS") {
+        return None;
+    }
+    let mode = (i + 2..tokens.len()).find(|&j| word(j, "DEFERRED") || word(j, "IMMEDIATE"))?;
+    let names = tokens[i + 2..mode].iter().all(|t| {
+        matches!(t.kind, Kind::Word | Kind::Comma)
+            || &sql[t.start..t.end] == "."
+            || sql[t.start..].starts_with('"')
+    });
+    (names && mode > i + 2).then(|| {
+        (
+            tokens[i].start,
+            tokens[mode].end,
+            "SET CONSTRAINTS TO DEFAULT".to_string(),
+        )
+    })
+}
+
+/// PostgreSQL's `DO [LANGUAGE name] code [LANGUAGE name]` starting at token `i`, an anonymous
+/// code block, as a statement that returns no rows; the code is not read.
+fn do_block(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, String)> {
+    let word = |j: usize, name: &str| {
+        tokens
+            .get(j)
+            .is_some_and(|t| t.kind == Kind::Word && sql[t.start..t.end].eq_ignore_ascii_case(name))
+    };
+    if !word(i, "DO") {
+        return None;
+    }
+    let code = if word(i + 1, "LANGUAGE") {
+        i + 3
+    } else {
+        i + 1
+    };
+    let token = tokens.get(code)?;
+    if token.kind != Kind::Other || !sql[token.start..].starts_with(['\'', '$']) {
+        return None;
+    }
+    let last = if word(code + 1, "LANGUAGE") && code + 2 < tokens.len() {
+        code + 2
+    } else {
+        code
+    };
+    Some((tokens[i].start, tokens[last].end, "RESET ALL".to_string()))
 }
 
 /// Whether `token` starts one of the predicates sqlparser reads after `IS [NOT]`, rather
@@ -511,6 +574,18 @@ struct Token {
     end: usize,
 }
 
+/// The `$tag$` that opens a PostgreSQL dollar-quoted string at the start of `sql`.
+fn dollar_tag(sql: &str) -> Option<&str> {
+    let rest = sql.strip_prefix('$')?;
+    let end = rest.find('$')?;
+    let tag = &rest[..end];
+    let valid = tag
+        .bytes()
+        .enumerate()
+        .all(|(k, b)| b == b'_' || b.is_ascii_alphabetic() || (k > 0 && b.is_ascii_digit()));
+    valid.then(|| &sql[..end + 2])
+}
+
 /// The words, parentheses, commas and other tokens of `sql`, without whitespace and
 /// comments; a quoted string or name is one `Other` token.
 fn tokens(sql: &str) -> Vec<Token> {
@@ -534,6 +609,14 @@ fn tokens(sql: &str) -> Vec<Token> {
             }
             b'\'' | b'"' | b'`' => {
                 i = quoted_end(bytes, i);
+                Kind::Other
+            }
+            b'$' if dollar_tag(&sql[i..]).is_some() => {
+                let tag = dollar_tag(&sql[i..]).unwrap_or_default();
+                let body = i + tag.len();
+                i = sql[body..]
+                    .find(tag)
+                    .map_or(bytes.len(), |n| body + n + tag.len());
                 Kind::Other
             }
             b'(' => {

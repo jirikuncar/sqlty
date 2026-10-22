@@ -59,13 +59,18 @@ from sqlty import SQL
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users FOR NO KEY UPDATE")
 ```
 
-PostgreSQL's row-lock clauses and `SET CONSTRAINTS`, which sqlparser does not read, are
-read as the closest syntax it does.
+PostgreSQL's row-lock clauses, `SET CONSTRAINTS` and `DO` blocks, which sqlparser does not
+read, are read as the closest syntax it does. A `DO` block's code is not read.
 
 ```python
 # error:
 a = "--sql\nSET CONSTRAINTS ALL DEFERRED"
 b = "--sql\nSET CONSTRAINTS orders_user_id_fkey, public.items_order_id_fkey IMMEDIATE"
+c = "--sql\n-- defer FK checks\nSET CONSTRAINTS ALL DEFERRED"
+d = "--sql\nBEGIN; /* defer */ SET CONSTRAINTS \"orders_fk\" DEFERRED; COMMIT"
+e = "--sql\nDO $$ BEGIN PERFORM 1; END $$"
+f = "--sql\nDO LANGUAGE plpgsql $body$ BEGIN RAISE NOTICE '$$'; END $body$"
+g = "--sql\nDO 'BEGIN PERFORM 1; END' LANGUAGE plpgsql"
 ```
 
 ## Syntax of another dialect
