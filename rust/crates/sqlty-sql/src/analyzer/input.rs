@@ -44,7 +44,9 @@ const POSTGRES_TYPED_STRINGS: [&str; 19] = [
 ///
 /// - ISO's `BINARY LARGE OBJECT` as `BLOB` and `T MULTISET` as the array `T[]`;
 /// - in PostgreSQL, the `WHERE` of `ON CONFLICT (...) WHERE ... DO` dropped (the partial
-///   index that arbitrates the conflict does not change the result), `FOR NO KEY UPDATE`
+///   index that arbitrates the conflict does not change the result), `OVERRIDING SYSTEM
+///   VALUE` and `OVERRIDING USER VALUE` dropped (they pick the stored value, not its
+///   type), `FOR NO KEY UPDATE`
 ///   as `FOR UPDATE`, `FOR KEY SHARE` as `FOR SHARE`, `OF` keeping only its first table,
 ///   and `cidr '...'` and similar literals as casts;
 /// - in PostgreSQL and MySQL, a `TABLE name` query as `SELECT * FROM name`;
@@ -119,6 +121,11 @@ fn fixes(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>
                     edits.extend(conflict_predicate(sql, tokens, i + 2));
                 } else if word(i, "FOR") {
                     row_lock(sql, tokens, i, edits);
+                } else if word(i, "OVERRIDING")
+                    && (word(i + 1, "SYSTEM") || word(i + 1, "USER"))
+                    && word(i + 2, "VALUE")
+                {
+                    edits.push((tokens[i].start, tokens[i + 2].end, String::new()));
                 } else if POSTGRES_TYPED_STRINGS.iter().any(|ty| word(i, ty))
                     && text(i + 1).starts_with('\'')
                     && spaced(sql, tokens, i)
