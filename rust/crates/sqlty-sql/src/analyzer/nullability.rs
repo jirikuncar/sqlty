@@ -497,6 +497,11 @@ fn is_nonzero_number(expr: &Expr) -> bool {
     }
 }
 
+/// Whether `expr` is SQLite's `'now'` time value, in any case.
+fn is_now(expr: &Expr) -> bool {
+    matches!(expr, Expr::Value(value) if matches!(&value.value, Value::SingleQuotedString(s) if s.eq_ignore_ascii_case("now")))
+}
+
 /// Grouping expressions that a subtotal row sets to NULL: those inside `ROLLUP`, `CUBE` and
 /// `GROUPING SETS`, and all of them under MySQL's `WITH ROLLUP`.
 fn rolled_up(select: &Select) -> Vec<&Expr> {
@@ -676,6 +681,10 @@ impl<'a> Analyzer<'a> {
                 any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of)))
             }
             Expr::MemberOf(member) => any_nullable([of(&member.value), of(&member.array)]),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => any_nullable([of(timestamp), of(time_zone)]),
             Expr::InSubquery {
                 expr: inner,
                 subquery,
@@ -1206,6 +1215,15 @@ impl<'a> Analyzer<'a> {
             "MOD" if !postgres => Nullability::Nullable,
             "FIRST_VALUE" | "LAST_VALUE" if frame_holds_current_row(func.over.as_ref()) => first(),
             "FIRST_VALUE" | "LAST_VALUE" => Nullability::Nullable,
+            "DATE" | "TIME" | "DATETIME" | "JULIANDAY" | "UNIXEPOCH"
+                if self.dialect == SqlDialect::Sqlite =>
+            {
+                match args.as_slice() {
+                    [] => Nullability::NonNull,
+                    [time] if is_now(time) => Nullability::NonNull,
+                    _ => Nullability::Nullable,
+                }
+            }
             _ if typed_by_rule(&name, self.dialect) && all_positional => {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }

@@ -254,11 +254,18 @@ impl<'a> Analyzer<'a> {
             },
             Expr::AtTimeZone { timestamp, .. } if self.dialect == SqlDialect::Postgres => {
                 // `timestamp AT TIME ZONE zone` is a `timestamptz` and vice versa; a time
-                // of day becomes a `timetz` either way.
+                // of day becomes a `timetz` either way. A date, a string literal and NULL
+                // are read as a `timestamptz`, the preferred type of their category.
                 let typed = self.expr(timestamp, scope)?;
+                let untyped = matches!(
+                    timestamp.as_ref(),
+                    Expr::Value(value)
+                        if matches!(value.value, Value::SingleQuotedString(_) | Value::Null)
+                );
                 Ok(match operand_type(&typed) {
+                    _ if untyped => from_sql_type("TIMESTAMP", self.dialect),
                     Some("TIMESTAMP") => from_sql_type("TIMESTAMPTZ", self.dialect),
-                    Some("TIMESTAMPTZ") => from_sql_type("TIMESTAMP", self.dialect),
+                    Some("TIMESTAMPTZ" | "DATE") => from_sql_type("TIMESTAMP", self.dialect),
                     Some("TIME" | "TIMETZ") => from_sql_type("TIMETZ", self.dialect),
                     _ => Typed::UNKNOWN,
                 })
