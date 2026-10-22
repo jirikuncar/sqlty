@@ -629,6 +629,16 @@ impl<'a> Analyzer<'a> {
             }
             self.check_references(expr, scope);
             let mut nullability = self.nullability(expr, scope, facts);
+            // Not NULL whichever way the conditions hold: `COALESCE(a, c)` under
+            // `a IS NOT NULL OR c IS NOT NULL`.
+            if nullability != Nullability::NonNull
+                && !facts.cases.is_empty()
+                && facts
+                    .cases()
+                    .all(|case| self.nullability(expr, scope, &case) == Nullability::NonNull)
+            {
+                nullability = Nullability::NonNull;
+            }
             // psycopg loads a JSON `null` as `None`, and it passes `IS NOT NULL`.
             if self
                 .json_extract(expr, scope)

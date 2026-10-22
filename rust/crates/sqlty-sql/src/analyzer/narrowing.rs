@@ -9,6 +9,13 @@
 //! What a condition proves is a [`Learned`] set of columns and expressions. A
 //! non-null column of a null-extended relation also proves the relation present, which
 //! [`Facts`] reads as no longer null-extended.
+//!
+//! A condition can hold in several ways: `a IS NOT NULL OR c IS NOT NULL` proves `a` in
+//! one and `c` in the other, and nothing about either in both. [`Analyzer::learn_cases`]
+//! keeps each way, a disjunction of [`Learned`] conjunctions, and drops the ways that
+//! contradict themselves (`a IS NULL AND a IS NOT NULL`), so that `COALESCE(a, c)` is
+//! known not NULL under it. Past [`MAX_CASES`] ways, they merge into what all of them
+//! prove.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -31,7 +38,7 @@ use crate::values::Value;
 use rustc_hash::FxHashSet;
 
 /// Columns and expressions proven not NULL.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Learned {
     /// `(reference, column)` pairs.
     columns: HashSet<(String, String)>,
@@ -95,6 +102,11 @@ impl Learned {
         !self.values.is_empty()
     }
 
+    /// Whether no row can satisfy this: a column is proven both NULL and not NULL.
+    fn contradicts(&self) -> bool {
+        self.null.iter().any(|pair| self.columns.contains(pair))
+    }
+
     fn union(mut self, other: Learned) -> Learned {
         self.columns.extend(other.columns);
         self.present.extend(other.present);
@@ -148,6 +160,50 @@ impl Learned {
     }
 }
 
+/// The most ways a condition holds that [`Analyzer::learn_cases`] keeps apart.
+const MAX_CASES: usize = 32;
+
+/// What all of `cases` prove: what a condition proves whichever way it holds.
+pub(super) fn merge(cases: Vec<Learned>) -> Learned {
+    cases
+        .into_iter()
+        .reduce(|all, case| all.intersect(&case))
+        .unwrap_or_default()
+}
+
+/// The ways both `left` and `right` hold: each way of one with each way of the other.
+fn both(mut left: Vec<Learned>, mut right: Vec<Learned>) -> Vec<Learned> {
+    if let ([_], [_]) = (left.as_slice(), right.as_slice()) {
+        let (l, r) = (left.remove(0), right.remove(0));
+        return vec![l.union(r)];
+    }
+    let mut cases = Vec::with_capacity(left.len() * right.len());
+    for l in &left {
+        for r in &right {
+            cases.push(l.clone().union(r.clone()));
+        }
+    }
+    possible(cases)
+}
+
+/// The ways `left` or `right` holds.
+fn either(mut left: Vec<Learned>, right: Vec<Learned>) -> Vec<Learned> {
+    left.extend(right);
+    possible(left)
+}
+
+/// `cases` without the ones no row satisfies, unless none is left, merged past
+/// [`MAX_CASES`].
+fn possible(mut cases: Vec<Learned>) -> Vec<Learned> {
+    if cases.iter().any(|case| !case.contradicts()) {
+        cases.retain(|case| !case.contradicts());
+    }
+    if cases.len() > MAX_CASES {
+        return vec![merge(cases)];
+    }
+    cases
+}
+
 impl Facts {
     /// These facts and what a condition proved.
     pub(super) fn with(&self, learned: Learned) -> Facts {
@@ -168,6 +224,26 @@ impl Facts {
             Rc::make_mut(&mut facts.null).extend(learned.null);
         }
         facts
+    }
+
+    /// These facts and what the conditions of a SELECT prove, given as the `cases` they
+    /// can hold in: what all prove, and each case apart in [`Facts::cases`].
+    fn with_cases(&self, mut cases: Vec<Learned>) -> Facts {
+        if cases.len() == 1 {
+            return self.with(cases.remove(0));
+        }
+        let mut facts = self.with(merge(cases.clone()));
+        facts.cases = Rc::new(cases);
+        facts
+    }
+
+    /// These facts in each way the conditions in force can hold, when there are several.
+    pub(super) fn cases(&self) -> impl Iterator<Item = Facts> + '_ {
+        self.cases.iter().map(|case| {
+            let mut facts = self.with(case.clone());
+            facts.cases = Rc::default();
+            facts
+        })
     }
 }
 
@@ -234,55 +310,57 @@ pub(super) fn conditions(select: &Select) -> Vec<&Expr> {
 
 impl<'a> Analyzer<'a> {
     /// The facts in force inside `select`, once its conditions are applied.
-    pub(super) fn narrow_select(&self, select: &Select, scope: &Scope, mut facts: Facts) -> Facts {
-        let learned = conditions(select)
-            .into_iter()
-            .map(|cond| self.learn(cond, true, scope))
-            .fold(Learned::default(), Learned::union);
-        facts = facts.with(learned);
-        facts
+    pub(super) fn narrow_select(&self, select: &Select, scope: &Scope, facts: &Facts) -> Facts {
+        let mut cases = vec![Learned::default()];
+        for cond in conditions(select) {
+            cases = both(cases, self.learn_cases(cond, true, scope));
+        }
+        facts.with_cases(cases)
     }
 
-    /// What is proven not NULL when `cond` evaluates to `truth`.
-    #[recursive::recursive]
+    /// What is proven not NULL when `cond` evaluates to `truth`, whichever way it does.
     pub(super) fn learn(&self, cond: &Expr, truth: bool, scope: &Scope) -> Learned {
+        merge(self.learn_cases(cond, truth, scope))
+    }
+
+    /// What is proven not NULL when `cond` evaluates to `truth`, for each way it can: the
+    /// sides of an `OR` that holds, of an `AND` that fails.
+    #[recursive::recursive]
+    pub(super) fn learn_cases(&self, cond: &Expr, truth: bool, scope: &Scope) -> Vec<Learned> {
         use BinaryOperator::*;
         match cond {
-            Expr::Nested(inner) => self.learn(inner, truth, scope),
+            Expr::Nested(inner) => self.learn_cases(inner, truth, scope),
             Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 expr,
-            } => self.learn(expr, !truth, scope),
+            } => self.learn_cases(expr, !truth, scope),
             Expr::BinaryOp {
                 left,
-                op: And,
+                op: op @ (And | Or),
                 right,
             } => {
                 let (l, r) = (
-                    self.learn(left, truth, scope),
-                    self.learn(right, truth, scope),
+                    self.learn_cases(left, truth, scope),
+                    self.learn_cases(right, truth, scope),
                 );
-                if truth {
-                    l.union(r)
+                if (*op == And) == truth {
+                    both(l, r)
                 } else {
-                    l.intersect(&r)
+                    either(l, r)
                 }
             }
-            Expr::BinaryOp {
-                left,
-                op: Or,
-                right,
-            } => {
-                let (l, r) = (
-                    self.learn(left, truth, scope),
-                    self.learn(right, truth, scope),
-                );
-                if truth {
-                    l.intersect(&r)
-                } else {
-                    l.union(r)
-                }
-            }
+            Expr::IsTrue(inner) if truth => self.learn_cases(inner, true, scope),
+            Expr::IsFalse(inner) if truth => self.learn_cases(inner, false, scope),
+            Expr::IsNotTrue(inner) if !truth => self.learn_cases(inner, true, scope),
+            Expr::IsNotFalse(inner) if !truth => self.learn_cases(inner, false, scope),
+            _ => vec![self.learn_one(cond, truth, scope)],
+        }
+    }
+
+    /// [`Self::learn`] of a condition that is no `AND`, `OR` or `NOT`.
+    fn learn_one(&self, cond: &Expr, truth: bool, scope: &Scope) -> Learned {
+        use BinaryOperator::*;
+        match cond {
             Expr::IsNull(inner) if !truth => self.proven(inner, scope),
             Expr::IsNotNull(inner) if truth => self.proven(inner, scope),
             Expr::IsNull(inner) | Expr::IsNotNull(inner)
@@ -294,10 +372,6 @@ impl<'a> Analyzer<'a> {
                 }
                 learned
             }
-            Expr::IsTrue(inner) if truth => self.learn(inner, true, scope),
-            Expr::IsFalse(inner) if truth => self.learn(inner, false, scope),
-            Expr::IsNotTrue(inner) if !truth => self.learn(inner, true, scope),
-            Expr::IsNotFalse(inner) if !truth => self.learn(inner, false, scope),
             // `x IS NOT NULL` false, `x IS NULL` true and the like say nothing about `x`.
             Expr::IsNull(_)
             | Expr::IsNotNull(_)

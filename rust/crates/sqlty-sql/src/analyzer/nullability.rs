@@ -89,6 +89,9 @@ pub(super) struct Facts {
     pub(super) values: Rc<Vec<super::narrowing::ColumnValues>>,
     /// `(reference, column)` pairs the conditions in force prove NULL (`col IS NULL`).
     pub(super) null: Rc<Vec<(String, String)>>,
+    /// The ways the conditions in force can hold, when they hold in several (an `OR`),
+    /// each with what it proves beyond the rest of these facts.
+    pub(super) cases: Rc<Vec<Learned>>,
 }
 
 impl Facts {
@@ -108,6 +111,11 @@ impl Facts {
         self.non_null
             .iter()
             .any(|(r, c)| r == reference && c == column)
+    }
+
+    /// Whether no row can satisfy these facts: a column is proven both NULL and not NULL.
+    pub(super) fn contradicts(&self) -> bool {
+        self.null.iter().any(|(r, c)| self.is_non_null(r, c))
     }
 
     /// Nullability of a column of `reference`, given what its source declares. `column` is
@@ -152,6 +160,7 @@ impl Facts {
         // SELECT may bind them to its own: none of them carries over.
         self.non_null_exprs = Rc::default();
         self.rolled_up_exprs = Rc::default();
+        self.cases = Rc::default();
     }
 
     /// These facts without the grouping subtotals: what an aggregate reads is the rows of
@@ -558,7 +567,7 @@ impl<'a> Analyzer<'a> {
                 }
             }
         }
-        self.narrow_select(select, scope, facts)
+        self.narrow_select(select, scope, &facts)
     }
 
     /// The identity narrowing knows column `name` of the relation `reference` by: what
@@ -1028,7 +1037,9 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
         facts: &Facts,
     ) -> Nullability {
-        // A branch is read where its WHEN holds and the earlier ones do not.
+        // A branch is read where its WHEN holds and the earlier ones do not; one no row
+        // reaches (`WHEN a IS NULL` where `a` is not NULL) does not count.
+        let reached = |branch: &Facts| !branch.contradicts() || facts.contradicts();
         let mut skipped = facts.clone();
         let mut results = Vec::new();
         for when in conditions {
@@ -1041,14 +1052,18 @@ impl<'a> Analyzer<'a> {
                 None => when.condition.clone(),
             };
             let taken = skipped.with(self.learn(&condition, true, scope));
-            results.push(self.nullability(&when.result, scope, &taken));
+            if reached(&taken) {
+                results.push(self.nullability(&when.result, scope, &taken));
+            }
             let unmatched = self.learn_not_true(&condition, scope, &skipped);
             skipped = skipped.with(unmatched);
         }
         // Without ELSE, a row no WHEN matches yields NULL.
-        results.push(else_result.map_or(Nullability::Nullable, |expr| {
-            self.nullability(expr, scope, &skipped)
-        }));
+        if reached(&skipped) {
+            results.push(else_result.map_or(Nullability::Nullable, |expr| {
+                self.nullability(expr, scope, &skipped)
+            }));
+        }
         any_nullable(results)
     }
 
