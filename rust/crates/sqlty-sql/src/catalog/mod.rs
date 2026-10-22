@@ -964,6 +964,35 @@ mod tests {
         assert_eq!(view_cols(&c, "v3"), ["id:INT", "name:TEXT"]);
     }
 
+    /// A view after each function resolves only the functions that changed since the last
+    /// one, not all of them.
+    #[test]
+    fn test_functions_between_views_resolve_once() {
+        let mut sql = String::new();
+        for i in 0..200 {
+            sql += &format!("CREATE TABLE t{i} (id int);\n");
+            sql +=
+                &format!("CREATE FUNCTION f{i}() RETURNS SETOF t{i} LANGUAGE sql AS 'select 1';\n");
+            sql += &format!("CREATE VIEW v{i} AS SELECT * FROM f{i}();\n");
+        }
+        resolve::FUNCTIONS_RESOLVED.with(|count| count.set(0));
+        let c = pg(&sql);
+        assert_eq!(view_cols(&c, "v199"), ["id:INT"]);
+        // Once before its view, once in the final build.
+        assert_eq!(resolve::FUNCTIONS_RESOLVED.with(std::cell::Cell::get), 400);
+    }
+
+    /// A function returning a table's row follows a later change to the table.
+    #[test]
+    fn test_function_returning_a_row_follows_its_table() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS t LANGUAGE sql AS 'select 1';
+            ALTER TABLE t ADD COLUMN name text;
+            CREATE VIEW v2 AS SELECT * FROM f();");
+        assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
+    }
+
     /// Functions do not force the catalog to be built again.
     #[test]
     fn test_functions_and_noop_alters_do_not_rebuild_the_catalog() {

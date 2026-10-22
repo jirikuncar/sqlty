@@ -15,7 +15,7 @@ use crate::ddl::RowEvents;
 use crate::values::{self, Value};
 
 use super::columns::{narrowed, Checks, RawColumn};
-use super::loader::{Loader, RawReturn, Rel, TypeDef};
+use super::loader::{Loader, RawFunction, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
     Catalog, Function, FunctionReturn, Relation, SchemaColumn, TableRelation, TypeOverrides,
@@ -26,12 +26,14 @@ use super::{
 thread_local! {
     /// How many times `Loader::build` ran on this thread; read by the timing test.
     pub(super) static BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many functions were resolved on this thread.
+    pub(super) static FUNCTIONS_RESOLVED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Loader {
     /// The catalog as it stands now.
     pub(super) fn snapshot(&mut self) -> &Catalog {
-        if self.functions_dirty {
+        if !self.stale_functions.is_empty() {
             self.rebuild_functions();
         }
         let catalog = self.cache.take().unwrap_or_else(|| self.build());
@@ -120,85 +122,12 @@ impl Loader {
         resolver: &Resolver<'_>,
         relations: &FxHashMap<String, Relation>,
     ) -> (FxHashMap<String, Vec<Function>>, FxHashMap<String, ()>) {
-        let (path, dialect) = (resolver.path, resolver.dialect);
-        let mut functions = FxHashMap::default();
-        for (key, overloads) in &self.functions {
-            if self.unknown_functions.contains(key) {
-                continue;
-            }
-            let mut built = Vec::new();
-            for f in overloads {
-                let returns = match &f.returns {
-                    RawReturn::Rows(columns) => FunctionReturn::Rows(
-                        columns
-                            .iter()
-                            .map(|(name, ty)| {
-                                resolver.column(name, name, ty, false, false, Checks::default())
-                            })
-                            .collect(),
-                    ),
-                    RawReturn::Scalar(ty) | RawReturn::SetOf(ty) => {
-                        let set_of = matches!(f.returns, RawReturn::SetOf(_));
-                        let rows = type_key(ty, dialect)
-                            .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
-                            .and_then(|key| match relations.get(&key) {
-                                Some(Relation::Table(table)) => Some(table.columns.clone()),
-                                _ => None,
-                            });
-                        match rows {
-                            Some(columns) if set_of => FunctionReturn::Rows(columns),
-                            Some(columns) => {
-                                let Resolved {
-                                    sql_type: sql,
-                                    python_type: python,
-                                    ..
-                                } = resolver.resolve(ty);
-                                let columns = columns
-                                    .into_iter()
-                                    .map(|column| SchemaColumn {
-                                        not_null: false,
-                                        ..column
-                                    })
-                                    .collect();
-                                FunctionReturn::Row(typed(sql, python, dialect), columns)
-                            }
-                            _ => {
-                                let Resolved {
-                                    sql_type: sql,
-                                    python_type: python,
-                                    ..
-                                } = resolver.resolve(ty);
-                                let value = if sql == "VOID" {
-                                    (Some("None".to_string()), Some(sql))
-                                } else {
-                                    typed(sql, python, dialect)
-                                };
-                                if set_of {
-                                    FunctionReturn::SetOf(value)
-                                } else {
-                                    FunctionReturn::Scalar(value)
-                                }
-                            }
-                        }
-                    }
-                };
-                let fixed = f.args.len() - usize::from(f.variadic);
-                built.push(Function {
-                    required: f.required,
-                    max: if f.variadic { usize::MAX } else { f.args.len() },
-                    args: f.args[..fixed]
-                        .iter()
-                        .map(|ty| {
-                            let resolved = resolver.resolve(ty);
-                            typed(resolved.sql_type, resolved.python_type, dialect)
-                        })
-                        .collect(),
-                    returns,
-                    strict: f.strict,
-                });
-            }
-            functions.insert(key.clone(), built);
-        }
+        let functions = self
+            .functions
+            .iter()
+            .filter(|(key, _)| !self.unknown_functions.contains(*key))
+            .map(|(key, overloads)| (key.clone(), function(overloads, resolver, relations)))
+            .collect();
         let unknown = self
             .unknown_functions
             .iter()
@@ -207,23 +136,44 @@ impl Loader {
         (functions, unknown)
     }
 
-    /// Mark the functions of the cached catalog stale; the next `snapshot` resolves them
-    /// again once, however many were changed in between.
-    pub(super) fn refresh_functions(&mut self) {
-        self.functions_dirty = self.cache.is_some();
+    /// Mark function `key` of the cached catalog stale; the next `snapshot` resolves it
+    /// again once, however often it changed in between.
+    pub(super) fn refresh_function(&mut self, key: String) {
+        if self.cache.is_some() {
+            self.stale_functions.insert(key);
+        }
     }
 
-    /// Resolve the functions of the cached catalog again, leaving its relations and
-    /// types as they are.
+    /// Resolve the stale functions of the cached catalog again, leaving the rest as they are.
     fn rebuild_functions(&mut self) {
-        self.functions_dirty = false;
+        let stale = std::mem::take(&mut self.stale_functions);
         let Some(mut cache) = self.cache.take() else {
             return;
         };
-        let (functions, unknown) =
-            self.build_functions(&cache.resolver(self.dialect), &cache.relations);
-        cache.functions = functions;
-        cache.unknown_functions = unknown;
+        let resolver = cache.resolver(self.dialect);
+        let mut built = Vec::with_capacity(stale.len());
+        for key in stale {
+            let overloads = self
+                .functions
+                .get(&key)
+                .filter(|_| !self.unknown_functions.contains(&key))
+                .map(|overloads| function(overloads, &resolver, &cache.relations));
+            built.push((key, overloads));
+        }
+        for (key, overloads) in built {
+            cache.unknown_functions.remove(&key);
+            match overloads {
+                Some(overloads) => {
+                    cache.functions.insert(key, overloads);
+                }
+                None => {
+                    cache.functions.remove(&key);
+                    if self.unknown_functions.contains(&key) {
+                        cache.unknown_functions.insert(key, ());
+                    }
+                }
+            }
+        }
         self.cache = Some(cache);
     }
 
@@ -507,4 +457,89 @@ pub(super) fn literal_values(python: Option<&str>) -> Option<Arc<[Value]>> {
 pub(super) fn literal_of(labels: &[String]) -> String {
     let labels: Vec<Value> = labels.iter().cloned().map(Value::Str).collect();
     values::render(&labels).unwrap_or_default()
+}
+
+/// The overloads of one function as the catalog holds them: user types resolve through
+/// `resolver`, and a function returning a table has its rows follow `relations`.
+fn function(
+    overloads: &[RawFunction],
+    resolver: &Resolver<'_>,
+    relations: &FxHashMap<String, Relation>,
+) -> Vec<Function> {
+    #[cfg(test)]
+    FUNCTIONS_RESOLVED.with(|count| count.set(count.get() + 1));
+    let (path, dialect) = (resolver.path, resolver.dialect);
+    overloads
+        .iter()
+        .map(|f| {
+            let returns = match &f.returns {
+                RawReturn::Rows(columns) => FunctionReturn::Rows(
+                    columns
+                        .iter()
+                        .map(|(name, ty)| {
+                            resolver.column(name, name, ty, false, false, Checks::default())
+                        })
+                        .collect(),
+                ),
+                RawReturn::Scalar(ty) | RawReturn::SetOf(ty) => {
+                    let set_of = matches!(f.returns, RawReturn::SetOf(_));
+                    let rows = type_key(ty, dialect)
+                        .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
+                        .and_then(|key| match relations.get(&key) {
+                            Some(Relation::Table(table)) => Some(table.columns.clone()),
+                            _ => None,
+                        });
+                    match rows {
+                        Some(columns) if set_of => FunctionReturn::Rows(columns),
+                        Some(columns) => {
+                            let Resolved {
+                                sql_type: sql,
+                                python_type: python,
+                                ..
+                            } = resolver.resolve(ty);
+                            let columns = columns
+                                .into_iter()
+                                .map(|column| SchemaColumn {
+                                    not_null: false,
+                                    ..column
+                                })
+                                .collect();
+                            FunctionReturn::Row(typed(sql, python, dialect), columns)
+                        }
+                        _ => {
+                            let Resolved {
+                                sql_type: sql,
+                                python_type: python,
+                                ..
+                            } = resolver.resolve(ty);
+                            let value = if sql == "VOID" {
+                                (Some("None".to_string()), Some(sql))
+                            } else {
+                                typed(sql, python, dialect)
+                            };
+                            if set_of {
+                                FunctionReturn::SetOf(value)
+                            } else {
+                                FunctionReturn::Scalar(value)
+                            }
+                        }
+                    }
+                }
+            };
+            let fixed = f.args.len() - usize::from(f.variadic);
+            Function {
+                required: f.required,
+                max: if f.variadic { usize::MAX } else { f.args.len() },
+                args: f.args[..fixed]
+                    .iter()
+                    .map(|ty| {
+                        let resolved = resolver.resolve(ty);
+                        typed(resolved.sql_type, resolved.python_type, dialect)
+                    })
+                    .collect(),
+                returns,
+                strict: f.strict,
+            }
+        })
+        .collect()
 }
