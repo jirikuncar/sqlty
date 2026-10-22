@@ -88,6 +88,9 @@ psycopg = ["psycopg>=3.2.12"]
 fuzz = [
     "hypothesis>=6.140",
 ]
+bench = [
+    "pytest-codspeed>=5.0.3",
+]
 
 [tool.pytest.ini_options]
 addopts = ["-p", "tests._mdtest.plugin", "--cov-report=term-missing", "--cov-report=html", "-v"]

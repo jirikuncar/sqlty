@@ -75,7 +75,7 @@ compiles them into the extension: rebuild it after editing one, or
 
 ## Benchmarks
 
-Two layers, both in the Makefile:
+Three layers, all in the Makefile:
 
 - `make bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
   is end-to-end: CLI wall time and RSS on a synthetic project, gated by
@@ -87,6 +87,10 @@ Two layers, both in the Makefile:
   `check_source`/`rewrite_source` on 1k/4k queries. Use it to find where time
   goes and to compare a branch (`ARGS="--save-baseline main"`, then
   `ARGS="--baseline main"`).
+- `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each
+  query kind of `synth.KINDS` through `analyze_select`/`analyze_params`, the schema
+  load, `rewrite_source` and `check_source`. CI's CodSpeed job counts their
+  instructions on every commit and reports the change on the pull request.
 
 ## Git safety
 

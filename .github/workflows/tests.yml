@@ -338,6 +338,50 @@ jobs:
           path: bench-result.json
           if-no-files-found: ignore
 
+  codspeed:
+    name: CodSpeed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # CodSpeed authenticates over OpenID Connect rather than an upload token.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          python-version: "3.15"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the dependencies
+        run: uv sync --group dev --group bench --no-install-project
+
+      - name: Build the release extension
+        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      # Simulation counts instructions, so a run is stable on a shared runner: the engine
+      # is CPU-bound, with no I/O for instruction counting to miss.
+      - uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: simulation
+          run: uv run pytest benchmarks/ --codspeed -p no:randomly --no-cov
+
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
