@@ -150,6 +150,16 @@ impl Diagnostics {
         inner.explained = explained;
     }
 
+    /// Drop what was recorded after `mark` under a rule `keep` rejects.
+    pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(NameRule) -> bool) {
+        let mut inner = self.0.borrow_mut();
+        let mut index = 0;
+        inner.items.retain(|item| {
+            index += 1;
+            index <= items || keep(item.rule)
+        });
+    }
+
     /// Everything recorded so far, in order.
     pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
         self.0.borrow().items.clone()

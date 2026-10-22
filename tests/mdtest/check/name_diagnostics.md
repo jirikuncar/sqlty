@@ -61,6 +61,35 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### Names a result column's type does not need
+
+A result column's type often needs none of its names: `x IS NULL` is a boolean and
+`x::int` an integer whatever `x` is. Every name it reads is still checked, in subqueries
+too. A column of a type with no Python type is reported only where it is a result.
+
+```toml
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+```python
+# error: [unknown-column] "column `nope` does not exist in `users`"
+a = "--sql\nSELECT EXISTS (SELECT nope FROM users) AS found"
+# error: [unknown-table] "table `missing` is not defined in the schema"
+b = "--sql\nSELECT id IN (SELECT id FROM missing) AS listed FROM users"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+c = "--sql\nSELECT nmae IS NULL AS anonymous FROM users"
+# error: [unknown-column] "column `idd` does not exist in `users`"
+d = "--sql\nSELECT idd::INTEGER FROM users"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+e = "--sql\nSELECT CASE WHEN nope THEN 1 END AS flag FROM users"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+f = "--sql\nSELECT count(*) FILTER (WHERE nope) AS n FROM users"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+g = "--sql\nSELECT row_number() OVER (ORDER BY nope) AS n FROM users"
+h = "--sql\nSELECT shape IS NULL AS blank FROM users WHERE shape IS NOT NULL"
+```
+
 #### GROUP BY, HAVING and ORDER BY
 
 Their keys are checked like `WHERE`, except a result column named by its alias or
