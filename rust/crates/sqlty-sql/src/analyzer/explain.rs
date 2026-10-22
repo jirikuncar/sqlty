@@ -14,7 +14,7 @@ use super::dml::returning;
 use super::functions::positional_args;
 use super::inference::RuleRef;
 use super::operators::mysql_date_add;
-use super::preprocess::parse_first;
+use super::preprocess::{parse_input, parser_input};
 use super::query::Analyzer;
 use super::scope::Scope;
 use super::SchemaData;
@@ -47,14 +47,15 @@ pub fn explain_select(
     schema: Option<&SchemaData>,
 ) -> Option<Vec<ColumnRules>> {
     let dialect = SqlDialect::from_name(dialect);
-    let stmt = parse_first(sql, dialect)?;
+    let input = parser_input(sql, dialect);
+    let stmt = parse_input(&input, dialect)?.into_iter().next()?;
     let mut analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
     );
     let explained = Explained::default();
     analyzer.explain = Some(explained.clone());
-    analyzer.source = super::api::text_source(sql, dialect);
+    analyzer.source = super::api::text_source(&input, dialect);
     let columns = analyzer.statement_columns(&stmt).ok()??;
     let items = match &stmt {
         Statement::Query(query) => top_projection(query),

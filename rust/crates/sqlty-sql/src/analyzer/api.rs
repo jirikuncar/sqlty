@@ -10,7 +10,7 @@ use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
 use super::names::alias_name;
-use super::preprocess::{parse_first, parse_query, parser_input, too_deep, MAX_DEPTH};
+use super::preprocess::{parse_input, parse_query, parser_input, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
 
@@ -143,7 +143,8 @@ pub fn analyze_with_diagnostics(
     schema: Option<&SchemaData>,
 ) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
     let dialect = SqlDialect::from_name(dialect);
-    let Some(stmt) = parse_first(sql, dialect) else {
+    let input = parser_input(sql, dialect);
+    let Some(stmt) = parse_input(&input, dialect).and_then(|stmts| stmts.into_iter().next()) else {
         return (Ok(None), Vec::new());
     };
     let mut analyzer = Analyzer::new(
@@ -151,7 +152,7 @@ pub fn analyze_with_diagnostics(
         dialect,
     );
     analyzer.diag = Diagnostics::collecting();
-    analyzer.source = text_source(sql, dialect);
+    analyzer.source = text_source(&input, dialect);
     let columns = analyzer.statement_columns(&stmt);
     (columns, analyzer.diag.items())
 }
@@ -190,8 +191,8 @@ pub fn returns_rows(sql: &str, dialect: &str) -> bool {
     }
 }
 
-/// The SQL as parsed, in the dialects that name a column by its expression's text.
-pub(super) fn text_source(sql: &str, dialect: SqlDialect) -> Option<std::rc::Rc<str>> {
-    matches!(dialect, SqlDialect::MySql | SqlDialect::Sqlite)
-        .then(|| std::rc::Rc::from(parser_input(sql, dialect)))
+/// The SQL as parsed, `input` from [`parser_input`], in the dialects that name a column by
+/// its expression's text.
+pub(super) fn text_source(input: &str, dialect: SqlDialect) -> Option<std::rc::Rc<str>> {
+    matches!(dialect, SqlDialect::MySql | SqlDialect::Sqlite).then(|| std::rc::Rc::from(input))
 }

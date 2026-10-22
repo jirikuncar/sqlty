@@ -139,13 +139,21 @@ pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     if reject_unsupported(&stmts, dialect) || too_deep(&stmts) {
         return None;
     }
-    if dialect == SqlDialect::Postgres {
+    if dialect == SqlDialect::Postgres && names_bare_function(sql) {
         let _ = visit_expressions_mut(&mut stmts, |expr| {
             bare_function(expr);
             ControlFlow::<()>::Continue(())
         });
     }
     Some(stmts)
+}
+
+/// Whether `sql` may name one of the functions [`bare_function`] reads, so that the walk
+/// is skipped for the queries that do not.
+fn names_bare_function(sql: &str) -> bool {
+    sql.as_bytes()
+        .windows(7)
+        .any(|w| w.eq_ignore_ascii_case(b"current") || w.eq_ignore_ascii_case(b"system_"))
 }
 
 /// PostgreSQL's `CURRENT_ROLE`, `CURRENT_SCHEMA`, `CURRENT_CATALOG` and `SYSTEM_USER`, reserved
@@ -257,7 +265,11 @@ pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
 /// the query doesn't parse as written, and so does the syntax [`respell`] rewrites.
 pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let sql = parser_input(sql, dialect);
+    parse_input(&parser_input(sql, dialect), dialect)
+}
+
+/// [`parse_query`] of what [`parser_input`] made of a query.
+pub(super) fn parse_input(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     let parse_placeholders = |sql: &str| {
         parse(sql, dialect).or_else(|| {
             (dialect == SqlDialect::Postgres && sql.contains('?'))
@@ -265,65 +277,72 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
                 .flatten()
         })
     };
-    parse_placeholders(&sql)
-        .or_else(|| respell(&sql, dialect).and_then(|sql| parse_placeholders(&sql)))
+    parse_placeholders(sql)
+        .or_else(|| respell(sql, dialect).and_then(|sql| parse_placeholders(&sql)))
 }
 
 /// `sql` as sqlparser should read it, in every dialect: the `--sql` marker line is
 /// dropped, PostgreSQL's `cidr '...'` and similar literals become casts (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
 /// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
 /// literals and comments are not skipped; any query this mangles fails to parse
-/// and stays uninferred rather than mistyped.
-pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> String {
-    let sql = SQL_MARKER.replace(sql, "");
-    let sql = match iso_types(&sql) {
-        Cow::Borrowed(_) => sql,
-        Cow::Owned(respelled) => Cow::Owned(respelled),
-    };
-    let sql = if dialect == SqlDialect::Postgres {
-        let sql = drop_conflict_predicate(&sql);
-        let sql = POSTGRES_FIXES
-            .iter()
-            .fold(sql, |sql, (pattern, replacement)| {
-                pattern.replace_all(&sql, *replacement).into_owned()
-            });
-        POSTGRES_TYPED_STRING
-            .replace_all(&sql, |caps: &Captures| match (caps.get(1), caps.get(2)) {
-                (Some(ty), Some(value)) => format!("CAST({} AS {})", value.as_str(), ty.as_str()),
-                _ => caps[0].to_string(),
+/// and stays uninferred rather than mistyped. Each pass copies the text only when it
+/// changes something.
+pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> Cow<'_, str> {
+    let mut sql = SQL_MARKER.replace(sql, "");
+    sql = apply(sql, iso_types);
+    if dialect == SqlDialect::Postgres {
+        sql = apply(sql, drop_conflict_predicate);
+        for (pattern, replacement) in POSTGRES_FIXES.iter() {
+            sql = apply(sql, |sql| pattern.replace_all(sql, *replacement));
+        }
+        sql = apply(sql, |sql| {
+            POSTGRES_TYPED_STRING.replace_all(sql, |caps: &Captures| {
+                match (caps.get(1), caps.get(2)) {
+                    (Some(ty), Some(value)) => {
+                        format!("CAST({} AS {})", value.as_str(), ty.as_str())
+                    }
+                    _ => caps[0].to_string(),
+                }
             })
-            .into_owned()
-    } else {
-        sql.into_owned()
-    };
-    let sql = match dialect {
-        SqlDialect::Postgres | SqlDialect::MySql => TABLE_COMMAND
-            .replace_all(&sql, "${1}SELECT * FROM $2")
-            .into_owned(),
-        SqlDialect::Sqlite if sql.to_ascii_uppercase().contains("INDEXED") => SQLITE_INDEX_HINT
-            .replace_all(&sql, |caps: &Captures| match caps.get(1) {
+        });
+    }
+    sql = match dialect {
+        SqlDialect::Postgres | SqlDialect::MySql => apply(sql, |sql| {
+            TABLE_COMMAND.replace_all(sql, "${1}SELECT * FROM $2")
+        }),
+        SqlDialect::Sqlite if sql.to_ascii_uppercase().contains("INDEXED") => apply(sql, |sql| {
+            SQLITE_INDEX_HINT.replace_all(sql, |caps: &Captures| match caps.get(1) {
                 Some(_) => String::new(),
                 None => caps[0].to_string(),
             })
-            .into_owned(),
+        }),
         _ => sql,
     };
-    PLACEHOLDER
-        .replace_all(&sql, |caps: &Captures| match &caps[0] {
+    apply(sql, |sql| {
+        PLACEHOLDER.replace_all(sql, |caps: &Captures| match &caps[0] {
             "%%" => "%",
             _ => "NULL",
         })
-        .into_owned()
+    })
+}
+
+/// `sql` after `pass`, borrowed still when the pass changed nothing.
+fn apply<'a>(sql: Cow<'a, str>, pass: impl FnOnce(&str) -> Cow<'_, str>) -> Cow<'a, str> {
+    let changed = match pass(&sql) {
+        Cow::Owned(changed) => Some(changed),
+        Cow::Borrowed(_) => None,
+    };
+    changed.map_or(sql, Cow::Owned)
 }
 
 /// Drops the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO ...`, the
 /// partial unique index that arbitrates the conflict; it does not change the result columns.
-pub(super) fn drop_conflict_predicate(sql: &str) -> String {
+pub(super) fn drop_conflict_predicate(sql: &str) -> Cow<'_, str> {
     static CONFLICT_TARGET: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
     static WHERE_CLAUSE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
-    let mut out = String::with_capacity(sql.len());
+    let mut out = String::new();
     let mut last = 0;
     for target in CONFLICT_TARGET.find_iter(sql) {
         if target.start() < last {
@@ -342,8 +361,11 @@ pub(super) fn drop_conflict_predicate(sql: &str) -> String {
         out.push(' ');
         last = end;
     }
+    if last == 0 {
+        return Cow::Borrowed(sql);
+    }
     out.push_str(&sql[last..]);
-    out
+    Cow::Owned(out)
 }
 
 /// Byte index of the `)` closing the parenthesis that ends just before `start`.
