@@ -1,18 +1,20 @@
-//! Column references outside the result columns: those of `WHERE`, `JOIN ... ON` and
-//! the values and conditions of INSERT, UPDATE and DELETE. Typing a result column
-//! resolves only the names it needs, so these are resolved on their own.
+//! Column references outside the result columns, those of `WHERE`, `JOIN ... ON` and
+//! the values and conditions of INSERT, UPDATE and DELETE, and those typing a result
+//! column does not need, as in `x IS NULL` or `x::int`. Only whether each name exists
+//! is checked: the types of these columns do not reach the result.
 
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{Expr, FunctionArg, FunctionArguments, Query, Visit, Visitor};
+use sqlparser::ast::{AccessExpr, Expr, FunctionArg, FunctionArguments, Query, Visit, Visitor};
 
 use super::memo::Reporting;
 use super::query::Analyzer;
 use super::scope::Scope;
+use crate::diagnostics::NameRule;
 
 impl Analyzer<'_> {
-    /// Resolves every column `expr` reads in `scope`, recording `unknown-column`,
-    /// `unknown-table` and `ambiguous-column` where the rules apply. A subquery is
+    /// Resolves every column `expr` reads in `scope`, recording only `unknown-column`,
+    /// `unknown-table` and `ambiguous-column`. A subquery is
     /// analyzed in its own scope, correlated with `scope`.
     pub(super) fn check_references(&self, expr: &Expr, scope: &Scope) {
         self.check_references_besides(expr, scope, &[]);
@@ -29,9 +31,16 @@ impl Analyzer<'_> {
             scope,
             aliases,
             depth: 0,
-            parameter_names: Vec::new(),
+            not_columns: Vec::new(),
         };
+        let mark = self.diag.mark();
         let _ = expr.visit(&mut visitor);
+        self.diag.retain_since(mark, |rule| {
+            matches!(
+                rule,
+                NameRule::UnknownTable | NameRule::UnknownColumn | NameRule::AmbiguousColumn
+            )
+        });
     }
 }
 
@@ -42,9 +51,9 @@ struct References<'a, 's> {
     aliases: &'a [&'a str],
     /// How many subqueries deep the visit is; only the outermost names are resolved here.
     depth: usize,
-    /// The names of named arguments seen so far, as in `make_interval(days => 3)`: parameters,
-    /// not columns.
-    parameter_names: Vec<*const Expr>,
+    /// Names that are not columns: named arguments, as in `make_interval(days => 3)`, and
+    /// fields, as in `(p).x`.
+    not_columns: Vec<*const Expr>,
 }
 
 impl Visitor for References<'_, '_> {
@@ -66,17 +75,27 @@ impl Visitor for References<'_, '_> {
     }
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
-        if let Expr::Function(function) = expr {
-            if let FunctionArguments::List(list) = &function.args {
-                self.parameter_names
-                    .extend(list.args.iter().filter_map(|arg| match arg {
-                        FunctionArg::ExprNamed { name, .. } => Some(std::ptr::from_ref(name)),
-                        _ => None,
+        match expr {
+            Expr::Function(function) => {
+                if let FunctionArguments::List(list) = &function.args {
+                    self.not_columns
+                        .extend(list.args.iter().filter_map(|arg| match arg {
+                            FunctionArg::ExprNamed { name, .. } => Some(std::ptr::from_ref(name)),
+                            _ => None,
+                        }));
+                }
+            }
+            Expr::CompoundFieldAccess { access_chain, .. } => {
+                self.not_columns
+                    .extend(access_chain.iter().filter_map(|access| match access {
+                        AccessExpr::Dot(field) => Some(std::ptr::from_ref(field)),
+                        AccessExpr::Subscript(_) => None,
                     }));
             }
+            _ => {}
         }
         if self
-            .parameter_names
+            .not_columns
             .iter()
             .any(|&name| std::ptr::eq(name, expr))
         {
