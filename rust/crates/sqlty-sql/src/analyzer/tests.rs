@@ -95,6 +95,14 @@ fn test_parser_input() {
         parser_input("(TABLE a) UNION ALL TABLE \"b\".c", SqlDialect::Postgres).text(),
         "(SELECT * FROM a) UNION ALL SELECT * FROM \"b\".c"
     );
+    assert_eq!(
+        parser_input(
+            "INSERT INTO t (id) overriding System VALUE VALUES ('OVERRIDING USER VALUE')",
+            SqlDialect::Postgres
+        )
+        .text(),
+        "INSERT INTO t (id)  VALUES ('OVERRIDING USER VALUE')"
+    );
     assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql).text(), "");
     assert_eq!(
         parser_input("SELECT %d, %%(a)s", SqlDialect::MySql).text(),
