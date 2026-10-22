@@ -111,6 +111,54 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
     assert "Fixed 1 file(s)" in out
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["check"],
+        ["check", "--statistics"],
+        ["check", "--fix"],
+        ["rewrite"],
+        ["rewrite", "--diff"],
+        ["strip"],
+    ],
+)
+def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);")
+    (tmp_path / "rows.py").write_text(
+        "from typing import TypedDict\nclass User(TypedDict):\n    name: str | None\n"
+    )
+    for n in range(8):
+        (tmp_path / f"q{n}.py").write_text(
+            "from rows import User\n"
+            "from sqlty import SQL\n"
+            f'a = SQL[tuple[str]]("--sql\\nSELECT id + {n} FROM users")\n'
+            f'b = SQL[User]("--sql\\nSELECT name FROM users WHERE id = {n}")\n'
+            'c = "--sql\\nSELECT * FROM users"\n'
+            'd = f"--sql\\nSELECT {column} FROM users"\n'
+        )
+    monkeypatch.chdir(tmp_path)
+    files = {path: path.read_text() for path in tmp_path.iterdir()}
+
+    outputs = []
+    for jobs in ("1", "4"):
+        for path, text in files.items():
+            path.write_text(text)
+        outputs.append(
+            (_run([*command, "--jobs", jobs, "."], capsys), sorted(p.read_text() for p in files))
+        )
+
+    assert outputs[0] == outputs[1]
+    (_, out, err), written = outputs[0]
+    assert out or err or written != sorted(files.values())
+
+
+def test_jobs_must_be_positive(capsys) -> None:
+    code, _, err = _run(["check", "--jobs", "0", "."], capsys)
+    assert code == 2
+    assert "expected a positive integer, got '0'" in err
+
+
 def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = true\n")
     args = build_parser().parse_args(["check", str(tmp_path)])
