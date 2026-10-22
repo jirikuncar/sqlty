@@ -10,7 +10,7 @@ use std::hint::black_box;
 fn catalog_load(c: &mut Criterion) {
     let mut group = c.benchmark_group("catalog_load");
     group.sample_size(10);
-    for tables in [50, 270] {
+    for tables in [50, 270, 540] {
         let sql = schema_sql(tables);
         group.throughput(Throughput::Bytes(sql.len() as u64));
         group.bench_function(format!("{tables}_tables"), |b| {

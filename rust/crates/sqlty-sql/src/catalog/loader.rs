@@ -137,8 +137,8 @@ pub(super) struct Loader {
     /// The resolved catalog; a change to one relation updates it in place, any other
     /// change drops it to be built again.
     pub(super) cache: Option<Catalog>,
-    /// The cached catalog's function table is stale; `snapshot` rebuilds it once.
-    pub(super) functions_dirty: bool,
+    /// Functions of the cached catalog that are stale; `snapshot` resolves them again.
+    pub(super) stale_functions: FxHashSet<String>,
     /// Old name -> current name of a renamed type: columns declared with the old name
     /// have the type under its new one.
     pub(super) type_aliases: FxHashMap<String, String>,
@@ -146,9 +146,9 @@ pub(super) struct Loader {
     pub(super) skipped: Vec<SkippedObject>,
     /// The Python types the project sets for SQL types and columns.
     pub(super) overrides: Arc<TypeOverrides>,
-    /// Type names `SETOF` functions return: a function returning a table has its rows follow
-    /// the table, so a change to a relation with one of these names refreshes the functions.
-    pub(super) setof_names: FxHashSet<String>,
+    /// Type name -> the functions that return it: a function returning a table has its rows
+    /// follow the table, so a change to a relation of that name refreshes them.
+    pub(super) returned_by: FxHashMap<String, FxHashSet<String>>,
 }
 
 impl Loader {
@@ -162,10 +162,10 @@ impl Loader {
             unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
             cache: None,
-            functions_dirty: false,
+            stale_functions: FxHashSet::default(),
             skipped: Vec::new(),
             type_aliases: FxHashMap::default(),
-            setof_names: FxHashSet::default(),
+            returned_by: FxHashMap::default(),
             overrides: Arc::default(),
         }
     }
@@ -694,7 +694,12 @@ impl Loader {
             .iter()
             .any(|schema| key.starts_with(&format!("{schema}.")));
         let bare = key.split_once('.').map_or(key.as_str(), |(_, name)| name);
-        let feeds_functions = self.setof_names.contains(&key) || self.setof_names.contains(bare);
+        let readers: Vec<String> = [key.as_str(), bare]
+            .iter()
+            .filter_map(|name| self.returned_by.get(*name))
+            .flatten()
+            .cloned()
+            .collect();
         match resolved {
             Some(relation) => {
                 if cache.relations.insert(key, relation).is_none() && user {
@@ -707,8 +712,8 @@ impl Loader {
                 }
             }
         }
-        if feeds_functions {
-            self.refresh_functions();
+        for reader in readers {
+            self.refresh_function(reader);
         }
     }
 
@@ -769,8 +774,8 @@ impl Loader {
                 if let Some(key) = key {
                     self.skipped.push(("function", name.join(".")));
                     self.functions.entry(key.clone()).or_default();
-                    self.unknown_functions.insert(key);
-                    self.refresh_functions();
+                    self.unknown_functions.insert(key.clone());
+                    self.refresh_function(key);
                 }
                 true
             }
@@ -855,8 +860,8 @@ impl Loader {
                             self.functions.remove(&key);
                         }
                     }
+                    self.refresh_function(key);
                 }
-                self.refresh_functions();
             }
             _ => {}
         }
@@ -894,16 +899,13 @@ impl Loader {
             Some(FunctionReturnType::DataType(dt)) if outs.len() < 2 => {
                 RawReturn::Scalar(dt.clone())
             }
-            Some(FunctionReturnType::SetOf(dt)) => {
-                self.setof_names.extend(type_key(dt, self.dialect));
-                RawReturn::SetOf(dt.clone())
-            }
+            Some(FunctionReturnType::SetOf(dt)) => RawReturn::SetOf(dt.clone()),
             _ if outs.len() >= 2 => RawReturn::Rows(outs),
             _ if outs.len() == 1 => RawReturn::Scalar(outs[0].1.clone()),
             _ => {
                 self.functions.entry(key.clone()).or_default();
-                self.unknown_functions.insert(key);
-                self.refresh_functions();
+                self.unknown_functions.insert(key.clone());
+                self.refresh_function(key);
                 return;
             }
         };
@@ -930,11 +932,19 @@ impl Loader {
                 .map(|dt| canonical_type(dt, dialect))
                 .collect()
         };
-        let overloads = self.functions.entry(key).or_default();
+        if let RawReturn::Scalar(ty) | RawReturn::SetOf(ty) = &function.returns {
+            if let Some(name) = type_key(ty, dialect) {
+                self.returned_by
+                    .entry(name)
+                    .or_default()
+                    .insert(key.clone());
+            }
+        }
+        let overloads = self.functions.entry(key.clone()).or_default();
         let wanted = signature(&function);
         overloads.retain(|f| signature(f) != wanted);
         overloads.push(function);
-        self.refresh_functions();
+        self.refresh_function(key);
     }
 }
 
