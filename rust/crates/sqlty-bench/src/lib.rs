@@ -102,7 +102,8 @@ pub const QUERIES: &[(&str, &str)] = &[
     ),
 ];
 
-/// A Python module of `queries` `--sql` query strings, cycling through [`QUERIES`].
+/// A Python module of `queries` `--sql` query strings, cycling through [`QUERIES`]. Each
+/// ends in a distinct comment, so no two strings are the same query.
 ///
 /// # Panics
 ///
@@ -114,7 +115,7 @@ pub fn python_source(queries: usize) -> String {
         let (_, sql) = QUERIES[i % QUERIES.len()];
         writeln!(
             out,
-            "def handler_{i}(conn):\n    return conn.execute(\"--sql\\n{}\")\n",
+            "def handler_{i}(conn):\n    return conn.execute(\"--sql\\n{} -- {i}\")\n",
             sql.replace('"', "'")
         )
         .unwrap();
