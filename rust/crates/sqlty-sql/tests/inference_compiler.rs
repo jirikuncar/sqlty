@@ -26,11 +26,21 @@ fn error(path: &str, text: &str) -> String {
     compile_one(path, text).expect_err("the rules must not compile")
 }
 
+/// The types of each operand predicate `field` of the generated code, from the comment
+/// beside its mask.
+fn predicates<'a>(code: &'a str, field: &str) -> Vec<&'a str> {
+    code.split(&format!("{field}: Some(0x"))
+        .skip(1)
+        .filter_map(|rest| rest.split_once(" /* ")?.1.split_once(" */)"))
+        .map(|(types, _)| types)
+        .collect()
+}
+
 #[test]
 fn a_rule_becomes_data_and_a_match_arm() {
     let code = compile_one("rules/common/a.inference.toml", VALID).unwrap();
     assert!(code.contains(r#"id: "test.long-arrow""#));
-    assert!(code.contains(r#"left: Some(&["JSON", "JSONB"])"#));
+    assert_eq!(predicates(&code, "left"), ["JSON | JSONB"]);
     assert!(code.contains("BinaryOperator::LongArrow { .. } => &BINARY_RULES[0..1]"));
 }
 
@@ -287,7 +297,7 @@ fn function_rules_become_their_own_table() {
         .replace("[\"@integer\"]", "[\"@known\"]")
         .replace("\"BIGINT\"", "\"@argument-as TEXT\"");
     let code = compile_one("rules/common/a.inference.toml", &known).unwrap();
-    assert!(code.contains(r#"argument: Some(&["@known"])"#));
+    assert!(code.contains("argument: Some(0x80000000000000000000000000000000 /* @known */)"));
     assert!(code.contains(r#"result: FunctionType::ArgumentAs("TEXT")"#));
 }
 
@@ -297,7 +307,8 @@ fn function_rules_read_the_first_two_arguments() {
         .replace("argument = [\"@integer\"]", "arguments = [[], [\"JSON\"]]")
         .replace("\"BIGINT\"", "\"@argument(1)\"");
     let code = compile_one("rules/common/a.inference.toml", &second).unwrap();
-    assert!(code.contains("argument: None,\n        second: Some(&[\"JSON\"])"));
+    assert!(code.contains("argument: None,\n        second: Some(0x"));
+    assert_eq!(predicates(&code, "second"), ["JSON"]);
     assert!(code.contains("result: FunctionType::Argument(1)"));
     let cases = [
         (
@@ -320,10 +331,12 @@ fn function_rules_read_any_argument() {
     let any = FUNCTION.replace("argument = [\"@integer\"]", "any-argument = [\"@binary\"]");
     let code = compile_one("rules/common/a.inference.toml", &any).unwrap();
     assert!(
-        code.contains(
-            "second: None,\n        any: Some(&[\"BINARY\", \"BLOB\", \"BYTEA\", \"VARBINARY\"])"
-        ),
+        code.contains("second: None,\n        any: Some(0x"),
         "{code}"
+    );
+    assert_eq!(
+        predicates(&code, "any"),
+        ["BINARY | BLOB | BYTEA | VARBINARY"]
     );
     let unconditional = format!(
         "{any}{}",

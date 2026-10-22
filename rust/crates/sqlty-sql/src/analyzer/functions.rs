@@ -8,7 +8,7 @@ use sqlparser::ast::{
 
 use super::dialect::SqlDialect;
 use super::expr::{from_sql_type, range_element, range_kind};
-use super::inference::{function_rules, FunctionRule};
+use super::inference::{function_rules, operand, FunctionRule};
 use super::literals::{strip, value_set};
 use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
 use super::query::Analyzer;
@@ -346,7 +346,7 @@ impl<'a> Analyzer<'a> {
             }))
         };
         let typed = [typed(0)?, typed(1)?];
-        let [first, second] = [0, 1].map(|i| typed[i].as_ref().and_then(operand_type));
+        let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(operand_type)));
         let all = if rules.iter().any(FunctionRule::reads_all) {
             args.iter()
                 .map(|arg| self.expr(arg, scope))
@@ -354,7 +354,10 @@ impl<'a> Analyzer<'a> {
         } else {
             Vec::new()
         };
-        let all: Vec<Option<&str>> = all.iter().map(operand_type).collect();
+        let all: Vec<_> = all
+            .iter()
+            .map(|typed| operand(operand_type(typed)))
+            .collect();
         let found = rules
             .iter()
             .find(|rule| rule.applies(self.dialect, first, second, &all));

@@ -75,9 +75,9 @@ pub(crate) struct BinaryRule {
     /// The dialects the rule applies to; empty for all.
     dialects: &'static [SqlDialect],
     /// The SQL types the left operand may have; `None` for any.
-    left: Option<&'static [&'static str]>,
+    left: Option<u128>,
     /// The SQL types the right operand may have; `None` for any.
-    right: Option<&'static [&'static str]>,
+    right: Option<u128>,
     pub(crate) result: RuleType,
     pub(crate) nullability: RuleNullability,
     /// The SQL type a placeholder on the left gets when the right operand matches.
@@ -102,7 +102,7 @@ impl BinaryRule {
         &self,
         dialect: SqlDialect,
         left: bool,
-        other: Option<&str>,
+        other: Option<Operand>,
     ) -> Option<&'static str> {
         let (parameter, other_types) = if left {
             (self.left_parameter, self.right)
@@ -132,8 +132,8 @@ impl BinaryRule {
     pub(crate) fn applies(
         &self,
         dialect: SqlDialect,
-        left: Option<&str>,
-        right: Option<&str>,
+        left: Option<Operand>,
+        right: Option<Operand>,
     ) -> bool {
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.left, left)
@@ -189,11 +189,11 @@ pub(crate) struct FunctionRule {
     pub(crate) reasoning: &'static str,
     dialects: &'static [SqlDialect],
     /// The SQL types the first argument may have; `None` for any.
-    argument: Option<&'static [&'static str]>,
+    argument: Option<u128>,
     /// The SQL types the second argument may have; `None` for any.
-    second: Option<&'static [&'static str]>,
+    second: Option<u128>,
     /// The SQL types one argument at least must have; `None` for any arguments.
-    any: Option<&'static [&'static str]>,
+    any: Option<u128>,
     pub(crate) result: FunctionType,
     pub(crate) nullability: FunctionNullability,
 }
@@ -229,9 +229,9 @@ impl FunctionRule {
     pub(crate) fn applies(
         &self,
         dialect: SqlDialect,
-        argument: Option<&str>,
-        second: Option<&str>,
-        all: &[Option<&str>],
+        argument: Option<Operand>,
+        second: Option<Operand>,
+        all: &[Option<Operand>],
     ) -> bool {
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.argument, argument)
@@ -253,11 +253,20 @@ pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
     })
 }
 
-/// Whether an operand of SQL type `operand` satisfies `types`; `@known` admits any typed one.
-fn admits(types: Option<&[&str]>, operand: Option<&str>) -> bool {
-    types.is_none_or(|types| {
-        operand.is_some_and(|operand| types.contains(&operand) || types.contains(&"@known"))
-    })
+/// An operand's SQL type as rules match it: one bit of the types they can name, from
+/// [`operand`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Operand(u128);
+
+/// The [`Operand`] of SQL type `sql`; `None` for an untyped operand.
+pub(crate) fn operand(sql: Option<&str>) -> Option<Operand> {
+    sql.map(|sql| Operand(type_bit(sql)))
+}
+
+/// Whether `operand` satisfies the predicate `types`, a mask of the SQL types it admits;
+/// `@known` admits any typed operand.
+fn admits(types: Option<u128>, operand: Option<Operand>) -> bool {
+    types.is_none_or(|types| operand.is_some_and(|Operand(bit)| types & (bit | KNOWN) != 0))
 }
 
 include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));
@@ -363,8 +372,15 @@ mod tests {
         for op in &operators {
             for &dialect in &dialects {
                 for rule in binary_rules(op) {
-                    matched += usize::from(rule.applies(dialect, Some("INT"), Some("JSONB")));
-                    matched += usize::from(rule.parameter(dialect, false, Some("JSONB")).is_some());
+                    matched += usize::from(rule.applies(
+                        dialect,
+                        operand(Some("INT")),
+                        operand(Some("JSONB")),
+                    ));
+                    matched += usize::from(
+                        rule.parameter(dialect, false, operand(Some("JSONB")))
+                            .is_some(),
+                    );
                 }
             }
         }
@@ -372,8 +388,8 @@ mod tests {
             for rule in function_rules(name) {
                 matched += usize::from(rule.applies(
                     SqlDialect::Postgres,
-                    Some("SMALLINT"),
-                    Some("TEXT"),
+                    operand(Some("SMALLINT")),
+                    operand(Some("TEXT")),
                     &[],
                 ));
             }
@@ -387,6 +403,18 @@ mod tests {
         drop(std::hint::black_box(vec![matched]));
         COUNTING.with(|counting| counting.set(false));
         assert_eq!(ALLOCATIONS.with(Cell::get), 1);
+    }
+
+    #[test]
+    fn operand_predicates_are_masks() {
+        let jsonb = Some(type_bit("JSONB"));
+        let (typed, named) = (operand(Some("app.mood")), operand(Some("JSONB")));
+        assert!(admits(jsonb, named));
+        assert!(!admits(jsonb, typed));
+        assert!(!admits(jsonb, None));
+        assert!(admits(Some(KNOWN), typed));
+        assert!(!admits(Some(KNOWN), None));
+        assert!(admits(None, None));
     }
 
     #[test]

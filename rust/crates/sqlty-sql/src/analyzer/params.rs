@@ -24,7 +24,7 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::binary_rules;
+use super::inference::{binary_rules, operand};
 use super::literals::strip;
 use super::names::{object_name, table_key};
 use super::nullability::Nullability;
@@ -573,9 +573,10 @@ impl<'a> Analyzer<'a> {
             return;
         };
         let other_type = operand_type(&typed);
+        let other = operand(other_type);
         let ruled = binary_rules(op)
             .iter()
-            .find_map(|rule| rule.parameter(self.dialect, left, other_type));
+            .find_map(|rule| rule.parameter(self.dialect, left, other));
         if let Some(sql_type) = ruled {
             return out.add(index, self.param_typed(sql_type), Nullability::Unknown);
         }
