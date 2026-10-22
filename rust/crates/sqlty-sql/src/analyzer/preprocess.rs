@@ -1,7 +1,6 @@
 //! Turning a query string into statements: the `--sql` marker, dialect fixes sqlparser
 //! needs, and the checks for syntax the analyzer does not read.
 
-use std::borrow::Cow;
 use std::ops::ControlFlow;
 use std::sync::LazyLock;
 
@@ -14,100 +13,12 @@ use sqlparser::parser::Parser;
 
 use super::dialect::SqlDialect;
 use super::dml::selects_into;
-use super::respell::respell;
-use super::star_expand::is_word;
-
-/// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
-pub(super) static SQL_MARKER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
-
-/// PostgreSQL syntax sqlparser cannot read, respelled as the closest it can. Of row-lock
-/// clauses, `NO KEY UPDATE` becomes `UPDATE`, `KEY SHARE` becomes `SHARE`, and `OF` keeps only
-/// its first table.
-pub(super) static POSTGRES_FIXES: LazyLock<[(Regex, &str); 3]> = LazyLock::new(|| {
-    const NAME: &str = r#"(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))*"#;
-    [
-        (
-            Regex::new(r"(?i)\bFOR\s+NO\s+KEY\s+UPDATE\b").unwrap(),
-            "FOR UPDATE",
-        ),
-        (
-            Regex::new(r"(?i)\bFOR\s+KEY\s+SHARE\b").unwrap(),
-            "FOR SHARE",
-        ),
-        (
-            Regex::new(&format!(
-                r"(?i)\b(FOR\s+(?:UPDATE|SHARE))\s+OF\s+({NAME})(?:\s*,\s*{NAME})*"
-            ))
-            .unwrap(),
-            "$1 OF $2",
-        ),
-    ]
-});
-
-/// `TABLE name`, which PostgreSQL and MySQL read as `SELECT * FROM name`, where it starts
-/// a query: sqlparser reads it only after a set operator or a `WITH`.
-static TABLE_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
-    const NAME: &str = r#"(?:"[^"]*"|`[^`]*`|\w+)(?:\s*\.\s*(?:"[^"]*"|`[^`]*`|\w+))*"#;
-    Regex::new(&format!(
-        r"(?i)(\A\s*|[()]\s*|\b(?:UNION|INTERSECT|EXCEPT)(?:\s+(?:ALL|DISTINCT))?\s+)TABLE\s+({NAME})"
-    ))
-    .unwrap()
-});
-
-/// PostgreSQL `type 'string'` literals sqlparser only reads for its built-in types, in
-/// groups 1 and 2; literals, quoted names and comments are matched to be skipped.
-pub(super) static POSTGRES_TYPED_STRING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:\b(bpchar|cidr|citext|daterange|hstore|inet|int4range|int8range|jsonpath|macaddr8?|money|name|numrange|oid|pg_lsn|tsrange|tstzrange|txid_snapshot))\s+('(?:[^']|'')*')"#,
-    )
-    .unwrap()
-});
-
-/// SQLite's `INDEXED BY name` and `NOT INDEXED`, in group 1, which only pick an index;
-/// literals, quoted names and comments are matched to be skipped.
-static SQLITE_INDEX_HINT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:(\s+(?:INDEXED\s+BY\s+(?:"(?:[^"]|"")*"|\w+\b)|NOT\s+INDEXED\b)))"#,
-    )
-    .unwrap()
-});
-
-/// psycopg placeholders (`%s`, `%b`, `%t`, `%(name)s`, ...) and the `%%` escape.
-pub(super) static PLACEHOLDER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"%%|%(?:\([^)]+\))?[sbt]").unwrap());
+use super::input::{iso_types, parser_input};
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
 pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
 });
-
-/// ISO types sqlparser does not read, in groups 1 and 2, respelled as ones it does:
-/// `BINARY LARGE OBJECT` as `BLOB`, and `T MULTISET` as the array `T[]`. Literals, quoted
-/// names and comments are matched to be skipped.
-static ISO_TYPES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|(?i:\b(BINARY\s+LARGE\s+OBJECT)\b)|(?i:\s+(MULTISET)\b)"#,
-    )
-    .unwrap()
-});
-
-/// `sql` with [`ISO_TYPES`] respelled; borrowed when it names none.
-fn iso_types(sql: &str) -> Cow<'_, str> {
-    let names = |word: &[u8]| {
-        sql.as_bytes()
-            .windows(word.len())
-            .any(|w| w.eq_ignore_ascii_case(word))
-    };
-    if !names(b"LARGE") && !names(b"MULTISET") {
-        return Cow::Borrowed(sql);
-    }
-    ISO_TYPES.replace_all(sql, |caps: &Captures| match (caps.get(1), caps.get(2)) {
-        (Some(_), _) => "BLOB".to_string(),
-        (_, Some(_)) => "[]".to_string(),
-        _ => caps[0].to_string(),
-    })
-}
 
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`),
 /// `INT3`/`MIDDLEINT` before `UNSIGNED`, and the `NATIONAL` spellings of `NCHAR` and
@@ -133,8 +44,16 @@ pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new
     ]
 });
 
+#[cfg(test)]
+thread_local! {
+    /// How many times [`parse`] ran sqlparser on this thread.
+    pub(super) static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Parse `sql`; `None` when sqlparser fails or [`reject_unsupported`] rejects it.
 pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+    #[cfg(test)]
+    PARSES.with(|n| n.set(n.get() + 1));
     let mut stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
     if reject_unsupported(&stmts, dialect) || too_deep(&stmts) {
         return None;
@@ -187,7 +106,7 @@ fn bare_function(expr: &mut Expr) {
 /// Parse schema DDL, with the MySQL column types sqlparser rejects respelled, and in
 /// SQLite multi-word type names (`UNSIGNED BIG INT`) joined into one word.
 pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let sql = &iso_types(sql);
+    let sql = &iso_types(sql, dialect);
     if dialect == SqlDialect::Sqlite {
         return parse(sql, dialect).or_else(|| parse(&sqlite_type_names(sql)?, dialect));
     }
@@ -263,162 +182,18 @@ pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
 
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
-/// the query doesn't parse as written, and so does the syntax [`respell`] rewrites.
+/// the query doesn't parse as written.
 pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    parse_input(&parser_input(sql, dialect), dialect)
+    parse_input(parser_input(sql, dialect).text(), dialect)
 }
 
 /// [`parse_query`] of what [`parser_input`] made of a query.
 pub(super) fn parse_input(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    let parse_placeholders = |sql: &str| {
-        parse(sql, dialect).or_else(|| {
-            (dialect == SqlDialect::Postgres && sql.contains('?'))
-                .then(|| parse(&numbered_placeholders(sql), dialect))
-                .flatten()
-        })
-    };
-    parse_placeholders(sql)
-        .or_else(|| respell(sql, dialect).and_then(|sql| parse_placeholders(&sql)))
-}
-
-/// `sql` as sqlparser should read it, in every dialect: the `--sql` marker line is
-/// dropped, PostgreSQL's `cidr '...'` and similar literals become casts (a leading space form like `--sql SELECT 1` leaves nothing), placeholders
-/// become `NULL`, a value of unknown type, and `%%` becomes `%`. Like psycopg,
-/// literals and comments are not skipped; any query this mangles fails to parse
-/// and stays uninferred rather than mistyped. Each pass copies the text only when it
-/// changes something.
-pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> Cow<'_, str> {
-    let mut sql = SQL_MARKER.replace(sql, "");
-    sql = apply(sql, iso_types);
-    if dialect == SqlDialect::Postgres {
-        sql = apply(sql, drop_conflict_predicate);
-        for (pattern, replacement) in POSTGRES_FIXES.iter() {
-            sql = apply(sql, |sql| pattern.replace_all(sql, *replacement));
-        }
-        sql = apply(sql, |sql| {
-            POSTGRES_TYPED_STRING.replace_all(sql, |caps: &Captures| {
-                match (caps.get(1), caps.get(2)) {
-                    (Some(ty), Some(value)) => {
-                        format!("CAST({} AS {})", value.as_str(), ty.as_str())
-                    }
-                    _ => caps[0].to_string(),
-                }
-            })
-        });
-    }
-    sql = match dialect {
-        SqlDialect::Postgres | SqlDialect::MySql => apply(sql, |sql| {
-            TABLE_COMMAND.replace_all(sql, "${1}SELECT * FROM $2")
-        }),
-        SqlDialect::Sqlite if sql.to_ascii_uppercase().contains("INDEXED") => apply(sql, |sql| {
-            SQLITE_INDEX_HINT.replace_all(sql, |caps: &Captures| match caps.get(1) {
-                Some(_) => String::new(),
-                None => caps[0].to_string(),
-            })
-        }),
-        _ => sql,
-    };
-    apply(sql, |sql| {
-        PLACEHOLDER.replace_all(sql, |caps: &Captures| match &caps[0] {
-            "%%" => "%",
-            _ => "NULL",
-        })
+    parse(sql, dialect).or_else(|| {
+        (dialect == SqlDialect::Postgres && sql.contains('?'))
+            .then(|| parse(&numbered_placeholders(sql), dialect))
+            .flatten()
     })
-}
-
-/// `sql` after `pass`, borrowed still when the pass changed nothing.
-fn apply<'a>(sql: Cow<'a, str>, pass: impl FnOnce(&str) -> Cow<'_, str>) -> Cow<'a, str> {
-    let changed = match pass(&sql) {
-        Cow::Owned(changed) => Some(changed),
-        Cow::Borrowed(_) => None,
-    };
-    changed.map_or(sql, Cow::Owned)
-}
-
-/// Drops the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO ...`, the
-/// partial unique index that arbitrates the conflict; it does not change the result columns.
-pub(super) fn drop_conflict_predicate(sql: &str) -> Cow<'_, str> {
-    static CONFLICT_TARGET: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\bON\s+CONFLICT\s*\(").unwrap());
-    static WHERE_CLAUSE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\A\s*WHERE\b").unwrap());
-    let mut out = String::new();
-    let mut last = 0;
-    for target in CONFLICT_TARGET.find_iter(sql) {
-        if target.start() < last {
-            continue;
-        }
-        let Some(close) = closing_paren(sql, target.end()) else {
-            break;
-        };
-        let Some(clause) = WHERE_CLAUSE.find(&sql[close + 1..]) else {
-            continue;
-        };
-        let Some(end) = do_keyword(sql, close + 1 + clause.end()) else {
-            continue;
-        };
-        out.push_str(&sql[last..=close]);
-        out.push(' ');
-        last = end;
-    }
-    if last == 0 {
-        return Cow::Borrowed(sql);
-    }
-    out.push_str(&sql[last..]);
-    Cow::Owned(out)
-}
-
-/// Byte index of the `)` closing the parenthesis that ends just before `start`.
-pub(super) fn closing_paren(sql: &str, start: usize) -> Option<usize> {
-    let bytes = sql.as_bytes();
-    let (mut depth, mut i) = (1, start);
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\'' | b'"' => i = quoted_end(bytes, i),
-            b'(' => {
-                depth += 1;
-                i += 1;
-            }
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-/// Byte index of the first `DO` word at or after `start` outside parentheses and quotes.
-pub(super) fn do_keyword(sql: &str, start: usize) -> Option<usize> {
-    let bytes = sql.as_bytes();
-    let (mut depth, mut i) = (0, start);
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\'' | b'"' => {
-                i = quoted_end(bytes, i);
-                continue;
-            }
-            b'(' => depth += 1,
-            b')' if depth == 0 => return None,
-            b')' => depth -= 1,
-            _ if depth == 0
-                && bytes
-                    .get(i..i + 2)
-                    .is_some_and(|w| w.eq_ignore_ascii_case(b"DO"))
-                && (i == 0 || !is_word(bytes[i - 1]))
-                && bytes.get(i + 2).is_none_or(|&b| !is_word(b)) =>
-            {
-                return Some(i)
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }
 
 /// Index just past the quoted string or identifier that opens at `start`; a doubled quote

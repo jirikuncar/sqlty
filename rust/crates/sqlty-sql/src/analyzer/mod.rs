@@ -18,6 +18,7 @@ mod functions;
 mod grouping;
 mod hashing;
 mod inference;
+mod input;
 mod json;
 mod literals;
 mod memo;
@@ -43,6 +44,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 mod text_names;
+mod tokens;
 mod typed;
 
 #[cfg(test)]
