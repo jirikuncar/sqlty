@@ -375,9 +375,16 @@ jobs:
       - name: Build the release extension
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
+      # The upload needs the repository enabled on codspeed.io; until the CODSPEED
+      # variable says so, each benchmark runs once, unmeasured.
+      - name: Run the benchmarks once
+        if: vars.CODSPEED != 'true'
+        run: uv run pytest benchmarks/ -p no:randomly --no-cov
+
       # Simulation counts instructions, so a run is stable on a shared runner: the engine
       # is CPU-bound, with no I/O for instruction counting to miss.
       - uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        if: vars.CODSPEED == 'true'
         with:
           mode: simulation
           run: uv run pytest benchmarks/ --codspeed -p no:randomly --no-cov

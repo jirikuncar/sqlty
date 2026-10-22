@@ -77,6 +77,10 @@ The `codspeed` job in `.github/workflows/tests.yml` runs `test_benchmarks.py` un
 [CodSpeed](https://codspeed.io) on every push to `main` and every pull request, and
 comments the change per benchmark on the pull request.
 
+The upload needs the repository enabled on codspeed.io, and the job only measures
+once the repository variable `CODSPEED` is `true`. Until then it runs each benchmark
+once, unmeasured, so a broken benchmark still fails the pull request.
+
 - It runs in simulation mode, which counts instructions instead of timing them. The
   engine is CPU-bound, so the count follows its speed, and it does not move with the
   load of a shared runner the way wall time does.
