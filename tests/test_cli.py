@@ -128,7 +128,8 @@ def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -
     (tmp_path / "rows.py").write_text(
         "from typing import TypedDict\nclass User(TypedDict):\n    name: str | None\n"
     )
-    for n in range(8):
+    # Enough files that a thread takes them two at a time.
+    for n in range(40):
         (tmp_path / f"q{n}.py").write_text(
             "from rows import User\n"
             "from sqlty import SQL\n"

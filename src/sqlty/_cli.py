@@ -15,6 +15,7 @@ import fnmatch
 import functools
 import gc
 import glob
+import itertools
 import json
 import logging
 import os
@@ -406,8 +407,13 @@ def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Pat
         return
     from concurrent.futures import ThreadPoolExecutor
 
+    # A task per file costs more than most files take; four batches a thread keep them balanced.
+    batches = itertools.batched(files, max(1, min(64, len(files) // (jobs * 4))), strict=False)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        yield from pool.map(work, files, buffersize=jobs)
+        for batch in pool.map(
+            lambda batch: [work(path) for path in batch], batches, buffersize=jobs
+        ):
+            yield from batch
 
 
 # --- Command implementations ---
