@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import argparse
     from collections import Counter
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
@@ -376,6 +376,38 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Print each file that rewrite, strip or check --fix changes",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=_jobs,
+        metavar="N",
+        help="Files to work on at once; 1 works on one at a time. Output is the same in any "
+        "case (default: the number of processors)",
+    )
+
+
+def _jobs(value: str) -> int:
+    import argparse
+
+    if not value.isdigit() or int(value) < 1:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
+    return int(value)
+
+
+def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
+    """``work`` on every file, its results in the order of ``files``.
+
+    The engine releases the GIL, so threads check files at once. Whatever prints or writes
+    stays with the caller, which reads the results in order.
+    """
+    jobs = min(args.jobs or os.process_cpu_count() or 1, len(files))
+    if jobs <= 1:
+        yield from map(work, files)
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        yield from pool.map(work, files, buffersize=jobs)
 
 
 # --- Command implementations ---
@@ -392,7 +424,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     from sqlty._lint import RULES
     from sqlty.core import check_source, rewrite_source
 
-    def transform(path: Path, original: str, settings: Settings) -> str:
+    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
         rewritten = rewrite_source(
             original,
             dialect=settings.dialect,
@@ -401,16 +433,16 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             untyped=settings.untyped,
             json_types=settings.json_types,
         )
-        if not args.quiet:
-            skipped_only = dict.fromkeys(RULES, "ignore") | {
-                rule: (settings.rules or {}).get(rule, RULES[rule].default_severity.value)
-                for rule in _SKIPPED_STRING_RULES
-            }
-            for diag in check_source(
-                original, import_style=settings.import_style, rules=skipped_only
-            ):
-                print(f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}", file=sys.stderr)
-        return rewritten
+        if args.quiet:
+            return rewritten, []
+        skipped_only = dict.fromkeys(RULES, "ignore") | {
+            rule: (settings.rules or {}).get(rule, RULES[rule].default_severity.value)
+            for rule in _SKIPPED_STRING_RULES
+        }
+        diagnostics = check_source(original, import_style=settings.import_style, rules=skipped_only)
+        return rewritten, [
+            f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}" for diag in diagnostics
+        ]
 
     _transform_files(args, transform, "rewrite", "Rewrote", "rewritten")
 
@@ -419,15 +451,15 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
-    def transform(path: Path, original: str, settings: Settings) -> str:
-        return strip_source(original, import_style=settings.import_style)
+    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
+        return strip_source(original, import_style=settings.import_style), []
 
     _transform_files(args, transform, "strip", "Stripped", "stripped")
 
 
 def _transform_files(
     args: argparse.Namespace,
-    transform: Callable[[Path, str, Settings], str],
+    transform: Callable[[Path, str, Settings], tuple[str, list[str]]],
     verb: str,
     done: str,
     participle: str,
@@ -444,14 +476,20 @@ def _transform_files(
         logger.warning("No Python files found")
         return
 
+    texts = {path: read_source(path) for path in files}
+    unreadable = sum(text is None for text in texts.values())
+    sources = {path: text for path, text in texts.items() if text is not None}
+    settings = {path: resolver.for_file(path) for path in sources}
+    readable = list(sources)
+
+    def work(path: Path) -> tuple[str, list[str]]:
+        return transform(path, sources[path], settings[path])
+
     changed = 0
-    unreadable = 0
-    for path in files:
-        original = read_source(path)
-        if original is None:
-            unreadable += 1
-            continue
-        result = transform(path, original, resolver.for_file(path))
+    for path, (result, warnings) in zip(readable, _map(args, work, readable), strict=True):
+        for warning in warnings:
+            print(warning, file=sys.stderr)
+        original = sources[path]
         if result == original:
             continue
 
@@ -464,7 +502,7 @@ def _transform_files(
         else:
             write_source(path, result)
             if verb == "rewrite":
-                _format(path, resolver.for_file(path).format_command)
+                _format(path, settings[path].format_command)
             if args.verbose:
                 print(f"{done} {path}")
 
@@ -578,52 +616,61 @@ def _cmd_check(args: argparse.Namespace) -> None:
     row_usage = RowUsage()
     reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
 
-    for path in files:
-        parsed = sources[path]
-        settings = resolver.for_file(path)
-        file_helpers = helpers_for(settings)
-        if args.fix:
-            fixed = fix_source(
-                parsed,
-                dialect=settings.dialect,
-                schema_sql=settings.schema,
-                import_style=settings.import_style,
-                untyped=settings.untyped,
-                rules=settings.rules,
-                json_types=settings.json_types,
-                helpers=file_helpers,
-            )
-            if fixed != parsed.text:
-                write_source(path, fixed)
-                if _format(path, settings.format_command):
-                    fixed = path.read_text(encoding="utf-8-sig")
-                parsed = ParsedSource(fixed, parsed.module)
-                total_fixed += 1
-                if args.verbose:
-                    # JSON and annotations own stdout; progress goes to stderr then.
-                    text = args.output_format == "text"
-                    print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
+    settings = {path: resolver.for_file(path) for path in files}
+    file_helpers = {path: helpers_for(settings[path]) for path in files}
+
+    def fix(path: Path) -> str:
+        return fix_source(
+            sources[path],
+            dialect=settings[path].dialect,
+            schema_sql=settings[path].schema,
+            import_style=settings[path].import_style,
+            untyped=settings[path].untyped,
+            rules=settings[path].rules,
+            json_types=settings[path].json_types,
+            helpers=file_helpers[path],
+        )
+
+    if args.fix:
+        for path, fixed in zip(files, _map(args, fix, files), strict=True):
+            if fixed == sources[path].text:
+                continue
+            write_source(path, fixed)
+            if _format(path, settings[path].format_command):
+                fixed = path.read_text(encoding="utf-8-sig")
+            sources[path] = ParsedSource(fixed, sources[path].module)
+            total_fixed += 1
+            if args.verbose:
+                # JSON and annotations own stdout; progress goes to stderr then.
+                text = args.output_format == "text"
+                print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
+
+    def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
         diagnostics = check_source(
-            parsed,
-            dialect=settings.dialect,
-            schema_sql=settings.schema,
-            rules=settings.rules,
-            import_style=settings.import_style,
-            untyped=settings.untyped,
-            helpers=file_helpers,
-            type_modules=settings.type_modules,
+            sources[path],
+            dialect=settings[path].dialect,
+            schema_sql=settings[path].schema,
+            rules=settings[path].rules,
+            import_style=settings[path].import_style,
+            untyped=settings[path].untyped,
+            helpers=file_helpers[path],
+            type_modules=settings[path].type_modules,
             row_usage=row_usage,
         )
-        if args.statistics:
-            statistics += query_statistics(
-                parsed,
-                dialect=settings.dialect,
-                schema_sql=settings.schema,
-                import_style=settings.import_style,
-                helpers=file_helpers,
-            )
+        if not args.statistics:
+            return diagnostics, Counter()
+        counts = query_statistics(
+            sources[path],
+            dialect=settings[path].dialect,
+            schema_sql=settings[path].schema,
+            import_style=settings[path].import_style,
+            helpers=file_helpers[path],
+        )
+        return diagnostics, counts
 
-        reports.extend((path, diag, parsed) for diag in diagnostics)
+    for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
+        statistics += counts
+        reports.extend((path, diag, sources[path]) for diag in diagnostics)
 
     kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
     shown: list[dict[str, object]] = []
@@ -642,8 +689,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
         elif not args.quiet:
             print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
             if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
-                settings = resolver.for_file(path)
-                for line in _explain(parsed, diag["line"], settings.dialect, settings.schema):
+                own = settings[path]
+                for line in _explain(parsed, diag["line"], own.dialect, own.schema):
                     print(line)
 
     if args.output_format == "json":
