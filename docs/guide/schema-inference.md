@@ -103,8 +103,9 @@ What makes a column nullable or not:
   `foreign_key_checks = 0`) can break it.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
   `IS NOT NULL`, comparisons, `IN`, `BETWEEN`, `LIKE`, a strict function such as
-  `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` proves only what both sides prove,
-  and the right side of `AND`, `OR` and a `CASE` branch is read under what the left side
+  `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` narrows a column only by what both
+  sides prove, but an expression non-null under each side is non-null: `COALESCE(a, b)` under
+  `a IS NOT NULL OR b IS NOT NULL`. The right side of `AND`, `OR` and a `CASE` branch is read under what the left side
   established. A non-null column of an outer-joined table in `WHERE` also drops the
   null-extended rows.
 - **Expressions.** Operators and most functions are NULL when an argument is.

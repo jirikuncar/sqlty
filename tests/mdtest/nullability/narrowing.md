@@ -135,6 +135,56 @@ SELECT age, nick FROM users WHERE NOT (age > 18) AND nick IS NOT NULL
 -- inferred: tuple[int, str]
 ```
 
+## Each side of an OR
+
+A column is narrowed only by what every side of an `OR` proves, but an expression is
+not NULL when it is not NULL under each side apart.
+
+```sql
+SELECT COALESCE(age, length(nick)), age + length(nick) FROM users WHERE age IS NOT NULL OR nick IS NOT NULL
+-- inferred: tuple[int, int | None]
+```
+
+```sql
+SELECT COALESCE(age, length(nick)) FROM users WHERE NOT (age IS NULL AND nick IS NULL)
+-- inferred: tuple[int]
+```
+
+The cases of an `AND` of `OR`s are each pair of their sides.
+
+```sql
+SELECT
+    COALESCE(age, length(nick)),
+    CASE WHEN age IS NULL THEN length(nick) ELSE age END
+FROM users
+WHERE (age IS NOT NULL AND id > 1) OR (age IS NULL AND nick IS NOT NULL)
+-- inferred: tuple[int, int]
+```
+
+Past 32 cases, they merge into what all of them prove, as for a column.
+
+```sql
+SELECT COALESCE(age, length(nick)) FROM users
+WHERE (age IS NOT NULL OR nick IS NOT NULL)
+    AND (id = 1 OR id = 2) AND (id = 3 OR id = 4) AND (id = 5 OR id = 6)
+    AND (id = 7 OR id = 8) AND (id = 9 OR id = 10)
+-- inferred: tuple[int | None]
+```
+
+A side that contradicts itself holds for no row and proves everything.
+
+```sql
+SELECT age, nick FROM users WHERE (age IS NULL AND age > 18) OR nick IS NOT NULL
+-- inferred: tuple[int | None, str]
+```
+
+A `CASE` branch no row reaches does not make it nullable.
+
+```sql
+SELECT CASE WHEN age IS NULL THEN NULL ELSE age END FROM users WHERE age IS NOT NULL
+-- inferred: tuple[int]
+```
+
 ## IS DISTINCT FROM NULL
 
 `x IS DISTINCT FROM NULL` is `x IS NOT NULL`, and `x IS NOT DISTINCT FROM NULL` is
