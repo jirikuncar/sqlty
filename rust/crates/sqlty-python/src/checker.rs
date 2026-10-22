@@ -12,12 +12,13 @@
 //!   unless the wrapper call is one of `any_calls`
 
 use regex::Regex;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use crate::edit::Edit;
 use crate::options::{Dialect, Options};
-use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
     strip_line_break, wraps, ImportStyle, Spelling,
@@ -25,10 +26,8 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
-use sqlty_sql::analyzer::{
-    analyze_with_diagnostics, expand_star, parse_error, result_stars, row_type, SchemaData,
-};
-use sqlty_sql::diagnostics::NameRule;
+use sqlty_sql::analyzer::{expand_star, parse, row_type, Column, Parsed, SchemaData};
+use sqlty_sql::diagnostics::{NameDiagnostic, NameRule};
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -120,7 +119,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
         spelling: Spelling::of(&scan),
-        inferred: HashMap::new(),
+        analyses: RefCell::default(),
     };
     if options.dialect == Dialect::MySql {
         checker.mysql_markers();
@@ -144,12 +143,48 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     /// How the module can spell the row types it names.
     spelling: Spelling,
-    /// Row types the name diagnostics' analysis already inferred, by marked query, so the
-    /// annotation checks don't analyze a query twice.
-    inferred: HashMap<String, Option<String>>,
+    /// Each marked query's analysis, by its text, so no step parses a query twice.
+    analyses: RefCell<HashMap<String, Rc<Analysis>>>,
+}
+
+/// What the steps of [`check_source`] ask of one marked query.
+struct Analysis {
+    parsed: Parsed,
+    /// The result columns; `None` when the query returns no rows or does not parse.
+    columns: Option<Vec<Column>>,
+    /// Why columns are untyped.
+    diagnostics: Vec<NameDiagnostic>,
+    row_type: Option<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static ANALYZED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Checker<'_> {
+    /// The analysis of `query`, a [`marked_query`], computed the first time a step asks.
+    fn analysis(&self, query: &str) -> Rc<Analysis> {
+        if let Some(analysis) = self.analyses.borrow().get(query) {
+            return Rc::clone(analysis);
+        }
+        #[cfg(test)]
+        ANALYZED.with(|count| count.set(count.get() + 1));
+        let parsed = parse(query, self.options.dialect.name());
+        let (columns, diagnostics) = parsed.analyze_with_diagnostics(self.options.schema);
+        let columns = columns.ok().flatten();
+        let analysis = Rc::new(Analysis {
+            row_type: columns.as_deref().and_then(row_type),
+            parsed,
+            columns,
+            diagnostics,
+        });
+        self.analyses
+            .borrow_mut()
+            .insert(query.to_string(), Rc::clone(&analysis));
+        analysis
+    }
+
     fn report(&mut self, rule: Rule, message: String, line: usize) {
         self.report_fix(rule, message, line, Vec::new());
     }
@@ -181,7 +216,10 @@ impl Checker<'_> {
     /// `--sql` strings that `rewrite` would wrap.
     fn stale_rewrites(&mut self) {
         let scan = self.scan;
-        for edit in wraps(scan, self.options, &|_| false) {
+        let edits = wraps(scan, self.options, &|_| false, &|content| {
+            self.infer(content)
+        });
+        for edit in edits {
             self.report_fix(
                 Rule::StaleRewrite,
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
@@ -274,8 +312,8 @@ impl Checker<'_> {
             );
         }
         if self.rules.is_enabled(Rule::UnparsedQuery) && !template {
-            if let Some(error) = marked_query(sql_content)
-                .and_then(|sql| parse_error(&sql, self.options.dialect.name()))
+            if let Some(error) =
+                marked_query(sql_content).and_then(|sql| self.analysis(&sql).parsed.error())
             {
                 self.report(Rule::UnparsedQuery, unparsed_message(&error), line);
             }
@@ -313,15 +351,8 @@ impl Checker<'_> {
             return;
         }
         if let Some(query) = marked_query(sql_content) {
-            let (columns, found) =
-                analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
-            let inferred = columns
-                .ok()
-                .flatten()
-                .and_then(|columns| row_type(&columns));
-            self.inferred.insert(query, inferred);
-            for found in found {
-                self.report(Rule::Name(found.rule), found.message, line);
+            for found in &self.analysis(&query).diagnostics {
+                self.report(Rule::Name(found.rule), found.message.clone(), line);
             }
         }
     }
@@ -332,11 +363,9 @@ impl Checker<'_> {
         let Some(query) = marked_query(sql_content) else {
             return;
         };
-        let Some((rule, message)) = select_star_finding(
-            &query,
-            self.options.dialect.name(),
-            self.options.schema.is_some(),
-        ) else {
+        let stars = self.analysis(&query).parsed.result_stars();
+        let Some((rule, message)) = star_finding(stars, &query, self.options.schema.is_some())
+        else {
             return;
         };
         let fix = match (rule, call.strings.as_slice(), self.options.schema) {
@@ -355,16 +384,7 @@ impl Checker<'_> {
     /// The row type of marked string content, from the name diagnostics' analysis when
     /// it ran.
     fn infer(&self, sql_content: &str) -> Option<String> {
-        if !self.inferred.is_empty() {
-            if let Some(inferred) = marked_query(sql_content).and_then(|q| self.inferred.get(&q)) {
-                return inferred.clone();
-            }
-        }
-        infer_from_sql_content(
-            sql_content,
-            self.options.dialect.name(),
-            self.options.schema,
-        )
+        self.analysis(&marked_query(sql_content)?).row_type.clone()
     }
 
     /// Why a query has no row type, and what to do about it: the first name or construct
@@ -374,9 +394,8 @@ impl Checker<'_> {
         let Some(query) = marked_query(sql_content) else {
             return "add casts (for example id::INTEGER) or a schema".to_string();
         };
-        let (columns, diagnostics) =
-            analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
-        if let Some(diagnostic) = diagnostics.first() {
+        let analysis = self.analysis(&query);
+        if let Some(diagnostic) = analysis.diagnostics.first() {
             let hint = match diagnostic.rule {
                 NameRule::UnknownFunction => {
                     "; cast its result, or declare the function in the schema"
@@ -387,11 +406,10 @@ impl Checker<'_> {
             };
             return format!("{}{hint}", diagnostic.message);
         }
-        let untyped: Vec<String> = columns
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        let untyped: Vec<String> = analysis
+            .columns
             .iter()
+            .flatten()
             .filter(|column| column.python_type.is_none())
             .map(|column| format!("`{}`", column.name))
             .collect();
@@ -604,7 +622,16 @@ impl SiteKind {
 /// assert!(select_star_finding("SELECT count(*) FROM users", "postgres", true).is_none());
 /// ```
 pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Option<(Rule, String)> {
-    let stars = result_stars(query, dialect).unwrap_or_else(|| {
+    star_finding(parse(query, dialect).result_stars(), query, has_schema)
+}
+
+/// [`select_star_finding`] of the `stars` of `query`, `None` when it does not parse.
+fn star_finding(
+    stars: Option<Vec<String>>,
+    query: &str,
+    has_schema: bool,
+) -> Option<(Rule, String)> {
+    let stars = stars.unwrap_or_else(|| {
         // A query that doesn't parse falls back to the text.
         let upper = query.to_uppercase();
         if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
@@ -1122,6 +1149,41 @@ mod tests {
     fn override_rule(rule: &str, severity: &str) -> RuleConfig {
         let overrides = HashMap::from([(rule.to_string(), severity.to_string())]);
         RuleConfig::from_overrides(Some(overrides)).unwrap()
+    }
+
+    #[test]
+    fn test_each_query_is_analyzed_once() {
+        let (schema, _) = sqlty_sql::analyzer::load_schema_with_skipped(
+            "CREATE TABLE users (id INTEGER NOT NULL, name TEXT);",
+            "postgres",
+        );
+        let source = concat!(
+            "from sqlty import SQL\n",
+            "a = \"--sql\\nSELECT id, nope FROM users\"\n",
+            "b = SQL[tuple[str]](\"--sql\\nSELECT * FROM users\")\n",
+            "c = SQL[tuple[str]](\"--sql\\nSELECT * FROM users\")\n",
+            "d = SQL[tuple[int]](\"--sql\\nSELEC 1\")\n",
+            "e = \"--sql\\nSELECT id, nope FROM users\"\n",
+        );
+        ANALYZED.with(|count| count.set(0));
+        let diags = check_source(
+            source,
+            "postgres",
+            Some(&schema),
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
+        let rules: Vec<Rule> = diags.iter().map(|d| d.rule).collect();
+        assert!(
+            rules.contains(&Rule::Name(NameRule::UnknownColumn)),
+            "{rules:?}"
+        );
+        assert!(rules.contains(&Rule::SelectStar), "{rules:?}");
+        assert!(rules.contains(&Rule::NarrowType), "{rules:?}");
+        assert!(rules.contains(&Rule::UnparsedQuery), "{rules:?}");
+        assert_eq!(ANALYZED.with(std::cell::Cell::get), 3);
     }
 
     #[test]
