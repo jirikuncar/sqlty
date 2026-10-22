@@ -1,6 +1,9 @@
 //! Analyzer unit tests that cross module boundaries.
 
-use super::preprocess::{numbered_placeholders, parse_first, parser_input, sqlite_type_names};
+use super::input::parser_input;
+use super::preprocess::{
+    numbered_placeholders, parse_first, parse_query, sqlite_type_names, PARSES,
+};
 use super::query::Analyzer;
 use super::*;
 
@@ -72,45 +75,64 @@ fn test_parser_input() {
         parser_input(
             "  --sql\r\nSELECT %s, %(id)s, %b, %(a-b)t, '%s', 5 %% 2",
             SqlDialect::MySql
-        ),
-        "SELECT NULL, NULL, NULL, NULL, 'NULL', 5 % 2"
+        )
+        .text(),
+        "SELECT NULL, NULL, NULL, NULL, '%s', 5 % 2"
     );
-    assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql), "");
     assert_eq!(
-        parser_input("SELECT %d, %%(a)s", SqlDialect::MySql),
+        parser_input("SELECT '100%%', 'it\\'s %s', %s", SqlDialect::MySql).text(),
+        "SELECT '100%', 'it\\'s %s', NULL"
+    );
+    assert_eq!(
+        parser_input(
+            "SELECT 'a (TABLE foo', 'FOR NO KEY UPDATE', 'x MULTISET' /* (TABLE foo) */",
+            SqlDialect::Postgres
+        )
+        .text(),
+        "SELECT 'a (TABLE foo', 'FOR NO KEY UPDATE', 'x MULTISET' /* (TABLE foo) */"
+    );
+    assert_eq!(
+        parser_input("(TABLE a) UNION ALL TABLE \"b\".c", SqlDialect::Postgres).text(),
+        "(SELECT * FROM a) UNION ALL SELECT * FROM \"b\".c"
+    );
+    assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql).text(), "");
+    assert_eq!(
+        parser_input("SELECT %d, %%(a)s", SqlDialect::MySql).text(),
         "SELECT %d, %(a)s"
     );
     assert_eq!(
         parser_input(
             "SELECT 1 FOR no key update OF a, s.b FOR KEY SHARE FOR SHARE OF \"c\" NOWAIT",
             SqlDialect::Postgres
-        ),
-        "SELECT 1 FOR UPDATE OF a FOR SHARE FOR SHARE OF \"c\" NOWAIT"
+        )
+        .text(),
+        "SELECT 1 FOR update OF a FOR SHARE FOR SHARE OF \"c\" NOWAIT"
     );
     assert_eq!(
-        parser_input("SELECT 1 FOR NO KEY UPDATE OF a, b", SqlDialect::MySql),
+        parser_input("SELECT 1 FOR NO KEY UPDATE OF a, b", SqlDialect::MySql).text(),
         "SELECT 1 FOR NO KEY UPDATE OF a, b"
     );
     assert_eq!(
         parser_input(
             "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) WHERE c = ')DO(' OR d = 'x''DO' DO NOTHING",
             SqlDialect::Postgres
-        ),
+        )
+        .text(),
         "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) DO NOTHING"
     );
     assert_eq!(
-        parser_input("SELECT 1 ON CONFLICT (a) WHERE b", SqlDialect::Postgres),
+        parser_input("SELECT 1 ON CONFLICT (a) WHERE b", SqlDialect::Postgres).text(),
         "SELECT 1 ON CONFLICT (a) WHERE b"
     );
     assert_eq!(
         parser_input(
             "SELECT CIDR '10.0.0.0/8', inet 'it''s', \"name\" 'x', 'oid ''1''' -- money '1'",
             SqlDialect::Postgres
-        ),
+        ).text(),
         "SELECT CAST('10.0.0.0/8' AS CIDR), CAST('it''s' AS inet), \"name\" 'x', 'oid ''1''' -- money '1'"
     );
     assert_eq!(
-        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql),
+        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql).text(),
         "SELECT inet '1.2.3.4'"
     );
     assert_eq!(
@@ -168,6 +190,26 @@ fn names_in(sql: &str, dialect: &str) -> Vec<String> {
         .into_iter()
         .map(|col| col.name)
         .collect()
+}
+
+#[test]
+fn test_a_query_is_parsed_once() {
+    for (sql, dialect) in [
+        ("SELECT 1", SqlDialect::Postgres),
+        (
+            "SELECT %s, 'TABLE t' FROM t FOR NO KEY UPDATE",
+            SqlDialect::Postgres,
+        ),
+        ("SELECT 7 MOD 3", SqlDialect::MySql),
+        (
+            "SELECT a FROM t WHERE a BETWEEN SYMMETRIC 1 AND 2",
+            SqlDialect::Postgres,
+        ),
+    ] {
+        PARSES.with(|n| n.set(0));
+        assert!(parse_query(sql, dialect).is_some(), "{sql}");
+        assert_eq!(PARSES.with(std::cell::Cell::get), 1, "{sql}");
+    }
 }
 
 #[test]

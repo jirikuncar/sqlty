@@ -25,14 +25,14 @@ use crate::placeholders::{self, Styles};
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
 use super::inference::{binary_rules, operand};
+use super::input::parser_input;
 use super::literals::strip;
 use super::names::{object_name, table_key};
 use super::nullability::Nullability;
 use super::operators::{is_text, numeric_rank, operand_type};
-use super::preprocess::{parse, parser_input};
+use super::preprocess::parse;
 use super::query::{rename_columns, Analyzer, Column};
 use super::registry::lookup;
-use super::respell::respell;
 use super::scope::{relations, Scope, Source};
 use super::typed::Typed;
 use super::SchemaData;
@@ -141,10 +141,7 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
     let read = |styles| {
         let rewritten = placeholders::rewrite(sql, styles);
         let input = parser_input(&rewritten.text, dialect);
-        let stmt = parse(&input, dialect)
-            .or_else(|| parse(&respell(&input, dialect)?, dialect))?
-            .into_iter()
-            .next()?;
+        let stmt = parse(input.text(), dialect)?.into_iter().next()?;
         Some((stmt, rewritten.names))
     };
     let (stmt, names) = read(styles).or_else(|| {

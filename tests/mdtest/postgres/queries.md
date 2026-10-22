@@ -485,6 +485,13 @@ SELECT id, label FROM tags UNION TABLE tags
 -- inferred: tuple[int, str | None]
 ```
 
+`TABLE` in a string literal or a comment is text.
+
+```sql
+SELECT 'a (TABLE tags' AS t, 'FOR NO KEY UPDATE' AS u /* (TABLE tags) */
+-- inferred: tuple[typing.Literal['a (TABLE tags'], typing.Literal['FOR NO KEY UPDATE']]
+```
+
 ### MySQL
 
 ```toml
