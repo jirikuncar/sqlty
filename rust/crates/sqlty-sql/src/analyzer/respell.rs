@@ -7,22 +7,20 @@
 //! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
 //! XMLTABLE's column options, PostgreSQL's `(composite).*`, as the field `"*"` the
 //! analyzer expands, and its `SET CONSTRAINTS` and `DO` statements, as statements that return
-//! no rows. It runs only on a query that does not parse as written.
+//! no rows. [`super::input::parser_input`] runs it on every query, deciding from the
+//! tokens alone: each edit is of syntax sqlparser rejects.
 
 use super::dialect::SqlDialect;
-use super::preprocess::quoted_end;
-use super::star_expand::is_word;
+use super::tokens::{arguments, closing, Edit, Kind, Token};
 
-/// `sql` with the syntax sqlparser rejects respelled; `None` when it has none.
-pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
+/// The edits that respell the syntax sqlparser rejects in `sql`, whose `tokens` they are.
+pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>) {
     if !matches!(
         dialect,
         SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
     ) {
-        return None;
+        return;
     }
-    let tokens = tokens(sql);
-    let mut edits: Vec<(usize, usize, String)> = Vec::new();
     let word = |i: usize, name: &str| {
         tokens
             .get(i)
@@ -38,8 +36,7 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
         let call = |name: &str| word(i, name) && is(i + 1, Kind::Open);
         let starts_statement = i == 0 || symbol(i - 1, ";");
         if dialect == SqlDialect::Postgres && starts_statement {
-            if let Some(edit) =
-                set_constraints(sql, &tokens, i).or_else(|| do_block(sql, &tokens, i))
+            if let Some(edit) = set_constraints(sql, tokens, i).or_else(|| do_block(sql, tokens, i))
             {
                 edits.push(edit);
             }
@@ -76,7 +73,7 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
             && symbol(i + 2, "*")
         {
             edits.push((tokens[i + 2].start, tokens[i + 2].end, "\"*\"".to_string()));
-        } else if dialect == SqlDialect::Sqlite && shift(sql, &tokens, i) {
+        } else if dialect == SqlDialect::Sqlite && shift(sql, tokens, i) {
             edits.push((tokens[i].start, tokens[i + 1].end, "&".to_string()));
         } else if dialect == SqlDialect::Sqlite
             && word(i, "ISNULL")
@@ -120,14 +117,14 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
             ]
             .into_iter()
             .find(|(side, _)| word(i + 2, side));
-            let chars = arguments(&tokens, i + 1)
+            let chars = arguments(tokens, i + 1)
                 .iter()
                 .any(|&j| tokens[j].kind == Kind::Comma);
             if let (Some((_, trim)), true) = (trim, chars) {
                 edits.push((tokens[i].start, tokens[i + 3].end, trim.to_string()));
             }
         } else if call("SUBSTRING") {
-            let inside = arguments(&tokens, i + 1);
+            let inside = arguments(tokens, i + 1);
             let similar = inside
                 .iter()
                 .find(|&&j| word(j, "SIMILAR") && !word(j + 1, "TO"));
@@ -143,27 +140,27 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 }
             }
         } else if call("JSON_EXISTS") || call("JSON_QUERY") || call("JSON_VALUE") {
-            edits.extend(json_clauses(sql, &tokens, i + 1, word(i, "JSON_EXISTS")));
+            edits.extend(json_clauses(sql, tokens, i + 1, word(i, "JSON_EXISTS")));
         } else if word(i, "UPDATE") && !word(i.wrapping_sub(1), "KEY") {
-            edits.extend(update_tables(sql, &tokens, i));
+            edits.extend(update_tables(sql, tokens, i));
         } else if (call("XMLELEMENT") || call("XMLPI")) && word(i + 2, "NAME") {
             edits.push((tokens[i + 2].start, tokens[i + 3].end, "''".to_string()));
         } else if call("XMLATTRIBUTES") {
             edits.push((tokens[i].start, tokens[i].end, "ROW".to_string()));
-            for j in arguments(&tokens, i + 1) {
+            for j in arguments(tokens, i + 1) {
                 if word(j, "AS") {
                     edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
                 }
             }
         } else if call("XMLPARSE") {
-            for j in arguments(&tokens, i + 1) {
+            for j in arguments(tokens, i + 1) {
                 if (word(j, "PRESERVE") || word(j, "STRIP")) && word(j + 1, "WHITESPACE") {
                     edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
                 }
             }
         } else if call("XMLSERIALIZE") && (word(i + 2, "DOCUMENT") || word(i + 2, "CONTENT")) {
             edits.push((tokens[i].start, tokens[i + 2].end, "CAST(".to_string()));
-            for j in arguments(&tokens, i + 1) {
+            for j in arguments(tokens, i + 1) {
                 if word(j, "NO") && word(j + 1, "INDENT") {
                     edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
                 } else if word(j, "INDENT") {
@@ -171,7 +168,7 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 }
             }
         } else if call("XMLROOT") {
-            let inside = arguments(&tokens, i + 1);
+            let inside = arguments(tokens, i + 1);
             for &j in &inside {
                 if word(j, "VERSION") {
                     edits.push((tokens[j].start, tokens[j].end, String::new()));
@@ -181,15 +178,14 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 {
                     edits.push((tokens[j].start, tokens[j + 1].end, "NULL".to_string()));
                 } else if tokens[j].kind == Kind::Comma && word(j + 1, "STANDALONE") {
-                    let end =
-                        closing(&tokens, i + 1).map_or(sql.len(), |close| tokens[close].start);
+                    let end = closing(tokens, i + 1).map_or(sql.len(), |close| tokens[close].start);
                     edits.push((tokens[j].start, end, String::new()));
                 }
             }
         } else if call("XMLTABLE") {
-            edits.extend(xmltable_options(sql, &tokens, i + 1));
+            edits.extend(xmltable_options(sql, tokens, i + 1));
         } else if call("XMLEXISTS") {
-            for j in arguments(&tokens, i + 1) {
+            for j in arguments(tokens, i + 1) {
                 if word(j, "PASSING") {
                     edits.push((tokens[j].start, tokens[j].end, ",".to_string()));
                 }
@@ -198,10 +194,7 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
                 }
             }
         } else if dialect == SqlDialect::MySql && call("CHAR") {
-            if let Some(&using) = arguments(&tokens, i + 1)
-                .iter()
-                .find(|&&j| word(j, "USING"))
-            {
+            if let Some(&using) = arguments(tokens, i + 1).iter().find(|&&j| word(j, "USING")) {
                 edits.push((tokens[i].start, tokens[i].start, "CONVERT(".to_string()));
                 edits.push((tokens[using].start, tokens[using].start, ") ".to_string()));
             }
@@ -216,14 +209,14 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
             edits.push((tokens[i].start, tokens[i + 3].end, "FOR SHARE".to_string()));
         } else if dialect == SqlDialect::MySql
             && call("INTERVAL")
-            && arguments(&tokens, i + 1)
+            && arguments(tokens, i + 1)
                 .iter()
                 .any(|&j| tokens[j].kind == Kind::Comma)
         {
             edits.push((tokens[i].start, tokens[i].end, "`INTERVAL`".to_string()));
-        } else if dialect == SqlDialect::MySql && bang(sql, &tokens, i) {
+        } else if dialect == SqlDialect::MySql && bang(sql, tokens, i) {
             // `!` binds tighter than any infix operator: `!a + 1` is `(NOT a) + 1`.
-            if let Some(end) = operand_end(sql, &tokens, i + 1) {
+            if let Some(end) = operand_end(sql, tokens, i + 1) {
                 edits.push((tokens[i].start, tokens[i].end, "(NOT ".to_string()));
                 edits.push((tokens[end].end, tokens[end].end, ")".to_string()));
             }
@@ -234,27 +227,12 @@ pub(super) fn respell(sql: &str, dialect: SqlDialect) -> Option<String> {
         {
             edits.push((tokens[i].start, tokens[i].end, "%".to_string()));
         } else if call("JSON_ARRAY") && word(i + 2, "SELECT") {
-            if let Some(close) = closing(&tokens, i + 1) {
+            if let Some(close) = closing(tokens, i + 1) {
                 edits.push((tokens[i + 2].start, tokens[i + 2].start, "(".to_string()));
                 edits.push((tokens[close].start, tokens[close].start, ")".to_string()));
             }
         }
     }
-    if edits.is_empty() {
-        return None;
-    }
-    edits.sort_by_key(|&(start, end, _)| (start, end));
-    let (mut out, mut last) = (String::with_capacity(sql.len() + 32), 0);
-    for (start, end, text) in edits {
-        if start < last {
-            continue;
-        }
-        out.push_str(&sql[last..start]);
-        out.push_str(&text);
-        last = end;
-    }
-    out.push_str(&sql[last..]);
-    Some(out)
 }
 
 /// `SET CONSTRAINTS ... DEFERRED` or `IMMEDIATE` starting at token `i`, as a `SET`: neither
@@ -331,7 +309,6 @@ fn is_predicate(sql: &str, token: &Token) -> bool {
     token.kind == Kind::Word && KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k))
 }
 
-/// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
 /// Whether `tokens[i]` starts SQLite's `<<` or `>>`, which sqlparser reads only in other
 /// dialects. They are respelled as `&`, which is typed the same.
 fn shift(sql: &str, tokens: &[Token], i: usize) -> bool {
@@ -345,6 +322,7 @@ fn shift(sql: &str, tokens: &[Token], i: usize) -> bool {
         && !(i + 2 < tokens.len() && adjacent(i + 1) && matches!(text(i + 2), "<" | ">" | "="))
 }
 
+/// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
 fn ends_operand(sql: &str, token: &Token) -> bool {
     const KEYWORDS: [&str; 19] = [
         "SELECT",
@@ -422,7 +400,6 @@ fn json_clauses(
     ))
 }
 
-/// The tokens directly inside the parenthesis that opens at token `open`.
 /// The commas between the tables of the `UPDATE` at token `update`, as cross joins.
 fn update_tables(sql: &str, tokens: &[Token], update: usize) -> Vec<(usize, usize, String)> {
     let mut depth = 0;
@@ -443,21 +420,6 @@ fn update_tables(sql: &str, tokens: &[Token], update: usize) -> Vec<(usize, usiz
         }
     }
     Vec::new()
-}
-
-fn arguments(tokens: &[Token], open: usize) -> Vec<usize> {
-    let mut depth = 0;
-    let mut inside = Vec::new();
-    for (j, token) in tokens.iter().enumerate().skip(open) {
-        match token.kind {
-            Kind::Open => depth += 1,
-            Kind::Close if depth == 1 => break,
-            Kind::Close => depth -= 1,
-            _ if depth == 1 => inside.push(j),
-            _ => {}
-        }
-    }
-    inside
 }
 
 /// The options of XMLTABLE's columns in the order sqlparser reads them, `PATH`, `DEFAULT`
@@ -513,7 +475,6 @@ fn xmltable_options(sql: &str, tokens: &[Token], open: usize) -> Vec<(usize, usi
     edits
 }
 
-/// The token that closes the parenthesis opening at token `open`.
 /// Whether token `i` is MySQL's prefix `!`, not the start of `!=`.
 fn bang(sql: &str, tokens: &[Token], i: usize) -> bool {
     let text = |j: usize| tokens.get(j).map(|t| &sql[t.start..t.end]);
@@ -545,108 +506,4 @@ fn operand_end(sql: &str, tokens: &[Token], j: usize) -> Option<usize> {
         return closing(tokens, end + 1);
     }
     Some(end)
-}
-
-fn closing(tokens: &[Token], open: usize) -> Option<usize> {
-    let mut depth = 0;
-    tokens.iter().enumerate().skip(open).find_map(|(j, token)| {
-        match token.kind {
-            Kind::Open => depth += 1,
-            Kind::Close => depth -= 1,
-            _ => {}
-        }
-        (depth == 0).then_some(j)
-    })
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Word,
-    Open,
-    Close,
-    Comma,
-    Other,
-}
-
-struct Token {
-    kind: Kind,
-    start: usize,
-    end: usize,
-}
-
-/// The `$tag$` that opens a PostgreSQL dollar-quoted string at the start of `sql`.
-fn dollar_tag(sql: &str) -> Option<&str> {
-    let rest = sql.strip_prefix('$')?;
-    let end = rest.find('$')?;
-    let tag = &rest[..end];
-    let valid = tag
-        .bytes()
-        .enumerate()
-        .all(|(k, b)| b == b'_' || b.is_ascii_alphabetic() || (k > 0 && b.is_ascii_digit()));
-    valid.then(|| &sql[..end + 2])
-}
-
-/// The words, parentheses, commas and other tokens of `sql`, without whitespace and
-/// comments; a quoted string or name is one `Other` token.
-fn tokens(sql: &str) -> Vec<Token> {
-    let bytes = sql.as_bytes();
-    let mut tokens = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        let start = i;
-        let kind = match bytes[i] {
-            b if b.is_ascii_whitespace() => {
-                i += 1;
-                continue;
-            }
-            b'-' if bytes.get(i + 1) == Some(&b'-') => {
-                i = sql[i..].find('\n').map_or(bytes.len(), |n| i + n);
-                continue;
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = sql[i + 2..].find("*/").map_or(bytes.len(), |n| i + n + 4);
-                continue;
-            }
-            b'\'' | b'"' | b'`' => {
-                i = quoted_end(bytes, i);
-                Kind::Other
-            }
-            b'$' if dollar_tag(&sql[i..]).is_some() => {
-                let tag = dollar_tag(&sql[i..]).unwrap_or_default();
-                let body = i + tag.len();
-                i = sql[body..]
-                    .find(tag)
-                    .map_or(bytes.len(), |n| body + n + tag.len());
-                Kind::Other
-            }
-            b'(' => {
-                i += 1;
-                Kind::Open
-            }
-            b')' => {
-                i += 1;
-                Kind::Close
-            }
-            b',' => {
-                i += 1;
-                Kind::Comma
-            }
-            b if is_word(b) => {
-                while i < bytes.len() && is_word(bytes[i]) {
-                    i += 1;
-                }
-                Kind::Word
-            }
-            _ => {
-                i += sql[i..].chars().next().map_or(1, char::len_utf8);
-                Kind::Other
-            }
-        };
-        tokens.push(Token {
-            kind,
-            start,
-            end: i,
-        });
-    }
-    tokens
 }

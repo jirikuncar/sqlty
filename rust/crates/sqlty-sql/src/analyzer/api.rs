@@ -10,8 +10,9 @@ use crate::diagnostics::{Diagnostics, NameDiagnostic};
 use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
+use super::input::{parser_input, Input};
 use super::names::alias_name;
-use super::preprocess::{parse_input, parse_query, parser_input, too_deep, MAX_DEPTH};
+use super::preprocess::{parse_input, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::star_expand::statement_stars;
 use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
@@ -168,7 +169,7 @@ pub fn parse_error(sql: &str, dialect: &str) -> Option<String> {
 pub fn parse(sql: &str, dialect: &str) -> Parsed {
     let dialect = SqlDialect::from_name(dialect);
     let input = parser_input(sql, dialect).into_owned();
-    let stmts = parse_input(&input, dialect);
+    let stmts = parse_input(input.text(), dialect);
     Parsed {
         input,
         stmts,
@@ -178,8 +179,8 @@ pub fn parse(sql: &str, dialect: &str) -> Parsed {
 
 /// A query as [`parse`] read it.
 pub struct Parsed {
-    /// The text sqlparser read, from [`parser_input`].
-    input: String,
+    /// The query sqlparser read, from [`parser_input`].
+    input: Input<'static>,
     stmts: Option<Vec<Statement>>,
     dialect: SqlDialect,
 }
@@ -191,7 +192,7 @@ impl Parsed {
             return None;
         }
         Some(
-            match Parser::parse_sql(self.dialect.parser_dialect().as_ref(), &self.input) {
+            match Parser::parse_sql(self.dialect.parser_dialect().as_ref(), &self.input.source) {
                 Ok(stmts) if too_deep(&stmts) => {
                     format!("expressions nest more than {MAX_DEPTH} levels deep")
                 }
@@ -219,7 +220,7 @@ impl Parsed {
             self.dialect,
         );
         analyzer.diag = Diagnostics::collecting();
-        analyzer.source = text_source(&self.input, self.dialect);
+        analyzer.source = text_source(&self.input.source, self.dialect);
         let columns = analyzer.statement_columns(stmt);
         (columns, analyzer.diag.items())
     }

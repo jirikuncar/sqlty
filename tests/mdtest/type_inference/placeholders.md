@@ -4,9 +4,8 @@ Driver placeholders (`%s`, `%b`, `%t`, `%(name)s`) are values of unknown
 type, so they don't stop inference; `%%` is a literal `%`. They are read alike
 in every dialect.
 
-Like psycopg, sqlty replaces them everywhere in the query, string literals
-and comments included: write `'a%%'` for a literal `%`. A query that this
-makes unparseable stays unwrapped, never mistyped.
+A placeholder in a string literal is text, as the database reads it. Like
+psycopg, sqlty still reads `%%` there as `%`: write `'a%%'` for a literal `%`.
 
 ## Positional
 
@@ -47,11 +46,23 @@ SELECT %s::INTEGER, %s
 
 ## Placeholder text in strings
 
-`%s` in a literal is replaced too, and the literal is still a literal.
+`%s` in a literal is text, and the literal keeps it.
 
 ```sql
-SELECT $$it's %s$$::TEXT, E'it''s %s'::TEXT, '%s'::TEXT WHERE x = %s
+SELECT $$it's %s$$::TEXT, E'it\'s %s'::TEXT, '%s'::TEXT WHERE x = %s
 -- inferred: tuple[str, str, str]
+```
+
+```sql
+SELECT '%s' AS a, '100%%' AS b
+-- inferred: tuple[typing.Literal['%s'], typing.Literal['100%']]
+```
+
+A placeholder in a comment is not read either.
+
+```sql
+SELECT id::INTEGER FROM users /* %(name)s */ WHERE id = %(id)s -- or %s
+-- inferred: tuple[int]
 ```
 
 ## Mixed with `$1`
