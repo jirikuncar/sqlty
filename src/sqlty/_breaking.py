@@ -57,6 +57,8 @@ class Queries(Protocol):
 
     def settings(self, relative: Path) -> Settings: ...
 
+    def roots(self) -> list[Path]: ...
+
 
 class Schemas(Protocol):
     """A revision whose schema the other revision's queries are checked against."""
@@ -81,6 +83,11 @@ class Revision:
 
     def schema(self, relative: Path, own: Settings) -> Schema | None:
         return self.settings(relative).schema
+
+    def roots(self) -> list[Path]:
+        from sqlty._cli import _checked_roots
+
+        return _checked_roots([self.root / p for p in self.paths], self.files)
 
     def sources(self) -> dict[Path, Source]:
         from sqlty._cli import _module_names, read_source
@@ -194,6 +201,7 @@ def _compare(
     queries: Queries,
     schema: Schemas,
 ) -> list[Finding]:
+    from sqlty._helpers import configured_helpers
     from sqlty._source import ParsedSource
     from sqlty.core import HelperIndex, breaking_source
 
@@ -203,14 +211,10 @@ def _compare(
         sources[relative] = ParsedSource(source.text, source.module)
         for name in source.names:
             index.add(name, sources[relative])
-    configured: dict[tuple[tuple[str, str, str | None], ...], HelperIndex] = {}
+    helpers_for = configured_helpers(index, queries.roots())
     findings: list[Finding] = []
     for relative, parsed in sources.items():
         own = queries.settings(relative)
-        if own.functions not in configured:
-            configured[own.functions] = helpers = index.fork()
-            for import_path, query_param, return_param in own.functions:
-                helpers.register(import_path, query_param, return_param)
         for diagnostic in breaking_source(
             parsed,
             schema_sql=own.schema,
@@ -220,7 +224,7 @@ def _compare(
             import_style=own.import_style,
             untyped=own.untyped,
             type_modules=own.type_modules,
-            helpers=configured[own.functions],
+            helpers=helpers_for(own),
         ):
             findings.append(Finding(direction, against, relative, diagnostic))
     return findings
