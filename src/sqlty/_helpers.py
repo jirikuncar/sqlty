@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlty._params import ParamArg, arg_type, literal_params
@@ -23,6 +25,9 @@ from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+    from sqlty._cli import Settings
     from sqlty._type_extractor import TypeInfo
 
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
@@ -221,6 +226,45 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
     return {name: helper for name, (_, helper) in found.items()}
 
 
+def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path, ...]:
+    """Directories a ``[[tool.sqlty.functions]]`` module is read from, the likeliest first.
+
+    ``config_dir/src``, ``config_dir``, the resolved ``checked`` roots inside it, then
+    sqlty's own ``sys.path``.
+
+    Example:
+        >>> [root.name for root in helper_roots(Path("/p"), [Path("/p/app"), Path("/q")])[:3]]
+        ['src', 'p', 'app']
+    """
+    project = config_dir.resolve() if config_dir is not None else None
+    own = [project / "src", project] if project is not None else []
+    inside = [root for root in checked if project is None or root.is_relative_to(project)]
+    return tuple(dict.fromkeys([*own, *inside, *(Path(entry) for entry in sys.path if entry)]))
+
+
+def configured_helpers(
+    index: HelperIndex, checked: Sequence[Path]
+) -> Callable[[Settings], HelperIndex]:
+    """``index`` with the ``[[tool.sqlty.functions]]`` of a file's settings, one fork per project.
+
+    ``checked`` are the checked directories and package roots, passed to `helper_roots`.
+    """
+    forks: dict[tuple[object, Path | None], HelperIndex] = {}
+
+    def helpers_for(settings: Settings) -> HelperIndex:
+        if not settings.functions:
+            return index
+        key = settings.functions, settings.config_dir
+        if (forked := forks.get(key)) is None:
+            forks[key] = forked = index.fork()
+            roots = helper_roots(settings.config_dir, checked)
+            for import_path, query, row in settings.functions:
+                forked.register(import_path, query, row, roots=roots)
+        return forked
+
+    return helpers_for
+
+
 class HelperIndex:
     """Helpers of the modules of a checked tree, by module name.
 
@@ -243,6 +287,7 @@ class HelperIndex:
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
         self._row_types: dict[tuple[str, frozenset[str]], dict[str, TypeInfo]] = {}
+        self._read: dict[tuple[Path, str], ParsedSource | None] = {}
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
@@ -254,6 +299,7 @@ class HelperIndex:
         other.type_modules = self.type_modules
         other._exports = self._exports
         other._row_types = self._row_types
+        other._read = self._read
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
@@ -281,13 +327,22 @@ class HelperIndex:
         self._names = None
         return True
 
-    def register(self, import_path: str, query: str, row: str | None = None) -> None:
+    def register(
+        self,
+        import_path: str,
+        query: str,
+        row: str | None = None,
+        *,
+        roots: Sequence[Path] = (),
+    ) -> None:
         """Register ``import_path`` (``pkg.mod.func`` or ``pkg.mod.Class.method``) as a helper.
 
         Used for ``[[tool.sqlty.functions]]``: the function needs no marked parameter. Its
-        positional parameters are read from the definition when ``pkg.mod`` is indexed;
-        otherwise ``query`` and ``row`` can only be passed by keyword. Of ``@overload``
-        definitions, the first naming both is used unless the implementation names them.
+        positional parameters are read from its definition in ``pkg.mod``, indexed or else
+        read (never imported) from ``pkg/mod.py`` or ``pkg/mod/__init__.py`` under the first
+        of ``roots`` holding it; otherwise ``query`` and ``row`` can only be passed by
+        keyword. Of ``@overload`` definitions, the first naming both is used unless the
+        implementation names them.
 
         Example:
             >>> index = HelperIndex()
@@ -296,10 +351,9 @@ class HelperIndex:
             True
         """
         parts = import_path.split(".")
-        known = [i for i in range(len(parts) - 1, 0, -1) if ".".join(parts[:i]) in self.sources]
-        for i in known[:1] or [i for i in (len(parts) - 1, len(parts) - 2) if i > 0]:
+        for i in range(len(parts) - 1, 0, -1):
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
-            parsed = self.sources.get(module)
+            parsed = self.sources.get(module) or self._module_source(parts[:i], roots)
             definition = min(
                 (d for d in (_definitions(parsed) if parsed else []) if d[0] == name),
                 key=lambda d: _rank(d[1], {query, row} - {None} <= _parameters(d[1].args)),
@@ -307,11 +361,36 @@ class HelperIndex:
             )
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)
-            else:
-                helper = Helper(name, (), frozenset(filter(None, [query, row])), query, row)
-            self.modules.setdefault(module, {})[name] = helper
+                self.modules.setdefault(module, {})[name] = helper
+                break
+        else:
+            keywords = frozenset(filter(None, [query, row]))
+            for i in (len(parts) - 1, len(parts) - 2):
+                if i > 0:
+                    module, name = ".".join(parts[:i]), ".".join(parts[i:])
+                    self.modules.setdefault(module, {})[name] = Helper(
+                        name, (), keywords, query, row
+                    )
         self._pattern = None
         self._names = None
+
+    def _module_source(self, parts: list[str], roots: Sequence[Path]) -> ParsedSource | None:
+        """Module ``parts`` read from the first of ``roots`` holding it; never imported."""
+        module = ".".join(parts)
+        for root in roots:
+            for path, name in (
+                (root.joinpath(*parts[:-1], f"{parts[-1]}.py"), module),
+                (root.joinpath(*parts, "__init__.py"), f"{module}.__init__"),
+            ):
+                if (path, name) not in self._read:
+                    try:
+                        text = path.read_text(encoding="utf-8-sig")
+                    except OSError, ValueError:
+                        text = None
+                    self._read[path, name] = None if text is None else ParsedSource(text, name)
+                if (parsed := self._read[path, name]) is not None:
+                    return parsed
+        return None
 
     def _reexports(self, module: str, parsed: ParsedSource) -> dict[str, tuple[str, str]]:
         if (exports := self._exports.get(module)) is None:

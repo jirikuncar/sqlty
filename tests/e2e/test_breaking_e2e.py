@@ -138,6 +138,42 @@ def test_queries_passed_to_configured_helpers_are_compared(cli: Cli, repo: Path)
     )
 
 
+def test_configured_helpers_outside_the_paths_bind_positionally(cli: Cli, repo: Path) -> None:
+    (repo / "pyproject.toml").write_text(HELPER_CONFIG)
+    (repo / "app" / "db.py").write_text("def fetchone(conn, query, return_cls=None, /): ...\n")
+    commit(
+        repo,
+        "CREATE TABLE users (id INTEGER NOT NULL, bio TEXT NOT NULL);\n",
+        HELPER_CODE,
+        "helpers",
+    )
+    (repo / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, bio TEXT);\n")
+
+    result = cli(
+        ["breaking", "--against", "HEAD", "--direction", "backward", "app/q.py"], {"cwd": repo}
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert lines(result)[0].startswith("app/q.py:12: [nullable-mismatch] User.bio is str")
+
+
+def test_configured_helpers_of_top_level_modules_bind_positionally(cli: Cli, repo: Path) -> None:
+    (repo / "pyproject.toml").write_text(HELPER_CONFIG.replace("app.db.fetchone", "db.fetchone"))
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "db.py").write_text("def fetchone(conn, query, return_cls=None, /): ...\n")
+    (repo / "scripts" / "q.py").write_text(HELPER_CODE.replace("from app.db", "from db"))
+    commit(repo, "CREATE TABLE users (id INTEGER NOT NULL, bio TEXT NOT NULL);\n", "", "helpers")
+    (repo / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, bio TEXT);\n")
+
+    result = cli(
+        ["breaking", "--against", "HEAD", "--direction", "backward", "scripts/q.py"],
+        {"cwd": repo},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert lines(result)[0].startswith("scripts/q.py:12: [nullable-mismatch] User.bio is str")
+
+
 def test_output_formats(cli: Cli, repo: Path) -> None:
     args = ["breaking", "--against", "HEAD~1", "--head", "HEAD", "--direction", "forward"]
 

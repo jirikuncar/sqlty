@@ -129,6 +129,10 @@ class Snapshot:
             if any(p == (relative := Path(name)) or p in relative.parents for p in self.paths)
         }
 
+    def roots(self) -> list[Path]:
+        """A snapshot keeps the checked files, not the directories they were read from."""
+        return []
+
     def settings(self, relative: Path) -> Settings:
         from sqlty._cli import Settings
 
