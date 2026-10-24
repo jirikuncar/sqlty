@@ -209,6 +209,25 @@ SELECT a.admitted FROM admission('{1}') AS a
 -- inferred: tuple[bool | None]
 ```
 
+## A return type named like a planner hint
+
+A type named `support` is the return type, not a `SUPPORT` hint. `pg_dump`
+writes a large estimate in exponent form.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE support (id integer NOT NULL);
+CREATE FUNCTION tickets() RETURNS SETOF support
+    LANGUAGE sql STABLE ROWS 1e+06
+    AS $_$ SELECT * FROM support $_$;
+```
+
+```sql
+SELECT id FROM tickets()
+-- inferred: tuple[int]
+```
+
 ## A function whose definition sqlparser cannot read
 
 A later definition that cannot be read leaves the function untyped, rather than

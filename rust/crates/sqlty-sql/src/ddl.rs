@@ -616,35 +616,66 @@ impl Statement<'_> {
 
     /// A `CREATE FUNCTION` without the planner hints sqlparser does not read: `ROWS n`,
     /// `COST n`, `[NOT] LEAKPROOF` and `SUPPORT name`, which never change the result type.
-    /// A quoted body is one piece, so the words in it stay. `None` when it has none.
+    /// Only the options between the return type and a `RETURN` or `BEGIN ATOMIC` body are
+    /// read, so a type, setting value or body word spelled like a hint stays. `None` when
+    /// it has none.
     pub(crate) fn without_planner_hints(&self) -> Option<String> {
         let pieces = &self.0;
-        let number = |at: usize| {
-            pieces
-                .get(at)
-                .is_some_and(|p| p.0 == Kind::Word && p.1.bytes().all(|b| b.is_ascii_digit()))
-        };
-        let punct = |at: usize, ch: &str| pieces.get(at).is_some_and(|p| is_punct(p, ch));
         let next = |from: usize| (from..pieces.len()).find(|&at| significant(&pieces[at]));
-        let mut kept: Vec<Piece> = Vec::with_capacity(pieces.len());
-        let (mut depth, mut at, mut changed) = (0usize, 0, false);
+        let is_name = |at: usize| matches!(pieces[at].0, Kind::Word | Kind::Quoted);
+        let name_end = |mut at: usize| loop {
+            let dot = next(at + 1).filter(|&dot| is_punct(&pieces[dot], "."));
+            match dot.and_then(|dot| next(dot + 1)) {
+                Some(part) if is_name(part) => at = part,
+                _ => break at + 1,
+            }
+        };
+        let number_end = |at: usize| {
+            let end = (at..pieces.len())
+                .find(|&end| {
+                    let piece = &pieces[end];
+                    piece.0 != Kind::Word && ![".", "+", "-"].iter().any(|ch| is_punct(piece, ch))
+                })
+                .unwrap_or(pieces.len());
+            NUMBER.is_match(&render(&pieces[at..end])).then_some(end)
+        };
+        let args = pieces.iter().position(|p| is_punct(p, "("))?;
+        let mut start = matching_paren(pieces, args)? + 1;
+        if let Some(returns) = next(start).filter(|&at| is_word(&pieces[at], "returns")) {
+            let mut ty = next(returns + 1)?;
+            if is_word(&pieces[ty], "table") {
+                let open = next(ty + 1).filter(|&at| is_punct(&pieces[at], "("))?;
+                start = matching_paren(pieces, open)? + 1;
+            } else {
+                if is_word(&pieces[ty], "setof") {
+                    ty = next(ty + 1)?;
+                }
+                start = if is_name(ty) { name_end(ty) } else { ty };
+            }
+        }
+        let mut kept: Vec<Piece> = pieces[..start].to_vec();
+        let (mut depth, mut at, mut changed) = (0usize, start, false);
         while at < pieces.len() {
             let piece = &pieces[at];
+            if depth == 0 && (is_word(piece, "return") || is_word(piece, "begin")) {
+                kept.extend_from_slice(&pieces[at..]);
+                break;
+            }
             if is_punct(piece, "(") {
                 depth += 1;
             } else if is_punct(piece, ")") {
                 depth = depth.saturating_sub(1);
             }
-            let hint_end = if depth > 0 {
+            let value = kept.iter().rev().find(|p| significant(p)).is_some_and(|p| {
+                ["=", ",", "."].iter().any(|ch| is_punct(p, ch))
+                    || ["to", "set", "language"]
+                        .iter()
+                        .any(|word| is_word(p, word))
+            });
+            let hint_end = if depth > 0 || value {
                 None
             } else if is_word(piece, "rows") || is_word(piece, "cost") {
-                next(at + 1).filter(|&n| number(n)).map(|n| {
-                    if punct(n + 1, ".") && number(n + 2) {
-                        n + 3
-                    } else {
-                        n + 1
-                    }
-                })
+                next(at + 1).and_then(number_end)
             } else if is_word(piece, "leakproof") {
                 if let Some(last) = kept.iter().rposition(significant) {
                     if is_word(&kept[last], "not") {
@@ -653,19 +684,7 @@ impl Statement<'_> {
                 }
                 Some(at + 1)
             } else if is_word(piece, "support") {
-                next(at + 1).map(|mut end| {
-                    while pieces
-                        .get(end)
-                        .is_some_and(|p| matches!(p.0, Kind::Word | Kind::Quoted))
-                    {
-                        end += 1;
-                        if !punct(end, ".") {
-                            break;
-                        }
-                        end += 1;
-                    }
-                    end
-                })
+                next(at + 1).filter(|&name| is_name(name)).map(name_end)
             } else {
                 None
             };
@@ -780,6 +799,11 @@ impl Statement<'_> {
         })
     }
 }
+
+/// A `ROWS` or `COST` value as pg_dump writes it: `1`, `0.5`, `1e+06`.
+static NUMBER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^[+-]?(\d[\d_]*(\.[\d_]*)?|\.\d[\d_]*)(e[+-]?\d+)?$").unwrap()
+});
 
 static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
@@ -1138,6 +1162,29 @@ mod tests {
         );
         assert_eq!(
             hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'"),
+            None
+        );
+        assert_eq!(
+            hints(
+                "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql ROWS 1e+06 \
+                 COST .5 SUPPORT s . \"F\" AS 'SELECT 1'"
+            )
+            .as_deref(),
+            Some("CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql AS 'SELECT 1'")
+        );
+        assert_eq!(
+            hints(
+                "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql COST 1_000 \
+                 SET search_path = support, leakproof SET search_path TO rows RETURN leakproof"
+            )
+            .as_deref(),
+            Some(
+                "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql \
+                 SET search_path = support, leakproof SET search_path TO rows RETURN leakproof"
+            )
+        );
+        assert_eq!(
+            hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1 ROWS 2"),
             None
         );
     }
