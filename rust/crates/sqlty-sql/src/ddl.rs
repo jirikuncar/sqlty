@@ -614,6 +614,72 @@ impl Statement<'_> {
         Some(render(&pieces[..at]).trim_end().to_string())
     }
 
+    /// A `CREATE FUNCTION` without the planner hints sqlparser does not read: `ROWS n`,
+    /// `COST n`, `[NOT] LEAKPROOF` and `SUPPORT name`, which never change the result type.
+    /// A quoted body is one piece, so the words in it stay. `None` when it has none.
+    pub(crate) fn without_planner_hints(&self) -> Option<String> {
+        let pieces = &self.0;
+        let number = |at: usize| {
+            pieces
+                .get(at)
+                .is_some_and(|p| p.0 == Kind::Word && p.1.bytes().all(|b| b.is_ascii_digit()))
+        };
+        let punct = |at: usize, ch: &str| pieces.get(at).is_some_and(|p| is_punct(p, ch));
+        let next = |from: usize| (from..pieces.len()).find(|&at| significant(&pieces[at]));
+        let mut kept: Vec<Piece> = Vec::with_capacity(pieces.len());
+        let (mut depth, mut at, mut changed) = (0usize, 0, false);
+        while at < pieces.len() {
+            let piece = &pieces[at];
+            if is_punct(piece, "(") {
+                depth += 1;
+            } else if is_punct(piece, ")") {
+                depth = depth.saturating_sub(1);
+            }
+            let hint_end = if depth > 0 {
+                None
+            } else if is_word(piece, "rows") || is_word(piece, "cost") {
+                next(at + 1).filter(|&n| number(n)).map(|n| {
+                    if punct(n + 1, ".") && number(n + 2) {
+                        n + 3
+                    } else {
+                        n + 1
+                    }
+                })
+            } else if is_word(piece, "leakproof") {
+                if let Some(last) = kept.iter().rposition(significant) {
+                    if is_word(&kept[last], "not") {
+                        kept.truncate(last);
+                    }
+                }
+                Some(at + 1)
+            } else if is_word(piece, "support") {
+                next(at + 1).map(|mut end| {
+                    while pieces
+                        .get(end)
+                        .is_some_and(|p| matches!(p.0, Kind::Word | Kind::Quoted))
+                    {
+                        end += 1;
+                        if !punct(end, ".") {
+                            break;
+                        }
+                        end += 1;
+                    }
+                    end
+                })
+            } else {
+                None
+            };
+            if let Some(end) = hint_end {
+                changed = true;
+                at = end;
+            } else {
+                kept.push(*piece);
+                at += 1;
+            }
+        }
+        changed.then(|| render(&kept).trim().to_string())
+    }
+
     /// The MySQL `ALTER TABLE` clauses sqlparser does not read respelled: `ADD [COLUMN]
     /// (a INT, b INT)` as `ADD COLUMN a INT, ADD COLUMN b INT`, and a `RENAME INDEX | KEY`
     /// next to other clauses dropped. `None` when it has neither.
@@ -1044,6 +1110,36 @@ mod tests {
         );
         let sql = "CREATE TABLE t (id INT)";
         assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
+    }
+
+    #[test]
+    fn test_without_planner_hints() {
+        let hints = |sql: &str| {
+            first(sql)
+                .without_planner_hints()
+                .map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" "))
+        };
+        assert_eq!(
+            hints(
+                "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+                 STABLE ROWS 1 COST 0.5 NOT LEAKPROOF SUPPORT pg_catalog.f_support PARALLEL SAFE \
+                 AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$"
+            )
+            .as_deref(),
+            Some(
+                "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+                 STABLE PARALLEL SAFE AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$"
+            )
+        );
+        assert_eq!(
+            hints("CREATE FUNCTION f() RETURNS int LEAKPROOF LANGUAGE sql AS 'SELECT 1'")
+                .as_deref(),
+            Some("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'")
+        );
+        assert_eq!(
+            hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'"),
+            None
+        );
     }
 
     #[test]

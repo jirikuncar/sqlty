@@ -185,7 +185,9 @@ pub(super) fn read_statements(
                 }
             }
         } else if postgres && stmt.creates("function") {
-            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
+            let parsed = parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_ddl(&stmt.without_planner_hints()?, dialect));
+            match parsed.and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreateFunction(create)) => push(OpKind::Function(Box::new(create))),
                 _ => push(OpKind::Taint(
                     Taint::Function,
