@@ -469,3 +469,37 @@ fn sqlite_multi_word_type_names_are_joined() {
     );
     assert_eq!(sqlite_type_names("CREATE TABLE t (a INT NOT NULL)"), None);
 }
+
+#[test]
+fn planner_hints_are_dropped_where_sqlparser_stops() {
+    let render =
+        |stmts: Option<Vec<sqlparser::ast::Statement>>| stmts.map(|stmts| stmts[0].to_string());
+    let hints = |sql: &str| render(parse_function_without_hints(sql));
+    let plain = |sql: &str| render(parse_ddl(sql, SqlDialect::Postgres));
+    for (sql, expected) in [
+        (
+            "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+             STABLE ROWS 1 COST 0.5 NOT LEAKPROOF SUPPORT pg_catalog.f_support PARALLEL SAFE \
+             AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$",
+            "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+             STABLE PARALLEL SAFE AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$",
+        ),
+        (
+            "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql ROWS 1e+06 \
+             COST /* c */ .5 SUPPORT s . \"F\" NOT -- c\n LEAKPROOF AS 'it''s'",
+            "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql AS 'it''s'",
+        ),
+        (
+            "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql COST +1_000 \
+             SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
+            "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql \
+             SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
+        ),
+    ] {
+        assert_eq!(hints(sql), Some(plain(expected).unwrap()), "{sql}");
+    }
+    assert_eq!(
+        hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql WINDOW COST 5 AS 'SELECT 1'"),
+        None
+    );
+}

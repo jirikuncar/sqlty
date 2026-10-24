@@ -614,91 +614,6 @@ impl Statement<'_> {
         Some(render(&pieces[..at]).trim_end().to_string())
     }
 
-    /// A `CREATE FUNCTION` without the planner hints sqlparser does not read: `ROWS n`,
-    /// `COST n`, `[NOT] LEAKPROOF` and `SUPPORT name`, which never change the result type.
-    /// Only the options between the return type and a `RETURN` or `BEGIN ATOMIC` body are
-    /// read, so a type, setting value or body word spelled like a hint stays. `None` when
-    /// it has none.
-    pub(crate) fn without_planner_hints(&self) -> Option<String> {
-        let pieces = &self.0;
-        let next = |from: usize| (from..pieces.len()).find(|&at| significant(&pieces[at]));
-        let is_name = |at: usize| matches!(pieces[at].0, Kind::Word | Kind::Quoted);
-        let name_end = |mut at: usize| loop {
-            let dot = next(at + 1).filter(|&dot| is_punct(&pieces[dot], "."));
-            match dot.and_then(|dot| next(dot + 1)) {
-                Some(part) if is_name(part) => at = part,
-                _ => break at + 1,
-            }
-        };
-        let number_end = |at: usize| {
-            let end = (at..pieces.len())
-                .find(|&end| {
-                    let piece = &pieces[end];
-                    piece.0 != Kind::Word && ![".", "+", "-"].iter().any(|ch| is_punct(piece, ch))
-                })
-                .unwrap_or(pieces.len());
-            NUMBER.is_match(&render(&pieces[at..end])).then_some(end)
-        };
-        let args = pieces.iter().position(|p| is_punct(p, "("))?;
-        let mut start = matching_paren(pieces, args)? + 1;
-        if let Some(returns) = next(start).filter(|&at| is_word(&pieces[at], "returns")) {
-            let mut ty = next(returns + 1)?;
-            if is_word(&pieces[ty], "table") {
-                let open = next(ty + 1).filter(|&at| is_punct(&pieces[at], "("))?;
-                start = matching_paren(pieces, open)? + 1;
-            } else {
-                if is_word(&pieces[ty], "setof") {
-                    ty = next(ty + 1)?;
-                }
-                start = if is_name(ty) { name_end(ty) } else { ty };
-            }
-        }
-        let mut kept: Vec<Piece> = pieces[..start].to_vec();
-        let (mut depth, mut at, mut changed) = (0usize, start, false);
-        while at < pieces.len() {
-            let piece = &pieces[at];
-            if depth == 0 && (is_word(piece, "return") || is_word(piece, "begin")) {
-                kept.extend_from_slice(&pieces[at..]);
-                break;
-            }
-            if is_punct(piece, "(") {
-                depth += 1;
-            } else if is_punct(piece, ")") {
-                depth = depth.saturating_sub(1);
-            }
-            let value = kept.iter().rev().find(|p| significant(p)).is_some_and(|p| {
-                ["=", ",", "."].iter().any(|ch| is_punct(p, ch))
-                    || ["to", "set", "language"]
-                        .iter()
-                        .any(|word| is_word(p, word))
-            });
-            let hint_end = if depth > 0 || value {
-                None
-            } else if is_word(piece, "rows") || is_word(piece, "cost") {
-                next(at + 1).and_then(number_end)
-            } else if is_word(piece, "leakproof") {
-                if let Some(last) = kept.iter().rposition(significant) {
-                    if is_word(&kept[last], "not") {
-                        kept.truncate(last);
-                    }
-                }
-                Some(at + 1)
-            } else if is_word(piece, "support") {
-                next(at + 1).filter(|&name| is_name(name)).map(name_end)
-            } else {
-                None
-            };
-            if let Some(end) = hint_end {
-                changed = true;
-                at = end;
-            } else {
-                kept.push(*piece);
-                at += 1;
-            }
-        }
-        changed.then(|| render(&kept).trim().to_string())
-    }
-
     /// The MySQL `ALTER TABLE` clauses sqlparser does not read respelled: `ADD [COLUMN]
     /// (a INT, b INT)` as `ADD COLUMN a INT, ADD COLUMN b INT`, and a `RENAME INDEX | KEY`
     /// next to other clauses dropped. `None` when it has neither.
@@ -799,11 +714,6 @@ impl Statement<'_> {
         })
     }
 }
-
-/// A `ROWS` or `COST` value as pg_dump writes it: `1`, `0.5`, `1e+06`.
-static NUMBER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^[+-]?(\d[\d_]*(\.[\d_]*)?|\.\d[\d_]*)(e[+-]?\d+)?$").unwrap()
-});
 
 static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
@@ -1134,59 +1044,6 @@ mod tests {
         );
         let sql = "CREATE TABLE t (id INT)";
         assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
-    }
-
-    #[test]
-    fn test_without_planner_hints() {
-        let hints = |sql: &str| {
-            first(sql)
-                .without_planner_hints()
-                .map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" "))
-        };
-        assert_eq!(
-            hints(
-                "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
-                 STABLE ROWS 1 COST 0.5 NOT LEAKPROOF SUPPORT pg_catalog.f_support PARALLEL SAFE \
-                 AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$"
-            )
-            .as_deref(),
-            Some(
-                "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
-                 STABLE PARALLEL SAFE AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$"
-            )
-        );
-        assert_eq!(
-            hints("CREATE FUNCTION f() RETURNS int LEAKPROOF LANGUAGE sql AS 'SELECT 1'")
-                .as_deref(),
-            Some("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'")
-        );
-        assert_eq!(
-            hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'"),
-            None
-        );
-        assert_eq!(
-            hints(
-                "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql ROWS 1e+06 \
-                 COST .5 SUPPORT s . \"F\" AS 'SELECT 1'"
-            )
-            .as_deref(),
-            Some("CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql AS 'SELECT 1'")
-        );
-        assert_eq!(
-            hints(
-                "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql COST 1_000 \
-                 SET search_path = support, leakproof SET search_path TO rows RETURN leakproof"
-            )
-            .as_deref(),
-            Some(
-                "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql \
-                 SET search_path = support, leakproof SET search_path TO rows RETURN leakproof"
-            )
-        );
-        assert_eq!(
-            hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1 ROWS 2"),
-            None
-        );
     }
 
     #[test]
