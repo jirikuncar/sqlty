@@ -136,8 +136,10 @@ return-type-param = "form"
 ```
 
 `query-param` names the parameter that holds the query and `return-type-param`
-the one holding the row type. When `pkg.db` is among the checked paths, both are
-looked up in the definition, so calls may pass them by position; otherwise
+the one holding the row type. Both are read from the definition of `pkg.db`, so
+calls may pass them by position. sqlty reads `pkg/db.py` (or `pkg/db/__init__.py`)
+from the checked paths, the project directory's `src/` or the project directory
+itself, or sqlty's own `sys.path`, and never imports it. Without a definition,
 they are checked only when passed by keyword (`fetch_all(query="...", form=int)`).
 For an `@overload`ed helper, positions come from the implementation, or from the
 first overload naming both parameters when the implementation does not.
