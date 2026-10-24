@@ -470,12 +470,17 @@ fn sqlite_multi_word_type_names_are_joined() {
     assert_eq!(sqlite_type_names("CREATE TABLE t (a INT NOT NULL)"), None);
 }
 
+fn without_hints(sql: &str) -> Option<String> {
+    parse_function_without_hints(sql).map(|stmts| stmts[0].to_string())
+}
+
+fn without_hints_expected(plain: &str) -> Option<String> {
+    let stmts = parse_ddl(plain, SqlDialect::Postgres);
+    Some(stmts.expect(plain)[0].to_string())
+}
+
 #[test]
 fn planner_hints_are_dropped_where_sqlparser_stops() {
-    let render =
-        |stmts: Option<Vec<sqlparser::ast::Statement>>| stmts.map(|stmts| stmts[0].to_string());
-    let hints = |sql: &str| render(parse_function_without_hints(sql));
-    let plain = |sql: &str| render(parse_ddl(sql, SqlDialect::Postgres));
     for (sql, expected) in [
         (
             "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
@@ -496,10 +501,32 @@ fn planner_hints_are_dropped_where_sqlparser_stops() {
              SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
         ),
     ] {
-        assert_eq!(hints(sql), Some(plain(expected).unwrap()), "{sql}");
+        assert_eq!(
+            without_hints(sql),
+            without_hints_expected(expected),
+            "{sql}"
+        );
     }
     assert_eq!(
-        hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql WINDOW COST 5 AS 'SELECT 1'"),
+        without_hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql WINDOW COST 5 AS 'SELECT 1'"),
         None
     );
+}
+
+#[test]
+fn planner_hints_spare_names_that_collide_with_them() {
+    let pairs: Vec<&str> = include_str!("planner_hints.sql")
+        .split(";\n")
+        .map(str::trim)
+        .filter(|sql| !sql.is_empty())
+        .collect();
+    assert_eq!(pairs.len(), 234);
+    for pair in pairs.chunks(2) {
+        assert_eq!(
+            without_hints(pair[0]),
+            without_hints_expected(pair[1]),
+            "{}",
+            pair[0]
+        );
+    }
 }
