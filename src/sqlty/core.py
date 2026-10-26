@@ -168,7 +168,8 @@ class ParamInfo(NamedTuple):
     ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
     ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
     accepts any value. ``untyped_sql_type`` is the type PostgreSQL gives the parameter when
-    the driver sends it untyped, as asyncpg does, when that differs from ``sql_type``.
+    the driver sends it untyped, as asyncpg does, when that differs from ``sql_type``: the
+    ``%s`` of ``%s + INTERVAL '1 day'`` is an ``interval`` then, and any date or time otherwise.
     """
 
     number: int

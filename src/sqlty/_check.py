@@ -502,8 +502,15 @@ def _param_diagnostics(
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
         if arg.type == "None" or (typed and not param.cast):
+            expected = param.python_type
+            if (
+                expected is None
+                and call.driver == "asyncpg"
+                and param.untyped_sql_type == "INTERVAL"
+            ):
+                expected = "datetime.timedelta"
             if problem := mismatch(
-                param.python_type,
+                expected,
                 param.nullable,
                 arg.type,
                 postgres=postgres,
@@ -518,7 +525,7 @@ def _param_diagnostics(
                     (
                         "param-type-mismatch",
                         f"parameter {param.number} is an `{untyped}` to PostgreSQL, as asyncpg sends it "
-                        f"untyped, so it cannot be compared with a `{sql_type}`: "
+                        f"untyped, so it cannot stand for a `{sql_type}`: "
                         f"cast it, `${param.number}::{sql_type}`",
                     )
                 )
