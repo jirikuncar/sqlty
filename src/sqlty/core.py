@@ -168,7 +168,8 @@ class ParamInfo(NamedTuple):
     ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
     ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
     accepts any value. ``untyped_sql_type`` is the type PostgreSQL gives the parameter when
-    the driver sends it untyped, as asyncpg does, when that differs from ``sql_type``.
+    the driver sends it untyped, as asyncpg does, when that differs from ``sql_type``: the
+    ``%s`` of ``%s + INTERVAL '1 day'`` is an ``interval`` then, and any date or time otherwise.
     """
 
     number: int
@@ -509,7 +510,7 @@ def query_statistics(
 
     Counts ``typed`` queries, ``partially typed`` ones (a column's type is
     unknown), ``unparsed`` ones, and skipped strings by rule
-    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``). Queries
+    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``, ``dynamic-query``). Queries
     that return no rows are not counted.
 
     Example:
@@ -528,7 +529,7 @@ def query_statistics(
     for call in find_helper_calls(parsed, helpers, module):
         if call.query is None:
             if not is_any_row(call):
-                counts["unchecked-query"] += 1
+                counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
         elif not MARKER.match(call.query) and (
             outcome := _outcome(call.query, dialect, schema_sql)
         ):

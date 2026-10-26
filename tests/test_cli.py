@@ -293,12 +293,15 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
         'broken = "--sql\\nSELECT NULL::xml IS DOCUMENT"\n'
         'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
         'ddl = "--sql\\nCREATE TABLE t (a INT)"\n'
+        "from typing import Annotated, LiteralString\n"
+        "def fetch[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...\n"
+        "fetch(QUERY, int)\n"
     )
     monkeypatch.chdir(tmp_path)
 
     main(["check", "--statistics", "."])
     assert capsys.readouterr().out.splitlines()[-1] == (
-        "Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)"
+        "Queries: 1 typed, 1 partially typed, 1 unparsed, 2 skipped (fstring-skipped: 1, dynamic-query: 1)"
     )
 
     main(["check", "--statistics", "-q", "."])

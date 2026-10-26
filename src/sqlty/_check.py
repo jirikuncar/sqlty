@@ -187,11 +187,18 @@ class _Check:
 def _check_unchecked_queries(ctx: _Check) -> None:
     for call in ctx.found:
         if call.query is None and not is_any_row(call):
-            ctx.report(
-                "unchecked-query",
-                "psycopg query is not built from literals only, so it is not checked",
-                call.line,
-            )
+            if call.dynamic:
+                ctx.report(
+                    "dynamic-query",
+                    "query is not a string literal, so it is not checked",
+                    call.line,
+                )
+            else:
+                ctx.report(
+                    "unchecked-query",
+                    "psycopg query is not built from literals only, so it is not checked",
+                    call.line,
+                )
 
 
 def _check_params(ctx: _Check) -> None:
@@ -502,8 +509,15 @@ def _param_diagnostics(
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
         if arg.type == "None" or (typed and not param.cast):
+            expected = param.python_type
+            if (
+                expected is None
+                and call.driver == "asyncpg"
+                and param.untyped_sql_type == "INTERVAL"
+            ):
+                expected = "datetime.timedelta"
             if problem := mismatch(
-                param.python_type,
+                expected,
                 param.nullable,
                 arg.type,
                 postgres=postgres,
@@ -518,7 +532,7 @@ def _param_diagnostics(
                     (
                         "param-type-mismatch",
                         f"parameter {param.number} is an `{untyped}` to PostgreSQL, as asyncpg sends it "
-                        f"untyped, so it cannot be compared with a `{sql_type}`: "
+                        f"untyped, so it cannot stand for a `{sql_type}`: "
                         f"cast it, `${param.number}::{sql_type}`",
                     )
                 )
