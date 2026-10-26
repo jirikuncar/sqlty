@@ -56,6 +56,7 @@ pub(super) struct RawForeignKey {
     pub(super) validated: bool,
 }
 
+#[derive(Clone)]
 pub(super) enum Rel {
     Table(RawTable),
     View(Vec<Column>),
@@ -71,6 +72,7 @@ pub(super) enum TypeDef {
     Unknown,
 }
 
+#[derive(Clone)]
 pub(super) struct RawFunction {
     pub(super) args: Vec<DataType>,
     pub(super) required: usize,
@@ -79,6 +81,7 @@ pub(super) struct RawFunction {
     pub(super) strict: bool,
 }
 
+#[derive(Clone)]
 pub(super) enum RawReturn {
     Scalar(DataType),
     SetOf(DataType),
@@ -167,6 +170,25 @@ impl Loader {
             type_aliases: FxHashMap::default(),
             returned_by: FxHashMap::default(),
             overrides: Arc::default(),
+        }
+    }
+
+    /// A copy to read more statements into, without the resolved catalog.
+    pub(super) fn fork(&self) -> Self {
+        Loader {
+            dialect: self.dialect,
+            postgres: self.postgres,
+            relations: self.relations.clone(),
+            types: self.types.clone(),
+            functions: self.functions.clone(),
+            unknown_functions: self.unknown_functions.clone(),
+            search_path: self.search_path.clone(),
+            cache: None,
+            stale_functions: self.stale_functions.clone(),
+            type_aliases: self.type_aliases.clone(),
+            skipped: self.skipped.clone(),
+            overrides: Arc::clone(&self.overrides),
+            returned_by: self.returned_by.clone(),
         }
     }
 
