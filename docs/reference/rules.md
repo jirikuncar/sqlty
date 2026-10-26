@@ -45,6 +45,7 @@ stale-type = "error"
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` and a field that changes the SQL |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
+| [`dynamic-query`](#dynamic-query) | Rewrite | ignore | no | Helper query that is not a string literal |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
@@ -718,6 +719,34 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM " + table)
 Fix: write the query as one plain literal, or implicitly concatenated ones.
 `SQL[Any](...)`, or `Any` as the row type of a helper called with a psycopg
 composition, opts out explicitly.
+
+### dynamic-query
+
+Default: ignore. A helper call whose query is not a string literal: a variable, a
+constant, a call or a concatenation. sqlty does not check it. A helper's own query
+parameter, forwarded to another helper, is not reported.
+
+```toml
+[tool.sqlty.rules]
+dynamic-query = "warn"
+```
+
+```python
+from typing import Annotated, LiteralString
+
+from sqlty import SQL
+
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+
+NAMES = "SELECT name FROM users"
+# error: [dynamic-query] "query is not a string literal, so it is not checked"
+names = fetch_all(NAMES, str)
+```
+
+Fix: pass the query as a string literal. `sqlty check --statistics` counts these calls
+under `dynamic-query`.
 
 ### untyped-query
 

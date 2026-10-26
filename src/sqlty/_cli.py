@@ -418,7 +418,7 @@ def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Pat
 
 # --- Command implementations ---
 
-_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query")
+_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query", "dynamic-query")
 
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
