@@ -308,6 +308,16 @@ SELECT id FROM events WHERE at < %s - INTERVAL '3 months' AND (INTERVAL '1 day' 
 -- params: 3: datetime.timedelta (INTERVAL)
 ```
 
+Alone, it has no type sqlty can hold the value to: psycopg may pass a date, a time or a
+`timedelta`. Stored in a column, it is what the column is.
+
+```sql
+INSERT INTO events (id, n, at, span, note, ids, doc, ip) SELECT n, n, %s + n * INTERVAL '1 second', %s - INTERVAL '1 day', '', '{}', '{}', '::1' FROM generate_series(1, 3) n RETURNING %s + INTERVAL '1 day'
+-- params: 1: datetime.datetime (TIMESTAMP)
+-- params: 2: datetime.timedelta (INTERVAL)
+-- params: 3: None (None)
+```
+
 ### Rows, CASE and AT TIME ZONE
 
 ```sql
