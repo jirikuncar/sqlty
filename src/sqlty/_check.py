@@ -242,7 +242,13 @@ def _check_unparsed(ctx: _Check) -> None:
             and not MARKER.match(call.query)
             and (error := _parse_error(call.query, dialect=ctx.dialect))
         ):
-            ctx.report("unparsed-query", f"query does not parse: {error}", call.line)
+            message = f"query does not parse: {error}"
+            if "found: {" in error and (field := _FORMAT_FIELD.search(call.query)):
+                message += f"; `{field[0]}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
+            ctx.report("unparsed-query", message, call.line)
+
+
+_FORMAT_FIELD = re.compile(r"\{\w*\}")
 
 
 def _check_names(ctx: _Check) -> None:
