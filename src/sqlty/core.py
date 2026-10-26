@@ -510,7 +510,7 @@ def query_statistics(
 
     Counts ``typed`` queries, ``partially typed`` ones (a column's type is
     unknown), ``unparsed`` ones, and skipped strings by rule
-    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``). Queries
+    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``, ``dynamic-query``). Queries
     that return no rows are not counted.
 
     Example:
@@ -529,7 +529,7 @@ def query_statistics(
     for call in find_helper_calls(parsed, helpers, module):
         if call.query is None:
             if not is_any_row(call):
-                counts["unchecked-query"] += 1
+                counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
         elif not MARKER.match(call.query) and (
             outcome := _outcome(call.query, dialect, schema_sql)
         ):

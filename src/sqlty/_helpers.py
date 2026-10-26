@@ -63,7 +63,8 @@ class Helper:
 class HelperCall(NamedTuple):
     """A call passing a query to a helper's query parameter.
 
-    ``query`` is ``None`` for a psycopg composition with a part that is not a literal.
+    ``query`` is ``None`` for a psycopg composition with a part that is not a literal, and
+    for any other argument that is not a string literal, which is ``dynamic``.
     ``params`` holds the arguments the call passes for the query's placeholders, with the
     type of each where the source states it, or ``None`` when the helper takes no parameters
     or the call does not spell them out. ``driver`` names the driver of a recognised
@@ -79,6 +80,7 @@ class HelperCall(NamedTuple):
     end_line: int | None = None
     driver: str | None = None
     single: str | None = None
+    dynamic: bool = False
 
     @property
     def typed_lines(self) -> range:
@@ -665,6 +667,20 @@ def find_helper_calls(
             source.module = module
         return helpers.fragment(source, dotted)
 
+    def forwarded(call: ast.Call, query: ast.expr) -> bool:
+        """Whether ``query`` is the marked query parameter of a function around ``call``."""
+        if not isinstance(query, ast.Name):
+            return False
+        annotated, marker = parsed.marker_names
+        for scope in reversed(parsed.scopes_of(call)):
+            if isinstance(scope, ast.ClassDef):
+                continue
+            args = scope.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                if arg.arg == query.id:
+                    return _is_marked(arg.annotation, annotated, marker)
+        return False
+
     aliases = parsed.typing_aliases
     calls = []
     scan = parsed.psycopg if composed else None
@@ -689,20 +705,19 @@ def find_helper_calls(
                     node.end_lineno,
                 )
             )
-        elif scan is not None and query is not None:
+        elif query is not None and not forwarded(node, query):
             pending.append((node, helper, query))
     for node, helper, query in pending:
-        assert scan is not None
-        if (text := scan.render(query, resolve_fragment)) is not None:
-            row = _argument(helper, node, helper.row)
-            calls.append(
-                HelperCall(
-                    node.lineno,
-                    None if text == UNCHECKED else text,
-                    row,
-                    aliases,
-                    _call_params(helper, node, parsed),
-                    node.end_lineno,
-                )
+        text = scan.render(query, resolve_fragment) if scan is not None else None
+        calls.append(
+            HelperCall(
+                node.lineno,
+                None if text == UNCHECKED else text,
+                _argument(helper, node, helper.row),
+                aliases,
+                _call_params(helper, node, parsed),
+                node.end_lineno,
+                dynamic=text is None,
             )
+        )
     return sorted(calls, key=lambda call: call.line)

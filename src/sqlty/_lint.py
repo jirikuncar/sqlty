@@ -27,6 +27,7 @@ Configuration via pyproject.toml:
     fstring-skipped = "warn"            # default
     tstring-skipped = "warn"            # default
     unchecked-query = "warn"            # default
+    dynamic-query = "ignore"            # default
     untyped-query = "warn"              # default
     unparsed-query = "warn"             # default
     unknown-table = "error"             # default
@@ -199,6 +200,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=False,
         description="--sql query is not plain string literals (raw, bytes, an expression), so it is not checked",
+    ),
+    "dynamic-query": LintRule(
+        name="dynamic-query",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="helper query that is not a string literal (a variable, a call), so it is not checked",
     ),
     "untyped-query": LintRule(
         name="untyped-query",
