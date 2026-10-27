@@ -6,6 +6,7 @@ import datetime
 import sys
 import typing
 import uuid
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
@@ -808,6 +809,23 @@ def test_type_modules_allow_imports(marker_module) -> None:
     diagnostics = check_source(MARKER_SOURCE, type_modules=["marker_app_ids"])
     assert marker_module.exists()
     assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]
+
+
+def test_checked_code_warnings_are_not_printed() -> None:
+    source = """from pydantic import BaseModel
+from sqlty import SQL
+
+class User(BaseModel):
+    id: int
+
+    class Config:
+        strict = True
+
+q = SQL[User]("--sql\\nSELECT 1::INTEGER AS id")
+"""
+    with warnings.catch_warnings(record=True, action="always") as caught:
+        assert check_source(source) == []
+    assert caught == []
 
 
 def test_every_inferred_python_type_is_checked():

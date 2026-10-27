@@ -91,6 +91,7 @@ class _Check:
         queries: list[tuple[int, str, str | None]],
         declared: list[tuple[int, ast.expr, str]],
         type_modules: Iterable[str] | None,
+        pydantic_types: bool,
         helpers: HelperIndex | None,
         module: str | None,
     ) -> None:
@@ -113,7 +114,7 @@ class _Check:
             if row
         ]
         self.type_defs: dict[str, TypeInfo] = (
-            extract_type_definitions(parsed, helpers, module, type_modules)
+            extract_type_definitions(parsed, helpers, module, type_modules, pydantic_types)
             if queries or named or declared
             else {}
         )
@@ -126,7 +127,7 @@ class _Check:
                 ast.unparse(p) for _, p, _ in declared if isinstance(p, ast.Name | ast.Attribute)
             }
             for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
-                if (imported := helpers.row_type(parsed, name, extra)) is not None:
+                if (imported := helpers.row_type(parsed, name, extra, pydantic_types)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         # A row type named through an alias (`type Row = User`) is checked as what it names.
         self.aliased: list[tuple[int, str, str | None, ast.expr]] = []
@@ -438,6 +439,7 @@ def diagnostics(
     type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
     variants: int | None = None,
+    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
 
@@ -494,6 +496,7 @@ def diagnostics(
         queries=queries,
         declared=declared,
         type_modules=type_modules,
+        pydantic_types=pydantic_types,
         helpers=helpers,
         module=module,
     )

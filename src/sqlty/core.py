@@ -392,6 +392,7 @@ def check_source(
     type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
     query_variants: int | None = None,
+    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -435,6 +436,10 @@ def check_source(
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
+    ``pydantic_types`` (the ``preview`` key) reads Pydantic's types from a static table, not
+    from pydantic: a ``TypedDict`` field ``EmailStr`` is a ``str``, and a model field
+    ``AnyUrl`` takes the ``str`` it validates.
+
     Example:
         >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
         []
@@ -458,6 +463,7 @@ def check_source(
         type_modules=type_modules,
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
+        pydantic_types=pydantic_types,
     )
     diagnostics = apply_suppressions(parsed, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
@@ -479,6 +485,7 @@ def breaking_source(
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
     query_variants: int | None = None,
+    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
@@ -510,6 +517,7 @@ def breaking_source(
             module=module,
             type_modules=type_modules,
             query_variants=query_variants,
+            pydantic_types=pydantic_types,
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}

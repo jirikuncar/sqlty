@@ -408,6 +408,7 @@ def _ast_type(
     aliases: dict[str, str],
     newtypes: TypeNames | None = None,
     imports: dict[str, str] | None = None,
+    known: typing.Mapping[str, typing.Any] = _IMPORTED_TYPES,
 ) -> typing.Any:
     """Builtin scalars and generics, ``Any``, ``Never``, NewTypes and their unions from source; None if unknown.
 
@@ -419,8 +420,10 @@ def _ast_type(
     or ``typing_extensions``.
     ``newtypes`` maps names (``X`` or ``mod.X``) to the values of aliases, or to types
     already resolved, such as ``NewType``s (see ``symbols.ModuleTypes``). A string annotation is parsed, never evaluated, and resolved the same way.
-    With ``imports`` (see ``ParsedSource.imported_names``), the ``decimal``,
-    ``datetime`` and ``uuid`` types and Pydantic's ``Strict*`` aliases resolve too.
+    With ``imports`` (see ``ParsedSource.imported_names``), the qualified names of ``known``
+    (the ``decimal``, ``datetime`` and ``uuid`` types and Pydantic's ``Strict*`` aliases by
+    default) and the standard-library classes resolve too; ``known`` keys a call
+    ``name()`` and a generic ``name[]`` (see ``pydantic_types.pydantic_names``).
     """
     newtypes = newtypes or {}
     if isinstance(node, ast.Constant) and node.value is None:
@@ -430,9 +433,14 @@ def _ast_type(
             parsed = ast.parse(node.value.strip(), mode="eval").body
         except SyntaxError:
             return None
-        return _ast_type(parsed, aliases, newtypes, imports)
+        return _ast_type(parsed, aliases, newtypes, imports, known)
     if imports and (qualname := _qualname(node, imports)):
-        if tp := _IMPORTED_TYPES.get(qualname) or stdlib_class(qualname):
+        if tp := known.get(qualname) or stdlib_class(qualname):
+            return tp
+    if imports and isinstance(node, (ast.Call, ast.Subscript)):
+        callee = node.func if isinstance(node, ast.Call) else node.value
+        suffix = "()" if isinstance(node, ast.Call) else "[]"
+        if (qualname := _qualname(callee, imports)) and (tp := known.get(qualname + suffix)):
             return tp
     if isinstance(node, (ast.Name, ast.Attribute)) and (
         (found := newtypes.get(_qualname(node, {}) or "")) is not None
@@ -440,7 +448,7 @@ def _ast_type(
     ):
         return found
     if isinstance(node, ast.Name) and (alias := newtypes.get(node.id)) is not None:
-        return _ast_type(alias, aliases, _Hiding(newtypes, node.id), imports)
+        return _ast_type(alias, aliases, _Hiding(newtypes, node.id), imports, known)
     if isinstance(node, ast.Name):
         known = _AST_TYPES | _TYPING_GENERICS if node.id in aliases else _AST_TYPES
         return known.get(aliases.get(node.id, node.id))
@@ -453,6 +461,7 @@ def _ast_type(
             aliases,
             newtypes,
             imports,
+            known,
         )
     if isinstance(node, ast.Subscript) and _is_name(node.value, "Literal", aliases):
         items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
@@ -462,11 +471,12 @@ def _ast_type(
         return None
     if (
         isinstance(node, ast.Subscript)
-        and (origin := _ast_type(node.value, aliases, newtypes, imports)) in _GENERICS
+        and (origin := _ast_type(node.value, aliases, newtypes, imports, known)) in _GENERICS
     ):
         args = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
         return types.GenericAlias(
-            origin, tuple(_ast_type(a, aliases, newtypes, imports) or typing.Any for a in args)
+            origin,
+            tuple(_ast_type(a, aliases, newtypes, imports, known) or typing.Any for a in args),
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         members = [node.left, node.right]
@@ -476,7 +486,7 @@ def _ast_type(
         members = list(node.slice.elts) if isinstance(node.slice, ast.Tuple) else [node.slice]
     else:
         return None
-    resolved = [_ast_type(m, aliases, newtypes, imports) for m in members]
+    resolved = [_ast_type(m, aliases, newtypes, imports, known) for m in members]
     return None if None in resolved else functools.reduce(operator.or_, resolved)
 
 
@@ -496,11 +506,12 @@ def _ast_key_types(
     aliases: dict[str, str],
     newtypes: TypeNames,
     imports: dict[str, str] | None = None,
+    known: typing.Mapping[str, typing.Any] = _IMPORTED_TYPES,
 ) -> dict[str, typing.Any]:
     """Key types of a TypedDict lineage (bases first) from source, as by ``_ast_type``."""
     return {
         item.target.id: _ast_type(
-            _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes, imports
+            _unwrap_qualifiers_ast(item.annotation, aliases)[0], aliases, newtypes, imports, known
         )
         for node in nodes
         for item in node.body

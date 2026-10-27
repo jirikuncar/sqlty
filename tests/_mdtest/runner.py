@@ -41,10 +41,9 @@ class Run:
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
+        self.preview: bool = settings.get("preview", True)
         self.query_variants: int | None = (
-            settings.get("max-query-variants", MAX_QUERY_VARIANTS)
-            if settings.get("preview", True)
-            else None
+            settings.get("max-query-variants", MAX_QUERY_VARIANTS) if self.preview else None
         )
         # With an `against.sql` file, `# error:` asserts what `sqlty breaking` reports.
         self.against_sql: str | None = section.files.get("against.sql")
@@ -198,6 +197,7 @@ class Run:
                 type_modules=self.type_modules,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
+                pydantic_types=self.preview,
             )
         else:
             found = core.check_source(
@@ -210,6 +210,7 @@ class Run:
                 type_modules=self.type_modules,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
+                pydantic_types=self.preview,
             )
         diagnostics = [
             (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))

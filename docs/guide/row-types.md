@@ -392,6 +392,67 @@ ok = SQL[Totals]("--sql\nSELECT sum(id::BIGINT) AS total FROM users")
 bad = SQL[StrictTotals]("--sql\nSELECT sum(id::BIGINT) AS total, sum(id::BIGINT) AS count FROM users")
 ```
 
+## Pydantic types
+
+```toml
+[tool.sqlty]
+preview = true
+```
+
+```python
+from typing import TypedDict
+from pydantic import AnyUrl, BaseModel, EmailStr, PositiveInt
+from sqlty import SQL
+
+class Profile(BaseModel):
+    email: EmailStr
+    homepage: AnyUrl
+    visits: PositiveInt
+
+class ProfileRow(TypedDict):
+    email: EmailStr
+    homepage: AnyUrl
+
+# error: [column-type-mismatch] "Profile.visits is PositiveInt but query column 'visits' infers str"
+model = SQL[Profile]("--sql\nSELECT 'a@b.co'::TEXT AS email, 'https://a.co'::TEXT AS homepage, 'x'::TEXT AS visits")
+# error: [column-type-mismatch] "ProfileRow.homepage is AnyUrl but query column 'homepage' infers str"
+row = SQL[ProfileRow]("--sql\nSELECT 'a@b.co'::TEXT AS email, 'https://a.co'::TEXT AS homepage")
+```
+
+With `preview`, `check` reads Pydantic's types from a table of its own, without
+importing pydantic, so the result is the same whether pydantic is installed or
+not. Each type has two readings:
+
+- A Pydantic model or `pydantic.dataclasses.dataclass` validates its input, so a
+  field takes the columns Pydantic validates into it: `AnyUrl` takes a `str`,
+  `ByteSize` an `int` or a `str`, and lax mode adds its conversions.
+- A `TypedDict`, `NamedTuple` or plain dataclass holds what the driver returns, so
+  a field is the type a type checker sees: `EmailStr` is a `str`, and `AnyUrl` is a
+  class no column holds.
+
+| Types | Type checker | Model input |
+|-------|--------------|-------------|
+| `PositiveInt`, `NegativeInt`, `NonNegativeInt`, `NonPositiveInt`, `conint()` | `int` | `int` |
+| `PositiveFloat`, `NegativeFloat`, `NonNegativeFloat`, `NonPositiveFloat`, `FiniteFloat`, `confloat()` | `float` | `float` |
+| `condecimal()` | `Decimal` | `Decimal` |
+| `AwareDatetime`, `NaiveDatetime`, `PastDatetime`, `FutureDatetime` | `datetime` | `datetime` |
+| `PastDate`, `FutureDate`, `condate()` | `date` | `date` |
+| `UUID1`, `UUID3` to `UUID8` | `UUID` | `UUID` |
+| `EmailStr`, `constr()` | `str` | `str` |
+| `conbytes()` | `bytes` | `bytes` |
+| `Base64Str`, `Base64UrlStr` | `str` | `str` or `bytes` |
+| `Base64Bytes`, `Base64UrlBytes` | `bytes` | `str` or `bytes` |
+| `SecretStr`, `SecretBytes` | the class | `str` or `bytes` |
+| `AnyUrl`, `HttpUrl`, the other URL types, and the `Dsn` types | the class | `str` |
+| `NameEmail`, `PaymentCardNumber` | the class | `str` |
+| `ByteSize` | the class, an `int` | `int` or `str` |
+| `IPvAnyAddress`, `IPvAnyNetwork`, `IPvAnyInterface` | the `ipaddress` classes | those, the narrower ones, or `str` |
+| `Json`, `Json[T]` | `T` | `str` or `bytes` |
+| `JsonValue`, `conlist()` | JSON values, `list` | JSON values, `list` |
+
+The `Strict*` types are read as their base type in strict mode. Other names, such
+as `FilePath` and `conset()`, are unknown: `check` does not report their fields.
+
 ## Defaults in `Annotated`
 
 A field whose `Annotated` metadata holds `Field(default=...)` or

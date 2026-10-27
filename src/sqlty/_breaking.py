@@ -225,6 +225,7 @@ def _compare(
             untyped=own.untyped,
             type_modules=own.type_modules,
             query_variants=own.query_variants,
+            pydantic_types=own.preview,
             helpers=helpers_for(own),
         ):
             findings.append(Finding(direction, against, relative, diagnostic))

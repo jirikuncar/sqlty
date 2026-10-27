@@ -11,6 +11,7 @@ if typing.TYPE_CHECKING:
     from sqlty._helpers import HelperIndex
 
 from sqlty._type_extractor.ast_fields import (
+    _IMPORTED_TYPES,
     _ast_annotations,
     _ast_key_types,
     _ast_type,
@@ -30,6 +31,7 @@ from sqlty._type_extractor.ast_fields import (
     _set_pydantic_names,
 )
 from sqlty._type_extractor.info import TypeInfo
+from sqlty._type_extractor.pydantic_types import pydantic_names
 from sqlty._type_extractor.sandbox import (
     _namespace_statements,
     _own_extra_type,
@@ -45,6 +47,7 @@ def extract_type_definitions(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     type_modules: typing.Iterable[str] | None = None,
+    pydantic_types: bool = False,
 ) -> dict[str, TypeInfo]:
     """Extract type definitions from Python source code.
 
@@ -70,6 +73,8 @@ def extract_type_definitions(
         helpers: modules of the checked paths.
         module: dotted name of ``source``.
         type_modules: extra modules (and their submodules) whose imports may be executed.
+        pydantic_types: read Pydantic's types from a static table (see ``pydantic_types``),
+            in place of the classes pydantic defines at run time.
 
     Returns:
         Dictionary mapping type name to TypeInfo.
@@ -97,7 +102,7 @@ def extract_type_definitions(
     if helpers is not None:
         local = {node.name for node in classes}
         for name in {name for node in classes for name in _base_names(node)} - local:
-            if (found := helpers.row_type(parsed, name, extra)) is not None:
+            if (found := helpers.row_type(parsed, name, extra, pydantic_types)) is not None:
                 imported_bases[name] = found[0]
     imported_of = {
         kind: {name for name, info in imported_bases.items() if info.kind == kind}
@@ -174,6 +179,12 @@ def extract_type_definitions(
             config = {key: value for c in configs for key, value in c.items()}
             info.lax = frozenset().union(*(_lax_fields(n, config, aliases, imports) for n in nodes))
         info.field_types = _ast_key_types(nodes, aliases, names, imports)
+        pydantic: dict[str, typing.Any] = {}
+        if pydantic_types:
+            known = _IMPORTED_TYPES | pydantic_names(model=bool(configs))
+            typed = _ast_key_types(nodes, aliases, names, imports, known)
+            pydantic = {n: tp for n, tp in typed.items() if tp != info.field_types.get(n)}
+            info.field_types |= pydantic
         info.annotations = _ast_annotations(nodes, aliases)
         for parent in (p for p in parents if p.module != module):
             info.field_types = parent.field_types | info.field_types
@@ -192,6 +203,7 @@ def extract_type_definitions(
             hints = _type_hints(cls, namespace)
             if not is_typeddict:
                 hints = {name: tp for name, tp in hints.items() if name in dict(fields)}
+            hints |= {name: tp for name, tp in pydantic.items() if name in hints}
             info.declared_hints = hints
             info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
         if is_typeddict:

@@ -13,6 +13,7 @@ import sys
 import textwrap
 import typing
 import uuid
+import warnings
 
 if typing.TYPE_CHECKING:
     from sqlty._helpers import HelperIndex
@@ -317,13 +318,17 @@ def _resolve_class(
     }
     wanted = _identifiers([*class_sources, *(s for s in import_stmts if isinstance(s, str))])
 
+    # The checked code's deprecation warnings are not sqlty's to print.
     try:
-        _populate(index, namespace, import_stmts, wanted, skip=True)
-        # dont_inherit=True prevents this module's `from __future__ import
-        # annotations` from turning the exec'd class annotations into
-        # ForwardRef strings — we need real type objects for get_type_hints.
-        code = compile("\n".join(class_sources), "<sqlty-type-check>", "exec", dont_inherit=True)
-        exec(code, namespace)  # noqa: S102
+        with warnings.catch_warnings(action="ignore"):
+            _populate(index, namespace, import_stmts, wanted, skip=True)
+            # dont_inherit=True prevents this module's `from __future__ import
+            # annotations` from turning the exec'd class annotations into
+            # ForwardRef strings — we need real type objects for get_type_hints.
+            code = compile(
+                "\n".join(class_sources), "<sqlty-type-check>", "exec", dont_inherit=True
+            )
+            exec(code, namespace)  # noqa: S102
     except Exception:
         return None
 

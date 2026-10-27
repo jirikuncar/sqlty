@@ -658,6 +658,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             type_modules=settings[path].type_modules,
             row_usage=row_usage,
             query_variants=settings[path].query_variants,
+            pydantic_types=settings[path].preview,
         )
         if not args.statistics:
             return diagnostics, Counter()
@@ -1187,6 +1188,7 @@ class Settings:
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     query_variants: int | None = None
+    preview: bool = False
     functions: tuple[tuple[str, str, str | None], ...] = ()
     format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
@@ -1302,6 +1304,7 @@ class SettingsResolver:
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
             if config.get("preview")
             else None,
+            preview=bool(config.get("preview")),
             functions=tuple(
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])

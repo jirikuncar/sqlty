@@ -295,7 +295,7 @@ class HelperIndex:
         self._pattern: re.Pattern[str] | None = None
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
-        self._row_types: dict[tuple[str, frozenset[str]], dict[str, TypeInfo]] = {}
+        self._row_types: dict[tuple[str, tuple[frozenset[str], bool]], dict[str, TypeInfo]] = {}
         self._types: dict[tuple[str, str], Any] = {}
         self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
@@ -444,7 +444,11 @@ class HelperIndex:
         )
 
     def row_type(
-        self, parsed: ParsedSource, dotted: str, type_modules: frozenset[str]
+        self,
+        parsed: ParsedSource,
+        dotted: str,
+        type_modules: frozenset[str],
+        pydantic_types: bool = False,
     ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
         """The row type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
 
@@ -453,7 +457,7 @@ class HelperIndex:
         """
         if (target := _target(parsed, dotted)) is None:
             return None
-        return self._row_type(*target, type_modules)
+        return self._row_type(*target, (type_modules, pydantic_types))
 
     def type_of(self, parsed: ParsedSource, dotted: str) -> Any:
         """The type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
@@ -485,21 +489,21 @@ class HelperIndex:
         return found
 
     def _row_type(
-        self, module: str, name: str, type_modules: frozenset[str], _depth: int = 0
+        self, module: str, name: str, options: tuple[frozenset[str], bool], _depth: int = 0
     ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
         if _depth > 8 or (parsed := self.sources.get(module)) is None:
             return None
-        if (defs := self._row_types.get((module, type_modules))) is None:
+        if (defs := self._row_types.get((module, options))) is None:
             from sqlty._type_extractor import extract_type_definitions
 
             # Modules that import each other's row types see none while either is read.
-            self._row_types[module, type_modules] = {}
-            defs = extract_type_definitions(parsed, self, module, type_modules)
-            self._row_types[module, type_modules] = defs
+            self._row_types[module, options] = {}
+            defs = extract_type_definitions(parsed, self, module, *options)
+            self._row_types[module, options] = defs
         if name in defs:
             return defs[name], defs
         exports = self._reexports(module, parsed)
-        return self._row_type(*exports[name], type_modules, _depth + 1) if name in exports else None
+        return self._row_type(*exports[name], options, _depth + 1) if name in exports else None
 
     def _constant(
         self, module: str, name: str, _depth: int = 0
