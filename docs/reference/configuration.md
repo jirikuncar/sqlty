@@ -40,6 +40,7 @@ query-param = "query"
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
+| [`param-types`](#param-types) | `true`, `false` | `false` | `rewrite`, `check --fix` | Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
 | [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants |
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
@@ -197,6 +198,24 @@ with generated `TypedDict`s, written after the imports under a
 [tool.sqlty]
 json-types = "typing.TypedDict"
 ```
+
+## `param-types`
+
+`false` (default) leaves the parameters of a query untyped, `SQL[R]`. `true`
+makes `rewrite` and `check --fix` write their type, `SQL[R, P]`: a `tuple`, or
+a generated `TypedDict` for named parameters, written as `json-types` writes
+its classes. `strip` removes them. See
+[Typed parameters](../guide/parameters.md#typed-parameters).
+
+```toml
+[tool.sqlty]
+param-types = true
+```
+
+!!! warning "Type checkers become stricter than the driver"
+    A type checker then rejects calls that psycopg runs: a list for a `tuple`,
+    text for another type, a `dict[str, Any]` or extra keys for a `TypedDict`.
+    That is why it is off by default.
 
 ## `functions`
 

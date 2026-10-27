@@ -163,7 +163,71 @@ async def main() -> None:
 ## Typed parameters
 
 `SQL[R, P]` types the parameters of a query as `P`, next to its rows `R`. Your
-type checker then checks the values you pass, without running `sqlty check`:
+type checker then checks the values you pass, without running `sqlty check`.
+Turn on [`param-types`](../reference/configuration.md#param-types) and
+`sqlty rewrite` writes `P`:
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+param-types = true
+```
+
+```python
+by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+by_name = "--sql\nSELECT id, born FROM users WHERE name = %s AND age > %s"
+count = "--sql\nSELECT count(*) FROM users"
+# rewritten-file: import datetime
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class ByIdParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# rewritten-file: by_name = SQL[tuple[int, datetime.date | None], tuple[str | None, int | None]]("--sql\nSELECT id, born FROM users WHERE name = %s AND age > %s")
+# rewritten-file: count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
+```
+
+- Positional parameters are a `tuple`, one item per placeholder.
+- Named parameters are a `TypedDict`, one key per name, generated after the
+  imports below a `# sqlty: generated` line. `sqlty strip` removes it.
+- A query without parameters takes `tuple[()]`.
+- A parameter is `T | None` unless a `NOT NULL` column stores it, and
+  `typing.Any` when its type is unknown or cast (`%s::int` takes anything).
+
+`rewrite` writes `P` for every `SQL[R]` call that has none, and keeps a `P`
+you wrote. `sqlty check` ignores `P`: it compares `R` with the query, and the
+parameters of each call with the query, as in [Checking calls](#checking-calls).
+Its fixes rewrite `R` and keep `P`.
+
+```python
+from sqlty import SQL
+
+# error: [stale-type] "SQL[tuple[str | None]] should be SQL[tuple[str]]"
+by_id = SQL[tuple[str | None], tuple[int]]("--sql\nSELECT name FROM users WHERE id = %s")
+```
+
+`P` defaults to `Any`, so `SQL[R]` takes any parameters and every `SQL[R]` you
+already have stays valid. A query is typed like a function from `P` to `R`: a
+query that takes `str | None` fits where one that takes `str` is expected, not
+the other way around.
+
+!!! warning "Type checkers become stricter than the driver"
+    `P` says what the query needs, not everything psycopg accepts. A type
+    checker rejects a list for a `tuple`, text for another type (the server
+    would convert it), and a `dict[str, Any]` or extra keys for a `TypedDict`.
+    That is why `param-types` is off by default.
+
+### `bind`
+
+`query.bind(params)` checks `params` against `P` and returns a `Bound[R]`, a
+`(query, params)` tuple. `cursor.execute(*bound)` runs it, and the
+[psycopg helpers](psycopg.md) take it in place of the query. You only need it
+where your type checker does not check `P` otherwise:
 
 ```python
 from typing import TypedDict
@@ -182,31 +246,8 @@ count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
 by_id.bind({"id": 1})
 by_name.bind(("alice",))
 count.bind(())
+# error:
 ```
-
-```python
-from sqlty import SQL
-
-# error: [stale-type] "SQL[tuple[str | None]] should be SQL[tuple[str]]"
-by_id = SQL[tuple[str | None], tuple[int]]("--sql\nSELECT name FROM users WHERE id = %s")
-```
-
-Positional parameters are a `tuple`, one item per placeholder. Named
-parameters are a `TypedDict`, one key per name. A query without parameters
-takes `tuple[()]`.
-
-`query.bind(params)` checks `params` against `P` and returns a `Bound[R]`, a
-`(query, params)` tuple. `cursor.execute(*bound)` runs it, and the
-[psycopg helpers](psycopg.md) take it in place of the query.
-
-`P` defaults to `Any`, so `SQL[R]` takes any parameters and every
-`SQL[R]` you already have stays valid. A query is typed like a function from
-`P` to `R`: a query that takes `str | None` fits where one that takes `str` is
-expected, not the other way around.
-
-`sqlty check` ignores `P`: it compares `R` with the query, and the parameters
-of each call with the query, as in [Checking calls](#checking-calls). Its fixes
-rewrite `R` and keep `P`.
 
 ### What each type checker checks
 
