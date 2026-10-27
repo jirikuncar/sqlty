@@ -159,6 +159,10 @@ lint-docs:
 generate-docs:
 	uv run python scripts/generate_docs.py
 
+.PHONY: generate-stdlib-types
+generate-stdlib-types:
+	uv run python scripts/generate_stdlib_types.py
+
 .PHONY: docs-serve
 docs-serve:
 	$(ZENSICAL) serve
