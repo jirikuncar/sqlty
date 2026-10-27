@@ -42,6 +42,7 @@ Configuration via pyproject.toml:
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
     param-type-mismatch = "error"       # default
+    params-type-mismatch = "error"      # default
 """
 
 from __future__ import annotations
@@ -284,6 +285,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="A call passes an argument whose type can't be the type its query parameter takes",
+    ),
+    "params-type-mismatch": LintRule(
+        name="params-type-mismatch",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="The parameter type `P` of `SQL[R, P]` doesn't fit the parameters of its query",
     ),
     "unused-ignore": LintRule(
         name="unused-ignore",

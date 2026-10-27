@@ -113,6 +113,24 @@ def arg_type(expr: ast.expr, parsed: ParsedSource, stack: _Stack) -> str | None:
     return None
 
 
+def annotation_type(expr: ast.expr, parsed: ParsedSource) -> str | None:
+    """The type a value annotated ``expr`` has, spelled as ``arg_type`` spells it, else ``None``.
+
+    Example:
+        >>> from sqlty._source import ParsedSource
+        >>> parsed = ParsedSource("from datetime import date")
+        >>> [annotation_type(ast.parse(a, mode="eval").body, parsed) for a in ("date", "None", "list[int]", "typing.Any")]
+        ['datetime.date', 'None', 'list[int]', None]
+    """
+    match expr:
+        case ast.Constant(value=None):
+            return "None"
+        case ast.Subscript(value=value, slice=item) if _class(_dotted(value), parsed) == "list":
+            inner = annotation_type(item, parsed)
+            return "list" if inner in (None, "None") else f"list[{inner}]"
+    return _class(_dotted(expr), parsed)
+
+
 def _dotted(node: ast.expr) -> str | None:
     parts: list[str] = []
     while isinstance(node, ast.Attribute):

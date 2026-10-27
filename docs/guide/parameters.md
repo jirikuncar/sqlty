@@ -200,15 +200,17 @@ count = "--sql\nSELECT count(*) FROM users"
   `typing.Any` when its type is unknown or cast (`%s::int` takes anything).
 
 `rewrite` writes `P` for every `SQL[R]` call that has none, and keeps a `P`
-you wrote. `sqlty check` ignores `P`: it compares `R` with the query, and the
-parameters of each call with the query, as in [Checking calls](#checking-calls).
-Its fixes rewrite `R` and keep `P`.
+you wrote. `sqlty check` compares a `P` you wrote with the query
+([`params-type-mismatch`](../reference/rules.md#params-type-mismatch)), and
+`R` as for any query. Its fixes rewrite `R` and keep `P`.
 
 ```python
 from sqlty import SQL
 
 # error: [stale-type] "SQL[tuple[str | None]] should be SQL[tuple[str]]"
 by_id = SQL[tuple[str | None], tuple[int]]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "tuple[int, int] has 2 items but the query has 1 parameter"
+by_name = SQL[tuple[int], tuple[int, int]]("--sql\nSELECT id FROM users WHERE name = %s")
 ```
 
 `P` defaults to `Any`, so `SQL[R]` takes any parameters and every `SQL[R]` you
