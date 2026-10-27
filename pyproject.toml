@@ -93,7 +93,7 @@ bench = [
 ]
 
 [tool.pytest.ini_options]
-addopts = ["-p", "tests._mdtest.plugin", "--cov-report=term-missing", "--cov-report=html", "-v"]
+addopts = ["-p", "tests._mdtest.plugin", "-p", "tests._no_exec", "--cov-report=term-missing", "--cov-report=html", "-v"]
 pythonpath = ["."]
 testpaths = ["tests", "docs", "src/sqlty/rules", "README.md"]
 mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md", "skills"]
