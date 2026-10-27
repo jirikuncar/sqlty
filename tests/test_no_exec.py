@@ -1,7 +1,7 @@
 """``check`` resolves row types from source: it never executes, evaluates or imports what a source names.
 
 `tests._no_exec` fails any test in which it does; ``tests/no_exec_allowlist.txt`` lists the
-functions that still do and may only shrink. See PLAN-NO-EXEC.md.
+functions that still do and may only shrink. See plans/2026-10-27-no-exec.md.
 """
 
 from __future__ import annotations
