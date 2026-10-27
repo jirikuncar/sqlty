@@ -41,7 +41,11 @@ def _sqlty_function(body: str):
         ("exec('x = 1')", "exec of <string>"),
         ("eval('1 + 1')", "exec of <string>"),
         ("__import__('no_exec_marker')", "import no_exec_marker"),
-        ("import importlib\nimportlib.import_module('no_exec_marker')", "import no_exec_marker"),
+        # importlib.import_module raises the import audit event from Python 3.15.
+        *[
+            ("import importlib\nimportlib.import_module('no_exec_marker')", "import no_exec_marker")
+            for _ in range(sys.version_info >= (3, 15))
+        ],
     ],
 )
 def test_guard_catches(body: str, what: str, tmp_path, monkeypatch) -> None:
