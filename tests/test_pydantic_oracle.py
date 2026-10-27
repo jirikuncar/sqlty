@@ -159,7 +159,7 @@ def _rejected(annotation: str) -> set[str]:
     fields = "\n".join(f"    {column}: {annotation}" for column in COLUMNS)
     select = ", ".join(f"{sql} AS {column}" for column, (sql, _) in COLUMNS.items())
     source = f'import pydantic\nfrom sqlty import SQL\nclass R(pydantic.BaseModel):\n{fields}\nq = SQL[R]("--sql\\nSELECT {select}")\n'
-    found = check_source(source, pydantic_types=True)
+    found = check_source(source)
     assert {d["rule"] for d in found} <= {"column-type-mismatch"}, found
     return {m.group(1) for d in found if (m := re.match(r"R\.(\w+) is", str(d["message"])))}
 

@@ -41,8 +41,7 @@ query-param = "query"
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
 | [`param-types`](#param-types) | `true`, `false` | `false` | `rewrite`, `check --fix` | Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]` |
-| [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
-| [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants, Pydantic types |
+| [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants |
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
@@ -142,20 +141,6 @@ style: `from sqlty import UNTYPED`, or `sqlty.UNTYPED` (`sy.UNTYPED`) for
 module imports.
 Example: [`examples/05_import_style/`](https://github.com/jirikuncar/sqlty/tree/main/examples/05_import_style).
 
-## `type-modules`
-
-Modules `check` may import to resolve the types of row type fields. By default
-only the standard library and `typing`, `typing_extensions`, `pydantic`,
-`pydantic_core`, `annotated_types` and `sqlty` are imported; names from
-modules of the checked paths are read from their source, and any other name is
-unknown and never reported, so no import-time code of your application runs.
-List a module (its submodules are included) to have it imported:
-
-```toml
-[tool.sqlty]
-type-modules = ["myapp.types"]
-```
-
 ## `preview`
 
 `true` turns on features that may still change before they are on by default:
@@ -163,8 +148,6 @@ type-modules = ["myapp.types"]
 - [Query variants](../guide/query-variants.md): a query built from names bound in
   branches is checked once per path that builds it, instead of being skipped as
   `dynamic-query`.
-- [Pydantic types](../guide/row-types.md#pydantic-types) are read from a table, not
-  from pydantic: a model field takes what Pydantic validates into it.
 
 ```toml
 [tool.sqlty]

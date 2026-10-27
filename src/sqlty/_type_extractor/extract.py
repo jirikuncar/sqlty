@@ -1,8 +1,9 @@
-"""Find the user-defined row types of a source: AST scan, then sandboxed resolution."""
+"""Find the user-defined row types of a source and resolve their fields, all from the AST."""
 
 from __future__ import annotations
 
 import ast
+import types
 import typing
 
 from sqlty._source import ParsedSource
@@ -24,7 +25,6 @@ from sqlty._type_extractor.ast_fields import (
     _lax_fields,
     _lineage,
     _metadata_defaults,
-    _newtype_assignments,
     _own_openness,
     _pydantic_config,
     _set_openness,
@@ -32,13 +32,7 @@ from sqlty._type_extractor.ast_fields import (
 )
 from sqlty._type_extractor.info import TypeInfo
 from sqlty._type_extractor.pydantic_types import pydantic_names
-from sqlty._type_extractor.sandbox import (
-    _namespace_statements,
-    _own_extra_type,
-    _resolve_class,
-    _type_hints,
-)
-from sqlty._type_extractor.subtype import _unwrap_optional
+from sqlty._type_extractor.stdlib import stdlib_class
 from sqlty._type_extractor.symbols import ModuleTypes
 
 
@@ -46,8 +40,6 @@ def extract_type_definitions(
     source: str | ParsedSource,
     helpers: HelperIndex | None = None,
     module: str | None = None,
-    type_modules: typing.Iterable[str] | None = None,
-    pydantic_types: bool = False,
 ) -> dict[str, TypeInfo]:
     """Extract type definitions from Python source code.
 
@@ -58,23 +50,16 @@ def extract_type_definitions(
     - Pydantic ``BaseModel`` subclasses
     - ``Protocol`` classes, whose attributes a row must have
 
-    For each recognized class, attempts runtime resolution of field types
-    using ``typing.get_type_hints()``. Falls back to AST string extraction
-    if runtime resolution fails (e.g. missing dependencies).
-
-    Names imported from modules of ``helpers`` (a ``HelperIndex``) are read
-    from those modules' source, never imported; ``module`` is the name of
-    ``source``, for relative imports. Imports are executed only for the
-    standard library, `_TRUSTED_MODULES` and ``type_modules``; any other name
-    is read from the source of ``helpers`` or is unknown.
+    Field types are read from the AST; nothing is imported or executed. Names imported
+    from modules of ``helpers`` (a ``HelperIndex``) are read from those modules' source,
+    standard-library classes from typeshed's class graph (see ``stdlib``) and Pydantic's
+    types from a table (see ``pydantic_types``); any other imported name is unknown.
+    ``module`` is the name of ``source``, for relative imports.
 
     Args:
         source: Python source code, or a ``ParsedSource`` whose tree is reused.
         helpers: modules of the checked paths.
         module: dotted name of ``source``.
-        type_modules: extra modules (and their submodules) whose imports may be executed.
-        pydantic_types: read Pydantic's types from a static table (see ``pydantic_types``),
-            in place of the classes pydantic defines at run time.
 
     Returns:
         Dictionary mapping type name to TypeInfo.
@@ -85,7 +70,6 @@ def extract_type_definitions(
 
     aliases = parsed.typing_aliases
     imports = parsed.imported_names
-    newtypes = set(_newtype_assignments(tree, aliases))
     names = ModuleTypes(parsed, helpers, module)
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
@@ -97,12 +81,11 @@ def extract_type_definitions(
     classes = parsed.classes
     if functional := _functional_classes(tree, aliases):
         classes = sorted([*classes, *functional], key=lambda node: node.lineno)
-    extra = frozenset(type_modules or ())
     imported_bases: dict[str, TypeInfo] = {}
     if helpers is not None:
         local = {node.name for node in classes}
         for name in {name for node in classes for name in _base_names(node)} - local:
-            if (found := helpers.row_type(parsed, name, extra, pydantic_types)) is not None:
+            if (found := helpers.row_type(parsed, name)) is not None:
                 imported_bases[name] = found[0]
     imported_of = {
         kind: {name for name, info in imported_bases.items() if info.kind == kind}
@@ -127,13 +110,7 @@ def extract_type_definitions(
     if not recognized:
         return {}
 
-    # Phase 2: Collect the guarded imports and aliases needed for the namespace
-    if helpers is not None and helpers.type_modules != extra:
-        helpers.type_modules = extra
-        helpers.namespaces.clear()
-    import_stmts = _namespace_statements(tree, newtypes, helpers, module, extra)
-
-    # Phase 3: For each class, try runtime resolution then fall back to AST
+    # Phase 2: resolve each class's fields
     result: dict[str, TypeInfo] = {}
     typeddicts = {name: info for name, info in imported_bases.items() if info.kind == "TypedDict"}
     # Dataclasses and Pydantic models, whose fields their subclasses inherit.
@@ -178,13 +155,13 @@ def extract_type_definitions(
         if configs:
             config = {key: value for c in configs for key, value in c.items()}
             info.lax = frozenset().union(*(_lax_fields(n, config, aliases, imports) for n in nodes))
-        info.field_types = _ast_key_types(nodes, aliases, names, imports)
-        pydantic: dict[str, typing.Any] = {}
-        if pydantic_types:
-            known = _IMPORTED_TYPES | pydantic_names(model=bool(configs))
-            typed = _ast_key_types(nodes, aliases, names, imports, known)
-            pydantic = {n: tp for n, tp in typed.items() if tp != info.field_types.get(n)}
-            info.field_types |= pydantic
+        known_types = _IMPORTED_TYPES | pydantic_names(model=bool(configs))
+        info.field_types = _ast_key_types(nodes, aliases, names, imports, known_types)
+        if configs:
+            # Pydantic validates an enum by value: a `str` column fills a `Color` field.
+            info.field_types = {
+                n: None if _has_enum(tp) else tp for n, tp in info.field_types.items()
+            }
         info.annotations = _ast_annotations(nodes, aliases)
         for parent in (p for p in parents if p.module != module):
             info.field_types = parent.field_types | info.field_types
@@ -195,34 +172,17 @@ def extract_type_definitions(
                 info.opaque |= parent.opaque
                 info.allows_extra |= parent.allows_extra
         info.aliases = aliases
-        hints = None
-        if (fields or is_typeddict) and (
-            resolved := _resolve_class(nodes, import_stmts, parsed.text, helpers)
-        ):
-            cls, namespace = resolved
-            hints = _type_hints(cls, namespace)
-            if not is_typeddict:
-                hints = {name: tp for name, tp in hints.items() if name in dict(fields)}
-            hints |= {name: tp for name, tp in pydantic.items() if name in hints}
-            info.declared_hints = hints
-            info.resolved_hints = {name: _unwrap_optional(tp) for name, tp in hints.items()}
         if is_typeddict:
             info.bases = [p.name for p in parents]
             own = _own_openness(keywords, aliases)
-            if hints is not None:
-                info.required = frozenset(getattr(cls, "__required_keys__", info.required))
-                info.required -= defaulted
-                own_type = _own_extra_type(cls, namespace) if own and own.extra_items else None
-            else:
-                hints = info.field_types
-                own_type = (
-                    _ast_type(own.extra_node, aliases, names) if own and own.extra_node else None
-                )
+            own_type = (
+                _ast_type(own.extra_node, aliases, names, imports, known_types)
+                if own and own.extra_node
+                else None
+            )
             header = _header_errors(info.name, keywords, own, own_type, parents)
-            info.errors = list(dict.fromkeys(header + _key_errors(info, hints, parents)))
+            info.errors = list(dict.fromkeys(header + _key_errors(info, info.field_types, parents)))
             _set_openness(info, None if header else own, own_type, parents)
-            if info.resolved_hints is not None and info.extra_items_type is not None:
-                info.extra_items_hint = _unwrap_optional(info.extra_items_type)
             typeddicts[node.name] = info
         else:
             bases[node.name] = info
@@ -230,3 +190,11 @@ def extract_type_definitions(
             result[node.name] = info
 
     return result
+
+
+def _has_enum(tp: typing.Any) -> bool:
+    """Whether ``tp`` is an ``enum.Enum`` class, or has one among its arguments."""
+    enum = stdlib_class("enum.Enum")
+    if isinstance(tp, type) and not isinstance(tp, types.GenericAlias):
+        return enum is not None and issubclass(tp, enum)
+    return any(map(_has_enum, typing.get_args(tp)))

@@ -290,12 +290,10 @@ class HelperIndex:
         self.sources: dict[str, ParsedSource] = {}
         self.packages: set[str] = set()
         self.prefixes: set[str] = set()
-        self.namespaces: dict[str, tuple[dict[str, object], dict[str, Any]]] = {}
-        self.type_modules: frozenset[str] = frozenset()
         self._pattern: re.Pattern[str] | None = None
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
-        self._row_types: dict[tuple[str, tuple[frozenset[str], bool]], dict[str, TypeInfo]] = {}
+        self._row_types: dict[str, dict[str, TypeInfo]] = {}
         self._types: dict[tuple[str, str], Any] = {}
         self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
@@ -307,7 +305,6 @@ class HelperIndex:
         other.sources = self.sources
         other.packages = set(self.packages)
         other.prefixes = set(self.prefixes)
-        other.type_modules = self.type_modules
         other._exports = self._exports
         other._row_types = self._row_types
         other._types = self._types
@@ -329,12 +326,10 @@ class HelperIndex:
             self.packages.add(module)
         parts = module.split(".")
         self.prefixes.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
-        self.namespaces.pop(module, None)
         self._exports.pop(module, None)
         self._names_of.pop(module, None)
         self._types.clear()
-        for key in [key for key in self._row_types if key[0] == module]:
-            del self._row_types[key]
+        self._row_types.pop(module, None)
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
         self.modules.setdefault(module, {}).update(found)
@@ -444,11 +439,7 @@ class HelperIndex:
         )
 
     def row_type(
-        self,
-        parsed: ParsedSource,
-        dotted: str,
-        type_modules: frozenset[str],
-        pydantic_types: bool = False,
+        self, parsed: ParsedSource, dotted: str
     ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
         """The row type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
 
@@ -457,7 +448,7 @@ class HelperIndex:
         """
         if (target := _target(parsed, dotted)) is None:
             return None
-        return self._row_type(*target, (type_modules, pydantic_types))
+        return self._row_type(*target)
 
     def type_of(self, parsed: ParsedSource, dotted: str) -> Any:
         """The type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
@@ -489,21 +480,21 @@ class HelperIndex:
         return found
 
     def _row_type(
-        self, module: str, name: str, options: tuple[frozenset[str], bool], _depth: int = 0
+        self, module: str, name: str, _depth: int = 0
     ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
         if _depth > 8 or (parsed := self.sources.get(module)) is None:
             return None
-        if (defs := self._row_types.get((module, options))) is None:
+        if (defs := self._row_types.get(module)) is None:
             from sqlty._type_extractor import extract_type_definitions
 
             # Modules that import each other's row types see none while either is read.
-            self._row_types[module, options] = {}
-            defs = extract_type_definitions(parsed, self, module, *options)
-            self._row_types[module, options] = defs
+            self._row_types[module] = {}
+            defs = extract_type_definitions(parsed, self, module)
+            self._row_types[module] = defs
         if name in defs:
             return defs[name], defs
         exports = self._reexports(module, parsed)
-        return self._row_type(*exports[name], options, _depth + 1) if name in exports else None
+        return self._row_type(*exports[name], _depth + 1) if name in exports else None
 
     def _constant(
         self, module: str, name: str, _depth: int = 0

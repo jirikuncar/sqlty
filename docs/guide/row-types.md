@@ -158,13 +158,13 @@ accepted wherever its supertype is, and a parametrised generic such as
 (element types are not compared). A JSON column infers `Any`, so any field
 accepts it.
 
-Annotations are resolved one field at a time with Python's typing machinery,
-so `from datetime import datetime` matches a `TIMESTAMP` column just like
+Annotations are read from source, one field at a time, and never evaluated, so
+`from datetime import datetime` matches a `TIMESTAMP` column just like
 `datetime.datetime` does. Aliases from the same module (`UserName = str`,
-`type UserName = str`) and `from __future__ import annotations` work too. A
-field whose annotation cannot be resolved, such as one imported from a module
-that is not installed, is unknown and never reported; the other fields are
-still checked:
+`type UserName = str`), string annotations and `from __future__ import annotations`
+work too. A field whose annotation cannot be resolved, such as one imported from a
+module outside the checked paths, is unknown and never reported; the other fields
+are still checked:
 
 ```python
 from datetime import datetime
@@ -225,15 +225,44 @@ A module is parsed only when a row type names something from it, and only once
 per run. A name from a module outside the checked paths, or one that is not a
 type definition, stays unknown and is never reported.
 
-`check` never runs the imports of your application: it executes only imports
-of the standard library, `typing`, `typing_extensions`, `pydantic`,
-`pydantic_core`, `annotated_types` and `sqlty`, plus the modules listed in
-[`type-modules`](../reference/configuration.md#type-modules). Everything else
-is resolved from source as above or stays unknown, so a module with import-time
-side effects is not triggered by `sqlty check`. From Python, pass a
-`HelperIndex` filled with the modules (`index.add("pkg.ids", source)`) and the
-`module` name of the checked source as `check_source(..., helpers=index,
-module=...)`.
+`check` never imports or runs the code it checks, not even the standard library or
+pydantic. Standard-library classes come from the class graph of
+[typeshed](https://github.com/python/typeshed), the stubs type checkers read, and
+[Pydantic types](#pydantic-types) from a table, so a module with import-time side
+effects is not triggered by `sqlty check`. From Python, pass a `HelperIndex`
+filled with the modules (`index.add("pkg.ids", source)`) and the `module` name of
+the checked source as `check_source(..., helpers=index, module=...)`.
+
+### Classes
+
+A field annotated with a class of the checked paths that is not a row type takes
+what its bases take, as a type checker sees it. `class Email(str)` is a `str`, but
+a `str` is not an `Email`, so a `TEXT` column doesn't fit an `Email` field: the
+driver returns a plain `str`.
+
+```python
+import enum
+from typing import TypedDict
+from sqlty import SQL
+
+class Email(str):
+    pass
+
+class Color(enum.StrEnum):
+    RED = "red"
+
+class Contact(TypedDict):
+    email: Email
+    color: Color
+
+# error: [column-type-mismatch] "Contact.email is Email but query column 'email' infers str"
+# error: [column-type-mismatch] "Contact.color is Color but query column 'color' infers str"
+q = SQL[Contact]("--sql\nSELECT 'a@b.co'::TEXT AS email, 'red'::TEXT AS color")
+```
+
+A Pydantic model validates an enum by value, so its enum fields are not compared.
+A class with an unknown base, a decorator, a `metaclass=` or other keyword, type
+parameters, or a `__get_pydantic_core_schema__` hook is unknown and never reported.
 
 ## Protocols
 
@@ -394,11 +423,6 @@ bad = SQL[StrictTotals]("--sql\nSELECT sum(id::BIGINT) AS total, sum(id::BIGINT)
 
 ## Pydantic types
 
-```toml
-[tool.sqlty]
-preview = true
-```
-
 ```python
 from typing import TypedDict
 from pydantic import AnyUrl, BaseModel, EmailStr, PositiveInt
@@ -419,8 +443,8 @@ model = SQL[Profile]("--sql\nSELECT 'a@b.co'::TEXT AS email, 'https://a.co'::TEX
 row = SQL[ProfileRow]("--sql\nSELECT 'a@b.co'::TEXT AS email, 'https://a.co'::TEXT AS homepage")
 ```
 
-With `preview`, `check` reads Pydantic's types from a table of its own, without
-importing pydantic, so the result is the same whether pydantic is installed or
+`check` reads Pydantic's types from a table of its own, without importing
+pydantic, so the result is the same whether pydantic is installed or
 not. Each type has two readings:
 
 - A Pydantic model or `pydantic.dataclasses.dataclass` validates its input, so a

@@ -655,10 +655,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             import_style=settings[path].import_style,
             untyped=settings[path].untyped,
             helpers=file_helpers[path],
-            type_modules=settings[path].type_modules,
             row_usage=row_usage,
             query_variants=settings[path].query_variants,
-            pydantic_types=settings[path].preview,
         )
         if not args.statistics:
             return diagnostics, Counter()
@@ -1186,7 +1184,6 @@ class Settings:
     json_types: str = "typing.Any"
     param_types: bool = False
     rules: dict[str, str] | None = None
-    type_modules: tuple[str, ...] = ()
     query_variants: int | None = None
     preview: bool = False
     functions: tuple[tuple[str, str, str | None], ...] = ()
@@ -1300,7 +1297,6 @@ class SettingsResolver:
             json_types=json_types,
             param_types=bool(config.get("param_types")),
             rules=config.get("rules"),
-            type_modules=tuple(config.get("type_modules", ())),
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
             if config.get("preview")
             else None,

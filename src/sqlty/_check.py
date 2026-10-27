@@ -10,7 +10,7 @@ from __future__ import annotations
 import ast
 import re
 import typing
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 from sqlty._core import analyze_columns as _analyze_columns
@@ -90,14 +90,14 @@ class _Check:
         driver_calls: list[HelperCall],
         queries: list[tuple[int, str, str | None]],
         declared: list[tuple[int, ast.expr, str]],
-        type_modules: Iterable[str] | None,
-        pydantic_types: bool,
         helpers: HelperIndex | None,
         module: str | None,
     ) -> None:
         from sqlty._type_extractor import extract_type_definitions
 
         self.parsed = parsed
+        self.helpers = helpers
+        self.module = module
         self.diagnostics = diagnostics
         self.dialect = dialect
         self.schema_sql = schema_sql
@@ -114,7 +114,7 @@ class _Check:
             if row
         ]
         self.type_defs: dict[str, TypeInfo] = (
-            extract_type_definitions(parsed, helpers, module, type_modules, pydantic_types)
+            extract_type_definitions(parsed, helpers, module)
             if queries or named or declared
             else {}
         )
@@ -122,12 +122,11 @@ class _Check:
         self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
         self.row_usage = RowUsage()
         if helpers is not None:
-            extra = frozenset(type_modules or ())
             p_names = {
                 ast.unparse(p) for _, p, _ in declared if isinstance(p, ast.Name | ast.Attribute)
             }
             for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
-                if (imported := helpers.row_type(parsed, name, extra, pydantic_types)) is not None:
+                if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         # A row type named through an alias (`type Row = User`) is checked as what it names.
         self.aliased: list[tuple[int, str, str | None, ast.expr]] = []
@@ -147,6 +146,7 @@ class _Check:
     def _specialize(self, name: str) -> None:
         """Add ``Row[int]`` to the row types when ``Row`` is a generic class of this source."""
         from sqlty._type_extractor import specialize
+        from sqlty._type_extractor.symbols import ModuleTypes
 
         try:
             row = ast.parse(name, mode="eval").body
@@ -162,7 +162,8 @@ class _Check:
         if info is None or node is None:
             return
         args = list(row.slice.elts) if isinstance(row.slice, ast.Tuple) else [row.slice]
-        if (generic := specialize(info, node, args, self.parsed.typing_aliases)) is not None:
+        names = ModuleTypes(self.parsed, self.helpers, self.module)
+        if (generic := specialize(info, node, args, names)) is not None:
             self.type_defs[name] = generic
 
     def composite(self, sql_type: str) -> list[_RowColumn] | None:
@@ -436,10 +437,8 @@ def diagnostics(
     untyped: bool,
     helpers: HelperIndex | None,
     module: str | None,
-    type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
     variants: int | None = None,
-    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
 
@@ -495,8 +494,6 @@ def diagnostics(
         driver_calls=driver_calls,
         queries=queries,
         declared=declared,
-        type_modules=type_modules,
-        pydantic_types=pydantic_types,
         helpers=helpers,
         module=module,
     )

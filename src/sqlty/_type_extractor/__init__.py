@@ -1,25 +1,20 @@
 """Extract and validate user-defined types against SQL query columns.
 
-Uses Python's runtime typing machinery (``get_type_hints()``, ``issubclass()``)
-instead of string comparison for reliable structural validation. This handles
-type aliases, ``Optional``, ``from datetime import datetime`` import
-variations, forward references, and inheritance correctly.
+Row types are read from source only: nothing of the checked code is imported, executed
+or evaluated. ``ast_fields`` finds the recognized classes (TypedDict, NamedTuple,
+dataclass, BaseModel, Protocol) and resolves each field's annotation to a ``typing``
+object (``int``, ``list[str]``, ``UserId | None``), going through:
 
-Two-phase approach:
+- the module's own names, ``symbols.ModuleTypes``: aliases, ``NewType``s and classes;
+- the modules of the checked paths, read from their source (``HelperIndex``);
+- the standard library, as nominal classes built from typeshed's class graph (``stdlib``);
+- Pydantic's types, from a table of what each takes (``pydantic_types``).
 
-1. **AST scan** (``ast_fields``): find recognized class definitions (TypedDict,
-   NamedTuple, dataclass, BaseModel) and collect the source needed to
-   reconstruct them.
-2. **Runtime resolve** (``sandbox``): ``exec()`` just the imports, module-level
-   type aliases and ``NewType`` assignments (each guarded: a name that fails to
-   import or evaluate becomes an unknown placeholder) and the class definition
-   in a sandbox namespace, then use ``typing.get_type_hints()`` on each field
-   on its own to get actual ``type`` objects. A field that stays unresolved is
-   unknown and never reported.
+Any other name is unknown, and a field of unknown type is never reported.
 
 Modules: ``info`` (``TypeInfo``), ``extract`` (``extract_type_definitions``),
-``sandbox`` (the trust boundary: the only code that executes user imports),
-``compat`` (column/field compatibility), ``subtype`` (subtyping), ``ast_fields``.
+``compat`` (column/field compatibility), ``subtype`` (subtyping), ``ast_fields``,
+``symbols``, ``stdlib``, ``pydantic_types`` and ``generic`` (``SQL[Row[int]]``).
 """
 
 from sqlty._type_extractor.compat import (

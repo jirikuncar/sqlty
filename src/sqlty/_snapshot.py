@@ -34,7 +34,6 @@ class SettingsEntry(TypedDict):
     import_style: str | None
     untyped: bool
     rules: dict[str, str] | None
-    type_modules: list[str]
     functions: list[tuple[str, str, str | None]]
 
 
@@ -72,7 +71,6 @@ def save(revision: Revision, path: Path) -> None:
                 import_style=s.import_style,
                 untyped=s.untyped,
                 rules=s.rules,
-                type_modules=list(s.type_modules),
                 functions=list(s.functions),
             ),
         )
@@ -143,7 +141,6 @@ class Snapshot:
             import_style=entry["import_style"],
             untyped=entry["untyped"],
             rules=entry["rules"],
-            type_modules=tuple(entry["type_modules"]),
             functions=tuple((f[0], f[1], f[2]) for f in entry["functions"]),
         )
 

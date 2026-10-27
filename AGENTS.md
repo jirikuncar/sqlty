@@ -345,7 +345,7 @@ src/sqlty/
 ├── core.py              # Public API over the Rust engine
 ├── _check.py            # Python check passes of check_source: row types, parameters
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _type_extractor/     # Row types (TypedDict, dataclass, ...) for structural checks
+├── _type_extractor/     # Row types (TypedDict, dataclass, ...), read from source, never imported
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, version
