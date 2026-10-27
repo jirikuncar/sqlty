@@ -189,13 +189,12 @@ Decided:
 1. **`type-modules`**: removed in phase 4, with no deprecation period.
 2. **User classes deriving from builtins** (`class Email(str)`, `enum.StrEnum`): tightened
    in this plan (design step 4, phase 4), adding assertions only.
-
-Open:
-
-3. **How much of typeshed to carry** (design step 3): (a) the class graph only:
-   `scripts/generate_stdlib_types.py` reads a pinned typeshed checkout and writes
-   `_type_extractor/_stdlib.py` (each class with its bases, plus the module version
-   ranges from `VERSIONS`); small, drift-tested, re-pinned with typeshed; (b) vendor the
-   stdlib `.pyi` files (about 1.2 MB zipped, the size of `ty_vendored`) and read them
-   with the same symbol table as user modules; complete and ty-like, but the wheel grows
-   and stubs are parsed at run time.
+3. **How much of typeshed to carry** (design step 3): the implementor's choice, named in
+   the phase 3 pull request. Either way the typeshed commit is pinned and recorded, and a
+   test fails when the carried data drifts from it.
+   - The class graph only: `scripts/generate_stdlib_types.py` reads the pinned typeshed
+     and writes `_type_extractor/_stdlib.py` (each class with its bases, and the module
+     version ranges from `VERSIONS`). Small; nothing parsed at run time.
+   - The stdlib `.pyi` files vendored, as ty does (about 1.2 MB zipped), read on demand
+     by the same symbol table as user modules. Complete; the wheel grows, and
+     `make bench-ci` must still hold.
