@@ -350,7 +350,7 @@ pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
 /// A `{wrapper}[T](...)` call.
 pub(crate) struct Call {
     pub span: Range<usize>,
-    /// `T`, between the brackets.
+    /// `R`, the first type argument between the brackets: `P` in `SQL[R, P]` is not a row.
     pub annotation: Range<usize>,
     /// The `(` opening the argument.
     pub open: usize,
@@ -488,6 +488,11 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ca
         let Some(close_bracket) = closing(source, tokens, i + 1) else {
             continue;
         };
+        let row_end = (i + 2..close_bracket)
+            .find(|&j| {
+                tokens[j].depth == tokens[close_bracket].depth + 1 && is_op(source, tokens, j, ",")
+            })
+            .unwrap_or(close_bracket);
         let open = close_bracket + 1;
         let Some(close) = Some(open)
             .filter(|&j| is_op(source, tokens, j, "("))
@@ -534,7 +539,7 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ca
         };
         calls.push(Call {
             span: token.span.start..tokens[close].span.end,
-            annotation: tokens[i + 1].span.end..tokens[close_bracket].span.start,
+            annotation: tokens[i + 1].span.end..tokens[row_end].span.start,
             open: tokens[open].span.start,
             exact: name == wrapper || name == template,
             template: is_template,
@@ -677,6 +682,15 @@ mod tests {
         assert!(!found[0].bare);
         assert_eq!(&source[found[1].span.clone()], "SQL[T](x)");
         assert!(!found[1].plain);
+    }
+
+    #[test]
+    fn test_annotation_is_the_row_type() {
+        let source =
+            "a = SQL[dict[str, int], tuple[int, str]](\"x\")\nb = SQL[\n    tuple[int],\n]('y')";
+        let found = calls(source);
+        assert_eq!(&source[found[0].annotation.clone()], "dict[str, int]");
+        assert_eq!(found[1].row_type(source), "tuple[int]");
     }
 
     #[test]

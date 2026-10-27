@@ -2,7 +2,16 @@
 
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Any, LiteralString, cast, get_origin, is_protocol, is_typeddict, overload
+from typing import (
+    Any,
+    Final,
+    LiteralString,
+    cast,
+    get_origin,
+    is_protocol,
+    is_typeddict,
+    overload,
+)
 
 if sys.version_info >= (3, 15):
     from typing import TypeForm
@@ -13,7 +22,7 @@ from psycopg import Connection, Cursor
 from psycopg.abc import Params
 from psycopg.rows import BaseRowFactory, class_row, dict_row, namedtuple_row, tuple_row
 
-from sqlty import SQL, SQLTemplate, row_form
+from sqlty import SQL, Bound, SQLTemplate, row_form
 
 __all__ = ["execute", "row_factory", "scalar"]
 
@@ -42,29 +51,53 @@ def row_factory[T](form: TypeForm[T]) -> BaseRowFactory[T]:
     raise TypeError(f"no psycopg row factory for {form!r}")
 
 
-def execute[T](
-    conn: Connection[Any], query: SQL[T] | SQLTemplate[T], params: Params | None = None
-) -> Cursor[T]:
-    """Execute ``query`` on a cursor whose rows are typed as ``T``.
+# mypy reads ``MYPY`` as true, pyright and ty as false. mypy cannot infer ``P`` from a
+# TypedDict literal (python/mypy#19201), so it keeps the signature that does not check ``P``.
+MYPY: Final = False
 
-    Queries without a runtime row type (see ``sqlty.row_form``) yield tuples. A
-    ``SQLTemplate`` runs its t-string, whose values are its parameters (psycopg >= 3.3).
+if MYPY:
 
-    Example:
-        >>> rows: list[User] = execute(conn, SQL[User]("--sql\\n...")).fetchall()  # doctest: +SKIP
-        >>> rows = execute(conn, SQLTemplate[User](t"--sql\\n... WHERE id = {user_id}")).fetchall()  # doctest: +SKIP
-    """
-    form = row_form(query, cast(TypeForm[T], tuple))
-    cursor = conn.cursor(row_factory=row_factory(form))
-    if isinstance(query, SQLTemplate):
-        return cursor.execute(cast(Any, query.template))
-    return cursor.execute(cast(LiteralString, query), params)
+    def execute[T](
+        conn: Connection[Any],
+        query: SQL[T] | SQLTemplate[T] | Bound[T],
+        params: Params | None = None,
+    ) -> Cursor[T]:
+        return _execute(conn, query, params)
+
+else:
+
+    @overload
+    def execute[T](
+        conn: Connection[Any],
+        query: SQL[T, tuple[()]] | SQLTemplate[T] | Bound[T],
+        params: None = None,
+    ) -> Cursor[T]: ...
+
+    @overload
+    def execute[T, P](conn: Connection[Any], query: SQL[T, P], params: P) -> Cursor[T]: ...
+
+    def execute(conn: Connection[Any], query: Any, params: Any = None) -> Cursor[Any]:
+        """Execute ``query`` on a cursor whose rows are typed as ``T``.
+
+        Queries without a runtime row type (see ``sqlty.row_form``) yield tuples. A
+        ``SQLTemplate`` runs its t-string, whose values are its parameters (psycopg >= 3.3).
+        ``params`` are checked against the ``P`` of ``SQL[T, P]`` by pyright and ty; a
+        ``Bound`` from ``SQL.bind`` carries its own, checked by every type checker.
+
+        Example:
+            >>> rows: list[User] = execute(conn, SQL[User]("--sql\\n...")).fetchall()  # doctest: +SKIP
+            >>> rows = execute(conn, SQLTemplate[User](t"--sql\\n... WHERE id = {user_id}")).fetchall()  # doctest: +SKIP
+            >>> rows = execute(conn, by_id.bind({"id": 1})).fetchall()  # doctest: +SKIP
+        """
+        return _execute(conn, query, params)
 
 
+# ``params`` is not checked against ``P`` here: with ``P = Any``, ty finds a ``P`` overload
+# ambiguous with the ``form`` one and loses ``T``. ``query.bind(params)`` checks it.
 @overload
 def scalar[T](
     conn: Connection[Any],
-    query: SQL[tuple[T]] | SQLTemplate[tuple[T]],
+    query: SQL[tuple[T]] | SQLTemplate[tuple[T]] | Bound[tuple[T]],
     /,
     params: Params | None = None,
 ) -> T: ...
@@ -91,9 +124,12 @@ def scalar(conn: Connection[Any], query: Any, /, *args: Any, **kwargs: Any) -> A
     Example:
         >>> email = scalar(conn, SQL[tuple[str | None]]("--sql\\nSELECT email::TEXT FROM users WHERE id = %s"), (1,))  # doctest: +SKIP
         >>> role = scalar(conn, "--sql\\nSELECT role::TEXT FROM users LIMIT 1", Literal["admin", "user"])  # doctest: +SKIP
+        >>> name = scalar(conn, name_by_id.bind((1,)))  # doctest: +SKIP
     """
     params = kwargs.get("params")
-    if args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str):
+    if isinstance(query, Bound):
+        query, params = query
+    elif args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str):
         params = args[-1]
     if isinstance(query, SQLTemplate):
         query, params = query.template, None
@@ -102,3 +138,13 @@ def scalar(conn: Connection[Any], query: Any, /, *args: Any, **kwargs: Any) -> A
         raise LookupError("query returned no rows")
     (value,) = row
     return value
+
+
+def _execute(conn: Connection[Any], query: Any, params: Any) -> Cursor[Any]:
+    if isinstance(query, Bound):
+        query, params = query
+    form = row_form(query, tuple)
+    cursor = conn.cursor(row_factory=row_factory(form))
+    if isinstance(query, SQLTemplate):
+        return cursor.execute(cast(Any, query.template))
+    return cursor.execute(query, params)

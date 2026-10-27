@@ -6,6 +6,7 @@ zero errors. The reveal_type() calls verify the inferred types match.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -93,3 +94,40 @@ def test_untyped_row_rejected(checker: str, command: list[str], marker: str) -> 
     result = subprocess.run([*command, str(MISUSE)], capture_output=True, text=True)
     errors = [line for line in result.stdout.splitlines() if marker in line]
     assert len(errors) == 1 and "UNTYPED" in errors[0], result.stdout
+
+
+# --- SQL[R, P] parameters ---
+
+PARAMS_MISUSE = TYPECHECKS_DIR / "params_misuse.py"
+
+
+@pytest.mark.parametrize(
+    ("checker", "command", "line_number"),
+    [
+        ("mypy", ["mypy", "--no-error-summary"], r"\.py:(\d+): error:"),
+        ("pyright", ["pyright"], r"\.py:(\d+):\d+ - error:"),
+        (
+            "ty",
+            [
+                "ty",
+                "check",
+                "--output-format",
+                "concise",
+                "--project",
+                str(TYPECHECKS_DIR.parent.parent),
+            ],
+            r"\.py:(\d+):\d+: error",
+        ),
+    ],
+    ids=["mypy", "pyright", "ty"],
+)
+def test_wrong_params_rejected(checker: str, command: list[str], line_number: str) -> None:
+    """Each checker reports exactly the lines whose ``# error:`` comment names it."""
+    if not shutil.which(checker):
+        pytest.skip(f"{checker} not installed")
+    lines = PARAMS_MISUSE.read_text().splitlines()
+    expected = {
+        n for n, line in enumerate(lines, 1) if checker in line.partition("# error:")[2].split()
+    }
+    result = subprocess.run([*command, str(PARAMS_MISUSE)], capture_output=True, text=True)
+    assert {int(n) for n in re.findall(line_number, result.stdout)} == expected, result.stdout
