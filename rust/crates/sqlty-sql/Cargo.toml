@@ -20,10 +20,10 @@ thiserror.workspace = true
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
 
 [dev-dependencies]
 insta.workspace = true
 # For `tests/inference_compiler.rs`, which tests the build script's compiler.
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
