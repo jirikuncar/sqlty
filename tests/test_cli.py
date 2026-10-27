@@ -128,7 +128,8 @@ def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -
     (tmp_path / "rows.py").write_text(
         "from typing import TypedDict\nclass User(TypedDict):\n    name: str | None\n"
     )
-    for n in range(8):
+    # Enough files that a thread takes them two at a time.
+    for n in range(40):
         (tmp_path / f"q{n}.py").write_text(
             "from rows import User\n"
             "from sqlty import SQL\n"
@@ -292,12 +293,15 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
         'broken = "--sql\\nSELECT NULL::xml IS DOCUMENT"\n'
         'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
         'ddl = "--sql\\nCREATE TABLE t (a INT)"\n'
+        "from typing import Annotated, LiteralString\n"
+        "def fetch[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...\n"
+        "fetch(QUERY, int)\n"
     )
     monkeypatch.chdir(tmp_path)
 
     main(["check", "--statistics", "."])
     assert capsys.readouterr().out.splitlines()[-1] == (
-        "Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)"
+        "Queries: 1 typed, 1 partially typed, 1 unparsed, 2 skipped (fstring-skipped: 1, dynamic-query: 1)"
     )
 
     main(["check", "--statistics", "-q", "."])
@@ -347,6 +351,85 @@ def test_configured_functions_apply_to_their_own_project(tmp_path, monkeypatch, 
     out = capsys.readouterr().out
     assert "a/q.py" in out
     assert "b/q.py" not in out
+
+
+HELPER_CALL = '\n\nfetch_all("SELECT nope FROM t", int)\n'
+
+
+def _helper_project(root, import_path: str = "pkg.h.fetch_all") -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(
+        f'[tool.sqlty]\nschema = "schema.sql"\n\n[[tool.sqlty.functions]]\n'
+        f'import-path = "{import_path}"\nquery-param = "query"\nreturn-type-param = "form"\n'
+    )
+    (root / "schema.sql").write_text("CREATE TABLE t (id INTEGER);\n")
+
+
+@pytest.mark.parametrize(
+    ("import_path", "helper", "caller", "also_checked"),
+    [
+        ("pkg.h.fetch_all", "pkg/h.py", "use.py", []),
+        ("pkg.h.fetch_all", "src/pkg/h.py", "use.py", []),
+        ("pkg.h.fetch_all", "pkg/h.py", "use.py", ["pkg/__init__.py"]),
+        ("app.db.fetch_all", "backend/app/db.py", "backend/app/q.py", []),
+    ],
+)
+def test_configured_functions_outside_the_checked_paths_bind_positionally(
+    tmp_path, monkeypatch, capsys, import_path, helper, caller, also_checked
+) -> None:
+    """A configured helper's parameters are read from its module when only callers are checked."""
+    _helper_project(tmp_path, import_path)
+    (tmp_path / helper).parent.mkdir(parents=True)
+    (tmp_path / helper).parent.joinpath("__init__.py").write_text("VERSION = 1\n")
+    (tmp_path / helper).write_text("def fetch_all(query, form): ...\n")
+    module = import_path.rpartition(".")[0]
+    (tmp_path / caller).write_text(f"from {module} import fetch_all{HELPER_CALL}")
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", caller, *also_checked], capsys)
+
+    assert code == 1
+    assert f"{caller}:3: [unknown-column]" in out
+
+
+def test_configured_functions_bind_only_where_their_module_is_found(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """A project without the helper's module does not bind calls by another project's copy."""
+    for name in ("a", "b"):
+        _helper_project(tmp_path / name)
+        (tmp_path / name / "use.py").write_text(f"from pkg.h import fetch_all{HELPER_CALL}")
+    (tmp_path / "a" / "pkg").mkdir()
+    (tmp_path / "a" / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "a" / "pkg" / "h.py").write_text("def fetch_all(query, form): ...\n")
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "a/use.py", "b/use.py"], capsys)
+
+    assert code == 1
+    assert "a/use.py:3: [unknown-column]" in out
+    assert "b/use.py" not in out
+
+
+def test_configured_function_modules_are_never_imported(tmp_path, monkeypatch, capsys) -> None:
+    """The module of a configured helper outside the checked paths is read, not executed."""
+    marker = tmp_path / "imported.txt"
+    _helper_project(tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text(f"open({str(marker)!r}, 'w')\n")
+    (tmp_path / "pkg" / "h.py").write_text(
+        f"open({str(marker)!r}, 'w')\nraise RuntimeError\ndef fetch_all(query, form): ...\n"
+    )
+    (tmp_path / "use.py").write_text(f"from pkg.h import fetch_all{HELPER_CALL}")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    code, out, _ = _run(["check", "use.py"], capsys)
+
+    assert code == 1
+    assert "use.py:3: [unknown-column]" in out
+    assert not marker.exists()
+    assert "pkg.h" not in sys.modules
 
 
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:

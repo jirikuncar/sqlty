@@ -95,6 +95,14 @@ fn test_parser_input() {
         parser_input("(TABLE a) UNION ALL TABLE \"b\".c", SqlDialect::Postgres).text(),
         "(SELECT * FROM a) UNION ALL SELECT * FROM \"b\".c"
     );
+    assert_eq!(
+        parser_input(
+            "INSERT INTO t (id) overriding System VALUE VALUES ('OVERRIDING USER VALUE')",
+            SqlDialect::Postgres
+        )
+        .text(),
+        "INSERT INTO t (id)  VALUES ('OVERRIDING USER VALUE')"
+    );
     assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql).text(), "");
     assert_eq!(
         parser_input("SELECT %d, %%(a)s", SqlDialect::MySql).text(),
@@ -460,4 +468,65 @@ fn sqlite_multi_word_type_names_are_joined() {
         )
     );
     assert_eq!(sqlite_type_names("CREATE TABLE t (a INT NOT NULL)"), None);
+}
+
+fn without_hints(sql: &str) -> Option<String> {
+    parse_function_without_hints(sql).map(|stmts| stmts[0].to_string())
+}
+
+fn without_hints_expected(plain: &str) -> Option<String> {
+    let stmts = parse_ddl(plain, SqlDialect::Postgres);
+    Some(stmts.expect(plain)[0].to_string())
+}
+
+#[test]
+fn planner_hints_are_dropped_where_sqlparser_stops() {
+    for (sql, expected) in [
+        (
+            "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+             STABLE ROWS 1 COST 0.5 NOT LEAKPROOF SUPPORT pg_catalog.f_support PARALLEL SAFE \
+             AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$",
+            "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+             STABLE PARALLEL SAFE AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$",
+        ),
+        (
+            "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql ROWS 1e+06 \
+             COST /* c */ .5 SUPPORT s . \"F\" NOT -- c\n LEAKPROOF AS 'it''s'",
+            "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql AS 'it''s'",
+        ),
+        (
+            "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql COST +1_000 \
+             SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
+            "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql \
+             SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
+        ),
+    ] {
+        assert_eq!(
+            without_hints(sql),
+            without_hints_expected(expected),
+            "{sql}"
+        );
+    }
+    assert_eq!(
+        without_hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql WINDOW COST 5 AS 'SELECT 1'"),
+        None
+    );
+}
+
+#[test]
+fn planner_hints_spare_names_that_collide_with_them() {
+    let pairs: Vec<&str> = include_str!("planner_hints.sql")
+        .split(";\n")
+        .map(str::trim)
+        .filter(|sql| !sql.is_empty())
+        .collect();
+    assert_eq!(pairs.len(), 234);
+    for pair in pairs.chunks(2) {
+        assert_eq!(
+            without_hints(pair[0]),
+            without_hints_expected(pair[1]),
+            "{}",
+            pair[0]
+        );
+    }
 }

@@ -204,6 +204,22 @@ def test_configured_functions(project, capsys):
     ]
 
 
+def test_register_reads_unindexed_modules_from_roots(tmp_path):
+    """`roots` give the positional parameters of a module not indexed; an indexed one wins."""
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    (tmp_path / "pkg" / "h.py").write_text("def run(sql, form): ...\n")
+    (tmp_path / "pkg" / "sub" / "__init__.py").write_text("def run(conn, sql, form): ...\n")
+    (tmp_path / "pkg" / "idx.py").write_text("def run(sql, form): ...\n")
+    index = HelperIndex()
+    index.add("pkg.idx", "def run(form, sql): ...\n")
+    index.add("pkg", "VERSION = 1\n")
+    for path in ("pkg.h.run", "pkg.sub.run", "pkg.idx.run"):
+        index.register(path, "sql", "form", roots=[tmp_path / "missing", tmp_path])
+    assert index.modules["pkg.h"]["run"].positional == ("sql", "form")
+    assert index.modules["pkg.sub"]["run"].positional == ("conn", "sql", "form")
+    assert index.modules["pkg.idx"]["run"].positional == ("form", "sql")
+
+
 COMPOSED_DB = """\
 from typing import Annotated, LiteralString
 from psycopg import sql

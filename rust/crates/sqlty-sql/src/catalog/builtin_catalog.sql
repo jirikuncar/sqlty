@@ -78,44 +78,6 @@ CREATE TABLE pg_catalog.pg_database (
     datminmxid xid NOT NULL, dattablespace oid NOT NULL, datcollate text NOT NULL,
     datctype text NOT NULL, datlocale text, daticurules text, datcollversion text,
     datacl aclitem[]);
-CREATE TABLE pg_catalog.pg_stats (
-    schemaname name, tablename name, attname name, inherited bool, null_frac float4,
-    avg_width int4, n_distinct float4, most_common_vals anyarray, most_common_freqs float4[],
-    histogram_bounds anyarray, correlation float4, most_common_elems anyarray,
-    most_common_elem_freqs float4[], elem_count_histogram float4[],
-    range_length_histogram anyarray, range_empty_frac float4,
-    range_bounds_histogram anyarray);
-CREATE TABLE pg_catalog.pg_roles (
-    rolname name, rolsuper bool, rolinherit bool,
-    rolcreaterole bool, rolcreatedb bool, rolcanlogin bool,
-    rolreplication bool, rolconnlimit int4, rolpassword text,
-    rolvaliduntil timestamptz, rolbypassrls bool, rolconfig text[],
-    oid oid);
-CREATE TABLE pg_catalog.pg_settings (
-    name text, setting text, unit text, category text, short_desc text,
-    extra_desc text, context text, vartype text, source text,
-    min_val text, max_val text, enumvals text[], boot_val text, reset_val text,
-    sourcefile text, sourceline int4, pending_restart bool);
-CREATE TABLE pg_catalog.pg_stat_activity (
-    datid oid, datname name, pid int4, leader_pid int4, usesysid oid, usename name,
-    application_name text, client_addr inet, client_hostname text, client_port int4,
-    backend_start timestamptz, xact_start timestamptz, query_start timestamptz,
-    state_change timestamptz, wait_event_type text, wait_event text, state text,
-    backend_xid xid, backend_xmin xid, query_id int8, query text, backend_type text);
-CREATE TABLE pg_catalog.pg_tables (
-    schemaname name, tablename name, tableowner name, tablespace name,
-    hasindexes bool, hasrules bool, hastriggers bool,
-    rowsecurity bool);
-CREATE TABLE pg_catalog.pg_views (
-    schemaname name, viewname name, viewowner name, definition text);
-CREATE TABLE pg_catalog.pg_indexes (
-    schemaname name, tablename name, indexname name, tablespace name,
-    indexdef text);
-CREATE TABLE pg_catalog.pg_sequences (
-    schemaname name, sequencename name, sequenceowner name,
-    data_type regtype, start_value int8, min_value int8,
-    max_value int8, increment_by int8, cycle bool,
-    cache_size int8, last_value int8);
 CREATE TABLE information_schema.schemata (
     catalog_name name, schema_name name, schema_owner name,
     default_character_set_catalog name, default_character_set_schema name,

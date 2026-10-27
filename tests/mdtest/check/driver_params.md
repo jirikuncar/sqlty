@@ -170,11 +170,38 @@ import psycopg
 
 async def main(now: datetime.datetime) -> None:
     conn = await asyncpg.connect("postgres://x")
-    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot be compared with a `timestamptz`: cast it, `$1::timestamptz`"
+    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `timestamptz`: cast it, `$1::timestamptz`"
     await conn.execute("DELETE FROM keys WHERE created_at < $1 - INTERVAL '3 months'", now)
     await conn.execute("DELETE FROM keys WHERE created_at < $1::timestamptz - INTERVAL '3 months'", now)
     with psycopg.connect("dbname=x") as sync:
         sync.execute("DELETE FROM keys WHERE created_at < %s - INTERVAL '3 months'", (now,))
+```
+
+A shifted parameter stored in a column takes the column's type the same way. Alone, it is
+an `interval` to asyncpg, and any date, time or `timedelta` to psycopg.
+
+```python
+import datetime
+
+import asyncpg
+import psycopg
+
+async def main(now: datetime.datetime) -> None:
+    conn = await asyncpg.connect("postgres://x")
+    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `timestamptz`: cast it, `$1::timestamptz`"
+    await conn.execute("INSERT INTO keys (id, created_at) VALUES (1, $1 + INTERVAL '1 day')", now)
+    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `timestamptz`: cast it, `$1::timestamptz`"
+    await conn.execute("UPDATE keys SET created_at = $1 - INTERVAL '1 day'", now)
+    # error: [param-type-mismatch] "parameter 1 expects datetime.timedelta, got datetime.datetime"
+    await conn.fetch("SELECT $1 + INTERVAL '1 day'", now)
+    await conn.fetch("SELECT $1 + INTERVAL '1 day'", datetime.timedelta(days=1))
+    with psycopg.connect("dbname=x") as sync:
+        sync.execute(
+            "INSERT INTO keys (id, created_at) SELECT n, %s + n * INTERVAL '1 second' FROM generate_series(1, 3) n",
+            (now,),
+        )
+        sync.execute("SELECT %s + INTERVAL '1 day'", (now,))
+        sync.execute("SELECT %s + INTERVAL '1 day'", (datetime.date.today(),))
 ```
 
 ## Names are resolved per scope

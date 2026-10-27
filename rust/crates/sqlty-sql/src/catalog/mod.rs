@@ -975,11 +975,17 @@ mod tests {
                 &format!("CREATE FUNCTION f{i}() RETURNS SETOF t{i} LANGUAGE sql AS 'select 1';\n");
             sql += &format!("CREATE VIEW v{i} AS SELECT * FROM f{i}();\n");
         }
+        let _ = pg("");
         resolve::FUNCTIONS_RESOLVED.with(|count| count.set(0));
+        let _ = pg("");
+        let builtin = resolve::FUNCTIONS_RESOLVED.with(|count| count.replace(0));
         let c = pg(&sql);
         assert_eq!(view_cols(&c, "v199"), ["id:INT"]);
         // Once before its view, once in the final build.
-        assert_eq!(resolve::FUNCTIONS_RESOLVED.with(std::cell::Cell::get), 400);
+        assert_eq!(
+            resolve::FUNCTIONS_RESOLVED.with(std::cell::Cell::get),
+            2 * (200 + builtin)
+        );
     }
 
     /// A function returning a table's row follows a later change to the table.

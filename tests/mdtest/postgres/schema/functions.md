@@ -183,6 +183,51 @@ SELECT lo, hi FROM bounds(3)
 -- inferred: tuple[int | None, int | None]
 ```
 
+## Planner hints
+
+`ROWS`, `COST`, `LEAKPROOF` and `SUPPORT` only guide the planner, so a function
+with them keeps its type. `pg_dump` writes them after the language.
+
+`schema.sql`:
+
+```sql
+CREATE FUNCTION accepted(ids integer[]) RETURNS SETOF integer
+    LANGUAGE sql STABLE ROWS 1 PARALLEL SAFE
+    AS $_$ SELECT x FROM unnest($1) AS x $_$;
+CREATE FUNCTION admission(ids integer[]) RETURNS TABLE(admitted boolean)
+    LANGUAGE sql STABLE COST 10 LEAKPROOF ROWS 1
+    AS $_$ SELECT EXISTS (SELECT FROM accepted($1)) $_$;
+```
+
+```sql
+SELECT * FROM accepted('{1}')
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT a.admitted FROM admission('{1}') AS a
+-- inferred: tuple[bool | None]
+```
+
+## A return type named like a planner hint
+
+A type named `support` is the return type, not a `SUPPORT` hint. `pg_dump`
+writes a large estimate in exponent form.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE support (id integer NOT NULL);
+CREATE FUNCTION tickets() RETURNS SETOF support
+    LANGUAGE sql STABLE ROWS 1e+06
+    AS $_$ SELECT * FROM support $_$;
+```
+
+```sql
+SELECT id FROM tickets()
+-- inferred: tuple[int]
+```
+
 ## A function whose definition sqlparser cannot read
 
 A later definition that cannot be read leaves the function untyped, rather than

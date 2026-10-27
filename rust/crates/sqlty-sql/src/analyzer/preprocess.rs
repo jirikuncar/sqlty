@@ -9,7 +9,9 @@ use sqlparser::ast::{
     visit_expressions, visit_expressions_mut, DataType, Expr, Function, FunctionArguments,
     ObjectName, Statement, Visit, Visitor,
 };
+use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
+use sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::dialect::SqlDialect;
 use super::dml::selects_into;
@@ -54,7 +56,12 @@ thread_local! {
 pub(super) fn parse(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     #[cfg(test)]
     PARSES.with(|n| n.set(n.get() + 1));
-    let mut stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    let stmts = Parser::parse_sql(dialect.parser_dialect().as_ref(), sql).ok()?;
+    checked(stmts, sql, dialect)
+}
+
+/// `stmts` parsed from `sql`, unless [`reject_unsupported`] rejects them.
+fn checked(mut stmts: Vec<Statement>, sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     if reject_unsupported(&stmts, dialect) || too_deep(&stmts) {
         return None;
     }
@@ -119,6 +126,40 @@ pub(crate) fn parse_ddl(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>
             pattern.replace_all(&sql, *replacement).into_owned()
         });
     parse(&sql, dialect)
+}
+
+/// A PostgreSQL `CREATE FUNCTION` without the planner hints sqlparser does not read:
+/// `ROWS n`, `COST n`, `[NOT] LEAKPROOF` and `SUPPORT name`, which never change the result
+/// type. sqlparser stops at an option it does not know, so a hint is only dropped there,
+/// never from a type, a setting value or the body.
+pub(crate) fn parse_function_without_hints(sql: &str) -> Option<Vec<Statement>> {
+    let sql = iso_types(sql, SqlDialect::Postgres);
+    let dialect = SqlDialect::Postgres.parser_dialect();
+    let mut tokens = Tokenizer::new(dialect.as_ref(), &sql)
+        .tokenize_with_location()
+        .ok()?;
+    loop {
+        let mut parser = Parser::new(dialect.as_ref()).with_tokens_with_locations(tokens.clone());
+        let stmt = parser.parse_statement().ok()?;
+        if matches!(parser.peek_token_ref().token, Token::EOF | Token::SemiColon) {
+            return checked(vec![stmt], &sql, SqlDialect::Postgres);
+        }
+        let at = parser.index();
+        let mut hint =
+            Parser::new(dialect.as_ref()).with_tokens_with_locations(tokens[at..].to_vec());
+        let read = if hint.parse_keyword(Keyword::ROWS) || hint.parse_keyword(Keyword::COST) {
+            hint.parse_number().is_ok()
+        } else if hint.parse_keyword(Keyword::SUPPORT) {
+            hint.parse_object_name(false).is_ok()
+        } else {
+            hint.parse_keywords(&[Keyword::NOT, Keyword::LEAKPROOF])
+                || hint.parse_keyword(Keyword::LEAKPROOF)
+        };
+        if !read {
+            return None;
+        }
+        tokens.drain(at..at + hint.index());
+    }
 }
 
 /// Words that end a column's type name in SQLite: the constraints that may follow it.

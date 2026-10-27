@@ -15,6 +15,7 @@ import fnmatch
 import functools
 import gc
 import glob
+import itertools
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import argparse
     from collections import Counter
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
@@ -406,13 +407,18 @@ def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Pat
         return
     from concurrent.futures import ThreadPoolExecutor
 
+    # A task per file costs more than most files take; four batches a thread keep them balanced.
+    batches = itertools.batched(files, max(1, min(64, len(files) // (jobs * 4))), strict=False)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        yield from pool.map(work, files, buffersize=jobs)
+        for batch in pool.map(
+            lambda batch: [work(path) for path in batch], batches, buffersize=jobs
+        ):
+            yield from batch
 
 
 # --- Command implementations ---
 
-_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query")
+_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query", "dynamic-query")
 
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
@@ -565,6 +571,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     from collections import Counter
 
     from sqlty._config import ConfigError
+    from sqlty._helpers import configured_helpers
     from sqlty._source import ParsedSource
     from sqlty.core import HelperIndex, RowUsage, check_source, fix_source, query_statistics
 
@@ -596,17 +603,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
     for path, parsed in sources.items():
         for name in modules[path]:
             helpers.add(name, parsed)
-    configured: dict[tuple[tuple[str, str, str | None], ...], HelperIndex] = {}
-
-    def helpers_for(settings: Settings) -> HelperIndex:
-        """The index for files governed by ``settings``: its own ``functions`` only."""
-        if not settings.functions:
-            return helpers
-        if settings.functions not in configured:
-            configured[settings.functions] = index = helpers.fork()
-            for import_path, query_param, return_param in settings.functions:
-                index.register(import_path, query_param, return_param)
-        return configured[settings.functions]
+    helpers_for = configured_helpers(
+        helpers, _checked_roots(args.paths, [resolver.resolve(path) for path in files])
+    )
 
     total_errors = 0
     total_warnings = 0
@@ -1129,6 +1128,22 @@ def _resolved_root(root: Path) -> Path | None:
     """``root`` resolved, or ``None`` when it is not a directory."""
     root = root.resolve()
     return root if root.is_dir() else None
+
+
+def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
+    """The checked directories, the parents of checked files and the package roots of ``files``.
+
+    Example:
+        >>> [root.name for root in _checked_roots([Path("/missing/q.py")], [])]
+        ['missing']
+    """
+    roots = [path if path.is_dir() else path.parent for path in paths]
+    for file in files:
+        directory = file.parent
+        for _ in _package_path(directory):
+            directory = directory.parent
+        roots.append(directory)
+    return list(dict.fromkeys(root.resolve() for root in roots))
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:

@@ -56,7 +56,9 @@ pub struct Param {
     pub cast: bool,
     /// The SQL type PostgreSQL gives the parameter when the driver sends it untyped, as
     /// asyncpg does, when that differs from `sql_type`: `$1 - INTERVAL '1 day'` compared
-    /// with a timestamp is a timestamp only if the driver says so, else an interval.
+    /// with a timestamp is a timestamp only if the driver says so, else an interval. Alone,
+    /// `$1 + INTERVAL '1 day'` has only this type: a driver that sends its type may pass
+    /// any date or time.
     pub untyped_sql_type: Option<String>,
 }
 
@@ -97,9 +99,21 @@ impl Hints {
         }
     }
 
-    /// The type of a parameter shifted by an interval, which is an interval to PostgreSQL
-    /// unless the driver sends the type.
+    /// The type of a parameter shifted by an interval, compared with or stored as `typed`: a
+    /// date or time is an interval to PostgreSQL unless the driver sends the type.
     fn add_shifted(&mut self, index: usize, typed: Typed) {
+        if !is_typed(&typed) {
+            return;
+        }
+        if operand_type(&typed) == Some("INTERVAL") {
+            return self.add(index, typed, Nullability::Unknown);
+        }
+        if !matches!(
+            operand_type(&typed),
+            Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ")
+        ) {
+            return;
+        }
         let typed_before = self
             .0
             .get(&index)
@@ -107,6 +121,15 @@ impl Hints {
         self.add(index, typed, Nullability::Unknown);
         if !typed_before {
             self.0.entry(index).or_default().untyped = Some("INTERVAL");
+        }
+    }
+
+    /// `%s + INTERVAL '1 day'` alone: PostgreSQL makes an untyped parameter an interval,
+    /// but a driver that sends its type (psycopg) may pass any date or time.
+    fn add_untyped(&mut self, index: usize, untyped: &'static str) {
+        let hint = self.0.entry(index).or_default();
+        if hint.typed.python.is_none() {
+            hint.untyped = Some(untyped);
         }
     }
 
@@ -380,28 +403,25 @@ impl<'a> Analyzer<'a> {
                 };
                 for row in &values.rows {
                     for (position, expr) in row.content.iter().enumerate() {
-                        match (targets.get(position), placeholder_index(expr)) {
-                            (Some(column), Some(index)) => {
-                                self.hint_column(&table, column, index, out);
-                            }
-                            _ => self.walk_params(expr, &Scope::new(), out),
+                        if let Some(column) = targets.get(position) {
+                            self.hint_stored(expr, &table, column, &Scope::new(), out);
                         }
+                        self.walk_params(expr, &Scope::new(), out);
                     }
                 }
             }
             Some(query) => {
                 // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
                 if let SetExpr::Select(select) = query.body.as_ref() {
+                    let (analyzer, select_scope) = self.scope_or_empty(&select.from);
                     for (position, item) in select.projection.iter().enumerate() {
                         let (SelectItem::UnnamedExpr(expr)
                         | SelectItem::ExprWithAlias { expr, .. }) = item
                         else {
                             continue;
                         };
-                        if let (Some(column), Some(index)) =
-                            (targets.get(position), placeholder_index(expr))
-                        {
-                            self.hint_column(&table, column, index, out);
+                        if let Some(column) = targets.get(position) {
+                            analyzer.hint_stored(expr, &table, column, &select_scope, out);
                         }
                     }
                 }
@@ -441,12 +461,29 @@ impl<'a> Analyzer<'a> {
                 }
                 AssignmentTarget::Tuple(_) => None,
             };
-            match (table, column, placeholder_index(&assignment.value)) {
-                (Some(table), Some(column), Some(index)) => {
-                    self.hint_column(table, &fold(column, self.dialect), index, out);
-                }
-                _ => self.walk_params(&assignment.value, scope, out),
+            if let (Some(table), Some(column)) = (table, column) {
+                let column = fold(column, self.dialect);
+                self.hint_stored(&assignment.value, table, &column, scope, out);
             }
+            self.walk_params(&assignment.value, scope, out);
+        }
+    }
+
+    /// `value` is stored in `column` of the schema `table`: a placeholder takes the column's
+    /// type and nullability, and so does one shifted by an interval, as in a comparison.
+    fn hint_stored(&self, value: &Expr, table: &str, column: &str, scope: &Scope, out: &mut Hints) {
+        if let Some(index) = placeholder_index(value) {
+            return self.hint_column(table, column, index, out);
+        }
+        let Some(index) = self.shifted_placeholder(value, scope) else {
+            return;
+        };
+        if let Some(col) = self
+            .schema
+            .table(table)
+            .and_then(|columns| columns.iter().find(|col| col.name == column))
+        {
+            out.add_shifted(index, col.typed(self.dialect));
         }
     }
 
@@ -502,34 +539,32 @@ impl<'a> Analyzer<'a> {
     /// `%s - INTERVAL '1 day'` compared with a date or time `other`: alone, the parameter
     /// is an interval, but a driver that sends its type (psycopg) makes it what `other` is.
     fn hint_shifted(&self, shifted: &Expr, other: &Expr, scope: &Scope, out: &mut Hints) {
+        let Some(index) = self.shifted_placeholder(shifted, scope) else {
+            return;
+        };
+        if let Ok(typed) = self.expr(other, scope) {
+            out.add_shifted(index, typed);
+        }
+    }
+
+    /// The placeholder of `%s + INTERVAL '1 day'`, `%s - INTERVAL '1 day'` or
+    /// `INTERVAL '1 day' + %s`.
+    fn shifted_placeholder(&self, shifted: &Expr, scope: &Scope) -> Option<usize> {
         let mut shifted = shifted;
         while let Expr::Nested(inner) = shifted {
             shifted = inner;
         }
         let Expr::BinaryOp { left, op, right } = shifted else {
-            return;
+            return None;
         };
-        let (placeholder, interval) = match (op, placeholder_index(left), placeholder_index(right))
-        {
-            (BinaryOperator::Plus | BinaryOperator::Minus, Some(_), None) => (left, right),
-            (BinaryOperator::Plus, None, Some(_)) => (right, left),
-            _ => return,
+        let (index, interval) = match (op, placeholder_index(left), placeholder_index(right)) {
+            (BinaryOperator::Plus | BinaryOperator::Minus, Some(index), None) => (index, right),
+            (BinaryOperator::Plus, None, Some(index)) => (index, left),
+            _ => return None,
         };
-        let is_interval = self
-            .expr(interval, scope)
-            .is_ok_and(|typed| operand_type(&typed) == Some("INTERVAL"));
-        let Ok(typed) = self.expr(other, scope) else {
-            return;
-        };
-        if let (true, Some(index), Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ")) = (
-            is_interval,
-            placeholder_index(placeholder),
-            operand_type(&typed),
-        ) {
-            if is_typed(&typed) {
-                out.add_shifted(index, typed);
-            }
-        }
+        self.expr(interval, scope)
+            .is_ok_and(|typed| operand_type(&typed) == Some("INTERVAL"))
+            .then_some(index)
     }
 
     /// A parameter searched with `= ANY(%s)` is an array of what the other side is.
@@ -579,6 +614,9 @@ impl<'a> Analyzer<'a> {
         }
         let array = typed.sql().is_some_and(|sql| array_element(sql).is_some());
         let sql_type = match (op, other_type) {
+            (Plus | Minus, Some("INTERVAL")) if left || *op == Plus => {
+                return out.add_untyped(index, "INTERVAL");
+            }
             (Plus | Minus | Multiply | Divide | Modulo, Some(ty)) if numeric_rank(ty).is_some() => {
                 return out.add(index, strip(typed, self.dialect), Nullability::Unknown);
             }

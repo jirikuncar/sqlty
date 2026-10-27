@@ -13,9 +13,9 @@ b: decimal.Decimal | DECIMAL | NonNull
 c: float | DOUBLE | NonNull
 
 SELECT ts AT TIME ZONE 'UTC' AS a, tz AT TIME ZONE 'UTC' AS b, i AT TIME ZONE 'UTC' AS c FROM t
-a: datetime.datetime | TIMESTAMPTZ | Unknown
-b: datetime.datetime | TIMESTAMP | Unknown
-c: ? | ? | Unknown
+a: datetime.datetime | TIMESTAMPTZ | NonNull
+b: datetime.datetime | TIMESTAMP | Nullable
+c: ? | ? | NonNull
 [unsupported-syntax] expression `i AT TIME ZONE 'UTC'` is not typed
 
 SELECT EXISTS (SELECT 1) AS a, i IN (SELECT i FROM t) AS b, i BETWEEN 1 AND 3 AS c FROM t

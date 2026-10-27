@@ -61,7 +61,7 @@ use expr::from_sql_type;
 pub use inference::RuleRef;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
-pub(crate) use preprocess::parse_ddl;
+pub(crate) use preprocess::{parse_ddl, parse_function_without_hints};
 pub use query::Column;
 pub(crate) use sql_type::canonical_type;
 pub use sql_type::python_types;

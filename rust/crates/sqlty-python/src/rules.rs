@@ -52,6 +52,8 @@ pub enum Rule {
     TstringSkipped,
     /// A `--sql` query that is not plain string literals.
     UncheckedQuery,
+    /// A helper call whose query is not a string literal.
+    DynamicQuery,
     /// A `SQL[UNTYPED]` query.
     UntypedQuery,
     /// A query that does not parse, so it cannot be checked.
@@ -68,7 +70,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 34] = [
+    pub const ALL: [Rule; 35] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -89,6 +91,7 @@ impl Rule {
         Rule::FstringSkipped,
         Rule::TstringSkipped,
         Rule::UncheckedQuery,
+        Rule::DynamicQuery,
         Rule::UntypedQuery,
         Rule::UnparsedQuery,
         Rule::UnusedIgnore,
@@ -128,6 +131,7 @@ impl Rule {
             Rule::FstringSkipped => "fstring-skipped",
             Rule::TstringSkipped => "tstring-skipped",
             Rule::UncheckedQuery => "unchecked-query",
+            Rule::DynamicQuery => "dynamic-query",
             Rule::UntypedQuery => "untyped-query",
             Rule::UnparsedQuery => "unparsed-query",
             Rule::UnusedIgnore => "unused-ignore",
@@ -179,7 +183,9 @@ impl Rule {
             | Rule::Name(
                 NameRule::UnknownFunction | NameRule::UnknownType | NameRule::UnsupportedSyntax,
             ) => Severity::Warn,
-            Rule::RedundantOptional | Rule::RedundantLiteral => Severity::Ignore,
+            Rule::RedundantOptional | Rule::RedundantLiteral | Rule::DynamicQuery => {
+                Severity::Ignore
+            }
         }
     }
 }
@@ -321,6 +327,7 @@ mod tests {
         assert_eq!(config.severity(Rule::NarrowType), Severity::Error);
         assert_eq!(config.severity(Rule::UnparsedQuery), Severity::Warn);
         assert_eq!(config.severity(Rule::RedundantOptional), Severity::Ignore);
+        assert_eq!(config.severity(Rule::DynamicQuery), Severity::Ignore);
         assert_eq!(
             config.severity(Rule::Name(NameRule::UnknownTable)),
             Severity::Error
