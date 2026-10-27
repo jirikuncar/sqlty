@@ -102,6 +102,14 @@ test-mdtest:
 test-e2e:
 	uv run pytest tests/e2e/ -v
 
+.PHONY: test-static-only
+test-static-only:  ## The suite without the runtime type resolver (PLAN-NO-EXEC.md)
+	uv run pytest -p tests._static_only --ignore=tests/e2e
+
+.PHONY: check-no-exec-harness
+check-no-exec-harness:  ## Fail if this branch weakened the no-exec harness (PLAN-NO-EXEC.md)
+	uv run python scripts/check_no_exec_harness.py origin/main
+
 .PHONY: test-coverage
 test-coverage:
 	uv run pytest tests/ -v --cov=sqlty --cov-report=term-missing

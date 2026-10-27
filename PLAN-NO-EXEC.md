@@ -1,0 +1,206 @@
+# Plan: resolve row types statically, without `exec`
+
+> **Status:** harness merged first; implementation not started.
+> Owner: @jirikuncar. Epic: [#784](https://github.com/jirikuncar/sqlty/issues/784); every pull request of this plan links it.
+
+## Goal
+
+`sqlty check` reads row types (`TypedDict`, `NamedTuple`, dataclass, `BaseModel`,
+`Protocol`) from source only. Like ty, mypy and pyright, it never executes, evaluates
+or imports anything a checked source names: no `exec`, `eval`, `compile(..., "exec")`,
+`typing.get_type_hints`, `ForwardRef` evaluation or user-driven import. What `check`
+reports stays the same.
+
+## Where `exec` is today
+
+All of it is in `src/sqlty/_type_extractor/sandbox.py`, behind `extract_type_definitions`:
+
+| Function | What it runs |
+|----------|--------------|
+| `_populate.<locals>.flush` | `exec` of the guarded module-level imports, aliases and `NewType`s (also of helper modules, via `_module_namespace`) |
+| `_resolve_class` | `exec` of the class definitions |
+| `_type_hints` | `annotationlib.get_annotations` + `typing.get_type_hints` (evaluates annotation strings) |
+| `_own_extra_type` | `typing.evaluate_forward_ref` of PEP 728 `extra_items` |
+
+Imports run only for the standard library, `_TRUSTED_MODULES` (`typing`,
+`typing_extensions`, `pydantic`, `pydantic_core`, `annotated_types`, `sqlty`) and the
+`type-modules` setting.
+
+A second, static path already exists: `ast_fields._ast_type` builds the same `typing`
+objects from the AST (`field_types`), and `compat` falls back to it. Measured on
+`e06dee7` with the sandbox disabled (`make test-static-only`):
+
+- 996 tests reach `exec`; 26 of 9,866 fail without it.
+- 19 of the 26 assert sandbox internals (`resolved_hints`, `type-modules` importing):
+  `tests/test_type_extractor.py` (18) and the doctest of `_type_extractor.generic`.
+- 7 are real gaps: cross-module `NewType`/alias chains and re-exports
+  (`tests/test_cross_module.py`, `generic_fields.md`).
+- 10 more behaviors had no test at all: local aliases (`X = int`, `type X = int`,
+  `X: TypeAlias = int`), alias of an alias, `NewType` of an alias, string annotations,
+  forward references to a later alias, and standard-library classes outside the scalar
+  table (`pathlib.Path`, `ipaddress.IPv4Address` as an attribute, `fractions.Fraction`).
+  `tests/mdtest/check/static_resolution.md` now pins them; 12 of its 16 cases fail
+  without the sandbox, so `make test-static-only` starts at 38 failures.
+
+## Approaches
+
+| | Approach | Verdict |
+|-|----------|---------|
+| A | Extend the static path (`_ast_type`) with a per-module symbol table and string annotations; delete the sandbox. `compat`/`subtype` keep working on `typing` objects. | **Recommended.** Smallest diff, already 99.7% of the suite, no new dependency. |
+| B | Own symbolic type model (`ClassRef`, `Union`, `NewTypeRef`, `Unknown`, ...) as ty's `Type`, porting `subtype`/`compat` to it. | Cleaner, and a path to Rust later. Twice the diff for no user-visible gain now; revisit if A's `typing` objects get in the way. |
+| C | Embed ty: `ty_python_semantic` (and `ruff_python_parser`) are on crates.io, but as 0.0.x "internal component crate[s] of Ruff", released weekly. | Viable, not chosen. [monty](https://github.com/pydantic/monty) does it: it pins the ty crates to `0.0.14` from crates.io in its root `Cargo.toml`, keeps a 547-line wrapper (`crates/monty-type-checking/src/{type_check,db}.rs`, its in-memory db adapted from ty's), trims typeshed to the stdlib it supports, and updates in jumps (still `0.0.14` while ty is at `0.0.20`). Its wrapper only renders diagnostics, though, while sqlty needs a field's type and assignability, so it would call `ty_python_semantic`'s least stable API itself, and monty's wheels with ty inside are 12 to 15 MB. Revisit if A falls short or ty publishes a stable API. |
+| D | Ask the `ty` CLI (generated probe file, parse its diagnostics). | Rejected for `check`: needs ty installed, output not a stable interface, a subprocess per file. Useful as a test oracle (see [Optional oracle](#optional-oracle)). |
+
+Type checkers resolve imports from the filesystem in this order: stubs or sources at the
+start of the path, user code, typeshed's standard library, `-stubs` packages, packages
+with `py.typed`, vendored third-party stubs
+([typing spec](https://typing.python.org/en/latest/spec/distributing.html#import-resolution-ordering));
+ty searches first-party paths, then `PYTHONPATH`, then the environment's `site-packages`
+([ty docs](https://docs.astral.sh/ty/modules/)). sqlty needs the first two only: the
+checked paths (`HelperIndex`) and a table of the standard library.
+
+## Design (approach A)
+
+1. **Symbol table.** `ast_fields` gets `_symbols(tree) -> dict[str, Symbol]` for the
+   module-level names a type can go through: `X = <type expr>`, `X: TypeAlias = ...`,
+   `type X = ...` (type parameters make it `Unknown` when subscripted), `NewType`,
+   classes (with their bases), and imports (`import a.b as c`, `from .x import y`).
+   Resolution is lazy, memoized per `(module, name)` on `HelperIndex`, and cycle-safe
+   (a name being resolved is `None`, unknown). It replaces `_namespace_statements`,
+   `_populate`, `_module_namespace`, `_ModuleProxy` and `_lookup`.
+2. **`_ast_type` takes a resolver** in place of `newtypes`: a `Name` or `mod.Name` goes
+   through the symbol table (local, then helper modules, then the standard-library
+   table). A string constant is parsed with `ast.parse(s, mode="eval")` and resolved
+   the same way. `ast.parse` compiles to an AST only and runs nothing.
+3. **Standard-library classes, from typeshed as ty does.** ty never imports the standard
+   library: it vendors typeshed's stdlib stubs (crate `ty_vendored`, zipped into the
+   binary, synced every two weeks) and reads classes and their bases from the `.pyi`
+   files, with `stdlib/VERSIONS` gating modules by Python version
+   ([ty_vendored](https://github.com/astral-sh/ruff/tree/main/crates/ty_vendored)).
+   sqlty only needs the class graph: inferred column types are a closed set
+   (`info.PYTHON_TYPE_MAP`), so a stdlib class matters only through its bases. See
+   [Decisions](#decisions) for how much of typeshed to carry. A stdlib class resolves to
+   a nominal class (`type(name, bases, {"__module__": module})`, one per qualname) whose
+   bases are the column types it derives from: `pathlib.Path` derives from none, which
+   keeps today's diagnostic; `enum.StrEnum` derives from `str`. Non-stdlib modules
+   outside the checked paths stay unknown and are never reported, as today.
+4. **User classes.** A class of the checked paths that is not a row type resolves the
+   same way, through the symbol table: `class Email(str)` is a nominal class deriving
+   from `str`, `class Color(enum.StrEnum)` one deriving from `str` through `StrEnum`. An
+   `int` column then no longer fits an `Email` field. A base that is unknown makes the
+   class unknown. The bare `# error:` of *User classes* in `static_resolution.md`
+   become specific assertions (the integrity check allows it).
+5. **Pydantic types** (`EmailStr`, `AnyUrl`, `PastDatetime`, `conint(...)`, ...) resolve from
+   a static table of pydantic's type-checker declarations and lax/strict input types,
+   never from the installed package. Importing pydantic gives false positives today
+   ([#783](https://github.com/jirikuncar/sqlty/issues/783), which carries the
+   details, harness additions and done criteria).
+6. **TypedDict keys.** `__required_keys__` and `extra_items` come from the AST
+   (`required`, `_ast_type` of `extra_node`), which already compute them.
+7. **`TypeInfo` shrinks.** `resolved_hints`, `declared_hints` and `extra_items_hint`
+   merge into `field_types` (`| None` kept) plus `_unwrap_optional` at use. `compat`,
+   `generic`, `_check`, `_json_shape` read one source.
+8. **Delete** `sandbox.py`, `_Unknown`, `_TRUSTED_MODULES`, the `exec` paragraph of the
+   `_type_extractor` docstring and `tests/_static_only.py`.
+9. **Remove `type-modules`** and the `type_modules` parameter of `check_source`,
+   `breaking_source`, `extract_type_definitions` and `HelperIndex.row_type`. A config
+   that still sets it fails as any unknown key does; the error names this change.
+
+## Phases
+
+Each phase is one pull request, green on the full CI and on `No-exec harness intact`.
+
+| # | Scope | Exit criterion |
+|---|-------|----------------|
+| 0 | Harness (this pull request) | Harness merged; suite green |
+| 1 | Symbol table + resolver for one module; string annotations | `make test-static-only`: `static_resolution.md` sections *Local aliases* and *String annotations* pass |
+| 2 | Helper modules through the symbol table | `make test-static-only`: `test_cross_module.py`, `generic_fields.md`, *Other modules* pass |
+| 3 | Stdlib classes from typeshed; user classes in the symbol table (still unknown to `compat`) | `make test-static-only`: *Standard library classes* pass; drift test green |
+| 3b | Pydantic types ([#783](https://github.com/jirikuncar/sqlty/issues/783)); pydantic in the `dev` group | The done criteria of #783 |
+| 4 | Delete the sandbox; collapse `TypeInfo`; rewrite the 19 internal tests to assert behavior or `field_types`; remove `type-modules`; tighten *User classes*; docs | [Definition of done](#definition-of-done) |
+
+In phases 1 to 3 the sandbox still runs, so `make test` stays green and only
+`make test-static-only` shows progress. Fill the gap there; never patch the
+sandbox to match. The sandbox cannot report the tightened *User classes*, so
+they land in phase 4, once it is gone, with no xfail in between.
+
+## Harness
+
+What keeps an implementation (human or agent) from widening scope, weakening tests or
+hiding `exec` behind another name:
+
+| Guard | Where | Catches |
+|-------|-------|---------|
+| Static scan | `tests/test_no_exec.py` | Any call in `src/sqlty` to `exec`, `eval`, `compile`, `__import__`, `breakpoint`, `importlib.import_module`/`reload`, `runpy.*`, `exec_module`/`load_module`, `get_type_hints`, `evaluate_forward_ref`, `get_annotations`, `call_evaluate_function`/`call_annotate_function`, `types.new_class` outside `tests/no_exec_allowlist.txt`, and stale allowlist lines (so it only shrinks). |
+| Audit hook | `tests/_no_exec.py`, loaded for every test (`pyproject.toml` `addopts`) | At runtime, any `exec`/`eval` or import that sqlty code (or code it executed) runs, charged to the innermost `src/sqlty` function, outside the allowlist. sqlty's own `import` statements and module bodies are free. 996 tests trip it with an empty allowlist. Self-tested by `test_guard_catches`. |
+| Behavior lock | `tests/mdtest/check/static_resolution.md` and every existing mdtest | Diagnostics must not change. |
+| Integrity check | `scripts/check_no_exec_harness.py`, CI job `No-exec harness intact`, `make check-no-exec-harness` | Against the merge base: guard files unchanged and still loaded; allowlist only shrinks; no mdtest assertion removed or edited (a bare `# error:` may become specific); no new skip/xfail/`python ignore`; no test function removed. CI runs the **base branch's** copy, so a pull request cannot relax it. |
+| Static-only run | `tests/_static_only.py`, `make test-static-only` | Measures the static resolver with the sandbox disabled. |
+
+Audit hooks are not a sandbox: code can bypass them
+([`sys.addaudithook`](https://docs.python.org/3/library/sys.html#sys.addaudithook)).
+They catch mistakes; CODEOWNERS review catches intent.
+
+### Rules for implementors
+
+- Work only in `src/sqlty/_type_extractor/`, `src/sqlty/_helpers.py`, the files that
+  carry `type_modules` (DoD 6), the typeshed script and data of decision 3, and the docs
+  and tests named here. Anything else is a separate pull request.
+- Never edit `tests/_no_exec.py`, `tests/test_no_exec.py`,
+  `scripts/check_no_exec_harness.py` or existing mdtest assertions, and never add
+  lines to the allowlist. If one looks wrong, stop and ask.
+- Remove an allowlist line in the same commit as the code it names.
+- `make update-mdtest` may only fill new, empty assertions. Review its diff: a
+  changed existing line is a regression.
+- New behavior gets cases in `static_resolution.md` first, filled from the sandbox
+  (phases 1 to 3), then made to pass statically.
+- Per AGENTS.md: `uv run prek run --all-files` before each commit, no force-push, and
+  disclose the agent in the commit trailer and the pull request.
+
+### Optional oracle
+
+For the `TypedDict` and `NamedTuple` cases of `static_resolution.md`, a test can
+generate `def f(x: <column type>) -> <annotation>: return x` and check that ty reports
+`invalid-return-type` exactly where sqlty reports `column-type-mismatch`. ty is
+already a dev dependency. Pydantic lax mode, the `int` -> `float` promotion and NULL
+handling are known differences and are excluded.
+
+## Definition of done
+
+1. `tests._no_exec.sites()` is empty: no call of the scanned list remains in `src/sqlty`.
+2. `tests/no_exec_allowlist.txt` holds its header only.
+3. `src/sqlty/_type_extractor/sandbox.py` and `tests/_static_only.py` are deleted;
+   `grep -rn "_TRUSTED_MODULES\|_Unknown\|resolved_hints\|declared_hints" src tests` is
+   empty.
+4. `uv run pytest` is green, including every assertion of `static_resolution.md` as
+   pinned in phase 0, and `make check-no-exec-harness` passes against `main`.
+5. `test_application_imports_are_not_executed` holds. A CLI test runs `sqlty check` on
+   a project whose imported module writes a marker file, and no marker appears.
+6. `type-modules` is gone from `_config.py` (`KEY_DOCS`), `core.py`, `_check.py`,
+   `_helpers.py`, `_breaking.py`, `_snapshot.py`, `_cli.py` and `tests/_mdtest/runner.py`;
+   `test_type_modules_allow_imports` asserts the key is rejected; `docs/guide/row-types.md`
+   ("`check` never runs the imports...") and `docs/reference/configuration.md` describe
+   the static behavior; `make generate-docs` shows no drift; `make lint-docs` is clean.
+7. `make typecheck` and `uv run prek run --all-files` are clean.
+8. `make bench-ci` stays within `benchmarks/baseline.json`; CodSpeed shows no
+   regression on `check_source`. A speed-up is expected: `pydantic` is no longer
+   imported.
+9. AGENTS.md (architecture) and the `_type_extractor` docstring describe one static
+   path. This plan moves to `PLAN-FUTURE.md` or is deleted.
+
+## Decisions
+
+Decided:
+
+1. **`type-modules`**: removed in phase 4, with no deprecation period.
+2. **User classes deriving from builtins** (`class Email(str)`, `enum.StrEnum`): tightened
+   in this plan (design step 4, phase 4), adding assertions only.
+3. **How much of typeshed to carry** (design step 3): the implementor's choice, named in
+   the phase 3 pull request. Either way the typeshed commit is pinned and recorded, and a
+   test fails when the carried data drifts from it.
+   - The class graph only: `scripts/generate_stdlib_types.py` reads the pinned typeshed
+     and writes `_type_extractor/_stdlib.py` (each class with its bases, and the module
+     version ranges from `VERSIONS`). Small; nothing parsed at run time.
+   - The stdlib `.pyi` files vendored, as ty does (about 1.2 MB zipped), read on demand
+     by the same symbol table as user modules. Complete; the wheel grows, and
+     `make bench-ci` must still hold.
