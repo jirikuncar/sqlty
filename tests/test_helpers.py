@@ -233,21 +233,24 @@ def test_query_variants_with_preview(project, capsys):
     """`preview` checks each variant, counts each in `--statistics`, and never runs the code."""
     (project / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\npreview = true\n')
     marker = project / "ran"
+    (project / "pkg" / "names.py").write_text("TABLE = 'users'\nWHERE = ' WHERE TRUE'\n")
     (project / "app.py").write_text(
+        "from pkg import names\n"
         "from pkg.db import fetch_all\n"
+        "from pkg.names import WHERE\n"
         f"open({str(marker)!r}, 'w')\n"
         "def column(flag: bool):\n"
         f"    open({str(marker)!r}, 'w')\n"
         "    return 'id' if flag else 'name'\n"
         "def find(flag: bool):\n"
-        "    return fetch_all('SELECT ' + column(flag) + ' FROM users', tuple[int])\n"
+        "    return fetch_all('SELECT ' + column(flag) + ' FROM ' + names.TABLE + WHERE, tuple[int])\n"
     )
 
     with pytest.raises(SystemExit):
         main(["check", "--statistics", "."])
 
     out = capsys.readouterr().out
-    assert "column-type-mismatch" in out and "(variant: line 5)" in out
+    assert "column-type-mismatch" in out and "(variant: line 7)" in out
     assert out.splitlines()[-1].startswith("Queries: 2 typed, 0 partially typed")
     assert not marker.exists()
 

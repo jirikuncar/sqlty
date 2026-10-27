@@ -59,7 +59,10 @@ on every path:
 | A `psycopg.sql` composition of these | `sql.SQL("... {}").format(sql.SQL(where))` |
 
 A condition tested twice takes the same branch both times, as long as nothing it reads
-is assigned in between. Names bound together in one branch stay together.
+is assigned in between. Names bound together in one branch stay together. A `case` of
+string literals keeps only the values it matches, so `case "foo": return` drops `foo`
+from the variants after the `match`. A function called without an argument reads the
+default of its parameter.
 
 ## What is not followed
 
@@ -69,7 +72,7 @@ unchecked path could hide any query. The call is then `dynamic-query`, or
 
 - an f-string, or a value from a call to anything but a function of the module;
 - a name bound in a loop, a `try` or a `with` block, or by a walrus;
-- a parameter whose type is not a `Literal` of strings.
+- a parameter whose type is not a `Literal` of strings, unless the argument is static.
 
 ```toml
 [tool.sqlty]

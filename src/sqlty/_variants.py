@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 
 class Variant(NamedTuple):
-    """One query a call can run, with the lines of the bindings that select it."""
+    """One query a call can run, with the lines of the bindings that select it among the others."""
 
     query: str
     lines: tuple[int, ...]
@@ -86,18 +86,16 @@ def query_variants(
     """
     walk = _Walk(resolve)
     stack = parsed.scopes_of(call)
-    if stack and isinstance(stack[-1], ast.ClassDef):
-        return Unchecked(False)
     scope = stack[-1] if stack else parsed.tree
-    if scope is None or isinstance(scope, ast.ClassDef):
+    if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
         return Unchecked(False)
     try:
         frame = _Frame(parsed, scope, [query], stack[:-1])
         paths = walk.reach(frame, call)
-        found: dict[str, tuple[int, ...]] = {}
+        found: dict[str, frozenset[int]] = {}
         for path in paths:
             for value, lines, _ in walk.values(query, path, frame):
-                found.setdefault(walk.render(value), tuple(sorted(lines)))
+                found.setdefault(walk.render(value), lines)
     except _Dynamic:
         return Unchecked(walk.composed)
     except _TooMany:
@@ -110,7 +108,10 @@ def query_variants(
         return Unchecked(
             walk.composed, f"{len(found)} variants, more than max-query-variants ({limit})"
         )
-    return [Variant(query, lines) for query, lines in found.items()]
+    shared = frozenset.intersection(*found.values())
+    return [
+        Variant(query, tuple(sorted(lines - shared or lines))) for query, lines in found.items()
+    ]
 
 
 class _Dynamic(Exception):
@@ -227,24 +228,25 @@ class _Frame:
         self.outer: set[str] = set()
         for enclosing in outer:
             if not isinstance(enclosing, ast.ClassDef):
-                self.outer |= _bound_names(enclosing.body) | _defined(enclosing.body)
+                self.outer |= _bound_names(enclosing.body)
                 self.outer.update(a.arg for a in ast.walk(enclosing.args) if isinstance(a, ast.arg))
         nodes = _own_nodes(self.body)
         guarded = {
             id(n) for g in nodes if isinstance(g, _GUARDED) for n in _own_nodes(_guarded_body(g))
         }
         values: dict[str, list[ast.expr]] = {}
-        plain: set[str] = set()
-        other: set[str] = set()
+        followed: set[int] = set()
         for node in nodes:
-            for name, value in _assignments(node):
-                if value is None or id(node) in guarded:
-                    other.add(name)
-                else:
-                    plain.add(name)
-                    values.setdefault(name, []).append(value)
-            other.update(_other_bindings(node))
-        self.local = plain | other
+            if id(node) in guarded:
+                continue
+            if isinstance(node, ast.AnnAssign) and node.value is None:
+                followed.add(id(node.target))
+            for target, value in _assignments(node):
+                followed.add(id(target))
+                values.setdefault(target.id, []).append(value)
+        stores = _stores(nodes)
+        other = {name for name, store in stores if store not in followed}
+        self.local = {name for name, _ in stores}
         # A function of the module is called by name; one defined in a function is not followed.
         self.shadowed = (
             _defined(self.body)
@@ -257,75 +259,65 @@ class _Frame:
         self.returns_guarded = any(isinstance(n, ast.Return) and id(n) in guarded for n in nodes)
 
 
-def _guarded_body(node: ast.stmt) -> list[ast.stmt]:
+def _guarded_body(
+    node: ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.With | ast.AsyncWith,
+) -> list[ast.stmt]:
     """The statements of a loop, ``try`` or ``with``, which may run any number of times or partly."""
-    match node:
-        case ast.With() | ast.AsyncWith():
-            return node.body
-        case ast.For() | ast.AsyncFor() | ast.While():
-            return [*node.body, *node.orelse]
-        case ast.Try() | ast.TryStar():
-            return [
-                *node.body,
-                *(s for h in node.handlers for s in h.body),
-                *node.orelse,
-                *node.finalbody,
-            ]
-    return []
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return node.body
+    if isinstance(node, (ast.Try, ast.TryStar)):
+        return [
+            *node.body,
+            *(s for h in node.handlers for s in h.body),
+            *node.orelse,
+            *node.finalbody,
+        ]
+    return [*node.body, *node.orelse]
 
 
-def _assignments(node: ast.AST) -> list[tuple[str, ast.expr | None]]:
-    """Names a plain assignment binds, with the value each takes; ``None`` when not followed."""
+def _assignments(node: ast.AST) -> list[tuple[ast.Name, ast.expr]]:
+    """The names a plain assignment binds, with the value each takes."""
     match node:
         case ast.Assign(targets=targets, value=value):
-            found: list[tuple[str, ast.expr | None]] = []
+            found: list[tuple[ast.Name, ast.expr]] = []
             for target in targets:
                 if isinstance(target, ast.Name):
-                    found.append((target.id, value))
+                    found.append((target, value))
                 elif (
                     isinstance(target, (ast.Tuple, ast.List))
                     and isinstance(value, (ast.Tuple, ast.List))
                     and len(target.elts) == len(value.elts)
-                    and all(isinstance(t, ast.Name) for t in target.elts)
                 ):
-                    names = [t.id for t in target.elts if isinstance(t, ast.Name)]
-                    found.extend(zip(names, value.elts, strict=True))
-                else:
-                    found.extend((n.id, None) for n in ast.walk(target) if isinstance(n, ast.Name))
+                    found.extend(
+                        (t, v)
+                        for t, v in zip(target.elts, value.elts, strict=True)
+                        if isinstance(t, ast.Name)
+                    )
             return found
-        case ast.AnnAssign(target=ast.Name(id=name), value=value) if value is not None:
-            return [(name, value)]
-        case ast.AugAssign(target=ast.Name(id=name), op=ast.Add(), value=value):
-            return [(name, value)]
-        case ast.AugAssign(target=ast.Name(id=name)):
-            return [(name, None)]
+        case ast.AnnAssign(target=ast.Name() as target, value=value) if value is not None:
+            return [(target, value)]
+        case ast.AugAssign(target=ast.Name() as target, op=ast.Add(), value=value):
+            return [(target, value)]
     return []
 
 
-def _other_bindings(node: ast.AST) -> set[str]:
-    """Names ``node`` binds other than by plain assignment."""
-    match node:
-        case (
-            ast.For(target=target) | ast.AsyncFor(target=target) | ast.comprehension(target=target)
-        ):
-            return set(_names(target))
-        case ast.withitem(optional_vars=target) if target is not None:
-            return set(_names(target))
-        case ast.NamedExpr(target=ast.Name(id=name)):
-            return {name}
-        case ast.Delete(targets=targets):
-            return {n for t in targets for n in _names(t)}
-        case ast.ExceptHandler(name=name) if name:
-            return {name}
-        case ast.Global(names=names) | ast.Nonlocal(names=names):
-            return set(names)
-        case ast.MatchAs(name=name) | ast.MatchStar(name=name) if name:
-            return {name}
-        case ast.MatchMapping(rest=name) if name:
-            return {name}
-        case ast.TypeAlias(name=ast.Name(id=name)):
-            return {name}
-    return set()
+def _stores(nodes: list[ast.AST]) -> list[tuple[str, int | None]]:
+    """Every name ``nodes`` bind, with the ``ast.Name`` that binds it, if any."""
+    found: list[tuple[str, int | None]] = []
+    for node in nodes:
+        match node:
+            case ast.Name(ctx=ast.Store() | ast.Del()):
+                found.append((node.id, id(node)))
+            case (
+                ast.ExceptHandler(name=str() as name)
+                | ast.MatchAs(name=str() as name)
+                | ast.MatchStar(name=str() as name)
+                | ast.MatchMapping(rest=str() as name)
+            ):
+                found.append((name, None))
+            case ast.Global(names=names) | ast.Nonlocal(names=names):
+                found.extend((name, None) for name in names)
+    return found
 
 
 def _defined(body: list[ast.stmt]) -> set[str]:
@@ -345,11 +337,7 @@ def _defined(body: list[ast.stmt]) -> set[str]:
 
 
 def _bound_names(body: list[ast.stmt]) -> set[str]:
-    names: set[str] = set()
-    for node in _own_nodes(body):
-        names.update(name for name, _ in _assignments(node))
-        names.update(_other_bindings(node))
-    return names
+    return {name for name, _ in _stores(_own_nodes(body))} | _defined(body)
 
 
 def _closure(roots: list[ast.expr], values: dict[str, list[ast.expr]]) -> set[str]:
@@ -390,17 +378,12 @@ class _Walk:
         return []
 
     def render(self, value: Any) -> str:
+        """The SQL of a value: a string, or a ``psycopg.sql`` composition."""
         if isinstance(value, str):
             return value
         try:
-            from psycopg import sql
-        except ImportError:
-            raise _Dynamic from None
-        if not isinstance(value, sql.Composable):
-            raise _Dynamic
-        try:
-            return value.as_string(None)
-        except TypeError, ValueError, NotImplementedError, AttributeError:
+            return str(value.as_string(None))
+        except AttributeError, TypeError, ValueError, NotImplementedError:
             raise _Dynamic from None
 
     def block(
@@ -446,8 +429,8 @@ class _Walk:
                     (stmt.orelse, paths),
                     (stmt.finalbody, paths),
                 ]
-            case ast.Match(cases=cases):
-                blocks = [(case.body, paths) for case in cases]
+            case ast.Match():
+                blocks = self.cases(frame, stmt, paths)
         for body, entry in blocks:
             if any(_contains(s, target) for s in body):
                 self.block(
@@ -473,20 +456,18 @@ class _Walk:
                 return self.assign(frame, stmt, paths, branch)
             case ast.If(test=test, body=body, orelse=orelse):
                 if not self.touches(frame, stmt):
-                    return [path.forget(set(_bound_names([stmt]))) for path in paths]
+                    return [path.forget(_bound_names([stmt])) for path in paths]
                 taken = self.block(frame, body, _assume(paths, test, True), None, returns, True)
                 other = self.block(frame, orelse, _assume(paths, test, False), None, returns, True)
                 return _dedupe([*taken, *other])
-            case ast.Match(cases=cases):
+            case ast.Match():
                 if not self.touches(frame, stmt):
-                    return [path.forget(set(_bound_names([stmt]))) for path in paths]
+                    return [path.forget(_bound_names([stmt])) for path in paths]
                 found = [
                     p
-                    for case in cases
-                    for p in self.block(frame, case.body, paths, None, returns, True)
+                    for body, entry in self.cases(frame, stmt, paths)
+                    for p in self.block(frame, body, entry, None, returns, True)
                 ]
-                if not any(_irrefutable(case) for case in cases):
-                    found.extend(paths)
                 return _dedupe(found)
             case ast.Return(value=value) if returns is not None:
                 for path in paths:
@@ -499,14 +480,45 @@ class _Walk:
                 return []
             case ast.Return() | ast.Raise() | ast.Break() | ast.Continue():
                 return []
-        return [path.forget(set(_bound_names([stmt]))) for path in paths]
+        return [path.forget(_bound_names([stmt])) for path in paths]
+
+    def cases(
+        self, frame: _Frame, stmt: ast.Match, paths: list[_Path]
+    ) -> list[tuple[list[ast.stmt], list[_Path]]]:
+        """The paths entering each case of ``stmt``, then those that match none, with an empty body.
+
+        A case of string literals on a name keeps the paths where the name takes one of them.
+        """
+        blocks: list[tuple[list[ast.stmt], list[_Path]]] = []
+        for case in stmt.cases:
+            strings = _strings(case.pattern)
+            if case.guard is not None or strings is None or not isinstance(stmt.subject, ast.Name):
+                blocks.append((case.body, paths))
+                if _irrefutable(case):
+                    return blocks
+                continue
+            entry: list[_Path] = []
+            rest: list[_Path] = []
+            for path in paths:
+                try:
+                    found = self.name(stmt.subject, path, frame)
+                except _Dynamic:
+                    entry.append(path)
+                    rest.append(path)
+                    continue
+                for value, _, after in found:
+                    (entry if isinstance(value, str) and value in strings else rest).append(after)
+            blocks.append((case.body, entry))
+            paths = rest
+        blocks.append(([], paths))
+        return blocks
 
     def touches(self, frame: _Frame, stmt: ast.stmt) -> bool:
         """Whether ``stmt`` binds a name the query reads, or may leave its block."""
         if (found := self._touches.get(id(stmt))) is None:
             found = any(
                 isinstance(node, _EXITS)
-                or any(name in frame.relevant for name, _ in _assignments(node))
+                or any(target.id in frame.relevant for target, _ in _assignments(node))
                 for node in _own_nodes([stmt])
             )
             self._touches[id(stmt)] = found
@@ -519,9 +531,8 @@ class _Walk:
         paths: list[_Path],
         branch: bool,
     ) -> list[_Path]:
-        bound = _assignments(stmt)
-        names = {name for name, _ in bound}
-        tracked = [(name, value) for name, value in bound if name in frame.relevant]
+        names = _bound_names([stmt])
+        tracked = [(t.id, value) for t, value in _assignments(stmt) if t.id in frame.relevant]
         if not tracked:
             return [path.forget(names) for path in paths]
         line = frozenset({stmt.lineno}) if branch else frozenset()
@@ -530,7 +541,6 @@ class _Walk:
             # Every value is read before any name is bound.
             options: list[tuple[dict[str, _Bound], _Path]] = [({}, path)]
             for name, value in tracked:
-                assert value is not None
                 if isinstance(stmt, ast.AugAssign):
                     value = ast.BinOp(ast.Name(name, ast.Load()), ast.Add(), value)
                     ast.copy_location(value, stmt)
@@ -573,7 +583,7 @@ class _Walk:
     ) -> list[tuple[Any, frozenset[int], _Path]]:
         none: frozenset[int] = frozenset()
         match node:
-            case ast.Constant(value=value):
+            case ast.Constant(value=str() as value):
                 return [(value, none, path)]
             case ast.Name():
                 return self.name(node, path, frame)
@@ -583,7 +593,7 @@ class _Walk:
                     for b, b_lines, end in self.values(right, middle, frame):
                         try:
                             found.append((a + b, a_lines | b_lines, end))
-                        except TypeError:
+                        except TypeError:  # a dict, or a string and a composition
                             raise _Dynamic from None
                 return found
             case ast.IfExp(test=test, body=body, orelse=orelse):
@@ -677,6 +687,16 @@ class _Walk:
                 return self.returns(defined[0], node, path, frame)
         if "psycopg" not in frame.parsed.text:
             raise _Dynamic
+        paths = [path]
+        for param in sorted(
+            {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} & frame.params.keys()
+        ):
+            paths = [after for p in paths for _, _, after in self.name(ast.Name(param), p, frame)]
+        return [self.compose(node, p, frame) for p in paths]
+
+    def compose(
+        self, node: ast.Call, path: _Path, frame: _Frame
+    ) -> tuple[Any, frozenset[int], _Path]:
         read: set[int] = set()
 
         def lookup(name: ast.Name) -> Any:
@@ -692,7 +712,7 @@ class _Walk:
             self.composed = self.composed or error.composed
             raise _Dynamic from None
         self.composed = True
-        return [(value, frozenset(read), path)]
+        return (value, frozenset(read), path)
 
     def returns(
         self, function: _Function, node: ast.Call, path: _Path, frame: _Frame
@@ -708,31 +728,55 @@ class _Walk:
             raise _Dynamic
         args = function.args
         positional = [*args.posonlyargs, *args.args]
-        passed: dict[str, ast.expr] = {
-            a.arg: v for a, v in zip(positional, node.args, strict=False)
+        defaults = {
+            **{a.arg: d for a, d in zip(positional[::-1], args.defaults[::-1], strict=False)},
+            **{
+                a.arg: d
+                for a, d in zip(args.kwonlyargs, args.kw_defaults, strict=True)
+                if d is not None
+            },
         }
+        passed = {a.arg: v for a, v in zip(positional, node.args, strict=False)}
         passed.update((k.arg, k.value) for k in node.keywords if k.arg is not None)
-        entry = _Path()
-        for name in callee.relevant & callee.params.keys():
-            if name not in passed:
-                if _literal_members(callee.params[name].annotation) is None:
-                    raise _Dynamic
-                continue
-            try:
-                entry = entry.bind(
-                    name, _Bound(self.single(passed[name], path, frame), frozenset())
+        # Each entry binds the arguments of one call, with their lines and the caller's path after.
+        entries = [(_Path(), frozenset[int](), path)]
+        for name in sorted(callee.relevant & callee.params.keys()):
+            literal = _literal_members(callee.params[name].annotation) is not None
+            if name not in passed and name not in defaults:
+                if literal:
+                    continue
+                raise _Dynamic
+            forked: list[tuple[_Path, frozenset[int], _Path]] = []
+            for entry, lines, caller in entries:
+                try:
+                    if name in passed:
+                        found = self.values(passed[name], caller, frame)
+                    else:
+                        found = [
+                            (v, n, caller)
+                            for v, n, _ in self.values(
+                                defaults[name], _Path(), self.constants(frame.parsed)
+                            )
+                        ]
+                except _Dynamic:
+                    forked.append((entry if literal else entry.bind(name, _UNKNOWN), lines, caller))
+                    continue
+                forked.extend(
+                    (entry.bind(name, _Bound(v, frozenset())), lines | v_lines, after)
+                    for v, v_lines, after in found
                 )
-            except _Dynamic:
-                if _literal_members(callee.params[name].annotation) is None:
-                    entry = entry.bind(name, _UNKNOWN)
-        collected: list[tuple[Any, frozenset[int]]] = []
+            entries = forked
+        results: list[tuple[Any, frozenset[int], _Path]] = []
         self.calls += 1
         try:
-            if self.block(callee, callee.body, [entry], None, collected, branch=False):
-                raise _Dynamic
+            for entry, lines, caller in entries:
+                collected: list[tuple[Any, frozenset[int]]] = []
+                if self.block(callee, callee.body, [entry], None, collected, branch=False):
+                    raise _Dynamic
+                results.extend((value, lines | v_lines, caller) for value, v_lines in collected)
         finally:
             self.calls -= 1
-        return [(value, lines, path) for value, lines in collected]
+        return results
 
 
 def _assume(paths: list[_Path], test: ast.expr, outcome: bool) -> list[_Path]:
@@ -757,6 +801,21 @@ def _dedupe(paths: list[_Path]) -> list[_Path]:
                 kept.env, {k: c for k, c in kept.conds.items() if path.conds.get(k) == c}
             )
     return list(found.values())
+
+
+def _strings(pattern: ast.pattern) -> set[str] | None:
+    """The strings a pattern of string literals matches, ``None`` for any other pattern."""
+    match pattern:
+        case ast.MatchValue(value=ast.Constant(value=str() as value)):
+            return {value}
+        case ast.MatchOr(patterns=patterns):
+            found: set[str] = set()
+            for alternative in patterns:
+                if (strings := _strings(alternative)) is None:
+                    return None
+                found |= strings
+            return found
+    return None
 
 
 def _irrefutable(case: ast.match_case) -> bool:

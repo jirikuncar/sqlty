@@ -249,3 +249,289 @@ def find(flag: bool) -> list[tuple[int]]:
     # error: [dynamic-query]
     return fetch_all("SELECT " + column + " FROM foos", tuple[int])
 ```
+
+## A name bound other than by a plain assignment is dynamic
+
+```python
+from typing import Literal
+
+from db import fetch_all
+
+ORDER = {"asc": "ASC", "desc": "DESC"}
+
+
+def unpacked(pair: tuple[str, str]) -> list[tuple[int]]:
+    column, *rest = pair
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def repeated() -> list[tuple[int]]:
+    column = "id"
+    column *= 2
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def caught() -> list[tuple[int]]:
+    column = "id"
+    try:
+        pass
+    except ValueError as column:
+        pass
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def captured(value: object) -> list[tuple[int]]:
+    column = "id"
+    match value:
+        case str(column):
+            pass
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def declared() -> list[tuple[int]]:
+    global ORDER
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos ORDER BY id " + ORDER["asc"], tuple[int])
+
+
+def walrus(columns: list[str]) -> list[tuple[int]]:
+    if (column := columns[0]) is None:
+        column = "id"
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def nested() -> list[tuple[int]]:
+    def column() -> str:
+        return "id"
+
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column() + " FROM foos", tuple[int])
+
+
+def not_a_string(direction: Literal["asc", "desc"]) -> list[tuple[int]]:
+    # error: [dynamic-query]
+    return fetch_all(ORDER, tuple[int])
+
+
+def mixed() -> list[tuple[int]]:
+    count = 1
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos LIMIT " + count, tuple[int])
+```
+
+## Unpacked literals are followed
+
+```python
+from db import fetch_all
+
+
+def find(flag: bool) -> list[tuple[int]]:
+    if flag:
+        column, table = "n", "foos"
+    else:
+        [column, table] = ["foo", "foos"]
+    # error: [column-type-mismatch] "(variant: line 8)"
+    return fetch_all("SELECT " + column + " FROM " + table, tuple[int])
+```
+
+## A call no path reaches is dynamic
+
+```python
+from db import fetch_all
+
+
+def find(flag: bool) -> list[tuple[int]]:
+    column = "id" if flag else "n"
+    raise NotImplementedError
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+```
+
+## A call in a class body is dynamic
+
+```python
+from db import fetch_all
+
+COLUMN = "id"
+
+
+class Repository:
+    # error: [dynamic-query]
+    rows = fetch_all("SELECT " + COLUMN + " FROM foos", tuple[int])
+```
+
+## A call inside a loop, try or with block reads the paths before it
+
+```python
+import contextlib
+
+from db import fetch_all
+
+
+def find(flag: bool, ids: list[int]) -> None:
+    column = "foo" if flag else "id"
+    for _ in ids:
+        # error: [column-type-mismatch] "(variant: line 7)"
+        fetch_all("SELECT " + column + " FROM foos", tuple[int])
+    try:
+        pass
+    except ValueError:
+        # error: [column-type-mismatch] "(variant: line 7)"
+        fetch_all("SELECT " + column + " FROM foos", tuple[int])
+    with contextlib.suppress(ValueError):
+        # error: [column-type-mismatch] "(variant: line 7)"
+        fetch_all("SELECT " + column + " FROM foos", tuple[int])
+    if flag:
+        pass
+    # The `else` of `if flag` reads only the variant of `flag` false.
+    elif fetch_all("SELECT " + column + " FROM foos", tuple[str]):  # error: [column-type-mismatch] "'id' infers int"
+        pass
+```
+
+## Functions with arguments are followed
+
+```python
+from typing import Literal, LiteralString
+
+from db import fetch_all
+
+
+def column(name: Literal["id", "n"], quoted: bool = False) -> LiteralString:
+    return name
+
+
+def nullable(name: str) -> LiteralString:
+    if name:
+        return "foo"
+    return "id"
+
+
+def find() -> list[tuple[int]]:
+    # error: [column-type-mismatch] "(variant: line 12)"
+    rows = fetch_all("SELECT " + column("id") + ", " + nullable("x") + " FROM foos", tuple[int, int])
+    return rows + fetch_all("SELECT " + column(name="n") + " FROM foos", tuple[int])
+```
+
+## More static values
+
+```python
+from typing import Literal, LiteralString
+
+from db import fetch_all
+
+COLUMNS = {"id": "id", "n": "n"}
+
+
+def suffix(column: str = "id") -> LiteralString:
+    return " ORDER BY " + column
+
+
+def order(flag: bool) -> list[tuple[int]]:
+    if flag:
+        pass
+    match flag:
+        case True:
+            pass
+    return fetch_all("SELECT id FROM foos" + suffix(), tuple[int]) + fetch_all(
+        "SELECT id FROM foos" + suffix(column="n"), tuple[int]
+    )
+
+
+def quoted(column: "Literal['id', 'foo']") -> list[tuple[int]]:
+    # error: [column-type-mismatch] "(variant: line 23)"
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def matched(column: Literal["id", "foo", "n"]) -> list[tuple[int]]:
+    match column:
+        case "foo" | "x":
+            return []
+        case str() if not column:
+            pass
+        case "id":
+            query = "SELECT id FROM foos"
+    # `foo` returns before the call: `id` and `n` reach it.
+    return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+
+
+def inside(column: Literal["id", "foo"]) -> list[tuple[int]]:
+    match column:
+        case "foo":
+            pass
+        case _:
+            # The `case _` reads only the variant of `column` other than `"foo"`.
+            return fetch_all("SELECT " + column + " FROM foos", tuple[int])
+    return []
+
+
+def select(column: str) -> LiteralString:
+    return "SELECT " + column + " FROM foos"
+
+
+def forwarded(flag: bool) -> list[tuple[int]]:
+    # error: [column-type-mismatch] "'foo' infers str (variant: line"
+    return fetch_all(select("foo" if flag else "id"), tuple[int])
+```
+
+## A `Literal` parameter in a psycopg composition
+
+```python
+from typing import Literal
+
+from psycopg import sql
+
+from db import fetch_all
+
+
+def find(column: Literal["id", "foo"]) -> list[tuple[int]]:
+    # error: [column-type-mismatch] "'foo' infers str (variant: line 8)"
+    return fetch_all(sql.SQL("SELECT {} FROM foos").format(sql.Identifier(column)), tuple[int])
+```
+
+## More dynamic values
+
+```python
+from typing import LiteralString
+
+from db import fetch_all
+
+ORDER = {"asc": "ASC", "desc": "DESC"}
+
+
+def nothing(flag: bool) -> LiteralString:
+    if flag:
+        return "id"
+    return
+
+
+def imported() -> list[tuple[int]]:
+    from os import sep
+
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos" + sep, tuple[int])
+
+
+def bare(flag: bool) -> list[tuple[int]]:
+    # error: [dynamic-query]
+    return fetch_all("SELECT " + nothing(flag) + " FROM foos", tuple[int])
+
+
+def added() -> list[tuple[int]]:
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos" + ORDER + "x", tuple[int])
+
+
+def indexed() -> list[tuple[int]]:
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos" + "abc"[0], tuple[int])
+
+
+def keyed(flag: bool) -> list[tuple[int]]:
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos" + {"a" if flag else "b": "c"}["a"], tuple[int])
+```
