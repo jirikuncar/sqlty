@@ -224,6 +224,7 @@ def _compare(
             import_style=own.import_style,
             untyped=own.untyped,
             type_modules=own.type_modules,
+            query_variants=own.query_variants,
             helpers=helpers_for(own),
         ):
             findings.append(Finding(direction, against, relative, diagnostic))

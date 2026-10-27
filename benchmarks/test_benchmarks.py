@@ -49,3 +49,18 @@ def test_rewrite_source(benchmark: BenchmarkFixture) -> None:
 
 def test_check_source(benchmark: BenchmarkFixture) -> None:
     assert benchmark(core.check_source, REWRITTEN, schema_sql=SCHEMA) == []
+
+
+BRANCHED = (
+    "from typing import Annotated, LiteralString\n"
+    "from sqlty import SQL\n"
+    "def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...\n"
+    "def find(" + ", ".join(f"f{i}: bool" for i in range(7)) + ") -> list[tuple[int, str]]:\n"
+    '    query = "SELECT id, name FROM app.t0007 WHERE TRUE"\n'
+    + "".join(f'    if f{i}:\n        query += " AND score > {i}"\n' for i in range(7))
+    + "    return fetch_all(query, tuple[int, str])\n"
+)
+
+
+def test_check_source_query_variants(benchmark: BenchmarkFixture) -> None:
+    assert benchmark(core.check_source, BRANCHED, schema_sql=SCHEMA, query_variants=128) == []

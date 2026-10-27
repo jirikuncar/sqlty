@@ -1,6 +1,7 @@
 # Query variants from branches
 
-> **Status:** planned. Acceptance spec: `tests/mdtest/check/query_variants.md`.
+> **Status:** stage 1 implemented behind `preview = true` (`src/sqlty/_variants.py`).
+> Acceptance spec: `tests/mdtest/check/query_variants.md`.
 
 ## Problem
 
@@ -163,24 +164,39 @@ What keeps an implementation honest, in order of strength:
 7. **Standard gates.** `uv run prek run --all-files`, `make typecheck`,
    `uv run pytest`, `test_core_invariants.py` (idempotency over the new mdtests).
 
+## Phase 0 findings
+
+- At the join of `if foo is None: var = "foo IS NULL" else: var = "foo = %(foo)s"`,
+  pyright and ty infer `Literal['foo IS NULL', 'foo = %(foo)s']`, mypy infers `str`.
+- The feature flag is `preview` (default `false`). The mdtest runner turns it on unless a
+  section sets `preview = false`, so the whole Markdown suite runs with variants and shows
+  they change nothing else; only the `dynamic-query` examples, whose module constant is
+  now followed, pin `preview = false`.
+- `check_source` on a 7-branch function (128 variants) spends its time in the analyzer
+  (one `analyze_columns` per variant); the walk itself is under 5% of it
+  (`benchmarks/test_benchmarks.py::test_check_source_query_variants`). With `preview`
+  off nothing runs.
+- `with` blocks are unmodelled like `try`: a context manager can swallow an exception
+  halfway through the block.
+
 ## Definition of done
 
-- [ ] Every section of `query_variants.md` passes with no `xfail` marker left, and the
+- [x] Every section of `query_variants.md` passes with no `xfail` marker left, and the
       frozen digest still matches.
-- [ ] Differential oracle passes at `SQLTY_FUZZ_EXAMPLES=5000`.
-- [ ] A branch binding a value that is not static leaves the query unchecked, all
+- [x] Differential oracle passes at `SQLTY_FUZZ_EXAMPLES=5000`.
+- [x] A branch binding a value that is not static leaves the query unchecked, all
       variants included.
-- [ ] Unmodelled constructs (loops, `try`, `with`, walrus, mutation) still report
+- [x] Unmodelled constructs (loops, `try`, `with`, walrus, mutation) still report
       `dynamic-query`/`unchecked-query`; no check runs on a partial set of variants.
-- [ ] Diagnostics follow the reporting rules above, wording included.
-- [ ] `max-query-variants` documented (`KEY_DOCS`, `make generate-docs`), validated,
+- [x] Diagnostics follow the reporting rules above, wording included.
+- [x] `max-query-variants` documented (`KEY_DOCS`, `make generate-docs`), validated,
       default 64.
-- [ ] No existing mdtest, rule default or benchmark baseline changed.
+- [x] No existing mdtest, rule default or benchmark baseline changed.
 - [ ] `make bench-ci` within baseline; CodSpeed shows no regression on existing cases.
-- [ ] mypy strict and ty clean; prek hooks clean; full `uv run pytest` green.
-- [ ] `docs/guide/` explains variants with a motivated example; rule pages of
+- [x] mypy strict and ty clean; prek hooks clean; full `uv run pytest` green.
+- [x] `docs/guide/` explains variants with a motivated example; rule pages of
       `dynamic-query` and `unchecked-query` updated.
-- [ ] Phase 0 findings recorded in this file.
+- [x] Phase 0 findings recorded in this file.
 
 ## Open questions
 

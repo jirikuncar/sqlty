@@ -35,8 +35,6 @@ def fetch_params[T](query: Annotated[LiteralString, SQL], form: type[T], /, *par
 
 ## if/else
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import LiteralString
 
@@ -54,8 +52,6 @@ def find(foo: str | None) -> list[tuple[int, str | None]]:
 ```
 
 ## A mismatch in one variant names it
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from typing import LiteralString
@@ -75,8 +71,6 @@ def find(by_n: bool) -> list[tuple[int]]:
 
 ## A mismatch in every variant is reported once, without a variant
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import LiteralString
 
@@ -90,8 +84,6 @@ def find(flag: bool) -> list[tuple[str]]:
 ```
 
 ## elif and nested branches
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from typing import LiteralString
@@ -116,8 +108,6 @@ def find(a: int, b: bool) -> list[tuple[int]]:
 
 ## match/case
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import LiteralString
 
@@ -141,8 +131,6 @@ def find(kind: str) -> list[tuple[int]]:
 
 Two branches give two variants, not four: `SELECT n FROM (SELECT 1 AS k) t` never runs.
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import LiteralString
 
@@ -163,8 +151,6 @@ def find(inline: bool) -> list[tuple[int]]:
 
 ## A condition tested twice takes the same branch
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import LiteralString
 
@@ -179,8 +165,6 @@ def find(inline: bool) -> list[tuple[int]]:
 ```
 
 ## A branch that returns or raises adds no variant
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from typing import LiteralString
@@ -198,8 +182,6 @@ def find(foo: str | None) -> list[tuple[int]]:
 ```
 
 ## Augmented assignment
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from db import fetch_params
@@ -220,8 +202,6 @@ def find(foo: str | None, n: int | None) -> list[tuple[int]]:
 
 ## A Literal parameter
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import Literal
 
@@ -234,8 +214,6 @@ def find(column: Literal["id", "foo"]) -> list[tuple[int]]:
 ```
 
 ## A function that returns a fragment
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from typing import LiteralString
@@ -256,8 +234,6 @@ def find(foo: str | None) -> list[tuple[int, str]]:
 
 ## A literal dict lookup
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import Literal
 
@@ -274,8 +250,6 @@ def find(direction: Literal["asc", "desc"]) -> list[tuple[int]]:
 ## Too many variants is reported, not skipped
 
 The default `max-query-variants` is 64.
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from db import fetch_all
@@ -353,8 +327,6 @@ def find(columns: list[str]) -> list[tuple[int]]:
 
 ## A name reassigned after the branch has one variant
 
-<!-- mdtest:xfail query variants -->
-
 ```python
 from typing import LiteralString
 
@@ -371,8 +343,6 @@ def find(flag: bool) -> list[tuple[int]]:
 ## psycopg composition
 
 `.format()` wraps a `str` in `sql.Literal`, a quoted value, so a fragment goes in `sql.SQL(...)`.
-
-<!-- mdtest:xfail query variants -->
 
 ```python
 from typing import Annotated, LiteralString

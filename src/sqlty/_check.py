@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from sqlty._helpers import HelperCall
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import TypeInfo
+    from sqlty._variants import Variant
     from sqlty.core import ParamInfo
 
 # The `--sql` marker that opens a query string, as the engine reads it.
@@ -187,7 +188,13 @@ class _Check:
 def _check_unchecked_queries(ctx: _Check) -> None:
     for call in ctx.found:
         if call.query is None and not is_any_row(call):
-            if call.dynamic:
+            if call.reason is not None:
+                ctx.report(
+                    "dynamic-query" if call.dynamic else "unchecked-query",
+                    f"query has {call.reason}, so it is not checked",
+                    call.line,
+                )
+            elif call.dynamic:
                 ctx.report(
                     "dynamic-query",
                     "query is not a string literal, so it is not checked",
@@ -411,8 +418,13 @@ def diagnostics(
     module: str | None,
     type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
+    variants: int | None = None,
 ) -> list[Diagnostic]:
-    """Every diagnostic before inline suppression: the Rust pass, then the Python passes."""
+    """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
+
+    ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
+    is checked as a call of its own, then ``_merge_variants`` reports at the call.
+    """
     from sqlty._lint import RuleConfig
 
     diagnostics: list[Diagnostic] = []
@@ -429,8 +441,9 @@ def diagnostics(
                 any_calls=parsed.any_calls(import_style),
             ),
         )
-    found = find_helper_calls(parsed, helpers, module)
+    found = find_helper_calls(parsed, helpers, module, variants=variants)
     typed = {line for call in found for line in call.typed_lines}
+    branched = [call for call in found if len(call.variants) > 1]
     diagnostics = [
         d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
     ]
@@ -452,7 +465,11 @@ def diagnostics(
         dialect=dialect,
         schema_sql=schema_sql,
         rule_config=RuleConfig(overrides=rules),
-        found=found,
+        found=[call for call in found if len(call.variants) <= 1]
+        + [
+            call._replace(line=_VARIANT_LINE + index, query=variant.query)
+            for index, (call, variant) in enumerate(_each_variant(branched))
+        ],
         driver_calls=driver_calls,
         queries=queries,
         type_modules=type_modules,
@@ -462,8 +479,54 @@ def diagnostics(
     ctx.row_usage = row_usage or RowUsage()
     for check_pass in _CHECK_PASSES:
         check_pass(ctx)
+    if branched:
+        diagnostics[:] = _merge_variants(diagnostics, branched)
     diagnostics.sort(key=lambda diagnostic: diagnostic["line"])
     return diagnostics
+
+
+_VARIANT_LINE = 1 << 30
+"""Where the variants of calls are checked: variant ``i`` (``_each_variant``) is on line ``_VARIANT_LINE + i``."""
+
+
+def _each_variant(calls: list[HelperCall]) -> list[tuple[HelperCall, Variant]]:
+    return [(call, variant) for call in calls for variant in call.variants]
+
+
+def _merge_variants(diagnostics: list[Diagnostic], calls: list[HelperCall]) -> list[Diagnostic]:
+    """The diagnostics of variants reported at their call.
+
+    One every variant of a call has is reported once; any other names the lines that
+    select the first variant having it. Each kept diagnostic is updated in place, so
+    ``RowUsage`` still refers to it.
+    """
+    variants = _each_variant(calls)
+    found: dict[int, list[Diagnostic]] = {}
+    merged = []
+    for diagnostic in diagnostics:
+        if (index := diagnostic["line"] - _VARIANT_LINE) >= 0:
+            found.setdefault(index, []).append(diagnostic)
+        else:
+            merged.append(diagnostic)
+    start = 0
+    for call in calls:
+        indexes = range(start, start + len(call.variants))
+        start = indexes.stop
+        keys = [{(d["rule"], d["message"]) for d in found.get(i, [])} for i in indexes]
+        common = set.intersection(*keys)
+        reported: set[tuple[str, str]] = set()
+        for index in indexes:
+            lines = variants[index][1].lines
+            for diagnostic in found.get(index, []):
+                key = (diagnostic["rule"], diagnostic["message"])
+                if key in reported:
+                    continue
+                reported.add(key)
+                diagnostic["line"] = call.line
+                if key not in common and lines:
+                    diagnostic["message"] += f" (variant: line {', '.join(map(str, lines))})"
+                merged.append(diagnostic)
+    return merged
 
 
 def _param_diagnostics(

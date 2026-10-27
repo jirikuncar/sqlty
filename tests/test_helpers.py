@@ -229,6 +229,29 @@ def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: ty
 """
 
 
+def test_query_variants_with_preview(project, capsys):
+    """`preview` checks each variant, counts each in `--statistics`, and never runs the code."""
+    (project / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\npreview = true\n')
+    marker = project / "ran"
+    (project / "app.py").write_text(
+        "from pkg.db import fetch_all\n"
+        f"open({str(marker)!r}, 'w')\n"
+        "def column(flag: bool):\n"
+        f"    open({str(marker)!r}, 'w')\n"
+        "    return 'id' if flag else 'name'\n"
+        "def find(flag: bool):\n"
+        "    return fetch_all('SELECT ' + column(flag) + ' FROM users', tuple[int])\n"
+    )
+
+    with pytest.raises(SystemExit):
+        main(["check", "--statistics", "."])
+
+    out = capsys.readouterr().out
+    assert "column-type-mismatch" in out and "(variant: line 5)" in out
+    assert out.splitlines()[-1].startswith("Queries: 2 typed, 0 partially typed")
+    assert not marker.exists()
+
+
 def test_compositions_use_fragments_of_other_modules(project, capsys, monkeypatch):
     """Names imported from checked modules resolve to their one literal binding."""
     pytest.importorskip("psycopg")
