@@ -90,6 +90,7 @@ class _Check:
         driver_calls: list[HelperCall],
         queries: list[tuple[int, str, str | None]],
         type_modules: Iterable[str] | None,
+        pydantic_types: bool,
         helpers: HelperIndex | None,
         module: str | None,
     ) -> None:
@@ -111,7 +112,7 @@ class _Check:
             if row
         ]
         self.type_defs: dict[str, TypeInfo] = (
-            extract_type_definitions(parsed, helpers, module, type_modules)
+            extract_type_definitions(parsed, helpers, module, type_modules, pydantic_types)
             if queries or named
             else {}
         )
@@ -121,7 +122,7 @@ class _Check:
         if helpers is not None:
             extra = frozenset(type_modules or ())
             for name in {q[1] for q in [*queries, *named]} - self.type_defs.keys():
-                if (imported := helpers.row_type(parsed, name, extra)) is not None:
+                if (imported := helpers.row_type(parsed, name, extra, pydantic_types)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         # A row type named through an alias (`type Row = User`) is checked as what it names.
         self.aliased: list[tuple[int, str, str | None, ast.expr]] = []
@@ -419,6 +420,7 @@ def diagnostics(
     type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
     variants: int | None = None,
+    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
 
@@ -473,6 +475,7 @@ def diagnostics(
         driver_calls=driver_calls,
         queries=queries,
         type_modules=type_modules,
+        pydantic_types=pydantic_types,
         helpers=helpers,
         module=module,
     )

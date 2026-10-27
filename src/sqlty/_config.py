@@ -106,7 +106,7 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "boolean",
         "`false`",
         "`check`",
-        "Turn on features still in preview: query variants",
+        "Turn on features still in preview: query variants, Pydantic types",
     ),
     "max-query-variants": KeyDoc(
         "positive integer",
@@ -401,7 +401,7 @@ class SQLTyConfig(TypedDict, total=False):
         str  # "typing.Any" (default) or "typing.TypedDict": generated TypedDicts for JSON columns
     )
     type_modules: list[str]  # modules whose imports may run to resolve row types
-    preview: bool  # features still in preview: query variants
+    preview: bool  # features still in preview: query variants, Pydantic types
     max_query_variants: int  # the most variants of a query built in branches that check checks
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above

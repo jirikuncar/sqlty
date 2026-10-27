@@ -210,6 +210,115 @@ class Row(TypedDict):
 q = SQL[Row]("--sql\nSELECT 'x'::TEXT AS color, 1::INTEGER AS level, '{}'::JSONB AS data, 1::INTEGER AS other")
 ```
 
+## Pydantic types
+
+With `preview = true`, Pydantic's types come from a static table, so `check`
+gives the same result whether pydantic is installed or not.
+
+### Model fields take what Pydantic validates
+
+A model validates its input: `AnyUrl` takes the `str` a `TEXT` column holds,
+`ByteSize` an `int`. Each comment is the value the driver returns.
+
+```python
+import pydantic
+from pydantic import AnyUrl, BaseModel, EmailStr, HttpUrl, Json
+from sqlty import SQL
+
+class Row(BaseModel):
+    email: EmailStr  # 'a@b.co'
+    name: pydantic.NameEmail  # 'A <a@b.co>'
+    url: AnyUrl  # 'https://a.co'
+    http: HttpUrl  # 'https://a.co'
+    secret: pydantic.SecretStr  # 's3cret'
+    count: Json[int]  # '1'
+    past: pydantic.PastDatetime  # datetime(2000, 1, 1)
+    aware: pydantic.AwareDatetime  # datetime(2000, 1, 1, tzinfo=UTC)
+    due: pydantic.FutureDate  # date(2100, 1, 1)
+    size: pydantic.ByteSize  # 1024
+    address: pydantic.IPvAnyAddress  # IPv4Address('127.0.0.1')
+
+# error:
+q = SQL[Row]("""--sql
+SELECT 'a@b.co'::TEXT AS email, 'A <a@b.co>'::TEXT AS name,
+    'https://a.co'::TEXT AS url, 'https://a.co'::TEXT AS http, 's3cret'::TEXT AS secret,
+    '1'::TEXT AS count, '2000-01-01'::TIMESTAMP AS past, '2000-01-01'::TIMESTAMPTZ AS aware,
+    '2100-01-01'::DATE AS due, 1024::INTEGER AS size, '127.0.0.1'::INET AS address""")
+```
+
+### Real mismatches
+
+Pydantic rejects each of these values.
+
+```python
+import pydantic
+from pydantic import BaseModel, conint, constr, condecimal
+from sqlty import SQL
+
+class Row(BaseModel):
+    email: pydantic.EmailStr  # 1
+    url: pydantic.AnyUrl  # 1
+    positive: pydantic.PositiveInt  # 'x'
+    bounded: conint(gt=0)  # 'x'
+    short: constr(max_length=3)  # 1
+    price: condecimal(max_digits=5)  # '2000-01-01'
+    id: pydantic.UUID4  # 1
+    encoded: pydantic.Base64Str  # 1
+    size: pydantic.ByteSize  # '2000-01-01'
+    address: pydantic.IPvAnyAddress  # date(2000, 1, 1)
+
+# error: [column-type-mismatch] "Row.address is pydantic.IPvAnyAddress but query column 'address' infers datetime.date"
+# error: [column-type-mismatch] "Row.bounded is conint(gt=0) but query column 'bounded' infers str"
+# error: [column-type-mismatch] "Row.email is pydantic.EmailStr but query column 'email' infers int"
+# error: [column-type-mismatch] "Row.encoded is pydantic.Base64Str but query column 'encoded' infers int"
+# error: [column-type-mismatch] "Row.id is pydantic.UUID4 but query column 'id' infers int"
+# error: [column-type-mismatch] "Row.positive is pydantic.PositiveInt but query column 'positive' infers str"
+# error: [column-type-mismatch] "Row.price is condecimal(max_digits=5) but query column 'price' infers datetime.date"
+# error: [column-type-mismatch] "Row.short is constr(max_length=3) but query column 'short' infers int"
+# error: [column-type-mismatch] "Row.size is pydantic.ByteSize but query column 'size' infers datetime.date"
+# error: [column-type-mismatch] "Row.url is pydantic.AnyUrl but query column 'url' infers int"
+q = SQL[Row]("""--sql
+SELECT 1::INTEGER AS email, 1::INTEGER AS url, 'x'::TEXT AS positive, 'x'::TEXT AS bounded,
+    1::INTEGER AS short, '2000-01-01'::DATE AS price, 1::INTEGER AS id, 1::INTEGER AS encoded,
+    '2000-01-01'::DATE AS size, '2000-01-01'::DATE AS address""")
+```
+
+### `TypedDict` fields are what a type checker sees
+
+A `TypedDict` holds what the driver returns, so it gets the type a type checker
+reads from pydantic: `EmailStr` is a `str`, and `AnyUrl` a class no column holds.
+
+```python
+from typing import TypedDict
+from pydantic import AnyUrl, EmailStr, PastDatetime
+from sqlty import SQL
+
+class Row(TypedDict):
+    email: EmailStr
+    past: PastDatetime
+    url: AnyUrl
+
+# error: [column-type-mismatch] "Row.url is AnyUrl but query column 'url' infers str"
+q = SQL[Row]("--sql\nSELECT 'a@b.co'::TEXT AS email, now()::TIMESTAMP AS past, 'https://a.co'::TEXT AS url")
+```
+
+### Imported from the defining module
+
+```python
+from pydantic.networks import EmailStr
+from pydantic.types import PositiveInt
+from pydantic.dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class Row:
+    email: EmailStr
+    count: PositiveInt
+
+# error: [column-type-mismatch] "Row.count is PositiveInt but query column 'count' infers str"
+q = SQL[Row]("--sql\nSELECT 'a@b.co'::TEXT AS email, 'x'::TEXT AS count")
+```
+
 ## User classes
 
 ### Subclass of a builtin

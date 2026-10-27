@@ -41,7 +41,7 @@ query-param = "query"
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
 | [`type-modules`](#type-modules) | list of strings | `[]` | `check` | Modules `check` may import to resolve row type fields |
-| [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants |
+| [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants, Pydantic types |
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
@@ -157,10 +157,13 @@ type-modules = ["myapp.types"]
 
 ## `preview`
 
-`true` turns on features that may still change before they are on by default. Today
-that is [query variants](../guide/query-variants.md): a query built from names bound in
-branches is checked once per path that builds it, instead of being skipped as
-`dynamic-query`.
+`true` turns on features that may still change before they are on by default:
+
+- [Query variants](../guide/query-variants.md): a query built from names bound in
+  branches is checked once per path that builds it, instead of being skipped as
+  `dynamic-query`.
+- [Pydantic types](../guide/row-types.md#pydantic-types) are read from a table, not
+  from pydantic: a model field takes what Pydantic validates into it.
 
 ```toml
 [tool.sqlty]

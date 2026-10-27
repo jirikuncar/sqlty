@@ -1,6 +1,6 @@
 # Plan: resolve row types statically, without `exec`
 
-> **Status:** phases 1 to 3 (symbol table, string annotations, helper modules, standard-library classes) done.
+> **Status:** phases 1 to 3b (symbol table, string annotations, helper modules, standard-library classes, Pydantic types behind `preview`) done.
 > Owner: @jirikuncar. Epic: [#784](https://github.com/jirikuncar/sqlty/issues/784); every pull request of this plan links it.
 
 ## Goal
@@ -94,7 +94,8 @@ checked paths (`HelperIndex`) and a table of the standard library.
    a static table of pydantic's type-checker declarations and lax/strict input types,
    never from the installed package. Importing pydantic gives false positives today
    ([#783](https://github.com/jirikuncar/sqlty/issues/783), which carries the
-   details, harness additions and done criteria).
+   details, harness additions and done criteria). **Done in phase 3b**, behind `preview`
+   (`_type_extractor/pydantic_types.py`); phase 4 reads the table without it.
 6. **TypedDict keys.** `__required_keys__` and `extra_items` come from the AST
    (`required`, `_ast_type` of `extra_node`), which already compute them.
 7. **`TypeInfo` shrinks.** `resolved_hints`, `declared_hints` and `extra_items_hint`
@@ -117,7 +118,7 @@ Each phase is one pull request, green on the full CI and on `No-exec harness int
 | 2 | Helper modules through the symbol table | `make test-static-only`: `test_cross_module.py`, `generic_fields.md`, *Other modules* pass |
 | 3 | Stdlib classes from typeshed (user classes moved to phase 4, where `compat` first reads them) | `make test-static-only`: *Standard library classes* pass; drift test green |
 | 3b | Pydantic types ([#783](https://github.com/jirikuncar/sqlty/issues/783)); pydantic in the `dev` group | The done criteria of #783 |
-| 4 | Delete the sandbox; collapse `TypeInfo`; rewrite the 19 internal tests to assert behavior or `field_types`; remove `type-modules`; tighten *User classes*; docs | [Definition of done](#definition-of-done) |
+| 4 | Delete the sandbox; Pydantic types without `preview`; collapse `TypeInfo`; rewrite the 19 internal tests to assert behavior or `field_types`; remove `type-modules`; tighten *User classes*; docs | [Definition of done](#definition-of-done) |
 
 In phases 1 to 3 the sandbox still runs, so `make test` stays green and only
 `make test-static-only` shows progress. Fill the gap there; never patch the
