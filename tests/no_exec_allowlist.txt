@@ -1,2 +1,2 @@
 # Functions of src/sqlty that still execute or evaluate user code, as module:qualname.
-# Remove a line with the code it names; never add one. See plans/2026-10-27-no-exec.md.
+# Remove a line with the code it names; never add one. See AGENTS.md#no-exec.

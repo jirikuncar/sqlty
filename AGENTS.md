@@ -337,6 +337,25 @@ inferred types, then run `uv run pytest tests/test_typecheckers.py -v`.
 Files that must produce errors (like `untyped_misuse.py`) need their own
 test with an explicit expected error count.
 
+## No exec
+
+`check` reads row types from source. It never executes, evaluates or imports what a
+checked file names, so checking an untrusted pull request is safe. A harness keeps it so:
+
+| Guard | Where | Catches |
+|-------|-------|---------|
+| Static scan | `tests/test_no_exec.py` | A call in `src/sqlty` to `exec`, `eval`, `compile`, `__import__`, `importlib.import_module`, `get_type_hints`, `types.new_class` and the like, outside `tests/no_exec_allowlist.txt` |
+| Audit hook | `tests/_no_exec.py`, loaded for every test | At runtime, any `exec`/`eval` or import that sqlty code runs, charged to the innermost `src/sqlty` function |
+| Integrity check | `scripts/check_no_exec_harness.py`, CI job `No-exec harness intact`, `make check-no-exec-harness` | Against the merge base: guard files edited or unloaded, allowlist lines added, mdtest assertions removed or edited (a bare `# error:` may become specific), skips or xfails added, test functions removed |
+
+CI runs the base branch's copy of the integrity check, so a pull request can't relax it.
+The allowlist is empty: never add a line. A change to a guard file fails the check by
+design and needs a maintainer to merge it.
+
+Audit hooks are not a sandbox: code can bypass them
+([`sys.addaudithook`](https://docs.python.org/3/library/sys.html#sys.addaudithook)).
+They catch mistakes; review catches intent.
+
 ## Architecture overview
 
 ```text

@@ -1,4 +1,4 @@
-"""Fail when a branch of the no-exec migration (plans/2026-10-27-no-exec.md) weakens its harness.
+"""Fail when a branch weakens the no-exec harness (AGENTS.md#no-exec).
 
     python scripts/check_no_exec_harness.py origin/main    # compare HEAD with its merge base
 
@@ -106,7 +106,7 @@ def main() -> int:
     base = git("merge-base", target, "HEAD").strip()
     if found := problems(base):
         print(
-            "The no-exec harness was weakened (see plans/2026-10-27-no-exec.md):",
+            "The no-exec harness was weakened (see AGENTS.md#no-exec):",
             *found,
             sep="\n  ",
         )
