@@ -23,8 +23,8 @@ from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
-from sqlty._params import mismatch
-from sqlty._source import ParsedSource, is_any
+from sqlty._params import _dotted, annotation_type, mismatch
+from sqlty._source import ParsedSource, _wrapper_name, is_any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -89,6 +89,7 @@ class _Check:
         found: list[HelperCall],
         driver_calls: list[HelperCall],
         queries: list[tuple[int, str, str | None]],
+        declared: list[tuple[int, ast.expr, str]],
         helpers: HelperIndex | None,
         module: str | None,
     ) -> None:
@@ -103,6 +104,7 @@ class _Check:
         self.rule_config = rule_config
         self.found = found
         self.driver_calls = driver_calls
+        self.declared = declared
         self.calls = [call for call in found if call.query is not None]
         self._unparsed: dict[str, str] = {}
         self.rows = [self._unparse(call.row) if call.row else None for call in self.calls]
@@ -112,13 +114,18 @@ class _Check:
             if row
         ]
         self.type_defs: dict[str, TypeInfo] = (
-            extract_type_definitions(parsed, helpers, module) if queries or named else {}
+            extract_type_definitions(parsed, helpers, module)
+            if queries or named or declared
+            else {}
         )
         # The row types of the module an imported row type comes from, by local name.
         self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
         self.row_usage = RowUsage()
         if helpers is not None:
-            for name in {q[1] for q in [*queries, *named]} - self.type_defs.keys():
+            p_names = {
+                ast.unparse(p) for _, p, _ in declared if isinstance(p, ast.Name | ast.Attribute)
+            }
+            for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
                 if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         # A row type named through an alias (`type Row = User`) is checked as what it names.
@@ -226,6 +233,19 @@ def _check_params(ctx: _Check) -> None:
         if call.params is not None:
             for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql):
                 ctx.report(rule, message, call.line)
+
+
+def _check_declared_params(ctx: _Check) -> None:
+    """``SQL[R, P]`` calls whose ``P`` doesn't fit the parameters of their query."""
+    if not ctx.rule_config.is_enabled("params-type-mismatch"):
+        return
+    from sqlty.core import analyze_params
+
+    for line, declared, query in ctx.declared:
+        params = analyze_params(query, dialect=ctx.dialect, schema_sql=ctx.schema_sql)
+        if params is not None:
+            for message in _declared_params_diagnostics(ctx, declared, params):
+                ctx.report("params-type-mismatch", message, line)
 
 
 def _check_typeddict_inheritance(ctx: _Check) -> None:
@@ -396,6 +416,7 @@ def _check_values(ctx: _Check) -> None:
 _CHECK_PASSES = (
     _check_unchecked_queries,
     _check_params,
+    _check_declared_params,
     _check_typeddict_inheritance,
     _check_select_star,
     _check_unparsed,
@@ -456,7 +477,8 @@ def diagnostics(
         )
         if not name.startswith("tuple[")
     ]
-    if not (queries or found or driver_calls):
+    declared = _declared_params(parsed, import_style)
+    if not (queries or found or driver_calls or declared):
         return diagnostics
     ctx = _Check(
         parsed,
@@ -471,6 +493,7 @@ def diagnostics(
         ],
         driver_calls=driver_calls,
         queries=queries,
+        declared=declared,
         helpers=helpers,
         module=module,
     )
@@ -598,6 +621,124 @@ def _param_diagnostics(
                     )
                 )
     return found
+
+
+def _declared_params(
+    parsed: ParsedSource, import_style: str | None
+) -> list[tuple[int, ast.expr, str]]:
+    """``(line, P, query)`` of each ``SQL[R, P]("...")`` call."""
+    wrapper = _wrapper_name(import_style)
+    if (
+        wrapper is None
+        or not parsed.may_wrap(import_style)
+        or not _names_params(parsed.text, wrapper)
+    ):
+        return []
+    return [
+        (call.lineno, call.func.slice.elts[1], query.value)
+        for call in parsed.calls
+        if isinstance(call.func, ast.Subscript)
+        and isinstance(call.func.slice, ast.Tuple)
+        and len(call.func.slice.elts) == 2
+        and _dotted(call.func.value) == wrapper
+        and call.args
+        and isinstance(query := call.args[0], ast.Constant)
+        and isinstance(query.value, str)
+    ]
+
+
+def _names_params(text: str, wrapper: str) -> bool:
+    """Whether ``text`` subscripts ``wrapper`` with two arguments, without parsing it."""
+    for match in re.finditer(rf"\b{re.escape(wrapper)}\[", text):
+        depth = 0
+        for index in range(match.end(), len(text)):
+            char = text[index]
+            if char == "," and depth == 0:
+                return True
+            if char in "[(":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+                if depth < 0:
+                    break
+    return False
+
+
+def _declared_params_diagnostics(
+    ctx: _Check, declared: ast.expr, params: list[ParamInfo]
+) -> list[str]:
+    """Why the parameter type ``declared`` doesn't fit ``params``: shape, count, keys, then item types."""
+    name = ctx._unparse(declared)
+    named = bool(params) and all(param.name is not None for param in params)
+    pairs: list[tuple[str, ast.expr | None, ParamInfo, int | str]]
+    if isinstance(declared, ast.Subscript) and _dotted(declared.value) in ("tuple", "typing.Tuple"):
+        items = declared.slice.elts if isinstance(declared.slice, ast.Tuple) else [declared.slice]
+        if any(isinstance(item, ast.Constant) and item.value is Ellipsis for item in items):
+            return []
+        if named:
+            return [f"{name} is a tuple but the query takes named parameters"]
+        if len(items) != len(params):
+            return [
+                f"{name} has {len(items)} item{'' if len(items) == 1 else 's'} "
+                f"but the query has {len(params)} parameter{'' if len(params) == 1 else 's'}"
+            ]
+        pairs = [
+            (f"{name} item {param.number}", item, param, param.number)
+            for item, param in zip(items, params, strict=True)
+        ]
+    elif (info := ctx.type_defs.get(name)) is not None and info.kind == "TypedDict":
+        if params and not named:
+            return [f"{name} is a TypedDict but the query takes positional parameters"]
+        keys = dict(info.fields)
+        by_name = {param.name: param for param in params if param.name is not None}
+        found = [
+            f"{name} has no key for query parameter '{key}'" for key in by_name if key not in keys
+        ]
+        found += [
+            f"{name}.{key} is not required but query parameter '{key}' is"
+            for key in by_name
+            if key in keys and key not in info.required
+        ]
+        found += [f"{name}.{key} is not a query parameter" for key in keys if key not in by_name]
+        if found:
+            return found
+        pairs = [
+            (f"{name}.{key}", info.annotations.get(key), by_name[key], f"'{key}'") for key in keys
+        ]
+    else:
+        return []
+    typed = ctx.dialect.lower() != "sqlite"
+    postgres = ctx.dialect.lower() in ("postgres", "postgresql")
+    found = []
+    for label, annotation, param, key in pairs:
+        for member in _union_members(annotation):
+            actual = annotation_type(member, ctx.parsed)
+            if actual != "None" and not (typed and not param.cast):
+                continue
+            if problem := mismatch(param.python_type, param.nullable, actual, postgres=postgres):
+                assert annotation is not None
+                expected = problem.partition(", got ")[0]
+                found.append(
+                    f"{label} is {ast.unparse(annotation)} but query parameter {key} {expected}"
+                )
+                break
+    return found
+
+
+def _union_members(annotation: ast.expr | None) -> list[ast.expr]:
+    """The members of a ``X | Y``, ``Optional[X]`` or ``Union[X, Y]`` annotation."""
+    match annotation:
+        case None:
+            return []
+        case ast.BinOp(op=ast.BitOr(), left=left, right=right):
+            return _union_members(left) + _union_members(right)
+        case ast.Subscript(value=value, slice=inner) if (_dotted(value) or "").endswith("Optional"):
+            return [*_union_members(inner), ast.Constant(value=None)]
+        case ast.Subscript(value=value, slice=ast.Tuple(elts=items)) if (
+            _dotted(value) or ""
+        ).endswith("Union"):
+            return [member for item in items for member in _union_members(item)]
+    return [annotation]
 
 
 def _columns(

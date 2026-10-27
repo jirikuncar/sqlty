@@ -64,13 +64,15 @@ pub enum Rule {
     ParamCountMismatch,
     /// A call passes an argument its query's parameter cannot take.
     ParamTypeMismatch,
+    /// The parameter type `P` of `SQL[R, P]` does not fit the parameters of its query.
+    ParamsTypeMismatch,
     /// A rule explaining why a column is untyped.
     Name(NameRule),
 }
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 35] = [
+    pub const ALL: [Rule; 36] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -97,6 +99,7 @@ impl Rule {
         Rule::UnusedIgnore,
         Rule::ParamCountMismatch,
         Rule::ParamTypeMismatch,
+        Rule::ParamsTypeMismatch,
         Rule::Name(NameRule::UnknownTable),
         Rule::Name(NameRule::UnknownColumn),
         Rule::Name(NameRule::AmbiguousColumn),
@@ -137,6 +140,7 @@ impl Rule {
             Rule::UnusedIgnore => "unused-ignore",
             Rule::ParamCountMismatch => "param-count-mismatch",
             Rule::ParamTypeMismatch => "param-type-mismatch",
+            Rule::ParamsTypeMismatch => "params-type-mismatch",
             Rule::Name(rule) => rule.name(),
         }
     }
@@ -158,6 +162,7 @@ impl Rule {
             | Rule::LiteralMismatch
             | Rule::ParamCountMismatch
             | Rule::ParamTypeMismatch
+            | Rule::ParamsTypeMismatch
             | Rule::NarrowType
             | Rule::SelectStarNoSchema
             | Rule::Name(
