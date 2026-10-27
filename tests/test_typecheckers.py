@@ -123,8 +123,6 @@ PARAMS_MISUSE = TYPECHECKS_DIR / "params_misuse.py"
 )
 def test_wrong_params_rejected(checker: str, command: list[str], line_number: str) -> None:
     """Each checker reports exactly the lines whose ``# error:`` comment names it."""
-    if not shutil.which(checker):
-        pytest.skip(f"{checker} not installed")
     lines = PARAMS_MISUSE.read_text().splitlines()
     expected = {
         n for n, line in enumerate(lines, 1) if checker in line.partition("# error:")[2].split()
